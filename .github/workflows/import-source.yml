@@ -20,7 +20,8 @@ jobs:
         run: |
           cat palisade-source.part-* | base64 --decode > /tmp/palisade-source.tar.gz
           tar -xzf /tmp/palisade-source.tar.gz
-          rm palisade-source.part-* .github/workflows/import-source.yml
+          rm palisade-source.part-*
+          rm -f .github/workflows/ci.yml
 
       - name: Commit source tree
         run: |
