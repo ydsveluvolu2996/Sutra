@@ -104,7 +104,7 @@ export default function Home() {
               <div className="signal-list">
                 <div><span className="signal-icon signal-green">01</span><p><strong>Configuration posture</strong><small>Exposure, encryption, logging, IAM and native-service coverage</small></p><b>Included</b></div>
                 <div><span className="signal-icon signal-blue">02</span><p><strong>Asset relationships</strong><small>Account, region, network, identity and service context</small></p><b>Included</b></div>
-                <div><span className="signal-icon signal-amber">03</span><p><strong>Threat & CVE engines</strong><small>Ingest native findings when customers already enable those AWS services</small></p><b className="muted-status">Not replaced</b></div>
+                <div><span className="signal-icon signal-amber">03</span><p><strong>Native threat &amp; CVE services</strong><small>Show GuardDuty and Security Hub enablement only; native finding import is planned</small></p><b className="muted-status">Coverage only</b></div>
               </div>
               <p className="panel-footnote">Sutra’s deterministic recommendations are not runtime behavior analytics or package vulnerability scanning.</p>
             </article>
