@@ -15,9 +15,9 @@ export function AppShell({ active, children }: { active: NavKey; children: React
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link className="brand" href="/dashboard" aria-label="Palisade workspace home">
+        <Link className="brand" href="/dashboard" aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Palisade</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud operations</small></span>
         </Link>
         <div className="workspace-label">MSP workspace</div>
         <nav className="main-nav" aria-label="Primary navigation">
@@ -67,7 +67,7 @@ export function AppShell({ active, children }: { active: NavKey; children: React
         </header>
         <div className="content-wrap">{children}</div>
         <footer className="app-footer">
-          <span>Palisade Cloud · production foundation preview</span>
+          <span>Sutra · production foundation preview</span>
           <span>Read-only AWS access · tenant-aware data model · evidence-backed controls</span>
         </footer>
       </main>

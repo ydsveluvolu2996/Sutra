@@ -20,19 +20,17 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 
   const description = "Multi-tenant AWS CMDB and configuration posture operations for managed service providers.";
-  const imageUrl = new URL("/og.png", metadataBase);
   return {
     metadataBase,
-    title: { default: "Palisade Cloud", template: "%s · Palisade Cloud" },
+    title: { default: "Sutra", template: "%s · Sutra" },
     description,
     icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
     openGraph: {
       type: "website",
-      title: "Palisade Cloud",
+      title: "Sutra",
       description,
-      images: [{ url: imageUrl, width: 1672, height: 939, alt: "Palisade Cloud AWS CMDB and posture operations for MSPs" }],
     },
-    twitter: { card: "summary_large_image", title: "Palisade Cloud", description, images: [imageUrl] },
+    twitter: { card: "summary", title: "Sutra", description },
   };
 }
 

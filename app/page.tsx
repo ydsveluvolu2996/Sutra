@@ -18,13 +18,13 @@ const platformLayers = [
 
 const trustPolicy = [
   "Principal:",
-  "  AWS: arn:aws:iam::VENDOR:role/PalisadeCollector",
+  "  AWS: arn:aws:iam::VENDOR:role/SutraCollector",
   "Action: sts:AssumeRole",
   "Condition:",
   "  StringEquals:",
   "    sts:ExternalId: psd_<unique-128-bit-value>",
   "  StringLike:",
-  "    sts:RoleSessionName: palisade-*",
+  "    sts:RoleSessionName: sutra-*",
   "",
   "# No resource mutation",
   "# No object, secret, or database payload reads",
@@ -35,9 +35,9 @@ export default function LandingPage() {
   return (
     <div className="landing">
       <header className="site-header">
-        <Link className="site-brand" href="/" aria-label="Palisade Cloud home">
+        <Link className="site-brand" href="/" aria-label="Sutra home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Palisade</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud operations</small></span>
         </Link>
         <nav className="site-nav" aria-label="Public navigation">
           <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#msp">For MSPs</a><a href="#trust">Security model</a><Link href="/controls">Control library</Link>
@@ -52,13 +52,13 @@ export default function LandingPage() {
           <div className="hero-copy">
             <span className="hero-kicker"><i /> AWS operations platform for MSPs</span>
             <h1>One source of truth for every customer cloud.</h1>
-            <p>Palisade gives managed service providers a tenant-aware AWS CMDB, configuration posture, security-group analysis and evidence-backed recommendations—through customer-owned, read-only IAM roles.</p>
+            <p>Sutra gives managed service providers a tenant-aware AWS CMDB, configuration posture, security-group analysis and evidence-backed recommendations—through customer-owned, read-only IAM roles.</p>
             <div className="hero-actions"><Link className="button hero-primary" href="/dashboard">Explore the live demo</Link><Link className="button hero-secondary" href="/onboard">See account onboarding</Link></div>
             <div className="hero-assurances"><span><b>✓</b> Read-only permissions</span><span><b>✓</b> No customer access keys</span><span><b>✓</b> ExternalId trust binding</span></div>
           </div>
 
-          <div className="hero-product" aria-label="Palisade multi-tenant cloud operations dashboard preview">
-            <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.palisade.cloud</span><b>DEMO</b></div>
+          <div className="hero-product" aria-label="Sutra multi-tenant cloud operations dashboard preview">
+            <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.sutra.cloud</span><b>DEMO</b></div>
             <div className="product-window-body">
               <aside className="product-rail"><span className="product-logo">P</span><i className="active" /><i /><i /><i /><i /><span className="product-user">AM</span></aside>
               <div className="product-canvas">
@@ -75,7 +75,7 @@ export default function LandingPage() {
         </section>
 
         <section className="foundation-strip" aria-label="Foundation preview metrics">
-          <p><span>Palisade foundation preview</span> Built around AWS trust best practices and explicit product boundaries</p>
+          <p><span>Sutra foundation preview</span> Built around AWS trust best practices and explicit product boundaries</p>
           <div><span><strong>4</strong> customer workspaces</span><span><strong>6</strong> AWS accounts</span><span><strong>20</strong> demo assets</span><span><strong>12</strong> deterministic controls</span></div>
         </section>
 
@@ -90,7 +90,7 @@ export default function LandingPage() {
         </section>
 
         <section className="site-section capabilities-section" id="capabilities">
-          <div className="section-intro"><span className="section-kicker">Integrated capabilities</span><h2>Build a cloud management suite around one reliable inventory.</h2><p>Palisade’s first release focuses on the AWS visibility and posture workflows an MSP can deliver honestly today. Broader modules stay clearly labeled until their data and operating controls exist.</p></div>
+          <div className="section-intro"><span className="section-kicker">Integrated capabilities</span><h2>Build a cloud management suite around one reliable inventory.</h2><p>Sutra’s first release focuses on the AWS visibility and posture workflows an MSP can deliver honestly today. Broader modules stay clearly labeled until their data and operating controls exist.</p></div>
           <div className="capability-grid">
             {capabilities.map((item) => <article key={item.code}><div><span>{item.code}</span><b className={`module-state state-${item.state.toLowerCase().replace("-", "")}`}>{item.state}</b></div><h3>{item.title}</h3><p>{item.copy}</p><Link href={item.state === "Foundation" ? "/dashboard" : "/controls"}>Explore capability <span>→</span></Link></article>)}
           </div>
@@ -122,13 +122,13 @@ export default function LandingPage() {
 
         <section className="claim-section">
           <div><span className="section-kicker">A suite with honest boundaries</span><h2>Lower-cost posture insight without pretending deterministic rules are a threat engine.</h2></div>
-          <div className="claim-columns"><article><strong>Palisade provides</strong><ul><li>Multi-tenant AWS CMDB and relationships</li><li>Configuration and exposure assessments</li><li>IAM, logging and native-service coverage signals</li><li>Customer-ready evidence and recommendations</li></ul></article><article><strong>AWS-native services still provide</strong><ul><li>Inspector package, image and Lambda vulnerability scanning</li><li>GuardDuty behavior analytics and threat intelligence</li><li>Security Hub managed standards and finding ecosystem</li><li>Service-specific remediation and delegated administration</li></ul></article></div>
+          <div className="claim-columns"><article><strong>Sutra provides</strong><ul><li>Multi-tenant AWS CMDB and relationships</li><li>Configuration and exposure assessments</li><li>IAM, logging and native-service coverage signals</li><li>Customer-ready evidence and recommendations</li></ul></article><article><strong>AWS-native services still provide</strong><ul><li>Inspector package, image and Lambda vulnerability scanning</li><li>GuardDuty behavior analytics and threat intelligence</li><li>Security Hub managed standards and finding ecosystem</li><li>Service-specific remediation and delegated administration</li></ul></article></div>
         </section>
 
         <section className="final-cta"><div><span className="section-kicker light">Start with the working foundation</span><h2>See the MSP experience before connecting an account.</h2><p>Explore fictional demo data, inspect the control library, then review the customer-owned IAM role.</p></div><div><Link className="button final-primary" href="/dashboard">Open demo workspace</Link><Link className="button final-secondary" href="/onboard">Review onboarding</Link></div></section>
       </main>
 
-      <footer className="site-footer"><div><Link className="site-brand footer-brand" href="/"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span><strong>Palisade</strong><small>Cloud operations for MSPs</small></span></Link><p>A production-oriented AWS CMDB and configuration posture foundation.</p></div><div><strong>Platform</strong><Link href="/dashboard">Demo workspace</Link><Link href="/cmdb">CMDB</Link><Link href="/findings">Findings</Link><Link href="/controls">Controls</Link></div><div><strong>Trust</strong><Link href="/onboard">AWS onboarding</Link><Link href="/controls#architecture">Architecture</Link><a href="/palisade-customer-role.yaml">CloudFormation</a></div><div><strong>Project</strong><span>Foundation preview</span><span>Fictional demo data</span><span>© 2026 Palisade Cloud</span></div></footer>
+      <footer className="site-footer"><div><Link className="site-brand footer-brand" href="/"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span><strong>Sutra</strong><small>Cloud operations for MSPs</small></span></Link><p>A production-oriented AWS CMDB and configuration posture foundation.</p></div><div><strong>Platform</strong><Link href="/dashboard">Demo workspace</Link><Link href="/cmdb">CMDB</Link><Link href="/findings">Findings</Link><Link href="/controls">Controls</Link></div><div><strong>Trust</strong><Link href="/onboard">AWS onboarding</Link><Link href="/controls#architecture">Architecture</Link><a href="/sutra-customer-role.yaml">CloudFormation</a></div><div><strong>Project</strong><span>Foundation preview</span><span>Fictional demo data</span><span>© 2026 Sutra</span></div></footer>
     </div>
   );
 }

@@ -14,13 +14,13 @@ async function render(pathname = "/") {
   );
 }
 
-test("server-renders the Palisade public product site", async () => {
+test("server-renders the Sutra public product site", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Palisade Cloud<\/title>/i);
+  assert.match(html, /<title>Sutra<\/title>/i);
   assert.match(html, /One source of truth for every customer cloud/i);
   assert.match(html, /Read-only permissions/i);
   assert.match(html, /Unified AWS inventory/i);
@@ -54,7 +54,7 @@ test("removes starter-only preview infrastructure", async () => {
   ]);
 
   assert.doesNotMatch(page, /SkeletonPreview|codex-preview/);
-  assert.match(layout, /Palisade Cloud/);
+  assert.match(layout, /Sutra/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
 });

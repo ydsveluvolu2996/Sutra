@@ -12,7 +12,7 @@ const controls = [
   ["IAM-001", "Stale access key", "AWS IAM", "Medium", "Active access keys older than the configured rotation threshold."],
   ["IAM-002", "Root MFA coverage", "AWS account", "Critical", "Root credential report indicates MFA is not enabled, or evidence is unavailable."],
   ["LOG-001", "Multi-region CloudTrail coverage", "CloudTrail", "High", "No active multi-region trail or incomplete log-delivery evidence."],
-  ["DET-001", "GuardDuty coverage signal", "GuardDuty", "Info", "Shows whether AWS-native threat detection is enabled; Palisade does not emulate it."],
+  ["DET-001", "GuardDuty coverage signal", "GuardDuty", "Info", "Shows whether AWS-native threat detection is enabled; Sutra does not emulate it."],
   ["VUL-001", "Inspector coverage signal", "Inspector", "Info", "Shows native vulnerability-scanning coverage and can ingest existing findings."],
 ];
 
@@ -69,7 +69,7 @@ export default function ControlsPage() {
 
       <section className="panel architecture-panel">
         <div className="panel-heading"><div><p className="eyebrow">Two-plane trust model</p><h2>AWS credentials stay out of the web application</h2></div></div>
-        <div className="architecture-flow" aria-label="Palisade control and collector plane flow">
+        <div className="architecture-flow" aria-label="Sutra control and collector plane flow">
           <div><b>01</b><strong>MSP control plane</strong><span>Tenant-aware UI, CMDB, findings, jobs</span></div><i>→</i>
           <div><b>02</b><strong>Signed job envelope</strong><span>Scoped IDs, expiry, nonce, no role credentials</span></div><i>→</i>
           <div><b>03</b><strong>AWS collector broker</strong><span>Vendor workload IAM and short STS sessions</span></div><i>→</i>

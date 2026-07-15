@@ -28,7 +28,7 @@ export function OnboardAccount() {
       <div className="onboard-layout">
         <section className="panel onboard-panel">
           <div className="stepper" aria-label="Onboarding steps"><span className="active"><b>1</b>Connection</span><i /><span><b>2</b>Deploy role</span><i /><span><b>3</b>Validate trust</span></div>
-          <div className="onboard-copy"><p className="eyebrow">Step 1 of 3</p><h2>Create the connection contract</h2><p>Palisade generates a unique ExternalId and binds the future role to the selected customer and AWS account.</p></div>
+          <div className="onboard-copy"><p className="eyebrow">Step 1 of 3</p><h2>Create the connection contract</h2><p>Sutra generates a unique ExternalId and binds the future role to the selected customer and AWS account.</p></div>
           <form className="onboard-form" onSubmit={submit}>
             <label><span>Customer workspace</span><select defaultValue="northstar"><option value="northstar">Northstar Retail (Demo)</option><option>Bluepeak Health (Demo)</option><option>Harbor Analytics (Demo)</option><option>Evergreen Finance (Demo)</option></select><small>Users only see accounts granted to this customer scope.</small></label>
             <div className="form-grid">
@@ -37,7 +37,7 @@ export function OnboardAccount() {
             </div>
             <label><span>Customer role ARN</span><input placeholder="arn:aws:iam::123456789012:role/mspcmdb/MSPCMDBReadRole" value={roleArn} onChange={(event) => { setRoleArn(event.target.value.trim()); setSubmitted(false); }} aria-invalid={roleArn.length > 0 && (!arnValid || !idsMatch)} /><small>{roleArn.length === 0 ? "Paste this after the CloudFormation stack finishes." : !arnValid ? "Enter a canonical IAM role ARN; assumed-role and user ARNs are rejected." : !idsMatch ? "The role ARN account must match the account ID above." : "Role ARN syntax and account binding match."}</small></label>
             <label><span>Platform-generated ExternalId</span><div className="copy-field"><code>{demoExternalId}</code><button type="button" onClick={() => navigator.clipboard?.writeText(demoExternalId)}>Copy</button></div><small>Preview value only. Production uses a server-generated value with at least 128 bits of entropy and never accepts customer input.</small></label>
-            <div className="template-actions"><a className="button button-secondary" href="/palisade-customer-role.yaml" download>Download CloudFormation</a><span>Review and deploy with <code>CAPABILITY_NAMED_IAM</code>, then return with the role ARN.</span></div>
+            <div className="template-actions"><a className="button button-secondary" href="/sutra-customer-role.yaml" download>Download CloudFormation</a><span>Review and deploy with <code>CAPABILITY_NAMED_IAM</code>, then return with the role ARN.</span></div>
             <button className="button button-primary onboard-submit" type="submit" disabled={!idsMatch}>Prepare validation</button>
           </form>
           {submitted ? <div className="validation-result" role="status"><span>✓</span><div><strong>Connection contract is ready.</strong><p>A live production broker must still run positive AssumeRole/GetCallerIdentity and negative missing/wrong ExternalId probes before this account becomes active.</p></div></div> : null}
@@ -45,7 +45,7 @@ export function OnboardAccount() {
 
         <aside className="onboard-aside">
           <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact vendor workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
-          <section className="panel aside-warning"><p className="eyebrow">Production gate</p><h2>Validation is behavioral</h2><p>ARN syntax is not proof of safe trust. Palisade only activates a connection after the AWS broker proves the role succeeds with the right ExternalId and fails without it or with a wrong one.</p></section>
+          <section className="panel aside-warning"><p className="eyebrow">Production gate</p><h2>Validation is behavioral</h2><p>ARN syntax is not proof of safe trust. Sutra only activates a connection after the AWS broker proves the role succeeds with the right ExternalId and fails without it or with a wrong one.</p></section>
           <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>AWS workload identity</li><li><b>3</b>STS AssumeRole</li><li><b>4</b>Temporary in-memory credentials</li><li><b>5</b>Normalized evidence only</li></ol></section>
         </aside>
       </div>

@@ -1,6 +1,6 @@
 # Security policy
 
-Palisade Cloud handles security-sensitive AWS metadata and cross-account trust
+Sutra handles security-sensitive AWS metadata and cross-account trust
 configuration. The repository is currently a pre-production foundation using demo
 data; no released version is approved for production customer accounts or data.
 
