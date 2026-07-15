@@ -10,22 +10,22 @@ permissions:
 
 jobs:
   import-source:
-    if: ${{ hashFiles('sutra-source.part-01') != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Expand verified Sutra source snapshot
+      - name: Import verified Sutra source snapshot
         run: |
+          if [ ! -f sutra-source.part-01 ]; then
+            echo "No source snapshot is present; nothing to import."
+            exit 0
+          fi
           base64 --decode sutra-source.part-01 > /tmp/sutra-source.tar.gz
           tar -xzf /tmp/sutra-source.tar.gz
           rm sutra-source.part-01
           rm -f public/palisade-customer-role.yaml public/og.png
-
-      - name: Commit source tree
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
