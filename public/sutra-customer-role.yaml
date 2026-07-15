@@ -52,7 +52,7 @@ Parameters:
 
   SessionNamePrefix:
     Type: String
-    Default: mspcmdb-
+    Default: sutra-
     Description: Required prefix for the cross-account STS role session name.
     MinLength: 3
     MaxLength: 32
@@ -67,7 +67,7 @@ Parameters:
 
   RoleName:
     Type: String
-    Default: MSPCMDBReadRole
+    Default: SutraReadOnlyRole
     Description: IAM role name. Changing it changes the ARN registered with the MSP.
     MinLength: 1
     MaxLength: 64
@@ -165,7 +165,7 @@ Resources:
     Properties:
       RoleName:
         Ref: RoleName
-      Path: /mspcmdb/
+      Path: /sutra/
       Description: Metadata-only role assumed by the MSP CMDB collector.
       MaxSessionDuration: 3600
       PermissionsBoundary:
@@ -190,12 +190,12 @@ Resources:
                 sts:RoleSessionName:
                   Fn::Sub: '${SessionNamePrefix}*'
       Tags:
-        - Key: mspcmdb:tenant-id
+        - Key: sutra:tenant-id
           Value:
             Ref: CustomerTenantId
-        - Key: mspcmdb:access-mode
+        - Key: sutra:access-mode
           Value: read-only
-        - Key: mspcmdb:managed-by
+        - Key: sutra:managed-by
           Value: cloudformation
 
   ComputeAndNetworkInventoryPolicy:
@@ -651,4 +651,4 @@ Outputs:
     Description: This template grants metadata and finding reads only.
     Value: READ_ONLY
   TemplateVersion:
-    Value: 0.1.0-draft
+    Value: 0.2.0-local-pilot

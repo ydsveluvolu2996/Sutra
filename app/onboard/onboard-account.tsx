@@ -1,52 +1,206 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
+import type { CollectorHealth, PilotConnection } from "../../lib/pilot-types";
+import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 
-const demoExternalId = "psd_demo_01J2F9R8KX4NQ7W3TM6C5V0HYA";
+interface CreateConnectionResponse {
+  readonly connection: PilotConnection;
+  readonly trust: {
+    readonly externalId: string;
+    readonly vendorCollectorRoleArn: string;
+    readonly sessionNamePrefix: string;
+    readonly customerTenantId: string;
+    readonly roleName: string;
+  };
+  readonly collector: CollectorHealth;
+}
+
+function messageFrom(error: unknown): string {
+  return error instanceof Error ? error.message : "Sutra could not complete onboarding";
+}
+
+function arnPartition(partition: string): string {
+  return partition === "aws-cn" ? "aws-cn" : partition === "aws-us-gov" ? "aws-us-gov" : "aws";
+}
 
 export function OnboardAccount() {
-  const [accountId, setAccountId] = useState("");
+  const { state, health, loading, refresh } = usePilotState();
+  const [customerName, setCustomerName] = useState("Pilot Customer");
+  const [accountId, setAccountId] = useState("123456789012");
+  const [partition, setPartition] = useState("aws");
+  const [regions, setRegions] = useState("us-east-1, ap-south-1");
   const [roleArn, setRoleArn] = useState("");
-  const [submitted, setSubmitted] = useState(false);
-  const arnAccount = useMemo(() => roleArn.match(/^arn:(?:aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]+$/)?.[1], [roleArn]);
-  const accountValid = /^\d{12}$/.test(accountId);
-  const arnValid = Boolean(arnAccount);
-  const idsMatch = accountValid && arnAccount === accountId;
+  const [created, setCreated] = useState<CreateConnectionResponse | null>(null);
+  const [busy, setBusy] = useState<"create" | "role" | "validate" | "sync" | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  const connection = state?.connection ?? created?.connection ?? null;
+  const effectiveRoleArn = roleArn || connection?.roleArn || "";
+  const arnAccount = useMemo(() => effectiveRoleArn.match(/^arn:(?:aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]+$/u)?.[1], [effectiveRoleArn]);
+  const accountValid = /^\d{12}$/u.test(accountId);
+  const roleValid = Boolean(arnAccount && connection && arnAccount === connection.awsAccountId);
+  const currentStep = connection?.status === "active" ? (state?.activeSnapshot ? 4 : 3) : connection?.roleArn ? 3 : connection ? 2 : 1;
+
+  async function createConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitted(idsMatch);
+    setBusy("create");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await postPilot<CreateConnectionResponse>("/api/pilot/connections", {
+        customerName,
+        awsAccountId: accountId,
+        partition,
+        enabledRegions: regions.split(",").map((region) => region.trim()).filter(Boolean),
+      });
+      setCreated(response);
+      setRoleArn(`arn:${arnPartition(response.connection.partition)}:iam::${response.connection.awsAccountId}:role/sutra/SutraReadOnlyRole`);
+      setNotice("Connection contract created. Copy the ExternalId now, then deploy the customer-owned role.");
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught));
+    } finally {
+      setBusy(null);
+    }
   }
+
+  async function registerRole(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!connection) return;
+    setBusy("role");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await postPilot<{ connection: PilotConnection }>("/api/pilot/connections/role", {
+        connectionId: connection.id,
+        roleArn: effectiveRoleArn,
+      });
+      if (created) setCreated({ ...created, connection: response.connection });
+      setNotice("Role registered. Sutra is ready to prove the trust policy behavior.");
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function validateAndSync() {
+    if (!connection) return;
+    setBusy("validate");
+    setError(null);
+    setNotice(null);
+    try {
+      await postPilot("/api/pilot/connections/validate", { connectionId: connection.id });
+      await refresh();
+      setBusy("sync");
+      await postPilot("/api/pilot/connections/sync", { connectionId: connection.id });
+      setNotice("Trust validation passed and the first complete CMDB snapshot was published.");
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught));
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runSync() {
+    if (!connection) return;
+    setBusy("sync");
+    setError(null);
+    setNotice(null);
+    try {
+      await postPilot("/api/pilot/connections/sync", { connectionId: connection.id });
+      setNotice("Inventory collection finished. The latest complete snapshot is now active.");
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught));
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const collectorMode = created?.collector.mode ?? health?.mode;
+  const principalArn = created?.trust.vendorCollectorRoleArn ?? health?.principalArn;
 
   return (
     <>
       <section className="page-heading onboard-heading">
-        <div><p className="eyebrow">Secure AWS connection</p><h1>Onboard a customer account</h1><p className="page-subtitle">Deploy one customer-owned, metadata-only IAM role. No access keys are created or stored.</p></div>
-        <span className="status-pill status-positive">Read-only v1</span>
+        <div><p className="eyebrow">Secure AWS connection</p><h1>Onboard one AWS account</h1><p className="page-subtitle">Create a customer-owned read-only role, prove the ExternalId boundary, then publish a complete CMDB snapshot.</p></div>
+        <span className={`status-pill ${collectorMode === "live" ? "status-positive" : "status-medium"}`}>{collectorMode === "live" ? "Live collector" : collectorMode === "fixture" ? "Fixture pilot" : "Collector checking"}</span>
       </section>
 
       <div className="onboard-layout">
         <section className="panel onboard-panel">
-          <div className="stepper" aria-label="Onboarding steps"><span className="active"><b>1</b>Connection</span><i /><span><b>2</b>Deploy role</span><i /><span><b>3</b>Validate trust</span></div>
-          <div className="onboard-copy"><p className="eyebrow">Step 1 of 3</p><h2>Create the connection contract</h2><p>Sutra generates a unique ExternalId and binds the future role to the selected customer and AWS account.</p></div>
-          <form className="onboard-form" onSubmit={submit}>
-            <label><span>Customer workspace</span><select defaultValue="northstar"><option value="northstar">Northstar Retail (Demo)</option><option>Bluepeak Health (Demo)</option><option>Harbor Analytics (Demo)</option><option>Evergreen Finance (Demo)</option></select><small>Users only see accounts granted to this customer scope.</small></label>
-            <div className="form-grid">
-              <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} placeholder="123456789012" value={accountId} onChange={(event) => { setAccountId(event.target.value.replace(/\D/g, "")); setSubmitted(false); }} aria-invalid={accountId.length > 0 && !accountValid} /><small>Exactly 12 digits.</small></label>
-              <label><span>AWS partition</span><select defaultValue="aws"><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>Collector workloads are isolated by partition.</small></label>
-            </div>
-            <label><span>Customer role ARN</span><input placeholder="arn:aws:iam::123456789012:role/mspcmdb/MSPCMDBReadRole" value={roleArn} onChange={(event) => { setRoleArn(event.target.value.trim()); setSubmitted(false); }} aria-invalid={roleArn.length > 0 && (!arnValid || !idsMatch)} /><small>{roleArn.length === 0 ? "Paste this after the CloudFormation stack finishes." : !arnValid ? "Enter a canonical IAM role ARN; assumed-role and user ARNs are rejected." : !idsMatch ? "The role ARN account must match the account ID above." : "Role ARN syntax and account binding match."}</small></label>
-            <label><span>Platform-generated ExternalId</span><div className="copy-field"><code>{demoExternalId}</code><button type="button" onClick={() => navigator.clipboard?.writeText(demoExternalId)}>Copy</button></div><small>Preview value only. Production uses a server-generated value with at least 128 bits of entropy and never accepts customer input.</small></label>
-            <div className="template-actions"><a className="button button-secondary" href="/sutra-customer-role.yaml" download>Download CloudFormation</a><span>Review and deploy with <code>CAPABILITY_NAMED_IAM</code>, then return with the role ARN.</span></div>
-            <button className="button button-primary onboard-submit" type="submit" disabled={!idsMatch}>Prepare validation</button>
-          </form>
-          {submitted ? <div className="validation-result" role="status"><span>✓</span><div><strong>Connection contract is ready.</strong><p>A live production broker must still run positive AssumeRole/GetCallerIdentity and negative missing/wrong ExternalId probes before this account becomes active.</p></div></div> : null}
+          <div className="stepper" aria-label="Onboarding steps">
+            {["Connection", "Deploy role", "Validate trust", "Inventory"].map((label, index) => {
+              const step = index + 1;
+              return <span key={label} className={step === currentStep ? "active" : step < currentStep ? "complete" : undefined}><b>{step < currentStep ? "✓" : step}</b>{label}</span>;
+            })}
+          </div>
+
+          {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the local pilot workspace…</div> : null}
+
+          {!loading && !connection ? (
+            <>
+              <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. The ExternalId is returned once for the CloudFormation handoff.</p></div>
+              <form className="onboard-form" onSubmit={createConnection}>
+                <label><span>Customer workspace</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} required /><small>This local pilot supports one customer and one AWS account.</small></label>
+                <div className="form-grid">
+                  <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
+                  <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
+                </div>
+                <label><span>Enabled regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS regions. Global IAM and S3 inventory are collected once.</small></label>
+                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
+              </form>
+            </>
+          ) : null}
+
+          {connection ? (
+            <>
+              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below as CloudFormation parameters. Sutra never creates or stores long-lived customer access keys.</p></div>
+              <div className="connection-contract" aria-label="AWS connection contract">
+                <div><small>Customer</small><strong>{connection.customerName}</strong><span>{connection.awsAccountId} · {connection.partition}</span></div>
+                <div><small>Regions</small><strong>{connection.enabledRegions.length}</strong><span>{connection.enabledRegions.join(", ")}</span></div>
+                <div><small>Status</small><strong className={`connection-status connection-${connection.status}`}>{connection.status.replace("_", " ")}</strong><span>Validated {formatTimestamp(connection.lastValidatedAt)}</span></div>
+              </div>
+
+              {created?.trust.externalId ? <label className="contract-field"><span>One-time ExternalId</span><div className="copy-field"><code>{created.trust.externalId}</code><button type="button" onClick={() => void navigator.clipboard?.writeText(created.trust.externalId)}>Copy</button></div><small>Copy this now. Sutra stores only an encrypted server-side value and does not show it again after a reload.</small></label> : <div className="inline-warning"><strong>ExternalId is no longer displayed.</strong><span>If you already deployed the role, continue with its ARN. This pilot intentionally does not expose stored trust material.</span></div>}
+
+              <div className="deployment-parameters" aria-label="CloudFormation trust parameters">
+                <div><small>SessionNamePrefix</small><code>{created?.trust.sessionNamePrefix ?? "sutra-"}</code></div>
+                <div><small>CustomerTenantId</small><code>{created?.trust.customerTenantId ?? connection.customerId}</code></div>
+                <div><small>RoleName</small><code>{created?.trust.roleName ?? "SutraReadOnlyRole"}</code></div>
+              </div>
+
+              <label className="contract-field"><span>Exact collector principal</span><div className="copy-field"><code>{principalArn ?? "Collector principal unavailable"}</code><button type="button" disabled={!principalArn} onClick={() => principalArn && void navigator.clipboard?.writeText(principalArn)}>Copy</button></div></label>
+
+              <div className="template-actions"><a className="button button-secondary" href="/sutra-customer-role.yaml" download>Download CloudFormation</a><span>Deploy with <code>CAPABILITY_NAMED_IAM</code>. The template reads metadata only and never enables AWS security services.</span></div>
+
+              <form className="onboard-form role-registration" onSubmit={registerRole}>
+                <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={`arn:${connection.partition}:iam::${connection.awsAccountId}:role/sutra/SutraReadOnlyRole`} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the CloudFormation output after the stack completes." : !roleValid ? "Use a canonical IAM role ARN from the connected account." : "Role ARN syntax and account binding match."}</small></label>
+                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || busy !== null}>{busy === "role" ? "Registering role…" : connection.roleArn ? "Update registered role" : "Register customer role"}</button>
+              </form>
+
+              <div className="onboard-validation-action">
+                <div><p className="eyebrow">Step 3 of 4</p><h2>Prove the trust boundary</h2><p>Sutra checks the expected caller identity and confirms missing or incorrect ExternalIds cannot assume the role.</p></div>
+                {connection.status === "active" ? <button className="button button-primary" type="button" disabled={busy !== null} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : "Run inventory sync"}</button> : <button className="button button-primary" type="button" disabled={!connection.roleArn || busy !== null} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating trust…" : busy === "sync" ? "Publishing first snapshot…" : "Validate trust & run first sync"}</button>}
+              </div>
+            </>
+          ) : null}
+
+          {notice ? <div className="validation-result" role="status"><span>✓</span><div><strong>Onboarding advanced</strong><p>{notice}</p></div></div> : null}
+          {error ? <div className="validation-result validation-error" role="alert"><span>!</span><div><strong>Action needs attention</strong><p>{error}</p></div></div> : null}
         </section>
 
         <aside className="onboard-aside">
-          <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact vendor workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
-          <section className="panel aside-warning"><p className="eyebrow">Production gate</p><h2>Validation is behavioral</h2><p>ARN syntax is not proof of safe trust. Sutra only activates a connection after the AWS broker proves the role succeeds with the right ExternalId and fails without it or with a wrong one.</p></section>
-          <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>AWS workload identity</li><li><b>3</b>STS AssumeRole</li><li><b>4</b>Temporary in-memory credentials</li><li><b>5</b>Normalized evidence only</li></ol></section>
+          <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact collector workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
+          <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Safe fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Fixture mode exercises onboarding, persistence, CMDB, relationships, findings, exports, and workflows without contacting AWS. Switch the collector to live mode before using customer evidence." : "Start the local collector before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
+          <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>Collector workload identity</li><li><b>3</b>STS AssumeRole</li><li><b>4</b>Temporary in-memory credentials</li><li><b>5</b>Validated normalized evidence</li></ol></section>
         </aside>
       </div>
     </>

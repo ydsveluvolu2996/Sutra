@@ -113,6 +113,67 @@ export interface OnboardingVerificationJobRequest {
 
 export type InventoryCoverage = "COMPLETE" | "PARTIAL";
 
+export type SafeJsonPrimitive = string | number | boolean | null;
+export type SafeJsonValue =
+  | SafeJsonPrimitive
+  | readonly SafeJsonValue[]
+  | SafeJsonObject;
+
+export interface SafeJsonObject {
+  readonly [key: string]: SafeJsonValue;
+}
+
+/**
+ * Allowlisted CMDB record. Raw AWS SDK responses, tags, environment variables,
+ * credentials, and arbitrary error messages are not valid persistence objects.
+ */
+export interface NormalizedAwsResource {
+  readonly schemaVersion: 1;
+  readonly provider: "aws";
+  readonly resourceKey: string;
+  readonly accountId: string;
+  readonly region: string;
+  readonly service: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly arn?: string;
+  readonly observedAt: string;
+  readonly configuration: SafeJsonObject;
+}
+
+export type InventoryEvidenceStatus =
+  | "ENABLED"
+  | "DISABLED"
+  | "CONFIGURED"
+  | "NOT_CONFIGURED"
+  | "OBSERVED"
+  | "ERROR";
+
+/** Security/configuration evidence with only explicitly normalized JSON data. */
+export interface NormalizedAwsEvidence {
+  readonly schemaVersion: 1;
+  readonly provider: "aws";
+  readonly evidenceKey: string;
+  readonly accountId: string;
+  readonly region: string;
+  readonly service: string;
+  readonly evidenceType: string;
+  readonly subjectId: string;
+  readonly status: InventoryEvidenceStatus;
+  readonly observedAt: string;
+  readonly data: SafeJsonObject;
+}
+
+export interface AwsInventoryBatch {
+  readonly resources: readonly NormalizedAwsResource[];
+  readonly evidence: readonly NormalizedAwsEvidence[];
+}
+
+/** Production implementations persist/upsert batches inside the tenant boundary. */
+export interface AwsInventorySink {
+  writeBatch(batch: AwsInventoryBatch): Promise<void>;
+}
+
 export interface InventoryCollectionContext {
   readonly tenantId: string;
   readonly connectionId: string;
