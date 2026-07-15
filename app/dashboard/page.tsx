@@ -59,7 +59,7 @@ export default function Home() {
 
       <div className="trust-strip" role="note">
         <span className="trust-icon">✓</span>
-        <span><strong>Read-only by design.</strong> Palisade inventories and assesses resources through customer-owned IAM roles. It cannot modify infrastructure.</span>
+        <span><strong>Read-only by design.</strong> Sutra inventories and assesses resources through customer-owned IAM roles. It cannot modify infrastructure.</span>
         <a href="/controls">See coverage</a>
       </div>
 
@@ -109,7 +109,7 @@ export default function Home() {
 
         <article className="panel signal-panel">
           <div className="panel-heading">
-            <div><p className="eyebrow">Coverage signals</p><h2>What Palisade checks</h2></div>
+            <div><p className="eyebrow">Coverage signals</p><h2>What Sutra checks</h2></div>
           </div>
           <div className="signal-list">
             <div><span className="signal-icon signal-green">01</span><p><strong>Configuration posture</strong><small>Encryption, exposure, logging and IAM hygiene</small></p><b>Live</b></div>

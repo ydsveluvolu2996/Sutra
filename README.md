@@ -1,6 +1,6 @@
-# Palisade Cloud
+# Sutra
 
-Palisade Cloud is a production-shaped foundation for a multi-tenant MSP AWS
+Sutra is a production-shaped foundation for a multi-tenant MSP AWS
 configuration management database (CMDB) and cloud security posture management
 (CSPM) service. The intended first release gives MSP teams and their customers a
 read-only inventory, resource relationships, evidence-backed configuration checks,
@@ -14,7 +14,7 @@ and scoped access to findings.
 
 This repository is an implementation foundation, not a production-ready service.
 It does not replace Amazon Inspector, Amazon GuardDuty, AWS Security Hub, an EDR
-agent, or human incident response. Palisade's initial controls are deterministic
+agent, or human incident response. Sutra's initial controls are deterministic
 configuration checks. Package/runtime vulnerability analysis and behavioral threat
 detection need different telemetry, detection engineering, and operational response
 capabilities.
@@ -39,7 +39,7 @@ Included in the target slice:
   `pass`/`fail`/`unknown`/`error` results, findings, suppression expiry, and audit
   history.
 - Optional read-only import of findings from native AWS security services that the
-  customer has already enabled. Palisade does not enable or configure those
+  customer has already enabled. Sutra does not enable or configure those
   billable services.
 
 Explicitly outside the first slice:

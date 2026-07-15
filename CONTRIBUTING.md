@@ -1,6 +1,6 @@
-# Contributing to Palisade Cloud
+# Contributing to Sutra
 
-Palisade is a pre-production, security-sensitive foundation. Contributions should
+Sutra is a pre-production, security-sensitive foundation. Contributions should
 preserve the read-only first-release boundary and make the difference between demo,
 sandbox, and production behavior unmistakable.
 
