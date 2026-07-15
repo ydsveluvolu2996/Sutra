@@ -1,0 +1,32 @@
+name: Import verified Palisade source
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  import-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Expand verified source snapshot
+        run: |
+          cat palisade-source.part-* | base64 --decode > /tmp/palisade-source.tar.gz
+          tar -xzf /tmp/palisade-source.tar.gz
+          rm palisade-source.part-* .github/workflows/import-source.yml
+
+      - name: Commit source tree
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Import verified Palisade Cloud source"
+          git push
