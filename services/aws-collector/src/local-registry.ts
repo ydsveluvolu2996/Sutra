@@ -1,0 +1,522 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rm,
+} from "node:fs/promises";
+import { dirname } from "node:path";
+
+import type {
+  ConnectionScope,
+  OnboardingTrustVerification,
+  ScopedConnectionRegistry,
+  StoredAwsConnection,
+} from "./types.js";
+
+const REGISTRY_AAD = Buffer.from("sutra-local-registry:v1", "utf8");
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
+const ACCOUNT_ID = /^\d{12}$/;
+const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
+const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/;
+const IAM_ROLE_ARN =
+  /^arn:(aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
+const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
+const MAX_CONNECTIONS = 10_000;
+
+export type LocalAwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+
+export interface RegisteredAwsConnection extends StoredAwsConnection {
+  readonly partition: LocalAwsPartition;
+  readonly enabledRegions: readonly string[];
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface RegisterAwsConnectionInput {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly expectedAccountId: string;
+  readonly partition: LocalAwsPartition;
+  readonly roleArn: string;
+  readonly externalId: string;
+  readonly enabledRegions: readonly string[];
+  readonly sessionNamePrefix?: string;
+}
+
+interface RegistryDocument {
+  readonly version: 1;
+  readonly connections: Readonly<Record<string, RegisteredAwsConnection>>;
+}
+
+interface EncryptedEnvelope {
+  readonly version: 1;
+  readonly iv: string;
+  readonly tag: string;
+  readonly ciphertext: string;
+}
+
+export interface EncryptedFileConnectionRegistryOptions {
+  readonly filePath: string;
+  readonly encryptionKey: string;
+  readonly now?: () => Date;
+}
+
+/**
+ * Small local-only registry used by the pilot collector. The whole document is
+ * authenticated and encrypted at rest; plaintext External IDs are never written
+ * to disk. Mutations are serialized and published with an atomic rename.
+ */
+export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry {
+  private readonly filePath: string;
+  private readonly key: Buffer;
+  private readonly now: () => Date;
+  private writeTail: Promise<void> = Promise.resolve();
+
+  public constructor(options: EncryptedFileConnectionRegistryOptions) {
+    if (options.filePath.length === 0 || options.filePath.includes("\u0000")) {
+      throw new RegistryConfigurationError("The local registry path is invalid");
+    }
+    this.filePath = options.filePath;
+    this.key = decodeAes256Key(options.encryptionKey);
+    this.now = options.now ?? (() => new Date());
+  }
+
+  public async resolve(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<StoredAwsConnection | null> {
+    const connection = await this.getRegistered(scope, connectionId);
+    if (connection === null) return null;
+    return {
+      tenantId: connection.tenantId,
+      connectionId: connection.connectionId,
+      expectedAccountId: connection.expectedAccountId,
+      roleArn: connection.roleArn,
+      externalId: connection.externalId,
+      status: connection.status,
+      ...(connection.sessionNamePrefix === undefined
+        ? {}
+        : { sessionNamePrefix: connection.sessionNamePrefix }),
+    };
+  }
+
+  public async getRegistered(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<RegisteredAwsConnection | null> {
+    assertScope(scope, connectionId);
+    await this.writeTail;
+    const document = await this.readDocument();
+    const connection = document.connections[connectionKey(scope.tenantId, connectionId)];
+    if (
+      connection === undefined ||
+      connection.tenantId !== scope.tenantId ||
+      connection.connectionId !== connectionId
+    ) {
+      return null;
+    }
+    return structuredClone(connection);
+  }
+
+  public async upsert(input: RegisterAwsConnectionInput): Promise<void> {
+    const parsed = parseConnectionInput(input);
+    await this.mutate((document) => {
+      const key = connectionKey(parsed.tenantId, parsed.connectionId);
+      const previous = document.connections[key];
+      const timestamp = this.now().toISOString();
+      const unchanged =
+        previous !== undefined &&
+        previous.expectedAccountId === parsed.expectedAccountId &&
+        previous.partition === parsed.partition &&
+        previous.roleArn === parsed.roleArn &&
+        secretsEqual(previous.externalId, parsed.externalId) &&
+        previous.sessionNamePrefix === parsed.sessionNamePrefix &&
+        arraysEqual(previous.enabledRegions, parsed.enabledRegions);
+
+      return {
+        version: 1,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...parsed,
+            status: unchanged ? previous.status : "PENDING",
+            createdAt: previous?.createdAt ?? timestamp,
+            updatedAt: timestamp,
+          },
+        },
+      };
+    });
+  }
+
+  public async markOnboardingVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    verification: OnboardingTrustVerification,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined) throw new RegistryConnectionNotFoundError();
+      if (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId) {
+        throw new RegistryConnectionNotFoundError();
+      }
+      if (connection.status !== "PENDING" && connection.status !== "DEGRADED") {
+        throw new RegistryStateError();
+      }
+      if (
+        verification.connectionId !== connection.connectionId ||
+        verification.accountId !== connection.expectedAccountId ||
+        verification.partition !== connection.partition ||
+        verification.roleArn !== connection.roleArn ||
+        verification.missingExternalIdDenied !== true ||
+        verification.wrongExternalIdDenied !== true
+      ) {
+        throw new RegistryIntegrityError();
+      }
+      return {
+        version: 1,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "ACTIVE",
+            updatedAt: this.now().toISOString(),
+          },
+        },
+      };
+    });
+  }
+
+  private async mutate(
+    transform: (document: RegistryDocument) => RegistryDocument,
+  ): Promise<void> {
+    const operation = this.writeTail.then(async () => {
+      const current = await this.readDocument();
+      const next = transform(current);
+      if (Object.keys(next.connections).length > MAX_CONNECTIONS) {
+        throw new RegistryIntegrityError();
+      }
+      await this.writeDocument(next);
+    });
+    this.writeTail = operation.catch(() => undefined);
+    return operation;
+  }
+
+  private async readDocument(): Promise<RegistryDocument> {
+    try {
+      const metadata = await lstat(this.filePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) {
+        throw new RegistryIntegrityError();
+      }
+      const raw = await readFile(this.filePath, { encoding: "utf8" });
+      if (Buffer.byteLength(raw, "utf8") > 8 * 1024 * 1024) {
+        throw new RegistryIntegrityError();
+      }
+      const envelope = parseEnvelope(JSON.parse(raw) as unknown);
+      const decipher = createDecipheriv(
+        "aes-256-gcm",
+        this.key,
+        Buffer.from(envelope.iv, "base64url"),
+      );
+      decipher.setAAD(REGISTRY_AAD);
+      decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+      const cleartext = Buffer.concat([
+        decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
+        decipher.final(),
+      ]).toString("utf8");
+      return parseDocument(JSON.parse(cleartext) as unknown);
+    } catch (error: unknown) {
+      if (isMissingFile(error)) return emptyDocument();
+      if (error instanceof RegistryError) throw error;
+      throw new RegistryIntegrityError();
+    }
+  }
+
+  private async writeDocument(document: RegistryDocument): Promise<void> {
+    const directory = dirname(this.filePath);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const iv = randomBytes(12);
+    const cipher = createCipheriv("aes-256-gcm", this.key, iv);
+    cipher.setAAD(REGISTRY_AAD);
+    const ciphertext = Buffer.concat([
+      cipher.update(JSON.stringify(document), "utf8"),
+      cipher.final(),
+    ]);
+    const envelope: EncryptedEnvelope = {
+      version: 1,
+      iv: iv.toString("base64url"),
+      tag: cipher.getAuthTag().toString("base64url"),
+      ciphertext: ciphertext.toString("base64url"),
+    };
+    const temporaryPath = `${this.filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+    let handle;
+    try {
+      handle = await open(temporaryPath, "wx", 0o600);
+      await handle.writeFile(JSON.stringify(envelope), { encoding: "utf8" });
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      await rename(temporaryPath, this.filePath);
+      await chmod(this.filePath, 0o600);
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined);
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+    }
+  }
+}
+
+export class RegistryError extends Error {}
+
+export class RegistryConfigurationError extends RegistryError {
+  public constructor(message: string) {
+    super(message);
+    this.name = "RegistryConfigurationError";
+  }
+}
+
+export class RegistryIntegrityError extends RegistryError {
+  public constructor() {
+    super("The encrypted local connection registry failed validation");
+    this.name = "RegistryIntegrityError";
+  }
+}
+
+export class RegistryConnectionNotFoundError extends RegistryError {
+  public constructor() {
+    super("The scoped connection was not found");
+    this.name = "RegistryConnectionNotFoundError";
+  }
+}
+
+export class RegistryStateError extends RegistryError {
+  public constructor() {
+    super("The scoped connection is not in a valid state for this operation");
+    this.name = "RegistryStateError";
+  }
+}
+
+function decodeAes256Key(value: string): Buffer {
+  if (value.length < 43 || value.length > 48 || /\s/u.test(value)) {
+    throw new RegistryConfigurationError(
+      "SUTRA_REGISTRY_ENCRYPTION_KEY must be a base64 value containing exactly 256 bits",
+    );
+  }
+  const decoded = Buffer.from(value.replaceAll("-", "+").replaceAll("_", "/"), "base64");
+  if (decoded.byteLength !== 32) {
+    throw new RegistryConfigurationError(
+      "SUTRA_REGISTRY_ENCRYPTION_KEY must contain exactly 256 bits",
+    );
+  }
+  return decoded;
+}
+
+function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsConnection {
+  if (!IDENTIFIER.test(input.tenantId) || !IDENTIFIER.test(input.connectionId)) {
+    throw new RegistryIntegrityError();
+  }
+  if (!ACCOUNT_ID.test(input.expectedAccountId) || !PARTITIONS.has(input.partition)) {
+    throw new RegistryIntegrityError();
+  }
+  const role = IAM_ROLE_ARN.exec(input.roleArn);
+  if (
+    role === null ||
+    role[1] !== input.partition ||
+    role[2] !== input.expectedAccountId ||
+    role[3] === undefined ||
+    role[3].startsWith("/") ||
+    role[3].endsWith("/") ||
+    role[3].includes("//")
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  if (!EXTERNAL_ID.test(input.externalId)) throw new RegistryIntegrityError();
+  if (
+    input.enabledRegions.length === 0 ||
+    input.enabledRegions.length > 32 ||
+    new Set(input.enabledRegions).size !== input.enabledRegions.length ||
+    input.enabledRegions.some((region) => !REGION.test(region))
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  const prefix = input.sessionNamePrefix ?? "sutra-";
+  if (!/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(prefix)) throw new RegistryIntegrityError();
+  const timestamp = new Date(0).toISOString();
+  return {
+    tenantId: input.tenantId,
+    connectionId: input.connectionId,
+    expectedAccountId: input.expectedAccountId,
+    partition: input.partition,
+    roleArn: input.roleArn,
+    externalId: input.externalId,
+    status: "PENDING",
+    sessionNamePrefix: prefix,
+    enabledRegions: [...input.enabledRegions],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+function parseEnvelope(value: unknown): EncryptedEnvelope {
+  const record = exactRecord(value, ["version", "iv", "tag", "ciphertext"]);
+  if (
+    record.version !== 1 ||
+    !isBase64Url(record.iv, 16, 16) ||
+    !isBase64Url(record.tag, 22, 22) ||
+    !isBase64Url(record.ciphertext, 1, 12 * 1024 * 1024)
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    version: 1,
+    iv: record.iv,
+    tag: record.tag,
+    ciphertext: record.ciphertext,
+  };
+}
+
+function parseDocument(value: unknown): RegistryDocument {
+  const record = exactRecord(value, ["version", "connections"]);
+  if (record.version !== 1 || !isRecord(record.connections)) {
+    throw new RegistryIntegrityError();
+  }
+  const entries = Object.entries(record.connections);
+  if (entries.length > MAX_CONNECTIONS) throw new RegistryIntegrityError();
+  const connections: Record<string, RegisteredAwsConnection> = {};
+  for (const [key, candidate] of entries) {
+    if (!isRecord(candidate)) throw new RegistryIntegrityError();
+    const parsed = parsePersistedConnection(candidate);
+    if (key !== connectionKey(parsed.tenantId, parsed.connectionId)) {
+      throw new RegistryIntegrityError();
+    }
+    connections[key] = parsed;
+  }
+  return { version: 1, connections };
+}
+
+function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
+  const record = exactRecord(value, [
+    "tenantId",
+    "connectionId",
+    "expectedAccountId",
+    "partition",
+    "roleArn",
+    "externalId",
+    "status",
+    "sessionNamePrefix",
+    "enabledRegions",
+    "createdAt",
+    "updatedAt",
+  ]);
+  if (
+    typeof record.tenantId !== "string" ||
+    typeof record.connectionId !== "string" ||
+    typeof record.expectedAccountId !== "string" ||
+    typeof record.partition !== "string" ||
+    typeof record.roleArn !== "string" ||
+    typeof record.externalId !== "string" ||
+    typeof record.sessionNamePrefix !== "string" ||
+    !Array.isArray(record.enabledRegions)
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  const parsed = parseConnectionInput({
+    tenantId: record.tenantId,
+    connectionId: record.connectionId,
+    expectedAccountId: record.expectedAccountId,
+    partition: record.partition as LocalAwsPartition,
+    roleArn: record.roleArn,
+    externalId: record.externalId,
+    enabledRegions: record.enabledRegions as string[],
+    sessionNamePrefix: record.sessionNamePrefix,
+  });
+  if (
+    record.status !== "PENDING" &&
+    record.status !== "ACTIVE" &&
+    record.status !== "DEGRADED" &&
+    record.status !== "DISABLED"
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  if (!validIsoDate(record.createdAt) || !validIsoDate(record.updatedAt)) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    ...parsed,
+    status: record.status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+  };
+}
+
+function emptyDocument(): RegistryDocument {
+  return { version: 1, connections: {} };
+}
+
+function connectionKey(tenantId: string, connectionId: string): string {
+  return `${tenantId}\u001f${connectionId}`;
+}
+
+function assertScope(scope: ConnectionScope, connectionId: string): void {
+  if (!IDENTIFIER.test(scope.tenantId) || !IDENTIFIER.test(connectionId)) {
+    throw new RegistryConnectionNotFoundError();
+  }
+}
+
+function exactRecord(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (!isRecord(value)) throw new RegistryIntegrityError();
+  const actual = Object.keys(value);
+  if (actual.length !== keys.length || actual.some((key) => !keys.includes(key))) {
+    throw new RegistryIntegrityError();
+  }
+  return value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBase64Url(value: unknown, minimum: number, maximum: number): value is string {
+  return (
+    typeof value === "string" &&
+    value.length >= minimum &&
+    value.length <= maximum &&
+    /^[A-Za-z0-9_-]+$/u.test(value)
+  );
+}
+
+function validIsoDate(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(Date.parse(value)).toISOString() === value
+  );
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function secretsEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "utf8");
+  const rightBuffer = Buffer.from(right, "utf8");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
+}

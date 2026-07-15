@@ -101,6 +101,140 @@ export const syncRuns = sqliteTable("sync_runs", {
   index("sync_runs_scope_started_idx").on(table.orgId, table.customerId, table.connectionId, table.startedAt),
 ]);
 
+/**
+ * Per-service/region execution detail. A sync can succeed partially without
+ * hiding which API families were denied, throttled, or unavailable.
+ */
+export const collectorRuns = sqliteTable("collector_runs", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  syncRunId: text("sync_run_id").notNull().references(() => syncRuns.id),
+  collectorKey: text("collector_key").notNull(),
+  regionKey: text("region_key").notNull(),
+  status: text("status", { enum: ["queued", "running", "succeeded", "partial", "failed", "skipped"] }).notNull(),
+  itemsObserved: integer("items_observed").notNull().default(0),
+  pagesObserved: integer("pages_observed").notNull().default(0),
+  errorCode: text("error_code"),
+  errorMessage: text("error_message"),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("collector_runs_sync_collector_region_uq").on(table.syncRunId, table.collectorKey, table.regionKey),
+  index("collector_runs_scope_sync_idx").on(table.orgId, table.customerId, table.connectionId, table.syncRunId),
+]);
+
+/**
+ * Immutable normalized snapshots. The connection head is only advanced after
+ * every row for a usable snapshot has been persisted, so failed runs preserve
+ * the last known-good CMDB projection.
+ */
+export const cmdbSnapshots = sqliteTable("cmdb_snapshots", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  syncRunId: text("sync_run_id").notNull().references(() => syncRuns.id),
+  status: text("status", { enum: ["staging", "complete", "partial", "failed"] }).notNull().default("staging"),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  coverageJson: text("coverage_json").notNull().default("{}"),
+  summaryJson: text("summary_json").notNull().default("{}"),
+  snapshotSha256: text("snapshot_sha256"),
+}, (table) => [
+  uniqueIndex("cmdb_snapshots_sync_run_uq").on(table.syncRunId),
+  index("cmdb_snapshots_connection_time_idx").on(table.orgId, table.connectionId, table.collectedAt),
+]);
+
+export const connectionHeads = sqliteTable("connection_heads", {
+  connectionId: text("connection_id").primaryKey().references(() => awsConnections.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("connection_heads_scope_idx").on(table.orgId, table.customerId, table.connectionId),
+]);
+
+export const cmdbResources = sqliteTable("cmdb_resources", {
+  id: text("id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  resourceKey: text("resource_key").notNull(),
+  providerKey: text("provider_key").notNull().default("aws"),
+  service: text("service").notNull(),
+  resourceType: text("resource_type").notNull(),
+  nativeId: text("native_id").notNull(),
+  arn: text("arn"),
+  name: text("name"),
+  regionKey: text("region_key").notNull(),
+  state: text("state").notNull().default("unknown"),
+  tagsJson: text("tags_json").notNull().default("{}"),
+  configurationJson: text("configuration_json").notNull().default("{}"),
+  sourceJson: text("source_json").notNull().default("{}"),
+  contentSha256: text("content_sha256").notNull(),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("cmdb_resources_snapshot_key_uq").on(table.snapshotId, table.resourceKey),
+  index("cmdb_resources_scope_type_idx").on(table.orgId, table.customerId, table.connectionId, table.resourceType, table.regionKey),
+]);
+
+export const cmdbRelationships = sqliteTable("cmdb_relationships", {
+  id: text("id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  fromResourceKey: text("from_resource_key").notNull(),
+  toResourceKey: text("to_resource_key").notNull(),
+  relationType: text("relation_type").notNull(),
+  evidenceJson: text("evidence_json").notNull().default("{}"),
+}, (table) => [
+  uniqueIndex("cmdb_relationships_snapshot_edge_uq").on(table.snapshotId, table.fromResourceKey, table.toResourceKey, table.relationType),
+  index("cmdb_relationships_scope_from_idx").on(table.orgId, table.customerId, table.connectionId, table.fromResourceKey),
+]);
+
+export const cmdbFindings = sqliteTable("cmdb_findings", {
+  id: text("id").primaryKey(),
+  snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  resourceKey: text("resource_key"),
+  controlKey: text("control_key").notNull(),
+  controlVersion: text("control_version").notNull(),
+  fingerprint: text("fingerprint").notNull(),
+  severity: text("severity", { enum: ["critical", "high", "medium", "low", "informational"] }).notNull(),
+  status: text("status", { enum: ["open", "acknowledged", "resolved", "suppressed"] }).notNull().default("open"),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  remediation: text("remediation").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  evaluatedAt: integer("evaluated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("cmdb_findings_snapshot_fingerprint_uq").on(table.snapshotId, table.fingerprint),
+  index("cmdb_findings_scope_severity_idx").on(table.orgId, table.customerId, table.connectionId, table.status, table.severity),
+]);
+
+/** Operator workflow state is kept outside immutable evidence snapshots. */
+export const findingWorkflowStates = sqliteTable("finding_workflow_states", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  fingerprint: text("fingerprint").notNull(),
+  status: text("status", { enum: ["open", "acknowledged", "suppressed"] }).notNull(),
+  note: text("note"),
+  actorId: text("actor_id").notNull(),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("finding_workflow_scope_fingerprint_uq").on(table.orgId, table.connectionId, table.fingerprint),
+  index("finding_workflow_scope_status_idx").on(table.orgId, table.customerId, table.connectionId, table.status),
+]);
+
 export const resources = sqliteTable("resources", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().references(() => organizations.id),

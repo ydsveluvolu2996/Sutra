@@ -6,11 +6,12 @@ configuration management database (CMDB) and cloud security posture management
 read-only inventory, resource relationships, evidence-backed configuration checks,
 and scoped access to findings.
 
-> **Demo data only:** the application currently renders seeded customers, assets,
-> findings, controls, and sync status from local fixtures. The onboarding screen
-> validates form syntax in the browser and shows a preview ExternalId; it does not
-> persist a connection, call AWS STS, validate a trust policy, or scan an account.
-> Do not enter real credentials or treat anything shown as a live security result.
+> **Local pilot boundary:** the application now supports one persistent local MSP
+> workspace and one AWS account connection. Fixture mode provides a repeatable sales
+> demo through the real signed collector, encrypted registry, D1 snapshot, CMDB, and
+> finding workflow. Live mode can validate and inventory a disposable AWS sandbox
+> through a customer IAM trust role. The UI labels the active source; fixture results
+> must never be represented as observations from a customer account.
 
 This repository is an implementation foundation, not a production-ready service.
 It does not replace Amazon Inspector, Amazon GuardDuty, AWS Security Hub, an EDR
@@ -90,11 +91,12 @@ must authenticate the control plane, reject replay, enforce tenant/connection sc
 and rate-limit work. A browser, generic web handler, D1 row, or Cloudflare variable
 must never contain a durable vendor AWS access key.
 
-The diagram is the target production architecture. The current repository contains
-the demo web surface, domain/schema foundation, a reviewable customer-role template,
-and a tested AWS-side STS credential-boundary package. It does not yet contain the
-production queue, authenticated ingestion boundary, R2 evidence path, deployed AWS
-broker, or service-specific inventory adapters.
+The diagram is the hosted target architecture. The repository implements its local
+equivalent: a tenant-scoped control-plane API, D1 snapshots, a signed replay-resistant
+loopback broker boundary, encrypted connection material, behavioral trust probes,
+and selected service-specific inventory adapters. It does not yet contain the hosted
+queue/workflow, managed secret service, R2 evidence path, deployed AWS worker fleet,
+or production multi-tenant identity and authorization plane.
 
 ## Trust-role onboarding
 
@@ -157,11 +159,15 @@ Prerequisites:
 corepack enable
 corepack prepare pnpm@10.13.1 --activate
 pnpm install --frozen-lockfile
-pnpm dev
+pnpm pilot:setup
+pnpm dev:pilot
 ```
 
-Open the local URL printed by the development server. The current demo needs no AWS
-credentials or application secrets. The `DB` D1 binding is declared in
+Open `http://localhost:3000/onboard`. Setup creates permission-restricted secrets in
+ignored `.dev.vars` and an encrypted collector registry under ignored `.sutra/`.
+Fixture mode is the default and requires no AWS account. See
+[`docs/local-demo.md`](docs/local-demo.md) for the reliable sales-demo flow and the
+separate live AWS sandbox procedure. The `DB` D1 binding is declared in
 `.openai/hosting.json` and simulated locally by the development stack.
 
 Never use a production AWS access key locally. Real broker development must use an
@@ -174,11 +180,11 @@ screenshots, logs, issues, or pull requests.
 
 | Path | Purpose and current status |
 | --- | --- |
-| `app/` | vinext/React demo UI, including dashboard, controls, and simulated onboarding |
-| `lib/` | Domain types, seeded demo records, and deterministic example controls |
-| `db/` | Drizzle/D1 schema and database binding foundation |
-| `infrastructure/` | Customer read-only IAM role template for review/sandbox use |
-| `services/aws-collector/` | AWS-hosted STS role broker and job boundary with injected fake-STS tests; not a deployed collector fleet |
+| `app/` | vinext/React control plane, real local onboarding, dashboard, CMDB, findings, and exports |
+| `lib/` | Domain types, cryptographic/request boundaries, payload validation, and control definitions |
+| `db/` | Drizzle/D1 connection, sync, immutable snapshot, relationship, finding, and audit repositories |
+| `infrastructure/` | Customer read-only IAM role template for controlled sandbox use |
+| `services/aws-collector/` | Signed loopback broker, encrypted registry, fixture/live runners, STS trust validation, and AWS adapters |
 | `docs/` | Production architecture, AWS integration, threat model, quality gates, and acceptance criteria |
 | `tests/` | Deterministic control tests and rendered-HTML route smoke tests; not yet the required tenant-isolation suite |
 | `public/` | Static assets and a downloadable copy of the customer-role template |
@@ -215,11 +221,18 @@ stores. Deployment automation must use short-lived OIDC federation rather than
 stored cloud access keys, pin the reviewed artifact digest, run forward-only
 migrations, and require environment approval for production.
 
-Until the P0 hold is cleared, deploy only the demo UI or an isolated test stack with
-synthetic data. A polished dashboard or a successful CloudFormation deployment is
-not production readiness.
+Until the P0 hold is cleared, use fixture mode or an isolated sandbox AWS account.
+A polished dashboard, successful role validation, or one-account scan is not proof
+of multi-tenant production readiness.
 
 ## Roadmap
+
+See the detailed [Cloud operations parity roadmap](docs/cloudaware-parity-roadmap.md)
+for a delivered-versus-future capability matrix covering the current local pilot,
+hosted MSP tenancy and jobs, broader AWS CMDB/CSPM and native finding imports,
+remediation, compliance, FinOps, ITSM/SIEM integrations, and the Azure/GCP/Kubernetes
+research horizon. It is a sequencing document, not a Cloudaware parity claim or
+release-date commitment.
 
 1. **P0 security foundation:** production identity, memberships and customer grants,
    centralized authorization, tenant-safe repositories, audit/outbox primitives,

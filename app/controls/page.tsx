@@ -4,16 +4,17 @@ import { AppShell } from "../components/app-shell";
 export const metadata: Metadata = { title: "Control library" };
 
 const controls = [
-  ["NET-001", "Public administrative ingress", "EC2 / VPC", "Critical", "Security groups allowing SSH or RDP from 0.0.0.0/0 or ::/0."],
-  ["NET-002", "Default security group in use", "EC2 / VPC", "Medium", "Default groups with ingress rules or attached network interfaces."],
-  ["DATA-001", "S3 public access exposure", "Amazon S3", "Critical", "Public policy, ACL, or account/bucket public-access-block gaps."],
-  ["DATA-002", "Storage encryption disabled", "EBS / RDS", "High", "Unencrypted block volumes or database instances based on collected metadata."],
-  ["DATA-003", "Public database reachability", "Amazon RDS", "High", "Database instances marked publicly accessible with reachable network context."],
-  ["IAM-001", "Stale access key", "AWS IAM", "Medium", "Active access keys older than the configured rotation threshold."],
-  ["IAM-002", "Root MFA coverage", "AWS account", "Critical", "Root credential report indicates MFA is not enabled, or evidence is unavailable."],
-  ["LOG-001", "Multi-region CloudTrail coverage", "CloudTrail", "High", "No active multi-region trail or incomplete log-delivery evidence."],
-  ["DET-001", "GuardDuty coverage signal", "GuardDuty", "Info", "Shows whether AWS-native threat detection is enabled; Sutra does not emulate it."],
-  ["VUL-001", "Inspector coverage signal", "Inspector", "Info", "Shows native vulnerability-scanning coverage and can ingest existing findings."],
+  ["EC2-001", "Public SSH ingress", "EC2 / VPC", "High", "Security groups allowing TCP/22 from a public IPv4 range."],
+  ["EC2-002", "Instance public IP", "Amazon EC2", "Medium", "Instances with a directly assigned public IPv4 address."],
+  ["EC2-003", "IMDSv2 not required", "Amazon EC2", "High", "Instance metadata settings where HttpTokens is not required."],
+  ["EC2-004", "Subnet auto-assigns public IPs", "EC2 / VPC", "Medium", "Subnets whose MapPublicIpOnLaunch setting is enabled."],
+  ["S3-001", "S3 Public Access Block gaps", "Amazon S3", "High", "Buckets missing one or more Public Access Block protections."],
+  ["RDS-001", "RDS storage encryption disabled", "Amazon RDS", "High", "Database instances whose StorageEncrypted setting is false."],
+  ["RDS-002", "Public database accessibility", "Amazon RDS", "Critical", "Database instances whose PubliclyAccessible setting is enabled."],
+  ["LOG-001", "CloudTrail logging stopped", "CloudTrail", "Critical", "Configured trails that are not currently delivering management events."],
+  ["IAM-001", "IAM password baseline", "AWS IAM", "Medium", "Account password policy is missing or below the local pilot baseline."],
+  ["DET-001", "GuardDuty coverage signal", "GuardDuty", "High", "Shows whether AWS-native threat detection is enabled; Sutra does not emulate it."],
+  ["HUB-001", "Security Hub coverage signal", "Security Hub", "Medium", "Shows whether native finding aggregation is enabled in the observed Region."],
 ];
 
 export default function ControlsPage() {
@@ -21,18 +22,18 @@ export default function ControlsPage() {
     <AppShell active="controls">
       <section className="page-heading">
         <div><p className="eyebrow">Transparent by default</p><h1>Control library</h1><p className="page-subtitle">Deterministic checks with explicit evidence, versioning, and honest coverage boundaries.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href="#architecture">View architecture</a><a className="button button-primary" href="/onboard">Connect account</a></div>
+        <div className="heading-actions"><a className="button button-secondary" href="/roadmap">Product roadmap</a><a className="button button-secondary" href="#architecture">View architecture</a><a className="button button-primary" href="/onboard">Connect account</a></div>
       </section>
 
       <section className="summary-band">
-        <div><small>Configuration controls</small><strong>8</strong><span>Enabled in foundation pack</span></div>
+        <div><small>Configuration controls</small><strong>9</strong><span>Enabled in local pilot pack</span></div>
         <div><small>Coverage signals</small><strong>2</strong><span>AWS-native service status</span></div>
         <div><small>Result semantics</small><strong>5</strong><span>Pass · fail · unknown · N/A · error</span></div>
         <div><small>Mutation permissions</small><strong>0</strong><span>Read-only v1 collector role</span></div>
       </section>
 
       <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">Foundation pack · v0.1</p><h2>AWS posture and exposure checks</h2></div><span className="status-pill status-positive">Versioned</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">Local pilot pack · v1.0</p><h2>AWS posture and exposure checks</h2></div><span className="status-pill status-positive">Versioned</span></div>
         <div className="control-list">
           {controls.map(([id, title, service, severity, description]) => (
             <article className="control-row" key={id}>
@@ -53,7 +54,7 @@ export default function ControlsPage() {
             <li><span>✓</span>Inventories supported AWS resources and relationships.</li>
             <li><span>✓</span>Evaluates explainable configuration and exposure rules.</li>
             <li><span>✓</span>Preserves unknown states when evidence is missing.</li>
-            <li><span>✓</span>Correlates AWS-native findings when customers enable them.</li>
+            <li><span>✓</span>Reports GuardDuty and Security Hub enablement as coverage signals.</li>
           </ul>
         </article>
         <article className="panel boundary-secondary">
@@ -75,6 +76,11 @@ export default function ControlsPage() {
           <div><b>03</b><strong>AWS collector broker</strong><span>Vendor workload IAM and short STS sessions</span></div><i>→</i>
           <div><b>04</b><strong>Customer role</strong><span>Exact principal + unique ExternalId + read-only policy</span></div>
         </div>
+      </section>
+
+      <section className="roadmap-inline-callout">
+        <div><p className="eyebrow">Delivered versus future</p><h2>See exactly what Sutra implements now—and what remains gated.</h2><p>The roadmap separates this local AWS pilot from hosted multitenancy, broader AWS coverage, native finding imports, FinOps, integrations, remediation, and multi-cloud work.</p></div>
+        <a className="button button-primary" href="/roadmap">Open product roadmap</a>
       </section>
     </AppShell>
   );

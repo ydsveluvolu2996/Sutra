@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
+import { register } from "node:module";
 import test from "node:test";
+
+register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -31,12 +34,13 @@ test("server-renders the Sutra public product site", async () => {
 
 test("renders the core product routes", async () => {
   const routes = [
-    ["/dashboard", /MSP portfolio/i],
-    ["/customers", /Customer portfolio/i],
+    ["/dashboard", /Your AWS pilot workspace/i],
+    ["/customers", /Customer workspace/i],
     ["/cmdb", /AWS resource inventory/i],
     ["/findings", /Security findings/i],
     ["/controls", /Control library/i],
-    ["/onboard", /Onboard a customer account/i],
+    ["/roadmap", /From working AWS pilot to MSP operations platform/i],
+    ["/onboard", /Onboard one AWS account/i],
   ];
 
   for (const [pathname, expected] of routes) {
