@@ -52,7 +52,7 @@ function opaqueId(prefix: string): string {
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const actor = requirePilotActor(request);
+    const actor = await requirePilotActor(request, "customer:create");
     assertSameOrigin(request);
     const body = record(await readBoundedJson(request));
     const name = customerName(body.customerName);

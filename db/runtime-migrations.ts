@@ -1,5 +1,6 @@
 import baseSchemaSql from "../drizzle/0000_wild_lenny_balinger.sql?raw";
 import pilotSchemaSql from "../drizzle/0001_good_sunspot.sql?raw";
+import localAuthSchemaSql from "../drizzle/0002_aspiring_terrax.sql?raw";
 
 const BREAKPOINT = "--> statement-breakpoint";
 
@@ -15,6 +16,7 @@ function statementsFrom(sql: string): string[] {
 const schemaStatements = [
   ...statementsFrom(baseSchemaSql),
   ...statementsFrom(pilotSchemaSql),
+  ...statementsFrom(localAuthSchemaSql),
 ];
 
 /**

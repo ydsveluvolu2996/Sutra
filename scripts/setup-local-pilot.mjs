@@ -9,20 +9,22 @@ const stateDirectory = resolve(root, ".sutra");
 await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
 await chmod(stateDirectory, 0o700);
 
-let exists = false;
+let existingContents = null;
 try {
-  await readFile(variablesPath, "utf8");
-  exists = true;
+  existingContents = await readFile(variablesPath, "utf8");
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;
 }
 
-if (!exists) {
-  const secret = () => randomBytes(32).toString("base64url");
+const secret = () => randomBytes(32).toString("base64url");
+
+if (existingContents === null) {
   const values = [
     "# Generated once by `npm run pilot:setup`. Never commit this file.",
     "SUTRA_LOCAL_MODE=true",
-    "SUTRA_LOCAL_OPERATOR_EMAIL=local-admin@sutra.invalid",
+    `SUTRA_LOCAL_BOOTSTRAP_TOKEN=${secret()}`,
+    `SUTRA_AUTH_ENCRYPTION_KEY=${secret()}`,
+    "SUTRA_AUTH_KEY_VERSION=local-auth-v1",
     `SUTRA_CONNECTION_ENCRYPTION_KEY=${secret()}`,
     "SUTRA_CONNECTION_KEY_VERSION=local-v1",
     `SUTRA_BROKER_SHARED_SECRET=${secret()}`,
@@ -36,6 +38,23 @@ if (!exists) {
     "",
   ];
   await writeFile(variablesPath, values.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
+} else {
+  const additions = [];
+  if (!/^SUTRA_LOCAL_BOOTSTRAP_TOKEN=/mu.test(existingContents)) {
+    additions.push(`SUTRA_LOCAL_BOOTSTRAP_TOKEN=${secret()}`);
+  }
+  if (!/^SUTRA_AUTH_ENCRYPTION_KEY=/mu.test(existingContents)) {
+    additions.push(`SUTRA_AUTH_ENCRYPTION_KEY=${secret()}`);
+  }
+  if (!/^SUTRA_AUTH_KEY_VERSION=/mu.test(existingContents)) {
+    additions.push("SUTRA_AUTH_KEY_VERSION=local-auth-v1");
+  }
+  if (additions.length > 0) {
+    const prefix = existingContents.endsWith("\n") ? existingContents : `${existingContents}\n`;
+    await writeFile(variablesPath, `${prefix}${additions.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
+  }
 }
 await chmod(variablesPath, 0o600);
-process.stdout.write(exists ? "Local pilot configuration already exists.\n" : "Created secure local pilot configuration.\n");
+process.stdout.write(existingContents === null
+  ? "Created secure local pilot configuration.\n"
+  : "Local pilot configuration is ready.\n");

@@ -6,21 +6,18 @@ import {
   parseVerificationResponse,
 } from "./pilot-boundary";
 import type { AwsPartition, CollectorHealth, PilotSnapshotPayload } from "./pilot-types";
+import { authorizePilotRequest, type AuthorizedPilotActor } from "./api-auth";
+import type { Capability } from "./auth-policy";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
-  readonly SUTRA_LOCAL_OPERATOR_EMAIL?: string;
   readonly SUTRA_CONNECTION_ENCRYPTION_KEY?: string;
   readonly SUTRA_CONNECTION_KEY_VERSION?: string;
   readonly SUTRA_BROKER_SHARED_SECRET?: string;
   readonly SUTRA_BROKER_URL?: string;
 }
 
-export interface PilotActor {
-  readonly id: string;
-  readonly email: string;
-  readonly local: boolean;
-}
+export type PilotActor = AuthorizedPilotActor;
 
 export interface PilotSecrets {
   readonly connectionEncryptionKey: string;
@@ -53,29 +50,12 @@ function isLocalHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-function actorIdFromEmail(email: string): string {
-  const normalized = email.trim().toLowerCase();
-  let hash = 2166136261;
-  for (const character of normalized) {
-    hash ^= character.charCodeAt(0);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `user_${(hash >>> 0).toString(16).padStart(8, "0")}`;
-}
-
-export function requirePilotActor(request: Request): PilotActor {
-  const config = runtimeEnv();
-  const url = new URL(request.url);
-  if (config.SUTRA_LOCAL_MODE === "true" && isLocalHostname(url.hostname)) {
-    const email = config.SUTRA_LOCAL_OPERATOR_EMAIL?.trim() || "local-admin@sutra.invalid";
-    return { id: actorIdFromEmail(email), email, local: true };
-  }
-
-  const forwardedEmail = request.headers.get("oai-authenticated-user-email")?.trim();
-  if (!forwardedEmail) {
-    throw new PilotServerError(401, "AUTHENTICATION_REQUIRED", "Sign in before using the Sutra workspace");
-  }
-  return { id: actorIdFromEmail(forwardedEmail), email: forwardedEmail, local: false };
+export function requirePilotActor(
+  request: Request,
+  capability: Capability = "workspace:read",
+  customerId?: string,
+): Promise<PilotActor> {
+  return authorizePilotRequest(request, capability, customerId);
 }
 
 export function getPilotSecrets(): PilotSecrets {
@@ -352,13 +332,29 @@ export function errorResponse(error: unknown): Response {
   if (error instanceof PilotServerError) {
     return jsonResponse({ error: { code: error.code, message: error.message } }, { status: error.status });
   }
-  const candidate = error as { code?: unknown; message?: unknown } | null;
+  const candidate = error as { code?: unknown; message?: unknown; status?: unknown } | null;
   const code = typeof candidate?.code === "string" ? candidate.code : "REQUEST_FAILED";
-  const publicMessage =
-    code === "INVALID_INPUT" || code === "INVALID_STATE" || code === "CONFLICT" || code === "NOT_FOUND"
-      ? (typeof candidate?.message === "string" ? candidate.message : "The request is invalid")
-      : "Sutra could not complete the request";
-  const status = code === "NOT_FOUND" ? 404 : code === "CONFLICT" ? 409 : code === "INVALID_INPUT" ? 400 : code === "INVALID_STATE" ? 409 : 500;
+  const safeCodes = new Set([
+    "AUTHENTICATION_REQUIRED",
+    "AUTHORIZATION_DENIED",
+    "BOOTSTRAP_ALREADY_COMPLETED",
+    "CONFLICT",
+    "INVALID_CREDENTIALS",
+    "INVALID_INPUT",
+    "INVALID_STATE",
+    "MFA_ALREADY_ENROLLED",
+    "MFA_CODE_INVALID",
+    "MFA_ENROLLMENT_REQUIRED",
+    "MFA_REQUIRED",
+    "NOT_FOUND",
+  ]);
+  const publicMessage = safeCodes.has(code) && typeof candidate?.message === "string"
+    ? candidate.message
+    : "Sutra could not complete the request";
+  const candidateStatus = typeof candidate?.status === "number" ? candidate.status : null;
+  const status = candidateStatus !== null && [400, 401, 403, 404, 409, 429, 503].includes(candidateStatus)
+    ? candidateStatus
+    : code === "NOT_FOUND" ? 404 : code === "CONFLICT" ? 409 : code === "INVALID_INPUT" ? 400 : code === "INVALID_STATE" ? 409 : 500;
   return jsonResponse({ error: { code, message: publicMessage } }, { status });
 }
 
