@@ -17,6 +17,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 const MANIFEST_VERSION = 1;
 const D1_SOURCE = ".wrangler/state/v3/d1";
 const REGISTRY_SOURCE = ".sutra/collector-registry.enc";
+const JOB_STATE_SOURCE = ".sutra/local-jobs.json";
 const CONFIG_SOURCE = ".dev.vars";
 const REQUIRED_KEY_NAMES = [
   "SUTRA_CONNECTION_ENCRYPTION_KEY",
@@ -183,6 +184,11 @@ export async function backupLocalState({
       );
     }
 
+    const jobStatePath = join(repositoryRoot, JOB_STATE_SOURCE);
+    if (await exists(jobStatePath)) {
+      await copyIntoBackup(jobStatePath, join(backupDirectory, "jobs", "local-jobs.json"), backupDirectory, files);
+    }
+
     const d1Directory = join(repositoryRoot, D1_SOURCE);
     for (const source of await filesUnder(d1Directory)) {
       const suffix = relative(d1Directory, source);
@@ -228,6 +234,7 @@ async function validateManifest(backupDirectory) {
     const path = safeRelativePath(entry?.path);
     if (
       path !== "collector/collector-registry.enc" &&
+      path !== "jobs/local-jobs.json" &&
       !path.startsWith("d1/")
     ) {
       throw new Error(`Backup manifest contains an unsupported file: ${path}`);
@@ -295,9 +302,11 @@ export async function restoreLocalState({
 
     const currentD1 = join(repositoryRoot, D1_SOURCE);
     const currentRegistry = join(repositoryRoot, REGISTRY_SOURCE);
+    const currentJobs = join(repositoryRoot, JOB_STATE_SOURCE);
     const moved = {
       d1: await moveIfPresent(currentD1, join(rollback, "d1")),
       registry: await moveIfPresent(currentRegistry, join(rollback, "collector-registry.enc")),
+      jobs: await moveIfPresent(currentJobs, join(rollback, "local-jobs.json")),
     };
 
     try {
@@ -305,13 +314,17 @@ export async function restoreLocalState({
       await moveIfPresent(join(staging, "d1"), currentD1);
       await mkdir(dirname(currentRegistry), { recursive: true, mode: 0o700 });
       await moveIfPresent(join(staging, "collector", "collector-registry.enc"), currentRegistry);
+      await moveIfPresent(join(staging, "jobs", "local-jobs.json"), currentJobs);
       if (await exists(currentRegistry)) await chmod(currentRegistry, 0o600);
+      if (await exists(currentJobs)) await chmod(currentJobs, 0o600);
       await rm(rollback, { recursive: true, force: true });
     } catch (error) {
       await rm(currentD1, { recursive: true, force: true });
       await rm(currentRegistry, { force: true });
+      await rm(currentJobs, { force: true });
       if (moved.d1) await moveIfPresent(join(rollback, "d1"), currentD1);
       if (moved.registry) await moveIfPresent(join(rollback, "collector-registry.enc"), currentRegistry);
+      if (moved.jobs) await moveIfPresent(join(rollback, "local-jobs.json"), currentJobs);
       throw error;
     }
     return { restoredFrom: backupDirectory, fileCount: manifest.files.length };
