@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { executeLocalFixtureCollectionJob } from "../src/local-fixture-catalog.js";
+import { MemoryLocalJobStateStore } from "../src/local-job-state.js";
 import { createLocalCollectorServer } from "../src/local-server.js";
 
 const NOW = new Date("2026-07-15T10:00:00.000Z");
@@ -33,6 +35,8 @@ test("signed loopback fixture API completes register, trust verification, and sy
     sharedSecret,
     registryEncryptionKey: randomBytes(32).toString("base64url"),
     registryPath: join(directory, "registry.enc"),
+    localJobStatePath: join(directory, "local-jobs.json"),
+    localJobWorkerEnabled: false,
     mode: "fixture",
     now: () => NOW,
   });
@@ -121,6 +125,8 @@ test("fixture API rejects unknown fields after authenticating the request", asyn
     sharedSecret,
     registryEncryptionKey: randomBytes(32).toString("base64url"),
     registryPath: join(directory, "registry.enc"),
+    localJobStatePath: join(directory, "local-jobs.json"),
+    localJobWorkerEnabled: false,
     mode: "fixture",
     now: () => NOW,
   });
@@ -149,6 +155,281 @@ test("fixture API rejects unknown fields after authenticating the request", asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("signed local fixture jobs are strict, idempotent, durable, and return verified snapshots", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-local-jobs-api-"));
+  const sharedSecret = randomBytes(32).toString("base64url");
+  const registryPath = join(directory, "registry.enc");
+  const localJobStatePath = join(directory, "local-jobs.json");
+  const createServerOptions = {
+    sharedSecret,
+    registryEncryptionKey: randomBytes(32).toString("base64url"),
+    registryPath,
+    localJobStatePath,
+    mode: "fixture" as const,
+    now: () => NOW,
+    localJobPollIntervalMs: 5,
+    localJobLeaseMs: 1_000,
+    localJobWorkerId: "fixture-api-test-worker",
+  };
+  const firstServer = createLocalCollectorServer({
+    ...createServerOptions,
+    localJobWorkerEnabled: false,
+  });
+  const firstBaseUrl = await listen(firstServer);
+  let jobId = "";
+  try {
+    const catalog = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      "/v1/local/fixtures",
+    );
+    assert.equal(catalog.status, 200);
+    const fixtures = (catalog.value as { fixtures: unknown[] }).fixtures;
+    assert.equal(fixtures.length, 3);
+    const serializedCatalog = JSON.stringify(catalog.value);
+    assert.doesNotMatch(serializedCatalog, /externalId|roleArn|credentials/iu);
+
+    const invalidLimit = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      "/v1/local/jobs?limit=0",
+    );
+    assert.equal(invalidLimit.status, 400);
+
+    const invalidBody = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "northstar-retail",
+        version: "2026.07.0",
+        idempotencyKey: "demo-sync-01",
+        externalId: "must-not-be-accepted",
+      },
+    );
+    assert.equal(invalidBody.status, 400);
+
+    const enqueued = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "northstar-retail",
+        version: "2026.07.0",
+        idempotencyKey: "demo-sync-01",
+      },
+    );
+    assert.equal(enqueued.status, 202);
+    const enqueuedValue = enqueued.value as {
+      created: boolean;
+      job: { jobId: string; status: string };
+    };
+    assert.equal(enqueuedValue.created, true);
+    assert.equal(enqueuedValue.job.status, "pending");
+    jobId = enqueuedValue.job.jobId;
+    assert.match(jobId, /^job_[a-f0-9]{48}$/u);
+
+    const replayed = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "northstar-retail",
+        version: "2026.07.0",
+        idempotencyKey: "demo-sync-01",
+      },
+    );
+    assert.equal(replayed.status, 200);
+    assert.equal((replayed.value as { created: boolean }).created, false);
+    assert.equal(
+      (replayed.value as { job: { jobId: string } }).job.jobId,
+      jobId,
+    );
+
+    const conflict = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "northstar-retail",
+        version: "2026.07.1",
+        idempotencyKey: "demo-sync-01",
+      },
+    );
+    assert.equal(conflict.status, 409);
+    assert.deepEqual(conflict.value, {
+      code: "IDEMPOTENCY_CONFLICT",
+      message: "The idempotency key is already bound to another local fixture request",
+    });
+
+    const jobs = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      "/v1/local/jobs?limit=1",
+    );
+    assert.equal(jobs.status, 200);
+    assert.equal((jobs.value as { count: number }).count, 1);
+    const serializedJobs = JSON.stringify(jobs.value);
+    assert.doesNotMatch(
+      serializedJobs,
+      /leaseToken|requestSha256|snapshot|externalId|roleArn|credentials/iu,
+    );
+  } finally {
+    await close(firstServer);
+  }
+
+  const restartedServer = createLocalCollectorServer(createServerOptions);
+  const restartedBaseUrl = await listen(restartedServer);
+  try {
+    const completed = await pollSignedRequest(
+      () =>
+        signedRequest(
+          restartedBaseUrl,
+          sharedSecret,
+          "GET",
+          `/v1/local/jobs/${jobId}/result`,
+        ),
+      (response) => response.status === 200,
+    );
+    const completedValue = completed.value as {
+      job: { status: string; attempts: number };
+      result: {
+        fixtureId: string;
+        snapshot: {
+          schemaVersion: string;
+          resources: unknown[];
+          snapshotSha256: string;
+        };
+      };
+    };
+    assert.equal(completedValue.job.status, "succeeded");
+    assert.equal(completedValue.job.attempts, 1);
+    assert.equal(completedValue.result.fixtureId, "northstar-retail");
+    assert.equal(completedValue.result.snapshot.schemaVersion, "sutra.inventory.v1");
+    assert.equal(completedValue.result.snapshot.resources.length, 13);
+    assert.match(completedValue.result.snapshot.snapshotSha256, /^[a-f0-9]{64}$/u);
+
+    const compactJobs = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      "/v1/local/jobs?limit=1",
+    );
+    assert.doesNotMatch(JSON.stringify(compactJobs.value), /snapshot|leaseToken/iu);
+  } finally {
+    await close(restartedServer);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("local fixture worker retries a failed lease with backoff before succeeding", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-local-worker-"));
+  const sharedSecret = randomBytes(32).toString("base64url");
+  let clock = NOW;
+  let executions = 0;
+  const server = createLocalCollectorServer({
+    sharedSecret,
+    registryEncryptionKey: randomBytes(32).toString("base64url"),
+    registryPath: join(directory, "registry.enc"),
+    mode: "fixture",
+    now: () => clock,
+    localJobStore: new MemoryLocalJobStateStore(),
+    localJobWorkerId: "retry-test-worker",
+    localJobPollIntervalMs: 5,
+    localJobLeaseMs: 1_000,
+    localJobBaseBackoffMs: 10,
+    localJobMaxBackoffMs: 10,
+    localFixtureJobExecutor: (input) => {
+      executions += 1;
+      if (executions === 1) throw new Error("injected retry");
+      return executeLocalFixtureCollectionJob(input);
+    },
+  });
+  const baseUrl = await listen(server);
+  try {
+    const enqueued = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "meridian-health",
+        version: "2026.07.1",
+        idempotencyKey: "retry-sync-01",
+      },
+    );
+    const jobId = (enqueued.value as { job: { jobId: string } }).job.jobId;
+    await pollSignedRequest(
+      () =>
+        signedRequest(baseUrl, sharedSecret, "GET", "/v1/local/jobs?limit=10"),
+      (response) => {
+        const jobs = (response.value as { jobs: Array<{ attempts: number; status: string }> })
+          .jobs;
+        return jobs[0]?.attempts === 1 && jobs[0]?.status === "pending";
+      },
+    );
+    clock = new Date(NOW.getTime() + 20);
+    const completed = await pollSignedRequest(
+      () =>
+        signedRequest(
+          baseUrl,
+          sharedSecret,
+          "GET",
+          `/v1/local/jobs/${jobId}/result`,
+        ),
+      (response) => response.status === 200,
+    );
+    assert.equal((completed.value as { job: { attempts: number } }).job.attempts, 2);
+    assert.equal(executions, 2);
+  } finally {
+    await close(server);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+async function listen(server: ReturnType<typeof createLocalCollectorServer>): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+async function close(server: ReturnType<typeof createLocalCollectorServer>): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  // The HTTP server closes synchronously; allow an already-leased file-store
+  // operation to observe the worker stop before deleting its temporary directory.
+  await new Promise((resolve) => setTimeout(resolve, 100));
+}
+
+async function pollSignedRequest(
+  request: () => Promise<{ readonly status: number; readonly value: unknown }>,
+  complete: (response: { readonly status: number; readonly value: unknown }) => boolean,
+): Promise<{ readonly status: number; readonly value: unknown }> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const response = await request();
+    if (complete(response)) return response;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for the local fixture worker");
+}
 
 async function signedRequest(
   baseUrl: string,
