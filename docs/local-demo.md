@@ -40,12 +40,14 @@ pnpm local:backup
 pnpm local:restore -- .sutra/backups/<backup-directory>
 ```
 
-The backup contains the D1 files, encrypted collector registry, and the local
-encryption/signing configuration required to read them. Every file is covered by
-a SHA-256 manifest. Restore verifies the complete manifest before replacing any
-state and rolls back the previous files if replacement fails. Backup directories
-are permission-restricted under ignored `.sutra/backups/`; protect them like
-credentials and never attach them to issues, chats, or source control.
+The backup contains the D1 files and encrypted collector registry. It deliberately
+excludes `.dev.vars` and plaintext encryption/signing keys. Every state file is
+covered by a SHA-256 manifest, and one-way key fingerprints prevent a restore with
+incompatible local keys. Keep `.dev.vars` in a separate secure secret backup.
+Restore verifies the complete manifest before replacing any state and rolls back
+the previous files if replacement fails. Backup directories are permission-
+restricted under ignored `.sutra/backups/`; never attach them to issues, chats, or
+source control.
 
 ## Real AWS sandbox demo
 

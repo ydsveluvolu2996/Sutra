@@ -18,6 +18,12 @@ const MANIFEST_VERSION = 1;
 const D1_SOURCE = ".wrangler/state/v3/d1";
 const REGISTRY_SOURCE = ".sutra/collector-registry.enc";
 const CONFIG_SOURCE = ".dev.vars";
+const REQUIRED_KEY_NAMES = [
+  "SUTRA_CONNECTION_ENCRYPTION_KEY",
+  "SUTRA_BROKER_SHARED_SECRET",
+  "SUTRA_REGISTRY_ENCRYPTION_KEY",
+  "SUTRA_AUTH_ENCRYPTION_KEY",
+];
 
 function pathInside(root, candidate) {
   const normalizedRoot = resolve(root);
@@ -74,6 +80,31 @@ async function sha256File(path) {
     await handle.close();
   }
   return hash.digest("hex");
+}
+
+function sha256Text(value) {
+  return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+async function keyFingerprints(configurationPath) {
+  const raw = await readFile(configurationPath, "utf8");
+  const values = new Map();
+  for (const rawLine of raw.split(/\r?\n/u)) {
+    const line = rawLine.trim();
+    if (line.length === 0 || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator < 1) continue;
+    values.set(line.slice(0, separator), line.slice(separator + 1));
+  }
+  const fingerprints = {};
+  for (const name of REQUIRED_KEY_NAMES) {
+    const value = values.get(name);
+    if (value === undefined || value.length < 32) {
+      throw new Error(`Local configuration is missing ${name}; run pnpm pilot:setup`);
+    }
+    fingerprints[name] = sha256Text(value);
+  }
+  return fingerprints;
 }
 
 async function portIsOpen(port) {
@@ -140,7 +171,7 @@ export async function backupLocalState({
   try {
     const configPath = join(repositoryRoot, CONFIG_SOURCE);
     if (!(await exists(configPath))) throw new Error("Run pnpm pilot:setup before creating a backup");
-    await copyIntoBackup(configPath, join(backupDirectory, "config", ".dev.vars"), backupDirectory, files);
+    const fingerprints = await keyFingerprints(configPath);
 
     const registryPath = join(repositoryRoot, REGISTRY_SOURCE);
     if (await exists(registryPath)) {
@@ -163,6 +194,7 @@ export async function backupLocalState({
       schema: "sutra.local-backup.v1",
       version: MANIFEST_VERSION,
       createdAt: now.toISOString(),
+      keyFingerprints: fingerprints,
       files,
     };
     await writeFile(join(backupDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, {
@@ -184,6 +216,9 @@ async function validateManifest(backupDirectory) {
   if (
     manifest?.schema !== "sutra.local-backup.v1" ||
     manifest?.version !== MANIFEST_VERSION ||
+    typeof manifest?.keyFingerprints !== "object" ||
+    manifest.keyFingerprints === null ||
+    Array.isArray(manifest.keyFingerprints) ||
     !Array.isArray(manifest?.files)
   ) {
     throw new Error("Backup manifest is missing or uses an unsupported version");
@@ -192,7 +227,6 @@ async function validateManifest(backupDirectory) {
   for (const entry of manifest.files) {
     const path = safeRelativePath(entry?.path);
     if (
-      path !== "config/.dev.vars" &&
       path !== "collector/collector-registry.enc" &&
       !path.startsWith("d1/")
     ) {
@@ -209,7 +243,11 @@ async function validateManifest(backupDirectory) {
       throw new Error(`Backup integrity check failed for ${path}`);
     }
   }
-  if (!seen.has("config/.dev.vars")) throw new Error("Backup does not contain the local encryption configuration");
+  for (const name of REQUIRED_KEY_NAMES) {
+    if (!/^[a-f0-9]{64}$/u.test(manifest.keyFingerprints[name] ?? "")) {
+      throw new Error("Backup manifest is missing encryption-key compatibility metadata");
+    }
+  }
   return manifest;
 }
 
@@ -231,6 +269,14 @@ export async function restoreLocalState({
   const backupDirectory = resolve(backup);
   if (!pathInside(repositoryRoot, backupDirectory)) throw new Error("The backup must be inside the Sutra repository");
   const manifest = await validateManifest(backupDirectory);
+  const currentFingerprints = await keyFingerprints(join(repositoryRoot, CONFIG_SOURCE));
+  for (const name of REQUIRED_KEY_NAMES) {
+    if (currentFingerprints[name] !== manifest.keyFingerprints[name]) {
+      throw new Error(
+        `Backup requires a different ${name}; restore the matching secret through the separate secure secret process first`,
+      );
+    }
+  }
 
   const operationId = randomUUID();
   const staging = join(repositoryRoot, ".sutra", `restore-staging-${operationId}`);
@@ -249,11 +295,9 @@ export async function restoreLocalState({
 
     const currentD1 = join(repositoryRoot, D1_SOURCE);
     const currentRegistry = join(repositoryRoot, REGISTRY_SOURCE);
-    const currentConfig = join(repositoryRoot, CONFIG_SOURCE);
     const moved = {
       d1: await moveIfPresent(currentD1, join(rollback, "d1")),
       registry: await moveIfPresent(currentRegistry, join(rollback, "collector-registry.enc")),
-      config: await moveIfPresent(currentConfig, join(rollback, ".dev.vars")),
     };
 
     try {
@@ -261,17 +305,13 @@ export async function restoreLocalState({
       await moveIfPresent(join(staging, "d1"), currentD1);
       await mkdir(dirname(currentRegistry), { recursive: true, mode: 0o700 });
       await moveIfPresent(join(staging, "collector", "collector-registry.enc"), currentRegistry);
-      await moveIfPresent(join(staging, "config", ".dev.vars"), currentConfig);
-      await chmod(currentConfig, 0o600);
       if (await exists(currentRegistry)) await chmod(currentRegistry, 0o600);
       await rm(rollback, { recursive: true, force: true });
     } catch (error) {
       await rm(currentD1, { recursive: true, force: true });
       await rm(currentRegistry, { force: true });
-      await rm(currentConfig, { force: true });
       if (moved.d1) await moveIfPresent(join(rollback, "d1"), currentD1);
       if (moved.registry) await moveIfPresent(join(rollback, "collector-registry.enc"), currentRegistry);
-      if (moved.config) await moveIfPresent(join(rollback, ".dev.vars"), currentConfig);
       throw error;
     }
     return { restoredFrom: backupDirectory, fileCount: manifest.files.length };

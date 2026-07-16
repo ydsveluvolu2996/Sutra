@@ -6,13 +6,21 @@ import test from "node:test";
 
 import { backupLocalState, restoreLocalState } from "../scripts/local-data-utils.mjs";
 
-test("local backup verifies and restores D1, registry, and encryption configuration", async () => {
+const LOCAL_CONFIGURATION = [
+  "SUTRA_CONNECTION_ENCRYPTION_KEY=connection-key-material-0000000000000000",
+  "SUTRA_BROKER_SHARED_SECRET=broker-signing-material-000000000000000000",
+  "SUTRA_REGISTRY_ENCRYPTION_KEY=registry-key-material-0000000000000000000",
+  "SUTRA_AUTH_ENCRYPTION_KEY=auth-key-material-0000000000000000000000",
+  "",
+].join("\n");
+
+test("local backup restores state only with the matching external key configuration", async () => {
   const root = await mkdtemp(join(tmpdir(), "sutra-backup-test-"));
   const stopped = async () => {};
   try {
     await mkdir(join(root, ".sutra"), { recursive: true });
     await mkdir(join(root, ".wrangler", "state", "v3", "d1", "object"), { recursive: true });
-    await writeFile(join(root, ".dev.vars"), "SUTRA_LOCAL_MODE=true\nsecret=original\n", "utf8");
+    await writeFile(join(root, ".dev.vars"), LOCAL_CONFIGURATION, "utf8");
     await writeFile(join(root, ".sutra", "collector-registry.enc"), "encrypted-registry", "utf8");
     await writeFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "sqlite-state", "utf8");
 
@@ -23,14 +31,14 @@ test("local backup verifies and restores D1, registry, and encryption configurat
       assertStopped: stopped,
     });
     assert.equal(backup.manifest.schema, "sutra.local-backup.v1");
-    assert.equal(backup.manifest.files.length, 3);
+    assert.equal(backup.manifest.files.length, 2);
+    await assert.rejects(readFile(join(backup.backupDirectory, "config", ".dev.vars"), "utf8"));
 
-    await writeFile(join(root, ".dev.vars"), "SUTRA_LOCAL_MODE=false\n", "utf8");
     await writeFile(join(root, ".sutra", "collector-registry.enc"), "corrupted", "utf8");
     await writeFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "changed", "utf8");
 
     await restoreLocalState({ root, backup: backup.backupDirectory, assertStopped: stopped });
-    assert.match(await readFile(join(root, ".dev.vars"), "utf8"), /secret=original/u);
+    assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), LOCAL_CONFIGURATION);
     assert.equal(await readFile(join(root, ".sutra", "collector-registry.enc"), "utf8"), "encrypted-registry");
     assert.equal(
       await readFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "utf8"),
@@ -46,7 +54,7 @@ test("local restore rejects a modified backup before replacing current state", a
   const stopped = async () => {};
   try {
     await mkdir(join(root, ".wrangler", "state", "v3", "d1"), { recursive: true });
-    await writeFile(join(root, ".dev.vars"), "secret=kept\n", "utf8");
+    await writeFile(join(root, ".dev.vars"), LOCAL_CONFIGURATION, "utf8");
     await writeFile(join(root, ".wrangler", "state", "v3", "d1", "state.sqlite"), "database", "utf8");
     const backup = await backupLocalState({
       root,
@@ -59,7 +67,7 @@ test("local restore rejects a modified backup before replacing current state", a
       restoreLocalState({ root, backup: backup.backupDirectory, assertStopped: stopped }),
       /integrity check failed/u,
     );
-    assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), "secret=kept\n");
+    assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), LOCAL_CONFIGURATION);
     assert.equal(await readFile(join(root, ".wrangler", "state", "v3", "d1", "state.sqlite"), "utf8"), "database");
   } finally {
     await rm(root, { recursive: true, force: true });
