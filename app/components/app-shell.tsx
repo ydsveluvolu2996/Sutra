@@ -7,7 +7,7 @@ import type { Capability } from "../../lib/auth-policy";
 import { postAuth, useSession } from "./use-session";
 import { usePilotState } from "./use-pilot-state";
 
-type NavKey = "overview" | "customers" | "cmdb" | "findings" | "controls" | "roadmap" | "onboard";
+type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "controls" | "roadmap" | "onboard";
 
 interface NavItem {
   readonly key: Exclude<NavKey, "onboard">;
@@ -21,9 +21,10 @@ const navItems: readonly NavItem[] = [
   { key: "overview", label: "Overview", href: "/dashboard", icon: "01", capability: "workspace:read" },
   { key: "customers", label: "Customers", href: "/customers", icon: "02", capability: "workspace:read" },
   { key: "cmdb", label: "CMDB inventory", href: "/cmdb", icon: "03", capability: "connection:read" },
-  { key: "findings", label: "Security findings", href: "/findings", icon: "04", capability: "connection:read" },
-  { key: "controls", label: "Control library", href: "/controls", icon: "05", capability: "workspace:read" },
-  { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "06", capability: "workspace:read" },
+  { key: "changes", label: "Change history", href: "/changes", icon: "04", capability: "connection:read" },
+  { key: "findings", label: "Security findings", href: "/findings", icon: "05", capability: "connection:read" },
+  { key: "controls", label: "Control library", href: "/controls", icon: "06", capability: "workspace:read" },
+  { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "07", capability: "workspace:read" },
 ];
 
 function connectionTone(status: string | undefined): string {
