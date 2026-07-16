@@ -1,7 +1,7 @@
 # Sutra local one-account demo
 
-This repository ships a demo-ready local slice and a separate path for a real
-AWS sandbox account. The local slice is deliberately limited to one MSP
+This repository ships a demo-ready local slice and a separately gated path for
+a real AWS sandbox account. The local slice is deliberately limited to one MSP
 workspace and one AWS connection. Its database and collector contracts retain
 explicit organization, customer, connection, account, partition, and Region
 keys so the cloud version can add tenancy and fan-out without changing the
@@ -38,8 +38,9 @@ the Sutra UI or `.dev.vars`.
 
 1. Configure a short-lived AWS profile, SSO session, or workload identity whose
    IAM role exactly matches `SUTRA_COLLECTOR_PRINCIPAL_ARN`.
-2. Change `SUTRA_COLLECTOR_MODE=live` in `.dev.vars` and set that exact collector
-   principal ARN.
+2. Change `SUTRA_COLLECTOR_MODE=live`, set `SUTRA_ALLOW_LIVE_AWS=true`, and set
+   that exact collector principal ARN in `.dev.vars`. Without both live-mode
+   settings the collector refuses to start.
 3. Start Sutra with `pnpm dev:pilot`.
 4. Create the connection in Sutra. Copy its generated ExternalId and collector
    principal.

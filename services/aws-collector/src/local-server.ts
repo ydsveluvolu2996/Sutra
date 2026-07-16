@@ -56,6 +56,7 @@ export interface LocalCollectorServerOptions {
   readonly registryEncryptionKey: string;
   readonly registryPath: string;
   readonly mode?: "fixture" | "live";
+  readonly allowLiveAws?: boolean;
   readonly principalArn?: string;
   readonly now?: () => Date;
 }
@@ -80,6 +81,11 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   const mode = options.mode ?? "fixture";
   if (mode !== "fixture" && mode !== "live") {
     throw new Error("SUTRA_COLLECTOR_MODE must be fixture or live");
+  }
+  if (mode === "live" && options.allowLiveAws !== true) {
+    throw new Error(
+      "Live AWS access is disabled; an explicitly authorized sandbox requires SUTRA_ALLOW_LIVE_AWS=true",
+    );
   }
   const principalArn = options.principalArn ?? (mode === "fixture" ? FIXTURE_PRINCIPAL : "");
   if (principalArn.length === 0) {
@@ -122,6 +128,7 @@ export async function startLocalCollectorServer(): Promise<Server> {
       process.env.SUTRA_REGISTRY_PATH?.trim() ||
       resolvePath(process.cwd(), ".sutra", "connections.enc.json"),
     mode: collectorMode(process.env.SUTRA_COLLECTOR_MODE),
+    allowLiveAws: exactBooleanEnvironment("SUTRA_ALLOW_LIVE_AWS", false),
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
   });
   await new Promise<void>((resolve, reject) => {
@@ -873,6 +880,14 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function exactBooleanEnvironment(name: string, fallback: boolean): boolean {
+  const value = process.env[name]?.trim();
+  if (value === undefined || value.length === 0) return fallback;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
 }
 
 function firstRegion(connection: RegisteredAwsConnection): string {
