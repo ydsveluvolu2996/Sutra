@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { AppShell } from "../components/app-shell";
-import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
+import { formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : "Sutra could not run inventory collection";
@@ -13,6 +13,8 @@ export default function Home() {
   const [syncing, setSyncing] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const connection = state?.connection ?? null;
+  const canRunAwsSync = connection?.sourceKind === "aws_trust_role";
+  const cmdbHref = connection ? `/cmdb?connectionId=${encodeURIComponent(connection.id)}` : "/onboard";
   const resources = useMemo(() => state?.resources ?? [], [state?.resources]);
   const findings = useMemo(() => state?.findings ?? [], [state?.findings]);
   const openFindings = findings.filter((finding) => finding.status === "open");
@@ -52,14 +54,15 @@ export default function Home() {
           <p className="page-subtitle">Current connection health, inventory coverage, asset context, and explainable security priorities.</p>
         </div>
         <div className="heading-actions">
-          {connection ? <button className="button button-secondary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync now"}</button> : null}
-          <a className="button button-primary" href={connection ? "/cmdb" : "/onboard"}>{connection ? "Open CMDB" : "Onboard AWS account"}</a>
+          {connection && canRunAwsSync ? <button className="button button-secondary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync now"}</button> : null}
+          {connection && !canRunAwsSync ? <a className="button button-secondary" href="/operations">Run another simulation</a> : null}
+          <a className="button button-primary" href={cmdbHref}>{connection ? "Open CMDB" : "Onboard AWS account"}</a>
         </div>
       </section>
 
       <div className="trust-strip" role="note">
         <span className="trust-icon">✓</span>
-        <span><strong>{health?.mode === "live" ? "Live read-only collection." : health?.mode === "fixture" ? "Fixture-backed local pilot." : "Collector status unavailable."}</strong> Customer infrastructure is never modified, and only a complete collection can replace the active CMDB projection.</span>
+        <span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready." : health?.mode === "fixture" ? "Fixture collector ready." : "Collector status unavailable."}</strong> Customer infrastructure is never modified, and only a complete collection can replace the active CMDB projection.</span>
         <a href="/controls">See boundaries</a>
       </div>
 
@@ -74,7 +77,7 @@ export default function Home() {
             <article className="metric-card metric-card-featured">
               <div className="metric-topline"><span>Connection health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
               <strong className="connection-account">{connection.awsAccountId}</strong>
-              <p>{connection.enabledRegions.length} enabled regions · validated {formatTimestamp(connection.lastValidatedAt)}</p>
+              <p>{connection.enabledRegions.length} enabled regions · {connection.sourceKind === "simulated_fixture" ? `fixture ${connection.fixtureVersion ?? "not published"}` : `validated ${formatTimestamp(connection.lastValidatedAt)}`}</p>
             </article>
             <article className="metric-card">
               <div className="metric-topline"><span>Managed assets</span><span className="metric-glyph">CMDB</span></div>

@@ -286,6 +286,44 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
       serializedJobs,
       /leaseToken|requestSha256|snapshot|externalId|roleArn|credentials/iu,
     );
+
+    const secondCustomer = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "meridian-health",
+        version: "2026.07.0",
+        idempotencyKey: "demo-sync-02",
+      },
+    );
+    assert.equal(secondCustomer.status, 202);
+    const scopedJobs = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=cust_11111111111111111111111111111111`,
+    );
+    assert.equal(scopedJobs.status, 200);
+    const scopedValue = scopedJobs.value as {
+      count: number;
+      jobs: Array<{ tenantId: string; customerId: string; fixtureId: string }>;
+    };
+    assert.equal(scopedValue.count, 1);
+    assert.ok(scopedValue.jobs.every((job) =>
+      job.tenantId === TENANT_ID &&
+      job.customerId === "cust_11111111111111111111111111111111" &&
+      job.fixtureId === "northstar-retail"));
+
+    const incompleteScope = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=10&customerId=cust_11111111111111111111111111111111`,
+    );
+    assert.equal(incompleteScope.status, 400);
   } finally {
     await close(firstServer);
   }

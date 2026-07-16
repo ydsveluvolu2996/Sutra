@@ -8,6 +8,7 @@ import {
 import { assertSameOrigin, decryptExternalId, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import {
   errorResponse,
+  getCollectorHealth,
   getPilotSecrets,
   jsonResponse,
   registerCollectorConnection,
@@ -42,6 +43,10 @@ export async function POST(request: Request): Promise<Response> {
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
+    const health = await getCollectorHealth(stored.partition);
+    if (health.mode !== "live") {
+      throw Object.assign(new Error("AWS trust validation requires an explicitly enabled live collector"), { code: "INVALID_STATE" });
+    }
     await markConnectionValidating(connectionId);
     validationClaimed = true;
     if (!stored.roleArn) {

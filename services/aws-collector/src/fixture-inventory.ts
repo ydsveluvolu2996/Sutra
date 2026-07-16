@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { canonicalJson } from "./canonical-json.js";
 
 import type { RegisteredAwsConnection } from "./local-registry.js";
 import type { SafeJsonObject, SafeJsonValue } from "./types.js";
@@ -78,9 +79,9 @@ export interface FixtureSnapshotInput {
   readonly now?: Date;
 }
 
-/** The exact property order mirrored by lib/pilot-boundary.ts. */
+/** The evidence fields mirrored by lib/pilot-boundary.ts and serialized canonically. */
 export function snapshotHashInput(payload: UnsignedPilotSnapshot): string {
-  return JSON.stringify({
+  return canonicalJson({
     schemaVersion: payload.schemaVersion,
     jobId: payload.jobId,
     connectionId: payload.connectionId,

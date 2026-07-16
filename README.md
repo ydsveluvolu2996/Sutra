@@ -6,12 +6,14 @@ configuration management database (CMDB) and cloud security posture management
 read-only inventory, resource relationships, evidence-backed configuration checks,
 and scoped access to findings.
 
-> **Local pilot boundary:** the application now supports one persistent local MSP
-> workspace and one AWS account connection. Fixture mode provides a repeatable sales
-> demo through the real signed collector, encrypted registry, D1 snapshot, CMDB, and
-> finding workflow. Live mode can validate and inventory a disposable AWS sandbox
-> through a customer IAM trust role. The UI labels the active source; fixture results
-> must never be represented as observations from a customer account.
+> **Local pilot boundary:** the application supports one persistent local MSP
+> workspace, local identities with enforced MFA/RBAC, and multiple deterministic
+> simulated customer accounts. Simulation runs use a signed collector-owned fixture
+> catalog, durable local jobs, strict result verification, explicit D1 publication,
+> immutable CMDB snapshots, and finding/change-history workflows. Live mode remains
+> separately gated for a disposable AWS sandbox trust role. Every screen labels the
+> active evidence source; simulated results must never be represented as customer AWS
+> observations.
 
 This repository is an implementation foundation, not a production-ready service.
 It does not replace Amazon Inspector, Amazon GuardDuty, AWS Security Hub, an EDR
@@ -163,9 +165,12 @@ pnpm pilot:setup
 pnpm dev:pilot
 ```
 
-Open `http://localhost:3000/onboard`. Setup creates permission-restricted secrets in
-ignored `.dev.vars` and an encrypted collector registry under ignored `.sutra/`.
-Fixture mode is the default and requires no AWS account. See
+Open `http://localhost:3000/login`, create the first local owner with the one-time
+token from `pnpm local:bootstrap-token`, and enroll MFA. Then open
+`http://localhost:3000/operations` to run and publish a signed simulated account
+snapshot. Setup creates permission-restricted secrets in ignored `.dev.vars` and
+durable local state under ignored `.sutra/`. Fixture mode is the default and requires
+no AWS account. See
 [`docs/local-demo.md`](docs/local-demo.md) for the reliable sales-demo flow and the
 separate live AWS sandbox procedure. The `DB` D1 binding is declared in
 `.openai/hosting.json` and simulated locally by the development stack.

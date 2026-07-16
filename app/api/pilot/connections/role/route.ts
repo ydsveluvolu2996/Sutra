@@ -11,6 +11,7 @@ import {
 } from "../../../../../lib/aws-pilot-security";
 import {
   errorResponse,
+  getCollectorHealth,
   getPilotSecrets,
   jsonResponse,
   registerCollectorConnection,
@@ -43,6 +44,10 @@ export async function POST(request: Request): Promise<Response> {
     const body = parseBody(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(body.connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
+    const health = await getCollectorHealth(stored.partition);
+    if (health.mode !== "live") {
+      throw Object.assign(new Error("AWS role registration requires an explicitly enabled live collector"), { code: "INVALID_STATE" });
+    }
     const role = parseIamRoleArn(body.roleArn, {
       accountId: stored.accountId,
       partition: stored.partition,

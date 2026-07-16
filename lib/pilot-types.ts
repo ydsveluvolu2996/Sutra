@@ -11,6 +11,9 @@ export interface PilotConnection {
   readonly id: string;
   readonly customerId: string;
   readonly customerName: string;
+  readonly sourceKind: "aws_trust_role" | "simulated_fixture";
+  readonly fixtureId: string | null;
+  readonly fixtureVersion: string | null;
   readonly partition: AwsPartition;
   readonly awsAccountId: string;
   readonly roleArn: string | null;
@@ -100,6 +103,12 @@ export interface PilotSyncRun {
   readonly createdAt: string;
 }
 
+export interface SnapshotOrigin {
+  readonly kind: "unknown" | "simulated_fixture" | "aws_sandbox";
+  readonly fixtureId: string | null;
+  readonly fixtureVersion: string | null;
+}
+
 export interface PilotState {
   readonly mode: "empty" | "live";
   readonly connection: PilotConnection | null;
@@ -113,6 +122,7 @@ export interface PilotState {
     readonly collectedAt: string;
     readonly coverageState: "complete" | "partial";
     readonly snapshotSha256: string;
+    readonly origin: SnapshotOrigin;
   } | null;
 }
 

@@ -36,7 +36,8 @@ export function OnboardAccount() {
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const connection = state?.connection ?? created?.connection ?? null;
+  const selectedConnection = state?.connection ?? created?.connection ?? null;
+  const connection = selectedConnection?.sourceKind === "aws_trust_role" ? selectedConnection : null;
   const effectiveRoleArn = roleArn || connection?.roleArn || "";
   const arnAccount = useMemo(() => effectiveRoleArn.match(/^arn:(?:aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]+$/u)?.[1], [effectiveRoleArn]);
   const accountValid = /^\d{12}$/u.test(accountId);
@@ -131,7 +132,7 @@ export function OnboardAccount() {
     <>
       <section className="page-heading onboard-heading">
         <div><p className="eyebrow">Secure AWS connection</p><h1>Onboard one AWS account</h1><p className="page-subtitle">Create a customer-owned read-only role, prove the ExternalId boundary, then publish a complete CMDB snapshot.</p></div>
-        <span className={`status-pill ${collectorMode === "live" ? "status-positive" : "status-medium"}`}>{collectorMode === "live" ? "Live collector" : collectorMode === "fixture" ? "Fixture pilot" : "Collector checking"}</span>
+        <span className={`status-pill ${collectorMode === "live" ? "status-positive" : "status-medium"}`}>{collectorMode === "live" ? "Live collector" : collectorMode === "fixture" ? "Simulations only" : "Collector checking"}</span>
       </section>
 
       <div className="onboard-layout">
@@ -145,7 +146,11 @@ export function OnboardAccount() {
 
           {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the local pilot workspace…</div> : null}
 
-          {!loading && !connection ? (
+          {!loading && !connection && collectorMode !== "live" ? (
+            <div className="onboard-copy"><p className="eyebrow">Local-only safety boundary</p><h2>AWS trust onboarding is disabled</h2><p>The collector is running in deterministic fixture mode, so Sutra will not create a trust-role connection or contact AWS. Use Simulation runs to exercise the durable queue, CMDB, change history, findings, and exports with clearly labelled local evidence.</p><a className="button button-primary" href="/operations">Open Simulation runs</a></div>
+          ) : null}
+
+          {!loading && !connection && collectorMode === "live" ? (
             <>
               <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. The ExternalId is returned once for the CloudFormation handoff.</p></div>
               <form className="onboard-form" onSubmit={createConnection}>
@@ -183,12 +188,12 @@ export function OnboardAccount() {
 
               <form className="onboard-form role-registration" onSubmit={registerRole}>
                 <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={`arn:${connection.partition}:iam::${connection.awsAccountId}:role/sutra/SutraReadOnlyRole`} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the CloudFormation output after the stack completes." : !roleValid ? "Use a canonical IAM role ARN from the connected account." : "Role ARN syntax and account binding match."}</small></label>
-                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || busy !== null}>{busy === "role" ? "Registering role…" : connection.roleArn ? "Update registered role" : "Register customer role"}</button>
+                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Update registered role" : "Register customer role" : "Live collector required"}</button>
               </form>
 
               <div className="onboard-validation-action">
                 <div><p className="eyebrow">Step 3 of 4</p><h2>Prove the trust boundary</h2><p>Sutra checks the expected caller identity and confirms missing or incorrect ExternalIds cannot assume the role.</p></div>
-                {connection.status === "active" ? <button className="button button-primary" type="button" disabled={busy !== null} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : "Run inventory sync"}</button> : <button className="button button-primary" type="button" disabled={!connection.roleArn || busy !== null} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating trust…" : busy === "sync" ? "Publishing first snapshot…" : "Validate trust & run first sync"}</button>}
+                {connection.status === "active" ? <button className="button button-primary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : collectorMode === "live" ? "Run inventory sync" : "Live collector required"}</button> : <button className="button button-primary" type="button" disabled={!connection.roleArn || busy !== null || collectorMode !== "live"} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating trust…" : busy === "sync" ? "Publishing first snapshot…" : collectorMode === "live" ? "Validate trust & run first sync" : "Live collector required"}</button>}
               </div>
             </>
           ) : null}
@@ -199,7 +204,7 @@ export function OnboardAccount() {
 
         <aside className="onboard-aside">
           <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact collector workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
-          <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Safe fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Fixture mode exercises onboarding, persistence, CMDB, relationships, findings, exports, and workflows without contacting AWS. Switch the collector to live mode before using customer evidence." : "Start the local collector before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
+          <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Safe fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Fixture mode uses the dedicated Simulation runs workflow and cannot create or synchronize AWS trust connections. Every resulting snapshot is labelled as simulated evidence." : "Start the local collector before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
           <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>Collector workload identity</li><li><b>3</b>STS AssumeRole</li><li><b>4</b>Temporary in-memory credentials</li><li><b>5</b>Validated normalized evidence</li></ol></section>
         </aside>
       </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { CollectorHealth, PilotState } from "../../lib/pilot-types";
+import type { CollectorHealth, PilotState, SnapshotOrigin } from "../../lib/pilot-types";
 
 interface PilotApiErrorBody {
   readonly error?: {
@@ -40,8 +40,14 @@ export async function postPilot<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function loadPilot(): Promise<{ state: PilotState; health: CollectorHealth | null }> {
+  const selectedConnectionId = typeof window === "undefined"
+    ? null
+    : new URLSearchParams(window.location.search).get("connectionId");
+  const statePath = selectedConnectionId !== null && /^conn_[a-f0-9]{32}$/u.test(selectedConnectionId)
+    ? `/api/pilot/state?connectionId=${encodeURIComponent(selectedConnectionId)}`
+    : "/api/pilot/state";
   const [stateResponse, healthResponse] = await Promise.all([
-    fetch("/api/pilot/state", { cache: "no-store" }),
+    fetch(statePath, { cache: "no-store" }),
     fetch("/api/pilot/health", { cache: "no-store" }),
   ]);
   const { state } = await readJson<{ state: PilotState }>(stateResponse);
@@ -112,4 +118,12 @@ export function formatTimestamp(value: string | null | undefined): string {
 
 export function compactIdentifier(value: string, leading = 12): string {
   return value.length <= leading + 7 ? value : `${value.slice(0, leading)}…${value.slice(-6)}`;
+}
+
+export function snapshotOriginLabel(origin: SnapshotOrigin | null | undefined): string {
+  if (origin?.kind === "simulated_fixture") {
+    return `Simulated fixture evidence${origin.fixtureVersion ? ` · ${origin.fixtureVersion}` : ""}`;
+  }
+  if (origin?.kind === "aws_sandbox") return "AWS sandbox evidence";
+  return "Stored snapshot evidence";
 }

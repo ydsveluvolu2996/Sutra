@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { JsonValue, PilotFinding } from "../../lib/pilot-types";
-import { compactIdentifier, formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
+import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 
 const severityOrder = ["critical", "high", "medium", "low", "informational"] as const;
 
@@ -26,6 +26,7 @@ export function FindingsBrowser() {
   const [actionError, setActionError] = useState<string | null>(null);
   const findings = useMemo(() => state?.findings ?? [], [state?.findings]);
   const connection = state?.connection ?? null;
+  const canRunAwsSync = connection?.sourceKind === "aws_trust_role";
   const resourceMap = useMemo(() => new Map((state?.resources ?? []).map((resource) => [resource.resourceKey, resource])), [state?.resources]);
   const filtered = useMemo(() => findings.filter((finding) => {
     const resource = finding.resourceKey ? resourceMap.get(finding.resourceKey) : null;
@@ -72,9 +73,9 @@ export function FindingsBrowser() {
     <>
       <section className="page-heading">
         <div><p className="eyebrow">Evidence-backed posture</p><h1>Security findings</h1><p className="page-subtitle">Explainable configuration checks, affected resources, evidence, and suggested remediation from the active snapshot.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href="/api/pilot/export?format=csv">Export CSV</a><a className="button button-secondary" href="/controls">Control library</a><button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button></div>
+        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href="/controls">Control library</a>{canRunAwsSync ? <button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button> : connection ? <a className="button button-primary" href="/operations">Run simulation</a> : null}</div>
       </section>
-      <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{health?.mode === "live" ? "AWS configuration evidence." : health?.mode === "fixture" ? "Fixture evidence for local evaluation." : "Stored finding evidence."}</strong> These findings are deterministic posture observations—not proof of compromise, behavior analytics, package vulnerability scanning, or an AWS Inspector/GuardDuty replacement.</span><a href="/controls#architecture">See limitations</a></div>
+      <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready; no finding snapshot selected." : health?.mode === "fixture" ? "Fixture collector ready; no finding snapshot selected." : "Stored finding evidence."}</strong> These findings are deterministic posture observations—not proof of compromise, behavior analytics, package vulnerability scanning, or an AWS Inspector/GuardDuty replacement.</span><a href="/controls#architecture">See limitations</a></div>
 
       {error || actionError ? <div className="page-alert page-alert-error" role="alert"><strong>Findings action needs attention</strong><span>{actionError ?? error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading configuration findings…</div> : null}

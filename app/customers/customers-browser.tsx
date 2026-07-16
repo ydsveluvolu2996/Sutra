@@ -60,12 +60,12 @@ export function CustomersBrowser() {
           <section className="panel account-directory">
             <div className="panel-heading"><div><p className="eyebrow">Connection health</p><h2>Customer cloud accounts</h2></div>{canOnboard ? <a href="/onboard" className="text-link">Manage trust roles →</a> : null}</div>
             <div className="data-table account-table" role="table" aria-label="Authorized cloud account connections">
-              <div className="data-row data-header" role="row"><span>Status</span><span>Customer / account</span><span>Role</span><span>Inventory</span><span>Last sync</span></div>
+              <div className="data-row data-header" role="row"><span>Status</span><span>Customer / account</span><span>Source</span><span>Inventory</span><span>Last sync</span></div>
               {connections.map(({ customer, connection }) => (
                 <div className="data-row" role="row" key={connection.id}>
                   <span><span className={`connection-status connection-${connection.status}`}>{connection.status.replace("_", " ")}</span></span>
                   <span className="primary-cell"><strong>{customer.name}</strong><small>{connection.awsAccountId} · {connection.partition}</small></span>
-                  <span className="primary-cell"><strong>{connection.roleArn?.split("/").at(-1) ?? "Not registered"}</strong><small>{connection.enabledRegions.length} regions · {connection.permissionPackVersion}</small></span>
+                  <span className="primary-cell"><strong>{connection.sourceKind === "simulated_fixture" ? "SIMULATED FIXTURE" : connection.roleArn?.split("/").at(-1) ?? "Trust role not registered"}</strong><small>{connection.sourceKind === "simulated_fixture" ? `${connection.fixtureId ?? "fixture"} · ${connection.fixtureVersion ?? "not published"}` : `${connection.enabledRegions.length} regions · ${connection.permissionPackVersion}`}</small></span>
                   <span className="primary-cell"><strong>{connection.resourceCount.toLocaleString()} assets</strong><small>{connection.openFindingCount.toLocaleString()} open findings</small></span>
                   <span className="muted-cell">{formatTimestamp(connection.lastSuccessfulSyncAt)}</span>
                 </div>

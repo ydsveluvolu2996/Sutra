@@ -3,6 +3,9 @@ import type { ConnectionStatus } from "./pilot-types";
 export interface PortfolioConnectionSummary {
   readonly id: string;
   readonly customerId: string;
+  readonly sourceKind: "aws_trust_role" | "simulated_fixture";
+  readonly fixtureId: string | null;
+  readonly fixtureVersion: string | null;
   readonly awsAccountId: string;
   readonly partition: "aws" | "aws-us-gov" | "aws-cn";
   readonly status: ConnectionStatus;
@@ -11,6 +14,7 @@ export interface PortfolioConnectionSummary {
   readonly permissionPackVersion: string;
   readonly lastSuccessfulSyncAt: string | null;
   readonly latestSnapshotAt: string | null;
+  readonly latestSnapshotOrigin: "unknown" | "simulated_fixture" | "aws_sandbox" | null;
   readonly resourceCount: number;
   readonly openFindingCount: number;
 }
