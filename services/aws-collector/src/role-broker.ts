@@ -6,6 +6,12 @@ import {
   STSClient,
   type STSClientConfig,
 } from "@aws-sdk/client-sts";
+import {
+  GetRoleCommand,
+  GetRolePolicyCommand,
+  IAMClient,
+  ListRolePoliciesCommand,
+} from "@aws-sdk/client-iam";
 
 import {
   AssumeRoleFailedError,
@@ -27,6 +33,8 @@ import {
   type NegativeExternalIdProbe,
   type OnboardingTrustVerification,
   type ParsedIamRoleArn,
+  type RoleContractClient,
+  type RoleContractClientFactory,
   type ScopedConnectionRegistry,
   type StoredAwsConnection,
   type ValidatedRoleSession,
@@ -42,6 +50,34 @@ const ACCOUNT_ID = /^[0-9]{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const SESSION_PREFIX = /^[A-Za-z0-9_+=,.@-]{3,32}$/;
 const SESSION_NAME = /^[A-Za-z0-9_+=,.@-]{2,64}$/;
+const EXPECTED_ROLE_PATH_AND_NAME = "sutra/SutraReadOnlyRole";
+const EXPECTED_ROLE_PATH = "/sutra/";
+const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
+const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
+const PERMISSION_PACK_VERSION = "live-demo-2026-07" as const;
+const IMPLEMENTED_READ_ACTIONS = [
+  "sts:GetCallerIdentity",
+  "ec2:DescribeRegions",
+  "ec2:DescribeInstances",
+  "ec2:DescribeVpcs",
+  "ec2:DescribeSubnets",
+  "ec2:DescribeSecurityGroups",
+  "s3:ListAllMyBuckets",
+  "s3:GetBucketPublicAccessBlock",
+  "rds:DescribeDBInstances",
+  "iam:GetAccountSummary",
+  "iam:GetAccountPasswordPolicy",
+  "cloudtrail:DescribeTrails",
+  "cloudtrail:GetTrailStatus",
+  "guardduty:ListDetectors",
+  "guardduty:GetDetector",
+  "securityhub:DescribeHub",
+] as const;
+const TRUST_ATTESTATION_ACTIONS = [
+  "iam:GetRole",
+  "iam:ListRolePolicies",
+  "iam:GetRolePolicy",
+] as const;
 
 const EXPECTED_ACCESS_DENIALS = new Set([
   "AccessDenied",
@@ -61,11 +97,14 @@ export interface AwsRoleBrokerDependencies {
   readonly registry: ScopedConnectionRegistry;
   readonly assumeRoleClient: AssumeRoleClient;
   readonly callerIdentityClientFactory: CallerIdentityClientFactory;
+  readonly roleContractClientFactory: RoleContractClientFactory;
+  readonly expectedPrincipalArn: string;
   readonly now?: () => Date;
 }
 
 export interface WorkloadIdentityRoleBrokerOptions {
   readonly registry: ScopedConnectionRegistry;
+  readonly principalArn: string;
   readonly region?: string;
   readonly maxAttempts?: number;
 }
@@ -111,6 +150,192 @@ export function parseIamRoleArn(roleArn: string): ParsedIamRoleArn {
 /** Convenience helper used by connection-registration and authorization code. */
 export function accountIdFromRoleArn(roleArn: string): string {
   return parseIamRoleArn(roleArn).accountId;
+}
+
+/**
+ * Defense-in-depth cap applied to every STS session. Even if a customer
+ * accidentally registers an administrator role, the issued session can use
+ * only this release's implemented metadata APIs and trust-attestation reads.
+ */
+export function readonlyMetadataSessionPolicy(roleArn: string): string {
+  const parsed = parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "SutraImplementedMetadataReadCap",
+        Effect: "Allow",
+        Action: IMPLEMENTED_READ_ACTIONS,
+        Resource: "*",
+      },
+      {
+        Sid: "SutraTrustAttestationReadCap",
+        Effect: "Allow",
+        Action: TRUST_ATTESTATION_ACTIONS,
+        Resource: parsed.arn,
+      },
+    ],
+  });
+  if (policy.length > 2_048) {
+    throw new ConnectionIntegrityError("The fixed STS session policy exceeds the AWS limit");
+  }
+  return policy;
+}
+
+type JsonRecord = Record<string, unknown>;
+
+function record(value: unknown): JsonRecord {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("expected object");
+  }
+  return value as JsonRecord;
+}
+
+function exactKeys(value: JsonRecord, keys: readonly string[]): void {
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    throw new Error("unexpected policy fields");
+  }
+}
+
+function policyDocument(value: string | undefined): JsonRecord {
+  if (value === undefined || value.length === 0 || value.length > 32_768) {
+    throw new Error("missing policy document");
+  }
+  const source = value.trimStart().startsWith("{") ? value : decodeURIComponent(value);
+  return record(JSON.parse(source) as unknown);
+}
+
+function stringList(value: unknown): readonly string[] {
+  if (typeof value === "string") return [value];
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error("expected string list");
+  }
+  return value as string[];
+}
+
+function sameStringSet(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length &&
+    [...actual].sort().every((value, index) => value === [...expected].sort()[index]);
+}
+
+function assertExpectedTrustPolicy(
+  value: string | undefined,
+  externalId: string,
+  sessionNamePrefix: string,
+  expectedPrincipalArn: string,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 1) {
+    throw new Error("unexpected trust policy shape");
+  }
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Principal", "Action", "Condition"]);
+  if (
+    statement.Sid !== "ExactCollectorWithConnectionExternalId" ||
+    statement.Effect !== "Allow" ||
+    !sameStringSet(stringList(statement.Action), ["sts:AssumeRole"])
+  ) {
+    throw new Error("unexpected trust statement");
+  }
+  const principal = record(statement.Principal);
+  exactKeys(principal, ["AWS"]);
+  if (!sameStringSet(stringList(principal.AWS), [expectedPrincipalArn])) {
+    throw new Error("unexpected trust principal");
+  }
+  const condition = record(statement.Condition);
+  exactKeys(condition, ["StringEquals", "StringLike"]);
+  const equals = record(condition.StringEquals);
+  const like = record(condition.StringLike);
+  exactKeys(equals, ["sts:ExternalId"]);
+  exactKeys(like, ["sts:RoleSessionName"]);
+  if (
+    equals["sts:ExternalId"] !== externalId ||
+    like["sts:RoleSessionName"] !== `${sessionNamePrefix}*`
+  ) {
+    throw new Error("unexpected trust conditions");
+  }
+}
+
+function assertExpectedPermissionPolicy(value: string | undefined, roleArn: string): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 2) {
+    throw new Error("unexpected permission policy shape");
+  }
+  const statements = document.Statement.map(record);
+  const metadata = statements.find((statement) => statement.Sid === "ImplementedMetadataApis");
+  const attestation = statements.find((statement) => statement.Sid === "TrustContractAttestation");
+  if (metadata === undefined || attestation === undefined) throw new Error("missing permission statement");
+  for (const statement of statements) exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    metadata.Effect !== "Allow" ||
+    metadata.Resource !== "*" ||
+    !sameStringSet(stringList(metadata.Action), IMPLEMENTED_READ_ACTIONS) ||
+    attestation.Effect !== "Allow" ||
+    attestation.Resource !== roleArn ||
+    !sameStringSet(stringList(attestation.Action), TRUST_ATTESTATION_ACTIONS)
+  ) {
+    throw new Error("unexpected permission policy");
+  }
+}
+
+function assertExpectedRole(
+  role: Awaited<ReturnType<RoleContractClient["getRole"]>>,
+  resolved: ResolvedConnection,
+  expectedPrincipalArn: string,
+): void {
+  if (
+    resolved.parsedRoleArn.rolePathAndName !== EXPECTED_ROLE_PATH_AND_NAME ||
+    role.arn !== resolved.connection.roleArn ||
+    role.roleName !== EXPECTED_ROLE_NAME ||
+    role.path !== EXPECTED_ROLE_PATH ||
+    role.maxSessionDuration !== 3_600
+  ) {
+    throw new Error("unexpected customer role identity");
+  }
+  const tags = new Map<string, string>();
+  for (const tag of role.tags ?? []) {
+    if (tag.key === undefined || tag.value === undefined || tags.has(tag.key)) {
+      throw new Error("invalid role tags");
+    }
+    tags.set(tag.key, tag.value);
+  }
+  if (
+    tags.get("sutra:access-mode") !== "read-only" ||
+    tags.get("sutra:permission-pack") !== PERMISSION_PACK_VERSION ||
+    tags.get("sutra:managed-by") !== "cloudformation"
+  ) {
+    throw new Error("role attestation tags are missing");
+  }
+  assertExpectedTrustPolicy(
+    role.assumeRolePolicyDocument,
+    resolved.connection.externalId,
+    resolved.sessionNamePrefix,
+    expectedPrincipalArn,
+  );
+}
+
+async function allInlinePolicyNames(
+  client: RoleContractClient,
+  roleName: string,
+): Promise<string[]> {
+  const names: string[] = [];
+  let marker: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < 100; page += 1) {
+    const output = await client.listRolePolicies(roleName, marker);
+    names.push(...output.policyNames);
+    if (!output.isTruncated) return [...new Set(names)].sort();
+    if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
+      throw new Error("invalid role-policy pagination");
+    }
+    seen.add(output.marker);
+    marker = output.marker;
+  }
+  throw new Error("role-policy pagination limit exceeded");
 }
 
 /**
@@ -176,17 +401,18 @@ export class AwsRoleBroker {
     const resolved = await this.resolveConnection(scope, connectionId, [
       "PENDING",
       "DEGRADED",
+      "ACTIVE",
     ]);
     const validated = await this.assumeAndValidateIdentity(resolved, jobId);
 
     const missingResult = await this.runNegativeProbe(
       resolved,
-      `${jobId}-missing-external-id`,
+      validated.roleSessionName,
       "MISSING_EXTERNAL_ID",
     );
     const wrongResult = await this.runNegativeProbe(
       resolved,
-      `${jobId}-wrong-external-id`,
+      validated.roleSessionName,
       "WRONG_EXTERNAL_ID",
       createWrongExternalId(resolved.connection),
     );
@@ -198,6 +424,8 @@ export class AwsRoleBroker {
       throw new UnsafeTrustPolicyError("WRONG_EXTERNAL_ID");
     }
 
+    await this.attestRoleContract(resolved, validated.credentials);
+
     return {
       connectionId: validated.connectionId,
       accountId: validated.accountId,
@@ -207,7 +435,37 @@ export class AwsRoleBroker {
       roleSessionName: validated.roleSessionName,
       missingExternalIdDenied: true,
       wrongExternalIdDenied: true,
+      trustPolicyAttested: true,
+      permissionPolicyAttested: true,
+      sessionPolicyApplied: true,
+      permissionPackVersion: PERMISSION_PACK_VERSION,
     };
+  }
+
+  private async attestRoleContract(
+    resolved: ResolvedConnection,
+    credentials: AwsTemporaryCredentials,
+  ): Promise<void> {
+    try {
+      const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
+      if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
+        throw new Error("principal partition mismatch");
+      }
+      const client = this.dependencies.roleContractClientFactory(credentials);
+      const role = await client.getRole(resolved.parsedRoleArn.roleName);
+      assertExpectedRole(role, resolved, expectedPrincipal.arn);
+      const policyNames = await allInlinePolicyNames(client, resolved.parsedRoleArn.roleName);
+      if (policyNames.length !== 1 || policyNames[0] !== EXPECTED_POLICY_NAME) {
+        throw new Error("unexpected inline policy set");
+      }
+      const policy = await client.getRolePolicy(
+        resolved.parsedRoleArn.roleName,
+        EXPECTED_POLICY_NAME,
+      );
+      assertExpectedPermissionPolicy(policy.policyDocument, resolved.connection.roleArn);
+    } catch {
+      throw new UnsafeTrustPolicyError("ROLE_CONTRACT");
+    }
   }
 
   private async resolveConnection(
@@ -259,6 +517,7 @@ export class AwsRoleBroker {
     jobId: string,
   ): Promise<ValidatedRoleSession> {
     const roleSessionName = sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix);
+    const policy = readonlyMetadataSessionPolicy(resolved.connection.roleArn);
     let output;
 
     try {
@@ -268,6 +527,7 @@ export class AwsRoleBroker {
           RoleSessionName: roleSessionName,
           ExternalId: resolved.connection.externalId,
           DurationSeconds: 900,
+          Policy: policy,
         }),
       );
     } catch (error: unknown) {
@@ -313,14 +573,18 @@ export class AwsRoleBroker {
 
   private async runNegativeProbe(
     resolved: ResolvedConnection,
-    jobId: string,
+    roleSessionName: string,
     probe: NegativeExternalIdProbe,
     externalId?: string,
   ): Promise<"DENIED" | "SUCCEEDED"> {
     const input = {
       RoleArn: resolved.connection.roleArn,
-      RoleSessionName: sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix),
+      // Keep every request field identical to the successful probe except the
+      // ExternalId. Otherwise a condition on RoleSessionName can masquerade as
+      // proof that the ExternalId itself was rejected.
+      RoleSessionName: roleSessionName,
       DurationSeconds: 900,
+      Policy: readonlyMetadataSessionPolicy(resolved.connection.roleArn),
       ...(externalId === undefined ? {} : { ExternalId: externalId }),
     };
 
@@ -356,8 +620,61 @@ export function createWorkloadIdentityRoleBroker(
   return new AwsRoleBroker({
     registry: options.registry,
     assumeRoleClient,
+    expectedPrincipalArn: options.principalArn,
     callerIdentityClientFactory: (credentials) =>
       new STSClient({ ...clientConfig, credentials }),
+    roleContractClientFactory: (credentials) => {
+      const client = new IAMClient({
+        retryMode: "standard",
+        maxAttempts: options.maxAttempts ?? 4,
+        credentials,
+        ...(options.region === undefined ? {} : { region: options.region }),
+      });
+      return {
+        getRole: async (roleName) => {
+          const output = await client.send(new GetRoleCommand({ RoleName: roleName }));
+          return {
+            ...(output.Role?.Arn === undefined ? {} : { arn: output.Role.Arn }),
+            ...(output.Role?.RoleName === undefined ? {} : { roleName: output.Role.RoleName }),
+            ...(output.Role?.Path === undefined ? {} : { path: output.Role.Path }),
+            ...(output.Role?.MaxSessionDuration === undefined
+              ? {}
+              : { maxSessionDuration: output.Role.MaxSessionDuration }),
+            ...(output.Role?.AssumeRolePolicyDocument === undefined
+              ? {}
+              : { assumeRolePolicyDocument: output.Role.AssumeRolePolicyDocument }),
+            ...(output.Role?.Tags === undefined
+              ? {}
+              : {
+                  tags: output.Role.Tags.map((tag) => ({
+                    ...(tag.Key === undefined ? {} : { key: tag.Key }),
+                    ...(tag.Value === undefined ? {} : { value: tag.Value }),
+                  })),
+                }),
+          };
+        },
+        listRolePolicies: async (roleName, marker) => {
+          const output = await client.send(new ListRolePoliciesCommand({
+            RoleName: roleName,
+            ...(marker === undefined ? {} : { Marker: marker }),
+          }));
+          return {
+            policyNames: output.PolicyNames ?? [],
+            isTruncated: output.IsTruncated === true,
+            ...(output.Marker === undefined ? {} : { marker: output.Marker }),
+          };
+        },
+        getRolePolicy: async (roleName, policyName) => {
+          const output = await client.send(new GetRolePolicyCommand({
+            RoleName: roleName,
+            PolicyName: policyName,
+          }));
+          return output.PolicyDocument === undefined
+            ? {}
+            : { policyDocument: output.PolicyDocument };
+        },
+      };
+    },
   });
 }
 
@@ -410,12 +727,12 @@ function matchesExpectedAssumedRoleArn(
 }
 
 function createWrongExternalId(connection: StoredAwsConnection): string {
-  const digest = createHash("sha256")
-    .update(`${connection.tenantId}:${connection.connectionId}:${connection.externalId}`, "utf8")
-    .digest("hex")
-    .slice(0, 32);
-  const candidate = `mspcmdb-negative-${digest}`;
-  return candidate === connection.externalId ? `${candidate}-x` : candidate;
+  // Preserve the exact shape and prefix of the configured value. A probe with
+  // a different prefix would not detect an unsafe StringLike "sutra_*" trust
+  // condition. The trust-policy attestation remains the authoritative check;
+  // this is a complementary behavioral sample.
+  const replacement = connection.externalId.endsWith("A") ? "B" : "A";
+  return `${connection.externalId.slice(0, -1)}${replacement}`;
 }
 
 function errorName(error: unknown): string {

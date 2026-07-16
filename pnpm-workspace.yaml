@@ -1,6 +1,9 @@
 packages:
   - "services/*"
 
+overrides:
+  postcss: 8.5.19
+
 allowBuilds:
   esbuild: true
   sharp: true

@@ -1,4 +1,4 @@
-import { getStoredConnectionSecret, setFindingWorkflowStatus } from "../../../../../db/pilot-repository";
+import { getConnection, setFindingWorkflowStatus } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
@@ -43,8 +43,14 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const body = parseBody(await readBoundedJson(request));
-    const stored = await getStoredConnectionSecret(body.connectionId);
-    assertSessionCapability(actor.authenticated, "finding:manage", stored.customerId);
+    // Workflow authorization needs only tenant-scoped connection metadata. It
+    // must not load AWS trust ciphertext, and simulated connections do not have
+    // such a secret by design.
+    const connection = await getConnection(body.connectionId);
+    if (connection === null) {
+      throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
+    }
+    assertSessionCapability(actor.authenticated, "finding:manage", connection.customerId);
     await setFindingWorkflowStatus(body.connectionId, body.fingerprint, body.status, body.note, actor.id);
     return jsonResponse({ updated: true, fingerprint: body.fingerprint, status: body.status });
   } catch (error) {

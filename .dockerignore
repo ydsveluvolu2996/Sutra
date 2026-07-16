@@ -1,0 +1,14 @@
+.git
+.dev.vars
+.env*
+.sutra
+.wrangler
+.vinext
+.next
+dist
+node_modules
+services/*/dist
+outputs
+work
+coverage
+*.log

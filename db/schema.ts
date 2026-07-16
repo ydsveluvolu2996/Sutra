@@ -129,6 +129,7 @@ export const syncRuns = sqliteTable("sync_runs", {
   customerId: text("customer_id").notNull().references(() => customers.id),
   connectionId: text("connection_id").notNull().references(() => awsConnections.id),
   triggerKind: text("trigger_kind", { enum: ["manual", "scheduled", "onboarding"] }).notNull(),
+  scheduleId: text("schedule_id"),
   status: text("status", { enum: ["queued", "running", "partial", "succeeded", "failed", "cancelled"] }).notNull(),
   coverageState: text("coverage_state", { enum: ["complete", "partial", "unknown"] }).notNull().default("unknown"),
   collectorPackVersion: text("collector_pack_version").notNull(),
@@ -311,6 +312,7 @@ export const localJobPublications = sqliteTable("local_job_publications", {
   snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
   fixtureId: text("fixture_id").notNull(),
   fixtureVersion: text("fixture_version").notNull(),
+  scheduleId: text("schedule_id"),
   actorId: text("actor_id").notNull(),
   publishedAt: timestamp("published_at"),
 }, (table) => [
@@ -393,4 +395,38 @@ export const auditEvents = sqliteTable("audit_events", {
   metadataJson: text("metadata_json").notNull().default("{}"),
   previousEventHash: text("previous_event_hash"),
   eventHash: text("event_hash").notNull(),
-}, (table) => [index("audit_events_org_time_idx").on(table.orgId, table.occurredAt, table.id)]);
+}, (table) => [
+  index("audit_events_org_time_idx").on(table.orgId, table.occurredAt, table.id),
+  uniqueIndex("audit_events_org_request_id_uq").on(table.orgId, table.requestId),
+]);
+
+/**
+ * Local collector mutations cross the D1/collector process boundary. This
+ * durable outbox preserves the exact signed command until its audit event is
+ * committed, allowing an interrupted request to be replayed safely.
+ */
+export const localScheduleMutationOutbox = sqliteTable("local_schedule_mutation_outbox", {
+  operationId: text("operation_id").primaryKey(),
+  mutationSequence: integer("mutation_sequence"),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  actorId: text("actor_id").notNull(),
+  customerId: text("customer_id").references(() => customers.id),
+  scheduleId: text("schedule_id").notNull(),
+  fixtureId: text("fixture_id").notNull(),
+  connectionId: text("connection_id").notNull(),
+  operationKind: text("operation_kind", { enum: ["upsert", "toggle"] }).notNull(),
+  commandJson: text("command_json").notNull(),
+  commandSha256: text("command_sha256").notNull(),
+  status: text("status", { enum: ["pending", "completed", "failed"] }).notNull().default("pending"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  failureCode: text("failure_code"),
+  failedAt: integer("failed_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("local_schedule_mutation_outbox_sequence_uq").on(table.mutationSequence),
+  index("local_schedule_mutation_outbox_pending_idx")
+    .on(table.orgId, table.status, table.createdAt, table.operationId),
+  index("local_schedule_mutation_outbox_scope_idx")
+    .on(table.orgId, table.customerId, table.scheduleId, table.createdAt),
+]);

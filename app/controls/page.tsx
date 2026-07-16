@@ -4,13 +4,13 @@ import { AppShell } from "../components/app-shell";
 export const metadata: Metadata = { title: "Control library" };
 
 const controls = [
-  ["EC2-001", "Public SSH ingress", "EC2 / VPC", "High", "Security groups allowing TCP/22 from a public IPv4 range."],
+  ["EC2-001", "Public SSH ingress candidate", "EC2 / VPC", "High", "Security groups allowing TCP/22 from a public IPv4 range; full network reachability is not claimed."],
   ["EC2-002", "Instance public IP", "Amazon EC2", "Medium", "Instances with a directly assigned public IPv4 address."],
   ["EC2-003", "IMDSv2 not required", "Amazon EC2", "High", "Instance metadata settings where HttpTokens is not required."],
   ["EC2-004", "Subnet auto-assigns public IPs", "EC2 / VPC", "Medium", "Subnets whose MapPublicIpOnLaunch setting is enabled."],
   ["S3-001", "S3 Public Access Block gaps", "Amazon S3", "High", "Buckets missing one or more Public Access Block protections."],
   ["RDS-001", "RDS storage encryption disabled", "Amazon RDS", "High", "Database instances whose StorageEncrypted setting is false."],
-  ["RDS-002", "Public database accessibility", "Amazon RDS", "Critical", "Database instances whose PubliclyAccessible setting is enabled."],
+  ["RDS-002", "RDS public-accessibility flag", "Amazon RDS", "Critical", "Database instances whose PubliclyAccessible setting is enabled; full network reachability is not claimed."],
   ["LOG-001", "CloudTrail logging stopped", "CloudTrail", "Critical", "Configured trails that are not currently delivering management events."],
   ["IAM-001", "IAM password baseline", "AWS IAM", "Medium", "Account password policy is missing or below the local pilot baseline."],
   ["DET-001", "GuardDuty coverage signal", "GuardDuty", "High", "Shows whether AWS-native threat detection is enabled; Sutra does not emulate it."],

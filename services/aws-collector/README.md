@@ -4,7 +4,8 @@ This package is the vendor-side AWS credential broker and collector job boundary
 It resolves a customer's role ARN and External ID from a tenant-scoped server-side
 registry, assumes the role with AWS STS, validates the resulting identity, and only
 then hands temporary credentials to an internal inventory runner. The included
-single-account runner inventories selected Regions plus global IAM/S3 configuration.
+single-account runner inventories selected Regions plus global IAM configuration;
+S3 buckets are retained only for their server-reported selected Region.
 
 ## Deployment requirement
 
@@ -37,8 +38,11 @@ an HTTP/queue boundary.
   Handler responses are constructed from an explicit scalar allowlist and never
   include credentials or the External ID.
 - Raw AWS responses are projected into allowlisted `NormalizedAwsResource` and
-  `NormalizedAwsEvidence` records. EC2/RDS tags, RDS master usernames, SDK error
-  messages, and all credentials are intentionally excluded.
+  `NormalizedAwsEvidence` records. A small key allowlist of bounded tags is retained
+  as tenant-confidential CMDB data; known credential formats, signed/credential
+  URLs, long opaque tokens, RDS master usernames, raw SDK errors, and all AWS
+  credentials are excluded. Tag filtering reduces accidental secret capture but
+  does not make retained names or tags public or safe for telemetry.
 - Pagination tokens are consumed with cycle/maximum-page guards. Service tasks use
   bounded concurrency and SDK standard retry mode with a bounded attempt count.
 - A failed service/Region writes sanitized `COLLECTION_ERROR` evidence and makes the

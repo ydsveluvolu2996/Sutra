@@ -5,7 +5,18 @@ import {
   parseCollectorHealth,
   parsePilotSnapshot,
 } from "../lib/pilot-boundary.ts";
-import type { PilotSnapshotPayload } from "../lib/pilot-types.ts";
+import {
+  describeLatestCollection,
+  describeLiveSyncFailure,
+  describeLiveSyncResult,
+  describeTrustHealth,
+} from "../lib/live-sync-presentation.ts";
+import type {
+  PilotConnection,
+  PilotSnapshotPayload,
+  PilotState,
+  PilotSyncRun,
+} from "../lib/pilot-types.ts";
 
 async function snapshot(): Promise<PilotSnapshotPayload> {
   const collectedAt = new Date().toISOString();
@@ -43,6 +54,63 @@ async function snapshot(): Promise<PilotSnapshotPayload> {
     findings: [],
   };
   return { ...unsigned, snapshotSha256: await computeSnapshotSha256(unsigned) };
+}
+
+const connection: PilotConnection = {
+  id: "conn_1234567890abcdef1234567890abcdef",
+  customerId: "cust_1234567890abcdef1234567890abcdef",
+  customerName: "Pilot Customer",
+  sourceKind: "aws_trust_role",
+  fixtureId: null,
+  fixtureVersion: null,
+  partition: "aws",
+  awsAccountId: "123456789012",
+  roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+  status: "active",
+  enabledRegions: ["us-east-1"],
+  permissionPackVersion: "aws-pilot-v1",
+  lastValidatedAt: "2026-07-16T10:00:00.000Z",
+  lastSuccessfulSyncAt: null,
+  createdAt: "2026-07-16T09:00:00.000Z",
+  updatedAt: "2026-07-16T10:00:00.000Z",
+};
+
+function syncRun(
+  status: PilotSyncRun["status"],
+  coverageState: PilotSyncRun["coverageState"],
+): PilotSyncRun {
+  return {
+    id: "sync_1234567890abcdef1234567890abcdef",
+    connectionId: connection.id,
+    status,
+    coverageState,
+    totals: {},
+    startedAt: "2026-07-16T10:01:00.000Z",
+    finishedAt: "2026-07-16T10:02:00.000Z",
+    createdAt: "2026-07-16T10:01:00.000Z",
+  };
+}
+
+function stateWith(run?: PilotSyncRun, hasActiveSnapshot = false): PilotState {
+  return {
+    mode: "live",
+    connection,
+    resources: [],
+    relationships: [],
+    findings: [],
+    coverage: [],
+    latestRunCoverage: run ? { syncRunId: run.id, entries: [] } : null,
+    syncRuns: run ? [run] : [],
+    activeSnapshot: hasActiveSnapshot
+      ? {
+        id: "snap_1234567890abcdef1234567890abcdef",
+        collectedAt: "2026-07-16T09:30:00.000Z",
+        coverageState: "complete",
+        snapshotSha256: "a".repeat(64),
+        origin: { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+      }
+      : null,
+  };
 }
 
 describe("collector boundary validation", () => {
@@ -107,6 +175,62 @@ describe("collector boundary validation", () => {
         partition: payload.partition,
       }),
       /failed Sutra validation/u,
+    );
+  });
+});
+
+describe("live AWS sync presentation", () => {
+  it("presents only a persisted complete run as an active publication", () => {
+    const state = stateWith(syncRun("succeeded", "complete"), true);
+    const result = describeLiveSyncResult(state, state.syncRuns[0]!.id);
+
+    assert.equal(result.kind, "complete");
+    assert.match(result.message, /new CMDB projection is active/u);
+    assert.equal(describeTrustHealth(connection).label, "Validated");
+  });
+
+  it("records partial evidence without claiming that it replaced the CMDB head", () => {
+    const withPreviousProjection = stateWith(syncRun("partial", "partial"), true);
+    const withNoProjection = stateWith(syncRun("partial", "partial"), false);
+
+    assert.deepEqual(describeLatestCollection(withPreviousProjection), {
+      kind: "partial",
+      title: "Partial collection recorded",
+      message: "Some configured collectors did not complete. The previous complete CMDB projection remains active. Review the run coverage, correct the AWS permission or service issue, and retry inventory.",
+    });
+    assert.match(
+      describeLiveSyncResult(withNoProjection, withNoProjection.syncRuns[0]!.id).message,
+      /No authoritative CMDB projection was promoted/u,
+    );
+  });
+
+  it("keeps trust success distinct when the following inventory request fails", () => {
+    const message = describeLiveSyncFailure({
+      publicError: "AWS throttled this inventory request; retry after a short delay.",
+      trustValidatedThisAttempt: true,
+      existingTrustWasActive: false,
+      hasActiveSnapshot: true,
+    });
+
+    assert.match(message, /^Trust validation passed, but inventory collection failed/u);
+    assert.match(message, /previous complete CMDB projection remains active/u);
+    assert.match(message, /customer role does not need to be recreated/u);
+  });
+
+  it("does not claim publication when the returned run is missing or failed", () => {
+    const failedState = stateWith(syncRun("failed", "unknown"), true);
+    const inconsistentState = stateWith(syncRun("succeeded", "partial"), true);
+    assert.equal(
+      describeLiveSyncResult(failedState, failedState.syncRuns[0]!.id).kind,
+      "failed",
+    );
+    assert.equal(
+      describeLiveSyncResult(failedState, "sync_missing").kind,
+      "unknown",
+    );
+    assert.equal(
+      describeLiveSyncResult(inconsistentState, inconsistentState.syncRuns[0]!.id).kind,
+      "unknown",
     );
   });
 });

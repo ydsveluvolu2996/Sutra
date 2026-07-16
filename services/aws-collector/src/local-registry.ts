@@ -52,9 +52,16 @@ export interface RegisterAwsConnectionInput {
   readonly sessionNamePrefix?: string;
 }
 
+interface RegistryTombstone {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly offboardedAt: string;
+}
+
 interface RegistryDocument {
-  readonly version: 1;
+  readonly version: 2;
   readonly connections: Readonly<Record<string, RegisteredAwsConnection>>;
+  readonly tombstones: Readonly<Record<string, RegistryTombstone>>;
 }
 
 interface EncryptedEnvelope {
@@ -131,7 +138,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     const parsed = parseConnectionInput(input);
     await this.mutate((document) => {
       const key = connectionKey(parsed.tenantId, parsed.connectionId);
+      if (document.tombstones[key] !== undefined) {
+        throw new RegistryStateError();
+      }
       const previous = document.connections[key];
+      if (previous?.status === "DISABLED") {
+        throw new RegistryStateError();
+      }
       const timestamp = this.now().toISOString();
       const unchanged =
         previous !== undefined &&
@@ -143,7 +156,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         arraysEqual(previous.enabledRegions, parsed.enabledRegions);
 
       return {
-        version: 1,
+        version: 2,
         connections: {
           ...document.connections,
           [key]: {
@@ -151,6 +164,73 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
             status: unchanged ? previous.status : "PENDING",
             createdAt: previous?.createdAt ?? timestamp,
             updatedAt: timestamp,
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /**
+   * Stops future broker work while retaining the encrypted trust contract for
+   * an operator-directed investigation. Missing registrations are treated as
+   * an idempotent success because a draft may be disabled before role setup.
+   */
+  public async disable(scope: ConnectionScope, connectionId: string): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      if (document.tombstones[key] !== undefined) return document;
+      const connection = document.connections[key];
+      if (connection === undefined) return document;
+      if (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId) {
+        throw new RegistryConnectionNotFoundError();
+      }
+      if (connection.status === "DISABLED") return document;
+      return {
+        version: 2,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "DISABLED",
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /**
+   * Permanently removes role and ExternalId material from the collector. The
+   * non-secret tombstone prevents a delayed registration request from
+   * recreating trust material under the same connection identifier.
+   */
+  public async offboard(scope: ConnectionScope, connectionId: string): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const existingTombstone = document.tombstones[key];
+      if (existingTombstone !== undefined) return document;
+      const connection = document.connections[key];
+      if (
+        connection !== undefined &&
+        (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId)
+      ) {
+        throw new RegistryConnectionNotFoundError();
+      }
+      const connections = { ...document.connections };
+      delete connections[key];
+      return {
+        version: 2,
+        connections,
+        tombstones: {
+          ...document.tombstones,
+          [key]: {
+            tenantId: scope.tenantId,
+            connectionId,
+            offboardedAt: this.now().toISOString(),
           },
         },
       };
@@ -170,7 +250,11 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       if (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId) {
         throw new RegistryConnectionNotFoundError();
       }
-      if (connection.status !== "PENDING" && connection.status !== "DEGRADED") {
+      if (
+        connection.status !== "PENDING" &&
+        connection.status !== "DEGRADED" &&
+        connection.status !== "ACTIVE"
+      ) {
         throw new RegistryStateError();
       }
       if (
@@ -179,12 +263,16 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         verification.partition !== connection.partition ||
         verification.roleArn !== connection.roleArn ||
         verification.missingExternalIdDenied !== true ||
-        verification.wrongExternalIdDenied !== true
+        verification.wrongExternalIdDenied !== true ||
+        verification.trustPolicyAttested !== true ||
+        verification.permissionPolicyAttested !== true ||
+        verification.sessionPolicyApplied !== true ||
+        verification.permissionPackVersion !== "live-demo-2026-07"
       ) {
         throw new RegistryIntegrityError();
       }
       return {
-        version: 1,
+        version: 2,
         connections: {
           ...document.connections,
           [key]: {
@@ -193,6 +281,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
             updatedAt: this.now().toISOString(),
           },
         },
+        tombstones: document.tombstones,
       };
     });
   }
@@ -203,7 +292,10 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     const operation = this.writeTail.then(async () => {
       const current = await this.readDocument();
       const next = transform(current);
-      if (Object.keys(next.connections).length > MAX_CONNECTIONS) {
+      if (
+        Object.keys(next.connections).length > MAX_CONNECTIONS ||
+        Object.keys(next.tombstones).length > MAX_CONNECTIONS
+      ) {
         throw new RegistryIntegrityError();
       }
       await this.writeDocument(next);
@@ -385,10 +477,14 @@ function parseEnvelope(value: unknown): EncryptedEnvelope {
 }
 
 function parseDocument(value: unknown): RegistryDocument {
-  const record = exactRecord(value, ["version", "connections"]);
-  if (record.version !== 1 || !isRecord(record.connections)) {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
     throw new RegistryIntegrityError();
   }
+  const expectedKeys = value.version === 1
+    ? ["version", "connections"]
+    : ["version", "connections", "tombstones"];
+  const record = exactRecord(value, expectedKeys);
+  if (!isRecord(record.connections)) throw new RegistryIntegrityError();
   const entries = Object.entries(record.connections);
   if (entries.length > MAX_CONNECTIONS) throw new RegistryIntegrityError();
   const connections: Record<string, RegisteredAwsConnection> = {};
@@ -400,7 +496,41 @@ function parseDocument(value: unknown): RegistryDocument {
     }
     connections[key] = parsed;
   }
-  return { version: 1, connections };
+  const tombstones: Record<string, RegistryTombstone> = {};
+  if (record.version === 2) {
+    if (!isRecord(record.tombstones)) throw new RegistryIntegrityError();
+    const tombstoneEntries = Object.entries(record.tombstones);
+    if (tombstoneEntries.length > MAX_CONNECTIONS) throw new RegistryIntegrityError();
+    for (const [key, candidate] of tombstoneEntries) {
+      const tombstone = parseTombstone(candidate);
+      if (
+        key !== connectionKey(tombstone.tenantId, tombstone.connectionId) ||
+        connections[key] !== undefined
+      ) {
+        throw new RegistryIntegrityError();
+      }
+      tombstones[key] = tombstone;
+    }
+  }
+  return { version: 2, connections, tombstones };
+}
+
+function parseTombstone(value: unknown): RegistryTombstone {
+  const record = exactRecord(value, ["tenantId", "connectionId", "offboardedAt"]);
+  if (
+    typeof record.tenantId !== "string" ||
+    typeof record.connectionId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    !IDENTIFIER.test(record.connectionId) ||
+    !validIsoDate(record.offboardedAt)
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    tenantId: record.tenantId,
+    connectionId: record.connectionId,
+    offboardedAt: record.offboardedAt,
+  };
 }
 
 function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
@@ -459,7 +589,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
 }
 
 function emptyDocument(): RegistryDocument {
-  return { version: 1, connections: {} };
+  return { version: 2, connections: {}, tombstones: {} };
 }
 
 function connectionKey(tenantId: string, connectionId: string): string {

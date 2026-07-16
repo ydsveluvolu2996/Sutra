@@ -14,17 +14,23 @@ import type {
   PilotSyncRun,
   SnapshotOrigin,
 } from "../lib/pilot-types";
-import { parseSafePilotFailure } from "../lib/aws-pilot-security";
+import {
+  deriveLocalAwsConnectionIdentity,
+  parseSafePilotFailure,
+} from "../lib/aws-pilot-security";
 import {
   diffCmdbResources,
   toComparableResource,
   type CmdbComparableResource,
   type CmdbResourceChangeType,
 } from "../lib/cmdb-change-history";
+import { canonicalJson } from "../lib/canonical-json";
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "sutra-readonly-2026-07";
+const PILOT_PERMISSION_PACK = "live-demo-2026-07";
+const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
+const OFFBOARDED_KEY_VERSION = "offboarded";
 
 export class PilotRepositoryError extends Error {
   public readonly code: "NOT_FOUND" | "CONFLICT" | "INVALID_STATE" | "PERSISTENCE_FAILED";
@@ -41,6 +47,7 @@ export class PilotRepositoryError extends Error {
 
 export interface CreateConnectionDraftInput {
   readonly actorId: string;
+  readonly operationId: string;
   readonly customerId: string;
   readonly connectionId: string;
   readonly customerName: string;
@@ -50,6 +57,13 @@ export interface CreateConnectionDraftInput {
   readonly enabledRegions: readonly string[];
   readonly externalIdCiphertext: string;
   readonly externalIdKeyVersion: string;
+}
+
+export interface PendingConnectionHandoff {
+  readonly connection: PilotConnection;
+  readonly externalIdCiphertext: string;
+  readonly externalIdKeyVersion: string;
+  readonly recovered: boolean;
 }
 
 export interface StoredConnectionSecret {
@@ -129,6 +143,16 @@ interface SyncRow {
   started_at: number | null;
   finished_at: number | null;
   created_at: number;
+}
+
+interface CollectorRunRow {
+  collector_key: string;
+  region_key: string;
+  status: PilotCoverageEntry["status"];
+  items_observed: number;
+  pages_observed: number;
+  error_code: string | null;
+  error_message: string | null;
 }
 
 interface SnapshotHeadRow {
@@ -236,11 +260,59 @@ function resourceRowToComparable(row: ResourceRow): CmdbComparableResource {
   };
 }
 
-export async function createConnectionDraft(input: CreateConnectionDraftInput): Promise<PilotConnection> {
+export function createConnectionDraft(
+  input: CreateConnectionDraftInput,
+): Promise<PendingConnectionHandoff> {
+  return serializeAuditOperation(() => createConnectionDraftWithAtomicAudit(input));
+}
+
+async function createConnectionDraftWithAtomicAudit(
+  input: CreateConnectionDraftInput,
+): Promise<PendingConnectionHandoff> {
   const db = await readyDatabase();
   const now = Date.now();
   const customerId = input.customerId;
   const connectionId = input.connectionId;
+  const expectedIdentity = await deriveLocalAwsConnectionIdentity(input.accountId, input.partition);
+  if (
+    !/^onb_[a-f0-9]{32}$/u.test(input.operationId) ||
+    expectedIdentity.customerId !== customerId ||
+    expectedIdentity.connectionId !== connectionId
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The local AWS onboarding identity is invalid",
+    );
+  }
+  if (
+    input.externalIdCiphertext.length < 20 ||
+    input.externalIdCiphertext.length > 2_048 ||
+    input.externalIdKeyVersion.length < 1 ||
+    input.externalIdKeyVersion.length > 128
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "The onboarding trust secret is invalid");
+  }
+
+  const audit = resolveAuditInput({
+    actorId: input.actorId,
+    action: "aws.connection.created",
+    targetType: "aws_connection",
+    targetId: connectionId,
+    customerId,
+    outcome: "allowed",
+    metadata: {
+      accountId: input.accountId,
+      partition: input.partition,
+      regions: [...input.enabledRegions],
+      customerName: input.customerName,
+      customerSlug: input.customerSlug,
+      handoffVersion: 1,
+    },
+    requestId: connectionCreationAuditRequestId(input.operationId),
+  });
+
+  const replay = await recoverPendingConnectionHandoff(db, input, audit, true);
+  if (replay !== null) return replay;
 
   const existing = await db.prepare(
     `SELECT id FROM aws_connections WHERE org_id = ? AND partition = ? AND aws_account_id = ? LIMIT 1`,
@@ -249,49 +321,131 @@ export async function createConnectionDraft(input: CreateConnectionDraftInput): 
     throw new PilotRepositoryError("CONFLICT", "That AWS account already has a local Sutra connection");
   }
 
-  await db.batch([
-    db.prepare(
-      `INSERT OR IGNORE INTO organizations (id, slug, name, status, created_at) VALUES (?, ?, ?, 'active', ?)`,
-    ).bind(LOCAL_ORG_ID, LOCAL_ORG_SLUG, "Sutra local MSP", now),
-    db.prepare(
-      `INSERT INTO customers (id, org_id, slug, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-    ).bind(customerId, LOCAL_ORG_ID, input.customerSlug, input.customerName, now, now),
-    db.prepare(
-      `INSERT INTO aws_connections
-        (id, org_id, customer_id, partition, aws_account_id, role_arn,
-         external_id_ciphertext, external_id_key_version, permission_pack_version,
-         status, enabled_regions_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, 'pending', ?, ?, ?)`,
-    ).bind(
-      connectionId,
-      LOCAL_ORG_ID,
-      customerId,
-      input.partition,
-      input.accountId,
-      input.externalIdCiphertext,
-      input.externalIdKeyVersion,
-      PILOT_PERMISSION_PACK,
-      JSON.stringify(input.enabledRegions),
-      now,
-      now,
-    ),
-  ]);
+  try {
+    await db.batch([
+      db.prepare(
+        `INSERT OR IGNORE INTO organizations (id, slug, name, status, created_at) VALUES (?, ?, ?, 'active', ?)`,
+      ).bind(LOCAL_ORG_ID, LOCAL_ORG_SLUG, "Sutra local MSP", now),
+      db.prepare(
+        `INSERT INTO customers (id, org_id, slug, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+      ).bind(customerId, LOCAL_ORG_ID, input.customerSlug, input.customerName, now, now),
+      db.prepare(
+        `INSERT INTO aws_connections
+          (id, org_id, customer_id, partition, aws_account_id, role_arn,
+           external_id_ciphertext, external_id_key_version, permission_pack_version,
+           status, enabled_regions_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, 'pending', ?, ?, ?)`,
+      ).bind(
+        connectionId,
+        LOCAL_ORG_ID,
+        customerId,
+        input.partition,
+        input.accountId,
+        input.externalIdCiphertext,
+        input.externalIdKeyVersion,
+        PILOT_PERMISSION_PACK,
+        JSON.stringify(input.enabledRegions),
+        now,
+        now,
+      ),
+      await prepareAuditEventStatement(db, audit),
+    ]);
+  } catch {
+    // A concurrent request or a response-path failure may have committed the
+    // exact operation. Only its actor-bound audit record is eligible for
+    // recovery; every other conflict fails closed.
+    const committed = await recoverPendingConnectionHandoff(db, input, audit, true);
+    if (committed !== null) return committed;
+    const conflicting = await db.prepare(
+      `SELECT id FROM aws_connections
+        WHERE org_id = ? AND partition = ? AND aws_account_id = ? LIMIT 1`,
+    ).bind(LOCAL_ORG_ID, input.partition, input.accountId).first<{ id: string }>();
+    if (conflicting !== null) {
+      throw new PilotRepositoryError("CONFLICT", "That AWS account already has a local Sutra connection");
+    }
+    throw new PilotRepositoryError(
+      "PERSISTENCE_FAILED",
+      "The connection and its audit evidence could not be committed atomically",
+    );
+  }
 
-  await appendAuditEvent({
-    actorId: input.actorId,
-    action: "aws.connection.created",
-    targetType: "aws_connection",
-    targetId: connectionId,
-    customerId,
-    outcome: "allowed",
-    metadata: { accountId: input.accountId, partition: input.partition, regions: [...input.enabledRegions] },
-  });
-
-  const created = await getConnection(connectionId);
+  const created = await recoverPendingConnectionHandoff(db, input, audit, false);
   if (created === null) {
-    throw new PilotRepositoryError("PERSISTENCE_FAILED", "The connection draft could not be read after creation");
+    throw new PilotRepositoryError(
+      "PERSISTENCE_FAILED",
+      "The connection draft could not be read after creation",
+    );
   }
   return created;
+}
+
+function connectionCreationAuditRequestId(operationId: string): string {
+  return `aws.connection.created:${operationId}`;
+}
+
+interface PendingHandoffRow extends ConnectionRow {
+  customer_slug: string;
+  external_id_ciphertext: string;
+  external_id_key_version: string;
+}
+
+async function recoverPendingConnectionHandoff(
+  db: D1Database,
+  input: CreateConnectionDraftInput,
+  audit: ResolvedAuditInput,
+  recovered: boolean,
+): Promise<PendingConnectionHandoff | null> {
+  const existingAudit = await findAuditRequest(db, audit.requestId);
+  if (existingAudit === null) return null;
+  assertMatchingAuditRequest(existingAudit, audit);
+  const row = await db.prepare(
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, cu.slug AS customer_slug,
+            c.source_kind, c.fixture_id, c.fixture_version, c.partition,
+            c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
+            c.permission_pack_version, c.external_id_ciphertext,
+            c.external_id_key_version, c.last_validated_at,
+            c.last_successful_sync_at, c.created_at, c.updated_at
+       FROM aws_connections c
+       JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
+      WHERE c.org_id = ? AND c.id = ? AND c.customer_id = ?
+      LIMIT 1`,
+  ).bind(LOCAL_ORG_ID, input.connectionId, input.customerId).first<PendingHandoffRow>();
+  if (row === null) {
+    throw new PilotRepositoryError(
+      "PERSISTENCE_FAILED",
+      "The audited onboarding operation has no connection record",
+    );
+  }
+  const enabledRegions = parseJson<string[]>(row.enabled_regions_json, []);
+  if (
+    row.source_kind !== "aws_trust_role" ||
+    row.partition !== input.partition ||
+    row.aws_account_id !== input.accountId ||
+    row.customer_name !== input.customerName ||
+    row.customer_slug !== input.customerSlug ||
+    JSON.stringify(enabledRegions) !== JSON.stringify(input.enabledRegions)
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The onboarding retry identifier does not match its original connection request",
+    );
+  }
+  if (
+    row.status !== "pending" ||
+    row.role_arn.length !== 0 ||
+    row.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The initial ExternalId handoff closed when the customer role was registered",
+    );
+  }
+  return {
+    connection: toPilotConnection(row),
+    externalIdCiphertext: row.external_id_ciphertext,
+    externalIdKeyVersion: row.external_id_key_version,
+    recovered,
+  };
 }
 
 export async function getConnection(connectionId: string): Promise<PilotConnection | null> {
@@ -327,7 +481,19 @@ export async function getLatestConnection(): Promise<PilotConnection | null> {
   return row === null ? null : toPilotConnection(row);
 }
 
-export async function setConnectionRole(
+export function setConnectionRole(
+  connectionId: string,
+  roleArn: string,
+  actorId: string,
+): Promise<PilotConnection> {
+  return serializeAuditOperation(() => setConnectionRoleWithAtomicAudit(
+    connectionId,
+    roleArn,
+    actorId,
+  ));
+}
+
+async function setConnectionRoleWithAtomicAudit(
   connectionId: string,
   roleArn: string,
   actorId: string,
@@ -340,16 +506,17 @@ export async function setConnectionRole(
   if (current.status === "disabled") {
     throw new PilotRepositoryError("INVALID_STATE", "A disabled AWS connection cannot be changed");
   }
+  if (current.status === "validating") {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The AWS connection changed or has active work; retry role registration after it settles",
+    );
+  }
   if (current.sourceKind === "simulated_fixture") {
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections do not accept IAM roles");
   }
-  const now = Date.now();
-  await db.prepare(
-    `UPDATE aws_connections
-        SET role_arn = ?, status = 'pending', updated_at = ?
-      WHERE org_id = ? AND id = ?`,
-  ).bind(roleArn, now, LOCAL_ORG_ID, connectionId).run();
-  await appendAuditEvent({
+  const now = nextMutationTimestamp(current);
+  const audit = resolveAuditInput({
     actorId,
     action: "aws.connection.role_registered",
     targetType: "aws_connection",
@@ -357,11 +524,330 @@ export async function setConnectionRole(
     customerId: current.customerId,
     outcome: "allowed",
     metadata: { roleArn },
+    requestId: `aws.connection.role_registered:${connectionId}:${(await sha256Hex(roleArn)).slice(0, 32)}`,
   });
-  const updated = await getConnection(connectionId);
-  if (updated === null) {
-    throw new PilotRepositoryError("PERSISTENCE_FAILED", "AWS connection disappeared after update");
+  if (await connectionHasActiveWork(db, connectionId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The AWS connection changed or has active work; retry role registration after it settles",
+    );
   }
+  const mutation = db.prepare(
+    `UPDATE aws_connections
+        SET role_arn = ?, status = 'pending', last_validated_at = NULL, updated_at = ?
+      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+        AND status IN ('pending', 'active', 'needs_attention')
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs
+           WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+        )`,
+  ).bind(roleArn, now, LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId);
+  return commitAuditedConnectionMutation({
+    db,
+    connectionId,
+    mutation,
+    audit,
+    mutationGuard: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND role_arn = ? AND status = 'pending'
+               AND last_validated_at IS NULL AND updated_at = ?`,
+      values: [LOCAL_ORG_ID, connectionId, roleArn, now],
+    },
+    committedState: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND role_arn = ? AND status IN ('pending', 'validating', 'active', 'needs_attention')`,
+      values: [LOCAL_ORG_ID, connectionId, roleArn],
+    },
+    persistenceMessage: "The IAM role and its audit evidence could not be committed atomically",
+  });
+}
+
+export function disableAwsConnection(
+  connectionId: string,
+  actorId: string,
+): Promise<PilotConnection> {
+  return serializeAuditOperation(() => disableAwsConnectionWithAtomicAudit(connectionId, actorId));
+}
+
+async function disableAwsConnectionWithAtomicAudit(
+  connectionId: string,
+  actorId: string,
+): Promise<PilotConnection> {
+  const db = await readyDatabase();
+  const current = await getConnection(connectionId);
+  if (current === null) {
+    throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+  }
+  if (current.sourceKind !== "aws_trust_role") {
+    throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
+  }
+  if (current.status === "disabled" && current.roleArn === null) return current;
+  if (await connectionHasActiveWork(db, connectionId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "Wait for the active inventory operation to finish before disabling this connection",
+    );
+  }
+
+  const now = nextMutationTimestamp(current);
+  const audit = resolveConnectionDisabledAudit(current, actorId);
+  const mutation = db.prepare(
+    `UPDATE aws_connections
+        SET status = 'disabled', updated_at = ?
+      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+        AND status IN ('pending', 'validating', 'active', 'needs_attention', 'disabled')
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs
+           WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+        )`,
+  ).bind(now, LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId);
+  return commitAuditedConnectionMutation({
+    db,
+    connectionId,
+    mutation,
+    audit,
+    mutationGuard: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND status = 'disabled' AND updated_at = ?`,
+      values: [LOCAL_ORG_ID, connectionId, now],
+    },
+    committedState: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND status = 'disabled'`,
+      values: [LOCAL_ORG_ID, connectionId],
+    },
+    persistenceMessage: "The disabled state and its audit evidence could not be committed atomically",
+  });
+}
+
+export function offboardAwsConnection(
+  connectionId: string,
+  actorId: string,
+): Promise<PilotConnection> {
+  return serializeAuditOperation(() => offboardAwsConnectionWithAtomicAudit(connectionId, actorId));
+}
+
+async function offboardAwsConnectionWithAtomicAudit(
+  connectionId: string,
+  actorId: string,
+): Promise<PilotConnection> {
+  const db = await readyDatabase();
+  const current = await getConnection(connectionId);
+  if (current === null) {
+    throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+  }
+  if (current.sourceKind !== "aws_trust_role") {
+    throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
+  }
+  const lifecycle = await db.prepare(
+    `SELECT role_arn, external_id_ciphertext
+       FROM aws_connections
+      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+      LIMIT 1`,
+  ).bind(LOCAL_ORG_ID, connectionId).first<{
+    role_arn: string;
+    external_id_ciphertext: string;
+  }>();
+  if (lifecycle === null) {
+    throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+  }
+  if (
+    lifecycle.role_arn.length === 0 &&
+    lifecycle.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER
+  ) {
+    const audit = resolveConnectionOffboardedAudit(current, actorId);
+    if (await auditRequestAlreadySatisfied(db, audit)) return current;
+  }
+  if (await connectionHasActiveWork(db, connectionId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "Wait for the active inventory operation to finish before offboarding this connection",
+    );
+  }
+
+  const now = nextMutationTimestamp(current);
+  const audit = resolveConnectionOffboardedAudit(current, actorId);
+  const mutation = db.prepare(
+    `UPDATE aws_connections
+        SET role_arn = '', external_id_ciphertext = ?, external_id_key_version = ?,
+            status = 'disabled', updated_at = ?
+      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs
+           WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+        )`,
+  ).bind(
+    OFFBOARDED_EXTERNAL_ID_MARKER,
+    OFFBOARDED_KEY_VERSION,
+    now,
+    LOCAL_ORG_ID,
+    connectionId,
+    LOCAL_ORG_ID,
+    connectionId,
+  );
+  return commitAuditedConnectionMutation({
+    db,
+    connectionId,
+    mutation,
+    audit,
+    mutationGuard: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND role_arn = '' AND external_id_ciphertext = ?
+               AND external_id_key_version = ? AND status = 'disabled'
+               AND updated_at = ?`,
+      values: [
+        LOCAL_ORG_ID,
+        connectionId,
+        OFFBOARDED_EXTERNAL_ID_MARKER,
+        OFFBOARDED_KEY_VERSION,
+        now,
+      ],
+    },
+    committedState: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+               AND role_arn = '' AND external_id_ciphertext = ?
+               AND external_id_key_version = ? AND status = 'disabled'`,
+      values: [
+        LOCAL_ORG_ID,
+        connectionId,
+        OFFBOARDED_EXTERNAL_ID_MARKER,
+        OFFBOARDED_KEY_VERSION,
+      ],
+    },
+    persistenceMessage: "The offboarded trust state and its audit evidence could not be committed atomically",
+  });
+}
+
+function resolveConnectionDisabledAudit(
+  connection: PilotConnection,
+  actorId: string,
+): ResolvedAuditInput {
+  return resolveAuditInput({
+    actorId,
+    action: "aws.connection.disabled",
+    targetType: "aws_connection",
+    targetId: connection.id,
+    customerId: connection.customerId,
+    outcome: "allowed",
+    metadata: { accountId: connection.awsAccountId, partition: connection.partition },
+    requestId: `aws.connection.disabled:${connection.id}`,
+  });
+}
+
+function resolveConnectionOffboardedAudit(
+  connection: PilotConnection,
+  actorId: string,
+): ResolvedAuditInput {
+  return resolveAuditInput({
+    actorId,
+    action: "aws.connection.offboarded",
+    targetType: "aws_connection",
+    targetId: connection.id,
+    customerId: connection.customerId,
+    outcome: "allowed",
+    metadata: {
+      accountId: connection.awsAccountId,
+      partition: connection.partition,
+      cmdbHistoryRetained: true,
+      controlPlaneTrustMaterialRemoved: true,
+      customerIamRoleRevocationRequired: true,
+    },
+    requestId: `aws.connection.offboarded:${connection.id}`,
+  });
+}
+
+interface SqlExistenceGuard {
+  readonly sql: string;
+  readonly values: readonly unknown[];
+}
+
+interface AuditedConnectionMutation {
+  readonly db: D1Database;
+  readonly connectionId: string;
+  readonly mutation: D1PreparedStatement;
+  readonly audit: ResolvedAuditInput;
+  readonly mutationGuard: SqlExistenceGuard;
+  readonly committedState: SqlExistenceGuard;
+  readonly persistenceMessage: string;
+}
+
+function nextMutationTimestamp(connection: PilotConnection): number {
+  return Math.max(Date.now(), Date.parse(connection.updatedAt) + 1);
+}
+
+async function connectionHasActiveWork(db: D1Database, connectionId: string): Promise<boolean> {
+  return await db.prepare(
+    `SELECT 1 FROM sync_runs
+      WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+      LIMIT 1`,
+  ).bind(LOCAL_ORG_ID, connectionId).first() !== null;
+}
+
+async function existenceGuardSatisfied(
+  db: D1Database,
+  guard: SqlExistenceGuard,
+): Promise<boolean> {
+  return (await db.prepare(guard.sql).bind(...guard.values).first()) !== null;
+}
+
+async function recoverAuditedConnectionMutation(
+  input: AuditedConnectionMutation,
+): Promise<PilotConnection | null> {
+  if (!await auditRequestAlreadySatisfied(input.db, input.audit)) return null;
+  if (!await existenceGuardSatisfied(input.db, input.committedState)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The audited connection operation is no longer the current connection state",
+    );
+  }
+  return requireUpdatedConnection(
+    input.connectionId,
+    "AWS connection disappeared after its audited mutation",
+  );
+}
+
+async function commitAuditedConnectionMutation(
+  input: AuditedConnectionMutation,
+): Promise<PilotConnection> {
+  const replay = await recoverAuditedConnectionMutation(input);
+  if (replay !== null) return replay;
+
+  let results: D1Result<unknown>[];
+  try {
+    results = await input.db.batch([
+      input.mutation,
+      await prepareAuditEventStatement(input.db, input.audit, true, input.mutationGuard),
+    ]);
+  } catch {
+    const recovered = await recoverAuditedConnectionMutation(input);
+    if (recovered !== null) return recovered;
+    throw new PilotRepositoryError("PERSISTENCE_FAILED", input.persistenceMessage);
+  }
+
+  if (
+    (results[0]?.meta?.changes ?? 0) !== 1 ||
+    (results[1]?.meta?.changes ?? 0) !== 1
+  ) {
+    const recovered = await recoverAuditedConnectionMutation(input);
+    if (recovered !== null) return recovered;
+    throw new PilotRepositoryError("PERSISTENCE_FAILED", input.persistenceMessage);
+  }
+  const updated = await recoverAuditedConnectionMutation(input);
+  if (updated === null) {
+    throw new PilotRepositoryError("PERSISTENCE_FAILED", input.persistenceMessage);
+  }
+  return updated;
+}
+
+async function requireUpdatedConnection(connectionId: string, message: string): Promise<PilotConnection> {
+  const updated = await getConnection(connectionId);
+  if (updated === null) throw new PilotRepositoryError("PERSISTENCE_FAILED", message);
   return updated;
 }
 
@@ -392,6 +878,13 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
   if (row.source_kind === "simulated_fixture") {
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections have no AWS trust secret");
   }
+  if (
+    row.status === "disabled" &&
+    row.role_arn.length === 0 &&
+    row.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "The AWS connection has been offboarded");
+  }
   return {
     connectionId: row.id,
     customerId: row.customer_id,
@@ -409,8 +902,12 @@ export async function markConnectionValidating(connectionId: string): Promise<vo
   const db = await readyDatabase();
   const result = await db.prepare(
     `UPDATE aws_connections SET status = 'validating', updated_at = ?
-      WHERE org_id = ? AND id = ? AND status IN ('pending', 'needs_attention')`,
-  ).bind(Date.now(), LOCAL_ORG_ID, connectionId).run();
+      WHERE org_id = ? AND id = ? AND status IN ('pending', 'needs_attention', 'active')
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs
+           WHERE org_id = ? AND connection_id = ? AND status = 'running'
+        )`,
+  ).bind(Date.now(), LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) {
     throw new PilotRepositoryError("INVALID_STATE", "Connection is not ready for validation");
   }
@@ -491,21 +988,52 @@ export async function createSyncRun(connectionId: string): Promise<string> {
   if (connection.sourceKind === "simulated_fixture") {
     throw new PilotRepositoryError("INVALID_STATE", "Run simulated inventory through the durable local jobs workflow");
   }
-  const running = await db.prepare(
-    `SELECT id FROM sync_runs WHERE org_id = ? AND connection_id = ? AND status = 'running' LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connectionId).first<{ id: string }>();
-  if (running !== null) {
-    throw new PilotRepositoryError("CONFLICT", "A sync is already running for this AWS connection");
-  }
   const runId = id("sync");
   const now = Date.now();
-  await db.prepare(
-    `INSERT INTO sync_runs
+  let result: D1Result<unknown>;
+  try {
+    result = await db.prepare(
+      `INSERT INTO sync_runs
       (id, org_id, customer_id, connection_id, trigger_kind, status,
        coverage_state, collector_pack_version, totals_json, idempotency_key,
        started_at, created_at)
-     VALUES (?, ?, ?, ?, 'manual', 'running', 'unknown', 'aws-pilot-v1', '{}', ?, ?, ?)`,
-  ).bind(runId, LOCAL_ORG_ID, connection.customerId, connectionId, runId, now, now).run();
+     SELECT ?, c.org_id, c.customer_id, c.id, 'manual', 'running', 'unknown',
+            'aws-pilot-v1', '{}', ?, ?, ?
+       FROM aws_connections c
+      WHERE c.org_id = ? AND c.customer_id = ? AND c.id = ?
+        AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs r
+           WHERE r.org_id = c.org_id AND r.connection_id = c.id
+             AND r.status IN ('queued', 'running')
+        )`,
+    ).bind(
+      runId,
+      runId,
+      now,
+      now,
+      LOCAL_ORG_ID,
+      connection.customerId,
+      connectionId,
+    ).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/unique|constraint/iu.test(message)) {
+      throw new PilotRepositoryError("CONFLICT", "A sync is already running for this AWS connection");
+    }
+    throw error;
+  }
+  if ((result.meta?.changes ?? 0) !== 1) {
+    const running = await db.prepare(
+      `SELECT id FROM sync_runs
+        WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+        LIMIT 1`,
+    ).bind(LOCAL_ORG_ID, connectionId).first<{ id: string }>();
+    if (running !== null) {
+      throw new PilotRepositoryError("CONFLICT", "A sync is already running for this AWS connection");
+    }
+    throw new PilotRepositoryError("INVALID_STATE", "The AWS connection is no longer active for inventory");
+  }
   return runId;
 }
 
@@ -526,10 +1054,6 @@ export async function failSyncRun(
   if ((result.meta?.changes ?? 0) !== 1) {
     throw new PilotRepositoryError("INVALID_STATE", "The sync failure result is stale");
   }
-  await db.prepare(
-    `UPDATE aws_connections SET status = 'needs_attention', updated_at = ?
-      WHERE org_id = ? AND id = ? AND status = 'active'`,
-  ).bind(now, LOCAL_ORG_ID, connectionId).run();
   const connection = await getConnection(connectionId);
   await appendAuditEvent({
     actorId,
@@ -556,6 +1080,7 @@ export async function persistSnapshot(
   actorId: string,
   origin: SnapshotOrigin = { kind: "unknown", fixtureId: null, fixtureVersion: null },
   localFixtureJobId: string | null = null,
+  localFixtureScheduleId: string | null = null,
 ): Promise<string> {
   const db = await readyDatabase();
   const connection = await getConnection(payload.connectionId);
@@ -572,12 +1097,14 @@ export async function persistSnapshot(
     throw new PilotRepositoryError("INVALID_STATE", "The AWS connection is not active for this sync");
   }
   const scopedRun = await db.prepare(
-    `SELECT id, idempotency_key FROM sync_runs
+    `SELECT id, idempotency_key, trigger_kind, schedule_id FROM sync_runs
       WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND id = ? AND status = 'running'
       LIMIT 1`,
   ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, runId).first<{
     id: string;
     idempotency_key: string;
+    trigger_kind: "manual" | "scheduled" | "onboarding";
+    schedule_id: string | null;
   }>();
   if (scopedRun === null || scopedRun.idempotency_key !== payload.jobId) {
     throw new PilotRepositoryError("INVALID_STATE", "The collector result does not belong to an active scoped sync");
@@ -619,7 +1146,15 @@ export async function persistSnapshot(
     (origin.kind === "simulated_fixture" && origin.fixtureVersion !== "2026.07.0" && origin.fixtureVersion !== "2026.07.1") ||
     (origin.kind === "simulated_fixture" && localFixtureJobId !== payload.jobId) ||
     (origin.kind !== "simulated_fixture" && localFixtureJobId !== null) ||
-    (localFixtureJobId !== null && !/^job_[a-f0-9]{48}$/u.test(localFixtureJobId))
+    (origin.kind !== "simulated_fixture" && localFixtureScheduleId !== null) ||
+    (localFixtureJobId !== null && !/^job_[a-f0-9]{48}$/u.test(localFixtureJobId)) ||
+    (localFixtureScheduleId !== null && !/^sched_[a-f0-9]{48}$/u.test(localFixtureScheduleId)) ||
+    (localFixtureScheduleId !== null && localFixtureJobId === null) ||
+    (localFixtureJobId !== null && (
+      localFixtureScheduleId === null
+        ? scopedRun.trigger_kind !== "manual" || scopedRun.schedule_id !== null
+        : scopedRun.trigger_kind !== "scheduled" || scopedRun.schedule_id !== localFixtureScheduleId
+    ))
   ) {
     throw new PilotRepositoryError("INVALID_STATE", "Snapshot origin metadata is inconsistent");
   }
@@ -829,11 +1364,11 @@ export async function persistSnapshot(
        )
        INSERT INTO local_job_publications
         (job_id, org_id, customer_id, connection_id, sync_run_id, snapshot_id,
-         fixture_id, fixture_version, actor_id, published_at)
-       SELECT ?, org_id, customer_id, connection_id, sync_run_id, snapshot_id, ?, ?, ?, ?
+         fixture_id, fixture_version, schedule_id, actor_id, published_at)
+       SELECT ?, org_id, customer_id, connection_id, sync_run_id, snapshot_id, ?, ?, ?, ?, CAST(? AS BIGINT)
          FROM scoped
        UNION ALL
-       SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+       SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
         WHERE NOT EXISTS (SELECT 1 FROM scoped)`,
     ).bind(
       runId,
@@ -848,6 +1383,7 @@ export async function persistSnapshot(
       localFixtureJobId,
       origin.fixtureId,
       origin.fixtureVersion,
+      localFixtureScheduleId,
       actorId,
       now,
     ));
@@ -879,7 +1415,7 @@ export async function persistSnapshot(
     ).bind(now, now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId)
     : db.prepare(
       `UPDATE aws_connections
-          SET status = 'needs_attention', updated_at = ?,
+          SET updated_at = ?,
               fixture_version = CASE WHEN source_kind = 'simulated_fixture' THEN ? ELSE fixture_version END
         WHERE org_id = ? AND id = ? AND status = 'active'`,
     ).bind(now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId));
@@ -903,6 +1439,7 @@ export async function persistSnapshot(
         originKind: origin.kind,
         fixtureId: origin.fixtureId ?? "",
         fixtureVersion: origin.fixtureVersion ?? "",
+        scheduleId: localFixtureScheduleId ?? "",
       },
     }
     : {
@@ -922,7 +1459,7 @@ export async function persistSnapshot(
         originKind: origin.kind,
       },
     };
-  publicationStatements.push(await prepareAuditEventStatement(db, publicationAudit));
+  publicationStatements.push(await prepareAuditEventStatement(db, resolveAuditInput(publicationAudit)));
 
   // This final batch is the publication boundary. Partial runs remain immutable
   // evidence while the last complete projection (if any) stays active. The
@@ -978,6 +1515,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
       relationships: [],
       findings: [],
       coverage: [],
+      latestRunCoverage: null,
       syncRuns: [],
       activeSnapshot: null,
     };
@@ -1010,6 +1548,35 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
     finishedAt: iso(row.finished_at),
     createdAt: new Date(row.created_at).toISOString(),
   }));
+  const latestSyncRun = syncRuns[0];
+  const latestCoverageResult = latestSyncRun === undefined
+    ? null
+    : await db.prepare(
+      `SELECT collector_key, region_key, status, items_observed, pages_observed,
+              error_code, error_message
+         FROM collector_runs
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND sync_run_id = ?
+        ORDER BY collector_key, region_key`,
+    ).bind(
+      LOCAL_ORG_ID,
+      connection.customerId,
+      connection.id,
+      latestSyncRun.id,
+    ).all<CollectorRunRow>();
+  const latestRunCoverage = latestSyncRun === undefined
+    ? null
+    : {
+      syncRunId: latestSyncRun.id,
+      entries: (latestCoverageResult?.results ?? []).map((row) => ({
+        collectorKey: row.collector_key,
+        region: row.region_key,
+        status: row.status,
+        itemsObserved: row.items_observed,
+        pagesObserved: row.pages_observed,
+        ...(row.error_code === null ? {} : { errorCode: row.error_code }),
+        ...(row.error_message === null ? {} : { message: row.error_message }),
+      })),
+    };
 
   if (head === null) {
     return {
@@ -1019,6 +1586,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
       relationships: [],
       findings: [],
       coverage: [],
+      latestRunCoverage,
       syncRuns,
       activeSnapshot: null,
     };
@@ -1099,6 +1667,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
     relationships,
     findings,
     coverage: parseJson<PilotCoverageEntry[]>(head.coverage_json, []),
+    latestRunCoverage,
     syncRuns,
     activeSnapshot: {
       id: head.id,
@@ -1168,7 +1737,7 @@ export async function setFindingWorkflowStatus(
   });
 }
 
-interface AuditInput {
+export interface AuditInput {
   readonly actorId: string;
   readonly action: string;
   readonly targetType: string;
@@ -1176,28 +1745,139 @@ interface AuditInput {
   readonly customerId: string | null;
   readonly outcome: "allowed" | "denied" | "failed";
   readonly metadata: Readonly<Record<string, JsonValue | readonly string[]>>;
+  /**
+   * A stable caller-supplied idempotency key. Reusing it for the exact same
+   * event succeeds; reusing it for different evidence fails closed.
+   */
+  readonly requestId?: string;
 }
 
 let auditAppendTail: Promise<void> = Promise.resolve();
+const AUDIT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
+
+interface StoredAuditRequestRow {
+  id: string;
+  customer_id: string | null;
+  actor_type: "user" | "service" | "system";
+  actor_id: string;
+  action: string;
+  target_type: string;
+  target_id: string | null;
+  outcome: "allowed" | "denied" | "failed";
+  metadata_json: string;
+}
+
+interface ResolvedAuditInput extends AuditInput {
+  readonly requestId: string;
+  readonly metadataJson: string;
+}
 
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function resolveAuditInput(input: AuditInput): ResolvedAuditInput {
+  const requestId = input.requestId ?? crypto.randomUUID();
+  if (!AUDIT_REQUEST_ID.test(requestId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The audit request identifier is invalid",
+    );
+  }
+  let metadataJson: string;
+  try {
+    metadataJson = canonicalJson(input.metadata);
+  } catch {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The audit event metadata is not safe JSON",
+    );
+  }
+  return { ...input, requestId, metadataJson };
+}
+
 export function appendAuditEvent(input: AuditInput): Promise<void> {
+  let resolved: ResolvedAuditInput;
+  try {
+    resolved = resolveAuditInput(input);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return serializeAuditOperation(() => appendAuditEventWithRetry(resolved));
+}
+
+/**
+ * The local process has one audit-chain writer. Connection creation uses this
+ * same queue because its audit event is committed in the creation batch.
+ */
+function serializeAuditOperation<T>(operation: () => Promise<T>): Promise<T> {
   const task = auditAppendTail
     .catch(() => undefined)
-    .then(() => appendAuditEventWithRetry(input));
-  auditAppendTail = task;
+    .then(operation);
+  auditAppendTail = task.then(() => undefined, () => undefined);
   return task;
 }
 
-async function appendAuditEventWithRetry(input: AuditInput): Promise<void> {
+async function findAuditRequest(
+  db: D1Database,
+  requestId: string,
+): Promise<StoredAuditRequestRow | null> {
+  return db.prepare(
+    `SELECT id, customer_id, actor_type, actor_id, action, target_type,
+            target_id, outcome, metadata_json
+       FROM audit_events
+      WHERE org_id = ? AND request_id = ?
+      LIMIT 1`,
+  ).bind(LOCAL_ORG_ID, requestId).first<StoredAuditRequestRow>();
+}
+
+function assertMatchingAuditRequest(
+  existing: StoredAuditRequestRow,
+  input: ResolvedAuditInput,
+): void {
+  if (
+    existing.customer_id !== input.customerId ||
+    existing.actor_type !== "user" ||
+    existing.actor_id !== input.actorId ||
+    existing.action !== input.action ||
+    existing.target_type !== input.targetType ||
+    existing.target_id !== input.targetId ||
+    existing.outcome !== input.outcome ||
+    existing.metadata_json !== input.metadataJson
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The audit request identifier was already used for a different event",
+    );
+  }
+}
+
+async function auditRequestAlreadySatisfied(
+  db: D1Database,
+  input: ResolvedAuditInput,
+): Promise<boolean> {
+  const existing = await findAuditRequest(db, input.requestId);
+  if (existing === null) return false;
+  assertMatchingAuditRequest(existing, input);
+  return true;
+}
+
+async function appendAuditEventWithRetry(input: ResolvedAuditInput): Promise<void> {
   const db = await readyDatabase();
   for (let attempt = 0; attempt < 12; attempt += 1) {
-    const result = await (await prepareAuditEventStatement(db, input, false)).run();
+    if (await auditRequestAlreadySatisfied(db, input)) return;
+    let result: D1Result<unknown>;
+    try {
+      result = await (await prepareAuditEventStatement(db, input, false)).run();
+    } catch (error) {
+      // A concurrent writer can win either the chain head or request-id race.
+      // Resolve the latter as an idempotent replay before surfacing the error.
+      if (await auditRequestAlreadySatisfied(db, input)) return;
+      throw error;
+    }
     if ((result.meta?.changes ?? 0) === 1) return;
+    if (await auditRequestAlreadySatisfied(db, input)) return;
   }
   throw new PilotRepositoryError(
     "PERSISTENCE_FAILED",
@@ -1207,8 +1887,9 @@ async function appendAuditEventWithRetry(input: AuditInput): Promise<void> {
 
 async function prepareAuditEventStatement(
   db: D1Database,
-  input: AuditInput,
+  input: ResolvedAuditInput,
   failClosed = true,
+  mutationGuard?: SqlExistenceGuard,
 ): Promise<D1PreparedStatement> {
   const previous = await db.prepare(
     `SELECT event_hash, occurred_at
@@ -1219,8 +1900,8 @@ async function prepareAuditEventStatement(
   ).bind(LOCAL_ORG_ID).first<{ event_hash: string; occurred_at: number }>();
   const eventId = id("audit");
   const occurredAt = Math.max(Date.now(), (previous?.occurred_at ?? -1) + 1);
-  const requestId = crypto.randomUUID();
-  const metadataJson = JSON.stringify(input.metadata);
+  const requestId = input.requestId;
+  const metadataJson = input.metadataJson;
   const previousHash = previous?.event_hash ?? null;
   const eventHash = await sha256Hex(JSON.stringify({
     eventId,
@@ -1236,34 +1917,43 @@ async function prepareAuditEventStatement(
     metadataJson,
     previousHash,
   }));
+  const mutationGuardCte = mutationGuard === undefined
+    ? `, mutation_guard(valid) AS (SELECT 1)`
+    : `, mutation_guard(valid) AS (
+       SELECT CASE WHEN EXISTS (${mutationGuard.sql}) THEN 1 ELSE 0 END
+     )`;
   const invalidGuard = failClosed
     ? `UNION ALL
      SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL, NULL, NULL
-       FROM chain_guard WHERE valid = 0`
+       FROM chain_guard, mutation_guard
+      WHERE chain_guard.valid = 0 OR mutation_guard.valid = 0`
     : "";
   return db.prepare(
     `WITH chain_guard(valid) AS (
        SELECT CASE
-         WHEN ? IS NULL THEN CASE
+         WHEN CAST(? AS TEXT) IS NULL THEN CASE
            WHEN NOT EXISTS (SELECT 1 FROM audit_events WHERE org_id = ?) THEN 1 ELSE 0 END
          WHEN (SELECT event_hash FROM audit_events
                 WHERE org_id = ? ORDER BY occurred_at DESC, id DESC LIMIT 1) = ? THEN 1
          ELSE 0
        END
      )
+     ${mutationGuardCte}
      INSERT INTO audit_events
       (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
        target_type, target_id, outcome, request_id, metadata_json,
        previous_event_hash, event_hash)
-     SELECT ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?
-       FROM chain_guard WHERE valid = 1
+     SELECT ?, ?, ?, CAST(? AS BIGINT), 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?
+       FROM chain_guard, mutation_guard
+      WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
      ${invalidGuard}`,
   ).bind(
     previousHash,
     LOCAL_ORG_ID,
     LOCAL_ORG_ID,
     previousHash,
+    ...(mutationGuard?.values ?? []),
     eventId,
     LOCAL_ORG_ID,
     input.customerId,

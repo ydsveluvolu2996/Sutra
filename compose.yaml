@@ -1,0 +1,68 @@
+name: sutra-local
+
+services:
+  postgres:
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: sutra
+      POSTGRES_USER: sutra_owner
+      POSTGRES_PASSWORD: ${SUTRA_POSTGRES_OWNER_PASSWORD:?Run pnpm docker:up to generate the ignored local owner secret}
+      SUTRA_POSTGRES_APP_PASSWORD: ${SUTRA_POSTGRES_APP_PASSWORD:?Run pnpm docker:up to generate the ignored local runtime secret}
+    ports:
+      - "127.0.0.1:${SUTRA_POSTGRES_PORT:-54329}:5432"
+    volumes:
+      - sutra_postgres_data:/var/lib/postgresql
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/010-sutra-runtime-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username sutra_owner --dbname sutra"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  migrate:
+    image: sutra-local-app
+    entrypoint: ["pnpm", "db:postgres:migrate"]
+    environment:
+      SUTRA_MIGRATOR_DATABASE_URL: postgresql://sutra_owner:${SUTRA_POSTGRES_OWNER_PASSWORD:?Run pnpm docker:up to generate the ignored local owner secret}@postgres:5432/sutra
+      SUTRA_POSTGRES_RUNTIME_ROLE: sutra_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    image: sutra-local-app
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run pnpm docker:up to generate the ignored local runtime secret}@postgres:5432/sutra
+      SUTRA_WEB_HOST: 0.0.0.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "127.0.0.1:${SUTRA_WEB_PORT:-3000}:3000"
+    volumes:
+      - sutra_runtime_config:/app/runtime
+      - sutra_application_data:/app/.sutra
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  sutra_postgres_data:
+  sutra_runtime_config:
+  sutra_application_data:

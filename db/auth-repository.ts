@@ -22,11 +22,13 @@ import {
   verifyPassword,
   type PasswordDigest,
 } from "../lib/local-auth-crypto";
+import { isRecentMfaVerification } from "../lib/recent-mfa";
 
 export const LOCAL_IDENTITY_ISSUER = "sutra-local";
 export const LOCAL_AUTH_ORG_ID = "org_local_sutra";
 export const LOCAL_AUTH_ORG_SLUG = "local-sutra";
 export const LOCAL_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+export const LOCAL_MFA_STEP_UP_TTL_MS = 5 * 60 * 1000;
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 5 * 60 * 1000;
@@ -41,6 +43,7 @@ export type LocalAuthErrorCode =
   | "MFA_CODE_INVALID"
   | "MFA_ENROLLMENT_REQUIRED"
   | "MFA_REQUIRED"
+  | "MFA_RECENT_REQUIRED"
   | "PERSISTENCE_FAILED";
 
 export class LocalAuthError extends Error {
@@ -94,6 +97,7 @@ export interface PublicLocalSession {
 
 export interface AuthenticatedLocalSession {
   readonly tokenDigest: string;
+  readonly mfaVerifiedAt: number | null;
   readonly subject: AuthorizationSubject;
   readonly session: PublicLocalSession;
 }
@@ -232,7 +236,12 @@ async function sessionFromRow(db: D1Database, row: SessionRow): Promise<Authenti
     scopeMode: row.scope_mode,
     grants: await loadGrants(db, row.org_id, row.membership_id),
   };
-  return { tokenDigest: row.token_digest, subject, session: publicSession(row, subject) };
+  return {
+    tokenDigest: row.token_digest,
+    mfaVerifiedAt: row.mfa_verified_at,
+    subject,
+    session: publicSession(row, subject),
+  };
 }
 
 async function createSession(
@@ -543,11 +552,140 @@ export async function revokeLocalSession(token: string, now = Date.now()): Promi
   ).bind(now, await digestSessionToken(token)).run();
 }
 
+let mfaStepUpTail: Promise<void> = Promise.resolve();
+
+function serializeMfaStepUp<T>(operation: () => Promise<T>): Promise<T> {
+  const task = mfaStepUpTail.catch(() => undefined).then(operation);
+  mfaStepUpTail = task.then(() => undefined, () => undefined);
+  return task;
+}
+
+export function verifyTotpStepUp(
+  authenticated: AuthenticatedLocalSession,
+  code: unknown,
+  secrets: LocalAuthSecrets,
+  now = Date.now(),
+): Promise<void> {
+  // A TOTP step is a one-time, per-user claim. Serializing the local writer
+  // prevents two sessions in this single-node demo from racing on the same
+  // code before the database transaction observes the first claim.
+  return serializeMfaStepUp(() => verifyTotpStepUpTransaction(authenticated, code, secrets, now));
+}
+
+async function verifyTotpStepUpTransaction(
+  authenticated: AuthenticatedLocalSession,
+  code: unknown,
+  secrets: LocalAuthSecrets,
+  now: number,
+): Promise<void> {
+  const db = await readyDatabase();
+  const row = await db.prepare(
+    `SELECT secret_ciphertext, secret_key_version, confirmed_at, last_used_step, updated_at
+       FROM totp_credentials WHERE user_id = ?`,
+  ).bind(authenticated.subject.userId).first<{
+    secret_ciphertext: string;
+    secret_key_version: string;
+    confirmed_at: number | null;
+    last_used_step: number | null;
+    updated_at: number | null;
+  }>();
+  if (row === null || row.confirmed_at === null) {
+    throw new LocalAuthError(403, "MFA_ENROLLMENT_REQUIRED", "Enroll MFA before confirming this action");
+  }
+  const secret = await openTotpSecret(
+    { ciphertext: row.secret_ciphertext, keyVersion: row.secret_key_version },
+    secrets.encryptionKey,
+    authenticated.subject.userId,
+  );
+  const step = await matchTotpCode(secret, code, now, row.last_used_step);
+  if (step === null) {
+    throw new LocalAuthError(401, "MFA_CODE_INVALID", "The authenticator code is invalid or was already used");
+  }
+  // `claimAt` is a transaction-local causal marker. It is strictly newer
+  // than the credential row read above, even when two operations share the
+  // same millisecond timestamp.
+  const claimAt = Math.max(now, (row.updated_at ?? -1) + 1);
+  let results: D1Result<unknown>[];
+  try {
+    results = await db.batch([
+      db.prepare(
+        `UPDATE totp_credentials SET last_used_step = ?, updated_at = ?
+          WHERE user_id = ? AND confirmed_at IS NOT NULL
+            AND (last_used_step IS NULL OR last_used_step < ?)`,
+      ).bind(step, claimAt, authenticated.subject.userId, step),
+      db.prepare(
+        `UPDATE local_sessions SET mfa_verified_at = ?, last_seen_at = ?
+          WHERE token_digest = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?
+            AND EXISTS (
+              SELECT 1 FROM totp_credentials
+               WHERE user_id = ? AND last_used_step = ? AND updated_at = ?
+            )`,
+      ).bind(
+        now,
+        now,
+        authenticated.tokenDigest,
+        authenticated.subject.userId,
+        now,
+        authenticated.subject.userId,
+        step,
+        claimAt,
+      ),
+      // D1 and the PostgreSQL adapter execute a batch transactionally. If
+      // either mutation missed its exact row, this deliberately-invalid
+      // insert raises a NOT NULL error and rolls the credential claim back.
+      db.prepare(
+        `INSERT INTO audit_events (id)
+         SELECT NULL
+          WHERE NOT EXISTS (
+            SELECT 1
+              FROM totp_credentials t
+              JOIN local_sessions s ON s.user_id = t.user_id
+             WHERE t.user_id = ? AND t.last_used_step = ? AND t.updated_at = ?
+               AND s.token_digest = ? AND s.mfa_verified_at = ? AND s.last_seen_at = ?
+               AND s.revoked_at IS NULL AND s.expires_at > ?
+          )`,
+      ).bind(
+        authenticated.subject.userId,
+        step,
+        claimAt,
+        authenticated.tokenDigest,
+        now,
+        now,
+        now,
+      ),
+    ]);
+  } catch {
+    throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The MFA step-up could not be committed atomically");
+  }
+  const [credential, session] = results;
+  if (
+    Number(credential.meta?.changes ?? 0) !== 1 ||
+    Number(session.meta?.changes ?? 0) !== 1
+  ) {
+    throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The MFA step-up could not be verified after commit");
+  }
+}
+
 export function requireMfa(session: AuthenticatedLocalSession): void {
   if (!session.session.mfa.enrolled) {
     throw new LocalAuthError(403, "MFA_ENROLLMENT_REQUIRED", "Enroll MFA before using the Sutra workspace");
   }
   if (!session.session.mfa.verified) {
     throw new LocalAuthError(401, "MFA_REQUIRED", "Verify MFA before using the Sutra workspace");
+  }
+}
+
+export function requireRecentMfa(
+  session: AuthenticatedLocalSession,
+  now = Date.now(),
+  maximumAgeMs = LOCAL_MFA_STEP_UP_TTL_MS,
+): void {
+  requireMfa(session);
+  if (!isRecentMfaVerification(session.mfaVerifiedAt, now, maximumAgeMs)) {
+    throw new LocalAuthError(
+      401,
+      "MFA_RECENT_REQUIRED",
+      "Enter a fresh authenticator code before changing AWS trust",
+    );
   }
 }

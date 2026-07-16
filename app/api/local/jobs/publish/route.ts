@@ -2,11 +2,14 @@ import { publishLocalFixtureJob } from "../../../../../db/local-operations-repos
 import { getConnection, getPilotState } from "../../../../../db/pilot-repository";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
+import { authorize } from "../../../../../lib/auth-policy";
 import {
+  acknowledgeLocalFixtureJobPublication,
   errorResponse,
   getLocalFixtureCatalog,
   getLocalFixtureJobResult,
   jsonResponse,
+  PilotServerError,
   requirePilotActor,
 } from "../../../../../lib/pilot-server";
 
@@ -30,20 +33,39 @@ export async function POST(request: Request): Promise<Response> {
     assertSameOrigin(request);
     const requestedJobId = jobId(await readBoundedJson(request));
     const catalog = await getLocalFixtureCatalog();
-    const result = await getLocalFixtureJobResult({
-      jobId: requestedJobId,
-      fixtures: catalog.filter((candidate) => candidate.tenantId === actor.orgId),
-    });
-    const job = result.job;
-    const fixture = catalog.find((candidate) =>
+    const authorizedFixtures = catalog.filter((candidate) =>
       candidate.tenantId === actor.orgId &&
-      candidate.fixtureId === job.fixtureId &&
-      candidate.customerId === job.customerId &&
-      candidate.connectionId === job.connectionId &&
-      candidate.availableVersions.includes(job.version));
-    if (fixture === undefined) {
-      throw Object.assign(new Error("The fixture job scope is not in the signed catalog"), { code: "INVALID_STATE" });
+      authorize(actor.authenticated.subject, {
+        orgId: actor.orgId,
+        capability: "sync:run",
+        customerId: candidate.customerId,
+      }).allowed);
+    let scoped: {
+      readonly fixture: (typeof authorizedFixtures)[number];
+      readonly result: Awaited<ReturnType<typeof getLocalFixtureJobResult>>;
+    } | null = null;
+    for (const candidate of authorizedFixtures) {
+      try {
+        scoped = {
+          fixture: candidate,
+          result: await getLocalFixtureJobResult({
+            jobId: requestedJobId,
+            fixture: candidate,
+          }),
+        };
+        break;
+      } catch (error) {
+        if (!(error instanceof PilotServerError && error.code === "JOB_NOT_FOUND")) {
+          throw error;
+        }
+      }
     }
+    if (scoped === null) {
+      throw Object.assign(new Error("The fixture job was not found in an authorized customer scope"), {
+        code: "NOT_FOUND",
+      });
+    }
+    const { fixture, result } = scoped;
     assertSessionCapability(actor.authenticated, "sync:run", fixture.customerId);
     const existingConnection = await getConnection(fixture.connectionId);
     const allowProvisioning = existingConnection === null;
@@ -56,6 +78,12 @@ export async function POST(request: Request): Promise<Response> {
       result,
       actorId: actor.id,
       allowProvisioning,
+    });
+    await acknowledgeLocalFixtureJobPublication({
+      fixture,
+      jobId: publication.jobId,
+      publicationId: publication.snapshotId,
+      publishedAt: publication.publishedAt,
     });
     return jsonResponse({
       publication,

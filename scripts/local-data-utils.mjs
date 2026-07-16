@@ -123,16 +123,32 @@ async function portIsOpen(port) {
   });
 }
 
-export async function assertLocalServicesStopped() {
+export async function assertLocalServicesStopped(action = "backup or restore") {
   const openPorts = [];
   for (const port of [3000, 8788]) {
     if (await portIsOpen(port)) openPorts.push(port);
   }
   if (openPorts.length > 0) {
     throw new Error(
-      `Stop pnpm dev:pilot before backup or restore (local port${openPorts.length === 1 ? "" : "s"} ${openPorts.join(", ")} still open)`,
+      `Stop pnpm dev:pilot before ${action} (local port${openPorts.length === 1 ? "" : "s"} ${openPorts.join(", ")} still open)`,
     );
   }
+}
+
+export async function resetLocalState({
+  root,
+  assertStopped = assertLocalServicesStopped,
+} = {}) {
+  if (!root) throw new Error("A Sutra repository root is required");
+  await assertStopped("resetting local state");
+  const repositoryRoot = resolve(root);
+  await Promise.all([
+    rm(join(repositoryRoot, REGISTRY_SOURCE), { force: true }),
+    rm(join(repositoryRoot, ".sutra", "connections.enc.json"), { force: true }),
+    rm(join(repositoryRoot, JOB_STATE_SOURCE), { force: true }),
+    rm(join(repositoryRoot, `${JOB_STATE_SOURCE}.lock`), { force: true }),
+    rm(join(repositoryRoot, D1_SOURCE), { recursive: true, force: true }),
+  ]);
 }
 
 function defaultBackupDirectory(root, now) {

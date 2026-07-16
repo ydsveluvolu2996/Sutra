@@ -100,6 +100,10 @@ export class AwsCollectorJobHandler {
       callerIdentityArn: verification.callerIdentityArn,
       missingExternalIdDenied: true,
       wrongExternalIdDenied: true,
+      trustPolicyAttested: true,
+      permissionPolicyAttested: true,
+      sessionPolicyApplied: true,
+      permissionPackVersion: verification.permissionPackVersion,
       verifiedAt: this.now().toISOString(),
     };
   }

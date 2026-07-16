@@ -12,12 +12,13 @@ interface D1PreparedStatement {
 }
 
 interface D1Database {
+  readonly sutraDialect?: "d1" | "postgres";
   prepare(query: string): D1PreparedStatement;
   batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
 }
 
 declare module "cloudflare:workers" {
-  export const env: { DB?: D1Database };
+  export const env: { DB?: D1Database; DATABASE_URL?: string };
 }
 
 interface Fetcher {

@@ -1,5 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 
+import { LocalJobStateCapacityError } from "./local-job-state.js";
+
 import type {
   LocalJobDisposition,
   LocalJobRecord,
@@ -15,8 +17,12 @@ const FAILURE_CODE = /^[A-Z0-9][A-Z0-9._-]{0,127}$/;
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 86_400_000;
 const MAX_ATTEMPTS = 1_000;
+const MAX_DURABLE_JOBS = 100_000;
+const DEFAULT_RETAINED_TERMINAL_SCHEDULE_JOBS = 10_000;
+const DEFAULT_RETAINED_TERMINAL_MANUAL_JOBS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
 const MAX_INTERVAL_MS = 31_536_000_000;
+const SCHEDULE_MUTATION_ID = /^schedop_[a-f0-9]{48}$/u;
 
 export interface DurableLocalJobQueueOptions {
   readonly store: LocalJobStateStore;
@@ -52,6 +58,13 @@ export interface FailLocalJobInput {
   readonly leaseToken: string;
   readonly code: string;
   readonly message: string;
+}
+
+export interface AcknowledgeLocalJobPublicationInput {
+  readonly tenantId: string;
+  readonly jobId: string;
+  readonly publicationId: string;
+  readonly publishedAt: Date;
 }
 
 export interface ListLocalJobsOptions {
@@ -137,12 +150,16 @@ export class DurableLocalJobQueue {
     assertLeaseToken(token);
 
     return this.store.update((draft) => {
-      recoverExpiredLeases(
+      const recovered = recoverExpiredLeases(
         draft,
         now,
         this.baseBackoffMs,
         this.maxBackoffMs,
+        1,
       );
+      if (recovered > 0 || Object.values(draft.jobs).some((job) => job.status === "leased")) {
+        return null;
+      }
       const next = Object.values(draft.jobs)
         .filter(
           (job) =>
@@ -168,7 +185,7 @@ export class DurableLocalJobQueue {
       };
       draft.jobs[next.jobId] = leased;
       return structuredClone(leased);
-    });
+    }, { mode: "operational" });
   }
 
   public async heartbeat(input: {
@@ -195,7 +212,7 @@ export class DurableLocalJobQueue {
       };
       draft.jobs[job.jobId] = updated;
       return structuredClone(updated);
-    });
+    }, { mode: "operational" });
   }
 
   public async complete(input: {
@@ -232,7 +249,7 @@ export class DurableLocalJobQueue {
       };
       draft.jobs[job.jobId] = completed;
       return structuredClone(completed);
-    });
+    }, { mode: "operational" });
   }
 
   public async fail(input: FailLocalJobInput): Promise<LocalJobRecord> {
@@ -287,19 +304,55 @@ export class DurableLocalJobQueue {
       };
       draft.jobs[job.jobId] = failed;
       return structuredClone(failed);
-    });
+    }, { mode: "operational" });
   }
 
   public async recoverExpiredLeases(): Promise<number> {
     const now = validNow(this.now());
-    return this.store.update((draft) =>
-      recoverExpiredLeases(
-        draft,
-        now,
-        this.baseBackoffMs,
-        this.maxBackoffMs,
-      ),
-    );
+    let recovered = 0;
+    for (;;) {
+      const next = await this.store.update((draft) =>
+        recoverExpiredLeases(
+          draft,
+          now,
+          this.baseBackoffMs,
+          this.maxBackoffMs,
+          1,
+        ), { mode: "operational" });
+      if (next === 0) return recovered;
+      recovered += next;
+    }
+  }
+
+  public async acknowledgePublished(
+    input: AcknowledgeLocalJobPublicationInput,
+  ): Promise<LocalJobRecord> {
+    assertIdentifier(input.tenantId, "tenantId");
+    assertIdentifier(input.jobId, "jobId");
+    assertIdentifier(input.publicationId, "publicationId");
+    const publishedAt = validNow(input.publishedAt).toISOString();
+    return this.store.update((draft) => {
+      const job = scopedJob(draft, input.tenantId, input.jobId);
+      if (job.status !== "succeeded") {
+        throw new LocalJobValidationError("Only a succeeded local job can be published");
+      }
+      if (job.publication !== undefined) {
+        if (
+          job.publication.publicationId !== input.publicationId ||
+          job.publication.publishedAt !== publishedAt
+        ) {
+          throw new LocalJobIdempotencyConflictError();
+        }
+        return structuredClone(job);
+      }
+      const updated: LocalJobRecord = {
+        ...job,
+        publication: { publicationId: input.publicationId, publishedAt },
+        updatedAt: publishedAt,
+      };
+      draft.jobs[job.jobId] = updated;
+      return structuredClone(updated);
+    }, { mode: "operational" });
   }
 }
 
@@ -307,11 +360,16 @@ export interface DurableLocalSchedulerOptions {
   readonly store: LocalJobStateStore;
   readonly now?: () => Date;
   readonly maxCatchUpPerSchedule?: number;
+  readonly maxJobs?: number;
+  readonly maxRetainedTerminalScheduleJobs?: number;
+  readonly maxRetainedTerminalManualJobs?: number;
 }
 
 export interface UpsertLocalScheduleInput {
   readonly tenantId: string;
   readonly scheduleId: string;
+  readonly mutationId: string;
+  readonly mutationSequence: number;
   readonly kind: string;
   readonly payload: SafeJsonObject;
   readonly everyMs: number;
@@ -322,6 +380,7 @@ export interface UpsertLocalScheduleInput {
 
 export interface LocalSchedulerTickResult {
   readonly occurrencesProcessed: number;
+  readonly occurrencesSkipped: number;
   readonly jobsCreated: number;
   readonly jobs: readonly LocalJobRecord[];
 }
@@ -330,13 +389,37 @@ export class DurableLocalScheduler {
   private readonly store: LocalJobStateStore;
   private readonly now: () => Date;
   private readonly maxCatchUpPerSchedule: number;
+  private readonly maxJobs: number;
+  private readonly maxRetainedTerminalScheduleJobs: number;
+  private readonly maxRetainedTerminalManualJobs: number;
 
   public constructor(options: DurableLocalSchedulerOptions) {
     const maxCatchUp = options.maxCatchUpPerSchedule ?? 100;
+    const maxJobs = options.maxJobs ?? MAX_DURABLE_JOBS;
+    const maxRetainedTerminalScheduleJobs =
+      options.maxRetainedTerminalScheduleJobs ?? DEFAULT_RETAINED_TERMINAL_SCHEDULE_JOBS;
+    const maxRetainedTerminalManualJobs =
+      options.maxRetainedTerminalManualJobs ?? DEFAULT_RETAINED_TERMINAL_MANUAL_JOBS;
     assertIntegerRange(maxCatchUp, 1, 10_000, "maxCatchUpPerSchedule");
+    assertIntegerRange(maxJobs, 1, MAX_DURABLE_JOBS, "maxJobs");
+    assertIntegerRange(
+      maxRetainedTerminalScheduleJobs,
+      1,
+      MAX_DURABLE_JOBS,
+      "maxRetainedTerminalScheduleJobs",
+    );
+    assertIntegerRange(
+      maxRetainedTerminalManualJobs,
+      1,
+      MAX_DURABLE_JOBS,
+      "maxRetainedTerminalManualJobs",
+    );
     this.store = options.store;
     this.now = options.now ?? (() => new Date());
     this.maxCatchUpPerSchedule = maxCatchUp;
+    this.maxJobs = maxJobs;
+    this.maxRetainedTerminalScheduleJobs = maxRetainedTerminalScheduleJobs;
+    this.maxRetainedTerminalManualJobs = maxRetainedTerminalManualJobs;
   }
 
   public async upsertSchedule(
@@ -344,6 +427,13 @@ export class DurableLocalScheduler {
   ): Promise<LocalScheduleRecord> {
     assertIdentifier(input.tenantId, "tenantId");
     assertIdentifier(input.scheduleId, "scheduleId");
+    assertScheduleMutationId(input.mutationId);
+    assertIntegerRange(
+      input.mutationSequence,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      "mutationSequence",
+    );
     assertIdentifier(input.kind, "kind");
     assertIntegerRange(input.everyMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS, "everyMs");
     const maxAttempts = input.maxAttempts ?? 5;
@@ -357,15 +447,56 @@ export class DurableLocalScheduler {
     return this.store.update((draft) => {
       const previous = draft.schedules[key];
       const timestamp = now.toISOString();
+      const nextRunAt = suppliedFirstRun ?? previous?.nextRunAt ?? timestamp;
+      const enabled = input.enabled ?? previous?.enabled ?? true;
+      const mutationSha256 = sha256(canonicalJson({
+        operation: "upsert",
+        mutationSequence: input.mutationSequence,
+        tenantId: input.tenantId,
+        scheduleId: input.scheduleId,
+        kind: input.kind,
+        payload,
+        everyMs: input.everyMs,
+        nextRunAt,
+        enabled,
+        maxAttempts,
+      }));
+      if (previous?.lastMutationId === input.mutationId) {
+        if (previous.lastMutationSha256 !== mutationSha256) {
+          throw new LocalJobIdempotencyConflictError();
+        }
+        return structuredClone(previous);
+      }
+      if (
+        previous?.lastMutationSequence !== undefined &&
+        input.mutationSequence <= previous.lastMutationSequence
+      ) {
+        throw new LocalScheduleStaleMutationError();
+      }
       const schedule: LocalScheduleRecord = {
         tenantId: input.tenantId,
         scheduleId: input.scheduleId,
         kind: input.kind,
         payload,
         everyMs: input.everyMs,
-        nextRunAt: suppliedFirstRun ?? previous?.nextRunAt ?? timestamp,
-        enabled: input.enabled ?? previous?.enabled ?? true,
+        nextRunAt,
+        enabled,
         maxAttempts,
+        lastMutationId: input.mutationId,
+        lastMutationSha256: mutationSha256,
+        lastMutationSequence: input.mutationSequence,
+        ...(previous?.capacitySkippedOccurrences === undefined
+          ? {}
+          : { capacitySkippedOccurrences: previous.capacitySkippedOccurrences }),
+        ...(previous?.capacityBlockedAt === undefined
+          ? {}
+          : { capacityBlockedAt: previous.capacityBlockedAt }),
+        ...(previous?.missedOccurrences === undefined
+          ? {}
+          : { missedOccurrences: previous.missedOccurrences }),
+        ...(previous?.lastMissedAt === undefined
+          ? {}
+          : { lastMissedAt: previous.lastMissedAt }),
         createdAt: previous?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
@@ -378,10 +509,24 @@ export class DurableLocalScheduler {
     tenantId: string,
     scheduleId: string,
     enabled: boolean,
+    mutationId: string,
+    mutationSequence: number,
+    options: { readonly resetNextRunAtWhenEnabling?: Date } = {},
   ): Promise<LocalScheduleRecord> {
     assertIdentifier(tenantId, "tenantId");
     assertIdentifier(scheduleId, "scheduleId");
+    assertScheduleMutationId(mutationId);
+    assertIntegerRange(
+      mutationSequence,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      "mutationSequence",
+    );
     const now = validNow(this.now());
+    const resetNextRunAt =
+      options.resetNextRunAtWhenEnabling === undefined
+        ? undefined
+        : validNow(options.resetNextRunAtWhenEnabling).toISOString();
     const key = scheduleStateKey(tenantId, scheduleId);
     return this.store.update((draft) => {
       const previous = draft.schedules[key];
@@ -392,7 +537,38 @@ export class DurableLocalScheduler {
       ) {
         throw new LocalScheduleNotFoundError();
       }
-      const updated = { ...previous, enabled, updatedAt: now.toISOString() };
+      const mutationSha256 = sha256(canonicalJson({
+        operation: "enabled",
+        mutationSequence,
+        tenantId,
+        scheduleId,
+        enabled,
+      }));
+      if (previous.lastMutationId === mutationId) {
+        if (previous.lastMutationSha256 !== mutationSha256) {
+          throw new LocalJobIdempotencyConflictError();
+        }
+        return structuredClone(previous);
+      }
+      if (
+        previous.lastMutationSequence !== undefined &&
+        mutationSequence <= previous.lastMutationSequence
+      ) {
+        throw new LocalScheduleStaleMutationError();
+      }
+      const updated = {
+        ...previous,
+        enabled,
+        ...(
+          enabled && !previous.enabled && resetNextRunAt !== undefined
+            ? { nextRunAt: resetNextRunAt }
+            : {}
+        ),
+        lastMutationId: mutationId,
+        lastMutationSha256: mutationSha256,
+        lastMutationSequence: mutationSequence,
+        updatedAt: now.toISOString(),
+      };
       draft.schedules[key] = updated;
       return structuredClone(updated);
     });
@@ -408,22 +584,38 @@ export class DurableLocalScheduler {
 
   public async runDueSchedules(): Promise<LocalSchedulerTickResult> {
     const now = validNow(this.now());
-    return this.store.update((draft) => {
-      const createdJobs: LocalJobRecord[] = [];
-      let occurrencesProcessed = 0;
-      const schedules = Object.entries(draft.schedules).sort(([, left], [, right]) =>
-        left.scheduleId.localeCompare(right.scheduleId),
-      );
+    await this.store.update((draft) => {
+      pruneTerminalJobs(draft, this.maxRetainedTerminalScheduleJobs, true);
+      pruneTerminalJobs(draft, this.maxRetainedTerminalManualJobs, false);
+    }, { mode: "operational" });
 
-      for (const [key, schedule] of schedules) {
-        if (!schedule.enabled) continue;
-        let nextRunTime = Date.parse(schedule.nextRunAt);
-        let scheduleOccurrences = 0;
-        while (
-          nextRunTime <= now.getTime() &&
-          scheduleOccurrences < this.maxCatchUpPerSchedule
-        ) {
-          const occurrence = new Date(nextRunTime).toISOString();
+    const scheduleKeys = Object.entries((await this.store.read()).schedules)
+      .sort(([, left], [, right]) => left.scheduleId.localeCompare(right.scheduleId))
+      .map(([key]) => key);
+    const createdJobs: LocalJobRecord[] = [];
+    let occurrencesProcessed = 0;
+    let occurrencesSkipped = 0;
+
+    for (const key of scheduleKeys) {
+      let processedForSchedule = 0;
+      while (processedForSchedule < this.maxCatchUpPerSchedule) {
+        try {
+          const outcome = await this.store.update((draft) => {
+            const schedule = draft.schedules[key];
+            if (schedule === undefined || !schedule.enabled) {
+              return { done: true, job: null, skipped: 0 } as const;
+            }
+            const storedNextRunTime = Date.parse(schedule.nextRunAt);
+            if (storedNextRunTime > now.getTime()) {
+              return { done: true, job: null, skipped: 0 } as const;
+            }
+            const dueOccurrences = Math.floor(
+              (now.getTime() - storedNextRunTime) / schedule.everyMs,
+            ) + 1;
+            const remainingBudget = this.maxCatchUpPerSchedule - processedForSchedule;
+            const missed = Math.max(0, dueOccurrences - remainingBudget);
+            const occurrenceTime = storedNextRunTime + missed * schedule.everyMs;
+            const occurrence = new Date(occurrenceTime).toISOString();
           const normalized: NormalizedEnqueueInput = {
             tenantId: schedule.tenantId,
             kind: schedule.kind,
@@ -434,31 +626,91 @@ export class DurableLocalScheduler {
           };
           const candidate = createJobRecord(normalized, now);
           const existing = draft.jobs[candidate.jobId];
+            let capacitySkipped = 0;
+            let created: LocalJobRecord | null = null;
           if (existing === undefined) {
-            draft.jobs[candidate.jobId] = candidate;
-            createdJobs.push(structuredClone(candidate));
+              if (Object.keys(draft.jobs).length >= this.maxJobs) {
+              capacitySkipped += 1;
+            } else {
+              draft.jobs[candidate.jobId] = candidate;
+                created = structuredClone(candidate);
+            }
           } else if (existing.requestSha256 !== candidate.requestSha256) {
             throw new LocalJobIdempotencyConflictError();
           }
-          nextRunTime += schedule.everyMs;
-          scheduleOccurrences += 1;
+            const { capacityBlockedAt: previousCapacityBlockedAt, ...withoutCapacityBlock } =
+              schedule;
+            void previousCapacityBlockedAt;
+            draft.schedules[key] = {
+              ...withoutCapacityBlock,
+              nextRunAt: new Date(occurrenceTime + schedule.everyMs).toISOString(),
+              capacitySkippedOccurrences: Math.min(
+                Number.MAX_SAFE_INTEGER,
+                (schedule.capacitySkippedOccurrences ?? 0) + capacitySkipped,
+              ),
+              ...(capacitySkipped > 0 ? { capacityBlockedAt: now.toISOString() } : {}),
+              missedOccurrences: Math.min(
+                Number.MAX_SAFE_INTEGER,
+                (schedule.missedOccurrences ?? 0) + missed,
+              ),
+              ...(missed > 0 ? { lastMissedAt: now.toISOString() } : {}),
+              updatedAt: now.toISOString(),
+            };
+            return {
+              done: false,
+              job: created,
+              skipped: missed + capacitySkipped,
+            } as const;
+          });
+          if (outcome.done) break;
+          processedForSchedule += 1;
           occurrencesProcessed += 1;
-        }
-        if (scheduleOccurrences > 0) {
-          draft.schedules[key] = {
-            ...schedule,
-            nextRunAt: new Date(nextRunTime).toISOString(),
-            updatedAt: now.toISOString(),
-          };
+          occurrencesSkipped += outcome.skipped;
+          if (outcome.job !== null) createdJobs.push(outcome.job);
+        } catch (error) {
+          if (!(error instanceof LocalJobStateCapacityError)) throw error;
+          const skipped = await this.store.update((draft) => {
+            const schedule = draft.schedules[key];
+            if (schedule === undefined || !schedule.enabled) return null;
+            const storedNextRunTime = Date.parse(schedule.nextRunAt);
+            if (storedNextRunTime > now.getTime()) return null;
+            const dueOccurrences = Math.floor(
+              (now.getTime() - storedNextRunTime) / schedule.everyMs,
+            ) + 1;
+            const remainingBudget = this.maxCatchUpPerSchedule - processedForSchedule;
+            const missed = Math.max(0, dueOccurrences - remainingBudget);
+            const occurrenceTime = storedNextRunTime + missed * schedule.everyMs;
+            draft.schedules[key] = {
+              ...schedule,
+              nextRunAt: new Date(occurrenceTime + schedule.everyMs).toISOString(),
+              capacitySkippedOccurrences: Math.min(
+                Number.MAX_SAFE_INTEGER,
+                (schedule.capacitySkippedOccurrences ?? 0) + 1,
+              ),
+              capacityBlockedAt: now.toISOString(),
+              missedOccurrences: Math.min(
+                Number.MAX_SAFE_INTEGER,
+                (schedule.missedOccurrences ?? 0) + missed,
+              ),
+              ...(missed > 0 ? { lastMissedAt: now.toISOString() } : {}),
+              updatedAt: now.toISOString(),
+            };
+            return missed + 1;
+          }, { mode: "operational" });
+          if (skipped === null) break;
+          processedForSchedule += 1;
+          occurrencesProcessed += 1;
+          occurrencesSkipped += skipped;
         }
       }
+    }
 
-      return {
-        occurrencesProcessed,
-        jobsCreated: createdJobs.length,
-        jobs: createdJobs,
-      };
-    });
+    return {
+      occurrencesProcessed,
+      occurrencesSkipped,
+      jobsCreated: createdJobs.length,
+      jobs: createdJobs,
+    };
   }
 }
 
@@ -496,6 +748,13 @@ export class LocalScheduleNotFoundError extends LocalJobQueueError {
   public constructor() {
     super("The scoped local schedule was not found");
     this.name = "LocalScheduleNotFoundError";
+  }
+}
+
+export class LocalScheduleStaleMutationError extends LocalJobQueueError {
+  public constructor() {
+    super("The local schedule mutation was superseded by a newer durable operation");
+    this.name = "LocalScheduleStaleMutationError";
   }
 }
 
@@ -566,6 +825,7 @@ function recoverExpiredLeases(
   now: Date,
   baseBackoffMs: number,
   maxBackoffMs: number,
+  limit = Number.MAX_SAFE_INTEGER,
 ): number {
   let recovered = 0;
   const timestamp = now.toISOString();
@@ -604,8 +864,25 @@ function recoverExpiredLeases(
       ...(terminal ? { completedAt: timestamp } : {}),
     };
     recovered += 1;
+    if (recovered >= limit) break;
   }
   return recovered;
+}
+
+function pruneTerminalJobs(
+  state: LocalJobState,
+  retained: number,
+  scheduled: boolean,
+): number {
+  const expired = Object.values(state.jobs)
+    .filter((job) =>
+      job.idempotencyKey.startsWith("schedule:") === scheduled &&
+      (job.status === "dead_letter" ||
+        (job.status === "succeeded" && job.publication !== undefined)))
+    .sort(compareJobs)
+    .slice(retained);
+  for (const job of expired) delete state.jobs[job.jobId];
+  return expired.length;
 }
 
 function scopedJob(
@@ -684,6 +961,12 @@ function compareJobs(left: LocalJobRecord, right: LocalJobRecord): number {
 
 function assertIdentifier(value: string, field: string): void {
   if (!IDENTIFIER.test(value)) throw new LocalJobValidationError(`${field} is invalid`);
+}
+
+function assertScheduleMutationId(value: string): void {
+  if (!SCHEDULE_MUTATION_ID.test(value)) {
+    throw new LocalJobValidationError("mutationId is invalid");
+  }
 }
 
 function assertLeaseToken(token: string): void {

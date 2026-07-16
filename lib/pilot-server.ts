@@ -11,9 +11,12 @@ import {
   parseLocalFixtureEnqueue,
   parseLocalFixtureJobs,
   parseLocalFixtureResultFromCatalog,
+  parseLocalFixtureScheduleResponse,
+  parseLocalFixtureSchedules,
   type LocalFixtureDescriptor,
   type LocalFixtureJobResult,
   type LocalFixtureJobSummary,
+  type LocalFixtureSchedule,
   type LocalFixtureVersion,
 } from "./local-ops-types";
 import { authorizePilotRequest, type AuthorizedPilotActor } from "./api-auth";
@@ -255,6 +258,8 @@ const BROKER_CODES = new Set([
   "JOB_FAILED",
   "JOB_NOT_FOUND",
   "JOB_NOT_READY",
+  "SCHEDULE_NOT_FOUND",
+  "STALE_SCHEDULE_MUTATION",
 ]);
 
 function safeBrokerErrorCode(value: unknown): string {
@@ -276,6 +281,8 @@ function publicBrokerMessage(code: string): string {
     JOB_FAILED: "The simulated inventory job exhausted its retries",
     JOB_NOT_FOUND: "The simulated inventory job was not found",
     JOB_NOT_READY: "The simulated inventory job is not complete",
+    SCHEDULE_NOT_FOUND: "The simulated collection schedule was not found",
+    STALE_SCHEDULE_MUTATION: "The schedule change was superseded by a newer operation",
     BROKER_REQUEST_FAILED: "The AWS collector rejected the request",
   };
   return messages[code] ?? messages.BROKER_REQUEST_FAILED;
@@ -297,6 +304,50 @@ export async function registerCollectorConnection(input: {
   return parseRegisteredResponse(
     await brokerFetch<unknown>(`/v1/connections/${input.connectionId}`, "PUT", input),
   );
+}
+
+export async function disableCollectorConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+}): Promise<void> {
+  const response = await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/disable`,
+    "POST",
+    input,
+  );
+  assertLifecycleAcknowledgement(response, "disabled");
+}
+
+export async function offboardCollectorConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+}): Promise<void> {
+  const response = await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/offboard`,
+    "POST",
+    input,
+  );
+  assertLifecycleAcknowledgement(response, "offboarded");
+}
+
+function assertLifecycleAcknowledgement(
+  value: unknown,
+  key: "disabled" | "offboarded",
+): void {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== 1 ||
+    !(key in value) ||
+    (value as Record<string, unknown>)[key] !== true
+  ) {
+    throw new PilotServerError(
+      502,
+      "BROKER_RESPONSE_INVALID",
+      "The collector lifecycle acknowledgement was invalid",
+    );
+  }
 }
 
 export async function verifyCollectorConnection(input: {
@@ -345,6 +396,7 @@ export async function getLocalFixtureCatalog(): Promise<readonly LocalFixtureDes
 export async function listLocalFixtureJobs(
   limit = 50,
   scope?: { readonly tenantId: string; readonly customerId: string },
+  options: { readonly reviewRequired?: boolean } = {},
 ): Promise<readonly LocalFixtureJobSummary[]> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new PilotServerError(400, "INVALID_INPUT", "The local job limit is invalid");
@@ -354,6 +406,7 @@ export async function listLocalFixtureJobs(
     query.set("tenantId", scope.tenantId);
     query.set("customerId", scope.customerId);
   }
+  if (options.reviewRequired === true) query.set("reviewRequired", "true");
   return parseLocalFixtureJobs(
     await brokerFetch<unknown>(`/v1/local/jobs?${query.toString()}`, "GET"),
   );
@@ -379,13 +432,145 @@ export async function enqueueLocalFixtureJob(input: {
 
 export async function getLocalFixtureJobResult(input: {
   readonly jobId: string;
-  readonly fixtures: readonly LocalFixtureDescriptor[];
+  readonly fixture: LocalFixtureDescriptor;
 }): Promise<LocalFixtureJobResult> {
+  const query = new URLSearchParams({
+    tenantId: input.fixture.tenantId,
+    customerId: input.fixture.customerId,
+  });
   return parseLocalFixtureResultFromCatalog(
-    await brokerFetch<unknown>(`/v1/local/jobs/${input.jobId}/result`, "GET", undefined, 30_000),
-    input.fixtures,
+    await brokerFetch<unknown>(
+      `/v1/local/jobs/${input.jobId}/result?${query.toString()}`,
+      "GET",
+      undefined,
+      30_000,
+    ),
+    [input.fixture],
     input.jobId,
   );
+}
+
+export async function acknowledgeLocalFixtureJobPublication(input: {
+  readonly fixture: LocalFixtureDescriptor;
+  readonly jobId: string;
+  readonly publicationId: string;
+  readonly publishedAt: string;
+}): Promise<void> {
+  const response = await brokerFetch<unknown>(
+    `/v1/local/jobs/${input.jobId}/published`,
+    "POST",
+    {
+      tenantId: input.fixture.tenantId,
+      customerId: input.fixture.customerId,
+      publicationId: input.publicationId,
+      publishedAt: input.publishedAt,
+    },
+  );
+  if (
+    typeof response !== "object" || response === null || Array.isArray(response) ||
+    Object.keys(response).join(",") !== "acknowledged" ||
+    !("acknowledged" in response) || response.acknowledged !== true
+  ) {
+    throw new PilotServerError(
+      502,
+      "BROKER_RESPONSE_INVALID",
+      "The collector publication acknowledgement was invalid",
+    );
+  }
+}
+
+export async function localFixtureScheduleId(tenantId: string, fixtureId: string): Promise<string> {
+  return `sched_${(await sha256Hex(`local-fixture-schedule\u0000${tenantId}\u0000${fixtureId}`)).slice(0, 48)}`;
+}
+
+export async function getLocalFixtureSchedules(
+  fixture: LocalFixtureDescriptor,
+): Promise<readonly LocalFixtureSchedule[]> {
+  const query = new URLSearchParams({
+    tenantId: fixture.tenantId,
+    customerId: fixture.customerId,
+  });
+  const schedules = parseLocalFixtureSchedules(
+    await brokerFetch<unknown>(`/v1/local/schedules?${query.toString()}`, "GET"),
+  );
+  if (schedules.some((schedule) => !scheduleMatchesFixture(schedule, fixture))) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector schedule scope is invalid");
+  }
+  return schedules;
+}
+
+export async function upsertLocalFixtureSchedule(input: {
+  readonly fixture: LocalFixtureDescriptor;
+  readonly scheduleId: string;
+  readonly mutationId: string;
+  readonly mutationSequence: number;
+  readonly version: LocalFixtureVersion;
+  readonly everyMs: number;
+  readonly enabled: boolean;
+  readonly firstRunAt: string;
+}): Promise<LocalFixtureSchedule> {
+  const schedule = parseLocalFixtureScheduleResponse(await brokerFetch<unknown>(
+    `/v1/local/schedules/${input.scheduleId}`,
+    "PUT",
+    {
+      tenantId: input.fixture.tenantId,
+      mutationId: input.mutationId,
+      mutationSequence: input.mutationSequence,
+      fixtureId: input.fixture.fixtureId,
+      version: input.version,
+      everyMs: input.everyMs,
+      enabled: input.enabled,
+      firstRunAt: input.firstRunAt,
+    },
+  ));
+  if (
+    schedule.scheduleId !== input.scheduleId ||
+    schedule.version !== input.version ||
+    schedule.everyMs !== input.everyMs ||
+    schedule.enabled !== input.enabled ||
+    !scheduleMatchesFixture(schedule, input.fixture)
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector schedule response is invalid");
+  }
+  return schedule;
+}
+
+export async function setLocalFixtureScheduleEnabled(input: {
+  readonly fixture: LocalFixtureDescriptor;
+  readonly scheduleId: string;
+  readonly mutationId: string;
+  readonly mutationSequence: number;
+  readonly enabled: boolean;
+}): Promise<LocalFixtureSchedule> {
+  const schedule = parseLocalFixtureScheduleResponse(await brokerFetch<unknown>(
+    `/v1/local/schedules/${input.scheduleId}/enabled`,
+    "POST",
+    {
+      tenantId: input.fixture.tenantId,
+      enabled: input.enabled,
+      mutationId: input.mutationId,
+      mutationSequence: input.mutationSequence,
+    },
+  ));
+  if (
+    schedule.scheduleId !== input.scheduleId ||
+    schedule.enabled !== input.enabled ||
+    !scheduleMatchesFixture(schedule, input.fixture)
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector schedule response is invalid");
+  }
+  return schedule;
+}
+
+function scheduleMatchesFixture(
+  schedule: LocalFixtureSchedule,
+  fixture: LocalFixtureDescriptor,
+): boolean {
+  return schedule.tenantId === fixture.tenantId &&
+    schedule.fixtureId === fixture.fixtureId &&
+    schedule.customerId === fixture.customerId &&
+    schedule.connectionId === fixture.connectionId &&
+    fixture.availableVersions.includes(schedule.version);
 }
 
 export function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
@@ -413,6 +598,7 @@ export function errorResponse(error: unknown): Response {
     "MFA_ALREADY_ENROLLED",
     "MFA_CODE_INVALID",
     "MFA_ENROLLMENT_REQUIRED",
+    "MFA_RECENT_REQUIRED",
     "MFA_REQUIRED",
     "NOT_FOUND",
   ]);

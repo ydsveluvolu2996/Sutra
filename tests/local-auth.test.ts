@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { authorize, effectiveCapabilities, type AuthorizationSubject } from "../lib/auth-policy.ts";
+import { isRecentMfaVerification } from "../lib/recent-mfa.ts";
 import {
   digestSessionToken,
   generateSessionToken,
@@ -59,6 +60,15 @@ test("TOTP secrets are encrypted and bound to the user and key version", async (
   assert.equal(sealed.ciphertext.includes("JBSWY3DPEHPK3PXP"), false);
   assert.equal(await openTotpSecret(sealed, key, "user_a"), "JBSWY3DPEHPK3PXP");
   await assert.rejects(openTotpSecret(sealed, key, "user_b"));
+});
+
+test("privileged AWS trust changes require MFA verified within five minutes", () => {
+  const now = Date.UTC(2026, 6, 16, 12, 0, 0);
+  const fiveMinutes = 5 * 60 * 1000;
+  assert.equal(isRecentMfaVerification(now - fiveMinutes, now, fiveMinutes), true);
+  assert.equal(isRecentMfaVerification(now - fiveMinutes - 1, now, fiveMinutes), false);
+  assert.equal(isRecentMfaVerification(now + 1, now, fiveMinutes), false);
+  assert.equal(isRecentMfaVerification(null, now, fiveMinutes), false);
 });
 
 test("authorization denies organization and customer ID swapping", () => {

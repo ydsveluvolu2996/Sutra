@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { lstat, mkdtemp, readFile, rm } from "node:fs/promises";
+import { lstat, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -9,8 +9,12 @@ import {
   DurableLocalScheduler,
   LocalJobIdempotencyConflictError,
   LocalJobLeaseLostError,
+  LocalScheduleStaleMutationError,
 } from "../src/durable-job-queue.js";
-import { JsonFileLocalJobStateStore } from "../src/local-job-state.js";
+import {
+  JsonFileLocalJobStateStore,
+  LocalJobStateCapacityError,
+} from "../src/local-job-state.js";
 
 const TENANT_ID = "org_local_sutra";
 
@@ -220,7 +224,7 @@ test("expired leases are recovered with backoff and stale tokens cannot settle",
   });
 });
 
-test("recurring schedules atomically catch up occurrences and persist across restart", async () => {
+test("recurring schedules atomically bound stale catch-up and persist across restart", async () => {
   await withTemporaryState(async (filePath) => {
     const clock = new TestClock("2026-07-15T13:00:00.000Z");
     const firstStore = new JsonFileLocalJobStateStore({ filePath });
@@ -229,28 +233,55 @@ test("recurring schedules atomically catch up occurrences and persist across res
       now: clock.now,
       maxCatchUpPerSchedule: 2,
     });
-    await scheduler.upsertSchedule({
+    const configured = await scheduler.upsertSchedule({
       tenantId: TENANT_ID,
       scheduleId: "hourly-fixture-sync",
+      mutationId: `schedop_${"a".repeat(48)}`,
+      mutationSequence: 1,
       kind: "fixture.inventory.collect",
       payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
       everyMs: 60_000,
       firstRunAt: clock.now(),
       maxAttempts: 4,
     });
+    assert.deepEqual(await scheduler.upsertSchedule({
+      tenantId: TENANT_ID,
+      scheduleId: "hourly-fixture-sync",
+      mutationId: `schedop_${"a".repeat(48)}`,
+      mutationSequence: 1,
+      kind: "fixture.inventory.collect",
+      payload: { version: "2026.07.1", fixtureId: "northstar-retail" },
+      everyMs: 60_000,
+      firstRunAt: clock.now(),
+      maxAttempts: 4,
+    }), configured);
+    await assert.rejects(
+      scheduler.upsertSchedule({
+        tenantId: TENANT_ID,
+        scheduleId: "hourly-fixture-sync",
+        mutationId: `schedop_${"a".repeat(48)}`,
+        mutationSequence: 1,
+        kind: "fixture.inventory.collect",
+        payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
+        everyMs: 120_000,
+        firstRunAt: clock.now(),
+        maxAttempts: 4,
+      }),
+      LocalJobIdempotencyConflictError,
+    );
 
     const firstTick = await scheduler.runDueSchedules();
     assert.equal(firstTick.occurrencesProcessed, 1);
+    assert.equal(firstTick.occurrencesSkipped, 0);
     assert.equal(firstTick.jobsCreated, 1);
     assert.equal((await scheduler.runDueSchedules()).jobsCreated, 0);
 
     clock.advance(180_000);
-    const catchUpOne = await scheduler.runDueSchedules();
-    assert.equal(catchUpOne.occurrencesProcessed, 2);
-    assert.equal(catchUpOne.jobsCreated, 2);
-    const catchUpTwo = await scheduler.runDueSchedules();
-    assert.equal(catchUpTwo.occurrencesProcessed, 1);
-    assert.equal(catchUpTwo.jobsCreated, 1);
+    const catchUp = await scheduler.runDueSchedules();
+    assert.equal(catchUp.occurrencesProcessed, 2);
+    assert.equal(catchUp.occurrencesSkipped, 1);
+    assert.equal(catchUp.jobsCreated, 2);
+    assert.equal((await scheduler.runDueSchedules()).jobsCreated, 0);
 
     const restartedStore = new JsonFileLocalJobStateStore({ filePath });
     const restartedQueue = new DurableLocalJobQueue({
@@ -258,8 +289,8 @@ test("recurring schedules atomically catch up occurrences and persist across res
       now: clock.now,
     });
     const jobs = await restartedQueue.listJobs(TENANT_ID);
-    assert.equal(jobs.length, 4);
-    assert.equal(new Set(jobs.map((job) => job.jobId)).size, 4);
+    assert.equal(jobs.length, 3);
+    assert.equal(new Set(jobs.map((job) => job.jobId)).size, 3);
     assert.ok(jobs.every((job) => job.maxAttempts === 4));
 
     const restartedScheduler = new DurableLocalScheduler({
@@ -269,13 +300,357 @@ test("recurring schedules atomically catch up occurrences and persist across res
     const [persisted] = await restartedScheduler.listSchedules(TENANT_ID);
     assert.ok(persisted);
     assert.equal(persisted.nextRunAt, "2026-07-15T13:04:00.000Z");
+    assert.equal(persisted.missedOccurrences, 1);
+    assert.equal(persisted.lastMissedAt, "2026-07-15T13:03:00.000Z");
     await restartedScheduler.setScheduleEnabled(
       TENANT_ID,
       persisted.scheduleId,
       false,
+      `schedop_${"b".repeat(48)}`,
+      2,
     );
+    await assert.rejects(
+      restartedScheduler.setScheduleEnabled(
+        TENANT_ID,
+        persisted.scheduleId,
+        true,
+        `schedop_${"e".repeat(48)}`,
+        1,
+      ),
+      LocalScheduleStaleMutationError,
+    );
+    assert.equal((await restartedScheduler.listSchedules(TENANT_ID))[0]?.enabled, false);
     clock.advance(60_000);
     assert.equal((await restartedScheduler.runDueSchedules()).jobsCreated, 0);
+  });
+});
+
+test("schedule capacity advances safely without blocking existing queue work", async () => {
+  await withTemporaryState(async (filePath) => {
+    const clock = new TestClock("2026-07-15T13:30:00.000Z");
+    const store = new JsonFileLocalJobStateStore({ filePath });
+    const scheduler = new DurableLocalScheduler({
+      store,
+      now: clock.now,
+      maxCatchUpPerSchedule: 5,
+      maxJobs: 1,
+    });
+    await scheduler.upsertSchedule({
+      tenantId: TENANT_ID,
+      scheduleId: "capacity-fixture-sync",
+      mutationId: `schedop_${"c".repeat(48)}`,
+      mutationSequence: 1,
+      kind: "fixture.inventory.collect",
+      payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
+      everyMs: 60_000,
+      firstRunAt: clock.now(),
+    });
+    assert.equal((await scheduler.runDueSchedules()).jobsCreated, 1);
+
+    clock.advance(180_000);
+    const bounded = await scheduler.runDueSchedules();
+    assert.equal(bounded.jobsCreated, 0);
+    assert.equal(bounded.occurrencesProcessed, 3);
+    assert.equal(bounded.occurrencesSkipped, 3);
+    const [degraded] = await scheduler.listSchedules(TENANT_ID);
+    assert.equal(degraded?.capacitySkippedOccurrences, 3);
+    assert.equal(degraded?.capacityBlockedAt, clock.now().toISOString());
+    assert.equal((await scheduler.runDueSchedules()).occurrencesProcessed, 0);
+
+    const queue = new DurableLocalJobQueue({ store, now: clock.now });
+    assert.equal((await queue.listJobs(TENANT_ID)).length, 1);
+  });
+});
+
+test("manual terminal evidence also uses bounded retention", async () => {
+  await withTemporaryState(async (filePath) => {
+    const clock = new TestClock("2026-07-15T13:55:00.000Z");
+    const store = new JsonFileLocalJobStateStore({ filePath });
+    const queue = new DurableLocalJobQueue({
+      store,
+      now: clock.now,
+      leaseTokenFactory: tokenFactory().next,
+    });
+    const scheduler = new DurableLocalScheduler({
+      store,
+      now: clock.now,
+      maxRetainedTerminalManualJobs: 1,
+    });
+    const completedJobIds: string[] = [];
+    for (let index = 0; index < 2; index += 1) {
+      await queue.enqueue({
+        tenantId: TENANT_ID,
+        kind: "fixture.inventory.collect",
+        idempotencyKey: `manual-retention-${index}`,
+        payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
+      });
+      const leased = await queue.leaseNext({ workerId: "manual_retention_worker", leaseMs: 5_000 });
+      assert.ok(leased?.lease);
+      completedJobIds.push(leased.jobId);
+      await queue.complete({
+        tenantId: TENANT_ID,
+        jobId: leased.jobId,
+        leaseToken: leased.lease.token,
+        result: { completed: true },
+      });
+      await queue.acknowledgePublished({
+        tenantId: TENANT_ID,
+        jobId: leased.jobId,
+        publicationId: `snapshot_manual_${index}`,
+        publishedAt: clock.now(),
+      });
+      clock.advance(1_000);
+    }
+    await scheduler.runDueSchedules();
+    const retained = await queue.listJobs(TENANT_ID);
+    assert.equal(retained.length, 1);
+    assert.equal(retained[0]?.jobId, completedJobIds[1]);
+  });
+});
+
+test("scheduled terminal evidence uses bounded retention while queue work continues", async () => {
+  await withTemporaryState(async (filePath) => {
+    const clock = new TestClock("2026-07-15T13:45:00.000Z");
+    const store = new JsonFileLocalJobStateStore({ filePath });
+    const scheduler = new DurableLocalScheduler({
+      store,
+      now: clock.now,
+      maxRetainedTerminalScheduleJobs: 1,
+    });
+    const queue = new DurableLocalJobQueue({
+      store,
+      now: clock.now,
+      leaseTokenFactory: tokenFactory().next,
+    });
+    await scheduler.upsertSchedule({
+      tenantId: TENANT_ID,
+      scheduleId: "retained-fixture-sync",
+      mutationId: `schedop_${"d".repeat(48)}`,
+      mutationSequence: 1,
+      kind: "fixture.inventory.collect",
+      payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
+      everyMs: 60_000,
+      firstRunAt: clock.now(),
+    });
+
+    const completedJobIds: string[] = [];
+    for (let occurrence = 0; occurrence < 2; occurrence += 1) {
+      await scheduler.runDueSchedules();
+      const leased = await queue.leaseNext({ workerId: "retention_worker", leaseMs: 5_000 });
+      assert.ok(leased?.lease);
+      completedJobIds.push(leased.jobId);
+      await queue.complete({
+        tenantId: TENANT_ID,
+        jobId: leased.jobId,
+        leaseToken: leased.lease.token,
+        result: { completed: true },
+      });
+      await queue.acknowledgePublished({
+        tenantId: TENANT_ID,
+        jobId: leased.jobId,
+        publicationId: `snapshot_scheduled_${occurrence}`,
+        publishedAt: clock.now(),
+      });
+      clock.advance(60_000);
+    }
+
+    const next = await scheduler.runDueSchedules();
+    assert.equal(next.jobsCreated, 1);
+    const retained = await queue.listJobs(TENANT_ID);
+    assert.equal(retained.length, 2);
+    assert.equal(retained.some((job) => job.jobId === completedJobIds[0]), false);
+    assert.equal(retained.some((job) => job.jobId === completedJobIds[1]), true);
+  });
+});
+
+test("file state prunes oldest terminal evidence before crossing its byte boundary", async () => {
+  await withTemporaryState(async (filePath) => {
+    const stateFileLimitBytes = 24_000;
+    const clock = new TestClock("2026-07-15T13:58:00.000Z");
+    const store = new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes });
+    const queue = new DurableLocalJobQueue({
+      store,
+      now: clock.now,
+      leaseTokenFactory: tokenFactory().next,
+    });
+    const completedJobIds: string[] = [];
+
+    for (let index = 0; index < 5; index += 1) {
+      await queue.enqueue({
+        tenantId: TENANT_ID,
+        kind: "fixture.inventory.collect",
+        idempotencyKey: `byte-retention-${index}`,
+        payload: { fixtureId: "northstar-retail", version: "2026.07.1" },
+      });
+      const leased = await queue.leaseNext({ workerId: "byte_retention_worker", leaseMs: 5_000 });
+      assert.ok(leased?.lease);
+      const completed = await queue.complete({
+        tenantId: TENANT_ID,
+        jobId: leased.jobId,
+        leaseToken: leased.lease.token,
+        result: { evidence: "界".repeat(2_400), sequence: index },
+      });
+      await queue.acknowledgePublished({
+        tenantId: TENANT_ID,
+        jobId: completed.jobId,
+        publicationId: `snapshot_byte_${index}`,
+        publishedAt: clock.now(),
+      });
+      completedJobIds.push(completed.jobId);
+      assert.equal((await queue.getJob(TENANT_ID, completed.jobId))?.jobId, completed.jobId);
+      clock.advance(1_000);
+    }
+
+    const retained = await queue.listJobs(TENANT_ID);
+    assert.ok(retained.length < completedJobIds.length);
+    assert.equal(retained.some((job) => job.jobId === completedJobIds[0]), false);
+    assert.equal(retained.some((job) => job.jobId === completedJobIds.at(-1)), true);
+    assert.ok((await lstat(filePath)).size <= stateFileLimitBytes);
+    assert.deepEqual(
+      await new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes }).read(),
+      await store.read(),
+    );
+  });
+});
+
+test("oversized active state is refused without replacing the last valid file", async () => {
+  await withTemporaryState(async (filePath) => {
+    const stateFileLimitBytes = 8_000;
+    const store = new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes });
+    const queue = new DurableLocalJobQueue({ store });
+    await queue.enqueue({
+      tenantId: TENANT_ID,
+      kind: "fixture.inventory.collect",
+      idempotencyKey: "last-valid-state",
+      payload: { fixtureId: "northstar-retail" },
+    });
+    const lastValidState = await readFile(filePath, "utf8");
+
+    await assert.rejects(
+      queue.enqueue({
+        tenantId: TENANT_ID,
+        kind: "fixture.inventory.collect",
+        idempotencyKey: "oversized-active-state",
+        payload: { fixtureId: "northstar-retail", evidence: "x".repeat(12_000) },
+      }),
+      LocalJobStateCapacityError,
+    );
+
+    assert.equal(await readFile(filePath, "utf8"), lastValidState);
+    await queue.enqueue({
+      tenantId: TENANT_ID,
+      kind: "fixture.inventory.collect",
+      idempotencyKey: "write-after-capacity-rejection",
+      payload: { fixtureId: "bluepeak-finance" },
+    });
+    const restartedQueue = new DurableLocalJobQueue({
+      store: new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes }),
+    });
+    const jobs = await restartedQueue.listJobs(TENANT_ID);
+    assert.equal(jobs.length, 2);
+    assert.deepEqual(
+      jobs.map((job) => job.idempotencyKey).sort(),
+      ["last-valid-state", "write-after-capacity-rejection"],
+    );
+  });
+});
+
+test("a queue saturated at the admission target can still lease, publish, and recover", async () => {
+  await withTemporaryState(async (filePath) => {
+    const stateFileLimitBytes = 8_000;
+    const store = new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes });
+    const queue = new DurableLocalJobQueue({
+      store,
+      leaseTokenFactory: tokenFactory().next,
+    });
+    let accepted = 0;
+    for (let index = 0; index < 100; index += 1) {
+      try {
+        await queue.enqueue({
+          tenantId: TENANT_ID,
+          kind: "fixture.inventory.collect",
+          idempotencyKey: `saturated-pending-${index}`,
+          payload: { evidence: "x".repeat(80), fixtureId: "northstar-retail" },
+        });
+        accepted += 1;
+      } catch (error) {
+        assert.ok(error instanceof LocalJobStateCapacityError);
+        break;
+      }
+    }
+    assert.ok(accepted > 1 && accepted < 100);
+    assert.ok((await lstat(filePath)).size <= Math.floor(stateFileLimitBytes * 0.9));
+
+    const leased = await queue.leaseNext({ workerId: "saturated_queue_worker", leaseMs: 5_000 });
+    assert.ok(leased?.lease);
+    assert.ok((await lstat(filePath)).size <= stateFileLimitBytes);
+    const completed = await queue.complete({
+      tenantId: TENANT_ID,
+      jobId: leased.jobId,
+      leaseToken: leased.lease.token,
+      result: { drained: true },
+    });
+    await queue.acknowledgePublished({
+      tenantId: TENANT_ID,
+      jobId: completed.jobId,
+      publicationId: "snapshot_capacity_drain",
+      publishedAt: new Date(),
+    });
+    await queue.enqueue({
+      tenantId: TENANT_ID,
+      kind: "fixture.inventory.collect",
+      idempotencyKey: "admitted-after-drain",
+      payload: { fixtureId: "bluepeak-finance" },
+    });
+    assert.ok((await queue.listJobs(TENANT_ID)).some(
+      (job) => job.idempotencyKey === "admitted-after-drain",
+    ));
+  });
+});
+
+test("idempotent terminal replay does not compact its legacy receipt away", async () => {
+  await withTemporaryState(async (filePath) => {
+    const stateFileLimitBytes = 12_000;
+    const store = new JsonFileLocalJobStateStore({ filePath, stateFileLimitBytes });
+    const queue = new DurableLocalJobQueue({
+      store,
+      leaseTokenFactory: tokenFactory().next,
+    });
+    const enqueued = await queue.enqueue({
+      tenantId: TENANT_ID,
+      kind: "fixture.inventory.collect",
+      idempotencyKey: "legacy-terminal-replay",
+      payload: { fixtureId: "northstar-retail" },
+    });
+    const leased = await queue.leaseNext({ workerId: "legacy_replay_worker", leaseMs: 5_000 });
+    assert.ok(leased?.lease);
+    const completed = await queue.complete({
+      tenantId: TENANT_ID,
+      jobId: enqueued.job.jobId,
+      leaseToken: leased.lease.token,
+      result: { completed: true },
+    });
+
+    const validState = await readFile(filePath, "utf8");
+    const legacySize = Math.floor(stateFileLimitBytes * 0.95);
+    assert.ok(Buffer.byteLength(validState, "utf8") < legacySize);
+    await writeFile(
+      filePath,
+      validState + " ".repeat(legacySize - Buffer.byteLength(validState, "utf8")),
+      "utf8",
+    );
+
+    assert.deepEqual(
+      await queue.complete({
+        tenantId: TENANT_ID,
+        jobId: completed.jobId,
+        leaseToken: leased.lease.token,
+        result: { ignoredOnIdempotentReplay: true },
+      }),
+      completed,
+    );
+    assert.equal((await lstat(filePath)).size, legacySize);
+    assert.equal((await queue.getJob(TENANT_ID, completed.jobId))?.jobId, completed.jobId);
   });
 });
 
