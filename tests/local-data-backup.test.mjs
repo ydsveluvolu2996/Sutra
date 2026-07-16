@@ -22,6 +22,7 @@ test("local backup restores state only with the matching external key configurat
     await mkdir(join(root, ".wrangler", "state", "v3", "d1", "object"), { recursive: true });
     await writeFile(join(root, ".dev.vars"), LOCAL_CONFIGURATION, "utf8");
     await writeFile(join(root, ".sutra", "collector-registry.enc"), "encrypted-registry", "utf8");
+    await writeFile(join(root, ".sutra", "local-jobs.json"), '{"version":1,"jobs":{},"schedules":{}}', "utf8");
     await writeFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "sqlite-state", "utf8");
 
     const backup = await backupLocalState({
@@ -31,15 +32,20 @@ test("local backup restores state only with the matching external key configurat
       assertStopped: stopped,
     });
     assert.equal(backup.manifest.schema, "sutra.local-backup.v1");
-    assert.equal(backup.manifest.files.length, 2);
+    assert.equal(backup.manifest.files.length, 3);
     await assert.rejects(readFile(join(backup.backupDirectory, "config", ".dev.vars"), "utf8"));
 
     await writeFile(join(root, ".sutra", "collector-registry.enc"), "corrupted", "utf8");
+    await writeFile(join(root, ".sutra", "local-jobs.json"), "corrupted", "utf8");
     await writeFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "changed", "utf8");
 
     await restoreLocalState({ root, backup: backup.backupDirectory, assertStopped: stopped });
     assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), LOCAL_CONFIGURATION);
     assert.equal(await readFile(join(root, ".sutra", "collector-registry.enc"), "utf8"), "encrypted-registry");
+    assert.equal(
+      await readFile(join(root, ".sutra", "local-jobs.json"), "utf8"),
+      '{"version":1,"jobs":{},"schedules":{}}',
+    );
     assert.equal(
       await readFile(join(root, ".wrangler", "state", "v3", "d1", "object", "state.sqlite"), "utf8"),
       "sqlite-state",

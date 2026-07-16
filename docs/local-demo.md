@@ -40,8 +40,9 @@ pnpm local:backup
 pnpm local:restore -- .sutra/backups/<backup-directory>
 ```
 
-The backup contains the D1 files and encrypted collector registry. It deliberately
-excludes `.dev.vars` and plaintext encryption/signing keys. Every state file is
+The backup contains the D1 files, encrypted collector registry, and durable local
+job/schedule state. It deliberately excludes `.dev.vars` and plaintext
+encryption/signing keys. Every state file is
 covered by a SHA-256 manifest, and one-way key fingerprints prevent a restore with
 incompatible local keys. Keep `.dev.vars` in a separate secure secret backup.
 Restore verifies the complete manifest before replacing any state and rolls back
