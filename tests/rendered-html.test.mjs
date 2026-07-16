@@ -32,22 +32,26 @@ test("server-renders the Sutra public product site", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 
-test("renders the core product routes", async () => {
-  const routes = [
-    ["/dashboard", /Your AWS pilot workspace/i],
-    ["/customers", /Customer workspace/i],
-    ["/cmdb", /AWS resource inventory/i],
-    ["/findings", /Security findings/i],
-    ["/controls", /Control library/i],
-    ["/roadmap", /From working AWS pilot to MSP operations platform/i],
-    ["/onboard", /Onboard one AWS account/i],
-  ];
+test("server-renders an authentication gate without leaking protected route data", async () => {
+  const routes = ["/dashboard", "/customers", "/cmdb", "/findings", "/controls", "/roadmap", "/onboard"];
 
-  for (const [pathname, expected] of routes) {
+  for (const pathname of routes) {
     const response = await render(pathname);
     assert.equal(response.status, 200, pathname);
-    assert.match(await response.text(), expected, pathname);
+    const html = await response.text();
+    assert.match(html, /Opening your protected workspace/i, pathname);
+    assert.doesNotMatch(html, /Your AWS pilot workspace|AWS resource inventory|Onboard one AWS account/i, pathname);
   }
+});
+
+test("server-renders the local login and MFA entry routes", async () => {
+  const login = await render("/login");
+  assert.equal(login.status, 200);
+  assert.match(await login.text(), /Checking your local workspace/i);
+
+  const mfa = await render("/mfa/setup");
+  assert.equal(mfa.status, 200);
+  assert.match(await mfa.text(), /Protecting your session/i);
 });
 
 test("removes starter-only preview infrastructure", async () => {
