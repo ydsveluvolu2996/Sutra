@@ -29,6 +29,7 @@ if (!exists) {
     `SUTRA_REGISTRY_ENCRYPTION_KEY=${secret()}`,
     "SUTRA_BROKER_URL=http://127.0.0.1:8788",
     "SUTRA_COLLECTOR_MODE=fixture",
+    "SUTRA_ALLOW_LIVE_AWS=false",
     "SUTRA_COLLECTOR_PRINCIPAL_ARN=arn:aws:iam::999988887777:role/SutraLocalCollector",
     "SUTRA_FIXTURE_ACCOUNT_ID=123456789012",
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",

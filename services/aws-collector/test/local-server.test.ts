@@ -12,6 +12,20 @@ const NOW = new Date("2026-07-15T10:00:00.000Z");
 const TENANT_ID = "org_local_sutra";
 const CONNECTION_ID = "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
+test("live AWS mode is denied unless a sandbox is explicitly authorized", () => {
+  assert.throws(
+    () =>
+      createLocalCollectorServer({
+        sharedSecret: randomBytes(32).toString("base64url"),
+        registryEncryptionKey: randomBytes(32).toString("base64url"),
+        registryPath: join(tmpdir(), "sutra-live-mode-must-not-start.enc"),
+        mode: "live",
+        principalArn: "arn:aws:iam::999988887777:role/SutraLocalCollector",
+      }),
+    /Live AWS access is disabled/u,
+  );
+});
+
 test("signed loopback fixture API completes register, trust verification, and sync", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sutra-server-"));
   const sharedSecret = randomBytes(32).toString("base64url");
