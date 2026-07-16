@@ -22,6 +22,28 @@ import {
   type LocalAwsPartition,
   type RegisteredAwsConnection,
 } from "./local-registry.js";
+import {
+  DurableLocalJobQueue,
+  LocalJobIdempotencyConflictError,
+  LocalJobQueueError,
+  LocalJobValidationError,
+} from "./durable-job-queue.js";
+import {
+  createLocalFixtureCollectionJobPayload,
+  executeLocalFixtureCollectionJob,
+  getLocalFixtureAccount,
+  listLocalFixtureAccounts,
+  LOCAL_FIXTURE_COLLECTION_JOB_KIND,
+  LocalFixtureCatalogError,
+  type LocalFixtureCollectionJobResult,
+  type LocalFixtureVersion,
+} from "./local-fixture-catalog.js";
+import {
+  JsonFileLocalJobStateStore,
+  LocalJobStateError,
+  type LocalJobRecord,
+  type LocalJobStateStore,
+} from "./local-job-state.js";
 import { createWorkloadIdentityRoleBroker, parseIamRoleArn } from "./role-broker.js";
 import {
   RequestAuthenticationError,
@@ -49,7 +71,13 @@ const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
   /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|sync)$/;
+const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const FIXTURE_PRINCIPAL = "arn:aws:iam::999988887777:role/SutraLocalCollector";
+const DEFAULT_LOCAL_JOB_LIMIT = 50;
+const MAX_LOCAL_JOB_LIMIT = 100;
+const LOCAL_JOB_AVAILABLE_AT = new Date(0);
+
+export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
 
 export interface LocalCollectorServerOptions {
   readonly sharedSecret: string;
@@ -59,6 +87,15 @@ export interface LocalCollectorServerOptions {
   readonly allowLiveAws?: boolean;
   readonly principalArn?: string;
   readonly now?: () => Date;
+  readonly localJobStatePath?: string;
+  readonly localJobStore?: LocalJobStateStore;
+  readonly localJobWorkerEnabled?: boolean;
+  readonly localJobWorkerId?: string;
+  readonly localJobPollIntervalMs?: number;
+  readonly localJobLeaseMs?: number;
+  readonly localJobBaseBackoffMs?: number;
+  readonly localJobMaxBackoffMs?: number;
+  readonly localFixtureJobExecutor?: LocalFixtureJobExecutor;
 }
 
 interface ServerContext {
@@ -69,12 +106,26 @@ interface ServerContext {
   readonly registry: EncryptedFileConnectionRegistry;
   readonly authenticator: RequestAuthenticator;
   readonly runningSyncs: Set<string>;
+  readonly localJobs: LocalJobsContext | null;
+}
+
+interface LocalJobsContext {
+  readonly queue: DurableLocalJobQueue;
+  readonly worker: LocalFixtureJobWorker;
+  readonly tenantIds: readonly string[];
 }
 
 interface ScopedJob {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly jobId: string;
+}
+
+interface LocalFixtureJobInput {
+  readonly tenantId: string;
+  readonly fixtureId: string;
+  readonly version: LocalFixtureVersion;
+  readonly idempotencyKey: string;
 }
 
 export function createLocalCollectorServer(options: LocalCollectorServerOptions): Server {
@@ -92,11 +143,16 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     throw new Error("SUTRA_COLLECTOR_PRINCIPAL_ARN is required in live mode");
   }
   const parsedPrincipal = parseIamRoleArn(principalArn);
+  const now = options.now ?? (() => new Date());
+  const localJobs =
+    mode === "fixture"
+      ? createLocalJobsContext(options, now)
+      : null;
   const context: ServerContext = {
     mode,
     principalArn,
     sourceAccountId: parsedPrincipal.accountId,
-    now: options.now ?? (() => new Date()),
+    now,
     registry: new EncryptedFileConnectionRegistry({
       filePath: options.registryPath,
       encryptionKey: options.registryEncryptionKey,
@@ -107,6 +163,7 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       ...(options.now === undefined ? {} : { now: () => options.now!().getTime() }),
     }),
     runningSyncs: new Set(),
+    localJobs,
   };
 
   const server = createServer((request, response) => {
@@ -116,6 +173,10 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
+  if (localJobs !== null) {
+    server.on("listening", () => localJobs.worker.start());
+    server.on("close", () => localJobs.worker.stop());
+  }
   return server;
 }
 
@@ -127,6 +188,9 @@ export async function startLocalCollectorServer(): Promise<Server> {
     registryPath:
       process.env.SUTRA_REGISTRY_PATH?.trim() ||
       resolvePath(process.cwd(), ".sutra", "connections.enc.json"),
+    localJobStatePath:
+      process.env.SUTRA_LOCAL_JOBS_PATH?.trim() ||
+      resolvePath(process.cwd(), ".sutra", "local-jobs.json"),
     mode: collectorMode(process.env.SUTRA_COLLECTOR_MODE),
     allowLiveAws: exactBooleanEnvironment("SUTRA_ALLOW_LIVE_AWS", false),
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
@@ -141,13 +205,160 @@ export async function startLocalCollectorServer(): Promise<Server> {
   return server;
 }
 
+function createLocalJobsContext(
+  options: LocalCollectorServerOptions,
+  now: () => Date,
+): LocalJobsContext {
+  const store =
+    options.localJobStore ??
+    new JsonFileLocalJobStateStore({
+      filePath:
+        options.localJobStatePath ??
+        resolvePath(process.cwd(), ".sutra", "local-jobs.json"),
+    });
+  const queue = new DurableLocalJobQueue({
+    store,
+    now,
+    ...(options.localJobBaseBackoffMs === undefined
+      ? {}
+      : { baseBackoffMs: options.localJobBaseBackoffMs }),
+    ...(options.localJobMaxBackoffMs === undefined
+      ? {}
+      : { maxBackoffMs: options.localJobMaxBackoffMs }),
+  });
+  const tenantIds = [
+    ...new Set(listLocalFixtureAccounts().map((fixture) => fixture.tenantId)),
+  ].sort();
+  const worker = new LocalFixtureJobWorker({
+    queue,
+    now,
+    enabled: options.localJobWorkerEnabled ?? true,
+    workerId: options.localJobWorkerId ?? `collector-${process.pid}`,
+    pollIntervalMs: options.localJobPollIntervalMs ?? 250,
+    leaseMs: options.localJobLeaseMs ?? 30_000,
+    execute: options.localFixtureJobExecutor ?? executeLocalFixtureCollectionJob,
+  });
+  return { queue, worker, tenantIds };
+}
+
+class LocalFixtureJobWorker {
+  private readonly queue: DurableLocalJobQueue;
+  private readonly now: () => Date;
+  private readonly enabled: boolean;
+  private readonly workerId: string;
+  private readonly pollIntervalMs: number;
+  private readonly leaseMs: number;
+  private readonly execute: LocalFixtureJobExecutor;
+  private timer: ReturnType<typeof setInterval> | undefined;
+  private tickRunning = false;
+
+  public constructor(options: {
+    readonly queue: DurableLocalJobQueue;
+    readonly now: () => Date;
+    readonly enabled: boolean;
+    readonly workerId: string;
+    readonly pollIntervalMs: number;
+    readonly leaseMs: number;
+    readonly execute: LocalFixtureJobExecutor;
+  }) {
+    if (!IDENTIFIER.test(options.workerId)) {
+      throw new Error("localJobWorkerId is invalid");
+    }
+    if (
+      !Number.isInteger(options.pollIntervalMs) ||
+      options.pollIntervalMs < 5 ||
+      options.pollIntervalMs > 60_000
+    ) {
+      throw new Error("localJobPollIntervalMs must be between 5 and 60000");
+    }
+    if (
+      !Number.isInteger(options.leaseMs) ||
+      options.leaseMs < 1_000 ||
+      options.leaseMs > 86_400_000
+    ) {
+      throw new Error("localJobLeaseMs must be between 1000 and 86400000");
+    }
+    this.queue = options.queue;
+    this.now = options.now;
+    this.enabled = options.enabled;
+    this.workerId = options.workerId;
+    this.pollIntervalMs = options.pollIntervalMs;
+    this.leaseMs = options.leaseMs;
+    this.execute = options.execute;
+  }
+
+  public start(): void {
+    if (!this.enabled || this.timer !== undefined) return;
+    this.scheduleTick();
+    this.timer = setInterval(() => this.scheduleTick(), this.pollIntervalMs);
+    this.timer.unref();
+  }
+
+  public stop(): void {
+    if (this.timer !== undefined) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+
+  private scheduleTick(): void {
+    if (this.tickRunning) return;
+    this.tickRunning = true;
+    void this.tick().finally(() => {
+      this.tickRunning = false;
+    });
+  }
+
+  private async tick(): Promise<void> {
+    try {
+      await this.queue.recoverExpiredLeases();
+      for (let processed = 0; processed < 25; processed += 1) {
+        const job = await this.queue.leaseNext({
+          workerId: this.workerId,
+          leaseMs: this.leaseMs,
+          kinds: [LOCAL_FIXTURE_COLLECTION_JOB_KIND],
+        });
+        if (job === null || job.lease === undefined) return;
+        try {
+          const result = this.execute({
+            jobId: job.jobId,
+            tenantId: job.tenantId,
+            payload: job.payload,
+            now: this.now(),
+          });
+          await this.queue.complete({
+            tenantId: job.tenantId,
+            jobId: job.jobId,
+            leaseToken: job.lease.token,
+            result: fixtureResultToSafeObject(result),
+          });
+        } catch {
+          await this.queue.fail({
+            tenantId: job.tenantId,
+            jobId: job.jobId,
+            leaseToken: job.lease.token,
+            code: "LOCAL_FIXTURE_COLLECTION_FAILED",
+            message: "The local fixture inventory collection did not complete",
+          });
+        }
+      }
+    } catch {
+      // A later tick retries durable state access. Never crash the collector process.
+    }
+  }
+}
+
+function fixtureResultToSafeObject(
+  result: LocalFixtureCollectionJobResult,
+): SafeJsonObject {
+  return structuredClone(result) as unknown as SafeJsonObject;
+}
+
 async function dispatch(
   context: ServerContext,
   request: IncomingMessage,
   response: ServerResponse,
 ): Promise<void> {
   const rawUrl = request.url ?? "";
-  const path = safePath(rawUrl);
+  const path = safeRequestTarget(rawUrl);
   const nonce = responseNonce(request);
   try {
     const body = await readBody(request);
@@ -188,6 +399,79 @@ async function route(
           context.mode === "fixture"
             ? "Fixture collector ready; no AWS API calls will be made."
             : "Live read-only AWS collector ready.",
+      },
+    };
+  }
+
+  if (method === "GET" && path === "/v1/local/fixtures") {
+    requireEmptyBody(body);
+    requireLocalJobs(context);
+    return {
+      status: 200,
+      body: { fixtures: listLocalFixtureAccounts() },
+    };
+  }
+
+  if (method === "GET" && requestPathname(path) === "/v1/local/jobs") {
+    requireEmptyBody(body);
+    const localJobs = requireLocalJobs(context);
+    const limit = parseLocalJobLimit(path);
+    const jobs = (
+      await Promise.all(
+        localJobs.tenantIds.map((tenantId) =>
+          localJobs.queue.listJobs(tenantId, {
+            kind: LOCAL_FIXTURE_COLLECTION_JOB_KIND,
+          }),
+        ),
+      )
+    )
+      .flat()
+      .sort(compareLocalJobs)
+      .slice(0, limit)
+      .map((job) => serializeLocalJob(job));
+    return { status: 200, body: { jobs, count: jobs.length, limit } };
+  }
+
+  if (method === "POST" && path === "/v1/local/jobs/simulated-sync") {
+    const localJobs = requireLocalJobs(context);
+    const input = parseLocalFixtureJob(body);
+    const fixture = getLocalFixtureAccount(input.fixtureId);
+    if (fixture.tenantId !== input.tenantId) throw invalidRequest();
+    const result = await localJobs.queue.enqueue({
+      tenantId: input.tenantId,
+      kind: LOCAL_FIXTURE_COLLECTION_JOB_KIND,
+      idempotencyKey: input.idempotencyKey,
+      payload: createLocalFixtureCollectionJobPayload(input.fixtureId, input.version),
+      availableAt: LOCAL_JOB_AVAILABLE_AT,
+      maxAttempts: 5,
+    });
+    return {
+      status: result.created ? 202 : 200,
+      body: { created: result.created, job: serializeLocalJob(result.job) },
+    };
+  }
+
+  const localResultMatch = LOCAL_JOB_RESULT_PATH.exec(path);
+  if (method === "GET" && localResultMatch !== null) {
+    requireEmptyBody(body);
+    const jobId = localResultMatch[1];
+    if (jobId === undefined) throw invalidRequest();
+    const localJobs = requireLocalJobs(context);
+    const job = await findLocalJob(localJobs, jobId);
+    if (job === null) {
+      throw new LocalHttpError(404, "JOB_NOT_FOUND", "The local fixture job was not found");
+    }
+    if (job.status === "dead_letter") {
+      throw new LocalHttpError(422, "JOB_FAILED", "The local fixture job exhausted its retries");
+    }
+    if (job.status !== "succeeded" || job.result === undefined) {
+      throw new LocalHttpError(409, "JOB_NOT_READY", "The local fixture job is not complete");
+    }
+    return {
+      status: 200,
+      body: {
+        job: serializeLocalJob(job),
+        result: validatedLocalFixtureResult(job),
       },
     };
   }
@@ -677,6 +961,236 @@ function verificationResponse(verification: OnboardingTrustVerification): unknow
   };
 }
 
+function requireLocalJobs(context: ServerContext): LocalJobsContext {
+  if (context.localJobs === null) {
+    throw new LocalHttpError(
+      404,
+      "INVALID_REQUEST",
+      "The collector endpoint does not exist",
+    );
+  }
+  return context.localJobs;
+}
+
+function requireEmptyBody(body: string): void {
+  if (body.length !== 0) throw invalidRequest();
+}
+
+function requestPathname(target: string): string {
+  try {
+    return new URL(target, "http://127.0.0.1").pathname;
+  } catch {
+    return "/invalid";
+  }
+}
+
+function parseLocalJobLimit(target: string): number {
+  let parsed: URL;
+  try {
+    parsed = new URL(target, "http://127.0.0.1");
+  } catch {
+    throw invalidRequest();
+  }
+  if (parsed.pathname !== "/v1/local/jobs") throw invalidRequest();
+  if (parsed.search.length === 0) return DEFAULT_LOCAL_JOB_LIMIT;
+  const keys = [...parsed.searchParams.keys()];
+  const values = parsed.searchParams.getAll("limit");
+  if (keys.length !== 1 || keys[0] !== "limit" || values.length !== 1) {
+    throw invalidRequest();
+  }
+  const rawLimit = values[0];
+  if (rawLimit === undefined || !/^[1-9]\d{0,2}$/u.test(rawLimit)) {
+    throw invalidRequest();
+  }
+  const limit = Number(rawLimit);
+  if (limit > MAX_LOCAL_JOB_LIMIT) throw invalidRequest();
+  return limit;
+}
+
+function parseLocalFixtureJob(body: string): LocalFixtureJobInput {
+  const record = exactJson(body, [
+    "tenantId",
+    "fixtureId",
+    "version",
+    "idempotencyKey",
+  ]);
+  if (
+    typeof record.tenantId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    typeof record.fixtureId !== "string" ||
+    !IDENTIFIER.test(record.fixtureId) ||
+    typeof record.version !== "string" ||
+    typeof record.idempotencyKey !== "string" ||
+    !IDENTIFIER.test(record.idempotencyKey)
+  ) {
+    throw invalidRequest();
+  }
+  if (record.version !== "2026.07.0" && record.version !== "2026.07.1") {
+    throw invalidRequest();
+  }
+  return {
+    tenantId: record.tenantId,
+    fixtureId: record.fixtureId,
+    version: record.version,
+    idempotencyKey: record.idempotencyKey,
+  };
+}
+
+async function findLocalJob(
+  localJobs: LocalJobsContext,
+  jobId: string,
+): Promise<LocalJobRecord | null> {
+  for (const tenantId of localJobs.tenantIds) {
+    const job = await localJobs.queue.getJob(tenantId, jobId);
+    if (job !== null && job.kind === LOCAL_FIXTURE_COLLECTION_JOB_KIND) return job;
+  }
+  return null;
+}
+
+function compareLocalJobs(left: LocalJobRecord, right: LocalJobRecord): number {
+  return (
+    Date.parse(right.createdAt) - Date.parse(left.createdAt) ||
+    left.jobId.localeCompare(right.jobId)
+  );
+}
+
+function localJobScope(job: LocalJobRecord): {
+  readonly fixtureId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly version: LocalFixtureVersion;
+} {
+  const payload = job.payload;
+  const keys = Object.keys(payload).sort().join(",");
+  if (
+    job.kind !== LOCAL_FIXTURE_COLLECTION_JOB_KIND ||
+    keys !== "connectionId,customerId,fixtureId,version" ||
+    typeof payload.fixtureId !== "string" ||
+    typeof payload.customerId !== "string" ||
+    typeof payload.connectionId !== "string" ||
+    (payload.version !== "2026.07.0" && payload.version !== "2026.07.1")
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture job failed validation",
+    );
+  }
+  const fixture = getLocalFixtureAccount(payload.fixtureId);
+  if (
+    fixture.tenantId !== job.tenantId ||
+    fixture.customerId !== payload.customerId ||
+    fixture.connectionId !== payload.connectionId
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture job failed validation",
+    );
+  }
+  return {
+    fixtureId: payload.fixtureId,
+    customerId: payload.customerId,
+    connectionId: payload.connectionId,
+    version: payload.version,
+  };
+}
+
+function serializeLocalJob(job: LocalJobRecord): SafeJsonObject {
+  const scope = localJobScope(job);
+  return {
+    jobId: job.jobId,
+    tenantId: job.tenantId,
+    kind: job.kind,
+    fixtureId: scope.fixtureId,
+    customerId: scope.customerId,
+    connectionId: scope.connectionId,
+    version: scope.version,
+    status: job.status,
+    attempts: job.attempts,
+    maxAttempts: job.maxAttempts,
+    availableAt: job.availableAt,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.completedAt ?? null,
+    lastFailure:
+      job.lastFailure === undefined
+        ? null
+        : {
+            code: job.lastFailure.code,
+            message: job.lastFailure.message,
+            failedAt: job.lastFailure.failedAt,
+            retryAt: job.lastFailure.retryAt ?? null,
+          },
+  };
+}
+
+function validatedLocalFixtureResult(job: LocalJobRecord): SafeJsonObject {
+  const scope = localJobScope(job);
+  const result = job.result;
+  if (
+    result === undefined ||
+    Object.keys(result).sort().join(",") !==
+      "connectionId,customerId,fixtureId,jobId,snapshot,tenantId,version" ||
+    result.jobId !== job.jobId ||
+    result.tenantId !== job.tenantId ||
+    result.customerId !== scope.customerId ||
+    result.connectionId !== scope.connectionId ||
+    result.fixtureId !== scope.fixtureId ||
+    result.version !== scope.version ||
+    !isPlainRecord(result.snapshot)
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture result failed validation",
+    );
+  }
+  const snapshot = result.snapshot;
+  const fixture = getLocalFixtureAccount(scope.fixtureId);
+  if (
+    snapshot.schemaVersion !== "sutra.inventory.v1" ||
+    snapshot.jobId !== job.jobId ||
+    snapshot.connectionId !== scope.connectionId ||
+    snapshot.accountId !== fixture.accountId ||
+    typeof snapshot.snapshotSha256 !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(snapshot.snapshotSha256) ||
+    !Array.isArray(snapshot.resources) ||
+    !Array.isArray(snapshot.relationships) ||
+    !Array.isArray(snapshot.findings) ||
+    containsSensitiveCredentialKey(result)
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture result failed validation",
+    );
+  }
+  return structuredClone(result);
+}
+
+function containsSensitiveCredentialKey(value: SafeJsonValue): boolean {
+  if (Array.isArray(value)) return value.some((item) => containsSensitiveCredentialKey(item));
+  if (!isPlainRecord(value)) return false;
+  const forbidden = new Set([
+    "accesskeyid",
+    "credentials",
+    "externalid",
+    "rolearn",
+    "secretaccesskey",
+    "sessiontoken",
+  ]);
+  return Object.entries(value).some(
+    ([key, item]) => forbidden.has(key.toLowerCase()) || containsSensitiveCredentialKey(item),
+  );
+}
+
+function isPlainRecord(value: unknown): value is SafeJsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value) as unknown;
+  return prototype === Object.prototype || prototype === null;
+}
+
 function exactJson(body: string, keys: readonly string[]): Record<string, unknown> {
   let value: unknown;
   try {
@@ -767,6 +1281,26 @@ function safeHttpError(error: unknown): LocalHttpError {
   if (error instanceof RegistryError) {
     return new LocalHttpError(500, "COLLECTION_FAILED", "The encrypted connection registry could not complete the operation");
   }
+  if (error instanceof LocalJobIdempotencyConflictError) {
+    return new LocalHttpError(
+      409,
+      "IDEMPOTENCY_CONFLICT",
+      "The idempotency key is already bound to another local fixture request",
+    );
+  }
+  if (
+    error instanceof LocalJobValidationError ||
+    error instanceof LocalFixtureCatalogError
+  ) {
+    return invalidRequest();
+  }
+  if (error instanceof LocalJobStateError || error instanceof LocalJobQueueError) {
+    return new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture queue could not complete the operation",
+    );
+  }
   if (error instanceof CollectorError) {
     const mapped = new Map<string, string>([
       ["ASSUME_ROLE_FAILED", "ASSUME_ROLE_FAILED"],
@@ -806,11 +1340,22 @@ function invalidRequest(): LocalHttpError {
   return new LocalHttpError(400, "INVALID_REQUEST", "The collector request is invalid");
 }
 
-function safePath(rawUrl: string): string {
+function safeRequestTarget(rawUrl: string): string {
   try {
+    if (
+      rawUrl.length === 0 ||
+      rawUrl.length > 2_048 ||
+      !rawUrl.startsWith("/") ||
+      rawUrl.includes("#") ||
+      rawUrl.includes("%")
+    ) {
+      return "/invalid";
+    }
     const parsed = new URL(rawUrl, "http://127.0.0.1");
-    if (parsed.search.length > 0 || parsed.hash.length > 0 || parsed.pathname.includes("%")) return "/invalid";
-    return parsed.pathname;
+    if (parsed.hash.length > 0 || parsed.username.length > 0 || parsed.password.length > 0) {
+      return "/invalid";
+    }
+    return `${parsed.pathname}${parsed.search}`;
   } catch {
     return "/invalid";
   }
