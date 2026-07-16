@@ -14,9 +14,10 @@ import {
   snapshotOriginLabel,
   usePilotState,
 } from "../components/use-pilot-state";
+import { ComplianceExceptions } from "./compliance-exceptions";
 
 interface ComplianceApiResponse {
-  readonly schemaVersion: "sutra.compliance-report.v1";
+  readonly schemaVersion: "sutra.compliance-report.v2";
   readonly assessment: ComplianceAssessment;
   readonly frameworks: readonly ComplianceFrameworkDefinition[];
   readonly reportSha256: string;
@@ -417,6 +418,12 @@ export function ComplianceBrowser() {
               ) : null}
             </div>
           </section>
+
+          <ComplianceExceptions
+            connectionId={connection.id}
+            onChanged={refreshReport}
+            results={results}
+          />
 
           <div className="trust-strip compliance-disclaimer" role="note">
             <span className="trust-icon">i</span><span>{assessment.disclaimer}</span>

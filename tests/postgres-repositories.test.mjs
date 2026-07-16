@@ -11,6 +11,8 @@ const authRepository = await import("../db/auth-repository.ts");
 const localOperations = await import("../db/local-operations-repository.ts");
 const outboxRepository = await import("../db/local-schedule-outbox-repository.ts");
 const pilotRepository = await import("../db/pilot-repository.ts");
+const caseRepository = await import("../db/case-repository.ts");
+const complianceExceptionRepository = await import("../db/compliance-exception-repository.ts");
 const { closePostgresDatabase } = await import("../db/postgres-d1-adapter.ts");
 const { computeSnapshotSha256 } = await import("../lib/pilot-boundary.ts");
 const authCrypto = await import("../lib/local-auth-crypto.ts");
@@ -152,6 +154,86 @@ test("real PostgreSQL repositories persist auth, CMDB publication, and concurren
     });
     assert.equal(publication.jobId, jobId);
     assert.equal(publication.scheduleId, null);
+
+    const findingFingerprint = `pg-workflow-${crypto.randomUUID().replaceAll("-", "")}`;
+    const findingId = `finding_${crypto.randomUUID().replaceAll("-", "")}`;
+    await rawDatabase.prepare(
+      `INSERT INTO cmdb_findings
+        (id, snapshot_id, org_id, customer_id, connection_id, resource_key,
+         control_key, control_version, fingerprint, severity, status, title,
+         summary, remediation, evidence_json, evaluated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, ?, '1.0.0', ?, 'high', 'open', ?, ?, ?, '{}', ?)`,
+    ).bind(
+      findingId,
+      publication.snapshotId,
+      pilotRepository.LOCAL_ORG_ID,
+      fixture.customerId,
+      fixture.connectionId,
+      "SUTRA.AWS.EC2.PUBLIC_IP",
+      findingFingerprint,
+      "PostgreSQL workflow finding",
+      "Acceptance evidence for atomic workflow audit",
+      "Remove the test exposure",
+      Date.now(),
+    ).run();
+    const createdCase = await caseRepository.createFindingCase({
+      orgId: pilotRepository.LOCAL_ORG_ID,
+      customerId: fixture.customerId,
+      connectionId: fixture.connectionId,
+      fingerprint: findingFingerprint,
+      priority: "high",
+      assigneeMembershipId: bootstrapped.session.subject.membershipId,
+      dueAt: null,
+      actorUserId: bootstrapped.session.subject.userId,
+    });
+    const notedCase = await caseRepository.addCaseNote({
+      orgId: pilotRepository.LOCAL_ORG_ID,
+      customerId: fixture.customerId,
+      connectionId: fixture.connectionId,
+      caseId: createdCase.id,
+      actorUserId: bootstrapped.session.subject.userId,
+      note: "Atomic case note and audit acceptance",
+    });
+    assert.equal(notedCase.activities.length, 2);
+
+    const requestedException = await complianceExceptionRepository.createComplianceException({
+      orgId: pilotRepository.LOCAL_ORG_ID,
+      customerId: fixture.customerId,
+      connectionId: fixture.connectionId,
+      controlKey: "SUTRA.AWS.EC2.PUBLIC_IP",
+      findingFingerprint,
+      ownerUserId: bootstrapped.session.subject.userId,
+      requestedBy: bootstrapped.session.subject.userId,
+      rationale: "The acceptance database needs a governed exception workflow test.",
+      compensatingControl: "The isolated test database contains no customer workload or network path.",
+      expiresAt: Date.now() + 24 * 60 * 60 * 1_000,
+    });
+    const approvedException = await complianceExceptionRepository.reviewComplianceException({
+      orgId: pilotRepository.LOCAL_ORG_ID,
+      customerId: fixture.customerId,
+      connectionId: fixture.connectionId,
+      exceptionId: requestedException.id,
+      actorId: bootstrapped.session.subject.userId,
+      action: "approved",
+      reviewNote: "Single-owner PostgreSQL acceptance approval",
+      selfReviewed: true,
+    });
+    assert.equal(approvedException.status, "approved");
+    const workflowAudits = await rawDatabase.prepare(
+      `SELECT action FROM audit_events
+        WHERE org_id = ? AND customer_id = ?
+          AND action IN (
+            'finding.case.create', 'finding.case.note',
+            'compliance.exception.requested', 'compliance.exception.approved'
+          )
+        ORDER BY occurred_at, id`,
+    ).bind(pilotRepository.LOCAL_ORG_ID, fixture.customerId).all();
+    assert.deepEqual(workflowAudits.results.map((row) => row.action), [
+      "finding.case.create",
+      "finding.case.note",
+      "compliance.exception.requested",
+      "compliance.exception.approved",
+    ]);
 
     const firstRunAt = "2026-07-16T06:00:00.000Z";
     const inputs = ["0", "1", "2", "3", "4", "5", "6", "7"].map((character) => ({

@@ -7,7 +7,7 @@ import type { Capability } from "../../lib/auth-policy";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 
-type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "costs" | "compliance" | "reports" | "controls" | "roadmap" | "operations" | "onboard";
+type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "security_events" | "cases" | "costs" | "compliance" | "reports" | "controls" | "roadmap" | "operations" | "onboard";
 
 interface NavItem {
   readonly key: Exclude<NavKey, "onboard">;
@@ -23,12 +23,14 @@ const navItems: readonly NavItem[] = [
   { key: "cmdb", label: "CMDB inventory", href: "/cmdb", icon: "03", capability: "connection:read" },
   { key: "changes", label: "Change history", href: "/changes", icon: "04", capability: "connection:read" },
   { key: "findings", label: "Security findings", href: "/findings", icon: "05", capability: "connection:read" },
-  { key: "costs", label: "Cost & FinOps", href: "/costs", icon: "06", capability: "connection:read" },
-  { key: "compliance", label: "Compliance posture", href: "/compliance", icon: "07", capability: "connection:read" },
-  { key: "reports", label: "Executive reports", href: "/reports", icon: "08", capability: "connection:read" },
-  { key: "controls", label: "Control library", href: "/controls", icon: "09", capability: "workspace:read" },
-  { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "10", capability: "workspace:read" },
-  { key: "operations", label: "Simulation runs", href: "/operations", icon: "11", capability: "sync:run" },
+  { key: "security_events", label: "Security events", href: "/security-events", icon: "06", capability: "connection:read" },
+  { key: "cases", label: "Finding cases", href: "/cases", icon: "07", capability: "connection:read" },
+  { key: "costs", label: "Cost & FinOps", href: "/costs", icon: "08", capability: "connection:read" },
+  { key: "compliance", label: "Compliance posture", href: "/compliance", icon: "09", capability: "connection:read" },
+  { key: "reports", label: "Executive reports", href: "/reports", icon: "10", capability: "connection:read" },
+  { key: "controls", label: "Control library", href: "/controls", icon: "11", capability: "workspace:read" },
+  { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "12", capability: "workspace:read" },
+  { key: "operations", label: "Simulation runs", href: "/operations", icon: "13", capability: "sync:run" },
 ];
 
 function connectionTone(status: string | undefined): string {

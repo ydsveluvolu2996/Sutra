@@ -13,9 +13,13 @@ This tracker separates verified product behavior from work that is merely planne
 | Executive customer report | Complete | Customer-readable posture summary, priority recommendations, evidence hashes, and print/save-to-PDF workflow |
 | AWS Cost and FinOps | Complete for live demo | Real Cost Explorer ingestion, immutable cost evidence, six-month trends, service/account breakdown, forecast provenance, signals and explicit unavailable states; the first live snapshot is persisted |
 | MSP Command Center | Complete | Cross-customer account, asset, workload, freshness and provenance view |
-| Full regression and local database migration | Complete | Secret scan, typecheck, lint, 225 application tests, 81 collector tests, PostgreSQL integration tests, production build and 4 protected-render tests passed; the additive live database migration is applied |
-| Live runtime restart | Complete | The verified build is running locally with a fresh short-lived federated collector session, the reviewed immutable onboarding template, and the migrated PostgreSQL database |
-| GitHub milestone | Complete | Verified source is committed and pushed to the existing draft pull request; GitHub CI passed |
+| Finding case management | Complete locally | Real finding-backed cases, assignees, priorities, due dates, SLA state, notes, lifecycle transitions, hash-linked activity and audit attribution |
+| Compliance exception governance | Complete locally | Exact-finding requests, scoped owners, rationale, compensating controls, expiry, MFA-reviewed approval/rejection/revocation and report integration; exceptions never become passes |
+| Security Events Lite | Complete locally; live activation pending | Bounded CloudTrail LookupEvents ingestion, normalized search, source coverage, 30-day retention, four explainable rules and audited acknowledge/reopen workflow; no fabricated events |
+| Expanded AWS CMDB coverage | Complete in source; live activation pending | EBS, ENI, ALB/NLB, KMS, DynamoDB and ECR metadata plus bounded relationship mapping and partial-failure evidence; Lambda remains opt-in/off because its list response can contain environment values |
+| Full regression and local database migration | Complete | Secret scan, both typechecks, lint, 250 application tests (247 passed, 3 environment-gated skips), 95 collector tests, real PostgreSQL migration/repository tests, production build and 4 protected-render tests passed; three additive live database migrations are applied |
+| Live permission-pack `.2` activation | Pending explicit AWS approval | Publish the reviewed immutable template, update the existing customer role with ten additional read-only actions, re-attest the same role, then restart the verified build |
+| GitHub milestone | Pending | Commit and push this verified operations wave to the existing draft pull request, then confirm GitHub CI |
 
 ## Explicitly after the investor demo
 
@@ -25,9 +29,9 @@ These are production SaaS programs and are not represented as overnight delivera
 - Enterprise OIDC/SAML, SCIM, recovery administration and production identity lifecycle.
 - AWS Organizations/OU discovery and StackSets-based bulk account onboarding.
 - CUR 2.0 data lake ingestion, allocation rules, commitment optimization and billing-grade reconciliation.
-- CloudTrail security-event ingestion, correlation, searchable retention and SIEM integrations.
+- Scheduled/event-driven CloudTrail ingestion, long-term log-lake retention, broader correlation and SIEM integrations beyond the bounded manual LookupEvents workspace.
 - Jira, ServiceNow, PSA, email, webhook, Slack and Teams delivery workflows.
-- Full security case management with assignments, SLA policies, comments and approval-controlled exceptions.
+- Production workflow automation, escalation calendars, external ticket synchronization and two-person exception approval beyond the local case/exception workflows.
 - Customer white-labeling, subscription controls, usage metering and billing.
 - Managed queue/worker fleet, hosted observability/SLOs, HA, backup/DR exercises and penetration-test closure.
 - Independent workload/package/container vulnerability scanning; Sutra currently imports native Inspector evidence when available.

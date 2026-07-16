@@ -34,6 +34,42 @@ import {
 
 const scope: ConnectionScope = { tenantId: "tenant-01", subjectId: "queue-worker" };
 const COLLECTOR_PRINCIPAL_ARN = "arn:aws:iam::999988887777:role/SutraLocalCollector";
+const EXPECTED_IMPLEMENTED_READ_ACTIONS = [
+  "sts:GetCallerIdentity",
+  "ec2:DescribeRegions",
+  "ec2:DescribeInstances",
+  "ec2:DescribeVpcs",
+  "ec2:DescribeSubnets",
+  "ec2:DescribeSecurityGroups",
+  "ec2:DescribeVolumes",
+  "ec2:DescribeNetworkInterfaces",
+  "elasticloadbalancing:DescribeLoadBalancers",
+  "kms:ListKeys",
+  "kms:ListAliases",
+  "kms:DescribeKey",
+  "dynamodb:ListTables",
+  "dynamodb:DescribeTable",
+  "ecr:DescribeRepositories",
+  "s3:ListAllMyBuckets",
+  "s3:GetBucketPublicAccessBlock",
+  "rds:DescribeDBInstances",
+  "iam:GetAccountSummary",
+  "iam:GetAccountPasswordPolicy",
+  "cloudtrail:DescribeTrails",
+  "cloudtrail:GetTrailStatus",
+  "cloudtrail:LookupEvents",
+  "guardduty:ListDetectors",
+  "guardduty:GetDetector",
+  "guardduty:ListFindings",
+  "guardduty:GetFindings",
+  "securityhub:DescribeHub",
+  "securityhub:GetFindings",
+  "inspector2:BatchGetAccountStatus",
+  "inspector2:ListFindings",
+  "ce:GetCostAndUsage",
+  "ce:GetCostForecast",
+] as const;
+const EXPECTED_TRUST_ACTIONS = ["iam:GetRole", "iam:ListRolePolicies", "iam:GetRolePolicy"] as const;
 
 function connection(
   overrides: Partial<StoredAwsConnection> = {},
@@ -45,6 +81,7 @@ function connection(
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status: "ACTIVE",
+    permissionPackVersion: "live-demo-2026-07.2",
     sessionNamePrefix: "mspcmdb-",
     ...overrides,
   };
@@ -135,7 +172,7 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "live-demo-2026-07.1" },
+        { key: "sutra:permission-pack", value: "live-demo-2026-07.2" },
         { key: "sutra:managed-by", value: "cloudformation" },
       ],
     }),
@@ -147,6 +184,12 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
       policyDocument: encodeURIComponent(JSON.stringify({
         Version: "2012-10-17",
         Statement: [
+          {
+            Sid: "DenyUnimplementedActions",
+            Effect: "Deny",
+            NotAction: [...(metadata?.Action ?? []), ...(attestation?.Action ?? [])],
+            Resource: "*",
+          },
           {
             Sid: "ImplementedMetadataApis",
             Effect: "Allow",
@@ -258,6 +301,13 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
   assert.ok(actions.includes("ec2:DescribeInstances"));
   assert.ok(actions.includes("ce:GetCostAndUsage"));
   assert.ok(actions.includes("ce:GetCostForecast"));
+  assert.ok(actions.includes("cloudtrail:LookupEvents"));
+  assert.ok(actions.includes("ec2:DescribeVolumes"));
+  assert.ok(actions.includes("ec2:DescribeNetworkInterfaces"));
+  assert.ok(actions.includes("elasticloadbalancing:DescribeLoadBalancers"));
+  assert.ok(actions.includes("kms:DescribeKey"));
+  assert.ok(actions.includes("dynamodb:DescribeTable"));
+  assert.ok(actions.includes("ecr:DescribeRepositories"));
   assert.ok(actions.includes("iam:GetRole"));
   assert.equal(actions.some((action) => /(?:Put|Create|Delete|Update|Attach|PassRole|AssumeRole)/u.test(action)), false);
   assert.equal(
@@ -265,7 +315,15 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
     roleArn,
   );
   assert.equal(denyOutside?.Effect, "Deny");
-  assert.deepEqual(new Set(denyOutside?.NotAction), new Set(actions));
+  assert.deepEqual(new Set(denyOutside?.NotAction), new Set([
+    "sts:GetCallerIdentity", "ec2:Describe*", "s3:ListAllMyBuckets",
+    "s3:GetBucketPublicAccessBlock", "rds:Describe*", "iam:Get*", "iam:List*",
+    "cloudtrail:Describe*", "cloudtrail:GetTrailStatus", "cloudtrail:LookupEvents",
+    "guardduty:List*", "guardduty:Get*", "securityhub:Describe*", "securityhub:Get*",
+    "inspector2:BatchGet*", "inspector2:List*", "ce:Get*",
+    "elasticloadbalancing:Describe*", "kms:List*", "kms:Describe*",
+    "dynamodb:List*", "dynamodb:Describe*", "ecr:Describe*",
+  ]));
   assert.equal(denyOutside?.Resource, "*");
   assert.equal(denyTrustScope?.Effect, "Deny");
   assert.deepEqual(new Set(denyTrustScope?.Action), new Set([
@@ -274,6 +332,34 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
     "iam:GetRolePolicy",
   ]));
   assert.equal(denyTrustScope?.NotResource, roleArn);
+});
+
+test("the permission pack exact Allows and compact deny exceptions have independent full parity", () => {
+  const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
+  const policy = JSON.parse(readonlyMetadataSessionPolicy(roleArn)) as {
+    Statement: Array<{ Effect: string; Action?: string[]; NotAction?: string[]; Resource?: string }>;
+  };
+  const metadata = policy.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === "*",
+  );
+  const trust = policy.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === roleArn,
+  );
+  const deny = policy.Statement.find(
+    (statement) => statement.Effect === "Deny" && statement.NotAction !== undefined,
+  );
+  assert.deepEqual(new Set(metadata?.Action), new Set(EXPECTED_IMPLEMENTED_READ_ACTIONS));
+  assert.deepEqual(new Set(trust?.Action), new Set(EXPECTED_TRUST_ACTIONS));
+  const patterns = deny?.NotAction ?? [];
+  for (const action of [...EXPECTED_IMPLEMENTED_READ_ACTIONS, ...EXPECTED_TRUST_ACTIONS]) {
+    assert.equal(
+      patterns.some((pattern) => pattern.endsWith("*")
+        ? action.startsWith(pattern.slice(0, -1))
+        : action === pattern),
+      true,
+      action,
+    );
+  }
 });
 
 test("workload STS and IAM clients use bounded standard-retry HTTP timeouts", () => {
@@ -340,6 +426,23 @@ test("positive AssumeRole/GetCallerIdentity contract uses registry trust materia
   assert.equal(identityClient.calls, 1);
   assert.equal(session.accountId, stored.expectedAccountId);
   assert.equal(session.credentials.sessionToken, "session-token-not-for-logs");
+});
+
+test("an active legacy permission pack is denied before STS is called", async () => {
+  const stored = connection({ permissionPackVersion: "live-demo-2026-07.1" });
+  const assume = new FakeAssumeRoleClient(() => successfulAssumeRole());
+  const broker = new AwsRoleBroker({
+    registry: new MemoryRegistry(stored),
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored),
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => ({ $metadata: {} })),
+  });
+  await assert.rejects(
+    broker.assumeValidatedSession(scope, stored.connectionId, "legacy-pack-job"),
+    /not in a state/u,
+  );
+  assert.equal(assume.calls.length, 0);
 });
 
 test("onboarding requires positive validation plus missing and wrong ExternalId denials", async () => {

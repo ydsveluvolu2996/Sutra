@@ -1,9 +1,15 @@
 import postgresBaselineSql from "../postgres/migrations/0000_sutra_baseline.sql?raw";
 import postgresFinopsSql from "../postgres/migrations/0001_finops_cost_snapshots.sql?raw";
+import postgresCaseManagementSql from "../postgres/migrations/0002_case_management.sql?raw";
+import postgresSecurityEventsSql from "../postgres/migrations/0003_security_events.sql?raw";
+import postgresComplianceExceptionsSql from "../postgres/migrations/0004_compliance_exceptions.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
   { id: "0001_finops_cost_snapshots", source: postgresFinopsSql },
+  { id: "0002_case_management", source: postgresCaseManagementSql },
+  { id: "0003_security_events", source: postgresSecurityEventsSql },
+  { id: "0004_compliance_exceptions", source: postgresComplianceExceptionsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

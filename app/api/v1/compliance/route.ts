@@ -1,13 +1,17 @@
 import { getConnection, getPilotState } from "../../../../db/pilot-repository";
+import { listComplianceExceptions } from "../../../../db/compliance-exception-repository";
 import { assertSessionCapability } from "../../../../lib/api-auth";
 import {
   COMPLIANCE_FRAMEWORKS,
 } from "../../../../lib/compliance-catalog";
 import {
   assessCompliance,
-  type ComplianceAssessment,
 } from "../../../../lib/compliance-engine";
 import { canonicalJson } from "../../../../lib/canonical-json";
+import {
+  applyComplianceExceptions,
+  type ComplianceAssessmentWithExceptions,
+} from "../../../../lib/compliance-exception-types";
 import {
   errorResponse,
   jsonResponse,
@@ -40,7 +44,7 @@ function csvCell(value: unknown): string {
 }
 
 function complianceCsv(
-  assessment: ComplianceAssessment,
+  assessment: ComplianceAssessmentWithExceptions,
   reportSha256: string,
 ): string {
   const header = [
@@ -65,6 +69,9 @@ function complianceCsv(
     "applicable_resource_count",
     "coverage",
     "matching_findings",
+    "approved_exception_ids",
+    "exception_expiries",
+    "compensating_controls",
     "nist_csf_2_categories",
     "remediation",
     "limitation",
@@ -95,6 +102,9 @@ function complianceCsv(
     result.evidence.matchingFindings
       .map((finding) => finding.fingerprint)
       .join(";"),
+    result.approvedExceptions.map((exception) => exception.exceptionId).join(";"),
+    result.approvedExceptions.map((exception) => exception.expiresAt).join(";"),
+    result.approvedExceptions.map((exception) => exception.compensatingControl).join(";"),
     result.frameworkMappings
       .flatMap((mapping) => mapping.categories)
       .join(";"),
@@ -152,11 +162,17 @@ export async function GET(request: Request): Promise<Response> {
         state.connection.customerId,
       );
     }
-    const assessment = assessCompliance(state);
+    const exceptionRecords = state.connection === null ? [] : await listComplianceExceptions({
+      orgId: actor.orgId,
+      customerId: state.connection.customerId,
+      connectionId: state.connection.id,
+    });
+    const assessment = applyComplianceExceptions(assessCompliance(state), exceptionRecords);
     const reportCore = {
-      schemaVersion: "sutra.compliance-report.v1" as const,
+      schemaVersion: "sutra.compliance-report.v2" as const,
       assessment,
       frameworks: COMPLIANCE_FRAMEWORKS,
+      exceptions: exceptionRecords,
     };
     const reportSha256 = await sha256Hex(canonicalJson(reportCore));
     if (format === "view") {

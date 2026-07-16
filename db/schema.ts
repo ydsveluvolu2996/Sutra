@@ -450,3 +450,194 @@ export const costSnapshots = sqliteTable("cost_snapshots", {
   uniqueIndex("cost_snapshots_connection_hash_uq").on(table.orgId, table.connectionId, table.payloadSha256),
   index("cost_snapshots_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.collectedAt, table.id),
 ]);
+
+/** Time-bounded, finding-specific compliance risk acceptance workflow. */
+export const complianceExceptions = sqliteTable("compliance_exceptions", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  controlKey: text("control_key").notNull(),
+  findingFingerprint: text("finding_fingerprint").notNull(),
+  status: text("status", { enum: ["pending", "approved", "rejected", "revoked"] }).notNull().default("pending"),
+  ownerUserId: text("owner_user_id").notNull().references(() => users.id),
+  requestedBy: text("requested_by").notNull().references(() => users.id),
+  reviewedBy: text("reviewed_by").references(() => users.id),
+  rationale: text("rationale").notNull(),
+  compensatingControl: text("compensating_control").notNull(),
+  reviewNote: text("review_note"),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  requestedAt: timestamp("requested_at"),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("compliance_exceptions_active_finding_uq")
+    .on(table.orgId, table.connectionId, table.findingFingerprint)
+    .where(sql`${table.status} IN ('pending', 'approved')`),
+  index("compliance_exceptions_scope_status_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.status, table.expiresAt),
+]);
+
+/** Immutable local activity ledger; the global chained audit log is also appended. */
+export const complianceExceptionEvents = sqliteTable("compliance_exception_events", {
+  id: text("id").primaryKey(),
+  exceptionId: text("exception_id").notNull().references(() => complianceExceptions.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  actorId: text("actor_id").notNull().references(() => users.id),
+  action: text("action", { enum: ["requested", "approved", "rejected", "revoked"] }).notNull(),
+  note: text("note"),
+  occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  index("compliance_exception_events_scope_time_idx")
+    .on(table.orgId, table.exceptionId, table.occurredAt, table.id),
+]);
+
+export const findingCases = sqliteTable("finding_cases", {
+  id: text("id").primaryKey(),
+  caseNumber: text("case_number").notNull(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  findingFingerprint: text("finding_fingerprint").notNull(),
+  findingSnapshotId: text("finding_snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  findingSeverity: text("finding_severity").notNull(),
+  title: text("title").notNull(),
+  status: text("status", { enum: ["open", "investigating", "resolved", "closed"] }).notNull().default("open"),
+  priority: text("priority", { enum: ["critical", "high", "medium", "low"] }).notNull(),
+  assigneeMembershipId: text("assignee_membership_id").references(() => memberships.id),
+  dueAt: integer("due_at", { mode: "timestamp_ms" }).notNull(),
+  resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+  closedAt: integer("closed_at", { mode: "timestamp_ms" }),
+  createdByUserId: text("created_by_user_id").notNull().references(() => users.id),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("finding_cases_org_number_uq").on(table.orgId, table.caseNumber),
+  uniqueIndex("finding_cases_active_fingerprint_uq")
+    .on(table.orgId, table.connectionId, table.findingFingerprint)
+    .where(sql`${table.status} != 'closed'`),
+  index("finding_cases_scope_status_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.status, table.updatedAt),
+]);
+
+export const findingCaseActivities = sqliteTable("finding_case_activities", {
+  id: text("id").primaryKey(),
+  caseId: text("case_id").notNull().references(() => findingCases.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  kind: text("kind", { enum: ["created", "status_changed", "assignment_changed", "priority_changed", "due_date_changed", "note_added"] }).notNull(),
+  actorUserId: text("actor_user_id").notNull().references(() => users.id),
+  occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+  detailJson: text("detail_json").notNull(),
+  previousEventHash: text("previous_event_hash"),
+  eventHash: text("event_hash").notNull(),
+}, (table) => [
+  uniqueIndex("finding_case_activity_hash_uq").on(table.caseId, table.eventHash),
+  uniqueIndex("finding_case_activity_chain_uq").on(table.caseId, table.previousEventHash),
+  index("finding_case_activity_timeline_idx")
+    .on(table.orgId, table.customerId, table.caseId, table.occurredAt, table.id),
+]);
+
+export const securityEventSources = sqliteTable("security_event_sources", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  source: text("source", { enum: ["aws_cloudtrail_lookup_events"] }).notNull().default("aws_cloudtrail_lookup_events"),
+  status: text("status", { enum: ["NOT_COLLECTED", "COMPLETE", "PARTIAL", "UNAVAILABLE"] }).notNull().default("NOT_COLLECTED"),
+  retentionDays: integer("retention_days").notNull().default(30),
+  lookbackHours: integer("lookback_hours").notNull().default(1),
+  overlapMinutes: integer("overlap_minutes").notNull().default(5),
+  lastWindowStart: integer("last_window_start", { mode: "timestamp_ms" }),
+  lastWindowEnd: integer("last_window_end", { mode: "timestamp_ms" }),
+  lastCollectedAt: integer("last_collected_at", { mode: "timestamp_ms" }),
+  lastRunId: text("last_run_id"),
+  lastErrorCode: text("last_error_code"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("security_event_sources_scope_uq").on(table.orgId, table.customerId, table.connectionId),
+]);
+
+export const securityEventRuns = sqliteTable("security_event_runs", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  source: text("source", { enum: ["aws_cloudtrail_lookup_events"] }).notNull().default("aws_cloudtrail_lookup_events"),
+  status: text("status", { enum: ["PERSISTING", "COMPLETE", "PARTIAL", "UNAVAILABLE"] }).notNull(),
+  windowStart: integer("window_start", { mode: "timestamp_ms" }).notNull(),
+  windowEnd: integer("window_end", { mode: "timestamp_ms" }).notNull(),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }).notNull(),
+  coverageJson: text("coverage_json").notNull(),
+  eventsObserved: integer("events_observed").notNull().default(0),
+  eventsInserted: integer("events_inserted").notNull().default(0),
+  duplicateEvents: integer("duplicate_events").notNull().default(0),
+  detectionsObserved: integer("detections_observed").notNull().default(0),
+  payloadSha256: text("payload_sha256").notNull(),
+}, (table) => [
+  uniqueIndex("security_event_runs_scope_hash_uq").on(table.orgId, table.connectionId, table.payloadSha256),
+  index("security_event_runs_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.collectedAt, table.id),
+]);
+
+export const securityEvents = sqliteTable("security_events", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  sourceRunId: text("source_run_id").notNull().references(() => securityEventRuns.id),
+  providerEventId: text("provider_event_id").notNull(),
+  accountId: text("account_id").notNull(),
+  regionKey: text("region_key").notNull(),
+  eventTime: integer("event_time", { mode: "timestamp_ms" }).notNull(),
+  eventName: text("event_name").notNull(),
+  eventSource: text("event_source").notNull(),
+  readOnly: integer("read_only", { mode: "boolean" }),
+  managementEvent: integer("management_event", { mode: "boolean" }),
+  eventCategory: text("event_category"),
+  username: text("username"),
+  identityType: text("identity_type"),
+  principalArn: text("principal_arn"),
+  sourceIp: text("source_ip"),
+  userAgent: text("user_agent"),
+  errorCode: text("error_code"),
+  requestId: text("request_id"),
+  consoleLoginResult: text("console_login_result", { enum: ["Success", "Failure"] }),
+  mfaUsed: integer("mfa_used", { mode: "boolean" }),
+  detailStatus: text("detail_status", { enum: ["AVAILABLE", "UNAVAILABLE"] }).notNull(),
+  resourcesJson: text("resources_json").notNull().default("[]"),
+  ingestedAt: integer("ingested_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("security_events_provider_identity_uq").on(table.orgId, table.connectionId, table.providerEventId),
+  index("security_events_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.eventTime, table.id),
+  index("security_events_scope_name_idx").on(table.orgId, table.customerId, table.connectionId, table.eventName, table.regionKey, table.eventTime),
+]);
+
+export const securityEventDetections = sqliteTable("security_event_detections", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  sourceRunId: text("source_run_id").notNull().references(() => securityEventRuns.id),
+  ruleKey: text("rule_key").notNull(),
+  ruleVersion: text("rule_version").notNull(),
+  severity: text("severity", { enum: ["critical", "high", "medium", "low"] }).notNull(),
+  status: text("status", { enum: ["open", "acknowledged"] }).notNull().default("open"),
+  title: text("title").notNull(),
+  summary: text("summary").notNull(),
+  firstEventAt: integer("first_event_at", { mode: "timestamp_ms" }).notNull(),
+  lastEventAt: integer("last_event_at", { mode: "timestamp_ms" }).notNull(),
+  eventIdsJson: text("event_ids_json").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  limitation: text("limitation").notNull(),
+  note: text("note"),
+  actorId: text("actor_id").references(() => users.id),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("security_event_detections_scope_id_uq").on(table.orgId, table.connectionId, table.id),
+  index("security_event_detections_scope_status_idx").on(table.orgId, table.customerId, table.connectionId, table.status, table.severity, table.lastEventAt, table.id),
+]);

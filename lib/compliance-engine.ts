@@ -236,9 +236,9 @@ function controlResult(
     status = "FAIL";
     reason = `${failing.length} active finding${failing.length === 1 ? "" : "s"} matched this control.`;
   } else if (suppressed.length > 0) {
-    status = "EXCEPTED";
+    status = "UNKNOWN";
     reason =
-      "All currently observed failures are suppressed in the finding workflow. Suppression is not a compliance certification; approval and expiry must be validated separately.";
+      "All currently observed failures are suppressed in the finding workflow, but no approved, unexpired compliance exception has been applied. Suppression alone is not a compliance exception.";
   } else if (
     hasGlobalIntegrityFailure(state) ||
     coverage.some((item) => item.conclusion !== "COMPLETE")

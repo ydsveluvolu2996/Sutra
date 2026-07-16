@@ -24,6 +24,8 @@ import type { Capability } from "./auth-policy";
 import { LIVE_AWS_BROKER_TIMEOUT_MS } from "../services/aws-collector/src/live-collection-limits";
 import { parseAwsCostSnapshot } from "./cost-boundary";
 import type { AwsCostSnapshot } from "./cost-types";
+import { parseAwsSecurityEventCollection } from "./security-event-boundary";
+import type { AwsSecurityEventCollection } from "./security-event-types";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
@@ -394,7 +396,7 @@ export async function verifyCollectorConnection(input: {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.1";
+  readonly permissionPackVersion: "live-demo-2026-07.2";
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parseVerificationResponse(
@@ -441,6 +443,33 @@ export async function runCollectorCostCollection(input: {
       "POST",
       payload,
       90_000,
+    ),
+    input.accountId,
+  );
+}
+
+export async function runCollectorSecurityEventCollection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly windowStart: string;
+  readonly windowEnd: string;
+}): Promise<AwsSecurityEventCollection> {
+  const payload = {
+    tenantId: input.tenantId,
+    connectionId: input.connectionId,
+    jobId: input.jobId,
+    windowStart: input.windowStart,
+    windowEnd: input.windowEnd,
+  };
+  return parseAwsSecurityEventCollection(
+    await brokerFetch<unknown>(
+      `/v1/connections/${input.connectionId}/security-events`,
+      "POST",
+      payload,
+      120_000,
     ),
     input.accountId,
   );

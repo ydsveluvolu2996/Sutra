@@ -22,6 +22,10 @@ import type {
   StoredAwsConnection,
 } from "./types.js";
 import {
+  CURRENT_PERMISSION_PACK_VERSION,
+  LEGACY_PERMISSION_PACK_VERSION,
+} from "./types.js";
+import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
   type LocalAwsPartition,
@@ -114,6 +118,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       roleArn: connection.roleArn,
       externalId: connection.externalId,
       status: connection.status,
+      permissionPackVersion: connection.permissionPackVersion,
       ...(connection.sessionNamePrefix === undefined
         ? {}
         : { sessionNamePrefix: connection.sessionNamePrefix }),
@@ -166,6 +171,9 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
           [key]: {
             ...parsed,
             status: unchanged ? previous.status : "PENDING",
+            permissionPackVersion: unchanged
+              ? previous.permissionPackVersion
+              : LEGACY_PERMISSION_PACK_VERSION,
             createdAt: previous?.createdAt ?? timestamp,
             updatedAt: timestamp,
           },
@@ -272,7 +280,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         verification.trustPolicyAttested !== true ||
         verification.permissionPolicyAttested !== true ||
         verification.sessionPolicyApplied !== true ||
-        verification.permissionPackVersion !== "live-demo-2026-07.1"
+        verification.permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
       ) {
         throw new RegistryIntegrityError();
       }
@@ -286,6 +294,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
             // or changed candidate remains fail-closed until the control plane
             // commits and calls activateOnboarding with the exact role ARN.
             status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
+            permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
             updatedAt: this.now().toISOString(),
           },
         },
@@ -316,8 +325,14 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ) {
         throw new RegistryStateError();
       }
-      if (connection.status === "ACTIVE") return document;
+      if (
+        connection.status === "ACTIVE" &&
+        connection.permissionPackVersion === CURRENT_PERMISSION_PACK_VERSION
+      ) return document;
       if (connection.status !== "VERIFIED") throw new RegistryStateError();
+      if (connection.permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION) {
+        throw new RegistryStateError();
+      }
       return {
         version: 2,
         connections: {
@@ -523,6 +538,7 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
     roleArn: input.roleArn,
     externalId: input.externalId,
     status: "PENDING",
+    permissionPackVersion: LEGACY_PERMISSION_PACK_VERSION,
     sessionNamePrefix: prefix,
     enabledRegions: [...input.enabledRegions],
     createdAt: timestamp,
@@ -606,7 +622,7 @@ function parseTombstone(value: unknown): RegistryTombstone {
 }
 
 function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
-  const record = exactRecord(value, [
+  const legacyKeys = [
     "tenantId",
     "connectionId",
     "expectedAccountId",
@@ -618,7 +634,9 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
     "enabledRegions",
     "createdAt",
     "updatedAt",
-  ]);
+  ];
+  const currentKeys = [...legacyKeys, "permissionPackVersion"];
+  const record = exactRecord(value, Object.hasOwn(value, "permissionPackVersion") ? currentKeys : legacyKeys);
   if (
     typeof record.tenantId !== "string" ||
     typeof record.connectionId !== "string" ||
@@ -653,9 +671,17 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   if (!validIsoDate(record.createdAt) || !validIsoDate(record.updatedAt)) {
     throw new RegistryIntegrityError();
   }
+  const permissionPackVersion = record.permissionPackVersion ?? LEGACY_PERMISSION_PACK_VERSION;
+  if (
+    permissionPackVersion !== LEGACY_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
+  ) {
+    throw new RegistryIntegrityError();
+  }
   return {
     ...parsed,
     status: record.status,
+    permissionPackVersion,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

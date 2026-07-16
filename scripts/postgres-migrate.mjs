@@ -15,6 +15,9 @@ const root = resolve(import.meta.dirname, "..");
 const migrationFiles = [
   "0000_sutra_baseline.sql",
   "0001_finops_cost_snapshots.sql",
+  "0002_case_management.sql",
+  "0003_security_events.sql",
+  "0004_compliance_exceptions.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

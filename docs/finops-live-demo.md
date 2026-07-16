@@ -9,7 +9,7 @@ Sutra never substitutes sample spend for AWS billing evidence. The Cost workspac
 3. Choose **Update → Replace current template → Upload a template file**.
 4. Upload the checked-in `public/sutra-customer-role-live-demo.yaml` file from this repository.
 5. Keep the existing `VendorCollectorRoleArn`, `ExternalId`, `CustomerTenantId`, and optional boundary parameters unchanged. Review and submit the change set.
-6. Confirm the updated inline policy includes only the two new billing reads: `ce:GetCostAndUsage` and `ce:GetCostForecast`. No billing writes, purchases, commitments, or resource mutations are granted.
+6. Confirm the updated inline policy contains `ce:GetCostAndUsage` and `ce:GetCostForecast` together with the current permission-pack `.2` metadata reads documented in `operations-wave-live-activation.md`. No billing writes, purchases, commitments, data-plane reads, or resource mutations are granted.
 7. Return to **Sutra → Costs** and choose **Refresh from AWS**.
 
 If Cost Explorer was only just activated, AWS may not have billing history ready immediately. Sutra will persist `BILLING_DATA_UNAVAILABLE` and can be retried later without re-onboarding or sharing credentials.

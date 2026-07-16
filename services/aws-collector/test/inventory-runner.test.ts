@@ -11,10 +11,14 @@ import {
   awsInventorySdkClientConfig,
   type AwsInventoryClientFactory,
   type CloudTrailInventoryClient,
+  type DynamoDbInventoryClient,
   type Ec2InventoryClient,
+  type EcrInventoryClient,
+  type Elbv2InventoryClient,
   type GuardDutyInventoryClient,
   type IamInventoryClient,
   type InspectorInventoryClient,
+  type KmsInventoryClient,
   type RdsInventoryClient,
   type S3InventoryClient,
   type SecurityHubInventoryClient,
@@ -255,6 +259,46 @@ class FakeClientFactory implements AwsInventoryClientFactory {
             },
           ],
         })),
+      describeVolumes: () => this.tracker.run(() => ({ $metadata: {}, Volumes: [] })),
+      describeNetworkInterfaces: () =>
+        this.tracker.run(() => ({ $metadata: {}, NetworkInterfaces: [] })),
+    };
+  }
+
+  public elbv2(_region: string): Elbv2InventoryClient {
+    void _region;
+    return {
+      describeLoadBalancers: () =>
+        this.tracker.run(() => ({ $metadata: {}, LoadBalancers: [] })),
+    };
+  }
+
+  public kms(_region: string): KmsInventoryClient {
+    void _region;
+    return {
+      listKeys: () => this.tracker.run(() => ({ $metadata: {}, Keys: [] })),
+      listAliases: () => this.tracker.run(() => ({ $metadata: {}, Aliases: [] })),
+      describeKey: () => {
+        throw new Error("describeKey must not run without a listed key");
+      },
+    };
+  }
+
+  public dynamodb(_region: string): DynamoDbInventoryClient {
+    void _region;
+    return {
+      listTables: () => this.tracker.run(() => ({ $metadata: {}, TableNames: [] })),
+      describeTable: () => {
+        throw new Error("describeTable must not run without a listed table");
+      },
+    };
+  }
+
+  public ecr(_region: string): EcrInventoryClient {
+    void _region;
+    return {
+      describeRepositories: () =>
+        this.tracker.run(() => ({ $metadata: {}, repositories: [] })),
     };
   }
 
@@ -475,6 +519,294 @@ function database(identifier: string, region: string) {
     TagList: [{ Key: "Service", Value: "orders" }],
   };
 }
+
+class ExpandedInventoryClientFactory extends FakeClientFactory {
+  public readonly tokens = new Map<string, (string | undefined)[]>();
+
+  private record(key: string, token: string | undefined): void {
+    const values = this.tokens.get(key) ?? [];
+    values.push(token);
+    this.tokens.set(key, values);
+  }
+
+  public override ec2(region: string): Ec2InventoryClient {
+    const base = super.ec2(region);
+    return {
+      ...base,
+      describeVolumes: async (input) => {
+        this.record("volumes", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "volumes-next",
+              Volumes: [{
+                VolumeId: "vol-expanded",
+                State: "in-use",
+                VolumeType: "gp3",
+                Size: 100,
+                Encrypted: true,
+                KmsKeyId: `arn:aws:kms:${region}:123456789012:key/key-expanded`,
+                AvailabilityZone: `${region}a`,
+                Attachments: [{ InstanceId: "i-east-1", Device: "/dev/xvda", State: "attached" }],
+              }],
+            }
+          : { $metadata: {}, Volumes: [] };
+      },
+      describeNetworkInterfaces: async (input) => {
+        this.record("network-interfaces", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "eni-next",
+              NetworkInterfaces: [{
+                NetworkInterfaceId: "eni-expanded",
+                Status: "in-use",
+                InterfaceType: "interface",
+                VpcId: "vpc-east",
+                SubnetId: "subnet-east",
+                PrivateIpAddress: "10.0.1.25",
+                Groups: [{ GroupId: "sg-east" }],
+                Attachment: { InstanceId: "i-east-1", Status: "attached" },
+              }],
+            }
+          : { $metadata: {}, NetworkInterfaces: [] };
+      },
+    };
+  }
+
+  public override elbv2(region: string): Elbv2InventoryClient {
+    return {
+      describeLoadBalancers: async (input) => {
+        this.record("load-balancers", input.Marker);
+        return input.Marker === undefined
+          ? {
+              $metadata: {},
+              NextMarker: "load-balancers-next",
+              LoadBalancers: [{
+                LoadBalancerArn: `arn:aws:elasticloadbalancing:${region}:123456789012:loadbalancer/app/demo/1234`,
+                LoadBalancerName: "demo",
+                Type: "application",
+                Scheme: "internet-facing",
+                State: { Code: "active" },
+                VpcId: "vpc-east",
+                SecurityGroups: ["sg-east"],
+                AvailabilityZones: [{ ZoneName: `${region}a`, SubnetId: "subnet-east" }],
+              }],
+            }
+          : { $metadata: {}, LoadBalancers: [] };
+      },
+    };
+  }
+
+  public override kms(region: string): KmsInventoryClient {
+    return {
+      listAliases: async (input) => {
+        this.record("kms-aliases", input.Marker);
+        return input.Marker === undefined
+          ? {
+              $metadata: {},
+              NextMarker: "aliases-next",
+              Aliases: [{ AliasName: "alias/sutra-demo", TargetKeyId: "key-expanded" }],
+            }
+          : { $metadata: {}, Aliases: [] };
+      },
+      listKeys: async (input) => {
+        this.record("kms-keys", input.Marker);
+        return input.Marker === undefined
+          ? {
+              $metadata: {},
+              NextMarker: "keys-next",
+              Keys: [{ KeyId: "key-expanded" }],
+            }
+          : { $metadata: {}, Keys: [] };
+      },
+      describeKey: async (input) => ({
+        $metadata: {},
+        KeyMetadata: {
+          AWSAccountId: "123456789012",
+          KeyId: input.KeyId,
+          Arn: `arn:aws:kms:${region}:123456789012:key/${input.KeyId}`,
+          CreationDate: new Date("2026-01-01T00:00:00Z"),
+          Enabled: true,
+          KeyState: "Enabled",
+          KeyManager: "CUSTOMER",
+          Origin: "AWS_KMS",
+          KeyUsage: "ENCRYPT_DECRYPT",
+          KeySpec: "SYMMETRIC_DEFAULT",
+        },
+      }),
+    };
+  }
+
+  public override dynamodb(region: string): DynamoDbInventoryClient {
+    return {
+      listTables: async (input) => {
+        this.record("dynamodb", input.ExclusiveStartTableName);
+        return input.ExclusiveStartTableName === undefined
+          ? {
+              $metadata: {},
+              LastEvaluatedTableName: "orders",
+              TableNames: ["orders"],
+            }
+          : { $metadata: {}, TableNames: [] };
+      },
+      describeTable: async (input) => ({
+        $metadata: {},
+        Table: {
+          TableName: input.TableName,
+          TableArn: `arn:aws:dynamodb:${region}:123456789012:table/${input.TableName}`,
+          TableStatus: "ACTIVE",
+          ItemCount: 42,
+          SSEDescription: {
+            Status: "ENABLED",
+            SSEType: "KMS",
+            KMSMasterKeyArn: `arn:aws:kms:${region}:123456789012:key/key-expanded`,
+          },
+        },
+      }),
+    };
+  }
+
+  public override ecr(region: string): EcrInventoryClient {
+    return {
+      describeRepositories: async (input) => {
+        this.record("ecr", input.nextToken);
+        return input.nextToken === undefined
+          ? {
+              $metadata: {},
+              nextToken: "ecr-next",
+              repositories: [{
+                repositoryName: "orders",
+                repositoryArn: `arn:aws:ecr:${region}:123456789012:repository/orders`,
+                repositoryUri: "123456789012.dkr.ecr.us-east-1.amazonaws.com/orders",
+                imageTagMutability: "IMMUTABLE",
+                imageScanningConfiguration: { scanOnPush: true },
+                encryptionConfiguration: {
+                  encryptionType: "KMS",
+                  kmsKey: `arn:aws:kms:${region}:123456789012:key/key-expanded`,
+                },
+              }],
+            }
+          : { $metadata: {}, repositories: [] };
+      },
+    };
+  }
+}
+
+test("expanded CMDB families paginate, preserve API provenance, and create safe graph edges", async () => {
+  const sink = new CapturingSink();
+  const clients = new ExpandedInventoryClientFactory();
+  const completedAt = new Date("2026-07-16T12:00:00Z");
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 4,
+    now: () => completedAt,
+  });
+  const collection = await runner.collect(context());
+  const resources = sink.batches.flatMap((batch) => batch.resources);
+  const expandedTypes = [
+    "aws.ec2.volume",
+    "aws.ec2.network-interface",
+    "aws.elasticloadbalancingv2.load-balancer",
+    "aws.kms.key",
+    "aws.dynamodb.table",
+    "aws.ecr.repository",
+  ];
+
+  assert.equal(collection.coverage, "COMPLETE");
+  for (const resourceType of expandedTypes) {
+    const observed = resources.find((resource) => resource.resourceType === resourceType);
+    assert.ok(observed, resourceType);
+    assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
+  }
+  for (const key of ["volumes", "network-interfaces", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr"]) {
+    assert.equal(clients.tokens.get(key)?.length, 2, key);
+  }
+
+  const connection = {
+    tenantId: "tenant-01",
+    connectionId: "conn-01",
+    expectedAccountId: "123456789012",
+    partition: "aws" as const,
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+    externalId: "sutra_external_id_1234567890abcd",
+    status: "ACTIVE" as const,
+    permissionPackVersion: "live-demo-2026-07.2" as const,
+    enabledRegions: ["us-east-1"],
+    createdAt: completedAt.toISOString(),
+    updatedAt: completedAt.toISOString(),
+  };
+  const snapshot = normalizeLiveSnapshot(
+    connection,
+    "job-expanded-inventory",
+    "sutra-job-expanded-inventory",
+    resources,
+    sink.batches.flatMap((batch) => batch.evidence),
+    collection.coverage,
+    collection.collectorCoverage,
+    completedAt,
+  );
+  const byNativeId = new Map(snapshot.resources.map((resource) => [resource.nativeId, resource.resourceKey]));
+  const hasEdge = (from: string, to: string, relationType: string) =>
+    snapshot.relationships.some((edge) =>
+      edge.fromResourceKey === byNativeId.get(from) &&
+      edge.toResourceKey === byNativeId.get(to) &&
+      edge.relationType === relationType,
+    );
+  assert.equal(hasEdge("vol-expanded", "i-east-1", "attached_to"), true);
+  assert.equal(hasEdge("eni-expanded", "subnet-east", "runs_in"), true);
+  assert.equal(hasEdge("orders", "key-expanded", "encrypted_by"), true);
+});
+
+class ExpandedPartialFailureClientFactory extends ExpandedInventoryClientFactory {
+  public override ecr(_region: string): EcrInventoryClient {
+    void _region;
+    return {
+      describeRepositories: async () => {
+        const error = new Error("customer-specific detail must not cross the boundary");
+        error.name = "AccessDeniedException";
+        throw error;
+      },
+    };
+  }
+}
+
+test("an expanded-family denial is isolated as partial coverage without discarding successful families", async () => {
+  const sink = new CapturingSink();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients: new ExpandedPartialFailureClientFactory(),
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 4,
+    now: () => new Date("2026-07-16T12:00:00Z"),
+  });
+
+  const collection = await runner.collect(context());
+  const denied = collection.collectorCoverage.find((entry) => entry.collectorKey === "ecr.repositories");
+  const volumes = collection.collectorCoverage.find((entry) => entry.collectorKey === "ec2.volumes");
+  const serialized = JSON.stringify({ collection, batches: sink.batches });
+
+  assert.equal(collection.coverage, "PARTIAL");
+  assert.deepEqual(denied, {
+    collectorKey: "ecr.repositories",
+    region: "us-east-1",
+    status: "FAILED",
+    itemsObserved: 0,
+    pagesObserved: 0,
+    errorCode: "AccessDeniedException",
+    message: "The read-only AWS collector did not return a usable page.",
+  });
+  assert.equal(volumes?.status, "SUCCEEDED");
+  assert.equal(
+    sink.batches.some((batch) => batch.resources.some((resource) => resource.resourceType === "aws.ec2.volume")),
+    true,
+  );
+  assert.equal(serialized.includes("customer-specific detail"), false);
+});
 
 class PostureEdgeCaseClientFactory extends FakeClientFactory {
   public override s3(region: string): S3InventoryClient {
@@ -943,7 +1275,10 @@ test("collects, paginates, normalizes, and bounds regional concurrency", async (
     findingsObserved: 15,
     coverage: "COMPLETE",
   });
-  assert.equal(collectorCoverage.length, 26);
+  assert.equal(
+    collectorCoverage.length,
+    LIVE_AWS_GLOBAL_COLLECTOR_COUNT + LIVE_AWS_REGIONAL_COLLECTOR_COUNT * 2,
+  );
   assert.ok(collectorCoverage.every((entry) => entry.status === "SUCCEEDED"));
   assert.deepEqual(
     collectorCoverage.find(
@@ -1103,6 +1438,7 @@ test("imports sanitized AWS-native findings with stable severity, status, finger
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "sutra_external_id_1234567890abcd",
     status: "ACTIVE" as const,
+    permissionPackVersion: "live-demo-2026-07.2" as const,
     enabledRegions: ["us-east-1"],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -1408,6 +1744,7 @@ test("regional account findings are unique and the live multi-Region snapshot pa
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "sutra_external_id_1234567890abcd",
     status: "ACTIVE" as const,
+    permissionPackVersion: "live-demo-2026-07.2" as const,
     enabledRegions: ["us-east-1", "us-west-2"],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -1789,10 +2126,10 @@ test("sink failure is propagated only after every bounded worker settles", async
 });
 
 test("Region capacity cannot exceed the 500-row signed coverage boundary", async () => {
-  assert.equal(
+  assert.ok(
     LIVE_AWS_GLOBAL_COLLECTOR_COUNT +
-      LIVE_AWS_REGIONAL_COLLECTOR_COUNT * LIVE_AWS_MAX_REGIONS,
-    494,
+      LIVE_AWS_REGIONAL_COLLECTOR_COUNT * LIVE_AWS_MAX_REGIONS <=
+      LIVE_AWS_COVERAGE_ROW_LIMIT,
   );
   assert.ok(
     LIVE_AWS_GLOBAL_COLLECTOR_COUNT +

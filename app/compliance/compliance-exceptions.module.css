@@ -1,0 +1,23 @@
+.panel { margin-top: 22px; }
+.intro { max-width: 850px; color: var(--muted); }
+.notice { margin: 14px 0; padding: 12px 14px; border: 1px solid rgba(226, 159, 38, .35); border-radius: 12px; background: rgba(226, 159, 38, .08); font-size: 13px; }
+.requestGrid { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; margin: 18px 0 24px; padding: 18px; border-radius: 16px; background: var(--surface-subtle); }
+.requestGrid label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.requestGrid select, .requestGrid input, .requestGrid textarea, .review input { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 10px 12px; font: inherit; }
+.requestGrid textarea { min-height: 78px; resize: vertical; }
+.wide { grid-column: span 3; }
+.requestGrid button { justify-self: start; }
+.list { display: grid; gap: 14px; }
+.list article { padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.exceptionHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.exceptionHead div { display: grid; gap: 4px; min-width: 0; }
+.exceptionHead small { color: var(--muted); overflow-wrap: anywhere; }
+.list dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0; }
+.list dl div { display: grid; gap: 3px; }
+.list dt { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.list dd { margin: 0; font-size: 13px; }
+.list p { margin: 8px 0; font-size: 13px; color: var(--muted); }
+.review { display: grid; grid-template-columns: 2fr 140px auto auto; gap: 8px; align-items: center; margin-top: 14px; }
+.list details { margin-top: 12px; color: var(--muted); font-size: 12px; }
+.list ol { display: grid; gap: 5px; padding-left: 20px; }
+@media (max-width: 900px) { .requestGrid { grid-template-columns: 1fr; } .wide { grid-column: span 1; } .list dl { grid-template-columns: 1fr 1fr; } .review { grid-template-columns: 1fr; } }

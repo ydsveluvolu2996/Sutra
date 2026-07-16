@@ -294,15 +294,16 @@ test("known active failures win over incomplete coverage", () => {
   assert.equal(result.evidence.matchingFindings[0]?.fingerprint, "finding-SUTRA.AWS.EC2.PUBLIC_IP");
 });
 
-test("suppressed findings become EXCEPTED and are never included in the score", () => {
+test("suppressed findings remain UNKNOWN until a governed exception is applied", () => {
   const assessment = assessCompliance(
     state({ findings: [finding("SUTRA.AWS.EC2.PUBLIC_IP", "suppressed")] }),
   );
   const result = resultFor(assessment, "SUTRA.AWS.EC2.PUBLIC_IP");
 
-  assert.equal(result.status, "EXCEPTED");
-  assert.match(result.reason, /approval and expiry/i);
-  assert.equal(assessment.summary.excepted, 1);
+  assert.equal(result.status, "UNKNOWN");
+  assert.match(result.reason, /suppression alone is not a compliance exception/i);
+  assert.equal(assessment.summary.excepted, 0);
+  assert.equal(assessment.summary.unknown, 1);
   assert.equal(assessment.summary.scoredControls, 10);
   assert.equal(assessment.summary.scorePercent, 100);
 });
@@ -317,7 +318,7 @@ test("resolved findings do not fail the current complete snapshot", () => {
   assert.equal(result.evidence.matchingFindings[0]?.status, "resolved");
 });
 
-test("score excludes UNKNOWN, NOT_APPLICABLE, and EXCEPTED results", () => {
+test("score excludes UNKNOWN and NOT_APPLICABLE results", () => {
   const coverage = completeCoverage().filter(
     (entry) => entry.collectorKey !== "rds.db-instances",
   );
@@ -332,8 +333,8 @@ test("score excludes UNKNOWN, NOT_APPLICABLE, and EXCEPTED results", () => {
   );
 
   assert.equal(assessment.summary.fail, 1);
-  assert.equal(assessment.summary.excepted, 1);
-  assert.equal(assessment.summary.unknown, 2);
+  assert.equal(assessment.summary.excepted, 0);
+  assert.equal(assessment.summary.unknown, 3);
   assert.equal(assessment.summary.pass, 7);
   assert.equal(assessment.summary.scoredControls, 8);
   assert.equal(assessment.summary.scorePercent, 87.5);
@@ -361,4 +362,3 @@ test("a newer failed run is not mixed into the active snapshot assessment", () =
   assert.equal(assessment.summary.pass, 11);
   assert.equal(resultFor(assessment, "SUTRA.AWS.EC2.PUBLIC_IP").status, "PASS");
 });
-

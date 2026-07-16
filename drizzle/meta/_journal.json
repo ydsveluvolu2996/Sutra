@@ -71,6 +71,13 @@
       "when": 1784216420314,
       "tag": "0009_acoustic_moondragon",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784219934485,
+      "tag": "0010_sutra_operations_wave",
+      "breakpoints": true
     }
   ]
 }

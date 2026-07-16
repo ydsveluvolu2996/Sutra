@@ -1,4 +1,4 @@
-import { appendAuditEvent, getConnection, getStoredConnectionSecret, LOCAL_ORG_ID } from "../../../../db/pilot-repository";
+import { appendAuditEvent, CURRENT_PILOT_PERMISSION_PACK, getConnection, getStoredConnectionSecret, LOCAL_ORG_ID } from "../../../../db/pilot-repository";
 import { getLatestCostSnapshot, persistCostSnapshot } from "../../../../db/cost-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
@@ -56,6 +56,9 @@ export async function POST(request: Request): Promise<Response> {
     assertSessionCapability(authenticated, "sync:run", stored.customerId);
     if (stored.status !== "active") {
       throw Object.assign(new Error("Activate the AWS connection before collecting cost evidence"), { code: "INVALID_STATE" });
+    }
+    if (stored.permissionPackVersion !== CURRENT_PILOT_PERMISSION_PACK) {
+      throw Object.assign(new Error("Revalidate the current AWS permission pack before collecting cost evidence"), { code: "INVALID_STATE" });
     }
     const health = await getCollectorHealth(stored.partition);
     if (health.mode !== "live") {

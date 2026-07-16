@@ -37,6 +37,7 @@ import {
   type ScopedConnectionRegistry,
   type StoredAwsConnection,
   type ValidatedRoleSession,
+  CURRENT_PERMISSION_PACK_VERSION,
 } from "./types.js";
 
 const IAM_ROLE_ARN =
@@ -53,7 +54,7 @@ const EXPECTED_ROLE_PATH_AND_NAME = "sutra/SutraReadOnlyRole";
 const EXPECTED_ROLE_PATH = "/sutra/";
 const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
-const PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
+const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
 const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:DescribeRegions",
@@ -61,6 +62,15 @@ const IMPLEMENTED_READ_ACTIONS = [
   "ec2:DescribeVpcs",
   "ec2:DescribeSubnets",
   "ec2:DescribeSecurityGroups",
+  "ec2:DescribeVolumes",
+  "ec2:DescribeNetworkInterfaces",
+  "elasticloadbalancing:DescribeLoadBalancers",
+  "kms:ListKeys",
+  "kms:ListAliases",
+  "kms:DescribeKey",
+  "dynamodb:ListTables",
+  "dynamodb:DescribeTable",
+  "ecr:DescribeRepositories",
   "s3:ListAllMyBuckets",
   "s3:GetBucketPublicAccessBlock",
   "rds:DescribeDBInstances",
@@ -68,6 +78,7 @@ const IMPLEMENTED_READ_ACTIONS = [
   "iam:GetAccountPasswordPolicy",
   "cloudtrail:DescribeTrails",
   "cloudtrail:GetTrailStatus",
+  "cloudtrail:LookupEvents",
   "guardduty:ListDetectors",
   "guardduty:GetDetector",
   "guardduty:ListFindings",
@@ -84,9 +95,35 @@ const TRUST_ATTESTATION_ACTIONS = [
   "iam:ListRolePolicies",
   "iam:GetRolePolicy",
 ] as const;
-const REVIEWED_SESSION_ACTIONS = [
-  ...IMPLEMENTED_READ_ACTIONS,
-  ...TRUST_ATTESTATION_ACTIONS,
+/**
+ * Compact exceptions to the STS outer deny. These wildcard read families do
+ * not grant permission. The attested customer role also carries an explicit
+ * exact-action deny ceiling, so resource-policy grants cannot expand access.
+ */
+const SESSION_DENY_EXCEPTIONS = [
+  "sts:GetCallerIdentity",
+  "ec2:Describe*",
+  "s3:ListAllMyBuckets",
+  "s3:GetBucketPublicAccessBlock",
+  "rds:Describe*",
+  "iam:Get*",
+  "iam:List*",
+  "cloudtrail:Describe*",
+  "cloudtrail:GetTrailStatus",
+  "cloudtrail:LookupEvents",
+  "guardduty:List*",
+  "guardduty:Get*",
+  "securityhub:Describe*",
+  "securityhub:Get*",
+  "inspector2:BatchGet*",
+  "inspector2:List*",
+  "ce:Get*",
+  "elasticloadbalancing:Describe*",
+  "kms:List*",
+  "kms:Describe*",
+  "dynamodb:List*",
+  "dynamodb:Describe*",
+  "ecr:Describe*",
 ] as const;
 
 const EXPECTED_ACCESS_DENIALS = new Set([
@@ -202,7 +239,7 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
     Statement: [
       {
         Effect: "Deny",
-        NotAction: REVIEWED_SESSION_ACTIONS,
+        NotAction: SESSION_DENY_EXCEPTIONS,
         Resource: "*",
       },
       {
@@ -312,15 +349,26 @@ function assertExpectedTrustPolicy(
 function assertExpectedPermissionPolicy(value: string | undefined, roleArn: string): void {
   const document = policyDocument(value);
   exactKeys(document, ["Version", "Statement"]);
-  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 2) {
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 3) {
     throw new Error("unexpected permission policy shape");
   }
   const statements = document.Statement.map(record);
+  const ceiling = statements.find((statement) => statement.Sid === "DenyUnimplementedActions");
   const metadata = statements.find((statement) => statement.Sid === "ImplementedMetadataApis");
   const attestation = statements.find((statement) => statement.Sid === "TrustContractAttestation");
-  if (metadata === undefined || attestation === undefined) throw new Error("missing permission statement");
-  for (const statement of statements) exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (ceiling === undefined || metadata === undefined || attestation === undefined) {
+    throw new Error("missing permission statement");
+  }
+  exactKeys(ceiling, ["Sid", "Effect", "NotAction", "Resource"]);
+  exactKeys(metadata, ["Sid", "Effect", "Action", "Resource"]);
+  exactKeys(attestation, ["Sid", "Effect", "Action", "Resource"]);
   if (
+    ceiling.Effect !== "Deny" ||
+    ceiling.Resource !== "*" ||
+    !sameStringSet(
+      stringList(ceiling.NotAction),
+      [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
+    ) ||
     metadata.Effect !== "Allow" ||
     metadata.Resource !== "*" ||
     !sameStringSet(stringList(metadata.Action), IMPLEMENTED_READ_ACTIONS) ||
@@ -436,6 +484,9 @@ export class AwsRoleBroker {
     jobId: string,
   ): Promise<ValidatedRoleSession> {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== PERMISSION_PACK_VERSION) {
+      throw new ConnectionStateError();
+    }
     return this.assumeAndValidateIdentity(resolved, jobId);
   }
 
