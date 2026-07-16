@@ -30,6 +30,23 @@ the vinext/Miniflare development runtime.
 To repeat the onboarding demo while preserving the generated local keys, stop
 the dev server, run `pnpm pilot:reset`, then start `pnpm dev:pilot` again.
 
+## Local backup and restore
+
+Stop `pnpm dev:pilot` before either operation. Sutra refuses to copy or replace
+state while the local web or collector port is open.
+
+```bash
+pnpm local:backup
+pnpm local:restore -- .sutra/backups/<backup-directory>
+```
+
+The backup contains the D1 files, encrypted collector registry, and the local
+encryption/signing configuration required to read them. Every file is covered by
+a SHA-256 manifest. Restore verifies the complete manifest before replacing any
+state and rolls back the previous files if replacement fails. Backup directories
+are permission-restricted under ignored `.sutra/backups/`; protect them like
+credentials and never attach them to issues, chats, or source control.
+
 ## Real AWS sandbox demo
 
 Use a disposable non-production AWS account. The local collector uses the AWS
