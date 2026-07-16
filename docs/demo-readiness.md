@@ -11,11 +11,11 @@ This tracker separates verified product behavior from work that is merely planne
 | Compliance workspace | Complete | 11-control evidence baseline, five-state outcomes, snapshot provenance, NIST CSF supporting mappings, and JSON/CSV evidence export |
 | Resource 360 | Complete | Resource identity, configuration, tags, relationships, findings, changes and evidence provenance |
 | Executive customer report | Complete | Customer-readable posture summary, priority recommendations, evidence hashes, and print/save-to-PDF workflow |
-| AWS Cost and FinOps | Code complete; AWS activation pending | Real Cost Explorer ingestion, immutable cost evidence, trends, service/account breakdown, forecast provenance, signals and explicit unavailable states |
+| AWS Cost and FinOps | Complete for live demo | Real Cost Explorer ingestion, immutable cost evidence, six-month trends, service/account breakdown, forecast provenance, signals and explicit unavailable states; the first live snapshot is persisted |
 | MSP Command Center | Complete | Cross-customer account, asset, workload, freshness and provenance view |
 | Full regression and local database migration | Complete | Secret scan, typecheck, lint, 225 application tests, 81 collector tests, PostgreSQL integration tests, production build and 4 protected-render tests passed; the additive live database migration is applied |
-| Live runtime restart | Blocked on AWS SSO login | Restart requires a fresh short-lived `sutra-msp-operator` SSO session; no static credentials are accepted |
-| GitHub milestone | Committed; push pending | Verified source is committed on the existing pilot branch; remote publication follows GitHub authentication and final status checks |
+| Live runtime restart | Complete | The verified build is running locally with a fresh short-lived federated collector session, the reviewed immutable onboarding template, and the migrated PostgreSQL database |
+| GitHub milestone | Complete | Verified source is committed and pushed to the existing draft pull request; GitHub CI passed |
 
 ## Explicitly after the investor demo
 
