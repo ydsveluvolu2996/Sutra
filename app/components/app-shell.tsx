@@ -21,7 +21,7 @@ const navItems: readonly NavItem[] = [
   { key: "overview", label: "Overview", href: "/dashboard", icon: "01", capability: "workspace:read" },
   { key: "customers", label: "Customers", href: "/customers", icon: "02", capability: "workspace:read" },
   { key: "cmdb", label: "CMDB inventory", href: "/cmdb", icon: "03", capability: "connection:read" },
-  { key: "findings", label: "Security findings", href: "/findings", icon: "04", capability: "workspace:read" },
+  { key: "findings", label: "Security findings", href: "/findings", icon: "04", capability: "connection:read" },
   { key: "controls", label: "Control library", href: "/controls", icon: "05", capability: "workspace:read" },
   { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "06", capability: "workspace:read" },
 ];
@@ -100,6 +100,7 @@ function AuthenticatedAppShell({
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const capabilitySet = new Set(session.capabilities);
   const visibleNav = navItems.filter((item) => capabilitySet.has(item.capability));
+  const canOnboard = capabilitySet.has("customer:create") && capabilitySet.has("connection:manage");
   const connection = state?.connection ?? null;
   const openFindings = state?.findings.filter((finding) => finding.status === "open").length ?? 0;
   const modeLabel = health?.mode === "live" ? "Live AWS collector" : health?.mode === "fixture" ? "Fixture collector" : "Collector offline";
@@ -143,7 +144,7 @@ function AuthenticatedAppShell({
           </div>
         </div>
         <nav className="secondary-nav" aria-label="Workspace actions">
-          {capabilitySet.has("connection:manage") ? (
+          {canOnboard ? (
             <Link href="/onboard" className={active === "onboard" ? "active" : undefined}><span>+</span>Onboard account</Link>
           ) : null}
           {capabilitySet.has("workspace:read") ? <Link href="/controls#architecture"><span>?</span>Architecture & trust</Link> : null}
@@ -161,7 +162,7 @@ function AuthenticatedAppShell({
             <summary aria-label="Open navigation">Menu</summary>
             <div>
               {visibleNav.map((item) => <Link href={item.href} key={item.key}>{item.label}</Link>)}
-              {capabilitySet.has("connection:manage") ? <Link href="/onboard">Onboard account</Link> : null}
+              {canOnboard ? <Link href="/onboard">Onboard account</Link> : null}
               <button disabled={signingOut} onClick={() => void signOut()} type="button">Sign out</button>
             </div>
           </details>
