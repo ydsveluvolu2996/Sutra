@@ -15,6 +15,7 @@ import {
   safeValidationFailureCode,
   verifyCollectorConnection,
 } from "../../../../../lib/pilot-server";
+import { assertSessionCapability } from "../../../../../lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -35,13 +36,14 @@ export async function POST(request: Request): Promise<Response> {
   let actorId: string | null = null;
   let validationClaimed = false;
   try {
-    const actor = requirePilotActor(request);
+    const actor = await requirePilotActor(request, "workspace:read");
     actorId = actor.id;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
+    const stored = await getStoredConnectionSecret(connectionId);
+    assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
     await markConnectionValidating(connectionId);
     validationClaimed = true;
-    const stored = await getStoredConnectionSecret(connectionId);
     if (!stored.roleArn) {
       throw Object.assign(new Error("Register the customer IAM role before validation"), { code: "INVALID_STATE" });
     }

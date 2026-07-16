@@ -13,7 +13,30 @@ export const users = sqliteTable("users", {
   createdAt: timestamp("created_at"),
 }, (table) => [
   uniqueIndex("users_issuer_subject_uq").on(table.issuer, table.subject),
+  uniqueIndex("users_issuer_email_uq").on(table.issuer, table.email),
 ]);
+
+export const localPasswordCredentials = sqliteTable("local_password_credentials", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  algorithm: text("algorithm", { enum: ["pbkdf2-sha256"] }).notNull(),
+  iterations: integer("iterations").notNull(),
+  salt: text("salt").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  failedAttempts: integer("failed_attempts").notNull().default(0),
+  lockedUntil: integer("locked_until", { mode: "timestamp_ms" }),
+  changedAt: timestamp("changed_at"),
+  updatedAt: timestamp("updated_at"),
+});
+
+export const totpCredentials = sqliteTable("totp_credentials", {
+  userId: text("user_id").primaryKey().references(() => users.id),
+  secretCiphertext: text("secret_ciphertext").notNull(),
+  secretKeyVersion: text("secret_key_version").notNull(),
+  confirmedAt: integer("confirmed_at", { mode: "timestamp_ms" }),
+  lastUsedStep: integer("last_used_step"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+});
 
 export const organizations = sqliteTable("organizations", {
   id: text("id").primaryKey(),
@@ -22,6 +45,21 @@ export const organizations = sqliteTable("organizations", {
   status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
   createdAt: timestamp("created_at"),
 }, (table) => [uniqueIndex("organizations_slug_uq").on(table.slug)]);
+
+export const localSessions = sqliteTable("local_sessions", {
+  id: text("id").primaryKey(),
+  tokenDigest: text("token_digest").notNull(),
+  userId: text("user_id").notNull().references(() => users.id),
+  selectedOrgId: text("selected_org_id").notNull().references(() => organizations.id),
+  createdAt: timestamp("created_at"),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  lastSeenAt: timestamp("last_seen_at"),
+  mfaVerifiedAt: integer("mfa_verified_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("local_sessions_token_digest_uq").on(table.tokenDigest),
+  index("local_sessions_user_expiry_idx").on(table.userId, table.expiresAt, table.revokedAt),
+]);
 
 export const memberships = sqliteTable("memberships", {
   id: text("id").primaryKey(),

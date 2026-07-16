@@ -14,6 +14,7 @@ import {
   runCollectorSync,
   safeCollectionFailureCode,
 } from "../../../../../lib/pilot-server";
+import { assertSessionCapability } from "../../../../../lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -34,11 +35,12 @@ export async function POST(request: Request): Promise<Response> {
   let connectionId: string | null = null;
   let actorId: string | null = null;
   try {
-    const actor = requirePilotActor(request);
+    const actor = await requirePilotActor(request, "workspace:read");
     actorId = actor.id;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(connectionId);
+    assertSessionCapability(actor.authenticated, "sync:run", stored.customerId);
     runId = await createSyncRun(connectionId);
     const snapshot = await runCollectorSync({
       tenantId: LOCAL_ORG_ID,

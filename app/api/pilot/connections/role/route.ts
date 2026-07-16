@@ -16,6 +16,7 @@ import {
   registerCollectorConnection,
   requirePilotActor,
 } from "../../../../../lib/pilot-server";
+import { assertSessionCapability } from "../../../../../lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -37,10 +38,11 @@ function parseBody(value: unknown): { connectionId: string; roleArn: string } {
 }
 export async function POST(request: Request): Promise<Response> {
   try {
-    const actor = requirePilotActor(request);
+    const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const body = parseBody(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(body.connectionId);
+    assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
     const role = parseIamRoleArn(body.roleArn, {
       accountId: stored.accountId,
       partition: stored.partition,

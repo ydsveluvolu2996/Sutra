@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    requirePilotActor(request);
+    await requirePilotActor(request, "workspace:read");
     const health = await getCollectorHealth();
     return jsonResponse({ health });
   } catch (error) {

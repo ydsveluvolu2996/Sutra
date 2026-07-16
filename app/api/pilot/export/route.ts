@@ -1,5 +1,6 @@
 import { getPilotState } from "../../../../db/pilot-repository";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../lib/pilot-server";
+import { assertSessionCapability } from "../../../../lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +11,15 @@ function csvCell(value: unknown): string {
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    requirePilotActor(request);
+    const actor = await requirePilotActor(request, "workspace:read");
     const format = new URL(request.url).searchParams.get("format") ?? "json";
     if (format !== "json" && format !== "csv") {
       throw Object.assign(new Error("Choose json or csv export format"), { code: "INVALID_INPUT" });
     }
     const state = await getPilotState();
+    if (state.connection !== null) {
+      assertSessionCapability(actor.authenticated, "export:read", state.connection.customerId);
+    }
     const timestamp = new Date().toISOString().replaceAll(":", "-");
     if (format === "json") {
       const response = jsonResponse({ exportedAt: new Date().toISOString(), state });
