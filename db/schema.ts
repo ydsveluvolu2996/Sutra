@@ -220,6 +220,25 @@ export const cmdbResources = sqliteTable("cmdb_resources", {
   index("cmdb_resources_scope_type_idx").on(table.orgId, table.customerId, table.connectionId, table.resourceType, table.regionKey),
 ]);
 
+/** Immutable resource-level deltas between consecutively published complete snapshots. */
+export const cmdbChangeEvents = sqliteTable("cmdb_change_events", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  fromSnapshotId: text("from_snapshot_id").references(() => cmdbSnapshots.id),
+  toSnapshotId: text("to_snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  resourceKey: text("resource_key").notNull(),
+  changeType: text("change_type", { enum: ["added", "changed", "removed"] }).notNull(),
+  changedPathsJson: text("changed_paths_json").notNull().default("[]"),
+  beforeJson: text("before_json"),
+  afterJson: text("after_json"),
+  occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("cmdb_change_events_snapshot_resource_uq").on(table.toSnapshotId, table.resourceKey),
+  index("cmdb_change_events_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.occurredAt, table.id),
+]);
+
 export const cmdbRelationships = sqliteTable("cmdb_relationships", {
   id: text("id").primaryKey(),
   snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
