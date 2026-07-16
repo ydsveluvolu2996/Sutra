@@ -10,12 +10,16 @@ import {
   type GetTrailStatusCommandOutput,
 } from "@aws-sdk/client-cloudtrail";
 import {
+  DescribeNetworkInterfacesCommand,
   DescribeInstancesCommand,
   DescribeRegionsCommand,
   DescribeSecurityGroupsCommand,
   DescribeSubnetsCommand,
+  DescribeVolumesCommand,
   DescribeVpcsCommand,
   EC2Client,
+  type DescribeNetworkInterfacesCommandInput,
+  type DescribeNetworkInterfacesCommandOutput,
   type DescribeInstancesCommandInput,
   type DescribeInstancesCommandOutput,
   type DescribeRegionsCommandOutput,
@@ -23,10 +27,45 @@ import {
   type DescribeSecurityGroupsCommandOutput,
   type DescribeSubnetsCommandInput,
   type DescribeSubnetsCommandOutput,
+  type DescribeVolumesCommandInput,
+  type DescribeVolumesCommandOutput,
   type DescribeVpcsCommandInput,
   type DescribeVpcsCommandOutput,
   type IpPermission,
 } from "@aws-sdk/client-ec2";
+import {
+  DescribeLoadBalancersCommand,
+  ElasticLoadBalancingV2Client,
+  type DescribeLoadBalancersCommandInput,
+  type DescribeLoadBalancersCommandOutput,
+} from "@aws-sdk/client-elastic-load-balancing-v2";
+import {
+  DescribeKeyCommand,
+  KMSClient,
+  ListAliasesCommand,
+  ListKeysCommand,
+  type DescribeKeyCommandInput,
+  type DescribeKeyCommandOutput,
+  type ListAliasesCommandInput,
+  type ListAliasesCommandOutput,
+  type ListKeysCommandInput,
+  type ListKeysCommandOutput,
+} from "@aws-sdk/client-kms";
+import {
+  DescribeTableCommand,
+  DynamoDBClient,
+  ListTablesCommand,
+  type DescribeTableCommandInput,
+  type DescribeTableCommandOutput,
+  type ListTablesCommandInput,
+  type ListTablesCommandOutput,
+} from "@aws-sdk/client-dynamodb";
+import {
+  DescribeRepositoriesCommand,
+  ECRClient,
+  type DescribeRepositoriesCommandInput,
+  type DescribeRepositoriesCommandOutput,
+} from "@aws-sdk/client-ecr";
 import {
   GetFindingsCommand as GetGuardDutyFindingsCommand,
   GetDetectorCommand,
@@ -283,6 +322,54 @@ export interface Ec2InventoryClient {
     input: DescribeSecurityGroupsCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeSecurityGroupsCommandOutput>;
+  describeVolumes(
+    input: DescribeVolumesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeVolumesCommandOutput>;
+  describeNetworkInterfaces(
+    input: DescribeNetworkInterfacesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeNetworkInterfacesCommandOutput>;
+}
+
+export interface Elbv2InventoryClient {
+  describeLoadBalancers(
+    input: DescribeLoadBalancersCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeLoadBalancersCommandOutput>;
+}
+
+export interface KmsInventoryClient {
+  listKeys(
+    input: ListKeysCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListKeysCommandOutput>;
+  listAliases(
+    input: ListAliasesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListAliasesCommandOutput>;
+  describeKey(
+    input: DescribeKeyCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeKeyCommandOutput>;
+}
+
+export interface DynamoDbInventoryClient {
+  listTables(
+    input: ListTablesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListTablesCommandOutput>;
+  describeTable(
+    input: DescribeTableCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeTableCommandOutput>;
+}
+
+export interface EcrInventoryClient {
+  describeRepositories(
+    input: DescribeRepositoriesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeRepositoriesCommandOutput>;
 }
 
 export interface S3InventoryClient {
@@ -361,6 +448,10 @@ export interface InspectorInventoryClient {
 
 export interface AwsInventoryClientFactory {
   ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient;
+  elbv2(region: string, credentials: AwsTemporaryCredentials): Elbv2InventoryClient;
+  kms(region: string, credentials: AwsTemporaryCredentials): KmsInventoryClient;
+  dynamodb(region: string, credentials: AwsTemporaryCredentials): DynamoDbInventoryClient;
+  ecr(region: string, credentials: AwsTemporaryCredentials): EcrInventoryClient;
   s3(region: string, credentials: AwsTemporaryCredentials): S3InventoryClient;
   rds(region: string, credentials: AwsTemporaryCredentials): RdsInventoryClient;
   iam(region: string, credentials: AwsTemporaryCredentials): IamInventoryClient;
@@ -449,6 +540,43 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
       describeSubnets: (input, signal) => sendSdkCommand(client, new DescribeSubnetsCommand(input), signal),
       describeSecurityGroups: (input, signal) =>
         sendSdkCommand(client, new DescribeSecurityGroupsCommand(input), signal),
+      describeVolumes: (input, signal) =>
+        sendSdkCommand(client, new DescribeVolumesCommand(input), signal),
+      describeNetworkInterfaces: (input, signal) =>
+        sendSdkCommand(client, new DescribeNetworkInterfacesCommand(input), signal),
+    };
+  }
+
+  public elbv2(region: string, credentials: AwsTemporaryCredentials): Elbv2InventoryClient {
+    const client = new ElasticLoadBalancingV2Client(this.clientConfig(region, credentials));
+    return {
+      describeLoadBalancers: (input, signal) =>
+        sendSdkCommand(client, new DescribeLoadBalancersCommand(input), signal),
+    };
+  }
+
+  public kms(region: string, credentials: AwsTemporaryCredentials): KmsInventoryClient {
+    const client = new KMSClient(this.clientConfig(region, credentials));
+    return {
+      listKeys: (input, signal) => sendSdkCommand(client, new ListKeysCommand(input), signal),
+      listAliases: (input, signal) => sendSdkCommand(client, new ListAliasesCommand(input), signal),
+      describeKey: (input, signal) => sendSdkCommand(client, new DescribeKeyCommand(input), signal),
+    };
+  }
+
+  public dynamodb(region: string, credentials: AwsTemporaryCredentials): DynamoDbInventoryClient {
+    const client = new DynamoDBClient(this.clientConfig(region, credentials));
+    return {
+      listTables: (input, signal) => sendSdkCommand(client, new ListTablesCommand(input), signal),
+      describeTable: (input, signal) => sendSdkCommand(client, new DescribeTableCommand(input), signal),
+    };
+  }
+
+  public ecr(region: string, credentials: AwsTemporaryCredentials): EcrInventoryClient {
+    const client = new ECRClient(this.clientConfig(region, credentials));
+    return {
+      describeRepositories: (input, signal) =>
+        sendSdkCommand(client, new DescribeRepositoriesCommand(input), signal),
     };
   }
 
@@ -547,6 +675,42 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeSubnets: (input) => this.run((signal) => client.describeSubnets(input, signal)),
       describeSecurityGroups: (input) =>
         this.run((signal) => client.describeSecurityGroups(input, signal)),
+      describeVolumes: (input) => this.run((signal) => client.describeVolumes(input, signal)),
+      describeNetworkInterfaces: (input) =>
+        this.run((signal) => client.describeNetworkInterfaces(input, signal)),
+    };
+  }
+
+  public elbv2(region: string, credentials: AwsTemporaryCredentials): Elbv2InventoryClient {
+    const client = this.delegate.elbv2(region, credentials);
+    return {
+      describeLoadBalancers: (input) =>
+        this.run((signal) => client.describeLoadBalancers(input, signal)),
+    };
+  }
+
+  public kms(region: string, credentials: AwsTemporaryCredentials): KmsInventoryClient {
+    const client = this.delegate.kms(region, credentials);
+    return {
+      listKeys: (input) => this.run((signal) => client.listKeys(input, signal)),
+      listAliases: (input) => this.run((signal) => client.listAliases(input, signal)),
+      describeKey: (input) => this.run((signal) => client.describeKey(input, signal)),
+    };
+  }
+
+  public dynamodb(region: string, credentials: AwsTemporaryCredentials): DynamoDbInventoryClient {
+    const client = this.delegate.dynamodb(region, credentials);
+    return {
+      listTables: (input) => this.run((signal) => client.listTables(input, signal)),
+      describeTable: (input) => this.run((signal) => client.describeTable(input, signal)),
+    };
+  }
+
+  public ecr(region: string, credentials: AwsTemporaryCredentials): EcrInventoryClient {
+    const client = this.delegate.ecr(region, credentials);
+    return {
+      describeRepositories: (input) =>
+        this.run((signal) => client.describeRepositories(input, signal)),
     };
   }
 
@@ -814,6 +978,10 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
       const securityHub = clients.securityHub(region, credentials);
       const inspector = clients.inspector(region, credentials);
       const s3 = clients.s3(region, credentials);
+      const elbv2 = clients.elbv2(region, credentials);
+      const kms = clients.kms(region, credentials);
+      const dynamodb = clients.dynamodb(region, credentials);
+      const ecr = clients.ecr(region, credentials);
 
       tasks.push(
         task("s3.buckets", "s3", "buckets", region, (state) =>
@@ -830,6 +998,24 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ),
         task("ec2.security-groups", "ec2", "security-groups", region, (state) =>
           collectSecurityGroups(context, region, ec2, observedAt, state),
+        ),
+        task("ec2.volumes", "ec2", "volumes", region, (state) =>
+          collectVolumes(context, region, ec2, observedAt, state),
+        ),
+        task("ec2.network-interfaces", "ec2", "network-interfaces", region, (state) =>
+          collectNetworkInterfaces(context, region, ec2, observedAt, state),
+        ),
+        task("elbv2.load-balancers", "elasticloadbalancing", "load-balancers", region, (state) =>
+          collectLoadBalancers(context, region, elbv2, observedAt, state),
+        ),
+        task("kms.keys", "kms", "keys", region, (state) =>
+          collectKmsKeys(context, region, kms, observedAt, state),
+        ),
+        task("dynamodb.tables", "dynamodb", "tables", region, (state) =>
+          collectDynamoDbTables(context, region, dynamodb, observedAt, state),
+        ),
+        task("ecr.repositories", "ecr", "repositories", region, (state) =>
+          collectEcrRepositories(context, region, ecr, observedAt, state),
         ),
         task("rds.db-instances", "rds", "db-instances", region, (state) =>
           collectRds(context, region, rds, observedAt, state),
@@ -1049,6 +1235,343 @@ async function collectSecurityGroups(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeSecurityGroups exceeded pagination limit");
+}
+
+async function collectVolumes(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeVolumes(
+      token === undefined ? { MaxResults: 500 } : { MaxResults: 500, NextToken: token },
+    );
+    const resources = (output.Volumes ?? []).flatMap((volume) =>
+      volume.VolumeId === undefined
+        ? []
+        : [resourceFromApi(
+            context,
+            observedAt,
+            region,
+            "ec2",
+            "aws.ec2.volume",
+            volume.VolumeId,
+            `arn:${context.partition}:ec2:${region}:${context.accountId}:volume/${volume.VolumeId}`,
+            "ec2:DescribeVolumes",
+            compact({
+              state: volume.State,
+              volumeType: volume.VolumeType,
+              sizeGiB: volume.Size,
+              iops: volume.Iops,
+              throughput: volume.Throughput,
+              encrypted: volume.Encrypted,
+              kmsKeyId: volume.KmsKeyId,
+              availabilityZone: volume.AvailabilityZone,
+              multiAttachEnabled: volume.MultiAttachEnabled,
+              instanceIds: strings((volume.Attachments ?? []).map((attachment) => attachment.InstanceId)),
+              attachments: (volume.Attachments ?? []).flatMap((attachment) =>
+                attachment.InstanceId === undefined
+                  ? []
+                  : [compact({
+                      instanceId: attachment.InstanceId,
+                      device: attachment.Device,
+                      state: attachment.State,
+                      attachTime: iso(attachment.AttachTime),
+                      deleteOnTermination: attachment.DeleteOnTermination,
+                    })],
+              ),
+            }),
+            volume.Tags,
+          )],
+    );
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeVolumes");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeVolumes exceeded pagination limit");
+}
+
+async function collectNetworkInterfaces(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeNetworkInterfaces(
+      token === undefined ? { MaxResults: 1000 } : { MaxResults: 1000, NextToken: token },
+    );
+    const resources = (output.NetworkInterfaces ?? []).flatMap((networkInterface) =>
+      networkInterface.NetworkInterfaceId === undefined
+        ? []
+        : [resourceFromApi(
+            context,
+            observedAt,
+            region,
+            "ec2",
+            "aws.ec2.network-interface",
+            networkInterface.NetworkInterfaceId,
+            `arn:${context.partition}:ec2:${region}:${context.accountId}:network-interface/${networkInterface.NetworkInterfaceId}`,
+            "ec2:DescribeNetworkInterfaces",
+            compact({
+              status: networkInterface.Status,
+              interfaceType: networkInterface.InterfaceType,
+              vpcId: networkInterface.VpcId,
+              subnetId: networkInterface.SubnetId,
+              availabilityZone: networkInterface.AvailabilityZone,
+              privateIpAddress: networkInterface.PrivateIpAddress,
+              privateIpAddresses: strings(
+                (networkInterface.PrivateIpAddresses ?? []).map((address) => address.PrivateIpAddress),
+              ),
+              publicIpAddress: networkInterface.Association?.PublicIp,
+              securityGroupIds: strings((networkInterface.Groups ?? []).map((group) => group.GroupId)),
+              instanceId: networkInterface.Attachment?.InstanceId,
+              attachmentStatus: networkInterface.Attachment?.Status,
+              sourceDestCheck: networkInterface.SourceDestCheck,
+              requesterManaged: networkInterface.RequesterManaged,
+            }),
+            networkInterface.TagSet,
+          )],
+    );
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeNetworkInterfaces");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeNetworkInterfaces exceeded pagination limit");
+}
+
+async function collectLoadBalancers(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Elbv2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let marker: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeLoadBalancers(
+      marker === undefined ? { PageSize: 400 } : { PageSize: 400, Marker: marker },
+    );
+    const resources = (output.LoadBalancers ?? []).flatMap((loadBalancer) => {
+      const arn = loadBalancer.LoadBalancerArn;
+      if (arn === undefined) return [];
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "elasticloadbalancing",
+        "aws.elasticloadbalancingv2.load-balancer",
+        arn,
+        arn,
+        "elasticloadbalancing:DescribeLoadBalancers",
+        compact({
+          name: loadBalancer.LoadBalancerName,
+          type: loadBalancer.Type,
+          scheme: loadBalancer.Scheme,
+          state: loadBalancer.State?.Code,
+          vpcId: loadBalancer.VpcId,
+          dnsName: loadBalancer.DNSName,
+          canonicalHostedZoneId: loadBalancer.CanonicalHostedZoneId,
+          ipAddressType: loadBalancer.IpAddressType,
+          securityGroupIds: strings(loadBalancer.SecurityGroups ?? []),
+          subnetIds: strings(
+            (loadBalancer.AvailabilityZones ?? []).map((zone) => zone.SubnetId),
+          ),
+          availabilityZones: strings(
+            (loadBalancer.AvailabilityZones ?? []).map((zone) => zone.ZoneName),
+          ),
+          createdAt: iso(loadBalancer.CreatedTime),
+        }),
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    marker = nextToken(output.NextMarker, seen, "ELBv2 DescribeLoadBalancers");
+    if (marker === undefined) return;
+  }
+  throw new InventoryProtocolError("ELBv2 DescribeLoadBalancers exceeded pagination limit");
+}
+
+async function collectKmsKeys(
+  context: InventoryCollectionContext,
+  region: string,
+  client: KmsInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const aliasesByKeyId = new Map<string, string[]>();
+  let aliasMarker: string | undefined;
+  const seenAliasMarkers = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.listAliases(
+      aliasMarker === undefined ? { Limit: 100 } : { Limit: 100, Marker: aliasMarker },
+    );
+    for (const alias of output.Aliases ?? []) {
+      if (alias.TargetKeyId === undefined || alias.AliasName === undefined) continue;
+      const safeAlias = safeNativeText(alias.AliasName, 256);
+      if (safeAlias === undefined) continue;
+      const values = aliasesByKeyId.get(alias.TargetKeyId) ?? [];
+      if (values.length < 100 && !values.includes(safeAlias)) values.push(safeAlias);
+      aliasesByKeyId.set(alias.TargetKeyId, values);
+    }
+    state.observePage();
+    aliasMarker = nextToken(output.NextMarker, seenAliasMarkers, "KMS ListAliases");
+    if (aliasMarker === undefined) break;
+  }
+  if (aliasMarker !== undefined) {
+    throw new InventoryProtocolError("KMS ListAliases exceeded pagination limit");
+  }
+
+  let keyMarker: string | undefined;
+  const seenKeyMarkers = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.listKeys(
+      keyMarker === undefined ? { Limit: 100 } : { Limit: 100, Marker: keyMarker },
+    );
+    const resources: NormalizedAwsResource[] = [];
+    for (const listed of output.Keys ?? []) {
+      if (listed.KeyId === undefined) continue;
+      const described = await client.describeKey({ KeyId: listed.KeyId });
+      const key = described.KeyMetadata;
+      if (key?.KeyId === undefined) continue;
+      resources.push(resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "kms",
+        "aws.kms.key",
+        key.KeyId,
+        key.Arn,
+        "kms:ListKeys+kms:DescribeKey+kms:ListAliases",
+        compact({
+          state: key.KeyState,
+          enabled: key.Enabled,
+          keyManager: key.KeyManager,
+          origin: key.Origin,
+          keySpec: key.KeySpec,
+          keyUsage: key.KeyUsage,
+          multiRegion: key.MultiRegion,
+          creationDate: iso(key.CreationDate),
+          deletionDate: iso(key.DeletionDate),
+          validTo: iso(key.ValidTo),
+          aliases: aliasesByKeyId.get(key.KeyId) ?? [],
+        }),
+      ));
+    }
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    keyMarker = nextToken(output.NextMarker, seenKeyMarkers, "KMS ListKeys");
+    if (keyMarker === undefined) return;
+  }
+  throw new InventoryProtocolError("KMS ListKeys exceeded pagination limit");
+}
+
+async function collectDynamoDbTables(
+  context: InventoryCollectionContext,
+  region: string,
+  client: DynamoDbInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let startName: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.listTables(
+      startName === undefined
+        ? { Limit: 100 }
+        : { Limit: 100, ExclusiveStartTableName: startName },
+    );
+    const resources: NormalizedAwsResource[] = [];
+    for (const tableName of output.TableNames ?? []) {
+      const described = await client.describeTable({ TableName: tableName });
+      const table = described.Table;
+      if (table?.TableName === undefined) continue;
+      resources.push(resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "dynamodb",
+        "aws.dynamodb.table",
+        table.TableName,
+        table.TableArn,
+        "dynamodb:ListTables+dynamodb:DescribeTable",
+        compact({
+          state: table.TableStatus,
+          creationDate: iso(table.CreationDateTime),
+          billingMode: table.BillingModeSummary?.BillingMode,
+          itemCount: table.ItemCount,
+          tableSizeBytes: table.TableSizeBytes,
+          tableClass: table.TableClassSummary?.TableClass,
+          deletionProtectionEnabled: table.DeletionProtectionEnabled,
+          latestStreamArn: table.LatestStreamArn,
+          latestStreamLabel: table.LatestStreamLabel,
+          sseStatus: table.SSEDescription?.Status,
+          sseType: table.SSEDescription?.SSEType,
+          kmsKeyId: table.SSEDescription?.KMSMasterKeyArn,
+          replicaRegions: strings((table.Replicas ?? []).map((replica) => replica.RegionName)),
+        }),
+      ));
+    }
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    startName = nextToken(output.LastEvaluatedTableName, seen, "DynamoDB ListTables");
+    if (startName === undefined) return;
+  }
+  throw new InventoryProtocolError("DynamoDB ListTables exceeded pagination limit");
+}
+
+async function collectEcrRepositories(
+  context: InventoryCollectionContext,
+  region: string,
+  client: EcrInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeRepositories(
+      token === undefined ? { maxResults: 1000 } : { maxResults: 1000, nextToken: token },
+    );
+    const resources = (output.repositories ?? []).flatMap((repository) =>
+      repository.repositoryName === undefined
+        ? []
+        : [resourceFromApi(
+            context,
+            observedAt,
+            region,
+            "ecr",
+            "aws.ecr.repository",
+            repository.repositoryName,
+            repository.repositoryArn,
+            "ecr:DescribeRepositories",
+            compact({
+              registryId: repository.registryId,
+              repositoryUri: repository.repositoryUri,
+              createdAt: iso(repository.createdAt),
+              imageTagMutability: repository.imageTagMutability,
+              scanOnPush: repository.imageScanningConfiguration?.scanOnPush,
+              encryptionType: repository.encryptionConfiguration?.encryptionType,
+              kmsKeyId: repository.encryptionConfiguration?.kmsKey,
+            }),
+          )],
+    );
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.nextToken, seen, "ECR DescribeRepositories");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("ECR DescribeRepositories exceeded pagination limit");
 }
 
 async function collectS3(
@@ -2420,6 +2943,34 @@ function resource(
     configuration,
   };
   return arn === undefined ? base : { ...base, arn };
+}
+
+function resourceFromApi(
+  context: InventoryCollectionContext,
+  observedAt: string,
+  region: string,
+  service: string,
+  resourceType: string,
+  resourceId: string,
+  arn: string | undefined,
+  sourceApi: string,
+  configuration: SafeJsonObject,
+  rawTags: readonly { readonly Key?: string | undefined; readonly Value?: string | undefined }[] = [],
+): NormalizedAwsResource {
+  return {
+    ...resource(
+      context,
+      observedAt,
+      region,
+      service,
+      resourceType,
+      resourceId,
+      arn,
+      configuration,
+      rawTags,
+    ),
+    sourceApi,
+  };
 }
 
 function normalizeTags(

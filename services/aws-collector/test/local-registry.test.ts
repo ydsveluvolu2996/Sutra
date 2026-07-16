@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { createCipheriv, randomBytes } from "node:crypto";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -37,6 +37,7 @@ test("registry stages verified trust until the control plane explicitly activate
     );
     assert.equal(scoped?.externalId, EXTERNAL_ID);
     assert.equal(scoped?.status, "PENDING");
+    assert.equal(scoped?.permissionPackVersion, "live-demo-2026-07.1");
     assert.equal(
       await registry.resolve(
         { tenantId: "org_other" },
@@ -58,7 +59,7 @@ test("registry stages verified trust until the control plane explicitly activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "live-demo-2026-07.1" as const,
+      permissionPackVersion: "live-demo-2026-07.2" as const,
     };
     await registry.markOnboardingVerified(
       { tenantId: "org_local_sutra" },
@@ -71,6 +72,13 @@ test("registry stages verified trust until the control plane explicitly activate
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.status,
       "VERIFIED",
+    );
+    assert.equal(
+      (await registry.resolve(
+        { tenantId: "org_local_sutra" },
+        "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ))?.permissionPackVersion,
+      "live-demo-2026-07.2",
     );
     await registry.activateOnboarding(
       { tenantId: "org_local_sutra" },
@@ -105,6 +113,48 @@ test("registry stages verified trust until the control plane explicitly activate
       "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       verification.roleArn,
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("legacy encrypted records decode as permission pack .1 until complete proof upgrades them", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-registry-legacy-pack-"));
+  const path = join(directory, "connections.enc.json");
+  const keyBytes = randomBytes(32);
+  const key = keyBytes.toString("base64");
+  const connectionId = "conn_99999999999999999999999999999999";
+  const legacy = {
+    version: 2,
+    connections: {
+      [`org_local_sutra\u001f${connectionId}`]: {
+        ...connection(connectionId),
+        status: "ACTIVE",
+        createdAt: NOW.toISOString(),
+        updatedAt: NOW.toISOString(),
+      },
+    },
+    tombstones: {},
+  };
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", keyBytes, iv);
+  cipher.setAAD(Buffer.from("sutra-local-registry:v1", "utf8"));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(legacy), "utf8"),
+    cipher.final(),
+  ]);
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url"),
+  }), { mode: 0o600 });
+
+  try {
+    const registry = new EncryptedFileConnectionRegistry({ filePath: path, encryptionKey: key });
+    const resolved = await registry.resolve({ tenantId: "org_local_sutra" }, connectionId);
+    assert.equal(resolved?.status, "ACTIVE");
+    assert.equal(resolved?.permissionPackVersion, "live-demo-2026-07.1");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -182,7 +232,7 @@ test("staged activation is role-bound and cannot remove an active connection", a
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "live-demo-2026-07.1" as const,
+      permissionPackVersion: "live-demo-2026-07.2" as const,
     };
     await registry.markOnboardingVerified(
       { tenantId: candidate.tenantId },

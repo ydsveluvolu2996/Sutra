@@ -56,6 +56,7 @@ import {
 } from "./request-auth.js";
 import {
   CollectorError,
+  CURRENT_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type InventoryCollectorCoverage,
@@ -76,7 +77,7 @@ const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|security-events|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -97,6 +98,7 @@ const LIVE_SNAPSHOT_RESOURCE_BUDGET_BYTES = 4 * 1024 * 1024;
 const LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES = 1024 * 1024;
 const LIVE_SNAPSHOT_FINDING_BUDGET_BYTES = 2 * 1024 * 1024;
 export const LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES = 10 * 1024 * 1024;
+const SECURITY_EVENT_OPERATION_DEADLINE_MS = 105_000;
 const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
 const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
@@ -699,6 +701,10 @@ async function route(
         body: action === "activate" ? { activated: true } : { discarded: true },
       };
     }
+    if (action === "security-events") {
+      const eventJob = parseSecurityEventJob(body, pathConnectionId, context.now());
+      return { status: 200, body: await collectConnectionSecurityEvents(context, eventJob) };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
       return { status: 200, body: await verifyConnection(context, job) };
@@ -722,8 +728,7 @@ async function collectConnectionCosts(context: ServerContext, job: ScopedJob): P
   }
   context.activeConnectionOperations.add(operationKey);
   try {
-    const connection = await requireConnection(context.registry, job);
-    if (connection.status !== "ACTIVE") throw new RegistryStateError();
+    const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode !== "live") {
       const { collectAwsCosts } = await import("./cost-explorer-runner.js");
       return collectAwsCosts({
@@ -766,6 +771,133 @@ async function collectConnectionCosts(context: ServerContext, job: ScopedJob): P
   }
 }
 
+interface ScopedSecurityEventJob extends ScopedJob {
+  readonly windowStart: Date;
+  readonly windowEnd: Date;
+}
+
+async function collectConnectionSecurityEvents(
+  context: ServerContext,
+  job: ScopedSecurityEventJob,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
+  if (context.lifecycleMutations.has(operationKey)) {
+    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
+  }
+  return runTimedSecurityEventOperation({
+    activeOperations: context.activeConnectionOperations,
+    operationKey,
+    deadlineMs: SECURITY_EVENT_OPERATION_DEADLINE_MS,
+    operation: async (operationSignal) => {
+      const connection = await requireCurrentActiveConnection(context.registry, job);
+      if (context.mode !== "live") {
+        throw new LocalHttpError(
+          409,
+          "INVALID_REQUEST",
+          "Security-event collection requires explicit live AWS mode",
+        );
+      }
+      const broker = createWorkloadIdentityRoleBroker({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(connection.partition),
+      });
+      const session = await raceLocalAbort(
+        broker.assumeValidatedSession(
+          { tenantId: job.tenantId },
+          job.connectionId,
+          job.jobId,
+        ),
+        operationSignal,
+      );
+      const { AwsEnabledRegionSelector } = await import("./inventory-runner.js");
+      const regionSelector = new AwsEnabledRegionSelector({
+        controlRegion: partitionControlRegion(connection.partition),
+        requestedRegions: connection.enabledRegions,
+      });
+      const regionSignal = AbortSignal.any([operationSignal, AbortSignal.timeout(20_000)]);
+      const regions = await raceLocalAbort(
+        regionSelector.selectRegions({
+          tenantId: job.tenantId,
+          connectionId: job.connectionId,
+          accountId: session.accountId,
+          partition: session.partition,
+          credentials: session.credentials,
+        }, regionSignal),
+        regionSignal,
+      );
+      const { collectCloudTrailSecurityEvents } = await import("./security-events-runner.js");
+      return collectCloudTrailSecurityEvents({
+        accountId: session.accountId,
+        partition: session.partition,
+        regions,
+        credentials: session.credentials,
+        windowStart: job.windowStart,
+        windowEnd: job.windowEnd,
+        now: context.now,
+        abortSignal: operationSignal,
+      });
+    },
+  });
+}
+
+export async function runTimedSecurityEventOperation<T>(input: {
+  readonly activeOperations: Set<string>;
+  readonly operationKey: string;
+  readonly deadlineMs: number;
+  readonly operation: (signal: AbortSignal) => Promise<T>;
+}): Promise<T> {
+  if (!Number.isSafeInteger(input.deadlineMs) || input.deadlineMs < 1 || input.deadlineMs > SECURITY_EVENT_OPERATION_DEADLINE_MS) {
+    throw new TypeError("Security-event operation deadline is invalid");
+  }
+  if (input.activeOperations.has(input.operationKey)) {
+    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
+  }
+  input.activeOperations.add(input.operationKey);
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(new Error("Security-event operation deadline exceeded")),
+    input.deadlineMs,
+  );
+  timer.unref?.();
+  try {
+    return await raceLocalAbort(
+      Promise.resolve().then(() => input.operation(controller.signal)),
+      controller.signal,
+    );
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new LocalHttpError(504, "COLLECTION_FAILED", "Security-event collection reached its deadline");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    input.activeOperations.delete(input.operationKey);
+  }
+}
+
+function raceLocalAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    void operation.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      callback();
+    };
+    const onAbort = () => finish(() => reject(signal.reason));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => finish(() => resolve(value)),
+      (error: unknown) => finish(() => reject(error)),
+    );
+  });
+}
+
 async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
   if (
@@ -792,7 +924,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "live-demo-2026-07.1",
+        permissionPackVersion: "live-demo-2026-07.2",
       };
       await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
       return verificationResponse(verification);
@@ -822,8 +954,7 @@ async function syncConnection(context: ServerContext, job: ScopedJob): Promise<P
   }
   context.activeConnectionOperations.add(syncKey);
   try {
-    const connection = await requireConnection(context.registry, job);
-    if (connection.status !== "ACTIVE") throw new RegistryStateError();
+    const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode === "fixture") {
       return buildFixtureSnapshot({ jobId: job.jobId, connection, now: context.now() });
     }
@@ -1279,7 +1410,7 @@ function liveResource(resource: NormalizedAwsResource, resourceKey: string): Pil
     tags: resource.tags,
     configuration: resource.configuration,
     source: {
-      api: `${resource.service}:inventory`,
+      api: resource.sourceApi ?? `${resource.service}:inventory`,
       accountId: resource.accountId,
       collectedAt: resource.observedAt,
     },
@@ -1292,10 +1423,15 @@ function liveRelationships(
   keyMap: ReadonlyMap<string, string>,
 ): PilotRelationship[] {
   const byNativeId = new Map<string, NormalizedAwsResource[]>();
+  const index = (identifier: string, resource: NormalizedAwsResource) => {
+    const list = byNativeId.get(identifier) ?? [];
+    if (!list.includes(resource)) list.push(resource);
+    byNativeId.set(identifier, list);
+  };
   for (const resource of normalized) {
-    const list = byNativeId.get(resource.resourceId) ?? [];
-    list.push(resource);
-    byNativeId.set(resource.resourceId, list);
+    index(resource.resourceId, resource);
+    if (resource.arn !== undefined) index(resource.arn, resource);
+    for (const alias of stringArray(resource.configuration.aliases)) index(alias, resource);
   }
   const result: PilotRelationship[] = [];
   const dedupe = new Set<string>();
@@ -1320,8 +1456,18 @@ function liveRelationships(
     const config = resource.configuration;
     const vpcId = scalarString(config.vpcId);
     const subnetId = scalarString(config.subnetId);
+    const instanceId = scalarString(config.instanceId);
+    const kmsKeyId = scalarString(config.kmsKeyId);
     if (vpcId !== null) link(resource, vpcId, "contained_by", "vpcId");
     if (subnetId !== null) link(resource, subnetId, "runs_in", "subnetId");
+    if (instanceId !== null) link(resource, instanceId, "attached_to", "instanceId");
+    if (kmsKeyId !== null) link(resource, kmsKeyId, "encrypted_by", "kmsKeyId");
+    for (const relatedSubnetId of stringArray(config.subnetIds)) {
+      link(resource, relatedSubnetId, "runs_in", "subnetIds");
+    }
+    for (const relatedInstanceId of stringArray(config.instanceIds)) {
+      link(resource, relatedInstanceId, "attached_to", "instanceIds");
+    }
     for (const securityGroupId of stringArray(config.securityGroupIds)) {
       link(resource, securityGroupId, "protected_by", "securityGroupIds");
     }
@@ -1596,6 +1742,38 @@ function parseScopedJob(body: string, pathConnectionId: string): ScopedJob {
   return { tenantId: record.tenantId, connectionId: record.connectionId, jobId: record.jobId };
 }
 
+function parseSecurityEventJob(
+  body: string,
+  pathConnectionId: string,
+  now: Date,
+): ScopedSecurityEventJob {
+  const record = exactJson(body, [
+    "tenantId", "connectionId", "jobId", "windowStart", "windowEnd",
+  ]);
+  if (
+    typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId) ||
+    typeof record.connectionId !== "string" || record.connectionId !== pathConnectionId ||
+    !IDENTIFIER.test(record.connectionId) ||
+    typeof record.jobId !== "string" || !IDENTIFIER.test(record.jobId) ||
+    typeof record.windowStart !== "string" || typeof record.windowEnd !== "string"
+  ) throw invalidRequest();
+  const windowStart = canonicalIsoDate(record.windowStart);
+  const windowEnd = canonicalIsoDate(record.windowEnd);
+  if (
+    windowStart === null || windowEnd === null ||
+    windowStart.getTime() >= windowEnd.getTime() ||
+    windowEnd.getTime() - windowStart.getTime() > 24 * 60 * 60 * 1_000 ||
+    windowEnd.getTime() > now.getTime() + 60_000
+  ) throw invalidRequest();
+  return {
+    tenantId: record.tenantId,
+    connectionId: record.connectionId,
+    jobId: record.jobId,
+    windowStart,
+    windowEnd,
+  };
+}
+
 function parseConnectionLifecycleScope(
   body: string,
   pathConnectionId: string,
@@ -1666,6 +1844,20 @@ async function requireConnection(
 ): Promise<RegisteredAwsConnection> {
   const connection = await registry.getRegistered({ tenantId: job.tenantId }, job.connectionId);
   if (connection === null) throw new RegistryConnectionNotFoundError();
+  return connection;
+}
+
+async function requireCurrentActiveConnection(
+  registry: EncryptedFileConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    connection.permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
+  ) {
+    throw new RegistryStateError();
+  }
   return connection;
 }
 

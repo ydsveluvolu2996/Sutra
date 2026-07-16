@@ -1,5 +1,6 @@
 import {
   createSyncRun,
+  CURRENT_PILOT_PERMISSION_PACK,
   failSyncRun,
   getPilotState,
   getStoredConnectionSecret,
@@ -42,6 +43,9 @@ export async function POST(request: Request): Promise<Response> {
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(connectionId);
     assertSessionCapability(actor.authenticated, "sync:run", stored.customerId);
+    if (stored.permissionPackVersion !== CURRENT_PILOT_PERMISSION_PACK) {
+      throw Object.assign(new Error("Revalidate the current AWS permission pack before running inventory"), { code: "INVALID_STATE" });
+    }
     const health = await getCollectorHealth(stored.partition);
     if (health.mode !== "live") {
       throw Object.assign(

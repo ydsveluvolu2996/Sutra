@@ -22,6 +22,14 @@ configuration checks. Package/runtime vulnerability analysis and behavioral thre
 detection need different telemetry, detection engineering, and operational response
 capabilities.
 
+The verified local demo now also includes tenant-scoped Cost Explorer evidence,
+finding-backed case management, approval-controlled compliance exceptions,
+bounded CloudTrail LookupEvents normalization/detections, and expanded metadata
+collectors for EBS, ENI, ALB/NLB, KMS, DynamoDB, and ECR. Lambda inventory remains
+off because `ListFunctions` can expose environment-variable values. These local
+capabilities do not clear the hosted production gates below and are not presented
+as a Cloudaware, GuardDuty, Inspector, Security Hub, or SIEM replacement.
+
 ## Bounded first-release scope
 
 The first production slice is intentionally read-only.
@@ -155,11 +163,11 @@ The complete architecture and acceptance criteria are in
 Prerequisites:
 
 - A current Node.js 22 LTS patch (`>=22.13.0` is the package engine floor)
-- pnpm 10 (the repository's canonical install input is `pnpm-lock.yaml`)
+- pnpm 11.13.1 (the repository's canonical install input is `pnpm-lock.yaml`)
 
 ```bash
 corepack enable
-corepack prepare pnpm@10.13.1 --activate
+corepack prepare pnpm@11.13.1 --activate
 pnpm install --frozen-lockfile
 pnpm pilot:setup
 pnpm dev:pilot
@@ -199,9 +207,9 @@ screenshots, logs, issues, or pull requests.
 
 | Path | Purpose and current status |
 | --- | --- |
-| `app/` | vinext/React control plane, real local onboarding, dashboard, CMDB, findings, and exports |
+| `app/` | vinext/React control plane, real local onboarding, dashboard, CMDB, findings, cases, security events, compliance, FinOps and exports |
 | `lib/` | Domain types, cryptographic/request boundaries, payload validation, and control definitions |
-| `db/` | Drizzle/D1 connection, sync, immutable snapshot, relationship, finding, and audit repositories |
+| `db/` | Drizzle/D1/PostgreSQL connection, sync, immutable snapshot, relationship, finding, case, exception, security-event, cost and audit repositories |
 | `infrastructure/` | Customer read-only IAM role template for controlled sandbox use |
 | `services/aws-collector/` | Signed loopback broker, encrypted registry, fixture/live runners, STS trust validation, and AWS adapters |
 | `docs/` | Production architecture, AWS integration, threat model, quality gates, and acceptance criteria |

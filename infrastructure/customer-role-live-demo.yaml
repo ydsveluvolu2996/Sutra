@@ -91,6 +91,46 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Sid: DenyUnimplementedActions
+                Effect: Deny
+                NotAction:
+                  - sts:GetCallerIdentity
+                  - ec2:DescribeRegions
+                  - ec2:DescribeInstances
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeNetworkInterfaces
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - kms:ListKeys
+                  - kms:ListAliases
+                  - kms:DescribeKey
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeTable
+                  - ecr:DescribeRepositories
+                  - s3:ListAllMyBuckets
+                  - s3:GetBucketPublicAccessBlock
+                  - rds:DescribeDBInstances
+                  - iam:GetAccountSummary
+                  - iam:GetAccountPasswordPolicy
+                  - cloudtrail:DescribeTrails
+                  - cloudtrail:GetTrailStatus
+                  - cloudtrail:LookupEvents
+                  - guardduty:ListDetectors
+                  - guardduty:GetDetector
+                  - guardduty:ListFindings
+                  - guardduty:GetFindings
+                  - securityhub:DescribeHub
+                  - securityhub:GetFindings
+                  - inspector2:BatchGetAccountStatus
+                  - inspector2:ListFindings
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
+                  - iam:GetRole
+                  - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                Resource: '*'
               - Sid: ImplementedMetadataApis
                 Effect: Allow
                 Action:
@@ -100,6 +140,15 @@ Resources:
                   - ec2:DescribeVpcs
                   - ec2:DescribeSubnets
                   - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeNetworkInterfaces
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - kms:ListKeys
+                  - kms:ListAliases
+                  - kms:DescribeKey
+                  - dynamodb:ListTables
+                  - dynamodb:DescribeTable
+                  - ecr:DescribeRepositories
                   - s3:ListAllMyBuckets
                   - s3:GetBucketPublicAccessBlock
                   - rds:DescribeDBInstances
@@ -107,6 +156,7 @@ Resources:
                   - iam:GetAccountPasswordPolicy
                   - cloudtrail:DescribeTrails
                   - cloudtrail:GetTrailStatus
+                  - cloudtrail:LookupEvents
                   - guardduty:ListDetectors
                   - guardduty:GetDetector
                   - guardduty:ListFindings
@@ -133,7 +183,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: live-demo-2026-07.1
+          Value: live-demo-2026-07.2
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -147,4 +197,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: live-demo-2026-07.1
+    Value: live-demo-2026-07.2

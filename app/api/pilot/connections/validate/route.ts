@@ -75,7 +75,7 @@ export async function POST(request: Request): Promise<Response> {
       accountId: stored.accountId,
       partition: stored.partition,
     });
-    await markConnectionValidated(connectionId, actor.id);
+    await markConnectionValidated(connectionId, actor.id, verification);
     await activateCollectorConnection({
       tenantId: LOCAL_ORG_ID,
       connectionId,

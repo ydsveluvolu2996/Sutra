@@ -6,6 +6,11 @@ import type {
 } from "@aws-sdk/client-sts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+export const CURRENT_PERMISSION_PACK_VERSION = "live-demo-2026-07.2" as const;
+export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
+export type PermissionPackVersion =
+  | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof LEGACY_PERMISSION_PACK_VERSION;
 
 export type AwsConnectionStatus =
   | "PENDING"
@@ -31,6 +36,7 @@ export interface StoredAwsConnection {
   readonly roleArn: string;
   readonly externalId: string;
   readonly status: AwsConnectionStatus;
+  readonly permissionPackVersion: PermissionPackVersion;
   readonly sessionNamePrefix?: string;
 }
 
@@ -129,7 +135,7 @@ export interface OnboardingTrustVerification {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.1";
+  readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
 }
 
 export interface InventoryJobRequest {
@@ -189,6 +195,8 @@ export interface NormalizedAwsResource {
   readonly resourceType: string;
   readonly resourceId: string;
   readonly arn?: string;
+  /** Exact read-only AWS API provenance for this normalized record. */
+  readonly sourceApi?: string;
   readonly observedAt: string;
   readonly tags: Readonly<Record<string, string>>;
   readonly configuration: SafeJsonObject;
@@ -273,7 +281,7 @@ export interface OnboardingVerificationJobResult {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.1";
+  readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
   readonly verifiedAt: string;
 }
 

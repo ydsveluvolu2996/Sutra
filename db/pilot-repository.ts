@@ -31,7 +31,8 @@ import { LIVE_AWS_RUN_RECLAIM_AFTER_MS } from "../services/aws-collector/src/liv
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "live-demo-2026-07.1";
+const PILOT_PERMISSION_PACK = "live-demo-2026-07.2";
+export const CURRENT_PILOT_PERMISSION_PACK = PILOT_PERMISSION_PACK;
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
 
@@ -79,6 +80,7 @@ export interface StoredConnectionSecret {
   readonly externalIdKeyVersion: string;
   readonly enabledRegions: AwsRegionSelection;
   readonly status: ConnectionStatus;
+  readonly permissionPackVersion: string;
 }
 
 export interface VerifiedRoleEvidence {
@@ -90,7 +92,7 @@ export interface VerifiedRoleEvidence {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.1";
+  readonly permissionPackVersion: "live-demo-2026-07.2";
 }
 
 export interface CommitVerifiedConnectionRoleInput {
@@ -853,7 +855,7 @@ function resolveConnectionOffboardedAudit(
   });
 }
 
-interface SqlExistenceGuard {
+export interface SqlExistenceGuard {
   readonly sql: string;
   readonly values: readonly unknown[];
 }
@@ -947,7 +949,7 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
   const row = await db.prepare(
     `SELECT id, customer_id, source_kind, partition, aws_account_id, role_arn,
             external_id_ciphertext, external_id_key_version,
-            enabled_regions_json, status
+            enabled_regions_json, status, permission_pack_version
        FROM aws_connections
       WHERE org_id = ? AND id = ?
       LIMIT 1`,
@@ -962,6 +964,7 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
     external_id_key_version: string;
     enabled_regions_json: string;
     status: ConnectionStatus;
+    permission_pack_version: string;
   }>();
   if (row === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
@@ -986,6 +989,7 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
     externalIdKeyVersion: row.external_id_key_version,
     enabledRegions: parseJson<string[]>(row.enabled_regions_json, []),
     status: row.status,
+    permissionPackVersion: row.permission_pack_version,
   };
 }
 
@@ -1004,29 +1008,44 @@ export async function markConnectionValidating(connectionId: string): Promise<vo
   }
 }
 
-export async function markConnectionValidated(connectionId: string, actorId: string): Promise<void> {
+export async function markConnectionValidated(
+  connectionId: string,
+  actorId: string,
+  verification: VerifiedRoleEvidence,
+): Promise<void> {
   const db = await readyDatabase();
   const now = Date.now();
   const connection = await getConnection(connectionId);
   if (connection === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
-  const result = await db.prepare(
-    `UPDATE aws_connections
-        SET status = 'active', last_validated_at = ?, updated_at = ?
-      WHERE org_id = ? AND id = ? AND status = 'validating'`,
-  ).bind(now, now, LOCAL_ORG_ID, connectionId).run();
-  if ((result.meta?.changes ?? 0) !== 1) {
-    throw new PilotRepositoryError("INVALID_STATE", "Connection validation result is stale");
+  if (verification.permissionPackVersion !== PILOT_PERMISSION_PACK) {
+    throw new PilotRepositoryError("INVALID_STATE", "The verified permission pack is not current");
   }
-  await appendAuditEvent({
-    actorId,
-    action: "aws.connection.trust_validated",
-    targetType: "aws_connection",
-    targetId: connectionId,
-    customerId: connection.customerId,
-    outcome: "allowed",
-    metadata: {},
+  await commitAuditedStatements({
+    db,
+    statements: [db.prepare(
+      `UPDATE aws_connections
+          SET status = 'active', permission_pack_version = ?, last_validated_at = ?, updated_at = ?
+        WHERE org_id = ? AND id = ? AND status = 'validating'`,
+    ).bind(PILOT_PERMISSION_PACK, now, now, LOCAL_ORG_ID, connectionId)],
+    audit: {
+      actorId,
+      action: "aws.connection.trust_validated",
+      targetType: "aws_connection",
+      targetId: connectionId,
+      customerId: connection.customerId,
+      outcome: "allowed",
+      requestId: `aws.connection.trust_validated:${connectionId}:${now}`,
+      metadata: { permissionPackVersion: PILOT_PERMISSION_PACK },
+    },
+    mutationGuard: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND status = 'active'
+               AND permission_pack_version = ? AND last_validated_at = ? AND updated_at = ?`,
+      values: [LOCAL_ORG_ID, connectionId, PILOT_PERMISSION_PACK, now, now],
+    },
+    persistenceMessage: "The verified permission pack and audit evidence could not be committed atomically",
   });
 }
 
@@ -1076,6 +1095,12 @@ export async function createSyncRun(connectionId: string): Promise<string> {
   if (connection.status !== "active") {
     throw new PilotRepositoryError("INVALID_STATE", "Validate the AWS connection before running inventory");
   }
+  if (connection.permissionPackVersion !== PILOT_PERMISSION_PACK) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "Revalidate the current AWS permission pack before running inventory",
+    );
+  }
   if (connection.sourceKind === "simulated_fixture") {
     throw new PilotRepositoryError("INVALID_STATE", "Run simulated inventory through the durable local jobs workflow");
   }
@@ -1093,6 +1118,7 @@ export async function createSyncRun(connectionId: string): Promise<string> {
        FROM aws_connections c
       WHERE c.org_id = ? AND c.customer_id = ? AND c.id = ?
         AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        AND c.permission_pack_version = ?
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs r
            WHERE r.org_id = c.org_id AND r.connection_id = c.id
@@ -1106,6 +1132,7 @@ export async function createSyncRun(connectionId: string): Promise<string> {
       LOCAL_ORG_ID,
       connection.customerId,
       connectionId,
+      PILOT_PERMISSION_PACK,
     ).run();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -1896,6 +1923,46 @@ export function appendAuditEvent(input: AuditInput): Promise<void> {
     return Promise.reject(error);
   }
   return serializeAuditOperation(() => appendAuditEventWithRetry(resolved));
+}
+
+/**
+ * Commit domain statements and their chained audit record in the same database
+ * transaction. The post-mutation guard is evaluated by the audit INSERT inside
+ * that transaction; a false guard intentionally violates the audit row's NOT
+ * NULL constraints so D1/PostgreSQL roll the whole batch back.
+ */
+export function commitAuditedStatements(input: {
+  readonly db: D1Database;
+  readonly statements: readonly D1PreparedStatement[];
+  readonly audit: AuditInput;
+  readonly mutationGuard: SqlExistenceGuard;
+  readonly persistenceMessage: string;
+}): Promise<void> {
+  let audit: ResolvedAuditInput;
+  try {
+    audit = resolveAuditInput(input.audit);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return serializeAuditOperation(async () => {
+    const recover = async (): Promise<boolean> =>
+      await auditRequestAlreadySatisfied(input.db, audit) &&
+      await existenceGuardSatisfied(input.db, input.mutationGuard);
+    if (await recover()) return;
+    let results: D1Result<unknown>[];
+    try {
+      results = await input.db.batch([
+        ...input.statements,
+        await prepareAuditEventStatement(input.db, audit, true, input.mutationGuard),
+      ]);
+    } catch {
+      if (await recover()) return;
+      throw new PilotRepositoryError("PERSISTENCE_FAILED", input.persistenceMessage);
+    }
+    if ((results.at(-1)?.meta?.changes ?? 0) !== 1 || !await recover()) {
+      throw new PilotRepositoryError("PERSISTENCE_FAILED", input.persistenceMessage);
+    }
+  });
 }
 
 /**

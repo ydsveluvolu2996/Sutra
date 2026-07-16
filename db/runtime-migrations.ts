@@ -8,6 +8,7 @@ import scheduleOutboxSchemaSql from "../drizzle/0006_acoustic_thunderbolt.sql?ra
 import scheduleSequenceSchemaSql from "../drizzle/0007_demonic_hardball.sql?raw";
 import scheduleProvenanceSchemaSql from "../drizzle/0008_far_nicolaos.sql?raw";
 import costSnapshotsSchemaSql from "../drizzle/0009_acoustic_moondragon.sql?raw";
+import operationsWaveSchemaSql from "../drizzle/0010_sutra_operations_wave.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -33,10 +34,11 @@ const migrations = [
   { id: "0007_demonic_hardball", statements: statementsFrom(scheduleSequenceSchemaSql) },
   { id: "0008_far_nicolaos", statements: statementsFrom(scheduleProvenanceSchemaSql) },
   { id: "0009_acoustic_moondragon", statements: statementsFrom(costSnapshotsSchemaSql) },
+  { id: "0010_sutra_operations_wave", statements: statementsFrom(operationsWaveSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
-const CREATE_OBJECT = /^CREATE (?:UNIQUE )?(?:TABLE|INDEX)\s/iu;
+const CREATE_OBJECT = /^CREATE (?:UNIQUE )?(?:TABLE|INDEX|TRIGGER)\s/iu;
 
 async function columnExists(db: D1Database, table: string, column: string): Promise<boolean> {
   const result = await db.prepare(`PRAGMA table_info(\"${table}\")`).all<{ name: string }>();
