@@ -35,6 +35,19 @@ test("fixture produces a complete, relationship-safe one-account snapshot", () =
   assert.equal(snapshot.relationships.length, 9);
   assert.equal(snapshot.findings.length, 11);
   assert.ok(snapshot.coverage.every((item) => item.status === "succeeded"));
+  assert.equal(
+    snapshot.coverage.some((item) => item.collectorKey === "s3.buckets" && item.region === "global"),
+    false,
+  );
+  assert.deepEqual(
+    snapshot.coverage
+      .filter((item) => item.collectorKey === "s3.buckets")
+      .map((item) => ({ region: item.region, itemsObserved: item.itemsObserved })),
+    [
+      { region: "us-east-1", itemsObserved: 1 },
+      { region: "ap-south-1", itemsObserved: 0 },
+    ],
+  );
 
   const resourceKeys = new Set(snapshot.resources.map((resource) => resource.resourceKey));
   assert.equal(resourceKeys.size, snapshot.resources.length);

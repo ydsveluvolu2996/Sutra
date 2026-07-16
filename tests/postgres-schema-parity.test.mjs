@@ -5,8 +5,13 @@ import { resolve } from "node:path";
 import pg from "pg";
 
 const root = resolve(import.meta.dirname, "..");
-const snapshot = JSON.parse(await readFile(resolve(root, "drizzle/meta/0008_snapshot.json"), "utf8"));
-const baseline = await readFile(resolve(root, "postgres/migrations/0000_sutra_baseline.sql"), "utf8");
+const snapshot = JSON.parse(await readFile(resolve(root, "drizzle/meta/0009_snapshot.json"), "utf8"));
+const postgresMigrations = (
+  await Promise.all([
+    "0000_sutra_baseline.sql",
+    "0001_finops_cost_snapshots.sql",
+  ].map((file) => readFile(resolve(root, "postgres/migrations", file), "utf8")))
+).join("\n--> statement-breakpoint\n");
 
 function expectedSchema() {
   const tables = new Map();
@@ -27,7 +32,7 @@ function expectedSchema() {
 function postgresBaselineSchema() {
   const tables = new Map();
   const indexes = new Map();
-  for (const statement of baseline.split("--> statement-breakpoint").map((value) => value.trim())) {
+  for (const statement of postgresMigrations.split("--> statement-breakpoint").map((value) => value.trim())) {
     const table = /CREATE TABLE IF NOT EXISTS\s+([a-z0-9_]+)\s*\(([\s\S]+)\);?$/iu.exec(statement);
     if (table !== null) {
       const columns = table[2]

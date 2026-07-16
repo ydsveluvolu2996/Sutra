@@ -110,6 +110,51 @@ test("public SSH candidates are protocol-aware and include IPv6 and all-protocol
   ]), false);
 });
 
+test("live snapshots evaluate the advertised subnet public-IP control", () => {
+  const subnet: NormalizedAwsResource = {
+    schemaVersion: 1,
+    provider: "aws",
+    resourceKey: "aws:123456789012:us-east-1:ec2:aws.ec2.subnet:subnet-public",
+    accountId: "123456789012",
+    region: "us-east-1",
+    service: "ec2",
+    resourceType: "aws.ec2.subnet",
+    resourceId: "subnet-public",
+    arn: "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-public",
+    observedAt: NOW.toISOString(),
+    tags: { Name: "public" },
+    configuration: {
+      state: "available",
+      mapPublicIpOnLaunch: true,
+    },
+  };
+
+  const snapshot = normalizeLiveSnapshot(
+    LIVE_CONNECTION,
+    "job_subnet_control_aaaaaaaaaaaaaaaaaaa",
+    "sutra-job-subnet-control",
+    [subnet],
+    [],
+    "COMPLETE",
+    [{
+      collectorKey: "ec2.subnets",
+      region: "us-east-1",
+      status: "SUCCEEDED",
+      itemsObserved: 1,
+      pagesObserved: 1,
+    }],
+    NOW,
+  );
+
+  const finding = snapshot.findings.find(
+    (candidate) => candidate.controlKey === "SUTRA.AWS.EC2.SUBNET_AUTO_PUBLIC_IP",
+  );
+  assert.ok(finding);
+  assert.equal(finding.resourceKey, snapshot.resources[0]?.resourceKey);
+  assert.equal(finding.severity, "medium");
+  assert.deepEqual(finding.evidence, { mapPublicIpOnLaunch: true });
+});
+
 test("live collector coverage is normalized without collapsing adapter failures", () => {
   assert.deepEqual(
     normalizeCollectorCoverage([

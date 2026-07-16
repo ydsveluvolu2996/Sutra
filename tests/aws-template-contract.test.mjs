@@ -50,6 +50,8 @@ test("live demo customer role is the reviewed public artifact", async () => {
     "securityhub:GetFindings",
     "inspector2:BatchGetAccountStatus",
     "inspector2:ListFindings",
+    "ce:GetCostAndUsage",
+    "ce:GetCostForecast",
   ]) {
     assert.match(infrastructure, new RegExp(`- ${action.replaceAll("*", "\\*")}`));
   }
@@ -130,7 +132,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "093292b0f6733bdddbcdb5bc34b31a0562e6350c77d8d4d76b744a7892b9ba7e",
+    "b123f6ea740f6b63a60ed639563792d7f34a08356d2fb8bb234f028a3d9821a0",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -160,7 +162,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
     "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/live-demo-2026-07.1/" +
-      "9e1388f98d55bc54254b8def9844a41ea916acacfa37144cd67a8a4dce4f1d42.yaml",
+      "3ba5fc12492f31898547a497449e36abbff1751b1069a805600e7e703a568156.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[

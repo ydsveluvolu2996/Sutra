@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-cloudtrail": "3.1087.0",
+    "@aws-sdk/client-cost-explorer": "3.1087.0",
     "@aws-sdk/client-ec2": "3.1087.0",
     "@aws-sdk/client-guardduty": "3.1087.0",
     "@aws-sdk/client-iam": "3.1087.0",

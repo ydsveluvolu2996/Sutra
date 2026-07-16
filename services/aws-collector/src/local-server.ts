@@ -76,7 +76,7 @@ const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -703,10 +703,67 @@ async function route(
     if (action === "verify") {
       return { status: 200, body: await verifyConnection(context, job) };
     }
+    if (action === "costs") {
+      return { status: 200, body: await collectConnectionCosts(context, job) };
+    }
     return { status: 200, body: await syncConnection(context, job) };
   }
 
   throw new LocalHttpError(404, "INVALID_REQUEST", "The collector endpoint does not exist");
+}
+
+async function collectConnectionCosts(context: ServerContext, job: ScopedJob): Promise<unknown> {
+  const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
+  if (
+    context.activeConnectionOperations.has(operationKey) ||
+    context.lifecycleMutations.has(operationKey)
+  ) {
+    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
+  }
+  context.activeConnectionOperations.add(operationKey);
+  try {
+    const connection = await requireConnection(context.registry, job);
+    if (connection.status !== "ACTIVE") throw new RegistryStateError();
+    if (context.mode !== "live") {
+      const { collectAwsCosts } = await import("./cost-explorer-runner.js");
+      return collectAwsCosts({
+        accountId: connection.expectedAccountId,
+        partition: connection.partition,
+        credentials: {
+          accessKeyId: "SIMULATED",
+          secretAccessKey: "SIMULATED",
+          sessionToken: "SIMULATED",
+          expiration: new Date(0),
+        },
+        client: {
+          getCostAndUsage: async () => {
+            throw Object.assign(new Error("Live AWS is required"), { name: "AccessDeniedException" });
+          },
+          getCostForecast: async () => ({}),
+        },
+        now: context.now,
+      });
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    const session = await broker.assumeValidatedSession(
+      { tenantId: job.tenantId },
+      job.connectionId,
+      job.jobId,
+    );
+    const { collectAwsCosts } = await import("./cost-explorer-runner.js");
+    return collectAwsCosts({
+      accountId: session.accountId,
+      partition: session.partition,
+      credentials: session.credentials,
+      now: context.now,
+    });
+  } finally {
+    context.activeConnectionOperations.delete(operationKey);
+  }
 }
 
 async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
@@ -1371,6 +1428,20 @@ function liveFindings(
           "Set HttpTokens to required after validating workload compatibility.",
           { metadataHttpTokens: scalarString(config.metadataHttpTokens) ?? "unknown" });
       }
+    }
+    if (
+      source.resourceType === "aws.ec2.subnet" &&
+      config.mapPublicIpOnLaunch === true
+    ) {
+      add(
+        resourceKey,
+        "SUTRA.AWS.EC2.SUBNET_AUTO_PUBLIC_IP",
+        "medium",
+        "Subnet auto-assigns public IPv4 addresses",
+        "MapPublicIpOnLaunch is enabled, so newly launched instances can receive public IPv4 addresses unless the launch request overrides the subnet default.",
+        "Disable MapPublicIpOnLaunch and explicitly expose only approved entry points.",
+        { mapPublicIpOnLaunch: true },
+      );
     }
     if (source.resourceType === "aws.rds.db-instance") {
       if (config.storageEncrypted === false) {

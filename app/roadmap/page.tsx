@@ -21,8 +21,8 @@ const phases = [
     state: "Planned expansion",
     tone: "planned",
     title: "AWS CMDB and posture depth",
-    summary: "Broaden AWS inventory, change context, control coverage, compliance evidence, and native security finding imports.",
-    items: ["More AWS resource and relationship types", "Change history, diffs, ownership and custom fields", "Reviewed controls, exceptions and standards mappings", "Inspector, GuardDuty and Security Hub finding imports"],
+    summary: "Broaden AWS inventory, change context, control coverage, compliance evidence, and the lifecycle around imported native security findings.",
+    items: ["More AWS resource and relationship types", "Change history, diffs, ownership and custom fields", "Reviewed controls, exceptions and standards mappings", "Deeper native-finding correlation, ownership and workflow"],
     evidence: "Coverage, quality and lifecycle tests per adapter",
   },
   {
@@ -57,10 +57,11 @@ const phases = [
 const capabilityRows = [
   ["AWS onboarding", "One account; behavioral trust validation", "Organization-scale lifecycle and partitions", "Gate → expand"],
   ["CMDB", "Selected AWS inventory, graph, snapshots, exports", "Broad CI coverage, changes, history and query API", "Gate → expand"],
-  ["CSPM", "9 controls + 2 native-service coverage signals", "Reviewed packs, exceptions and compliance mappings", "Gate → expand"],
-  ["Native findings", "Coverage signals only; no finding import", "Inspector, GuardDuty and Security Hub correlation", "Expand"],
+  ["CSPM", "8 configuration controls + 3 service-coverage controls", "Reviewed packs, exceptions and compliance mappings", "Gate → expand"],
+  ["Native findings", "Bounded read-only imports from enabled Inspector, GuardDuty and Security Hub services", "Deeper correlation, ownership, lifecycle and workflow", "Gate → expand"],
+  ["SIEM", "Not implemented; no event/log ingestion, normalization or correlation", "Tenant-safe telemetry ingestion, detection and retention", "Expand"],
   ["Resource changes", "None; collector has zero write permissions", "Separate approved remediation plane", "Expand"],
-  ["FinOps", "Not implemented", "Cost allocation, budgets, anomalies and optimization", "Expand"],
+  ["FinOps", "Read-only Cost Explorer trends, breakdowns, forecast provenance and evidence-derived signals", "CUR 2.0, allocation, budgets, commitments, utilization-aware optimization and billing reconciliation", "Gate → expand"],
   ["Integrations", "JSON/CSV export only", "ITSM, SIEM, PSA, chat, webhooks and public API", "Expand"],
   ["Multi-cloud", "Not implemented", "Azure, GCP and Kubernetes collectors", "Horizon"],
 ] as const;
@@ -79,8 +80,8 @@ export default function RoadmapPage() {
         <div className="roadmap-now-copy">
           <span className="roadmap-phase-label"><i /> Delivered locally · Phase 0</span>
           <h2 id="roadmap-now-title">One complete, honest AWS vertical slice.</h2>
-          <p>Sutra can create a scoped connection, hand off an ExternalId, prove the IAM trust behavior, collect selected metadata, publish a complete snapshot, browse assets and relationships, evaluate deterministic checks, update finding workflow, and export evidence.</p>
-          <div className="roadmap-facts"><span><strong>1</strong> customer / account</span><span><strong>7</strong> selected AWS collectors</span><span><strong>11</strong> controls and coverage signals</span><span><strong>0</strong> mutation permissions</span></div>
+          <p>Sutra can create a scoped connection, hand off an ExternalId, prove the IAM trust behavior, collect selected metadata and existing AWS-native findings, publish a complete snapshot, browse assets and relationships, evaluate deterministic checks, update finding workflow, and export evidence.</p>
+          <div className="roadmap-facts"><span><strong>1</strong> customer / account</span><span><strong>8</strong> AWS service families</span><span><strong>11</strong> versioned baseline controls</span><span><strong>0</strong> mutation permissions</span></div>
         </div>
         <div className="roadmap-now-boundary">
           <div><p className="eyebrow">Delivered</p><ul><li>Fixture and disposable-sandbox live modes</li><li>Signed broker boundary and encrypted local registry</li><li>Immutable complete snapshots and last-good projection</li><li>CMDB, findings, workflows, coverage, JSON and CSV</li></ul></div>

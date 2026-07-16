@@ -22,6 +22,8 @@ import {
 import { authorizePilotRequest, type AuthorizedPilotActor } from "./api-auth";
 import type { Capability } from "./auth-policy";
 import { LIVE_AWS_BROKER_TIMEOUT_MS } from "../services/aws-collector/src/live-collection-limits";
+import { parseAwsCostSnapshot } from "./cost-boundary";
+import type { AwsCostSnapshot } from "./cost-types";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
@@ -422,6 +424,25 @@ export async function runCollectorSync(input: {
       accountId: input.accountId,
       partition: input.partition,
     },
+  );
+}
+
+export async function runCollectorCostCollection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+}): Promise<AwsCostSnapshot> {
+  const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
+  return parseAwsCostSnapshot(
+    await brokerFetch<unknown>(
+      `/v1/connections/${input.connectionId}/costs`,
+      "POST",
+      payload,
+      90_000,
+    ),
+    input.accountId,
   );
 }
 

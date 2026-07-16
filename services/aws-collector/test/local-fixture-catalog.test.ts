@@ -54,6 +54,12 @@ test("each catalog account executes locally and returns a complete scoped snapsh
     assert.equal(result.snapshot.accountId, account.accountId);
     assert.equal(result.snapshot.coverageState, "complete");
     assert.equal(result.snapshot.resources.length, 13);
+    assert.deepEqual(
+      result.snapshot.coverage
+        .filter((entry) => entry.collectorKey === "s3.buckets")
+        .map((entry) => entry.region),
+      account.enabledRegions,
+    );
     assert.ok(
       result.snapshot.resources.every(
         (resource) => resource.source.accountId === account.accountId,

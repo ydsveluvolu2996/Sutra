@@ -1,47 +1,43 @@
 import type { Metadata } from "next";
+import { SUTRA_AWS_BASELINE } from "../../lib/compliance-catalog";
 import { AppShell } from "../components/app-shell";
 
 export const metadata: Metadata = { title: "Control library" };
 
-const controls = [
-  ["EC2-001", "Public SSH ingress candidate", "EC2 / VPC", "High", "Security groups allowing TCP/22 from a public IPv4 range; full network reachability is not claimed."],
-  ["EC2-002", "Instance public IP", "Amazon EC2", "Medium", "Instances with a directly assigned public IPv4 address."],
-  ["EC2-003", "IMDSv2 not required", "Amazon EC2", "High", "Instance metadata settings where HttpTokens is not required."],
-  ["EC2-004", "Subnet auto-assigns public IPs", "EC2 / VPC", "Medium", "Subnets whose MapPublicIpOnLaunch setting is enabled."],
-  ["S3-001", "S3 Public Access Block gaps", "Amazon S3", "High", "Buckets missing one or more Public Access Block protections."],
-  ["RDS-001", "RDS storage encryption disabled", "Amazon RDS", "High", "Database instances whose StorageEncrypted setting is false."],
-  ["RDS-002", "RDS public-accessibility flag", "Amazon RDS", "Critical", "Database instances whose PubliclyAccessible setting is enabled; full network reachability is not claimed."],
-  ["LOG-001", "CloudTrail logging stopped", "CloudTrail", "Critical", "Configured trails that are not currently delivering management events."],
-  ["IAM-001", "IAM password baseline", "AWS IAM", "Medium", "Account password policy is missing or below the local pilot baseline."],
-  ["DET-001", "GuardDuty coverage signal", "GuardDuty", "High", "Shows whether AWS-native threat detection is enabled; Sutra does not emulate it."],
-  ["HUB-001", "Security Hub coverage signal", "Security Hub", "Medium", "Shows whether native finding aggregation is enabled in the observed Region."],
-];
+const configurationControls = SUTRA_AWS_BASELINE.controls.filter(
+  (control) => control.kind === "configuration",
+).length;
+const coverageControls = SUTRA_AWS_BASELINE.controls.length - configurationControls;
+
+function compactControlKey(key: string): string {
+  return key.split(".").slice(-2).join(".");
+}
 
 export default function ControlsPage() {
   return (
     <AppShell active="controls">
       <section className="page-heading">
         <div><p className="eyebrow">Transparent by default</p><h1>Control library</h1><p className="page-subtitle">Deterministic checks with explicit evidence, versioning, and honest coverage boundaries.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href="/roadmap">Product roadmap</a><a className="button button-secondary" href="#architecture">View architecture</a><a className="button button-primary" href="/onboard">Connect account</a></div>
+        <div className="heading-actions"><a className="button button-secondary" href="/roadmap">Product roadmap</a><a className="button button-secondary" href="#architecture">View architecture</a><a className="button button-primary" href="/compliance">Open compliance</a></div>
       </section>
 
       <section className="summary-band">
-        <div><small>Configuration controls</small><strong>9</strong><span>Enabled in local pilot pack</span></div>
-        <div><small>Coverage signals</small><strong>2</strong><span>AWS-native service status</span></div>
-        <div><small>Result semantics</small><strong>5</strong><span>Pass · fail · unknown · N/A · error</span></div>
-        <div><small>Mutation permissions</small><strong>0</strong><span>Read-only v1 collector role</span></div>
+        <div><small>Configuration controls</small><strong>{configurationControls}</strong><span>Resource and account checks</span></div>
+        <div><small>Coverage controls</small><strong>{coverageControls}</strong><span>Regional service evidence</span></div>
+        <div><small>Result semantics</small><strong>5</strong><span>Pass · fail · unknown · N/A · excepted</span></div>
+        <div><small>Native finding sources</small><strong>3</strong><span>GuardDuty · Security Hub · Inspector</span></div>
       </section>
 
       <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">Local pilot pack · v1.0</p><h2>AWS posture and exposure checks</h2></div><span className="status-pill status-positive">Versioned</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">{SUTRA_AWS_BASELINE.name} · v{SUTRA_AWS_BASELINE.version}</p><h2>AWS posture and coverage checks</h2></div><span className="status-pill status-positive">Versioned</span></div>
         <div className="control-list">
-          {controls.map(([id, title, service, severity, description]) => (
-            <article className="control-row" key={id}>
-              <code>{id}</code>
-              <div><h3>{title}</h3><p>{description}</p></div>
-              <span>{service}</span>
-              <span className={`severity-badge severity-${severity.toLowerCase()}`}>{severity}</span>
-              <span className="control-state">Enabled</span>
+          {SUTRA_AWS_BASELINE.controls.map((control) => (
+            <article className="control-row" key={control.key}>
+              <code title={control.key}>{compactControlKey(control.key)}</code>
+              <div><h3>{control.title}</h3><p>{control.description} {control.limitation}</p></div>
+              <span>{control.service}</span>
+              <span className={`severity-badge severity-${control.severity}`}>{control.severity}</span>
+              <span className="control-state">{control.kind === "service-coverage" ? "Coverage" : "Enabled"}</span>
             </article>
           ))}
         </div>
@@ -54,7 +50,8 @@ export default function ControlsPage() {
             <li><span>✓</span>Inventories supported AWS resources and relationships.</li>
             <li><span>✓</span>Evaluates explainable configuration and exposure rules.</li>
             <li><span>✓</span>Preserves unknown states when evidence is missing.</li>
-            <li><span>✓</span>Reports GuardDuty and Security Hub enablement as coverage signals.</li>
+            <li><span>✓</span>Imports bounded GuardDuty, Security Hub, and Inspector findings.</li>
+            <li><span>✓</span>Exports snapshot-pinned compliance evidence with report hashes.</li>
           </ul>
         </article>
         <article className="panel boundary-secondary">
@@ -79,7 +76,7 @@ export default function ControlsPage() {
       </section>
 
       <section className="roadmap-inline-callout">
-        <div><p className="eyebrow">Delivered versus future</p><h2>See exactly what Sutra implements now—and what remains gated.</h2><p>The roadmap separates this local AWS pilot from hosted multitenancy, broader AWS coverage, native finding imports, FinOps, integrations, remediation, and multi-cloud work.</p></div>
+        <div><p className="eyebrow">Delivered versus future</p><h2>See exactly what Sutra implements now—and what remains gated.</h2><p>The roadmap separates delivered native-finding imports and CSPM evidence from future SIEM event ingestion, correlation, hosted scale, remediation, integrations, and multi-cloud work.</p></div>
         <a className="button button-primary" href="/roadmap">Open product roadmap</a>
       </section>
     </AppShell>

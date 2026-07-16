@@ -27,15 +27,15 @@ in the README have been satisfied. They have not.
 | --- | --- | --- | --- | --- |
 | **AWS trust onboarding** | One customer and one AWS account; platform-generated encrypted ExternalId; canonical role/account/partition binding; positive `AssumeRole`/`GetCallerIdentity` validation and missing/wrong-ExternalId negative probes; read-only CloudFormation role | Hosted AWS broker identity, managed secret/key service, connection disable/rotate/offboard lifecycle, multi-tenant authorization and negative isolation tests | AWS Organizations onboarding, delegated administration, account discovery, bulk lifecycle, regional/partition operating model | Production gate |
 | **CMDB inventory** | Persistent D1 snapshots for selected EC2/VPC, subnet, security group, S3, RDS, IAM account posture, CloudTrail, GuardDuty coverage, and Security Hub coverage; normalized resources, provenance, coverage, relationships, freshness, JSON/CSV export | Durable collection jobs, retry/backoff/DLQ, authenticated ingestion, retention, backup/restore, quotas, atomic reconciliation under load | Broad AWS service and CI-type coverage, event-assisted change capture, dependency graph, history/diff, ownership, custom fields, reconciliation policies, search/query API | Production gate → planned expansion |
-| **Configuration posture** | Nine deterministic configuration controls and two AWS-native service coverage signals, with evidence, severity, remediation text, complete-snapshot boundary, and acknowledge/reopen workflow | Reviewed control lifecycle, central authorization, false-positive process, suppression expiry, control-version migrations, regression fixtures and quality metrics | Larger AWS control catalog, custom policies, risk context, exception approvals, standards mappings and evidence reporting | Production gate → planned expansion |
-| **Native AWS security findings** | Service enablement/coverage signals only. Sutra does **not** currently import Inspector, GuardDuty, or Security Hub findings | Authenticated, paginated import contract; provider identifiers; deduplication; update/archive lifecycle; least-privilege permission review | Inspector, GuardDuty and Security Hub finding correlation with resources, accounts, ownership, workflow, and export; preserve provider semantics and links | Planned expansion |
+| **Configuration posture** | Eleven versioned baseline controls: eight deterministic configuration controls and three AWS-native service-coverage controls, with evidence, severity, remediation text, complete-snapshot boundary, and acknowledge/reopen workflow | Reviewed control lifecycle, central authorization, false-positive process, suppression expiry, control-version migrations, regression fixtures and quality metrics | Larger AWS control catalog, custom policies, risk context, exception approvals, standards mappings and evidence reporting | Production gate → planned expansion |
+| **Native AWS security findings** | Bounded, paginated, read-only import of existing Inspector, GuardDuty, and Security Hub findings when those services are enabled; account/Region scoping, sanitized evidence, provider identifiers and lifecycle are preserved; disabled services remain explicit coverage observations | Hosted ingestion authentication, tenant-isolation tests, durable scheduling/retries, least-privilege review, retention and lifecycle quality metrics | Deeper resource/account/ownership correlation, workflow and export while preserving provider semantics and links | Production gate → planned expansion |
 | **Change and resource management** | No mutation permissions and no remediation execution | Separate remediation-plane threat model, customer role, step-up authentication, approvals, dry-run/diff, idempotency and immutable audit evidence | Bounded human-approved actions, policy-driven workflows, rollback guidance, maintenance windows; never add write access to the CMDB collector | Planned expansion |
 | **Hosted MSP tenancy and access** | One local workspace and local operator; schemas anticipate organizations/customers, but production tenant isolation is not claimed | Hosted OIDC sessions, MFA/step-up, invitations, server-side RBAC/ABAC, customer grants, route/job/cache/export isolation tests, audit administration | MSP portfolio views, customer portals, delegated roles, SAML/SCIM, custom roles, data-residency and enterprise administration | Production gate |
 | **Collection orchestration and reliability** | Signed replay-resistant loopback protocol, encrypted local registry, synchronous manual runs, last-complete-snapshot publication | Durable outbox/queue, leases, idempotency, deadlines, cancellation, retry/backoff, DLQ, autoscaling, observability/SLOs and incident runbooks | Scheduled and event-driven collection fleets, regional resilience, fleet health, per-customer windows, high-scale reconciliation | Production gate |
 | **Compliance evidence** | Versioned configuration evidence and immutable snapshot/audit foundations; no compliance certification or framework-compliance claim | Evidence retention policy, audit export, exception approvals, control ownership, testable report semantics | CIS/AWS FSBP/NIST/ISO/SOC mappings, continuous evidence packages, customer reports and auditor workflows; mappings do not equal certification | Planned expansion |
-| **FinOps** | Not implemented. Resource tags are inventory context only; no billing or savings claim | Cost-data ingestion design, tenant-safe storage, currency/time-zone rules, reconciliation and cost-allocation model | CUR/Data Exports ingestion, allocation, budgets, anomaly signals, commitments, rightsizing recommendations, unit economics and customer reporting | Planned expansion |
+| **FinOps** | Tenant-scoped immutable Cost Explorer snapshots; six-month service/account trends, current spend, AWS forecast with labelled fallback, and conservative evidence-derived growth/concentration signals; no savings or billing-reconciliation claim | Production cost-data retention, currency/time-zone policy, reconciliation, allocation ownership, scheduling and isolation tests | CUR 2.0/Data Exports ingestion, allocation, budgets, native anomalies, commitments, utilization-aware rightsizing, unit economics and customer billing | Production gate → planned expansion |
 | **ITSM and collaboration** | Local finding workflow plus JSON/CSV export; no outbound integration | Signed webhook and connector security model, delivery queue, retries, secrets, audit, field mapping and tenant scopes | ServiceNow, Jira, email, Slack/Teams and PSA/ticket synchronization with ownership, status and SLA workflows | Planned expansion |
-| **SIEM and security ecosystem** | No SIEM export or bidirectional security workflow | Versioned event schema, bounded evidence payloads, export authorization, delivery reliability and redaction tests | Splunk, Microsoft Sentinel, Elastic and provider-neutral webhook/API integrations; finding links remain traceable to source | Planned expansion |
+| **SIEM and security ecosystem** | Not implemented: no security-event or log ingestion, normalization, correlation, detection rules, hot/cold retention, SIEM export, or bidirectional security workflow | Tenant-scoped telemetry architecture, versioned event schema, bounded evidence payloads, export authorization, delivery reliability and redaction tests | Centralized cloud telemetry, correlation and governed retention plus Splunk, Microsoft Sentinel, Elastic and provider-neutral webhook/API integrations | Planned expansion |
 | **Public API and ecosystem** | Internal local pilot APIs only; they are not a supported public integration contract | Versioned tenant-authorized API, pagination, idempotency, quotas, service accounts, audit, SDK contract and deprecation policy | Integration marketplace, customer-defined automations and governed data export/import ecosystem | Planned expansion |
 | **Azure, GCP and Kubernetes** | Not implemented; no provider parity claim | Common provider-neutral CI, relationship, evidence and coverage contracts proven without weakening AWS semantics | Azure subscriptions/resources/Defender signals, GCP projects/assets/SCC signals, and Kubernetes clusters/workloads/posture through separately secured collectors | Research horizon |
 
@@ -49,6 +49,12 @@ trust behavior, collect a selected inventory, publish an immutable complete snap
 browse the CMDB and graph edges, review findings, update finding workflow state, and
 export the active projection. Fixture mode proves this flow without representing its
 data as customer evidence.
+
+Live collection also imports existing findings from enabled Amazon Inspector,
+GuardDuty, and Security Hub services through bounded, paginated, account/Region-scoped
+read-only adapters. It preserves provider identity and lifecycle, sanitizes evidence,
+and reports disabled or partial service coverage explicitly. It does not enable those
+services or reproduce their vulnerability, threat-detection, or standards engines.
 
 Exit evidence already present is useful engineering evidence, not production release
 approval. The local control plane, operator model, loopback broker, synchronous jobs,
@@ -67,9 +73,10 @@ accepted before the P0 evidence in the README is independently reviewed and appr
 
 Expand collectors only with pagination, throttling, partial-result, permission, region,
 schema, and fixture tests. Add change history and diff, deeper relationships, ownership,
-custom fields, reviewed controls, exception lifecycle, standards mappings, and actual
-Inspector/GuardDuty/Security Hub finding imports. Coverage signals must never be
-presented as imported findings or replacement detection.
+custom fields, reviewed controls, exception lifecycle, standards mappings, and deeper
+correlation and workflow for imported Inspector, GuardDuty, and Security Hub findings.
+Coverage signals must never be presented as imported findings, and imported findings
+must never be presented as replacement detection.
 
 Any resource-management capability belongs to a separate, opt-in remediation plane
 with a distinct role and approval boundary. It is not an extension of the read-only
@@ -86,8 +93,11 @@ signals, commitment coverage/utilization, rightsizing, and MSP/customer reportin
 
 Build a reliable connector platform before individual logos: tenant-scoped secrets,
 signed webhooks, delivery queues, retries, idempotency, schema versioning, audit,
-redaction, and supportable failure handling. Add ticketing, messaging, SIEM, and PSA
-connectors in measured order based on MSP demand.
+redaction, and supportable failure handling. A SIEM capability additionally requires
+tenant-safe security-event and log ingestion, normalization, correlation, governed
+retention, and detection operations; none of that is delivered by the current native-
+finding imports. Add ticketing, messaging, SIEM, and PSA connectors in measured order
+based on MSP demand.
 
 ### Phase 5 — Azure, GCP, and Kubernetes
 

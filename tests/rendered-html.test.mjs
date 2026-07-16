@@ -33,7 +33,7 @@ test("server-renders the Sutra public product site", async () => {
 });
 
 test("server-renders an authentication gate without leaking protected route data", async () => {
-  const routes = ["/dashboard", "/customers", "/cmdb", "/changes", "/findings", "/controls", "/roadmap", "/onboard"];
+  const routes = ["/dashboard", "/customers", "/cmdb", "/cmdb/resource?key=demo", "/changes", "/findings", "/compliance", "/costs", "/reports", "/controls", "/roadmap", "/onboard"];
 
   for (const pathname of routes) {
     const response = await render(pathname);
