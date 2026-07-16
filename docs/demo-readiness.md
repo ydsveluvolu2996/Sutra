@@ -19,7 +19,7 @@ This tracker separates verified product behavior from work that is merely planne
 | Expanded AWS CMDB coverage | Complete in source; live activation pending | EBS, ENI, ALB/NLB, KMS, DynamoDB and ECR metadata plus bounded relationship mapping and partial-failure evidence; Lambda remains opt-in/off because its list response can contain environment values |
 | Full regression and local database migration | Complete | Secret scan, both typechecks, lint, 250 application tests (247 passed, 3 environment-gated skips), 95 collector tests, real PostgreSQL migration/repository tests, production build and 4 protected-render tests passed; three additive live database migrations are applied |
 | Live permission-pack `.2` activation | Pending explicit AWS approval | Publish the reviewed immutable template, update the existing customer role with ten additional read-only actions, re-attest the same role, then restart the verified build |
-| GitHub milestone | Pending | Commit and push this verified operations wave to the existing draft pull request, then confirm GitHub CI |
+| GitHub milestone | Complete | Operations-wave source and the dynamic PostgreSQL CI-port hardening are committed and pushed to the existing draft pull request; GitHub CI passed |
 
 ## Explicitly after the investor demo
 
