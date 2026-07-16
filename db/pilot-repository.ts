@@ -14,6 +14,12 @@ import type {
   PilotSyncRun,
 } from "../lib/pilot-types";
 import { parseSafePilotFailure } from "../lib/aws-pilot-security";
+import {
+  diffCmdbResources,
+  toComparableResource,
+  type CmdbComparableResource,
+  type CmdbResourceChangeType,
+} from "../lib/cmdb-change-history";
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
@@ -129,6 +135,37 @@ interface SnapshotHeadRow {
   snapshot_sha256: string;
 }
 
+interface ChangeEventRow {
+  id: string;
+  from_snapshot_id: string | null;
+  to_snapshot_id: string;
+  resource_key: string;
+  change_type: CmdbResourceChangeType;
+  changed_paths_json: string;
+  before_json: string | null;
+  after_json: string | null;
+  occurred_at: number;
+}
+
+export interface ChangeHistoryScope {
+  readonly orgId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly limit?: number;
+}
+
+export interface CmdbChangeHistoryEvent {
+  readonly id: string;
+  readonly fromSnapshotId: string | null;
+  readonly toSnapshotId: string;
+  readonly resourceKey: string;
+  readonly changeType: CmdbResourceChangeType;
+  readonly changedPaths: readonly string[];
+  readonly before: CmdbComparableResource | null;
+  readonly after: CmdbComparableResource | null;
+  readonly occurredAt: string;
+}
+
 function database(): D1Database {
   return getRawDb();
 }
@@ -170,6 +207,22 @@ function toPilotConnection(row: ConnectionRow): PilotConnection {
     lastSuccessfulSyncAt: iso(row.last_successful_sync_at),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
+  };
+}
+
+function resourceRowToComparable(row: ResourceRow): CmdbComparableResource {
+  return {
+    resourceKey: row.resource_key,
+    service: row.service,
+    resourceType: row.resource_type,
+    nativeId: row.native_id,
+    arn: row.arn,
+    name: row.name,
+    region: row.region_key,
+    state: row.state,
+    tags: parseJson<Record<string, string>>(row.tags_json, {}),
+    configuration: parseJson<Record<string, JsonValue>>(row.configuration_json, {}),
+    contentSha256: row.content_sha256,
   };
 }
 
@@ -499,10 +552,39 @@ export async function persistSnapshot(
   if (scopedRun === null) {
     throw new PilotRepositoryError("INVALID_STATE", "The collector result does not belong to an active scoped sync");
   }
+
+  let previousSnapshotId: string | null = null;
+  let previousResources: readonly CmdbComparableResource[] = [];
+  if (payload.coverageState === "complete") {
+    const previousHead = await db.prepare(
+      `SELECT s.id
+         FROM connection_heads h
+         JOIN cmdb_snapshots s ON s.id = h.snapshot_id
+          AND s.org_id = h.org_id AND s.customer_id = h.customer_id
+          AND s.connection_id = h.connection_id AND s.status = 'complete'
+        WHERE h.org_id = ? AND h.customer_id = ? AND h.connection_id = ?
+        LIMIT 1`,
+    ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId).first<{ id: string }>();
+    if (previousHead !== null) {
+      previousSnapshotId = previousHead.id;
+      const previousResult = await db.prepare(
+        `SELECT resource_key, service, resource_type, native_id, arn, name,
+                region_key, state, tags_json, configuration_json, source_json,
+                content_sha256
+           FROM cmdb_resources
+          WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND snapshot_id = ?
+          ORDER BY resource_key`,
+      ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, previousHead.id).all<ResourceRow>();
+      previousResources = (previousResult.results ?? []).map(resourceRowToComparable);
+    }
+  }
   const snapshotId = id("snap");
   const collectedAt = Date.parse(payload.collectedAt);
   const now = Date.now();
   const snapshotStatus = payload.coverageState === "complete" ? "complete" : "partial";
+  const resourceChanges = payload.coverageState === "complete"
+    ? diffCmdbResources(previousResources, payload.resources.map(toComparableResource))
+    : [];
 
   await db.prepare(
     `INSERT INTO cmdb_snapshots
@@ -625,6 +707,32 @@ export async function persistSnapshot(
     )));
   }
 
+  // Changes are populated while the target snapshot is staging and only become
+  // queryable once the publication batch marks that snapshot complete. Partial
+  // observations never enter this table.
+  for (const group of chunks(resourceChanges, 60)) {
+    await db.batch(group.map((change, index) => db.prepare(
+      `INSERT INTO cmdb_change_events
+        (id, org_id, customer_id, connection_id, from_snapshot_id,
+         to_snapshot_id, resource_key, change_type, changed_paths_json,
+         before_json, after_json, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      `${snapshotId}:change:${change.changeType}:${index}:${change.resourceKey}`,
+      LOCAL_ORG_ID,
+      connection.customerId,
+      payload.connectionId,
+      previousSnapshotId,
+      snapshotId,
+      change.resourceKey,
+      change.changeType,
+      JSON.stringify(change.changedPaths),
+      change.before === null ? null : JSON.stringify(change.before),
+      change.after === null ? null : JSON.stringify(change.after),
+      collectedAt,
+    )));
+  }
+
   // A partial observation is useful audit evidence, but it is never promoted to
   // the CMDB projection. This also prevents a first, incomplete collection from
   // presenting itself as an authoritative inventory.
@@ -696,6 +804,40 @@ export async function persistSnapshot(
       snapshotSha256: payload.snapshotSha256,
     },
   });
+}
+
+/** Returns only immutable events matching the complete tenant scope supplied by the caller. */
+export async function getChangeHistory(scope: ChangeHistoryScope): Promise<readonly CmdbChangeHistoryEvent[]> {
+  const db = await readyDatabase();
+  const limit = scope.limit ?? 100;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+    throw new PilotRepositoryError("INVALID_STATE", "Change history limit must be between 1 and 500");
+  }
+
+  const result = await db.prepare(
+    `SELECT e.id, e.from_snapshot_id, e.to_snapshot_id, e.resource_key,
+            e.change_type, e.changed_paths_json, e.before_json, e.after_json,
+            e.occurred_at
+       FROM cmdb_change_events e
+       JOIN cmdb_snapshots s ON s.id = e.to_snapshot_id
+        AND s.org_id = e.org_id AND s.customer_id = e.customer_id
+        AND s.connection_id = e.connection_id AND s.status = 'complete'
+      WHERE e.org_id = ? AND e.customer_id = ? AND e.connection_id = ?
+      ORDER BY e.occurred_at DESC, e.id DESC
+      LIMIT ?`,
+  ).bind(scope.orgId, scope.customerId, scope.connectionId, limit).all<ChangeEventRow>();
+
+  return (result.results ?? []).map((row) => ({
+    id: row.id,
+    fromSnapshotId: row.from_snapshot_id,
+    toSnapshotId: row.to_snapshot_id,
+    resourceKey: row.resource_key,
+    changeType: row.change_type,
+    changedPaths: parseJson<string[]>(row.changed_paths_json, []),
+    before: row.before_json === null ? null : parseJson<CmdbComparableResource | null>(row.before_json, null),
+    after: row.after_json === null ? null : parseJson<CmdbComparableResource | null>(row.after_json, null),
+    occurredAt: new Date(row.occurred_at).toISOString(),
+  }));
 }
 
 export async function getPilotState(): Promise<PilotState> {
