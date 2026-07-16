@@ -111,7 +111,7 @@ export function InventoryBrowser() {
                 const edgeCount = edgeCounts.get(resource.resourceKey) ?? 0;
                 return <div className="data-row" role="row" key={resource.resourceKey}>
                   <span><span className="service-chip">{resource.service.toUpperCase()}</span></span>
-                  <span className="primary-cell"><strong title={resourceLabel(resource)}>{resourceLabel(resource)}</strong><small title={resource.arn ?? resource.nativeId}>{resource.resourceType} · {compactIdentifier(resource.nativeId, 18)}</small></span>
+                  <span className="primary-cell"><a className="resource-link" href={`/cmdb/resource?key=${encodeURIComponent(resource.resourceKey)}`} title={`Open Resource 360 for ${resourceLabel(resource)}`}><strong>{resourceLabel(resource)}</strong><small title={resource.arn ?? resource.nativeId}>{resource.resourceType} · {compactIdentifier(resource.nativeId, 18)}</small></a></span>
                   <span className="primary-cell"><strong>{connection.customerName}</strong><small>{connection.awsAccountId}</small></span>
                   <span><code className="region-code">{resource.region}</code></span>
                   <span><span className="resource-state">{resource.state || "observed"}</span></span>

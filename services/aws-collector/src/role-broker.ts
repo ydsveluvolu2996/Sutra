@@ -76,6 +76,8 @@ const IMPLEMENTED_READ_ACTIONS = [
   "securityhub:GetFindings",
   "inspector2:BatchGetAccountStatus",
   "inspector2:ListFindings",
+  "ce:GetCostAndUsage",
+  "ce:GetCostForecast",
 ] as const;
 const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
@@ -224,7 +226,7 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
   // representation whose limit can be reached before the documented 2,048-byte
   // plaintext limit. Optional Sid fields are deliberately omitted, and this
   // fixed ceiling preserves headroom for the reviewed four-statement policy.
-  if (policy.length > 1_600) {
+  if (policy.length > 1_800) {
     throw new ConnectionIntegrityError("The fixed STS session policy exceeds its safe limit");
   }
   return policy;

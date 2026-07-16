@@ -12,16 +12,22 @@ if (!new Set(["postgres:", "postgresql:"]).has(parsed.protocol)) {
 }
 
 const root = resolve(import.meta.dirname, "..");
-const migrationId = "0000_sutra_baseline";
-const migrationSql = await readFile(
-  resolve(root, "postgres/migrations/0000_sutra_baseline.sql"),
-  "utf8",
-);
-const statements = migrationSql
-  .split("--> statement-breakpoint")
-  .map((statement) => statement.trim())
-  .filter((statement) => statement.length > 0);
-const migrationSha256 = createHash("sha256").update(migrationSql, "utf8").digest("hex");
+const migrationFiles = [
+  "0000_sutra_baseline.sql",
+  "0001_finops_cost_snapshots.sql",
+];
+const migrations = await Promise.all(migrationFiles.map(async (file) => {
+  const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
+  return {
+    id: file.replace(/\.sql$/u, ""),
+    source,
+    statements: source
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim())
+      .filter((statement) => statement.length > 0),
+    sha256: createHash("sha256").update(source, "utf8").digest("hex"),
+  };
+}));
 const runtimeRole = process.env.SUTRA_POSTGRES_RUNTIME_ROLE?.trim();
 if (runtimeRole !== undefined && !/^[a-z][a-z0-9_]{0,62}$/u.test(runtimeRole)) {
   throw new Error("SUTRA_POSTGRES_RUNTIME_ROLE is invalid");
@@ -45,22 +51,26 @@ try {
     )`,
   );
   await client.query("ALTER TABLE sutra_runtime_migrations ADD COLUMN IF NOT EXISTS migration_sha256 text");
-  const applied = await client.query(
-    "SELECT migration_id, migration_sha256 FROM sutra_runtime_migrations WHERE migration_id = $1 LIMIT 1",
-    [migrationId],
-  );
-  if (applied.rowCount === 0) {
-    for (const statement of statements) await client.query(statement);
-    await client.query(
-      "INSERT INTO sutra_runtime_migrations (migration_id, migration_sha256) VALUES ($1, $2) ON CONFLICT (migration_id) DO NOTHING",
-      [migrationId, migrationSha256],
+  let appliedCount = 0;
+  for (const migration of migrations) {
+    const applied = await client.query(
+      "SELECT migration_id, migration_sha256 FROM sutra_runtime_migrations WHERE migration_id = $1 LIMIT 1",
+      [migration.id],
     );
-  } else if (applied.rows[0].migration_sha256 === null) {
-    throw new Error(
-      `Applied PostgreSQL migration ${migrationId} has no checksum; restore a verified backup or reset the unshipped local database`,
-    );
-  } else if (applied.rows[0].migration_sha256 !== migrationSha256) {
-    throw new Error(`Applied PostgreSQL migration ${migrationId} no longer matches its immutable checksum`);
+    if (applied.rowCount === 0) {
+      for (const statement of migration.statements) await client.query(statement);
+      await client.query(
+        "INSERT INTO sutra_runtime_migrations (migration_id, migration_sha256) VALUES ($1, $2) ON CONFLICT (migration_id) DO NOTHING",
+        [migration.id, migration.sha256],
+      );
+      appliedCount += 1;
+    } else if (applied.rows[0].migration_sha256 === null) {
+      throw new Error(
+        `Applied PostgreSQL migration ${migration.id} has no checksum; restore a verified backup or reset the unshipped local database`,
+      );
+    } else if (applied.rows[0].migration_sha256 !== migration.sha256) {
+      throw new Error(`Applied PostgreSQL migration ${migration.id} no longer matches its immutable checksum`);
+    }
   }
   if (runtimeRole !== undefined) {
     await client.query(`GRANT USAGE ON SCHEMA public TO ${runtimeRole}`);
@@ -70,8 +80,8 @@ try {
     await client.query(`ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${runtimeRole}`);
   }
   await client.query("COMMIT");
-  process.stdout.write(applied.rowCount === 0
-    ? "Applied Sutra PostgreSQL baseline.\n"
+  process.stdout.write(appliedCount > 0
+    ? `Applied ${appliedCount} Sutra PostgreSQL migration${appliedCount === 1 ? "" : "s"}.\n`
     : "Sutra PostgreSQL schema is current.\n");
 } catch (error) {
   try {

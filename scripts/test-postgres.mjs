@@ -6,7 +6,9 @@ import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const { environmentPath, ownerPassword, appPassword } = await ensureDockerLocalEnvironment(root);
-const port = process.env.SUTRA_POSTGRES_PORT ?? "54329";
+// Keep the isolated verification database separate from the live-demo stack,
+// which intentionally uses the normal local PostgreSQL port while Sutra runs.
+const port = process.env.SUTRA_POSTGRES_TEST_PORT ?? "54330";
 const suppliedOwnerUrl = process.env.SUTRA_POSTGRES_TEST_URL?.trim();
 const suppliedRuntimeUrl = process.env.SUTRA_POSTGRES_RUNTIME_TEST_URL?.trim();
 const baseOwnerUrl = `postgresql://sutra_owner:${encodeURIComponent(ownerPassword)}@127.0.0.1:${port}/sutra`;
@@ -23,7 +25,10 @@ async function run(command, args, environment = process.env) {
   });
 }
 
-await run("docker", ["compose", "--env-file", environmentPath, "up", "-d", "--wait", "postgres"]);
+await run("docker", ["compose", "--env-file", environmentPath, "up", "-d", "--wait", "postgres"], {
+  ...process.env,
+  SUTRA_POSTGRES_PORT: port,
+});
 
 let databaseName;
 let databaseUrl = suppliedOwnerUrl;

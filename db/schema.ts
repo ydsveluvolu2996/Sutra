@@ -430,3 +430,23 @@ export const localScheduleMutationOutbox = sqliteTable("local_schedule_mutation_
   index("local_schedule_mutation_outbox_scope_idx")
     .on(table.orgId, table.customerId, table.scheduleId, table.createdAt),
 ]);
+
+/** Immutable, account-scoped AWS Cost Explorer observations. */
+export const costSnapshots = sqliteTable("cost_snapshots", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  source: text("source", { enum: ["aws_cost_explorer"] }).notNull().default("aws_cost_explorer"),
+  status: text("status", { enum: ["complete", "partial", "unavailable"] }).notNull(),
+  currency: text("currency").notNull(),
+  periodStart: text("period_start").notNull(),
+  periodEnd: text("period_end").notNull(),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  payloadJson: text("payload_json").notNull(),
+  payloadSha256: text("payload_sha256").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("cost_snapshots_connection_hash_uq").on(table.orgId, table.connectionId, table.payloadSha256),
+  index("cost_snapshots_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.collectedAt, table.id),
+]);

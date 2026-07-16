@@ -115,6 +115,8 @@ Resources:
                   - securityhub:GetFindings
                   - inspector2:BatchGetAccountStatus
                   - inspector2:ListFindings
+                  - ce:GetCostAndUsage
+                  - ce:GetCostForecast
                 Resource: '*'
               - Sid: TrustContractAttestation
                 Effect: Allow

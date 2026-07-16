@@ -253,9 +253,11 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
     (statement) => statement.Effect === "Deny" && statement.NotResource === roleArn,
   );
 
-  assert.ok(serialized.length <= 1_600);
+  assert.ok(serialized.length <= 1_800);
   assert.equal(policy.Statement.some((statement) => "Sid" in statement), false);
   assert.ok(actions.includes("ec2:DescribeInstances"));
+  assert.ok(actions.includes("ce:GetCostAndUsage"));
+  assert.ok(actions.includes("ce:GetCostForecast"));
   assert.ok(actions.includes("iam:GetRole"));
   assert.equal(actions.some((action) => /(?:Put|Create|Delete|Update|Attach|PassRole|AssumeRole)/u.test(action)), false);
   assert.equal(

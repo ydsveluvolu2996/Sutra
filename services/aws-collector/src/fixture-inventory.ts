@@ -583,10 +583,10 @@ function fixtureCoverage(
   const result: PilotCoverageEntry[] = [
     coverageEntry("iam.account", "global", resources),
     coverageEntry("iam.password-policy", "global", resources),
-    coverageEntry("s3.buckets", "global", resources),
   ];
   for (const region of regions) {
     for (const collector of [
+      "s3.buckets",
       "ec2.instances",
       "ec2.vpcs",
       "ec2.subnets",

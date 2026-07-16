@@ -18,6 +18,7 @@ function errorMessage(value: unknown): string {
 
 export function FindingsBrowser() {
   const { state, health, loading, refreshing, error, refresh } = usePilotState();
+  const [resourceFilter] = useState(() => typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("resource") ?? "");
   const [severity, setSeverity] = useState("all");
   const [status, setStatus] = useState("open");
   const [query, setQuery] = useState("");
@@ -31,8 +32,8 @@ export function FindingsBrowser() {
   const filtered = useMemo(() => findings.filter((finding) => {
     const resource = finding.resourceKey ? resourceMap.get(finding.resourceKey) : null;
     const haystack = `${finding.title} ${finding.summary} ${finding.controlKey} ${resource?.name ?? ""} ${resource?.nativeId ?? ""} ${resource?.service ?? ""} ${resource?.region ?? ""}`.toLowerCase();
-    return (severity === "all" || finding.severity === severity) && (status === "all" || finding.status === status) && haystack.includes(query.toLowerCase());
-  }), [findings, query, resourceMap, severity, status]);
+    return (!resourceFilter || finding.resourceKey === resourceFilter) && (severity === "all" || finding.severity === severity) && (status === "all" || finding.status === status) && haystack.includes(query.toLowerCase());
+  }), [findings, query, resourceFilter, resourceMap, severity, status]);
   const openFindings = findings.filter((finding) => finding.status === "open");
 
   async function runAssessment() {
@@ -92,7 +93,8 @@ export function FindingsBrowser() {
           {!state?.activeSnapshot ? <section className="panel empty-workspace compact-empty"><h2>No finding evidence yet</h2><p>Publish the first complete inventory snapshot to run the configured checks.</p><a className="button button-primary" href="/onboard">Finish onboarding</a></section> : null}
 
           {state?.activeSnapshot ? <section className="panel findings-panel">
-            <div className="panel-heading"><div><p className="eyebrow">Workflow queue</p><h2>Current findings</h2></div><span className="result-count">{filtered.length} of {findings.length} findings</span></div>
+            <div className="panel-heading"><div><p className="eyebrow">Workflow queue</p><h2>{resourceFilter ? "Resource findings" : "Current findings"}</h2></div><span className="result-count">{filtered.length} of {findings.length} findings</span></div>
+            {resourceFilter ? <div className="scoped-filter-note"><span>Resource 360 filter active</span><a href="/findings">Show all findings</a></div> : null}
             <div className="filter-bar">
               <label className="search-field"><span className="sr-only">Search findings</span><input className="filter-control" placeholder="Search finding, control, resource or region" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
               <label><span className="sr-only">Filter by severity</span><select className="filter-control" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="all">All severities</option>{severityOrder.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
@@ -111,7 +113,7 @@ export function FindingsBrowser() {
                     <span className="finding-chevron">⌄</span>
                   </summary>
                   <div className="finding-detail">
-                    <div><p className="eyebrow">Observation</p><p>{finding.summary}</p><p className="limitation-note">Control {finding.controlKey} · v{finding.controlVersion} · evaluated {formatTimestamp(finding.evaluatedAt)}</p></div>
+                    <div><p className="eyebrow">Observation</p><p>{finding.summary}</p>{resource ? <a className="text-link" href={`/cmdb/resource?key=${encodeURIComponent(resource.resourceKey)}`}>Open Resource 360 →</a> : null}<p className="limitation-note">Control {finding.controlKey} · v{finding.controlVersion} · evaluated {formatTimestamp(finding.evaluatedAt)}</p></div>
                     <div><p className="eyebrow">Evidence</p><dl>{Object.entries(finding.evidence).map(([key, value]) => <div key={key}><dt>{key}</dt><dd title={evidenceValue(value)}>{compactIdentifier(evidenceValue(value), 42)}</dd></div>)}</dl></div>
                     <div><p className="eyebrow">Suggested remediation</p><p>{finding.remediation}</p><div className="finding-workflow"><span className={`workflow-status workflow-${finding.status}`}>{finding.status}</span><button className="button button-secondary button-small" disabled={updating === finding.fingerprint} onClick={() => void updateWorkflow(finding, finding.status === "acknowledged" ? "open" : "acknowledged")} type="button">{updating === finding.fingerprint ? "Saving…" : finding.status === "acknowledged" ? "Reopen" : "Acknowledge"}</button></div></div>
                   </div>
