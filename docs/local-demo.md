@@ -22,6 +22,13 @@ registry, schema validation, immutable D1 snapshot publication, UI, finding
 workflow, and exports as live mode. It does not call AWS, and every screen labels
 the source as fixture data.
 
+On the first start, open `http://localhost:3000/login`. Run
+`pnpm local:bootstrap-token` in a local terminal and paste the one-time setup
+token into that screen, then create the owner password and enroll a TOTP
+authenticator. Sutra stores only a costed password digest, a session-token digest,
+and an encrypted TOTP secret. Every CMDB API requires the persisted session, MFA,
+and the corresponding RBAC capability.
+
 The generated `.dev.vars` and `.sutra/` directory contain local secrets and
 encrypted connection state. They are permission-restricted and ignored by Git.
 Delete both to reset all collector trust material. Local D1 data is managed by
