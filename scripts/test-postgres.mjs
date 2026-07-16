@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 import pg from "pg";
 import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
@@ -8,7 +9,11 @@ const root = resolve(import.meta.dirname, "..");
 const { environmentPath, ownerPassword, appPassword } = await ensureDockerLocalEnvironment(root);
 // Keep the isolated verification database separate from the live-demo stack,
 // which intentionally uses the normal local PostgreSQL port while Sutra runs.
-const port = process.env.SUTRA_POSTGRES_TEST_PORT ?? "54330";
+const requestedPort = process.env.SUTRA_POSTGRES_TEST_PORT?.trim();
+if (requestedPort !== undefined && !validPort(requestedPort)) {
+  throw new Error("SUTRA_POSTGRES_TEST_PORT must be an integer from 1 through 65535");
+}
+const port = requestedPort ?? String(await findAvailableLoopbackPort());
 const suppliedOwnerUrl = process.env.SUTRA_POSTGRES_TEST_URL?.trim();
 const suppliedRuntimeUrl = process.env.SUTRA_POSTGRES_RUNTIME_TEST_URL?.trim();
 const baseOwnerUrl = `postgresql://sutra_owner:${encodeURIComponent(ownerPassword)}@127.0.0.1:${port}/sutra`;
@@ -21,6 +26,30 @@ async function run(command, args, environment = process.env) {
     child.once("exit", (code, signal) => {
       if (code === 0) resolvePromise();
       else reject(new Error(`${command} exited ${signal ?? code}`));
+    });
+  });
+}
+
+function validPort(value) {
+  return /^\d{1,5}$/u.test(value) && Number(value) >= 1 && Number(value) <= 65_535;
+}
+
+async function findAvailableLoopbackPort() {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port: 0, exclusive: true }, () => {
+      const address = server.address();
+      if (address === null || typeof address === "string") {
+        server.close();
+        reject(new Error("Could not allocate a loopback port for the PostgreSQL test container"));
+        return;
+      }
+      server.close((error) => {
+        if (error) reject(error);
+        else resolvePort(address.port);
+      });
     });
   });
 }
