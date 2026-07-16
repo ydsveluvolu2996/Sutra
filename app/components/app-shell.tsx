@@ -5,9 +5,9 @@ import Link from "next/link";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import type { Capability } from "../../lib/auth-policy";
 import { postAuth, useSession } from "./use-session";
-import { usePilotState } from "./use-pilot-state";
+import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 
-type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "controls" | "roadmap" | "onboard";
+type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "controls" | "roadmap" | "operations" | "onboard";
 
 interface NavItem {
   readonly key: Exclude<NavKey, "onboard">;
@@ -25,6 +25,7 @@ const navItems: readonly NavItem[] = [
   { key: "findings", label: "Security findings", href: "/findings", icon: "05", capability: "connection:read" },
   { key: "controls", label: "Control library", href: "/controls", icon: "06", capability: "workspace:read" },
   { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "07", capability: "workspace:read" },
+  { key: "operations", label: "Simulation runs", href: "/operations", icon: "08", capability: "sync:run" },
 ];
 
 function connectionTone(status: string | undefined): string {
@@ -104,7 +105,13 @@ function AuthenticatedAppShell({
   const canOnboard = capabilitySet.has("customer:create") && capabilitySet.has("connection:manage");
   const connection = state?.connection ?? null;
   const openFindings = state?.findings.filter((finding) => finding.status === "open").length ?? 0;
-  const modeLabel = health?.mode === "live" ? "Live AWS collector" : health?.mode === "fixture" ? "Fixture collector" : "Collector offline";
+  const snapshotOrigin = state?.activeSnapshot?.origin;
+  const modeLabel = state?.activeSnapshot
+    ? snapshotOriginLabel(snapshotOrigin)
+    : health?.mode === "live" ? "AWS collector ready" : health?.mode === "fixture" ? "Fixture collector ready" : "Collector offline";
+  const modeKind = snapshotOrigin?.kind === "simulated_fixture"
+    ? "fixture"
+    : snapshotOrigin?.kind === "aws_sandbox" ? "live" : health?.mode ?? "offline";
   const scopeLabel = connection?.customerName ?? session.organization.name;
   const initials = userInitials(session);
 
@@ -173,7 +180,7 @@ function AuthenticatedAppShell({
           </div>
           <div className="topbar-actions">
             <span className="mfa-badge"><i /> MFA verified</span>
-            <span className={`demo-badge mode-${health?.mode ?? "offline"}`}><i /> {modeLabel}</span>
+            <span className={`demo-badge mode-${modeKind}`}><i /> {modeLabel}</span>
             <span className="topbar-avatar" aria-label={session.user.displayName}>{initials}</span>
           </div>
         </header>

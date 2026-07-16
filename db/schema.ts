@@ -103,6 +103,9 @@ export const awsConnections = sqliteTable("aws_connections", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().references(() => organizations.id),
   customerId: text("customer_id").notNull().references(() => customers.id),
+  sourceKind: text("source_kind", { enum: ["aws_trust_role", "simulated_fixture"] }).notNull().default("aws_trust_role"),
+  fixtureId: text("fixture_id"),
+  fixtureVersion: text("fixture_version"),
   partition: text("partition", { enum: ["aws", "aws-us-gov", "aws-cn"] }).notNull().default("aws"),
   awsAccountId: text("aws_account_id").notNull(),
   roleArn: text("role_arn").notNull(),
@@ -136,6 +139,9 @@ export const syncRuns = sqliteTable("sync_runs", {
   createdAt: timestamp("created_at"),
 }, (table) => [
   uniqueIndex("sync_runs_connection_idempotency_uq").on(table.orgId, table.connectionId, table.idempotencyKey),
+  uniqueIndex("sync_runs_one_active_connection_uq")
+    .on(table.orgId, table.connectionId)
+    .where(sql`${table.status} IN ('queued', 'running')`),
   index("sync_runs_scope_started_idx").on(table.orgId, table.customerId, table.connectionId, table.startedAt),
 ]);
 
@@ -180,6 +186,9 @@ export const cmdbSnapshots = sqliteTable("cmdb_snapshots", {
   coverageJson: text("coverage_json").notNull().default("{}"),
   summaryJson: text("summary_json").notNull().default("{}"),
   snapshotSha256: text("snapshot_sha256"),
+  originKind: text("origin_kind", { enum: ["unknown", "simulated_fixture", "aws_sandbox"] }).notNull().default("unknown"),
+  fixtureId: text("fixture_id"),
+  fixtureVersion: text("fixture_version"),
 }, (table) => [
   uniqueIndex("cmdb_snapshots_sync_run_uq").on(table.syncRunId),
   index("cmdb_snapshots_connection_time_idx").on(table.orgId, table.connectionId, table.collectedAt),
@@ -290,6 +299,23 @@ export const findingWorkflowStates = sqliteTable("finding_workflow_states", {
 }, (table) => [
   uniqueIndex("finding_workflow_scope_fingerprint_uq").on(table.orgId, table.connectionId, table.fingerprint),
   index("finding_workflow_scope_status_idx").on(table.orgId, table.customerId, table.connectionId, table.status),
+]);
+
+/** Idempotent control-plane publication record for durable local fixture jobs. */
+export const localJobPublications = sqliteTable("local_job_publications", {
+  jobId: text("job_id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  syncRunId: text("sync_run_id").notNull().references(() => syncRuns.id),
+  snapshotId: text("snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  fixtureId: text("fixture_id").notNull(),
+  fixtureVersion: text("fixture_version").notNull(),
+  actorId: text("actor_id").notNull(),
+  publishedAt: timestamp("published_at"),
+}, (table) => [
+  uniqueIndex("local_job_publications_sync_uq").on(table.orgId, table.syncRunId),
+  index("local_job_publications_scope_time_idx").on(table.orgId, table.customerId, table.publishedAt, table.jobId),
 ]);
 
 export const resources = sqliteTable("resources", {

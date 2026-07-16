@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { PilotResource } from "../../lib/pilot-types";
-import { compactIdentifier, formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
+import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 
 function isSecurityGroup(resource: PilotResource): boolean {
   const type = resource.resourceType.toLowerCase();
@@ -28,6 +28,7 @@ export function InventoryBrowser() {
   const relationships = useMemo(() => state?.relationships ?? [], [state?.relationships]);
   const findings = useMemo(() => state?.findings ?? [], [state?.findings]);
   const connection = state?.connection ?? null;
+  const canRunAwsSync = connection?.sourceKind === "aws_trust_role";
   const services = useMemo(() => [...new Set(resources.map((resource) => resource.service))].sort(), [resources]);
   const regions = useMemo(() => [...new Set(resources.map((resource) => resource.region))].sort(), [resources]);
   const filtered = useMemo(() => resources.filter((resource) => {
@@ -66,9 +67,9 @@ export function InventoryBrowser() {
     <>
       <section className="page-heading">
         <div><p className="eyebrow">Configuration management database</p><h1>AWS resource inventory</h1><p className="page-subtitle">Search the latest complete snapshot, trace relationships, and verify per-collector coverage.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href="/api/pilot/export?format=csv">Export CSV</a><a className="button button-secondary" href="/api/pilot/export?format=json">Export JSON</a>{connection ? <button className="button button-primary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync inventory"}</button> : <a className="button button-primary" href="/onboard">Connect account</a>}</div>
+        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href={`/api/pilot/export?format=json${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export JSON</a>{connection && canRunAwsSync ? <button className="button button-primary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync inventory"}</button> : connection ? <a className="button button-primary" href="/operations">Run simulation</a> : <a className="button button-primary" href="/onboard">Connect account</a>}</div>
       </section>
-      <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{health?.mode === "live" ? "Live AWS evidence." : health?.mode === "fixture" ? "Fixture pilot data." : "Stored snapshot view."}</strong> Sutra inventories and assesses metadata only; it does not change customer resources or replace runtime threat and vulnerability engines.</span><a href="/controls">Review coverage</a></div>
+      <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready; no snapshot selected." : health?.mode === "fixture" ? "Fixture collector ready; no snapshot selected." : "Stored snapshot view."}</strong> Sutra inventories and assesses metadata only; it does not change customer resources or replace runtime threat and vulnerability engines.</span><a href="/controls">Review coverage</a></div>
 
       {error || actionError ? <div className="page-alert page-alert-error" role="alert"><strong>Inventory is unavailable</strong><span>{actionError ?? error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading the current CMDB projection…</div> : null}
@@ -84,7 +85,7 @@ export function InventoryBrowser() {
             <article><small>Collector coverage</small><strong>{coverageTotal > 0 ? `${coveragePercent}%` : "—"}</strong><span>{successfulCoverage} of {coverageTotal} collector-region checks succeeded</span></article>
           </section>
 
-          {!state?.activeSnapshot ? <section className="panel empty-workspace compact-empty"><h2>No complete snapshot has been published</h2><p>{connection.status === "active" ? "Run inventory to collect the first authoritative CMDB projection." : "Return to onboarding and validate the customer trust role before collecting inventory."}</p><a className="button button-primary" href="/onboard">Open onboarding</a></section> : null}
+          {!state?.activeSnapshot ? <section className="panel empty-workspace compact-empty"><h2>No complete snapshot has been published</h2><p>{connection.sourceKind === "simulated_fixture" ? "Complete and publish a durable simulated collection to create this CMDB projection." : connection.status === "active" ? "Run inventory to collect the first authoritative CMDB projection." : "Return to onboarding and validate the customer trust role before collecting inventory."}</p><a className="button button-primary" href={connection.sourceKind === "simulated_fixture" ? "/operations" : "/onboard"}>{connection.sourceKind === "simulated_fixture" ? "Open simulations" : "Open onboarding"}</a></section> : null}
 
           {state?.activeSnapshot ? <section className="panel inventory-panel">
             <div className="panel-heading"><div><p className="eyebrow">Active projection</p><h2>Resources</h2></div><span className="result-count">{filtered.length} of {resources.length} resources</span></div>

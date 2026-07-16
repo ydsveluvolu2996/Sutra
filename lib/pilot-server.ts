@@ -6,6 +6,16 @@ import {
   parseVerificationResponse,
 } from "./pilot-boundary";
 import type { AwsPartition, CollectorHealth, PilotSnapshotPayload } from "./pilot-types";
+import {
+  parseLocalFixtureCatalog,
+  parseLocalFixtureEnqueue,
+  parseLocalFixtureJobs,
+  parseLocalFixtureResultFromCatalog,
+  type LocalFixtureDescriptor,
+  type LocalFixtureJobResult,
+  type LocalFixtureJobSummary,
+  type LocalFixtureVersion,
+} from "./local-ops-types";
 import { authorizePilotRequest, type AuthorizedPilotActor } from "./api-auth";
 import type { Capability } from "./auth-policy";
 
@@ -241,6 +251,10 @@ const BROKER_CODES = new Set([
   "COLLECTION_FAILED",
   "CONNECTION_NOT_FOUND",
   "INVALID_REQUEST",
+  "IDEMPOTENCY_CONFLICT",
+  "JOB_FAILED",
+  "JOB_NOT_FOUND",
+  "JOB_NOT_READY",
 ]);
 
 function safeBrokerErrorCode(value: unknown): string {
@@ -258,6 +272,10 @@ function publicBrokerMessage(code: string): string {
     COLLECTION_FAILED: "The AWS inventory collection did not complete",
     CONNECTION_NOT_FOUND: "The collector does not have this scoped connection",
     INVALID_REQUEST: "The collector rejected the scoped request",
+    IDEMPOTENCY_CONFLICT: "That operation key is already bound to a different simulated request",
+    JOB_FAILED: "The simulated inventory job exhausted its retries",
+    JOB_NOT_FOUND: "The simulated inventory job was not found",
+    JOB_NOT_READY: "The simulated inventory job is not complete",
     BROKER_REQUEST_FAILED: "The AWS collector rejected the request",
   };
   return messages[code] ?? messages.BROKER_REQUEST_FAILED;
@@ -320,6 +338,56 @@ export async function runCollectorSync(input: {
   );
 }
 
+export async function getLocalFixtureCatalog(): Promise<readonly LocalFixtureDescriptor[]> {
+  return parseLocalFixtureCatalog(await brokerFetch<unknown>("/v1/local/fixtures", "GET"));
+}
+
+export async function listLocalFixtureJobs(
+  limit = 50,
+  scope?: { readonly tenantId: string; readonly customerId: string },
+): Promise<readonly LocalFixtureJobSummary[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw new PilotServerError(400, "INVALID_INPUT", "The local job limit is invalid");
+  }
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (scope !== undefined) {
+    query.set("tenantId", scope.tenantId);
+    query.set("customerId", scope.customerId);
+  }
+  return parseLocalFixtureJobs(
+    await brokerFetch<unknown>(`/v1/local/jobs?${query.toString()}`, "GET"),
+  );
+}
+
+export async function enqueueLocalFixtureJob(input: {
+  readonly fixture: LocalFixtureDescriptor;
+  readonly version: LocalFixtureVersion;
+  readonly idempotencyKey: string;
+}): Promise<{ readonly created: boolean; readonly job: LocalFixtureJobSummary }> {
+  const payload = {
+    tenantId: input.fixture.tenantId,
+    fixtureId: input.fixture.fixtureId,
+    version: input.version,
+    idempotencyKey: input.idempotencyKey,
+  };
+  return parseLocalFixtureEnqueue(
+    await brokerFetch<unknown>("/v1/local/jobs/simulated-sync", "POST", payload),
+    input.fixture,
+    input.version,
+  );
+}
+
+export async function getLocalFixtureJobResult(input: {
+  readonly jobId: string;
+  readonly fixtures: readonly LocalFixtureDescriptor[];
+}): Promise<LocalFixtureJobResult> {
+  return parseLocalFixtureResultFromCatalog(
+    await brokerFetch<unknown>(`/v1/local/jobs/${input.jobId}/result`, "GET", undefined, 30_000),
+    input.fixtures,
+    input.jobId,
+  );
+}
+
 export function jsonResponse(value: unknown, init: ResponseInit = {}): Response {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
@@ -355,7 +423,18 @@ export function errorResponse(error: unknown): Response {
   const status = candidateStatus !== null && [400, 401, 403, 404, 409, 429, 503].includes(candidateStatus)
     ? candidateStatus
     : code === "NOT_FOUND" ? 404 : code === "CONFLICT" ? 409 : code === "INVALID_INPUT" ? 400 : code === "INVALID_STATE" ? 409 : 500;
-  return jsonResponse({ error: { code, message: publicMessage } }, { status });
+  const requestId = crypto.randomUUID();
+  if (runtimeEnv().SUTRA_LOCAL_MODE === "true") {
+    const diagnostic = typeof candidate?.message === "string"
+      ? candidate.message
+        .replace(/[\u0000-\u001f\u007f]+/gu, " ")
+        .replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/gu, "[REDACTED]")
+        .replace(/\b[A-Za-z0-9_-]{43,}\b/gu, "[REDACTED]")
+        .slice(0, 500)
+      : "Non-error failure";
+    console.error(JSON.stringify({ event: "sutra.request.failed", requestId, code, status, diagnostic }));
+  }
+  return jsonResponse({ error: { code, message: publicMessage, requestId } }, { status });
 }
 
 export function safeValidationFailureCode(error: unknown): string {

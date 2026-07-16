@@ -67,3 +67,26 @@ test("fixture hash binds the job and normalized content", () => {
   });
   assert.notEqual(first.snapshotSha256, second.snapshotSha256);
 });
+
+test("fixture hash is stable across recursively reordered persisted JSON", () => {
+  const snapshot = buildFixtureSnapshot({
+    jobId: "sync_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    connection: CONNECTION,
+    now: new Date("2026-07-15T10:00:00.000Z"),
+  });
+  const unsigned = Object.fromEntries(
+    Object.entries(snapshot).filter(([key]) => key !== "snapshotSha256"),
+  ) as Omit<typeof snapshot, "snapshotSha256">;
+  const reordered = reverseObjectKeys(unsigned) as typeof unsigned;
+  assert.equal(snapshotHashInput(unsigned), snapshotHashInput(reordered));
+});
+
+function reverseObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reverseObjectKeys);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .reverse()
+      .map(([key, item]) => [key, reverseObjectKeys(item)]),
+  );
+}

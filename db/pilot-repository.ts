@@ -12,6 +12,7 @@ import type {
   PilotSnapshotPayload,
   PilotState,
   PilotSyncRun,
+  SnapshotOrigin,
 } from "../lib/pilot-types";
 import { parseSafePilotFailure } from "../lib/aws-pilot-security";
 import {
@@ -67,6 +68,9 @@ interface ConnectionRow {
   id: string;
   customer_id: string;
   customer_name: string;
+  source_kind: PilotConnection["sourceKind"];
+  fixture_id: string | null;
+  fixture_version: string | null;
   partition: AwsPartition;
   aws_account_id: string;
   role_arn: string;
@@ -133,6 +137,9 @@ interface SnapshotHeadRow {
   status: "complete" | "partial";
   coverage_json: string;
   snapshot_sha256: string;
+  origin_kind: SnapshotOrigin["kind"];
+  fixture_id: string | null;
+  fixture_version: string | null;
 }
 
 interface ChangeEventRow {
@@ -197,6 +204,9 @@ function toPilotConnection(row: ConnectionRow): PilotConnection {
     id: row.id,
     customerId: row.customer_id,
     customerName: row.customer_name,
+    sourceKind: row.source_kind,
+    fixtureId: row.fixture_id,
+    fixtureVersion: row.fixture_version,
     partition: row.partition,
     awsAccountId: row.aws_account_id,
     roleArn: row.role_arn.length > 0 ? row.role_arn : null,
@@ -287,7 +297,8 @@ export async function createConnectionDraft(input: CreateConnectionDraftInput): 
 export async function getConnection(connectionId: string): Promise<PilotConnection | null> {
   const db = await readyDatabase();
   const row = await db.prepare(
-    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.partition,
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
+            c.fixture_id, c.fixture_version, c.partition,
             c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
             c.permission_pack_version, c.last_validated_at,
             c.last_successful_sync_at, c.created_at, c.updated_at
@@ -302,7 +313,8 @@ export async function getConnection(connectionId: string): Promise<PilotConnecti
 export async function getLatestConnection(): Promise<PilotConnection | null> {
   const db = await readyDatabase();
   const row = await db.prepare(
-    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.partition,
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
+            c.fixture_id, c.fixture_version, c.partition,
             c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
             c.permission_pack_version, c.last_validated_at,
             c.last_successful_sync_at, c.created_at, c.updated_at
@@ -327,6 +339,9 @@ export async function setConnectionRole(
   }
   if (current.status === "disabled") {
     throw new PilotRepositoryError("INVALID_STATE", "A disabled AWS connection cannot be changed");
+  }
+  if (current.sourceKind === "simulated_fixture") {
+    throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections do not accept IAM roles");
   }
   const now = Date.now();
   await db.prepare(
@@ -353,7 +368,7 @@ export async function setConnectionRole(
 export async function getStoredConnectionSecret(connectionId: string): Promise<StoredConnectionSecret> {
   const db = await readyDatabase();
   const row = await db.prepare(
-    `SELECT id, customer_id, partition, aws_account_id, role_arn,
+    `SELECT id, customer_id, source_kind, partition, aws_account_id, role_arn,
             external_id_ciphertext, external_id_key_version,
             enabled_regions_json, status
        FROM aws_connections
@@ -362,6 +377,7 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
   ).bind(LOCAL_ORG_ID, connectionId).first<{
     id: string;
     customer_id: string;
+    source_kind: PilotConnection["sourceKind"];
     partition: AwsPartition;
     aws_account_id: string;
     role_arn: string;
@@ -372,6 +388,9 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
   }>();
   if (row === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+  }
+  if (row.source_kind === "simulated_fixture") {
+    throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections have no AWS trust secret");
   }
   return {
     connectionId: row.id,
@@ -469,6 +488,9 @@ export async function createSyncRun(connectionId: string): Promise<string> {
   if (connection.status !== "active") {
     throw new PilotRepositoryError("INVALID_STATE", "Validate the AWS connection before running inventory");
   }
+  if (connection.sourceKind === "simulated_fixture") {
+    throw new PilotRepositoryError("INVALID_STATE", "Run simulated inventory through the durable local jobs workflow");
+  }
   const running = await db.prepare(
     `SELECT id FROM sync_runs WHERE org_id = ? AND connection_id = ? AND status = 'running' LIMIT 1`,
   ).bind(LOCAL_ORG_ID, connectionId).first<{ id: string }>();
@@ -532,7 +554,9 @@ export async function persistSnapshot(
   runId: string,
   payload: PilotSnapshotPayload,
   actorId: string,
-): Promise<void> {
+  origin: SnapshotOrigin = { kind: "unknown", fixtureId: null, fixtureVersion: null },
+  localFixtureJobId: string | null = null,
+): Promise<string> {
   const db = await readyDatabase();
   const connection = await getConnection(payload.connectionId);
   if (connection === null) {
@@ -541,15 +565,21 @@ export async function persistSnapshot(
   if (connection.awsAccountId !== payload.accountId) {
     throw new PilotRepositoryError("PERSISTENCE_FAILED", "Collector payload account does not match the connection");
   }
+  if (connection.partition !== payload.partition) {
+    throw new PilotRepositoryError("PERSISTENCE_FAILED", "Collector payload partition does not match the connection");
+  }
   if (connection.status !== "active") {
     throw new PilotRepositoryError("INVALID_STATE", "The AWS connection is not active for this sync");
   }
   const scopedRun = await db.prepare(
-    `SELECT id FROM sync_runs
+    `SELECT id, idempotency_key FROM sync_runs
       WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND id = ? AND status = 'running'
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, runId).first<{ id: string }>();
-  if (scopedRun === null) {
+  ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, runId).first<{
+    id: string;
+    idempotency_key: string;
+  }>();
+  if (scopedRun === null || scopedRun.idempotency_key !== payload.jobId) {
     throw new PilotRepositoryError("INVALID_STATE", "The collector result does not belong to an active scoped sync");
   }
 
@@ -582,6 +612,26 @@ export async function persistSnapshot(
   const collectedAt = Date.parse(payload.collectedAt);
   const now = Date.now();
   const snapshotStatus = payload.coverageState === "complete" ? "complete" : "partial";
+  if (
+    (origin.kind !== "unknown" && origin.kind !== "simulated_fixture" && origin.kind !== "aws_sandbox") ||
+    (origin.kind === "simulated_fixture" && (!origin.fixtureId || !origin.fixtureVersion)) ||
+    (origin.kind !== "simulated_fixture" && (origin.fixtureId !== null || origin.fixtureVersion !== null)) ||
+    (origin.kind === "simulated_fixture" && origin.fixtureVersion !== "2026.07.0" && origin.fixtureVersion !== "2026.07.1") ||
+    (origin.kind === "simulated_fixture" && localFixtureJobId !== payload.jobId) ||
+    (origin.kind !== "simulated_fixture" && localFixtureJobId !== null) ||
+    (localFixtureJobId !== null && !/^job_[a-f0-9]{48}$/u.test(localFixtureJobId))
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "Snapshot origin metadata is inconsistent");
+  }
+  if (
+    (origin.kind === "simulated_fixture" && (
+      connection.sourceKind !== "simulated_fixture" ||
+      connection.fixtureId !== origin.fixtureId
+    )) ||
+    (origin.kind !== "simulated_fixture" && connection.sourceKind === "simulated_fixture")
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "Snapshot origin does not match the connection source");
+  }
   const resourceChanges = payload.coverageState === "complete"
     ? diffCmdbResources(previousResources, payload.resources.map(toComparableResource))
     : [];
@@ -589,8 +639,8 @@ export async function persistSnapshot(
   await db.prepare(
     `INSERT INTO cmdb_snapshots
       (id, org_id, customer_id, connection_id, sync_run_id, status,
-       collected_at, coverage_json, summary_json)
-     VALUES (?, ?, ?, ?, ?, 'staging', ?, ?, ?)`,
+       collected_at, coverage_json, summary_json, origin_kind, fixture_id, fixture_version)
+     VALUES (?, ?, ?, ?, ?, 'staging', ?, ?, ?, ?, ?, ?)`,
   ).bind(
     snapshotId,
     LOCAL_ORG_ID,
@@ -604,6 +654,9 @@ export async function persistSnapshot(
       relationships: payload.relationships.length,
       findings: payload.findings.length,
     }),
+    origin.kind,
+    origin.fixtureId,
+    origin.fixtureVersion,
   ).run();
 
   for (const group of chunks(payload.resources, 60)) {
@@ -757,6 +810,48 @@ export async function persistSnapshot(
        WHERE connection_heads.org_id = excluded.org_id`,
     ).bind(payload.connectionId, LOCAL_ORG_ID, connection.customerId, snapshotId, now, runId, LOCAL_ORG_ID, payload.connectionId));
   }
+  if (localFixtureJobId !== null && origin.kind === "simulated_fixture") {
+    publicationStatements.push(db.prepare(
+      `WITH scoped AS (
+         SELECT r.org_id, r.customer_id, r.connection_id, r.id AS sync_run_id,
+                s.id AS snapshot_id
+           FROM sync_runs r
+         JOIN cmdb_snapshots s ON s.sync_run_id = r.id
+          AND s.org_id = r.org_id AND s.customer_id = r.customer_id
+          AND s.connection_id = r.connection_id
+         JOIN aws_connections c ON c.id = r.connection_id
+          AND c.org_id = r.org_id AND c.customer_id = r.customer_id
+          WHERE r.id = ? AND r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
+            AND r.idempotency_key = ? AND r.status = 'running'
+            AND s.id = ? AND s.status IN ('complete', 'partial')
+            AND s.origin_kind = 'simulated_fixture' AND s.fixture_id = ? AND s.fixture_version = ?
+            AND c.source_kind = 'simulated_fixture' AND c.fixture_id = ?
+       )
+       INSERT INTO local_job_publications
+        (job_id, org_id, customer_id, connection_id, sync_run_id, snapshot_id,
+         fixture_id, fixture_version, actor_id, published_at)
+       SELECT ?, org_id, customer_id, connection_id, sync_run_id, snapshot_id, ?, ?, ?, ?
+         FROM scoped
+       UNION ALL
+       SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+        WHERE NOT EXISTS (SELECT 1 FROM scoped)`,
+    ).bind(
+      runId,
+      LOCAL_ORG_ID,
+      connection.customerId,
+      payload.connectionId,
+      payload.jobId,
+      snapshotId,
+      origin.fixtureId,
+      origin.fixtureVersion,
+      origin.fixtureId,
+      localFixtureJobId,
+      origin.fixtureId,
+      origin.fixtureVersion,
+      actorId,
+      now,
+    ));
+  }
   publicationStatements.push(db.prepare(
     `UPDATE sync_runs
         SET status = ?, coverage_state = ?, totals_json = ?, finished_at = ?
@@ -777,33 +872,63 @@ export async function persistSnapshot(
   ));
   publicationStatements.push(payload.coverageState === "complete"
     ? db.prepare(
-      `UPDATE aws_connections SET status = 'active', last_successful_sync_at = ?, updated_at = ?
+      `UPDATE aws_connections
+          SET status = 'active', last_successful_sync_at = ?, updated_at = ?,
+              fixture_version = CASE WHEN source_kind = 'simulated_fixture' THEN ? ELSE fixture_version END
         WHERE org_id = ? AND id = ? AND status = 'active'`,
-    ).bind(now, now, LOCAL_ORG_ID, payload.connectionId)
+    ).bind(now, now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId)
     : db.prepare(
-      `UPDATE aws_connections SET status = 'needs_attention', updated_at = ?
+      `UPDATE aws_connections
+          SET status = 'needs_attention', updated_at = ?,
+              fixture_version = CASE WHEN source_kind = 'simulated_fixture' THEN ? ELSE fixture_version END
         WHERE org_id = ? AND id = ? AND status = 'active'`,
-    ).bind(now, LOCAL_ORG_ID, payload.connectionId));
+    ).bind(now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId));
+
+  const publicationAudit: AuditInput = origin.kind === "simulated_fixture" && localFixtureJobId !== null
+    ? {
+      actorId,
+      action: "fixture.job.published",
+      targetType: "local_fixture_job",
+      targetId: localFixtureJobId,
+      customerId: connection.customerId,
+      outcome: "allowed",
+      metadata: {
+        connectionId: payload.connectionId,
+        runId,
+        coverageState: payload.coverageState,
+        resources: payload.resources.length,
+        findings: payload.findings.length,
+        snapshotId,
+        snapshotSha256: payload.snapshotSha256,
+        originKind: origin.kind,
+        fixtureId: origin.fixtureId ?? "",
+        fixtureVersion: origin.fixtureVersion ?? "",
+      },
+    }
+    : {
+      actorId,
+      action: "aws.sync.published",
+      targetType: "cmdb_snapshot",
+      targetId: snapshotId,
+      customerId: connection.customerId,
+      outcome: "allowed",
+      metadata: {
+        connectionId: payload.connectionId,
+        runId,
+        coverageState: payload.coverageState,
+        resources: payload.resources.length,
+        findings: payload.findings.length,
+        snapshotSha256: payload.snapshotSha256,
+        originKind: origin.kind,
+      },
+    };
+  publicationStatements.push(await prepareAuditEventStatement(db, publicationAudit));
 
   // This final batch is the publication boundary. Partial runs remain immutable
-  // evidence while the last complete projection (if any) stays active.
+  // evidence while the last complete projection (if any) stays active. The
+  // publication audit event is committed in the same transaction.
   await db.batch(publicationStatements);
-
-  await appendAuditEvent({
-    actorId,
-    action: "aws.sync.published",
-    targetType: "cmdb_snapshot",
-    targetId: snapshotId,
-    customerId: connection.customerId,
-    outcome: "allowed",
-    metadata: {
-      runId,
-      coverageState: payload.coverageState,
-      resources: payload.resources.length,
-      findings: payload.findings.length,
-      snapshotSha256: payload.snapshotSha256,
-    },
-  });
+  return snapshotId;
 }
 
 /** Returns only immutable events matching the complete tenant scope supplied by the caller. */
@@ -840,9 +965,11 @@ export async function getChangeHistory(scope: ChangeHistoryScope): Promise<reado
   }));
 }
 
-export async function getPilotState(): Promise<PilotState> {
+export async function getPilotState(connectionId?: string): Promise<PilotState> {
   const db = await readyDatabase();
-  const connection = await getLatestConnection();
+  const connection = connectionId === undefined
+    ? await getLatestConnection()
+    : await getConnection(connectionId);
   if (connection === null) {
     return {
       mode: "empty",
@@ -857,7 +984,8 @@ export async function getPilotState(): Promise<PilotState> {
   }
 
   const head = await db.prepare(
-    `SELECT s.id, s.collected_at, s.status, s.coverage_json, s.snapshot_sha256
+    `SELECT s.id, s.collected_at, s.status, s.coverage_json, s.snapshot_sha256,
+            s.origin_kind, s.fixture_id, s.fixture_version
        FROM connection_heads h
        JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
       WHERE h.org_id = ? AND h.connection_id = ?
@@ -977,6 +1105,11 @@ export async function getPilotState(): Promise<PilotState> {
       collectedAt: new Date(head.collected_at).toISOString(),
       coverageState: head.status,
       snapshotSha256: head.snapshot_sha256,
+      origin: {
+        kind: head.origin_kind,
+        fixtureId: head.fixture_id,
+        fixtureVersion: head.fixture_version,
+      },
     },
   };
 }
@@ -1045,18 +1178,47 @@ interface AuditInput {
   readonly metadata: Readonly<Record<string, JsonValue | readonly string[]>>;
 }
 
+let auditAppendTail: Promise<void> = Promise.resolve();
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-export async function appendAuditEvent(input: AuditInput): Promise<void> {
+export function appendAuditEvent(input: AuditInput): Promise<void> {
+  const task = auditAppendTail
+    .catch(() => undefined)
+    .then(() => appendAuditEventWithRetry(input));
+  auditAppendTail = task;
+  return task;
+}
+
+async function appendAuditEventWithRetry(input: AuditInput): Promise<void> {
   const db = await readyDatabase();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const result = await (await prepareAuditEventStatement(db, input, false)).run();
+    if ((result.meta?.changes ?? 0) === 1) return;
+  }
+  throw new PilotRepositoryError(
+    "PERSISTENCE_FAILED",
+    "The audit chain changed too frequently to append this event safely",
+  );
+}
+
+async function prepareAuditEventStatement(
+  db: D1Database,
+  input: AuditInput,
+  failClosed = true,
+): Promise<D1PreparedStatement> {
   const previous = await db.prepare(
-    `SELECT event_hash FROM audit_events WHERE org_id = ? ORDER BY occurred_at DESC, id DESC LIMIT 1`,
-  ).bind(LOCAL_ORG_ID).first<{ event_hash: string }>();
+    `SELECT event_hash, occurred_at
+       FROM audit_events
+      WHERE org_id = ?
+      ORDER BY occurred_at DESC, id DESC
+      LIMIT 1`,
+  ).bind(LOCAL_ORG_ID).first<{ event_hash: string; occurred_at: number }>();
   const eventId = id("audit");
-  const occurredAt = Date.now();
+  const occurredAt = Math.max(Date.now(), (previous?.occurred_at ?? -1) + 1);
   const requestId = crypto.randomUUID();
   const metadataJson = JSON.stringify(input.metadata);
   const previousHash = previous?.event_hash ?? null;
@@ -1074,13 +1236,34 @@ export async function appendAuditEvent(input: AuditInput): Promise<void> {
     metadataJson,
     previousHash,
   }));
-  await db.prepare(
-    `INSERT INTO audit_events
+  const invalidGuard = failClosed
+    ? `UNION ALL
+     SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL
+       FROM chain_guard WHERE valid = 0`
+    : "";
+  return db.prepare(
+    `WITH chain_guard(valid) AS (
+       SELECT CASE
+         WHEN ? IS NULL THEN CASE
+           WHEN NOT EXISTS (SELECT 1 FROM audit_events WHERE org_id = ?) THEN 1 ELSE 0 END
+         WHEN (SELECT event_hash FROM audit_events
+                WHERE org_id = ? ORDER BY occurred_at DESC, id DESC LIMIT 1) = ? THEN 1
+         ELSE 0
+       END
+     )
+     INSERT INTO audit_events
       (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
        target_type, target_id, outcome, request_id, metadata_json,
        previous_event_hash, event_hash)
-     VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     SELECT ?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?
+       FROM chain_guard WHERE valid = 1
+     ${invalidGuard}`,
   ).bind(
+    previousHash,
+    LOCAL_ORG_ID,
+    LOCAL_ORG_ID,
+    previousHash,
     eventId,
     LOCAL_ORG_ID,
     input.customerId,
@@ -1094,5 +1277,5 @@ export async function appendAuditEvent(input: AuditInput): Promise<void> {
     metadataJson,
     previousHash,
     eventHash,
-  ).run();
+  );
 }

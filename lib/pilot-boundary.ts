@@ -11,6 +11,7 @@ import type {
   PilotResource,
   PilotSnapshotPayload,
 } from "./pilot-types.ts";
+import { canonicalJson } from "./canonical-json.ts";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/#+=-]*$/u;
@@ -102,7 +103,10 @@ function jsonValue(value: unknown, depth = 0): JsonValue {
   if (entries.length > 100) invalid();
   const result: Record<string, JsonValue> = {};
   for (const [key, item] of entries) {
-    if (key.length === 0 || key.length > 128 || /[\u0000-\u001f\u007f]/u.test(key)) invalid();
+    if (
+      key.length === 0 || key.length > 128 || /[\u0000-\u001f\u007f]/u.test(key) ||
+      key === "__proto__" || key === "prototype" || key === "constructor"
+    ) invalid();
     result[key] = jsonValue(item, depth + 1);
   }
   return result;
@@ -120,7 +124,10 @@ function tags(value: unknown): Readonly<Record<string, string>> {
   if (entries.length > 100) invalid();
   const result: Record<string, string> = {};
   for (const [key, item] of entries) {
-    if (key.length === 0 || key.length > 128 || typeof item !== "string" || item.length > 512) invalid();
+    if (
+      key.length === 0 || key.length > 128 || typeof item !== "string" || item.length > 512 ||
+      key === "__proto__" || key === "prototype" || key === "constructor"
+    ) invalid();
     result[key] = item;
   }
   return result;
@@ -227,7 +234,7 @@ function hex(bytes: ArrayBuffer): string {
 }
 
 export function snapshotHashInput(payload: Omit<PilotSnapshotPayload, "snapshotSha256">): string {
-  return JSON.stringify({
+  return canonicalJson({
     schemaVersion: payload.schemaVersion,
     jobId: payload.jobId,
     connectionId: payload.connectionId,

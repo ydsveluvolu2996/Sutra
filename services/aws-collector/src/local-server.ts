@@ -128,6 +128,12 @@ interface LocalFixtureJobInput {
   readonly idempotencyKey: string;
 }
 
+interface LocalJobListQuery {
+  readonly limit: number;
+  readonly tenantId?: string;
+  readonly customerId?: string;
+}
+
 export function createLocalCollectorServer(options: LocalCollectorServerOptions): Server {
   const mode = options.mode ?? "fixture";
   if (mode !== "fixture" && mode !== "live") {
@@ -415,10 +421,15 @@ async function route(
   if (method === "GET" && requestPathname(path) === "/v1/local/jobs") {
     requireEmptyBody(body);
     const localJobs = requireLocalJobs(context);
-    const limit = parseLocalJobLimit(path);
+    const query = parseLocalJobListQuery(path);
+    const tenantIds = query.tenantId === undefined
+      ? localJobs.tenantIds
+      : localJobs.tenantIds.includes(query.tenantId)
+        ? [query.tenantId]
+        : [];
     const jobs = (
       await Promise.all(
-        localJobs.tenantIds.map((tenantId) =>
+        tenantIds.map((tenantId) =>
           localJobs.queue.listJobs(tenantId, {
             kind: LOCAL_FIXTURE_COLLECTION_JOB_KIND,
           }),
@@ -426,10 +437,12 @@ async function route(
       )
     )
       .flat()
+      .filter((job) =>
+        query.customerId === undefined || localJobScope(job).customerId === query.customerId)
       .sort(compareLocalJobs)
-      .slice(0, limit)
+      .slice(0, query.limit)
       .map((job) => serializeLocalJob(job));
-    return { status: 200, body: { jobs, count: jobs.length, limit } };
+    return { status: 200, body: { jobs, count: jobs.length, limit: query.limit } };
   }
 
   if (method === "POST" && path === "/v1/local/jobs/simulated-sync") {
@@ -984,7 +997,7 @@ function requestPathname(target: string): string {
   }
 }
 
-function parseLocalJobLimit(target: string): number {
+function parseLocalJobListQuery(target: string): LocalJobListQuery {
   let parsed: URL;
   try {
     parsed = new URL(target, "http://127.0.0.1");
@@ -992,19 +1005,30 @@ function parseLocalJobLimit(target: string): number {
     throw invalidRequest();
   }
   if (parsed.pathname !== "/v1/local/jobs") throw invalidRequest();
-  if (parsed.search.length === 0) return DEFAULT_LOCAL_JOB_LIMIT;
+  if (parsed.search.length === 0) return { limit: DEFAULT_LOCAL_JOB_LIMIT };
+  const allowedKeys = new Set(["limit", "tenantId", "customerId"]);
   const keys = [...parsed.searchParams.keys()];
-  const values = parsed.searchParams.getAll("limit");
-  if (keys.length !== 1 || keys[0] !== "limit" || values.length !== 1) {
+  if (
+    keys.some((key) => !allowedKeys.has(key)) ||
+    [...allowedKeys].some((key) => parsed.searchParams.getAll(key).length > 1)
+  ) {
     throw invalidRequest();
   }
-  const rawLimit = values[0];
-  if (rawLimit === undefined || !/^[1-9]\d{0,2}$/u.test(rawLimit)) {
-    throw invalidRequest();
-  }
+  const rawLimit = parsed.searchParams.get("limit") ?? String(DEFAULT_LOCAL_JOB_LIMIT);
+  const tenantId = parsed.searchParams.get("tenantId");
+  const customerId = parsed.searchParams.get("customerId");
+  if (
+    !/^[1-9]\d{0,2}$/u.test(rawLimit) ||
+    ((tenantId === null) !== (customerId === null)) ||
+    (tenantId !== null && !IDENTIFIER.test(tenantId)) ||
+    (customerId !== null && !IDENTIFIER.test(customerId))
+  ) throw invalidRequest();
   const limit = Number(rawLimit);
   if (limit > MAX_LOCAL_JOB_LIMIT) throw invalidRequest();
-  return limit;
+  return {
+    limit,
+    ...(tenantId === null || customerId === null ? {} : { tenantId, customerId }),
+  };
 }
 
 function parseLocalFixtureJob(body: string): LocalFixtureJobInput {

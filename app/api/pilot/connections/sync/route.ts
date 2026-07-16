@@ -9,6 +9,7 @@ import {
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import {
   errorResponse,
+  getCollectorHealth,
   jsonResponse,
   requirePilotActor,
   runCollectorSync,
@@ -41,6 +42,13 @@ export async function POST(request: Request): Promise<Response> {
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecret(connectionId);
     assertSessionCapability(actor.authenticated, "sync:run", stored.customerId);
+    const health = await getCollectorHealth(stored.partition);
+    if (health.mode !== "live") {
+      throw Object.assign(
+        new Error("Use Simulation runs for fixture evidence; AWS trust connections require an explicitly enabled live collector"),
+        { code: "INVALID_STATE" },
+      );
+    }
     runId = await createSyncRun(connectionId);
     const snapshot = await runCollectorSync({
       tenantId: LOCAL_ORG_ID,
@@ -49,8 +57,12 @@ export async function POST(request: Request): Promise<Response> {
       accountId: stored.accountId,
       partition: stored.partition,
     });
-    await persistSnapshot(runId, snapshot, actor.id);
-    return jsonResponse({ runId, state: await getPilotState() });
+    await persistSnapshot(runId, snapshot, actor.id, {
+      kind: "aws_sandbox",
+      fixtureId: null,
+      fixtureVersion: null,
+    });
+    return jsonResponse({ runId, state: await getPilotState(connectionId) });
   } catch (error) {
     if (runId !== null && connectionId !== null && actorId !== null) {
       try {

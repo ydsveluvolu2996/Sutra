@@ -2,6 +2,8 @@ import baseSchemaSql from "../drizzle/0000_wild_lenny_balinger.sql?raw";
 import pilotSchemaSql from "../drizzle/0001_good_sunspot.sql?raw";
 import localAuthSchemaSql from "../drizzle/0002_aspiring_terrax.sql?raw";
 import changeHistorySchemaSql from "../drizzle/0003_opposite_siren.sql?raw";
+import localOperationsSchemaSql from "../drizzle/0004_ambiguous_landau.sql?raw";
+import activeRunSchemaSql from "../drizzle/0005_tiny_hobgoblin.sql?raw";
 
 const BREAKPOINT = "--> statement-breakpoint";
 
@@ -14,12 +16,39 @@ function statementsFrom(sql: string): string[] {
     .filter((statement) => statement.length > 0);
 }
 
-const schemaStatements = [
-  ...statementsFrom(baseSchemaSql),
-  ...statementsFrom(pilotSchemaSql),
-  ...statementsFrom(localAuthSchemaSql),
-  ...statementsFrom(changeHistorySchemaSql),
-];
+const migrations = [
+  { id: "0000_wild_lenny_balinger", statements: statementsFrom(baseSchemaSql) },
+  { id: "0001_good_sunspot", statements: statementsFrom(pilotSchemaSql) },
+  { id: "0002_aspiring_terrax", statements: statementsFrom(localAuthSchemaSql) },
+  { id: "0003_opposite_siren", statements: statementsFrom(changeHistorySchemaSql) },
+  { id: "0004_ambiguous_landau", statements: statementsFrom(localOperationsSchemaSql) },
+  { id: "0005_tiny_hobgoblin", statements: statementsFrom(activeRunSchemaSql) },
+] as const;
+
+const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
+const CREATE_OBJECT = /^CREATE (?:UNIQUE )?(?:TABLE|INDEX)\s/iu;
+
+async function columnExists(db: D1Database, table: string, column: string): Promise<boolean> {
+  const result = await db.prepare(`PRAGMA table_info(\"${table}\")`).all<{ name: string }>();
+  return (result.results ?? []).some((candidate) => candidate.name === column);
+}
+
+async function applyStatement(db: D1Database, statement: string): Promise<void> {
+  const addColumn = ADD_COLUMN.exec(statement);
+  if (addColumn !== null && await columnExists(db, addColumn[1], addColumn[2])) return;
+  try {
+    await db.prepare(statement).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (CREATE_OBJECT.test(statement) && /already exists/iu.test(message)) return;
+    if (
+      addColumn !== null &&
+      /duplicate column name/iu.test(message) &&
+      await columnExists(db, addColumn[1], addColumn[2])
+    ) return;
+    throw error;
+  }
+}
 
 /**
  * The local pilot creates the checked-in schema lazily inside Miniflare D1.
@@ -27,23 +56,32 @@ const schemaStatements = [
  * separately approved release step.
  */
 export function ensureRuntimeSchema(db: D1Database): Promise<void> {
-  schemaReady ??= (async () => {
-    for (const statement of schemaStatements) {
-      try {
-        await db.prepare(statement).run();
-      } catch (error) {
-        // CREATE TABLE/INDEX statements are idempotent only when generated with
-        // IF NOT EXISTS. Drizzle migrations are not, so an already-created
-        // object is the sole safe error to ignore during local startup races.
-        const message = error instanceof Error ? error.message : String(error);
-        if (!/already exists/i.test(message)) {
-          throw error;
-        }
+  if (schemaReady !== undefined) return schemaReady;
+  const attempt = (async () => {
+    await db.prepare(
+      `CREATE TABLE IF NOT EXISTS sutra_runtime_migrations (
+        migration_id text PRIMARY KEY NOT NULL,
+        applied_at integer DEFAULT (unixepoch() * 1000) NOT NULL
+      )`,
+    ).run();
+    for (const migration of migrations) {
+      const applied = await db.prepare(
+        `SELECT migration_id FROM sutra_runtime_migrations WHERE migration_id = ? LIMIT 1`,
+      ).bind(migration.id).first<{ migration_id: string }>();
+      if (applied !== null) continue;
+      for (const statement of migration.statements) {
+        await applyStatement(db, statement);
       }
+      await db.prepare(
+        `INSERT OR IGNORE INTO sutra_runtime_migrations (migration_id) VALUES (?)`,
+      ).bind(migration.id).run();
     }
   })();
-
-  return schemaReady;
+  schemaReady = attempt;
+  void attempt.catch(() => {
+    if (schemaReady === attempt) schemaReady = undefined;
+  });
+  return attempt;
 }
 
 export function resetRuntimeSchemaCacheForTests(): void {

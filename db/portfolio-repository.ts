@@ -22,6 +22,9 @@ interface CustomerRow {
 interface ConnectionRow {
   id: string;
   customer_id: string;
+  source_kind: PortfolioConnectionSummary["sourceKind"];
+  fixture_id: string | null;
+  fixture_version: string | null;
   partition: PortfolioConnectionSummary["partition"];
   aws_account_id: string;
   role_arn: string;
@@ -30,6 +33,7 @@ interface ConnectionRow {
   permission_pack_version: string;
   last_successful_sync_at: number | null;
   latest_snapshot_at: number | null;
+  latest_snapshot_origin: PortfolioConnectionSummary["latestSnapshotOrigin"];
   resource_count: number;
   open_finding_count: number;
 }
@@ -97,12 +101,16 @@ export async function getPortfolio(subject: AuthorizationSubject, now = Date.now
   ).bind(subject.orgId, subject.scopeMode, subject.membershipId).all<CustomerRow>();
 
   const connectionResult = await db.prepare(
-    `SELECT a.id, a.customer_id, a.partition, a.aws_account_id, a.role_arn,
+    `SELECT a.id, a.customer_id, a.source_kind, a.fixture_id, a.fixture_version,
+            a.partition, a.aws_account_id, a.role_arn,
             a.status, a.enabled_regions_json, a.permission_pack_version,
             a.last_successful_sync_at,
             (SELECT s.collected_at FROM connection_heads h
               JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
              WHERE h.org_id = a.org_id AND h.connection_id = a.id LIMIT 1) AS latest_snapshot_at,
+            (SELECT s.origin_kind FROM connection_heads h
+              JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
+             WHERE h.org_id = a.org_id AND h.connection_id = a.id LIMIT 1) AS latest_snapshot_origin,
             (SELECT COUNT(*) FROM connection_heads h
               JOIN cmdb_resources r ON r.snapshot_id = h.snapshot_id AND r.connection_id = h.connection_id
              WHERE h.org_id = a.org_id AND h.connection_id = a.id) AS resource_count,
@@ -122,6 +130,9 @@ export async function getPortfolio(subject: AuthorizationSubject, now = Date.now
     const connection: PortfolioConnectionSummary = {
       id: row.id,
       customerId: row.customer_id,
+      sourceKind: row.source_kind,
+      fixtureId: row.fixture_id,
+      fixtureVersion: row.fixture_version,
       awsAccountId: row.aws_account_id,
       partition: row.partition,
       status: row.status,
@@ -130,6 +141,7 @@ export async function getPortfolio(subject: AuthorizationSubject, now = Date.now
       permissionPackVersion: row.permission_pack_version,
       lastSuccessfulSyncAt: iso(row.last_successful_sync_at),
       latestSnapshotAt: iso(row.latest_snapshot_at),
+      latestSnapshotOrigin: row.latest_snapshot_origin,
       resourceCount: numberValue(row.resource_count),
       openFindingCount: numberValue(row.open_finding_count),
     };

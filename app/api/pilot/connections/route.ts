@@ -64,7 +64,7 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     const health = await getCollectorHealth(partition);
-    if (!health.ok || !health.principalArn) {
+    if (!health.ok || !health.principalArn || health.mode !== "live") {
       throw Object.assign(new Error("The local AWS collector is not ready"), { code: "INVALID_STATE" });
     }
     const customerId = opaqueId("cust");
