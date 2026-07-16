@@ -18,8 +18,8 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
   const connectionId = `conn_${suffix}`;
   const accountId = "888899990000";
   const actorId = `usr_${suffix}`;
-  const originalRoleArn = `arn:aws:iam::${accountId}:role/sutra/SutraReadOnlyRole`;
-  const replacementRoleArn = `arn:aws:iam::${accountId}:role/sutra/SutraReplacementReadOnly`;
+  const originalRoleArn = `arn:aws:iam::${accountId}:role/LegacySutraReadOnly`;
+  const replacementRoleArn = `arn:aws:iam::${accountId}:role/sutra/SutraReadOnlyRole`;
   const now = Date.now();
 
   try {
@@ -43,7 +43,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
            permission_pack_version, status, enabled_regions_json,
            last_validated_at, created_at, updated_at)
          VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, ?, 'test-key-v1',
-                 'live-demo-2026-07', 'active', '["us-east-1"]', ?, ?, ?)`,
+                 'live-demo-2026-07.1', 'active', '["us-east-1"]', ?, ?, ?)`,
       ).bind(
         connectionId,
         pilotRepository.LOCAL_ORG_ID,
@@ -57,13 +57,25 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
       ),
     ]);
 
-    const registered = await pilotRepository.setConnectionRole(
+    const registered = await pilotRepository.commitVerifiedConnectionRole({
       connectionId,
-      replacementRoleArn,
+      expectedPreviousRoleArn: originalRoleArn,
+      roleArn: replacementRoleArn,
       actorId,
-    );
+      verification: {
+        verified: true,
+        accountId,
+        callerIdentityArn: `arn:aws:sts::${accountId}:assumed-role/SutraReadOnlyRole/sutra-postgres-test`,
+        missingExternalIdDenied: true,
+        wrongExternalIdDenied: true,
+        trustPolicyAttested: true,
+        permissionPolicyAttested: true,
+        sessionPolicyApplied: true,
+        permissionPackVersion: "live-demo-2026-07.1",
+      },
+    });
     assert.equal(registered.roleArn, replacementRoleArn);
-    assert.equal(registered.status, "pending");
+    assert.equal(registered.status, "active");
 
     const disabled = await pilotRepository.disableAwsConnection(connectionId, actorId);
     assert.equal(disabled.status, "disabled");

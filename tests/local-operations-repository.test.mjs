@@ -11,6 +11,7 @@ const awsSecurity = await import("../lib/aws-pilot-security.ts");
 const localOperations = await import("../db/local-operations-repository.ts");
 const pilotRepository = await import("../db/pilot-repository.ts");
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
+const liveLimits = await import("../services/aws-collector/src/live-collection-limits.ts");
 
 const FIXTURE = {
   fixtureId: "northstar-retail",
@@ -27,6 +28,37 @@ const FIXTURE = {
 const LIVE_CUSTOMER_ID = "cust_99999999999999999999999999999999";
 const LIVE_CONNECTION_ID = "conn_99999999999999999999999999999999";
 const LIVE_ACCOUNT_ID = "999900001111";
+
+function verifiedRoleEvidence(accountId = LIVE_ACCOUNT_ID, partition = "aws") {
+  return {
+    verified: true,
+    accountId,
+    callerIdentityArn: `arn:${partition}:sts::${accountId}:assumed-role/SutraReadOnlyRole/sutra-repository-test`,
+    missingExternalIdDenied: true,
+    wrongExternalIdDenied: true,
+    trustPolicyAttested: true,
+    permissionPolicyAttested: true,
+    sessionPolicyApplied: true,
+    permissionPackVersion: "live-demo-2026-07.1",
+  };
+}
+
+function verifiedRoleCommit({
+  connectionId = LIVE_CONNECTION_ID,
+  expectedPreviousRoleArn,
+  roleArn,
+  actorId = "usr_local_operations_test",
+  accountId = LIVE_ACCOUNT_ID,
+  partition = "aws",
+}) {
+  return pilotRepository.commitVerifiedConnectionRole({
+    connectionId,
+    expectedPreviousRoleArn,
+    roleArn,
+    actorId,
+    verification: verifiedRoleEvidence(accountId, partition),
+  });
+}
 
 async function provisionValidatedLiveConnection(database) {
   await database.batch([
@@ -349,8 +381,44 @@ describe("recoverable initial AWS connection handoff", () => {
     });
   });
 
+  it("retains the exact actor-bound handoff when verified role evidence is incomplete", async () => {
+    await withDatabase(async (database) => {
+      const input = await connectionDraftInput({ operationId: `onb_${"1".repeat(32)}` });
+      const created = await pilotRepository.createConnectionDraft(input);
+      await assert.rejects(
+        pilotRepository.commitVerifiedConnectionRole({
+          connectionId: input.connectionId,
+          expectedPreviousRoleArn: null,
+          roleArn: `arn:aws:iam::${input.accountId}:role/sutra/SutraReadOnlyRole`,
+          actorId: input.actorId,
+          verification: {
+            ...verifiedRoleEvidence(input.accountId, input.partition),
+            wrongExternalIdDenied: false,
+          },
+        }),
+        (error) => error?.code === "INVALID_STATE",
+      );
+      const recovered = await pilotRepository.createConnectionDraft({
+        ...input,
+        externalIdCiphertext: "encrypted-material-that-must-not-replace-the-handoff",
+      });
+      assert.equal(recovered.recovered, true);
+      assert.equal(recovered.externalIdCiphertext, created.externalIdCiphertext);
+      const row = await database.prepare(
+        "SELECT role_arn, status FROM aws_connections WHERE id = ? LIMIT 1",
+      ).bind(input.connectionId).first();
+      assert.deepEqual(row, { role_arn: "", status: "pending" });
+      assert.equal(
+        (await database.prepare(
+          "SELECT COUNT(*) AS count FROM audit_events WHERE action = 'aws.connection.role_registered'",
+        ).first())?.count,
+        0,
+      );
+    });
+  });
+
   it("never recovers the handoff for another actor, changed input, or a registered role", async () => {
-    await withDatabase(async () => {
+    await withDatabase(async (database) => {
       const input = await connectionDraftInput({ operationId: `onb_${"f".repeat(32)}` });
       await pilotRepository.createConnectionDraft(input);
       await assert.rejects(
@@ -361,10 +429,30 @@ describe("recoverable initial AWS connection handoff", () => {
         pilotRepository.createConnectionDraft({ ...input, customerName: "Changed customer" }),
         (error) => error?.code === "INVALID_STATE",
       );
-      await pilotRepository.setConnectionRole(
-        input.connectionId,
-        `arn:aws:iam::${input.accountId}:role/sutra/SutraReadOnlyRole`,
-        input.actorId,
+      const roleArn = `arn:aws:iam::${input.accountId}:role/sutra/SutraReadOnlyRole`;
+      const committed = await verifiedRoleCommit({
+        connectionId: input.connectionId,
+        expectedPreviousRoleArn: null,
+        roleArn,
+        actorId: input.actorId,
+        accountId: input.accountId,
+        partition: input.partition,
+      });
+      const exactRetry = await verifiedRoleCommit({
+        connectionId: input.connectionId,
+        expectedPreviousRoleArn: roleArn,
+        roleArn,
+        actorId: input.actorId,
+        accountId: input.accountId,
+        partition: input.partition,
+      });
+      assert.equal(committed.status, "active");
+      assert.equal(exactRetry.updatedAt, committed.updatedAt);
+      assert.equal(
+        (await database.prepare(
+          "SELECT COUNT(*) AS count FROM audit_events WHERE action = 'aws.connection.role_registered'",
+        ).first())?.count,
+        1,
       );
       await assert.rejects(
         pilotRepository.createConnectionDraft(input),
@@ -420,6 +508,43 @@ describe("local fixture publication provenance", () => {
 });
 
 describe("AWS trust health remains separate from collection health", () => {
+  it("reclaims a crashed live run only after the bounded collector window", async () => {
+    await withDatabase(async (database) => {
+      await provisionValidatedLiveConnection(database);
+      const abandonedRunId = await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
+
+      await assert.rejects(
+        pilotRepository.createSyncRun(LIVE_CONNECTION_ID),
+        (error) => error?.code === "CONFLICT",
+      );
+
+      const crashedAt = Date.now() - liveLimits.LIVE_AWS_RUN_RECLAIM_AFTER_MS - 1_000;
+      await database.prepare(
+        "UPDATE sync_runs SET created_at = ?, started_at = ? WHERE id = ?",
+      ).bind(crashedAt, crashedAt, abandonedRunId).run();
+
+      const retryRunId = await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
+      assert.notEqual(retryRunId, abandonedRunId);
+      const runs = await database.prepare(
+        "SELECT id, status, coverage_state, totals_json FROM sync_runs WHERE connection_id = ? ORDER BY created_at",
+      ).bind(LIVE_CONNECTION_ID).all();
+      const abandoned = runs.results.find((run) => run.id === abandonedRunId);
+      const retry = runs.results.find((run) => run.id === retryRunId);
+      assert.deepEqual(abandoned, {
+        id: abandonedRunId,
+        status: "failed",
+        coverage_state: "unknown",
+        totals_json: '{"error":"COLLECTION_FAILED"}',
+      });
+      assert.deepEqual(retry, {
+        id: retryRunId,
+        status: "running",
+        coverage_state: "unknown",
+        totals_json: "{}",
+      });
+    });
+  });
+
   it("keeps a validated connection active after an ordinary sync failure", async () => {
     await withDatabase(async (database) => {
       await provisionValidatedLiveConnection(database);
@@ -539,7 +664,7 @@ describe("AWS trust health remains separate from collection health", () => {
 });
 
 describe("AWS trust connection lifecycle", () => {
-  it("clears stale trust validation when the registered role is replaced", async () => {
+  it("atomically activates a replacement only with complete fresh trust evidence", async () => {
     await withDatabase(async (database) => {
       await provisionValidatedLiveConnection(database);
       const before = await database.prepare(
@@ -547,21 +672,37 @@ describe("AWS trust connection lifecycle", () => {
       ).bind(LIVE_CONNECTION_ID).first();
       assert.equal(typeof before?.last_validated_at, "number");
 
-      const replaced = await pilotRepository.setConnectionRole(
-        LIVE_CONNECTION_ID,
-        `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReplacementReadOnly`,
-        "usr_local_operations_test",
-      );
-      assert.equal(replaced.status, "pending");
-      assert.equal(replaced.lastValidatedAt, null);
+      const replaced = await verifiedRoleCommit({
+        expectedPreviousRoleArn: `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`,
+        roleArn: `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`,
+      });
+      assert.equal(replaced.status, "active");
+      assert.equal(typeof replaced.lastValidatedAt, "string");
       assert.equal(
         replaced.roleArn,
-        `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReplacementReadOnly`,
+        `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`,
       );
       const after = await database.prepare(
         "SELECT last_validated_at FROM aws_connections WHERE id = ? LIMIT 1",
       ).bind(LIVE_CONNECTION_ID).first();
-      assert.equal(after?.last_validated_at, null);
+      assert.equal(typeof after?.last_validated_at, "number");
+      const audit = await database.prepare(
+        `SELECT request_id, metadata_json FROM audit_events
+          WHERE action = 'aws.connection.role_registered' AND target_id = ? LIMIT 1`,
+      ).bind(LIVE_CONNECTION_ID).first();
+      assert.match(audit?.request_id ?? "", /^aws\.connection\.role_verified:/u);
+      const metadata = JSON.parse(audit?.metadata_json ?? "{}");
+      assert.deepEqual(metadata.trustProof, {
+        assumeRoleSucceeded: true,
+        exactPermissionPolicyAttested: true,
+        exactTrustPolicyAttested: true,
+        expectedCallerIdentityMatched: true,
+        missingExternalIdDenied: true,
+        permissionPackVersion: "live-demo-2026-07.1",
+        sessionPolicyApplied: true,
+        wrongExternalIdDenied: true,
+      });
+      assert.equal("callerIdentityArn" in metadata, false);
     });
   });
 
@@ -673,26 +814,27 @@ describe("AWS trust connection lifecycle", () => {
     await withDatabase(async (database) => {
       await provisionValidatedLiveConnection(database);
       const actorId = "usr_local_operations_test";
-      const roleArn = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReplacementReadOnly`;
+      const previousRoleArn = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`;
+      const roleArn = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`;
 
-      const registered = await pilotRepository.setConnectionRole(
-        LIVE_CONNECTION_ID,
+      const registered = await verifiedRoleCommit({
+        expectedPreviousRoleArn: previousRoleArn,
         roleArn,
         actorId,
-      );
-      const roleReplay = await pilotRepository.setConnectionRole(
-        LIVE_CONNECTION_ID,
+      });
+      const roleReplay = await verifiedRoleCommit({
+        expectedPreviousRoleArn: roleArn,
         roleArn,
         actorId,
-      );
+      });
       assert.equal(roleReplay.updatedAt, registered.updatedAt);
       assert.equal(roleReplay.roleArn, roleArn);
       await assert.rejects(
-        pilotRepository.setConnectionRole(
-          LIVE_CONNECTION_ID,
+        verifiedRoleCommit({
+          expectedPreviousRoleArn: roleArn,
           roleArn,
-          "usr_different_actor",
-        ),
+          actorId: "usr_different_actor",
+        }),
         (error) => error?.code === "INVALID_STATE",
       );
 
@@ -744,11 +886,10 @@ describe("AWS trust connection lifecycle", () => {
       ).bind(LIVE_CONNECTION_ID).first();
 
       await assert.rejects(
-        withForcedAtomicAuditFailure(database, () => pilotRepository.setConnectionRole(
-          LIVE_CONNECTION_ID,
-          `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReplacementReadOnly`,
-          "usr_local_operations_test",
-        )),
+        withForcedAtomicAuditFailure(database, () => verifiedRoleCommit({
+          expectedPreviousRoleArn: `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`,
+          roleArn: `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`,
+        })),
         (error) => error?.code === "PERSISTENCE_FAILED",
       );
 

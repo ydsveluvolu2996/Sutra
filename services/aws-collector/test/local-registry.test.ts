@@ -14,7 +14,7 @@ import {
 const NOW = new Date("2026-07-15T10:00:00.000Z");
 const EXTERNAL_ID = "sutra_external_id_1234567890abcd";
 
-test("registry encrypts trust material, scopes reads, and conditionally activates", async () => {
+test("registry stages verified trust until the control plane explicitly activates it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "sutra-registry-"));
   const path = join(directory, "connections.enc.json");
   const key = randomBytes(32).toString("base64");
@@ -58,12 +58,24 @@ test("registry encrypts trust material, scopes reads, and conditionally activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "live-demo-2026-07" as const,
+      permissionPackVersion: "live-demo-2026-07.1" as const,
     };
     await registry.markOnboardingVerified(
       { tenantId: "org_local_sutra" },
       "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       verification,
+    );
+    assert.equal(
+      (await registry.resolve(
+        { tenantId: "org_local_sutra" },
+        "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      ))?.status,
+      "VERIFIED",
+    );
+    await registry.activateOnboarding(
+      { tenantId: "org_local_sutra" },
+      "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      verification.roleArn,
     );
     assert.equal(
       (await registry.resolve(
@@ -86,6 +98,112 @@ test("registry encrypts trust material, scopes reads, and conditionally activate
         { tenantId: "org_local_sutra" },
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.status,
+      "ACTIVE",
+    );
+    await registry.activateOnboarding(
+      { tenantId: "org_local_sutra" },
+      "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      verification.roleArn,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("failed initial registration discards only staged material and remains retryable", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-registry-compensation-"));
+  const path = join(directory, "connections.enc.json");
+  const connectionId = "conn_22222222222222222222222222222222";
+  try {
+    const registry = new EncryptedFileConnectionRegistry({
+      filePath: path,
+      encryptionKey: randomBytes(32).toString("base64"),
+      now: () => NOW,
+    });
+    const candidate = connection(connectionId);
+    await registry.upsert(candidate);
+    await registry.discardStagedOnboarding(
+      { tenantId: candidate.tenantId },
+      connectionId,
+      candidate.roleArn,
+    );
+    assert.equal(
+      await registry.resolve({ tenantId: candidate.tenantId }, connectionId),
+      null,
+    );
+
+    // Discard does not create the irreversible tombstone used by offboarding.
+    await registry.upsert(candidate);
+    assert.equal(
+      (await registry.resolve({ tenantId: candidate.tenantId }, connectionId))?.status,
+      "PENDING",
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("staged activation is role-bound and cannot remove an active connection", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-registry-cas-"));
+  const path = join(directory, "connections.enc.json");
+  const connectionId = "conn_33333333333333333333333333333333";
+  try {
+    const registry = new EncryptedFileConnectionRegistry({
+      filePath: path,
+      encryptionKey: randomBytes(32).toString("base64"),
+      now: () => NOW,
+    });
+    const candidate = connection(connectionId);
+    await registry.upsert(candidate);
+    await assert.rejects(
+      registry.activateOnboarding(
+        { tenantId: candidate.tenantId },
+        connectionId,
+        "arn:aws:iam::123456789012:role/sutra/AnotherRole",
+      ),
+      RegistryStateError,
+    );
+    await registry.discardStagedOnboarding(
+      { tenantId: candidate.tenantId },
+      connectionId,
+      candidate.roleArn,
+    );
+    await registry.upsert(candidate);
+    const verification = {
+      connectionId,
+      accountId: candidate.expectedAccountId,
+      partition: candidate.partition,
+      roleArn: candidate.roleArn,
+      callerIdentityArn:
+        "arn:aws:sts::123456789012:assumed-role/SutraReadOnlyRole/sutra-fixture-test",
+      roleSessionName: "sutra-fixture-test",
+      missingExternalIdDenied: true as const,
+      wrongExternalIdDenied: true as const,
+      trustPolicyAttested: true as const,
+      permissionPolicyAttested: true as const,
+      sessionPolicyApplied: true as const,
+      permissionPackVersion: "live-demo-2026-07.1" as const,
+    };
+    await registry.markOnboardingVerified(
+      { tenantId: candidate.tenantId },
+      connectionId,
+      verification,
+    );
+    await registry.activateOnboarding(
+      { tenantId: candidate.tenantId },
+      connectionId,
+      candidate.roleArn,
+    );
+    await assert.rejects(
+      registry.discardStagedOnboarding(
+        { tenantId: candidate.tenantId },
+        connectionId,
+        candidate.roleArn,
+      ),
+      RegistryStateError,
+    );
+    assert.equal(
+      (await registry.resolve({ tenantId: candidate.tenantId }, connectionId))?.status,
       "ACTIVE",
     );
   } finally {
@@ -114,6 +232,46 @@ test("registry serializes concurrent writes without dropping connections", async
         id,
       );
     }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("registry persists the strict all-enabled selection and rejects ambiguous scope", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-registry-regions-"));
+  const path = join(directory, "connections.enc.json");
+  try {
+    const registry = new EncryptedFileConnectionRegistry({
+      filePath: path,
+      encryptionKey: randomBytes(32).toString("base64"),
+      now: () => NOW,
+    });
+    const connectionId = "conn_eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
+    await registry.upsert({
+      ...connection(connectionId),
+      enabledRegions: ["all-enabled"],
+    });
+    assert.deepEqual(
+      (await registry.getRegistered({ tenantId: "org_local_sutra" }, connectionId))
+        ?.enabledRegions,
+      ["all-enabled"],
+    );
+    await assert.rejects(
+      registry.upsert({
+        ...connection("conn_ffffffffffffffffffffffffffffffff"),
+        enabledRegions: ["all-enabled", "us-east-1"],
+      }),
+      RegistryIntegrityError,
+    );
+    await assert.rejects(
+      registry.upsert({
+        ...connection("conn_11111111111111111111111111111111"),
+        partition: "aws-cn",
+        roleArn: "arn:aws-cn:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+        enabledRegions: ["us-east-1"],
+      }),
+      RegistryIntegrityError,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

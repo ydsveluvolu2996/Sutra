@@ -245,8 +245,14 @@ function createHandler(
     roleContractClientFactory: () => {
       const stored = registry.stored;
       const capped = JSON.parse(readonlyMetadataSessionPolicy(stored.roleArn)) as {
-        Statement: Array<{ Action: string[] }>;
+        Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
       };
+      const metadata = capped.Statement.find(
+        (statement) => statement.Effect === "Allow" && statement.Resource === "*",
+      );
+      const attestation = capped.Statement.find(
+        (statement) => statement.Effect === "Allow" && statement.Resource === stored.roleArn,
+      );
       return {
         getRole: async () => ({
           arn: stored.roleArn,
@@ -268,7 +274,7 @@ function createHandler(
           })),
           tags: [
             { key: "sutra:access-mode", value: "read-only" },
-            { key: "sutra:permission-pack", value: "live-demo-2026-07" },
+            { key: "sutra:permission-pack", value: "live-demo-2026-07.1" },
             { key: "sutra:managed-by", value: "cloudformation" },
           ],
         }),
@@ -283,13 +289,13 @@ function createHandler(
               {
                 Sid: "ImplementedMetadataApis",
                 Effect: "Allow",
-                Action: capped.Statement[0]?.Action ?? [],
+                Action: metadata?.Action ?? [],
                 Resource: "*",
               },
               {
                 Sid: "TrustContractAttestation",
                 Effect: "Allow",
-                Action: capped.Statement[1]?.Action ?? [],
+                Action: attestation?.Action ?? [],
                 Resource: stored.roleArn,
               },
             ],

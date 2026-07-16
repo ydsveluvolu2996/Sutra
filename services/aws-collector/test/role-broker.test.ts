@@ -10,11 +10,14 @@ import type {
 } from "@aws-sdk/client-sts";
 
 import {
+  AWS_BROKER_CONNECTION_TIMEOUT_MS,
+  AWS_BROKER_REQUEST_TIMEOUT_MS,
   AwsRoleBroker,
   accountIdFromRoleArn,
   parseIamRoleArn,
   readonlyMetadataSessionPolicy,
   sanitizeRoleSessionName,
+  workloadIdentityAwsClientConfig,
 } from "../src/role-broker.js";
 import {
   ConnectionIntegrityError,
@@ -103,8 +106,14 @@ class FakeCallerIdentityClient implements CallerIdentityClient {
 
 function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractClient {
   const capped = JSON.parse(readonlyMetadataSessionPolicy(stored.roleArn)) as {
-    Statement: Array<{ Action: string[] }>;
+    Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
   };
+  const metadata = capped.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === "*",
+  );
+  const attestation = capped.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === stored.roleArn,
+  );
   return {
     getRole: async () => ({
       arn: stored.roleArn,
@@ -126,7 +135,7 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "live-demo-2026-07" },
+        { key: "sutra:permission-pack", value: "live-demo-2026-07.1" },
         { key: "sutra:managed-by", value: "cloudformation" },
       ],
     }),
@@ -141,13 +150,13 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
           {
             Sid: "ImplementedMetadataApis",
             Effect: "Allow",
-            Action: capped.Statement[0]?.Action ?? [],
+            Action: metadata?.Action ?? [],
             Resource: "*",
           },
           {
             Sid: "TrustContractAttestation",
             Effect: "Allow",
-            Action: capped.Statement[1]?.Action ?? [],
+            Action: attestation?.Action ?? [],
             Resource: stored.roleArn,
           },
         ],
@@ -227,15 +236,64 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
   const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
   const serialized = readonlyMetadataSessionPolicy(roleArn);
   const policy = JSON.parse(serialized) as {
-    Statement: Array<{ Action: string[]; Resource: string }>;
+    Statement: Array<{
+      Effect: string;
+      Action?: string[];
+      NotAction?: string[];
+      Resource?: string;
+      NotResource?: string;
+    }>;
   };
-  const actions = policy.Statement.flatMap((statement) => statement.Action);
+  const allows = policy.Statement.filter((statement) => statement.Effect === "Allow");
+  const actions = allows.flatMap((statement) => statement.Action ?? []);
+  const denyOutside = policy.Statement.find(
+    (statement) => statement.Effect === "Deny" && statement.NotAction !== undefined,
+  );
+  const denyTrustScope = policy.Statement.find(
+    (statement) => statement.Effect === "Deny" && statement.NotResource === roleArn,
+  );
 
-  assert.ok(serialized.length <= 2_048);
+  assert.ok(serialized.length <= 1_600);
+  assert.equal(policy.Statement.some((statement) => "Sid" in statement), false);
   assert.ok(actions.includes("ec2:DescribeInstances"));
   assert.ok(actions.includes("iam:GetRole"));
   assert.equal(actions.some((action) => /(?:Put|Create|Delete|Update|Attach|PassRole|AssumeRole)/u.test(action)), false);
-  assert.equal(policy.Statement[1]?.Resource, roleArn);
+  assert.equal(
+    allows.find((statement) => statement.Resource === roleArn)?.Resource,
+    roleArn,
+  );
+  assert.equal(denyOutside?.Effect, "Deny");
+  assert.deepEqual(new Set(denyOutside?.NotAction), new Set(actions));
+  assert.equal(denyOutside?.Resource, "*");
+  assert.equal(denyTrustScope?.Effect, "Deny");
+  assert.deepEqual(new Set(denyTrustScope?.Action), new Set([
+    "iam:GetRole",
+    "iam:ListRolePolicies",
+    "iam:GetRolePolicy",
+  ]));
+  assert.equal(denyTrustScope?.NotResource, roleArn);
+});
+
+test("workload STS and IAM clients use bounded standard-retry HTTP timeouts", () => {
+  assert.equal(AWS_BROKER_CONNECTION_TIMEOUT_MS, 5_000);
+  assert.equal(AWS_BROKER_REQUEST_TIMEOUT_MS, 10_000);
+  assert.deepEqual(workloadIdentityAwsClientConfig("us-east-1"), {
+    retryMode: "standard",
+    maxAttempts: 4,
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 10_000,
+    },
+    region: "us-east-1",
+  });
+  assert.deepEqual(workloadIdentityAwsClientConfig(undefined, 2), {
+    retryMode: "standard",
+    maxAttempts: 2,
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 10_000,
+    },
+  });
 });
 
 test("positive AssumeRole/GetCallerIdentity contract uses registry trust material", async () => {

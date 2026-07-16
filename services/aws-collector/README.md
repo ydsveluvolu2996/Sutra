@@ -45,6 +45,9 @@ an HTTP/queue boundary.
   does not make retained names or tags public or safe for telemetry.
 - Pagination tokens are consumed with cycle/maximum-page guards. Service tasks use
   bounded concurrency and SDK standard retry mode with a bounded attempt count.
+  Every AWS command has an abortable 15-second deadline and the complete one-host
+  run has a shared five-minute deadline. A timeout is sanitized and published as
+  partial coverage; it is never presented as a complete observation.
 - A failed service/Region writes sanitized `COLLECTION_ERROR` evidence and makes the
   scan `PARTIAL`; it does not erase successfully observed resources.
 - Errors intentionally omit the External ID, STS credential values, SDK request
@@ -52,6 +55,12 @@ an HTTP/queue boundary.
 
 `markOnboardingVerified` must use a conditional database update so stale workers
 cannot activate a connection that changed after verification.
+
+The loopback server's connection-operation lock is intentionally a one-host demo
+boundary. A hosted, horizontally scaled or multi-process deployment still requires
+a durable queue, database-backed leases/fencing tokens, a staging snapshot store,
+and atomic promotion of a complete manifest. Do not treat the in-memory lock or the
+bounded signed-response snapshot as a substitute for that architecture.
 
 ## Runtime wiring
 

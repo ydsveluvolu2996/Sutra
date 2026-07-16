@@ -25,7 +25,7 @@ test("live demo customer role is the reviewed public artifact", async () => {
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "live-demo-2026-07");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "live-demo-2026-07.1");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -44,7 +44,12 @@ test("live demo customer role is the reviewed public artifact", async () => {
     "cloudtrail:GetTrailStatus",
     "guardduty:ListDetectors",
     "guardduty:GetDetector",
+    "guardduty:ListFindings",
+    "guardduty:GetFindings",
     "securityhub:DescribeHub",
+    "securityhub:GetFindings",
+    "inspector2:BatchGetAccountStatus",
+    "inspector2:ListFindings",
   ]) {
     assert.match(infrastructure, new RegExp(`- ${action.replaceAll("*", "\\*")}`));
   }
@@ -61,12 +66,13 @@ test("live demo customer role is the reviewed public artifact", async () => {
     assert.doesNotMatch(infrastructure, new RegExp(forbidden.replaceAll("*", "\\*")));
   }
   assert.match(infrastructure, /sts:ExternalId:/);
+  assert.doesNotMatch(infrastructure, /NoEcho:\s*true/u);
   assert.match(infrastructure, /sts:RoleSessionName:/);
   assert.match(infrastructure, /AllowedValues:\s*\n\s*- SutraReadOnlyRole/u);
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+live-demo-2026-07/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+live-demo-2026-07/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+live-demo-2026-07\.1/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+live-demo-2026-07\.1/u);
 });
 
 test("local collector role can only assume the fixed Sutra customer role", async () => {
@@ -74,6 +80,10 @@ test("local collector role can only assume the fixed Sutra customer role", async
     resolve(root, "infrastructure/local-collector-role.yaml"),
     "utf8",
   );
+  const boundary = JSON.parse(await readFile(
+    resolve(root, "infrastructure/sutra-collector-boundary-policy.json"),
+    "utf8",
+  ));
 
   assert.match(template, /Action: sts:AssumeRole/);
   assert.match(template, /CustomerRoleName:[\s\S]+AllowedValues:\s*\n\s*- SutraReadOnlyRole/u);
@@ -84,4 +94,92 @@ test("local collector role can only assume the fixed Sutra customer role", async
   assert.doesNotMatch(template, /Action:\s*['"]?\*['"]?/);
   assert.doesNotMatch(template, /Principal:\s*['"]?\*['"]?/);
   assert.doesNotMatch(template, /AccessKey/);
+  assert.match(
+    template,
+    /PermissionsBoundary:\s*\n\s*Fn::Sub: arn:\$\{AWS::Partition\}:iam::\$\{AWS::AccountId\}:policy\/SutraCollectorBoundary/u,
+  );
+  assert.doesNotMatch(template, /ManagedPolicyArns/u);
+  assert.deepEqual(boundary, {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "DenyEveryNonAssumeRoleAction",
+        Effect: "Deny",
+        NotAction: "sts:AssumeRole",
+        Resource: "*",
+      },
+      {
+        Sid: "DenyAssumeRoleOutsideFixedCustomerRole",
+        Effect: "Deny",
+        Action: "sts:AssumeRole",
+        NotResource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      },
+      {
+        Sid: "AssumeFixedSutraCustomerRoleOnly",
+        Effect: "Allow",
+        Action: "sts:AssumeRole",
+        Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      },
+    ],
+  });
+});
+
+test("SutraOperator permission-set policy is the exact account-scoped live contract", async () => {
+  const path = resolve(root, "infrastructure/sutra-operator-permission-set-policy.json");
+  const source = await readFile(path, "utf8");
+  const policy = JSON.parse(source);
+  assert.equal(
+    createHash("sha256").update(source, "utf8").digest("hex"),
+    "093292b0f6733bdddbcdb5bc34b31a0562e6350c77d8d4d76b744a7892b9ba7e",
+  );
+  assert.equal(policy.Version, "2012-10-17");
+  assert.ok(Array.isArray(policy.Statement));
+  const statements = new Map(policy.Statement.map((statement) => [statement.Sid, statement]));
+  assert.deepEqual(
+    new Set(statements.get("AttestExactCollectorRolePolicies")?.Action),
+    new Set(["iam:GetRolePolicy", "iam:ListAttachedRolePolicies", "iam:ListRolePolicies"]),
+  );
+  assert.equal(
+    statements.get("AttestExactCollectorRolePolicies")?.Resource,
+    "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole",
+  );
+  assert.deepEqual(
+    new Set(statements.get("ConfigureAndRecoverExactTemplateBucket")?.Action),
+    new Set([
+      "s3:GetBucketTagging",
+      "s3:ListBucket",
+      "s3:ListBucketVersions",
+      "s3:PutBucketOwnershipControls",
+      "s3:PutBucketPolicy",
+      "s3:PutBucketPublicAccessBlock",
+      "s3:PutBucketTagging",
+      "s3:PutBucketVersioning",
+      "s3:PutEncryptionConfiguration",
+    ]),
+  );
+  assert.equal(
+    statements.get("PublishExactReviewedTemplateObject")?.Resource,
+    "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/live-demo-2026-07.1/" +
+      "9e1388f98d55bc54254b8def9844a41ea916acacfa37144cd67a8a4dce4f1d42.yaml",
+  );
+  assert.equal(
+    statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[
+      "aws:RequestTag/sutra:template-sha256"
+    ],
+    "c8bbaa5b20b33b576ad33c930a98ea51afdb67013bd263833b16c91bcfe4006d",
+  );
+  const serialized = JSON.stringify(policy);
+  for (const forbidden of [
+    '"Action":"*"',
+    "iam:AttachRolePolicy",
+    "iam:CreatePolicy",
+    "iam:CreatePolicyVersion",
+    "iam:DeleteRolePermissionsBoundary",
+    "iam:PassRole",
+    "iam:SetDefaultPolicyVersion",
+    "s3:GetObject",
+    "s3:DeleteObject",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
 });

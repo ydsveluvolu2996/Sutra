@@ -4,7 +4,6 @@ import {
   AssumeRoleCommand,
   GetCallerIdentityCommand,
   STSClient,
-  type STSClientConfig,
 } from "@aws-sdk/client-sts";
 import {
   GetRoleCommand,
@@ -54,7 +53,7 @@ const EXPECTED_ROLE_PATH_AND_NAME = "sutra/SutraReadOnlyRole";
 const EXPECTED_ROLE_PATH = "/sutra/";
 const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
-const PERMISSION_PACK_VERSION = "live-demo-2026-07" as const;
+const PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:DescribeRegions",
@@ -71,12 +70,21 @@ const IMPLEMENTED_READ_ACTIONS = [
   "cloudtrail:GetTrailStatus",
   "guardduty:ListDetectors",
   "guardduty:GetDetector",
+  "guardduty:ListFindings",
+  "guardduty:GetFindings",
   "securityhub:DescribeHub",
+  "securityhub:GetFindings",
+  "inspector2:BatchGetAccountStatus",
+  "inspector2:ListFindings",
 ] as const;
 const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
   "iam:ListRolePolicies",
   "iam:GetRolePolicy",
+] as const;
+const REVIEWED_SESSION_ACTIONS = [
+  ...IMPLEMENTED_READ_ACTIONS,
+  ...TRUST_ATTESTATION_ACTIONS,
 ] as const;
 
 const EXPECTED_ACCESS_DENIALS = new Set([
@@ -107,6 +115,34 @@ export interface WorkloadIdentityRoleBrokerOptions {
   readonly principalArn: string;
   readonly region?: string;
   readonly maxAttempts?: number;
+}
+
+export const AWS_BROKER_CONNECTION_TIMEOUT_MS = 5_000;
+export const AWS_BROKER_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface WorkloadIdentityAwsClientConfig {
+  readonly retryMode: "standard";
+  readonly maxAttempts: number;
+  readonly requestHandler: {
+    readonly connectionTimeout: number;
+    readonly requestTimeout: number;
+  };
+  readonly region?: string;
+}
+
+export function workloadIdentityAwsClientConfig(
+  region: string | undefined,
+  maxAttempts = 4,
+): WorkloadIdentityAwsClientConfig {
+  return {
+    retryMode: "standard",
+    maxAttempts,
+    requestHandler: {
+      connectionTimeout: AWS_BROKER_CONNECTION_TIMEOUT_MS,
+      requestTimeout: AWS_BROKER_REQUEST_TIMEOUT_MS,
+    },
+    ...(region === undefined ? {} : { region }),
+  };
 }
 
 /**
@@ -163,21 +199,33 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
     Version: "2012-10-17",
     Statement: [
       {
-        Sid: "SutraImplementedMetadataReadCap",
+        Effect: "Deny",
+        NotAction: REVIEWED_SESSION_ACTIONS,
+        Resource: "*",
+      },
+      {
+        Effect: "Deny",
+        Action: TRUST_ATTESTATION_ACTIONS,
+        NotResource: parsed.arn,
+      },
+      {
         Effect: "Allow",
         Action: IMPLEMENTED_READ_ACTIONS,
         Resource: "*",
       },
       {
-        Sid: "SutraTrustAttestationReadCap",
         Effect: "Allow",
         Action: TRUST_ATTESTATION_ACTIONS,
         Resource: parsed.arn,
       },
     ],
   });
-  if (policy.length > 2_048) {
-    throw new ConnectionIntegrityError("The fixed STS session policy exceeds the AWS limit");
+  // STS compresses inline policies and any session tags into a separate packed
+  // representation whose limit can be reached before the documented 2,048-byte
+  // plaintext limit. Optional Sid fields are deliberately omitted, and this
+  // fixed ceiling preserves headroom for the reviewed four-statement policy.
+  if (policy.length > 1_600) {
+    throw new ConnectionIntegrityError("The fixed STS session policy exceeds its safe limit");
   }
   return policy;
 }
@@ -400,6 +448,7 @@ export class AwsRoleBroker {
   ): Promise<OnboardingTrustVerification> {
     const resolved = await this.resolveConnection(scope, connectionId, [
       "PENDING",
+      "VERIFIED",
       "DEGRADED",
       "ACTIVE",
     ]);
@@ -604,17 +653,16 @@ export class AwsRoleBroker {
 /**
  * Production constructor. The source STS client intentionally has no static
  * credentials configuration, so the AWS SDK resolves the service's workload identity.
+ * Every STS/IAM client also uses bounded connect/request timeouts so SDK retries fit
+ * within the broker's outer trust deadline.
  */
 export function createWorkloadIdentityRoleBroker(
   options: WorkloadIdentityRoleBrokerOptions,
 ): AwsRoleBroker {
-  const clientConfig: STSClientConfig = {
-    retryMode: "standard",
-    maxAttempts: options.maxAttempts ?? 4,
-  };
-  if (options.region !== undefined) {
-    clientConfig.region = options.region;
-  }
+  const clientConfig = workloadIdentityAwsClientConfig(
+    options.region,
+    options.maxAttempts ?? 4,
+  );
 
   const assumeRoleClient = new STSClient(clientConfig);
   return new AwsRoleBroker({
@@ -625,10 +673,11 @@ export function createWorkloadIdentityRoleBroker(
       new STSClient({ ...clientConfig, credentials }),
     roleContractClientFactory: (credentials) => {
       const client = new IAMClient({
-        retryMode: "standard",
-        maxAttempts: options.maxAttempts ?? 4,
+        ...workloadIdentityAwsClientConfig(
+          options.region,
+          options.maxAttempts ?? 4,
+        ),
         credentials,
-        ...(options.region === undefined ? {} : { region: options.region }),
       });
       return {
         getRole: async (roleName) => {

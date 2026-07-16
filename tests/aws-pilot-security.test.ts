@@ -28,9 +28,10 @@ import {
   readBoundedJson,
   type SecretContext,
 } from "../lib/aws-pilot-security.ts";
+import { ALL_ENABLED_AWS_REGIONS } from "../lib/aws-region-selection.ts";
 import {
   applyControlPlaneLifecycleThenReconcileCollector,
-  commitRoleThenRegisterCollector,
+  stageVerifyThenCommitRole,
 } from "../lib/local-aws-lifecycle.ts";
 import { withLocalOnboardingAccountLock } from "../lib/local-onboarding-lock.ts";
 
@@ -80,6 +81,29 @@ test("onboarding parser binds canonical role ARN to account and partition", () =
         accountId: "210987654321",
         partition: "aws",
       }),
+    isPilotError("INVALID_INPUT"),
+  );
+});
+
+test("onboarding accepts only the sole all-enabled Region selection marker", () => {
+  assert.deepEqual(
+    parseAwsConnectionDraftRequest({
+      operationId: `onb_${"b".repeat(32)}`,
+      customerName: "Pilot Customer",
+      awsAccountId: "123456789012",
+      partition: "aws",
+      enabledRegions: [ALL_ENABLED_AWS_REGIONS],
+    }),
+    {
+      operationId: `onb_${"b".repeat(32)}`,
+      customerName: "Pilot Customer",
+      awsAccountId: "123456789012",
+      partition: "aws",
+      enabledRegions: [ALL_ENABLED_AWS_REGIONS],
+    },
+  );
+  assert.throws(
+    () => parseRegions([ALL_ENABLED_AWS_REGIONS, "us-east-1"], "aws"),
     isPilotError("INVALID_INPUT"),
   );
 });
@@ -338,35 +362,119 @@ test("lifecycle changes become authoritative before best-effort collector cleanu
   });
 });
 
-test("role registration keeps the durable pending role when collector reconciliation fails", async () => {
+test("role registration commits only after the collector proves the complete trust contract", async () => {
   const events: string[] = [];
-  let durableRole: string | null = null;
-  await assert.rejects(
-    commitRoleThenRegisterCollector({
-      commitControlPlaneRole: async () => {
-        events.push("control-plane-role");
-        durableRole = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
-        return { status: "pending" as const, roleArn: durableRole };
-      },
-      registerCollector: async () => {
-        events.push("collector-register");
-        throw new Error("collector unavailable");
-      },
-    }),
-    /collector unavailable/u,
-  );
-  assert.deepEqual(events, ["control-plane-role", "collector-register"]);
-  assert.equal(durableRole, "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole");
+  const verification = {
+    verified: true as const,
+    missingExternalIdDenied: true as const,
+    wrongExternalIdDenied: true as const,
+  };
+  const result = await stageVerifyThenCommitRole({
+    stageCollector: async () => { events.push("collector-stage"); },
+    verifyCollector: async () => {
+      events.push("collector-proof");
+      return verification;
+    },
+    commitVerifiedControlPlaneRole: async (proof) => {
+      assert.equal(proof, verification);
+      events.push("control-plane-commit");
+      return { status: "active" as const };
+    },
+    activateCollector: async () => { events.push("collector-activate"); },
+    compensateStagedCollector: async () => { events.push("collector-compensate"); },
+  });
+  assert.deepEqual(events, [
+    "collector-stage",
+    "collector-proof",
+    "control-plane-commit",
+    "collector-activate",
+  ]);
+  assert.deepEqual(result, { connection: { status: "active" }, verification });
+});
 
-  let collectorCalled = false;
+test("failed role proof retains the handoff and reconciles an existing active collector", async () => {
+  const events: string[] = [];
+  let handoffOpen = true;
   await assert.rejects(
-    commitRoleThenRegisterCollector({
-      commitControlPlaneRole: async () => { throw new Error("database unavailable"); },
-      registerCollector: async () => { collectorCalled = true; },
+    stageVerifyThenCommitRole({
+      stageCollector: async () => { events.push("collector-stage"); },
+      verifyCollector: async () => {
+        events.push("collector-proof");
+        throw new Error("unsafe trust");
+      },
+      commitVerifiedControlPlaneRole: async () => {
+        handoffOpen = false;
+        events.push("control-plane-commit");
+        return { status: "active" as const };
+      },
+      activateCollector: async () => { events.push("collector-activate"); },
+      compensateStagedCollector: async () => { events.push("collector-restore"); },
     }),
-    /database unavailable/u,
+    /unsafe trust/u,
   );
-  assert.equal(collectorCalled, false);
+  assert.equal(handoffOpen, true);
+  assert.deepEqual(events, ["collector-stage", "collector-proof", "collector-restore"]);
+});
+
+test("failed verified-role commit restores the collector and remains exactly retryable", async () => {
+  const events: string[] = [];
+  let commitAttempts = 0;
+  const registration = {
+    stageCollector: async () => { events.push("collector-stage"); },
+    verifyCollector: async () => {
+      events.push("collector-proof");
+      return { verified: true as const };
+    },
+    commitVerifiedControlPlaneRole: async () => {
+      commitAttempts += 1;
+      events.push("control-plane-commit");
+      if (commitAttempts === 1) throw new Error("database unavailable");
+      return { status: "active" as const };
+    },
+    activateCollector: async () => {
+      events.push("collector-activate");
+    },
+    compensateStagedCollector: async () => {
+      events.push("collector-restore");
+    },
+  };
+  await assert.rejects(stageVerifyThenCommitRole(registration), /database unavailable/u);
+  const retried = await stageVerifyThenCommitRole(registration);
+  assert.deepEqual(retried.connection, { status: "active" });
+  assert.deepEqual(events, [
+    "collector-stage", "collector-proof", "control-plane-commit", "collector-restore",
+    "collector-stage", "collector-proof", "control-plane-commit", "collector-activate",
+  ]);
+});
+
+test("post-commit activation failure remains staged and skips destructive compensation", async () => {
+  const events: string[] = [];
+  let activationAttempts = 0;
+  const registration = {
+    stageCollector: async () => { events.push("collector-stage"); },
+    verifyCollector: async () => {
+      events.push("collector-proof");
+      return { verified: true as const };
+    },
+    commitVerifiedControlPlaneRole: async () => {
+      events.push("control-plane-commit");
+      return { status: "active" as const };
+    },
+    activateCollector: async () => {
+      activationAttempts += 1;
+      events.push("collector-activate");
+      if (activationAttempts === 1) throw new Error("collector unavailable");
+    },
+    compensateStagedCollector: async () => { events.push("collector-compensate"); },
+  };
+
+  await assert.rejects(stageVerifyThenCommitRole(registration), /collector unavailable/u);
+  const retried = await stageVerifyThenCommitRole(registration);
+  assert.deepEqual(retried.connection, { status: "active" });
+  assert.deepEqual(events, [
+    "collector-stage", "collector-proof", "control-plane-commit", "collector-activate",
+    "collector-stage", "collector-proof", "control-plane-commit", "collector-activate",
+  ]);
 });
 
 test("collector lifecycle cleanup is safe to retry after an unavailable collector", async () => {

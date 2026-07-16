@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 import { AppShell } from "../components/app-shell";
 import { formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 
@@ -27,6 +28,14 @@ export default function Home() {
   const maxServiceCount = Math.max(...serviceCounts.map(([, count]) => count), 1);
   const succeededCoverage = state?.coverage.filter((entry) => entry.status === "succeeded").length ?? 0;
   const totalCoverage = state?.coverage.length ?? 0;
+  const coveredRegions = useMemo(() => [...new Set(
+    (state?.coverage ?? [])
+      .map((entry) => entry.region)
+      .filter((region) => region !== "global"),
+  )].sort(), [state?.coverage]);
+  const allEnabledRegionScope = connection
+    ? isAllEnabledAwsRegionSelection(connection.enabledRegions)
+    : false;
   const coveragePercent = totalCoverage ? Math.round((succeededCoverage / totalCoverage) * 100) : 0;
   const priorityFindings = openFindings.filter((finding) => finding.severity === "critical" || finding.severity === "high").slice(0, 5);
 
@@ -77,7 +86,7 @@ export default function Home() {
             <article className="metric-card metric-card-featured">
               <div className="metric-topline"><span>Trust health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
               <strong className="connection-account">{connection.awsAccountId}</strong>
-              <p>{connection.enabledRegions.length} enabled regions · {connection.sourceKind === "simulated_fixture" ? `fixture ${connection.fixtureVersion ?? "not published"}` : `validated ${formatTimestamp(connection.lastValidatedAt)}`}</p>
+              <p>{allEnabledRegionScope ? (coveredRegions.length > 0 ? `${coveredRegions.length} AWS-discovered enabled regions` : "All account-enabled Regions") : `${connection.enabledRegions.length} explicitly selected regions`} · {connection.sourceKind === "simulated_fixture" ? `fixture ${connection.fixtureVersion ?? "not published"}` : `validated ${formatTimestamp(connection.lastValidatedAt)}`}</p>
             </article>
             <article className="metric-card">
               <div className="metric-topline"><span>Managed assets</span><span className="metric-glyph">CMDB</span></div>
@@ -107,7 +116,7 @@ export default function Home() {
               <div className="signal-list">
                 <div><span className="signal-icon signal-green">01</span><p><strong>Configuration posture</strong><small>Exposure, encryption, logging, IAM and native-service coverage</small></p><b>Included</b></div>
                 <div><span className="signal-icon signal-blue">02</span><p><strong>Asset relationships</strong><small>Account, region, network, identity and service context</small></p><b>Included</b></div>
-                <div><span className="signal-icon signal-amber">03</span><p><strong>Native threat &amp; CVE services</strong><small>Show GuardDuty and Security Hub enablement only; native finding import is planned</small></p><b className="muted-status">Coverage only</b></div>
+                <div><span className="signal-icon signal-amber">03</span><p><strong>Native threat &amp; CVE services</strong><small>Import existing GuardDuty, Security Hub and Inspector findings when those services are already enabled</small></p><b className="muted-status">Read-only import</b></div>
               </div>
               <p className="panel-footnote">Sutra’s deterministic recommendations are not runtime behavior analytics or package vulnerability scanning.</p>
             </article>
@@ -134,7 +143,7 @@ export default function Home() {
           <section className="dashboard-bottom-grid">
             <article className="panel customer-live-card">
               <div className="panel-heading"><div><p className="eyebrow">Managed customer</p><h2>{connection.customerName}</h2></div><span className="customer-avatar large">{connection.customerName.slice(0, 2).toUpperCase()}</span></div>
-              <dl><div><dt>AWS account</dt><dd>{connection.awsAccountId}</dd></div><div><dt>Regions</dt><dd>{connection.enabledRegions.join(", ")}</dd></div><div><dt>Last successful sync</dt><dd>{formatTimestamp(connection.lastSuccessfulSyncAt)}</dd></div><div><dt>Permission pack</dt><dd>{connection.permissionPackVersion}</dd></div></dl>
+              <dl><div><dt>AWS account</dt><dd>{connection.awsAccountId}</dd></div><div><dt>Region scope</dt><dd>{allEnabledRegionScope ? (coveredRegions.length > 0 ? coveredRegions.join(", ") : "All account-enabled Regions (discovered during sync)") : connection.enabledRegions.join(", ")}</dd></div><div><dt>Last successful sync</dt><dd>{formatTimestamp(connection.lastSuccessfulSyncAt)}</dd></div><div><dt>Permission pack</dt><dd>{connection.permissionPackVersion}</dd></div></dl>
               <a className="text-link" href="/customers">Open customer workspace →</a>
             </article>
             <article className="panel sync-history-card">

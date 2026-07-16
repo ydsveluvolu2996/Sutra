@@ -65,6 +65,7 @@ import {
   type SafeJsonObject,
   type SafeJsonValue,
 } from "./types.js";
+import { isValidAwsRegionSelection } from "./aws-region-selection.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -73,10 +74,9 @@ const RESPONSE_LIMIT = 12 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
-const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|sync|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -88,6 +88,15 @@ const FIXTURE_PRINCIPAL = "arn:aws:iam::999988887777:role/SutraLocalCollector";
 const DEFAULT_LOCAL_JOB_LIMIT = 50;
 const MAX_LOCAL_JOB_LIMIT = 100;
 const MAX_LOCAL_SCHEDULE_CATCH_UP = 5;
+const LIVE_RESOURCE_LIMIT = 10_000;
+const LIVE_EVIDENCE_LIMIT = 5_000;
+const EVIDENCE_BUDGET_COLLECTOR_KEY = "sutra.evidence-budget";
+const RESOURCE_BUDGET_COLLECTOR_KEY = "sutra.resource-budget";
+const SNAPSHOT_BUDGET_COLLECTOR_KEY = "sutra.snapshot-budget";
+const LIVE_SNAPSHOT_RESOURCE_BUDGET_BYTES = 4 * 1024 * 1024;
+const LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES = 1024 * 1024;
+const LIVE_SNAPSHOT_FINDING_BUDGET_BYTES = 2 * 1024 * 1024;
+export const LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES = 10 * 1024 * 1024;
 const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
 const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
@@ -682,6 +691,14 @@ async function route(
         body: action === "disable" ? { disabled: true } : { offboarded: true },
       };
     }
+    if (action === "activate" || action === "discard") {
+      const candidate = parseStagedRegistrationMutation(body, pathConnectionId);
+      await mutateStagedRegistration(context, candidate, action);
+      return {
+        status: 200,
+        body: action === "activate" ? { activated: true } : { discarded: true },
+      };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
       return { status: 200, body: await verifyConnection(context, job) };
@@ -718,7 +735,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "live-demo-2026-07",
+        permissionPackVersion: "live-demo-2026-07.1",
       };
       await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
       return verificationResponse(verification);
@@ -783,6 +800,43 @@ async function mutateConnectionLifecycle(
   }
 }
 
+async function mutateStagedRegistration(
+  context: ServerContext,
+  candidate: {
+    readonly tenantId: string;
+    readonly connectionId: string;
+    readonly roleArn: string;
+  },
+  action: "activate" | "discard",
+): Promise<void> {
+  const operationKey = connectionOperationKey(candidate.tenantId, candidate.connectionId);
+  if (
+    context.activeConnectionOperations.has(operationKey) ||
+    context.lifecycleMutations.has(operationKey)
+  ) {
+    throw new RegistryStateError();
+  }
+  context.lifecycleMutations.add(operationKey);
+  try {
+    const scope = { tenantId: candidate.tenantId };
+    if (action === "activate") {
+      await context.registry.activateOnboarding(
+        scope,
+        candidate.connectionId,
+        candidate.roleArn,
+      );
+    } else {
+      await context.registry.discardStagedOnboarding(
+        scope,
+        candidate.connectionId,
+        candidate.roleArn,
+      );
+    }
+  } finally {
+    context.lifecycleMutations.delete(operationKey);
+  }
+}
+
 function connectionOperationKey(tenantId: string, connectionId: string): string {
   return `${tenantId}\u001f${connectionId}`;
 }
@@ -807,7 +861,7 @@ async function collectLiveSnapshot(
     job.connectionId,
     job.jobId,
   );
-  const sink = new CapturingInventorySink();
+  const sink = new BoundedLiveInventorySink();
   const clients = new AwsSdkInventoryClientFactory();
   const runner = new SingleAccountAwsInventoryRunner({
     clients,
@@ -837,22 +891,118 @@ async function collectLiveSnapshot(
     result.coverage,
     result.collectorCoverage,
     context.now(),
+    sink.evidenceTruncation,
+    sink.resourceTruncation,
   );
 }
 
-class CapturingInventorySink implements AwsInventorySink {
+export interface LiveEvidenceTruncation {
+  readonly evidenceLimit: number;
+  readonly retainedEvidence: number;
+  readonly droppedEvidence: number;
+  readonly nativeFindingsDropped: number;
+  readonly otherEvidenceDropped: number;
+}
+
+export interface LiveResourceTruncation {
+  readonly resourceLimit: number;
+  readonly retainedResources: number;
+  readonly droppedResources: number;
+}
+
+/**
+ * The local live API returns an in-memory snapshot, so it must retain a hard
+ * upper bound even when multiple regional native-finding adapters are busy.
+ * Once the bound is crossed, one slot is reserved for explicit truncation
+ * evidence in the normalized snapshot. Non-native posture evidence displaces
+ * native findings first so a native-finding surge cannot hide base coverage.
+ */
+export class BoundedLiveInventorySink implements AwsInventorySink {
   public readonly resources: NormalizedAwsResource[] = [];
   public readonly evidence: NormalizedAwsEvidence[] = [];
+  private droppedEvidence = 0;
+  private nativeFindingsDropped = 0;
+  private otherEvidenceDropped = 0;
+  private droppedResources = 0;
+
+  public constructor(
+    private readonly evidenceLimit = LIVE_EVIDENCE_LIMIT,
+    private readonly resourceLimit = LIVE_RESOURCE_LIMIT,
+  ) {
+    if (!Number.isSafeInteger(evidenceLimit) || evidenceLimit < 1) {
+      throw new TypeError("The live evidence limit must be a positive safe integer");
+    }
+    if (!Number.isSafeInteger(resourceLimit) || resourceLimit < 1) {
+      throw new TypeError("The live resource limit must be a positive safe integer");
+    }
+  }
+
+  public get evidenceTruncation(): LiveEvidenceTruncation | null {
+    if (this.droppedEvidence === 0) return null;
+    return {
+      evidenceLimit: this.evidenceLimit,
+      retainedEvidence: this.evidence.length,
+      droppedEvidence: this.droppedEvidence,
+      nativeFindingsDropped: this.nativeFindingsDropped,
+      otherEvidenceDropped: this.otherEvidenceDropped,
+    };
+  }
+
+  public get resourceTruncation(): LiveResourceTruncation | null {
+    if (this.droppedResources === 0) return null;
+    return {
+      resourceLimit: this.resourceLimit,
+      retainedResources: this.resources.length,
+      droppedResources: this.droppedResources,
+    };
+  }
 
   public async writeBatch(batch: AwsInventoryBatch): Promise<void> {
-    if (this.resources.length + batch.resources.length > 10_000) {
-      throw new Error("inventory resource limit reached");
-    }
-    if (this.evidence.length + batch.evidence.length > 5_000) {
-      throw new Error("inventory evidence limit reached");
-    }
     this.resources.push(...batch.resources);
-    this.evidence.push(...batch.evidence);
+    this.resources.sort((left, right) => left.resourceKey.localeCompare(right.resourceKey));
+    if (this.resources.length > this.resourceLimit) {
+      this.droppedResources += this.resources.length - this.resourceLimit;
+      this.resources.splice(this.resourceLimit);
+    }
+    for (const item of batch.evidence) {
+      this.evidence.push(item);
+      this.evidence.sort((left, right) => {
+        const leftNative = left.evidenceType === "AWS_NATIVE_FINDING" ? 1 : 0;
+        const rightNative = right.evidenceType === "AWS_NATIVE_FINDING" ? 1 : 0;
+        return leftNative - rightNative || left.evidenceKey.localeCompare(right.evidenceKey);
+      });
+      if (
+        this.droppedEvidence > 0 ||
+        this.evidence.length > this.evidenceLimit
+      ) {
+        this.truncateEvidence();
+      }
+    }
+  }
+
+  private truncateEvidence(): void {
+    const retainedLimit = this.evidenceLimit - 1;
+    while (this.evidence.length > retainedLimit) {
+      const nativeIndex = this.lastNativeFindingIndex();
+      const dropped = this.evidence.splice(
+        nativeIndex === -1 ? this.evidence.length - 1 : nativeIndex,
+        1,
+      )[0];
+      if (dropped === undefined) return;
+      this.droppedEvidence += 1;
+      if (dropped.evidenceType === "AWS_NATIVE_FINDING") {
+        this.nativeFindingsDropped += 1;
+      } else {
+        this.otherEvidenceDropped += 1;
+      }
+    }
+  }
+
+  private lastNativeFindingIndex(): number {
+    for (let index = this.evidence.length - 1; index >= 0; index -= 1) {
+      if (this.evidence[index]?.evidenceType === "AWS_NATIVE_FINDING") return index;
+    }
+    return -1;
   }
 }
 
@@ -865,17 +1015,111 @@ export function normalizeLiveSnapshot(
   coverage: "COMPLETE" | "PARTIAL",
   collectorCoverage: readonly InventoryCollectorCoverage[],
   completedAt: Date,
+  evidenceTruncation: LiveEvidenceTruncation | null = null,
+  resourceTruncation: LiveResourceTruncation | null = null,
 ): PilotSnapshot {
+  const resourceCandidates = [...normalized]
+    .sort((left, right) => left.resourceKey.localeCompare(right.resourceKey))
+    .map((source) => {
+      const resourceKey = boundaryResourceKey(source);
+      return { source, resource: liveResource(source, resourceKey) };
+    });
+  const resourceSelection = selectWithinJsonBudget(
+    resourceCandidates,
+    LIVE_SNAPSHOT_RESOURCE_BUDGET_BYTES,
+    (candidate) => candidate.resource,
+  );
+  const selectedNormalized = resourceSelection.items.map((candidate) => candidate.source);
+  const resources = resourceSelection.items.map((candidate) => candidate.resource);
   const keyMap = new Map<string, string>();
-  const resources = normalized.map((resource) => {
-    const key = boundaryResourceKey(resource);
-    keyMap.set(resource.resourceKey, key);
-    return liveResource(resource, key);
-  });
-  const relationships = liveRelationships(normalized, keyMap);
-  const findings = liveFindings(resources, normalized, evidence, keyMap, completedAt.toISOString());
+  for (const candidate of resourceSelection.items) {
+    keyMap.set(candidate.source.resourceKey, candidate.resource.resourceKey);
+  }
+  const relationshipSelection = selectWithinJsonBudget(
+    liveRelationships(selectedNormalized, keyMap),
+    LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES,
+  );
+  const baseFindings = liveFindings(
+    resources,
+    selectedNormalized,
+    evidence,
+    keyMap,
+    completedAt.toISOString(),
+    evidenceTruncation,
+    resourceTruncation,
+  );
+  let findingSelection = selectWithinJsonBudget(
+    [...baseFindings].sort((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
+    LIVE_SNAPSHOT_FINDING_BUDGET_BYTES,
+  );
+  const snapshotBudgetNeeded =
+    resourceSelection.dropped > 0 ||
+    relationshipSelection.dropped > 0 ||
+    findingSelection.dropped > 0;
+  if (snapshotBudgetNeeded) {
+    let findingsDropped = findingSelection.dropped;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const budgetFinding = snapshotBudgetFinding(completedAt.toISOString(), {
+        resourcesDropped: resourceSelection.dropped,
+        relationshipsDropped: relationshipSelection.dropped,
+        findingsDropped,
+      });
+      const preferred = selectWithinJsonBudget(
+        [budgetFinding],
+        LIVE_SNAPSHOT_FINDING_BUDGET_BYTES,
+      );
+      const remainingBytes = LIVE_SNAPSHOT_FINDING_BUDGET_BYTES - preferred.bytes;
+      const regular = selectWithinJsonBudget(
+        [...baseFindings].sort((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
+        remainingBytes,
+      );
+      const nextDropped = regular.dropped;
+      findingSelection = {
+        items: [...preferred.items, ...regular.items]
+          .sort((left, right) => left.fingerprint.localeCompare(right.fingerprint)),
+        dropped: nextDropped,
+        bytes: preferred.bytes + regular.bytes,
+      };
+      if (nextDropped === findingsDropped) break;
+      findingsDropped = nextDropped;
+    }
+  }
+
   const coverageEntries = normalizeCollectorCoverage(collectorCoverage);
-  return finalizePilotSnapshot({
+  if (evidenceTruncation !== null) {
+    coverageEntries.push({
+      collectorKey: EVIDENCE_BUDGET_COLLECTOR_KEY,
+      region: "global",
+      status: "partial",
+      itemsObserved: evidenceTruncation.retainedEvidence,
+      pagesObserved: 0,
+      errorCode: "EVIDENCE_BUDGET_EXCEEDED",
+      message: "The bounded local collector omitted evidence and returned a partial snapshot.",
+    });
+  }
+  if (resourceTruncation !== null) {
+    coverageEntries.push({
+      collectorKey: RESOURCE_BUDGET_COLLECTOR_KEY,
+      region: "global",
+      status: "partial",
+      itemsObserved: resourceTruncation.retainedResources,
+      pagesObserved: 0,
+      errorCode: "RESOURCE_BUDGET_EXCEEDED",
+      message: "The bounded local collector omitted resources and returned a partial snapshot.",
+    });
+  }
+  if (snapshotBudgetNeeded) {
+    coverageEntries.push({
+      collectorKey: SNAPSHOT_BUDGET_COLLECTOR_KEY,
+      region: "global",
+      status: "partial",
+      itemsObserved: resources.length,
+      pagesObserved: 0,
+      errorCode: "SNAPSHOT_BUDGET_EXCEEDED",
+      message: "The signed local snapshot was reduced to its bounded byte budget.",
+    });
+  }
+  const snapshot = finalizePilotSnapshot({
     schemaVersion: "sutra.inventory.v1",
     jobId,
     connectionId: connection.connectionId,
@@ -883,12 +1127,80 @@ export function normalizeLiveSnapshot(
     partition: connection.partition,
     roleSessionName,
     collectedAt: completedAt.toISOString(),
-    coverageState: coverage === "COMPLETE" ? "complete" : "partial",
+    coverageState:
+      coverage === "COMPLETE" &&
+        evidenceTruncation === null &&
+        resourceTruncation === null &&
+        !snapshotBudgetNeeded
+        ? "complete"
+        : "partial",
     coverage: coverageEntries,
     resources,
-    relationships,
-    findings,
+    relationships: relationshipSelection.items,
+    findings: findingSelection.items,
   });
+  const serializedBytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+  if (
+    LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES >= RESPONSE_LIMIT ||
+    serializedBytes > LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES
+  ) {
+    throw new Error("The live snapshot byte-budget invariant was violated");
+  }
+  return snapshot;
+}
+
+interface JsonBudgetSelection<T> {
+  readonly items: T[];
+  readonly dropped: number;
+  readonly bytes: number;
+}
+
+function selectWithinJsonBudget<T>(
+  values: readonly T[],
+  maximumBytes: number,
+  serializable: (value: T) => unknown = (value) => value,
+): JsonBudgetSelection<T> {
+  const items: T[] = [];
+  let bytes = 0;
+  let dropped = 0;
+  for (const value of values) {
+    const itemBytes = Buffer.byteLength(JSON.stringify(serializable(value)), "utf8") + 1;
+    if (bytes + itemBytes > maximumBytes) {
+      dropped += 1;
+      continue;
+    }
+    items.push(value);
+    bytes += itemBytes;
+  }
+  return { items, dropped, bytes };
+}
+
+function snapshotBudgetFinding(
+  evaluatedAt: string,
+  details: {
+    readonly resourcesDropped: number;
+    readonly relationshipsDropped: number;
+    readonly findingsDropped: number;
+  },
+): PilotFinding {
+  return {
+    fingerprint: sha256("SUTRA.COLLECTOR.SNAPSHOT_BUDGET:account:global").slice(0, 48),
+    resourceKey: null,
+    controlKey: "SUTRA.COLLECTOR.SNAPSHOT_BUDGET",
+    controlVersion: "1.0.0",
+    severity: "medium",
+    status: "open",
+    title: "AWS snapshot was reduced to the signed-response budget",
+    summary: "Sutra retained a deterministic, relationship-safe subset of the collected AWS snapshot.",
+    remediation: "Use the durable hosted ingestion architecture before relying on complete high-cardinality inventory coverage.",
+    evidence: {
+      resourceBytesBudget: LIVE_SNAPSHOT_RESOURCE_BUDGET_BYTES,
+      relationshipBytesBudget: LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES,
+      findingBytesBudget: LIVE_SNAPSHOT_FINDING_BUDGET_BYTES,
+      ...details,
+    },
+    evaluatedAt,
+  };
 }
 
 function liveResource(resource: NormalizedAwsResource, resourceKey: string): PilotResource {
@@ -957,7 +1269,10 @@ function liveRelationships(
       link(resource, securityGroupId, "protected_by", "securityGroupIds");
     }
   }
-  return result.slice(0, 20_000);
+  return result.sort((left, right) =>
+    `${left.fromResourceKey}\n${left.toResourceKey}\n${left.relationType}`.localeCompare(
+      `${right.fromResourceKey}\n${right.toResourceKey}\n${right.relationType}`,
+    ));
 }
 
 function liveFindings(
@@ -966,6 +1281,8 @@ function liveFindings(
   evidence: readonly NormalizedAwsEvidence[],
   keyMap: ReadonlyMap<string, string>,
   evaluatedAt: string,
+  evidenceTruncation: LiveEvidenceTruncation | null,
+  resourceTruncation: LiveResourceTruncation | null,
 ): PilotFinding[] {
   const result: PilotFinding[] = [];
   const fingerprints = new Set<string>();
@@ -1000,6 +1317,42 @@ function liveFindings(
       evaluatedAt,
     });
   };
+
+  if (evidenceTruncation !== null) {
+    add(
+      null,
+      "SUTRA.COLLECTOR.EVIDENCE_BUDGET",
+      "medium",
+      "AWS evidence collection was truncated",
+      "The local collector reached its bounded evidence budget. This snapshot remains usable, but its AWS evidence coverage is incomplete.",
+      "Treat this snapshot as partial and use a durable production sink before relying on it for complete AWS-native finding coverage.",
+      {
+        evidenceLimit: evidenceTruncation.evidenceLimit,
+        retainedEvidence: evidenceTruncation.retainedEvidence,
+        droppedEvidence: evidenceTruncation.droppedEvidence,
+        nativeFindingsDropped: evidenceTruncation.nativeFindingsDropped,
+        otherEvidenceDropped: evidenceTruncation.otherEvidenceDropped,
+      },
+      EVIDENCE_BUDGET_COLLECTOR_KEY,
+    );
+  }
+
+  if (resourceTruncation !== null) {
+    add(
+      null,
+      "SUTRA.COLLECTOR.RESOURCE_BUDGET",
+      "medium",
+      "AWS resource collection was truncated",
+      "The local collector reached its bounded resource budget. This snapshot remains usable, but its AWS inventory coverage is incomplete.",
+      "Use the durable hosted ingestion architecture before relying on complete high-cardinality resource coverage.",
+      {
+        resourceLimit: resourceTruncation.resourceLimit,
+        retainedResources: resourceTruncation.retainedResources,
+        droppedResources: resourceTruncation.droppedResources,
+      },
+      RESOURCE_BUDGET_COLLECTOR_KEY,
+    );
+  }
 
   for (const source of normalized) {
     const resourceKey = keyMap.get(source.resourceKey);
@@ -1049,6 +1402,29 @@ function liveFindings(
         : undefined;
     const findingEvidence =
       accountSignalScope === undefined ? item.data : { ...item.data, region: item.region };
+    if (item.evidenceType === "AWS_NATIVE_FINDING") {
+      if (result.length >= 5_000) continue;
+      const fingerprint = sha256(`aws-native:${item.evidenceKey}`).slice(0, 48);
+      if (fingerprints.has(fingerprint)) continue;
+      fingerprints.add(fingerprint);
+      const nativeService = scalarString(item.data.nativeService) ?? "AWS security service";
+      result.push({
+        fingerprint,
+        resourceKey,
+        controlKey: nativeFindingControlKey(item.service),
+        controlVersion: "aws-native-v1",
+        severity: nativeFindingSeverity(item.data.normalizedSeverity),
+        status: nativeFindingStatus(item.data.normalizedStatus),
+        title: (scalarString(item.data.title) ?? `${nativeService} finding`).slice(0, 180),
+        summary: (scalarString(item.data.summary) ??
+          `${nativeService} reported an AWS-native security finding.`).slice(0, 1_200),
+        remediation: (scalarString(item.data.remediation) ??
+          `Review the finding in ${nativeService} and follow the customer-approved response runbook.`).slice(0, 2_000),
+        evidence: findingEvidence,
+        evaluatedAt,
+      });
+      continue;
+    }
     if (item.evidenceType === "S3_PUBLIC_ACCESS_BLOCK" && item.status === "NOT_CONFIGURED") {
       add(resourceKey, "SUTRA.AWS.S3.PUBLIC_ACCESS_BLOCK", "high", "S3 Public Access Block is not fully configured",
         "The bucket is missing one or more public-access guardrails.",
@@ -1114,9 +1490,7 @@ function parseRegistration(body: string, pathConnectionId: string) {
     (record.partition !== "aws" && record.partition !== "aws-us-gov" && record.partition !== "aws-cn") ||
     typeof record.roleArn !== "string" ||
     typeof record.externalId !== "string" || !EXTERNAL_ID.test(record.externalId) ||
-    !Array.isArray(record.enabledRegions) || record.enabledRegions.length === 0 || record.enabledRegions.length > 32 ||
-    record.enabledRegions.some((region) => typeof region !== "string" || !REGION.test(region)) ||
-    new Set(record.enabledRegions).size !== record.enabledRegions.length
+    !isValidAwsRegionSelection(record.enabledRegions, record.partition)
   ) {
     throw invalidRequest();
   }
@@ -1168,12 +1542,48 @@ function parseConnectionLifecycleScope(
   return { tenantId: record.tenantId, connectionId: record.connectionId };
 }
 
+function parseStagedRegistrationMutation(
+  body: string,
+  pathConnectionId: string,
+): {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly roleArn: string;
+} {
+  const record = exactJson(body, ["tenantId", "connectionId", "roleArn"]);
+  if (
+    typeof record.tenantId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    typeof record.connectionId !== "string" ||
+    record.connectionId !== pathConnectionId ||
+    !IDENTIFIER.test(record.connectionId) ||
+    typeof record.roleArn !== "string"
+  ) {
+    throw invalidRequest();
+  }
+  try {
+    parseIamRoleArn(record.roleArn);
+  } catch {
+    throw invalidRequest();
+  }
+  return {
+    tenantId: record.tenantId,
+    connectionId: record.connectionId,
+    roleArn: record.roleArn,
+  };
+}
+
 async function activeCandidate(
   registry: EncryptedFileConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await requireConnection(registry, job);
-  if (connection.status !== "PENDING" && connection.status !== "DEGRADED") {
+  if (
+    connection.status !== "PENDING" &&
+    connection.status !== "VERIFIED" &&
+    connection.status !== "DEGRADED" &&
+    connection.status !== "ACTIVE"
+  ) {
     throw new RegistryStateError();
   }
   return connection;
@@ -1913,14 +2323,44 @@ function evidenceResourceKey(
   normalized: readonly NormalizedAwsResource[],
   keyMap: ReadonlyMap<string, string>,
 ): string | null {
+  const candidateIds = new Set([
+    evidence.subjectId,
+    ...stringArray(evidence.data.resourceIds),
+  ]);
   const match = normalized.find(
     (resource) =>
       resource.accountId === evidence.accountId &&
-      resource.service === evidence.service &&
       (resource.region === evidence.region || evidence.region === "global") &&
-      (resource.resourceId === evidence.subjectId || resource.resourceType === "aws.iam.account"),
+      (
+        evidence.evidenceType === "AWS_NATIVE_FINDING"
+          ? candidateIds.has(resource.resourceId) ||
+            (resource.arn !== undefined && candidateIds.has(resource.arn))
+          : resource.service === evidence.service &&
+            (candidateIds.has(resource.resourceId) || resource.resourceType === "aws.iam.account")
+      ),
   );
   return match === undefined ? null : keyMap.get(match.resourceKey) ?? null;
+}
+
+function nativeFindingControlKey(service: string): string {
+  if (service === "guardduty") return "AWS.NATIVE.GUARDDUTY.FINDING";
+  if (service === "securityhub") return "AWS.NATIVE.SECURITYHUB.FINDING";
+  if (service === "inspector2") return "AWS.NATIVE.INSPECTOR2.FINDING";
+  return "AWS.NATIVE.SECURITY.FINDING";
+}
+
+function nativeFindingSeverity(value: SafeJsonValue | undefined): PilotFinding["severity"] {
+  return value === "critical" || value === "high" || value === "medium" ||
+    value === "low" || value === "informational"
+    ? value
+    : "informational";
+}
+
+function nativeFindingStatus(value: SafeJsonValue | undefined): PilotFinding["status"] {
+  return value === "open" || value === "acknowledged" || value === "resolved" ||
+    value === "suppressed"
+    ? value
+    : "open";
 }
 
 export function isPublicSshIngressCandidate(value: SafeJsonValue | undefined): boolean {

@@ -36,6 +36,8 @@ Resources:
       Path: /sutra/
       Description: Short-lived source role used only by the local Sutra sandbox collector.
       MaxSessionDuration: 3600
+      PermissionsBoundary:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/SutraCollectorBoundary
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

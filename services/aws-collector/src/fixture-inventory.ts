@@ -36,7 +36,7 @@ export interface PilotFinding {
   readonly controlKey: string;
   readonly controlVersion: string;
   readonly severity: "critical" | "high" | "medium" | "low" | "informational";
-  readonly status: "open";
+  readonly status: "open" | "acknowledged" | "resolved" | "suppressed";
   readonly title: string;
   readonly summary: string;
   readonly remediation: string;

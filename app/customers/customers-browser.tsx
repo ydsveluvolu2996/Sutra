@@ -3,6 +3,7 @@
 import { usePortfolio } from "../components/use-portfolio";
 import { useSession } from "../components/use-session";
 import { formatTimestamp } from "../components/use-pilot-state";
+import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 
 function initials(name: string): string {
   const words = name.trim().split(/\s+/u).filter(Boolean);
@@ -65,7 +66,7 @@ export function CustomersBrowser() {
                 <div className="data-row" role="row" key={connection.id}>
                   <span><span className={`connection-status connection-${connection.status}`}>{connection.status.replace("_", " ")}</span></span>
                   <span className="primary-cell"><strong>{customer.name}</strong><small>{connection.awsAccountId} · {connection.partition}</small></span>
-                  <span className="primary-cell"><strong>{connection.sourceKind === "simulated_fixture" ? "SIMULATED FIXTURE" : connection.roleArn?.split("/").at(-1) ?? "Trust role not registered"}</strong><small>{connection.sourceKind === "simulated_fixture" ? `${connection.fixtureId ?? "fixture"} · ${connection.fixtureVersion ?? "not published"}` : `${connection.enabledRegions.length} regions · ${connection.permissionPackVersion}`}</small></span>
+                  <span className="primary-cell"><strong>{connection.sourceKind === "simulated_fixture" ? "SIMULATED FIXTURE" : connection.roleArn?.split("/").at(-1) ?? "Trust role not registered"}</strong><small>{connection.sourceKind === "simulated_fixture" ? `${connection.fixtureId ?? "fixture"} · ${connection.fixtureVersion ?? "not published"}` : `${isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All enabled Regions" : `${connection.enabledRegions.length} explicit Regions`} · ${connection.permissionPackVersion}`}</small></span>
                   <span className="primary-cell"><strong>{connection.resourceCount.toLocaleString()} assets</strong><small>{connection.openFindingCount.toLocaleString()} open findings</small></span>
                   <span className="muted-cell">{formatTimestamp(connection.lastSuccessfulSyncAt)}</span>
                 </div>

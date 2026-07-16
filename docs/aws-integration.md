@@ -99,6 +99,16 @@ for example:
 }
 ```
 
+Apply the same target as a fixed, customer-managed permissions boundary on the
+collector workload role, with explicit denies for every action other than
+`sts:AssumeRole` and for `sts:AssumeRole` against any other resource. The matching
+allow then permits only `arn:aws:iam::*:role/sutra/SutraReadOnlyRole`. Create and
+control that boundary independently of the
+operator-mutable collector stack. The operator may attach the exact boundary ARN
+but must not create new versions, change the default version, or delete it. This
+keeps the effective collector permissions at the fixed customer-role target even
+if an alternate role policy is submitted through CloudFormation.
+
 Use separate vendor accounts and collector roles for `aws`, `aws-us-gov`, and
 `aws-cn`; AWS partitions do not share trust. If customers can choose a role name,
 generate an exact-ARN allowlist or shard policies rather than widening to every IAM
@@ -111,6 +121,12 @@ can attempt every customer role. Mitigations are a fixed role path/name, exact
 trusted vendor principal, tenant-unique External IDs, no interactive access to the
 broker, short sessions, egress controls, workload identity, CloudTrail alerting, and
 strong separation between public API and collector credentials.
+
+Every customer `AssumeRole` request also carries a fixed inline session policy. It
+explicitly denies actions outside the release's reviewed metadata/attestation API
+set and explicitly denies role-policy attestation reads outside the one registered
+customer role ARN, before adding the narrow allows. This makes the runtime ceiling
+auditable as an explicit deny contract instead of depending only on implicit deny.
 
 Do not expose assumed credentials or AWS console federation URLs to MSP/customer
 users. They access normalized CMDB data through SaaS RBAC. If customers need AWS
@@ -165,9 +181,11 @@ Modules are explicit:
 | Organizations discovery | off | Account metadata is sensitive and only works in management/delegated accounts |
 
 The role accepts an optional customer permissions boundary. It is tagged with a
-non-secret tenant ID and access mode. The External ID is `NoEcho`, but must still be
-treated as non-secret because principals able to inspect the role trust policy can
-see it.
+non-secret tenant ID and access mode. The External ID is a non-secret, unique
+high-entropy trust binding. The live quick-create template leaves the parameter
+visible because AWS CloudFormation quick-create links cannot prefill `NoEcho`
+parameters; the template never outputs it, and Sutra excludes it from logs and
+analytics.
 
 The sensitive-field decisions above follow the documented response shapes for
 [Lambda ListFunctions](https://docs.aws.amazon.com/lambda/latest/api/API_ListFunctions.html)

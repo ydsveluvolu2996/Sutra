@@ -1,8 +1,8 @@
 import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
+  commitVerifiedConnectionRole,
   getStoredConnectionSecret,
   LOCAL_ORG_ID,
-  setConnectionRole,
 } from "../../../../../db/pilot-repository";
 import {
   assertSameOrigin,
@@ -11,16 +11,19 @@ import {
   readBoundedJson,
 } from "../../../../../lib/aws-pilot-security";
 import {
+  activateCollectorConnection,
+  discardStagedCollectorConnection,
   errorResponse,
   getCollectorHealth,
   getPilotSecrets,
   jsonResponse,
   registerCollectorConnection,
   requirePilotActor,
+  verifyCollectorConnection,
 } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { withLocalOnboardingAccountLock } from "../../../../../lib/local-onboarding-lock";
-import { commitRoleThenRegisterCollector } from "../../../../../lib/local-aws-lifecycle";
+import { stageVerifyThenCommitRole } from "../../../../../lib/local-aws-lifecycle";
 
 export const dynamic = "force-dynamic";
 
@@ -86,21 +89,69 @@ export async function POST(request: Request): Promise<Response> {
           secrets.connectionEncryptionKey,
           { orgId: LOCAL_ORG_ID, customerId: current.customerId, connectionId: current.connectionId },
         );
-        const connection = await commitRoleThenRegisterCollector({
-          // The control plane closes the one-time handoff first. If collector
-          // reconciliation fails, the pending role remains safe to retry.
-          commitControlPlaneRole: () => setConnectionRole(current.connectionId, role.arn, actor.id),
-          registerCollector: () => registerCollectorConnection({
-            tenantId: LOCAL_ORG_ID,
-            connectionId: current.connectionId,
-            accountId: current.accountId,
-            partition: current.partition,
-            roleArn: role.arn,
-            externalId,
-            enabledRegions: current.enabledRegions,
-          }),
+        const registerRoleWithCollector = (roleArn: string) => registerCollectorConnection({
+          tenantId: LOCAL_ORG_ID,
+          connectionId: current.connectionId,
+          accountId: current.accountId,
+          partition: current.partition,
+          roleArn,
+          externalId,
+          enabledRegions: current.enabledRegions,
         });
-        return jsonResponse({ connection, registered: true });
+        const verifyRoleWithCollector = () => verifyCollectorConnection({
+          tenantId: LOCAL_ORG_ID,
+          connectionId: current.connectionId,
+          jobId: `verify_role_${crypto.randomUUID().replaceAll("-", "")}`,
+          accountId: current.accountId,
+          partition: current.partition,
+        });
+        const activateRoleWithCollector = (roleArn: string) => activateCollectorConnection({
+          tenantId: LOCAL_ORG_ID,
+          connectionId: current.connectionId,
+          roleArn,
+        });
+        const result = await stageVerifyThenCommitRole({
+          stageCollector: () => registerRoleWithCollector(role.arn),
+          verifyCollector: verifyRoleWithCollector,
+          commitVerifiedControlPlaneRole: (verification) => commitVerifiedConnectionRole({
+            connectionId: current.connectionId,
+            expectedPreviousRoleArn: current.roleArn.length === 0 ? null : current.roleArn,
+            roleArn: role.arn,
+            actorId: actor.id,
+            verification,
+          }),
+          activateCollector: () => activateRoleWithCollector(role.arn),
+          compensateStagedCollector: async () => {
+            if (current.roleArn.length === 0) {
+              await discardStagedCollectorConnection({
+                tenantId: LOCAL_ORG_ID,
+                connectionId: current.connectionId,
+                roleArn: role.arn,
+              });
+              return;
+            }
+            if (current.roleArn === role.arn) {
+              // Durable state already names this exact role. Activation is safe
+              // only if verification reached the collector's VERIFIED state.
+              await activateRoleWithCollector(current.roleArn);
+              return;
+            }
+            await registerRoleWithCollector(current.roleArn);
+            await verifyCollectorConnection({
+              tenantId: LOCAL_ORG_ID,
+              connectionId: current.connectionId,
+              jobId: `restore_role_${crypto.randomUUID().replaceAll("-", "")}`,
+              accountId: current.accountId,
+              partition: current.partition,
+            });
+            await activateRoleWithCollector(current.roleArn);
+          },
+        });
+        return jsonResponse({
+          connection: result.connection,
+          registered: true,
+          verification: result.verification,
+        });
       },
     );
   } catch (error) {
