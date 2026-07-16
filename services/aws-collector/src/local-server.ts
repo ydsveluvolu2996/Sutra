@@ -23,10 +23,13 @@ import {
   type RegisteredAwsConnection,
 } from "./local-registry.js";
 import {
+  DurableLocalScheduler,
   DurableLocalJobQueue,
   LocalJobIdempotencyConflictError,
   LocalJobQueueError,
   LocalJobValidationError,
+  LocalScheduleNotFoundError,
+  LocalScheduleStaleMutationError,
 } from "./durable-job-queue.js";
 import {
   createLocalFixtureCollectionJobPayload,
@@ -42,9 +45,11 @@ import {
   JsonFileLocalJobStateStore,
   LocalJobStateError,
   type LocalJobRecord,
+  type LocalScheduleRecord,
   type LocalJobStateStore,
 } from "./local-job-state.js";
 import { createWorkloadIdentityRoleBroker, parseIamRoleArn } from "./role-broker.js";
+import { runSandboxIdentityPreflight } from "./aws-sandbox-preflight.js";
 import {
   RequestAuthenticationError,
   RequestAuthenticator,
@@ -53,6 +58,7 @@ import {
   CollectorError,
   type AwsInventoryBatch,
   type AwsInventorySink,
+  type InventoryCollectorCoverage,
   type NormalizedAwsEvidence,
   type NormalizedAwsResource,
   type OnboardingTrustVerification,
@@ -70,11 +76,20 @@ const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|sync)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|sync|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
+const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
+const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
+const LOCAL_SCHEDULE_ENABLED_PATH =
+  /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})\/enabled$/;
+const LOCAL_SCHEDULE_ID = /^sched_[a-f0-9]{48}$/;
+const LOCAL_SCHEDULE_MUTATION_ID = /^schedop_[a-f0-9]{48}$/;
 const FIXTURE_PRINCIPAL = "arn:aws:iam::999988887777:role/SutraLocalCollector";
 const DEFAULT_LOCAL_JOB_LIMIT = 50;
 const MAX_LOCAL_JOB_LIMIT = 100;
+const MAX_LOCAL_SCHEDULE_CATCH_UP = 5;
+const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
+const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -95,6 +110,7 @@ export interface LocalCollectorServerOptions {
   readonly localJobLeaseMs?: number;
   readonly localJobBaseBackoffMs?: number;
   readonly localJobMaxBackoffMs?: number;
+  readonly localScheduleMaxCatchUpPerTick?: number;
   readonly localFixtureJobExecutor?: LocalFixtureJobExecutor;
 }
 
@@ -105,12 +121,14 @@ interface ServerContext {
   readonly now: () => Date;
   readonly registry: EncryptedFileConnectionRegistry;
   readonly authenticator: RequestAuthenticator;
-  readonly runningSyncs: Set<string>;
+  readonly activeConnectionOperations: Set<string>;
+  readonly lifecycleMutations: Set<string>;
   readonly localJobs: LocalJobsContext | null;
 }
 
 interface LocalJobsContext {
   readonly queue: DurableLocalJobQueue;
+  readonly scheduler: DurableLocalScheduler;
   readonly worker: LocalFixtureJobWorker;
   readonly tenantIds: readonly string[];
 }
@@ -132,6 +150,28 @@ interface LocalJobListQuery {
   readonly limit: number;
   readonly tenantId?: string;
   readonly customerId?: string;
+  readonly reviewRequired?: boolean;
+}
+
+interface LocalJobResultQuery {
+  readonly tenantId: string;
+  readonly customerId: string;
+}
+
+interface LocalScheduleListQuery {
+  readonly tenantId: string;
+  readonly customerId: string;
+}
+
+interface LocalScheduleUpsertInput {
+  readonly tenantId: string;
+  readonly mutationId: string;
+  readonly mutationSequence: number;
+  readonly fixtureId: string;
+  readonly version: LocalFixtureVersion;
+  readonly everyMs: number;
+  readonly enabled: boolean;
+  readonly firstRunAt: Date;
 }
 
 export function createLocalCollectorServer(options: LocalCollectorServerOptions): Server {
@@ -168,7 +208,8 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       sharedSecret: options.sharedSecret,
       ...(options.now === undefined ? {} : { now: () => options.now!().getTime() }),
     }),
-    runningSyncs: new Set(),
+    activeConnectionOperations: new Set(),
+    lifecycleMutations: new Set(),
     localJobs,
   };
 
@@ -188,6 +229,19 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
 
 export async function startLocalCollectorServer(): Promise<Server> {
   const principalArn = process.env.SUTRA_COLLECTOR_PRINCIPAL_ARN?.trim();
+  const mode = collectorMode(process.env.SUTRA_COLLECTOR_MODE);
+  const allowLiveAws = exactBooleanEnvironment("SUTRA_ALLOW_LIVE_AWS", false);
+  if (mode === "live") {
+    if (!allowLiveAws) {
+      throw new Error(
+        "Live AWS access is disabled; an explicitly authorized sandbox requires SUTRA_ALLOW_LIVE_AWS=true",
+      );
+    }
+    if (principalArn === undefined || principalArn.length === 0) {
+      throw new Error("SUTRA_COLLECTOR_PRINCIPAL_ARN is required in live mode");
+    }
+    await runSandboxIdentityPreflight(principalArn);
+  }
   const server = createLocalCollectorServer({
     sharedSecret: requiredEnvironment("SUTRA_BROKER_SHARED_SECRET"),
     registryEncryptionKey: requiredEnvironment("SUTRA_REGISTRY_ENCRYPTION_KEY"),
@@ -197,8 +251,8 @@ export async function startLocalCollectorServer(): Promise<Server> {
     localJobStatePath:
       process.env.SUTRA_LOCAL_JOBS_PATH?.trim() ||
       resolvePath(process.cwd(), ".sutra", "local-jobs.json"),
-    mode: collectorMode(process.env.SUTRA_COLLECTOR_MODE),
-    allowLiveAws: exactBooleanEnvironment("SUTRA_ALLOW_LIVE_AWS", false),
+    mode,
+    allowLiveAws,
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
   });
   await new Promise<void>((resolve, reject) => {
@@ -232,11 +286,18 @@ function createLocalJobsContext(
       ? {}
       : { maxBackoffMs: options.localJobMaxBackoffMs }),
   });
+  const scheduler = new DurableLocalScheduler({
+    store,
+    now,
+    maxCatchUpPerSchedule:
+      options.localScheduleMaxCatchUpPerTick ?? MAX_LOCAL_SCHEDULE_CATCH_UP,
+  });
   const tenantIds = [
     ...new Set(listLocalFixtureAccounts().map((fixture) => fixture.tenantId)),
   ].sort();
   const worker = new LocalFixtureJobWorker({
     queue,
+    scheduler,
     now,
     enabled: options.localJobWorkerEnabled ?? true,
     workerId: options.localJobWorkerId ?? `collector-${process.pid}`,
@@ -244,11 +305,12 @@ function createLocalJobsContext(
     leaseMs: options.localJobLeaseMs ?? 30_000,
     execute: options.localFixtureJobExecutor ?? executeLocalFixtureCollectionJob,
   });
-  return { queue, worker, tenantIds };
+  return { queue, scheduler, worker, tenantIds };
 }
 
 class LocalFixtureJobWorker {
   private readonly queue: DurableLocalJobQueue;
+  private readonly scheduler: DurableLocalScheduler;
   private readonly now: () => Date;
   private readonly enabled: boolean;
   private readonly workerId: string;
@@ -260,6 +322,7 @@ class LocalFixtureJobWorker {
 
   public constructor(options: {
     readonly queue: DurableLocalJobQueue;
+    readonly scheduler: DurableLocalScheduler;
     readonly now: () => Date;
     readonly enabled: boolean;
     readonly workerId: string;
@@ -285,6 +348,7 @@ class LocalFixtureJobWorker {
       throw new Error("localJobLeaseMs must be between 1000 and 86400000");
     }
     this.queue = options.queue;
+    this.scheduler = options.scheduler;
     this.now = options.now;
     this.enabled = options.enabled;
     this.workerId = options.workerId;
@@ -314,6 +378,11 @@ class LocalFixtureJobWorker {
   }
 
   private async tick(): Promise<void> {
+    try {
+      await this.scheduler.runDueSchedules();
+    } catch {
+      // Scheduler state is retried later, but existing queue work must still run.
+    }
     try {
       await this.queue.recoverExpiredLeases();
       for (let processed = 0; processed < 25; processed += 1) {
@@ -347,7 +416,7 @@ class LocalFixtureJobWorker {
         }
       }
     } catch {
-      // A later tick retries durable state access. Never crash the collector process.
+      // A later tick retries queue state access. Never crash the collector process.
     }
   }
 }
@@ -438,11 +507,76 @@ async function route(
     )
       .flat()
       .filter((job) =>
-        query.customerId === undefined || localJobScope(job).customerId === query.customerId)
+        (query.customerId === undefined || localJobScope(job).customerId === query.customerId) &&
+        (query.reviewRequired !== true ||
+          job.status === "pending" ||
+          job.status === "leased" ||
+          (job.status === "succeeded" && job.publication === undefined)))
       .sort(compareLocalJobs)
       .slice(0, query.limit)
       .map((job) => serializeLocalJob(job));
     return { status: 200, body: { jobs, count: jobs.length, limit: query.limit } };
+  }
+
+  if (method === "GET" && requestPathname(path) === "/v1/local/schedules") {
+    requireEmptyBody(body);
+    const localJobs = requireLocalJobs(context);
+    const query = parseLocalScheduleListQuery(path);
+    requireCatalogCustomer(query.tenantId, query.customerId);
+    const schedules = (await localJobs.scheduler.listSchedules(query.tenantId))
+      .filter((schedule) => localScheduleScope(schedule).customerId === query.customerId)
+      .map((schedule) => serializeLocalSchedule(schedule));
+    return { status: 200, body: { schedules, count: schedules.length } };
+  }
+
+  const localScheduleEnabledMatch = LOCAL_SCHEDULE_ENABLED_PATH.exec(path);
+  if (method === "POST" && localScheduleEnabledMatch !== null) {
+    const scheduleId = localScheduleEnabledMatch[1];
+    if (scheduleId === undefined) throw invalidRequest();
+    const localJobs = requireLocalJobs(context);
+    const input = parseLocalScheduleEnabled(body);
+    const current = (await localJobs.scheduler.listSchedules(input.tenantId))
+      .find((candidate) => candidate.scheduleId === scheduleId);
+    if (current === undefined) throw new LocalScheduleNotFoundError();
+    const currentScope = localScheduleScope(current);
+    if (scheduleId !== deterministicLocalFixtureScheduleId(input.tenantId, currentScope.fixtureId)) {
+      throw invalidRequest();
+    }
+    const schedule = await localJobs.scheduler.setScheduleEnabled(
+      input.tenantId,
+      scheduleId,
+      input.enabled,
+      input.mutationId,
+      input.mutationSequence,
+      { resetNextRunAtWhenEnabling: context.now() },
+    );
+    return { status: 200, body: { schedule: serializeLocalSchedule(schedule) } };
+  }
+
+  const localScheduleMatch = LOCAL_SCHEDULE_PATH.exec(path);
+  if (method === "PUT" && localScheduleMatch !== null) {
+    const scheduleId = localScheduleMatch[1];
+    if (scheduleId === undefined) throw invalidRequest();
+    const localJobs = requireLocalJobs(context);
+    const input = parseLocalScheduleUpsert(body);
+    const fixture = getLocalFixtureAccount(input.fixtureId);
+    if (
+      fixture.tenantId !== input.tenantId ||
+      scheduleId !== deterministicLocalFixtureScheduleId(input.tenantId, input.fixtureId)
+    ) throw invalidRequest();
+    const schedule = await localJobs.scheduler.upsertSchedule({
+      tenantId: input.tenantId,
+      scheduleId,
+      mutationId: input.mutationId,
+      mutationSequence: input.mutationSequence,
+      kind: LOCAL_FIXTURE_COLLECTION_JOB_KIND,
+      payload: createLocalFixtureCollectionJobPayload(input.fixtureId, input.version),
+      everyMs: input.everyMs,
+      firstRunAt: input.firstRunAt,
+      enabled: input.enabled,
+      maxAttempts: 5,
+    });
+    return { status: 200, body: { schedule: serializeLocalSchedule(schedule) } };
   }
 
   if (method === "POST" && path === "/v1/local/jobs/simulated-sync") {
@@ -464,14 +598,44 @@ async function route(
     };
   }
 
-  const localResultMatch = LOCAL_JOB_RESULT_PATH.exec(path);
+  const localPublishedMatch = LOCAL_JOB_PUBLISHED_PATH.exec(path);
+  if (method === "POST" && localPublishedMatch !== null) {
+    const jobId = localPublishedMatch[1];
+    if (jobId === undefined) throw invalidRequest();
+    const input = parseLocalJobPublished(body);
+    requireCatalogCustomer(input.tenantId, input.customerId);
+    const localJobs = requireLocalJobs(context);
+    const job = await findLocalJob(localJobs, jobId);
+    if (job === null) {
+      throw new LocalHttpError(404, "JOB_NOT_FOUND", "The local fixture job was not found");
+    }
+    const scope = localJobScope(job);
+    if (job.tenantId !== input.tenantId || scope.customerId !== input.customerId) {
+      throw new LocalHttpError(404, "JOB_NOT_FOUND", "The local fixture job was not found");
+    }
+    await localJobs.queue.acknowledgePublished({
+      tenantId: input.tenantId,
+      jobId,
+      publicationId: input.publicationId,
+      publishedAt: input.publishedAt,
+    });
+    return { status: 200, body: { acknowledged: true } };
+  }
+
+  const localResultMatch = LOCAL_JOB_RESULT_PATH.exec(requestPathname(path));
   if (method === "GET" && localResultMatch !== null) {
     requireEmptyBody(body);
+    const query = parseLocalJobResultQuery(path);
+    requireCatalogCustomer(query.tenantId, query.customerId);
     const jobId = localResultMatch[1];
     if (jobId === undefined) throw invalidRequest();
     const localJobs = requireLocalJobs(context);
     const job = await findLocalJob(localJobs, jobId);
     if (job === null) {
+      throw new LocalHttpError(404, "JOB_NOT_FOUND", "The local fixture job was not found");
+    }
+    const jobScope = localJobScope(job);
+    if (job.tenantId !== query.tenantId || jobScope.customerId !== query.customerId) {
       throw new LocalHttpError(404, "JOB_NOT_FOUND", "The local fixture job was not found");
     }
     if (job.status === "dead_letter") {
@@ -494,6 +658,13 @@ async function route(
     const pathConnectionId = connectionMatch[1];
     if (pathConnectionId === undefined) throw invalidRequest();
     const input = parseRegistration(body, pathConnectionId);
+    const operationKey = connectionOperationKey(input.tenantId, input.connectionId);
+    if (
+      context.activeConnectionOperations.has(operationKey) ||
+      context.lifecycleMutations.has(operationKey)
+    ) {
+      throw new RegistryStateError();
+    }
     await context.registry.upsert(input);
     return { status: 200, body: { registered: true } };
   }
@@ -503,6 +674,14 @@ async function route(
     const pathConnectionId = actionMatch[1];
     const action = actionMatch[2];
     if (pathConnectionId === undefined || action === undefined) throw invalidRequest();
+    if (action === "disable" || action === "offboard") {
+      const scope = parseConnectionLifecycleScope(body, pathConnectionId);
+      await mutateConnectionLifecycle(context, scope, action);
+      return {
+        status: 200,
+        body: action === "disable" ? { disabled: true } : { offboarded: true },
+      };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
       return { status: 200, body: await verifyConnection(context, job) };
@@ -514,40 +693,60 @@ async function route(
 }
 
 async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
-  const scope = { tenantId: job.tenantId };
-  if (context.mode === "fixture") {
-    const connection = await activeCandidate(context.registry, job);
-    const callerIdentityArn = fixtureCallerIdentityArn(connection, job.jobId);
-    const verification: OnboardingTrustVerification = {
-      connectionId: connection.connectionId,
-      accountId: connection.expectedAccountId,
-      partition: connection.partition,
-      roleArn: connection.roleArn,
-      callerIdentityArn,
-      roleSessionName: fixtureRoleSessionName(job.jobId),
-      missingExternalIdDenied: true,
-      wrongExternalIdDenied: true,
-    };
+  const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
+  if (
+    context.activeConnectionOperations.has(operationKey) ||
+    context.lifecycleMutations.has(operationKey)
+  ) {
+    throw new RegistryStateError();
+  }
+  context.activeConnectionOperations.add(operationKey);
+  try {
+    const scope = { tenantId: job.tenantId };
+    if (context.mode === "fixture") {
+      const connection = await activeCandidate(context.registry, job);
+      const callerIdentityArn = fixtureCallerIdentityArn(connection, job.jobId);
+      const verification: OnboardingTrustVerification = {
+        connectionId: connection.connectionId,
+        accountId: connection.expectedAccountId,
+        partition: connection.partition,
+        roleArn: connection.roleArn,
+        callerIdentityArn,
+        roleSessionName: fixtureRoleSessionName(job.jobId),
+        missingExternalIdDenied: true,
+        wrongExternalIdDenied: true,
+        trustPolicyAttested: true,
+        permissionPolicyAttested: true,
+        sessionPolicyApplied: true,
+        permissionPackVersion: "live-demo-2026-07",
+      };
+      await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
+      return verificationResponse(verification);
+    }
+
+    const connection = await requireConnection(context.registry, job);
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    const verification = await broker.verifyOnboardingTrust(scope, job.connectionId, job.jobId);
     await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
     return verificationResponse(verification);
+  } finally {
+    context.activeConnectionOperations.delete(operationKey);
   }
-
-  const connection = await requireConnection(context.registry, job);
-  const broker = createWorkloadIdentityRoleBroker({
-    registry: context.registry,
-    region: firstRegion(connection),
-  });
-  const verification = await broker.verifyOnboardingTrust(scope, job.connectionId, job.jobId);
-  await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
-  return verificationResponse(verification);
 }
 
 async function syncConnection(context: ServerContext, job: ScopedJob): Promise<PilotSnapshot> {
-  const syncKey = `${job.tenantId}\u001f${job.connectionId}`;
-  if (context.runningSyncs.has(syncKey)) {
+  const syncKey = connectionOperationKey(job.tenantId, job.connectionId);
+  if (
+    context.activeConnectionOperations.has(syncKey) ||
+    context.lifecycleMutations.has(syncKey)
+  ) {
     throw new LocalHttpError(409, "INVALID_REQUEST", "A sync is already running for this connection");
   }
-  context.runningSyncs.add(syncKey);
+  context.activeConnectionOperations.add(syncKey);
   try {
     const connection = await requireConnection(context.registry, job);
     if (connection.status !== "ACTIVE") throw new RegistryStateError();
@@ -556,8 +755,36 @@ async function syncConnection(context: ServerContext, job: ScopedJob): Promise<P
     }
     return await collectLiveSnapshot(context, connection, job);
   } finally {
-    context.runningSyncs.delete(syncKey);
+    context.activeConnectionOperations.delete(syncKey);
   }
+}
+
+async function mutateConnectionLifecycle(
+  context: ServerContext,
+  scope: { readonly tenantId: string; readonly connectionId: string },
+  action: "disable" | "offboard",
+): Promise<void> {
+  const operationKey = connectionOperationKey(scope.tenantId, scope.connectionId);
+  if (
+    context.activeConnectionOperations.has(operationKey) ||
+    context.lifecycleMutations.has(operationKey)
+  ) {
+    throw new RegistryStateError();
+  }
+  context.lifecycleMutations.add(operationKey);
+  try {
+    if (action === "disable") {
+      await context.registry.disable({ tenantId: scope.tenantId }, scope.connectionId);
+    } else {
+      await context.registry.offboard({ tenantId: scope.tenantId }, scope.connectionId);
+    }
+  } finally {
+    context.lifecycleMutations.delete(operationKey);
+  }
+}
+
+function connectionOperationKey(tenantId: string, connectionId: string): string {
+  return `${tenantId}\u001f${connectionId}`;
 }
 
 async function collectLiveSnapshot(
@@ -566,13 +793,14 @@ async function collectLiveSnapshot(
   job: ScopedJob,
 ): Promise<PilotSnapshot> {
   const {
+    AwsEnabledRegionSelector,
     AwsSdkInventoryClientFactory,
     SingleAccountAwsInventoryRunner,
-    StaticInventoryRegionSelector,
   } = await import("./inventory-runner.js");
   const broker = createWorkloadIdentityRoleBroker({
     registry: context.registry,
-    region: firstRegion(connection),
+    principalArn: context.principalArn,
+    region: partitionControlRegion(connection.partition),
   });
   const session = await broker.assumeValidatedSession(
     { tenantId: job.tenantId },
@@ -580,11 +808,14 @@ async function collectLiveSnapshot(
     job.jobId,
   );
   const sink = new CapturingInventorySink();
+  const clients = new AwsSdkInventoryClientFactory();
   const runner = new SingleAccountAwsInventoryRunner({
-    clients: new AwsSdkInventoryClientFactory(),
+    clients,
     sink,
-    regionSelector: new StaticInventoryRegionSelector(connection.enabledRegions),
-    globalControlRegion: firstRegion(connection),
+    regionSelector: new AwsEnabledRegionSelector({
+      controlRegion: partitionControlRegion(connection.partition),
+      requestedRegions: connection.enabledRegions,
+    }),
     maxConcurrency: 4,
     now: context.now,
   });
@@ -604,6 +835,7 @@ async function collectLiveSnapshot(
     sink.resources,
     sink.evidence,
     result.coverage,
+    result.collectorCoverage,
     context.now(),
   );
 }
@@ -624,13 +856,14 @@ class CapturingInventorySink implements AwsInventorySink {
   }
 }
 
-function normalizeLiveSnapshot(
+export function normalizeLiveSnapshot(
   connection: RegisteredAwsConnection,
   jobId: string,
   roleSessionName: string,
   normalized: readonly NormalizedAwsResource[],
   evidence: readonly NormalizedAwsEvidence[],
   coverage: "COMPLETE" | "PARTIAL",
+  collectorCoverage: readonly InventoryCollectorCoverage[],
   completedAt: Date,
 ): PilotSnapshot {
   const keyMap = new Map<string, string>();
@@ -641,7 +874,7 @@ function normalizeLiveSnapshot(
   });
   const relationships = liveRelationships(normalized, keyMap);
   const findings = liveFindings(resources, normalized, evidence, keyMap, completedAt.toISOString());
-  const coverageEntries = liveCoverage(connection.enabledRegions, resources, coverage);
+  const coverageEntries = normalizeCollectorCoverage(collectorCoverage);
   return finalizePilotSnapshot({
     schemaVersion: "sutra.inventory.v1",
     jobId,
@@ -674,7 +907,7 @@ function liveResource(resource: NormalizedAwsResource, resourceKey: string): Pil
     name: rawName.slice(0, 512),
     region: resource.region,
     state: state.slice(0, 64),
-    tags: {},
+    tags: resource.tags,
     configuration: resource.configuration,
     source: {
       api: `${resource.service}:inventory`,
@@ -735,6 +968,7 @@ function liveFindings(
   evaluatedAt: string,
 ): PilotFinding[] {
   const result: PilotFinding[] = [];
+  const fingerprints = new Set<string>();
   const byKey = new Map(resources.map((resource) => [resource.resourceKey, resource]));
   const add = (
     resourceKey: string | null,
@@ -744,10 +978,16 @@ function liveFindings(
     summary: string,
     remediation: string,
     details: SafeJsonObject,
+    accountSignalScope?: string,
   ) => {
     if (result.length >= 5_000) return;
+    const fingerprint = sha256(
+      `${controlKey}:${resourceKey ?? `account:${accountSignalScope ?? "global"}`}`,
+    ).slice(0, 48);
+    if (fingerprints.has(fingerprint)) return;
+    fingerprints.add(fingerprint);
     result.push({
-      fingerprint: sha256(`${controlKey}:${resourceKey ?? "account"}`).slice(0, 48),
+      fingerprint,
       resourceKey,
       controlKey,
       controlVersion: "1.0.0",
@@ -768,9 +1008,9 @@ function liveFindings(
     if (source.resourceType === "aws.ec2.instance") {
       if (typeof config.publicIpAddress === "string") {
         add(resourceKey, "SUTRA.AWS.EC2.PUBLIC_IP", "medium", "EC2 instance has a public IP",
-          "This instance is directly addressable from the internet.",
-          "Place the workload behind an approved entry point and remove the public IP where possible.",
-          { publicIpPresent: true });
+          "A public IP is assigned. Route, NACL, security-group, service-listener, and attachment evidence is still required to prove internet reachability.",
+          "Confirm the full network path, then place the workload behind an approved entry point and remove the public IP where possible.",
+          { publicIpPresent: true, internetReachabilityProven: false });
       }
       if (config.metadataHttpTokens !== "required") {
         add(resourceKey, "SUTRA.AWS.EC2.IMDSV2_REQUIRED", "high", "EC2 metadata does not require IMDSv2",
@@ -787,112 +1027,79 @@ function liveFindings(
           { storageEncrypted: false });
       }
       if (config.publiclyAccessible === true) {
-        add(resourceKey, "SUTRA.AWS.RDS.PUBLIC_ACCESS", "critical", "RDS database is publicly accessible",
-          "PubliclyAccessible is enabled for this database instance.",
-          "Move the database to private subnets and restrict access to application security groups.",
-          { publiclyAccessible: true });
+        add(resourceKey, "SUTRA.AWS.RDS.PUBLIC_ACCESS", "high", "RDS public-access mode is enabled",
+          "PubliclyAccessible is true. Subnet routing, NACL, and security-group evidence is still required to prove an external connection path.",
+          "Confirm the full network path, move the database to private subnets, and restrict access to application security groups.",
+          { publiclyAccessible: true, internetReachabilityProven: false });
       }
     }
-    if (source.resourceType === "aws.ec2.security-group" && hasPublicSsh(config.ingress)) {
-      add(resourceKey, "SUTRA.AWS.EC2.SSH_PUBLIC", "high", "SSH is reachable from the internet",
-        "The security group permits TCP/22 from a public CIDR.",
-        "Restrict SSH to managed administration paths or use Systems Manager Session Manager.",
-        { port: 22, publicCidr: true });
+    if (source.resourceType === "aws.ec2.security-group" && isPublicSshIngressCandidate(config.ingress)) {
+      add(resourceKey, "SUTRA.AWS.EC2.SSH_PUBLIC", "high", "Security group allows public SSH ingress",
+        "The security-group rule permits SSH from a public IPv4 or IPv6 CIDR. Route, NACL, attachment, and public-address evidence is still required to prove internet reachability.",
+        "Restrict SSH to managed administration paths or use Systems Manager Session Manager, then verify the attached network path.",
+        { port: 22, publicCidr: true, internetReachabilityProven: false });
     }
   }
 
   for (const item of evidence) {
     const resourceKey = evidenceResourceKey(item, normalized, keyMap);
-    if (item.evidenceType === "S3_PUBLIC_ACCESS_BLOCK" && item.status !== "CONFIGURED") {
+    const accountSignalScope =
+      resourceKey === null
+        ? `${item.region}:${item.service}:${item.evidenceType}:${item.subjectId}`
+        : undefined;
+    const findingEvidence =
+      accountSignalScope === undefined ? item.data : { ...item.data, region: item.region };
+    if (item.evidenceType === "S3_PUBLIC_ACCESS_BLOCK" && item.status === "NOT_CONFIGURED") {
       add(resourceKey, "SUTRA.AWS.S3.PUBLIC_ACCESS_BLOCK", "high", "S3 Public Access Block is not fully configured",
         "The bucket is missing one or more public-access guardrails.",
-        "Enable all four S3 Public Access Block settings and review bucket policies and ACLs.", item.data);
+        "Enable all four S3 Public Access Block settings and review bucket policies and ACLs.", findingEvidence,
+        accountSignalScope);
     }
-    if (item.evidenceType === "CLOUDTRAIL_LOGGING_STATUS" && item.status !== "ENABLED") {
-      add(resourceKey, "SUTRA.AWS.CLOUDTRAIL.LOGGING", "critical", "CloudTrail logging is not active",
-        "The selected trail is not currently delivering management events.",
-        "Start logging and monitor delivery and digest status.", item.data);
+    if (item.evidenceType === "CLOUDTRAIL_LOGGING_STATUS" && item.status === "DISABLED") {
+      add(resourceKey, "SUTRA.AWS.CLOUDTRAIL.LOGGING", "critical", "CloudTrail regional logging coverage is absent",
+        `No applicable logging trail was observed for ${item.region}. Event-selector coverage was not evaluated.`,
+        "Create or start an applicable regional or multi-Region trail, then separately verify its event selectors and delivery health.", findingEvidence,
+        accountSignalScope);
     }
-    if (item.evidenceType === "GUARDDUTY_ENABLEMENT" && item.status !== "ENABLED") {
+    if (item.evidenceType === "GUARDDUTY_ENABLEMENT" && item.status === "DISABLED") {
       add(resourceKey, "SUTRA.AWS.GUARDDUTY.ENABLED", "high", "GuardDuty is not enabled",
         "No enabled detector was observed in this Region.",
-        "Enable GuardDuty through AWS Organizations for governed Regions.", item.data);
+        "Enable GuardDuty through AWS Organizations for governed Regions.", findingEvidence,
+        accountSignalScope);
     }
-    if (item.evidenceType === "SECURITY_HUB_ENABLEMENT" && item.status !== "ENABLED") {
+    if (item.evidenceType === "SECURITY_HUB_ENABLEMENT" && item.status === "DISABLED") {
       add(resourceKey, "SUTRA.AWS.SECURITYHUB.ENABLED", "medium", "Security Hub is not enabled",
         "AWS-native findings are not being aggregated in this Region.",
-        "Enable Security Hub and the standards required by the customer baseline.", item.data);
+        "Enable Security Hub and the standards required by the customer baseline.", findingEvidence,
+        accountSignalScope);
     }
-    if (item.evidenceType === "IAM_ACCOUNT_PASSWORD_POLICY" && item.status !== "CONFIGURED") {
+    if (item.evidenceType === "IAM_ACCOUNT_PASSWORD_POLICY" && item.status === "NOT_CONFIGURED") {
       add(resourceKey, "SUTRA.AWS.IAM.PASSWORD_POLICY", "medium", "IAM password policy is not configured",
         "No account password policy was returned.",
-        "Prefer federation and configure a strong policy for any remaining IAM users.", item.data);
+        "Prefer federation and configure a strong policy for any remaining IAM users.", findingEvidence,
+        accountSignalScope);
     }
   }
   return result;
 }
 
-function liveCoverage(
-  regions: readonly string[],
-  resources: readonly PilotResource[],
-  state: "COMPLETE" | "PARTIAL",
+export function normalizeCollectorCoverage(
+  coverage: readonly InventoryCollectorCoverage[],
 ): PilotCoverageEntry[] {
-  const status = state === "COMPLETE" ? "succeeded" as const : "partial" as const;
-  const entries: PilotCoverageEntry[] = [];
-  for (const [collectorKey, region] of [
-    ["iam.account", "global"],
-    ["iam.password-policy", "global"],
-    ["s3.buckets", "global"],
-  ] as const) {
-    entries.push(coverageFor(collectorKey, region, resources, status));
-  }
-  for (const region of regions) {
-    for (const collectorKey of [
-      "ec2.instances", "ec2.vpcs", "ec2.subnets", "ec2.security-groups",
-      "rds.db-instances", "cloudtrail.trails", "guardduty.detectors", "securityhub.hub",
-    ]) {
-      entries.push(coverageFor(collectorKey, region, resources, status));
-    }
-  }
-  return entries;
-}
-
-function coverageFor(
-  collectorKey: string,
-  region: string,
-  resources: readonly PilotResource[],
-  status: "succeeded" | "partial",
-): PilotCoverageEntry {
-  const resourceType = collectorResourceType(collectorKey);
-  return {
-    collectorKey,
-    region,
-    status,
-    itemsObserved: resources.filter(
-      (resource) => resource.resourceType === resourceType && (region === "global" || resource.region === region),
-    ).length,
-    pagesObserved: 1,
-    ...(status === "partial"
-      ? { errorCode: "COLLECTION_PARTIAL", message: "One or more read-only API calls did not complete." }
-      : {}),
-  };
-}
-
-function collectorResourceType(collectorKey: string): string {
-  const types: Readonly<Record<string, string>> = {
-    "iam.account": "aws.iam.account",
-    "iam.password-policy": "aws.iam.account",
-    "s3.buckets": "aws.s3.bucket",
-    "ec2.instances": "aws.ec2.instance",
-    "ec2.vpcs": "aws.ec2.vpc",
-    "ec2.subnets": "aws.ec2.subnet",
-    "ec2.security-groups": "aws.ec2.security-group",
-    "rds.db-instances": "aws.rds.db-instance",
-    "cloudtrail.trails": "aws.cloudtrail.trail",
-    "guardduty.detectors": "aws.guardduty.detector",
-    "securityhub.hub": "aws.securityhub.hub",
-  };
-  return types[collectorKey] ?? `unknown.${collectorKey}`;
+  return coverage.map((entry) => ({
+    collectorKey: entry.collectorKey,
+    region: entry.region,
+    status:
+      entry.status === "SUCCEEDED"
+        ? "succeeded"
+        : entry.status === "FAILED"
+          ? "failed"
+          : "partial",
+    itemsObserved: entry.itemsObserved,
+    pagesObserved: entry.pagesObserved,
+    ...(entry.errorCode === undefined ? {} : { errorCode: entry.errorCode }),
+    ...(entry.message === undefined ? {} : { message: entry.message }),
+  }));
 }
 
 function parseRegistration(body: string, pathConnectionId: string) {
@@ -944,6 +1151,23 @@ function parseScopedJob(body: string, pathConnectionId: string): ScopedJob {
   return { tenantId: record.tenantId, connectionId: record.connectionId, jobId: record.jobId };
 }
 
+function parseConnectionLifecycleScope(
+  body: string,
+  pathConnectionId: string,
+): { readonly tenantId: string; readonly connectionId: string } {
+  const record = exactJson(body, ["tenantId", "connectionId"]);
+  if (
+    typeof record.tenantId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    typeof record.connectionId !== "string" ||
+    record.connectionId !== pathConnectionId ||
+    !IDENTIFIER.test(record.connectionId)
+  ) {
+    throw invalidRequest();
+  }
+  return { tenantId: record.tenantId, connectionId: record.connectionId };
+}
+
 async function activeCandidate(
   registry: EncryptedFileConnectionRegistry,
   job: ScopedJob,
@@ -971,6 +1195,10 @@ function verificationResponse(verification: OnboardingTrustVerification): unknow
     callerIdentityArn: verification.callerIdentityArn,
     missingExternalIdDenied: true,
     wrongExternalIdDenied: true,
+    trustPolicyAttested: true,
+    permissionPolicyAttested: true,
+    sessionPolicyApplied: true,
+    permissionPackVersion: verification.permissionPackVersion,
   };
 }
 
@@ -1006,7 +1234,7 @@ function parseLocalJobListQuery(target: string): LocalJobListQuery {
   }
   if (parsed.pathname !== "/v1/local/jobs") throw invalidRequest();
   if (parsed.search.length === 0) return { limit: DEFAULT_LOCAL_JOB_LIMIT };
-  const allowedKeys = new Set(["limit", "tenantId", "customerId"]);
+  const allowedKeys = new Set(["limit", "tenantId", "customerId", "reviewRequired"]);
   const keys = [...parsed.searchParams.keys()];
   if (
     keys.some((key) => !allowedKeys.has(key)) ||
@@ -1017,17 +1245,176 @@ function parseLocalJobListQuery(target: string): LocalJobListQuery {
   const rawLimit = parsed.searchParams.get("limit") ?? String(DEFAULT_LOCAL_JOB_LIMIT);
   const tenantId = parsed.searchParams.get("tenantId");
   const customerId = parsed.searchParams.get("customerId");
+  const rawReviewRequired = parsed.searchParams.get("reviewRequired");
   if (
     !/^[1-9]\d{0,2}$/u.test(rawLimit) ||
     ((tenantId === null) !== (customerId === null)) ||
     (tenantId !== null && !IDENTIFIER.test(tenantId)) ||
-    (customerId !== null && !IDENTIFIER.test(customerId))
+    (customerId !== null && !IDENTIFIER.test(customerId)) ||
+    (rawReviewRequired !== null && rawReviewRequired !== "true")
   ) throw invalidRequest();
   const limit = Number(rawLimit);
   if (limit > MAX_LOCAL_JOB_LIMIT) throw invalidRequest();
   return {
     limit,
     ...(tenantId === null || customerId === null ? {} : { tenantId, customerId }),
+    ...(rawReviewRequired === "true" ? { reviewRequired: true } : {}),
+  };
+}
+
+function parseLocalScheduleListQuery(target: string): LocalScheduleListQuery {
+  let parsed: URL;
+  try {
+    parsed = new URL(target, "http://127.0.0.1");
+  } catch {
+    throw invalidRequest();
+  }
+  if (parsed.pathname !== "/v1/local/schedules") throw invalidRequest();
+  const allowedKeys = new Set(["tenantId", "customerId"]);
+  const keys = [...parsed.searchParams.keys()];
+  if (
+    keys.length !== allowedKeys.size ||
+    keys.some((key) => !allowedKeys.has(key)) ||
+    [...allowedKeys].some((key) => parsed.searchParams.getAll(key).length !== 1)
+  ) {
+    throw invalidRequest();
+  }
+  const tenantId = parsed.searchParams.get("tenantId");
+  const customerId = parsed.searchParams.get("customerId");
+  if (
+    tenantId === null ||
+    customerId === null ||
+    !IDENTIFIER.test(tenantId) ||
+    !IDENTIFIER.test(customerId)
+  ) {
+    throw invalidRequest();
+  }
+  return { tenantId, customerId };
+}
+
+function parseLocalJobResultQuery(target: string): LocalJobResultQuery {
+  let parsed: URL;
+  try {
+    parsed = new URL(target, "http://127.0.0.1");
+  } catch {
+    throw invalidRequest();
+  }
+  const keys = [...parsed.searchParams.keys()];
+  if (
+    keys.length !== 2 ||
+    keys.some((key) => key !== "tenantId" && key !== "customerId") ||
+    parsed.searchParams.getAll("tenantId").length !== 1 ||
+    parsed.searchParams.getAll("customerId").length !== 1
+  ) throw invalidRequest();
+  const tenantId = parsed.searchParams.get("tenantId");
+  const customerId = parsed.searchParams.get("customerId");
+  if (
+    tenantId === null || customerId === null ||
+    !IDENTIFIER.test(tenantId) || !IDENTIFIER.test(customerId)
+  ) throw invalidRequest();
+  return { tenantId, customerId };
+}
+
+function parseLocalScheduleUpsert(body: string): LocalScheduleUpsertInput {
+  const record = exactJson(body, [
+    "tenantId",
+    "mutationId",
+    "mutationSequence",
+    "fixtureId",
+    "version",
+    "everyMs",
+    "enabled",
+    "firstRunAt",
+  ]);
+  if (
+    typeof record.tenantId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    typeof record.mutationId !== "string" ||
+    !LOCAL_SCHEDULE_MUTATION_ID.test(record.mutationId) ||
+    !Number.isSafeInteger(record.mutationSequence) ||
+    (record.mutationSequence as number) < 1 ||
+    typeof record.fixtureId !== "string" ||
+    !IDENTIFIER.test(record.fixtureId) ||
+    (record.version !== "2026.07.0" && record.version !== "2026.07.1") ||
+    typeof record.everyMs !== "number" ||
+    !Number.isInteger(record.everyMs) ||
+    record.everyMs < MIN_LOCAL_SCHEDULE_INTERVAL_MS ||
+    record.everyMs > MAX_LOCAL_SCHEDULE_INTERVAL_MS ||
+    typeof record.enabled !== "boolean" ||
+    typeof record.firstRunAt !== "string"
+  ) {
+    throw invalidRequest();
+  }
+  const firstRunAt = canonicalIsoDate(record.firstRunAt);
+  if (firstRunAt === null) throw invalidRequest();
+  return {
+    tenantId: record.tenantId,
+    mutationId: record.mutationId,
+    mutationSequence: record.mutationSequence as number,
+    fixtureId: record.fixtureId,
+    version: record.version,
+    everyMs: record.everyMs,
+    enabled: record.enabled,
+    firstRunAt,
+  };
+}
+
+function parseLocalScheduleEnabled(body: string): {
+  readonly tenantId: string;
+  readonly enabled: boolean;
+  readonly mutationId: string;
+  readonly mutationSequence: number;
+} {
+  const record = exactJson(body, [
+    "tenantId",
+    "enabled",
+    "mutationId",
+    "mutationSequence",
+  ]);
+  if (
+    typeof record.tenantId !== "string" ||
+    !IDENTIFIER.test(record.tenantId) ||
+    typeof record.enabled !== "boolean" ||
+    typeof record.mutationId !== "string" ||
+    !LOCAL_SCHEDULE_MUTATION_ID.test(record.mutationId) ||
+    !Number.isSafeInteger(record.mutationSequence) ||
+    (record.mutationSequence as number) < 1
+  ) {
+    throw invalidRequest();
+  }
+  return {
+    tenantId: record.tenantId,
+    enabled: record.enabled,
+    mutationId: record.mutationId,
+    mutationSequence: record.mutationSequence as number,
+  };
+}
+
+function parseLocalJobPublished(body: string): {
+  readonly tenantId: string;
+  readonly customerId: string;
+  readonly publicationId: string;
+  readonly publishedAt: Date;
+} {
+  const record = exactJson(body, [
+    "tenantId",
+    "customerId",
+    "publicationId",
+    "publishedAt",
+  ]);
+  if (
+    typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId) ||
+    typeof record.customerId !== "string" || !IDENTIFIER.test(record.customerId) ||
+    typeof record.publicationId !== "string" || !IDENTIFIER.test(record.publicationId) ||
+    typeof record.publishedAt !== "string"
+  ) throw invalidRequest();
+  const publishedAt = canonicalIsoDate(record.publishedAt);
+  if (publishedAt === null) throw invalidRequest();
+  return {
+    tenantId: record.tenantId,
+    customerId: record.customerId,
+    publicationId: record.publicationId,
+    publishedAt,
   };
 }
 
@@ -1045,7 +1432,8 @@ function parseLocalFixtureJob(body: string): LocalFixtureJobInput {
     !IDENTIFIER.test(record.fixtureId) ||
     typeof record.version !== "string" ||
     typeof record.idempotencyKey !== "string" ||
-    !IDENTIFIER.test(record.idempotencyKey)
+    !IDENTIFIER.test(record.idempotencyKey) ||
+    record.idempotencyKey.startsWith("schedule:")
   ) {
     throw invalidRequest();
   }
@@ -1076,6 +1464,16 @@ function compareLocalJobs(left: LocalJobRecord, right: LocalJobRecord): number {
     Date.parse(right.createdAt) - Date.parse(left.createdAt) ||
     left.jobId.localeCompare(right.jobId)
   );
+}
+
+function requireCatalogCustomer(tenantId: string, customerId: string): void {
+  if (
+    !listLocalFixtureAccounts().some(
+      (fixture) => fixture.tenantId === tenantId && fixture.customerId === customerId,
+    )
+  ) {
+    throw invalidRequest();
+  }
 }
 
 function localJobScope(job: LocalJobRecord): {
@@ -1122,6 +1520,7 @@ function localJobScope(job: LocalJobRecord): {
 
 function serializeLocalJob(job: LocalJobRecord): SafeJsonObject {
   const scope = localJobScope(job);
+  const provenance = localJobProvenance(job);
   return {
     jobId: job.jobId,
     tenantId: job.tenantId,
@@ -1130,6 +1529,8 @@ function serializeLocalJob(job: LocalJobRecord): SafeJsonObject {
     customerId: scope.customerId,
     connectionId: scope.connectionId,
     version: scope.version,
+    triggerKind: provenance.triggerKind,
+    scheduleId: provenance.scheduleId,
     status: job.status,
     attempts: job.attempts,
     maxAttempts: job.maxAttempts,
@@ -1146,6 +1547,96 @@ function serializeLocalJob(job: LocalJobRecord): SafeJsonObject {
             failedAt: job.lastFailure.failedAt,
             retryAt: job.lastFailure.retryAt ?? null,
           },
+  };
+}
+
+function localJobProvenance(job: LocalJobRecord): {
+  readonly triggerKind: "manual" | "scheduled";
+  readonly scheduleId: string | null;
+} {
+  if (!job.idempotencyKey.startsWith("schedule:")) {
+    return { triggerKind: "manual", scheduleId: null };
+  }
+  const match = /^schedule:(sched_[a-f0-9]{48}):(.+)$/u.exec(job.idempotencyKey);
+  const scheduleId = match?.[1];
+  const occurrence = match?.[2];
+  if (
+    scheduleId === undefined ||
+    occurrence === undefined ||
+    canonicalIsoDate(occurrence) === null
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture job failed validation",
+    );
+  }
+  return { triggerKind: "scheduled", scheduleId };
+}
+
+function localScheduleScope(schedule: LocalScheduleRecord): {
+  readonly fixtureId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly version: LocalFixtureVersion;
+} {
+  const payload = schedule.payload;
+  const keys = Object.keys(payload).sort().join(",");
+  if (
+    !LOCAL_SCHEDULE_ID.test(schedule.scheduleId) ||
+    schedule.kind !== LOCAL_FIXTURE_COLLECTION_JOB_KIND ||
+    keys !== "connectionId,customerId,fixtureId,version" ||
+    typeof payload.fixtureId !== "string" ||
+    typeof payload.customerId !== "string" ||
+    typeof payload.connectionId !== "string" ||
+    (payload.version !== "2026.07.0" && payload.version !== "2026.07.1")
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture schedule failed validation",
+    );
+  }
+  const fixture = getLocalFixtureAccount(payload.fixtureId);
+  if (
+    fixture.tenantId !== schedule.tenantId ||
+    fixture.customerId !== payload.customerId ||
+    fixture.connectionId !== payload.connectionId
+  ) {
+    throw new LocalHttpError(
+      500,
+      "COLLECTION_FAILED",
+      "The durable local fixture schedule failed validation",
+    );
+  }
+  return {
+    fixtureId: payload.fixtureId,
+    customerId: payload.customerId,
+    connectionId: payload.connectionId,
+    version: payload.version,
+  };
+}
+
+function serializeLocalSchedule(schedule: LocalScheduleRecord): SafeJsonObject {
+  const scope = localScheduleScope(schedule);
+  return {
+    scheduleId: schedule.scheduleId,
+    tenantId: schedule.tenantId,
+    customerId: scope.customerId,
+    connectionId: scope.connectionId,
+    fixtureId: scope.fixtureId,
+    version: scope.version,
+    everyMs: schedule.everyMs,
+    nextRunAt: schedule.nextRunAt,
+    enabled: schedule.enabled,
+    maxAttempts: schedule.maxAttempts,
+    capacityState: schedule.capacityBlockedAt === undefined ? "healthy" : "degraded",
+    capacitySkippedOccurrences: schedule.capacitySkippedOccurrences ?? 0,
+    capacityBlockedAt: schedule.capacityBlockedAt ?? null,
+    missedOccurrences: schedule.missedOccurrences ?? 0,
+    lastMissedAt: schedule.lastMissedAt ?? null,
+    createdAt: schedule.createdAt,
+    updatedAt: schedule.updatedAt,
   };
 }
 
@@ -1229,6 +1720,12 @@ function exactJson(body: string, keys: readonly string[]): Record<string, unknow
   return record;
 }
 
+function canonicalIsoDate(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value)) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) || date.toISOString() !== value ? null : date;
+}
+
 async function readBody(request: IncomingMessage): Promise<string> {
   const declared = request.headers["content-length"];
   if (typeof declared === "string") {
@@ -1310,6 +1807,20 @@ function safeHttpError(error: unknown): LocalHttpError {
       409,
       "IDEMPOTENCY_CONFLICT",
       "The idempotency key is already bound to another local fixture request",
+    );
+  }
+  if (error instanceof LocalScheduleNotFoundError) {
+    return new LocalHttpError(
+      404,
+      "SCHEDULE_NOT_FOUND",
+      "The scoped local fixture schedule was not found",
+    );
+  }
+  if (error instanceof LocalScheduleStaleMutationError) {
+    return new LocalHttpError(
+      409,
+      "STALE_SCHEDULE_MUTATION",
+      "The local fixture schedule mutation was superseded by a newer operation",
     );
   }
   if (
@@ -1412,14 +1923,20 @@ function evidenceResourceKey(
   return match === undefined ? null : keyMap.get(match.resourceKey) ?? null;
 }
 
-function hasPublicSsh(value: SafeJsonValue | undefined): boolean {
+export function isPublicSshIngressCandidate(value: SafeJsonValue | undefined): boolean {
   if (!Array.isArray(value)) return false;
   return value.some((item) => {
     if (!isJsonObject(item)) return false;
+    const protocol = item.protocol;
     const from = item.fromPort;
     const to = item.toPort;
-    const cidrs = stringArray(item.ipv4Cidrs);
-    return typeof from === "number" && typeof to === "number" && from <= 22 && to >= 22 && cidrs.includes("0.0.0.0/0");
+    const publicSource =
+      stringArray(item.ipv4Cidrs).includes("0.0.0.0/0") ||
+      stringArray(item.ipv6Cidrs).includes("::/0");
+    if (!publicSource) return false;
+    if (protocol === "-1") return true;
+    if (protocol !== "tcp" && protocol !== "6") return false;
+    return typeof from === "number" && typeof to === "number" && from <= 22 && to >= 22;
   });
 }
 
@@ -1437,6 +1954,13 @@ function isJsonObject(value: SafeJsonValue): value is SafeJsonObject {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function deterministicLocalFixtureScheduleId(
+  tenantId: string,
+  fixtureId: string,
+): string {
+  return `sched_${sha256(`local-fixture-schedule\u0000${tenantId}\u0000${fixtureId}`).slice(0, 48)}`;
 }
 
 function errorName(error: unknown): string {
@@ -1459,10 +1983,10 @@ function exactBooleanEnvironment(name: string, fallback: boolean): boolean {
   throw new Error(`${name} must be true or false`);
 }
 
-function firstRegion(connection: RegisteredAwsConnection): string {
-  const region = connection.enabledRegions[0];
-  if (region === undefined) throw new RegistryStateError();
-  return region;
+function partitionControlRegion(partition: LocalAwsPartition): string {
+  if (partition === "aws-us-gov") return "us-gov-west-1";
+  if (partition === "aws-cn") return "cn-north-1";
+  return "us-east-1";
 }
 
 function collectorMode(value: string | undefined): "fixture" | "live" {

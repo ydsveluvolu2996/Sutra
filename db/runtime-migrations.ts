@@ -4,6 +4,11 @@ import localAuthSchemaSql from "../drizzle/0002_aspiring_terrax.sql?raw";
 import changeHistorySchemaSql from "../drizzle/0003_opposite_siren.sql?raw";
 import localOperationsSchemaSql from "../drizzle/0004_ambiguous_landau.sql?raw";
 import activeRunSchemaSql from "../drizzle/0005_tiny_hobgoblin.sql?raw";
+import scheduleOutboxSchemaSql from "../drizzle/0006_acoustic_thunderbolt.sql?raw";
+import scheduleSequenceSchemaSql from "../drizzle/0007_demonic_hardball.sql?raw";
+import scheduleProvenanceSchemaSql from "../drizzle/0008_far_nicolaos.sql?raw";
+import { isPostgresDatabase } from "./postgres-d1-adapter";
+import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
 const BREAKPOINT = "--> statement-breakpoint";
 
@@ -23,6 +28,9 @@ const migrations = [
   { id: "0003_opposite_siren", statements: statementsFrom(changeHistorySchemaSql) },
   { id: "0004_ambiguous_landau", statements: statementsFrom(localOperationsSchemaSql) },
   { id: "0005_tiny_hobgoblin", statements: statementsFrom(activeRunSchemaSql) },
+  { id: "0006_acoustic_thunderbolt", statements: statementsFrom(scheduleOutboxSchemaSql) },
+  { id: "0007_demonic_hardball", statements: statementsFrom(scheduleSequenceSchemaSql) },
+  { id: "0008_far_nicolaos", statements: statementsFrom(scheduleProvenanceSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
@@ -56,6 +64,7 @@ async function applyStatement(db: D1Database, statement: string): Promise<void> 
  * separately approved release step.
  */
 export function ensureRuntimeSchema(db: D1Database): Promise<void> {
+  if (isPostgresDatabase(db)) return ensurePostgresRuntimeSchema(db);
   if (schemaReady !== undefined) return schemaReady;
   const attempt = (async () => {
     await db.prepare(
@@ -86,4 +95,5 @@ export function ensureRuntimeSchema(db: D1Database): Promise<void> {
 
 export function resetRuntimeSchemaCacheForTests(): void {
   schemaReady = undefined;
+  resetPostgresRuntimeSchemaCacheForTests();
 }

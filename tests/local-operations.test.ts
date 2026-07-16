@@ -5,6 +5,7 @@ import {
   parseLocalFixtureEnqueue,
   parseLocalFixtureJob,
   parseLocalFixtureJobs,
+  parseLocalFixtureSchedules,
   type LocalFixtureDescriptor,
 } from "../lib/local-ops-types.ts";
 
@@ -34,6 +35,8 @@ function job(overrides: Record<string, unknown> = {}): Record<string, unknown> {
     customerId: `cust_${"a".repeat(32)}`,
     connectionId: `conn_${"b".repeat(32)}`,
     version: "2026.07.0",
+    triggerKind: "manual",
+    scheduleId: null,
     status: "pending",
     attempts: 0,
     maxAttempts: 5,
@@ -63,6 +66,11 @@ describe("signed local operations boundary", () => {
       completedAt: NOW,
       lastFailure: null,
     })), /invalid/u);
+    assert.throws(() => parseLocalFixtureJob(job({ triggerKind: "scheduled", scheduleId: null })), /invalid/u);
+    assert.equal(parseLocalFixtureJob(job({
+      triggerKind: "scheduled",
+      scheduleId: `sched_${"d".repeat(48)}`,
+    })).triggerKind, "scheduled");
   });
 
   it("binds an enqueue response to the signed fixture scope", () => {
@@ -89,5 +97,57 @@ describe("signed local operations boundary", () => {
     assert.equal(parseLocalFixtureJobs({ jobs: [job()], count: 1, limit: 30 }).length, 1);
     assert.throws(() => parseLocalFixtureJobs({ jobs: [job()], count: 0, limit: 30 }), /invalid/u);
     assert.throws(() => parseLocalFixtureJobs({ jobs: [], count: 0, limit: 0 }), /invalid/u);
+  });
+
+  it("validates scoped durable schedule state", () => {
+    const schedule = {
+      scheduleId: `sched_${"d".repeat(48)}`,
+      tenantId: "org_local_sutra",
+      fixtureId: "northstar-retail",
+      customerId: `cust_${"a".repeat(32)}`,
+      connectionId: `conn_${"b".repeat(32)}`,
+      version: "2026.07.0",
+      everyMs: 3_600_000,
+      nextRunAt: NOW,
+      enabled: true,
+      maxAttempts: 5,
+      capacityState: "healthy",
+      capacitySkippedOccurrences: 0,
+      capacityBlockedAt: null,
+      missedOccurrences: 0,
+      lastMissedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    assert.equal(parseLocalFixtureSchedules({ schedules: [schedule], count: 1 })[0]?.enabled, true);
+    assert.equal(parseLocalFixtureSchedules({
+      schedules: [{
+        ...schedule,
+        capacityState: "degraded",
+        capacitySkippedOccurrences: 2,
+        capacityBlockedAt: NOW,
+      }],
+      count: 1,
+    })[0]?.capacityState, "degraded");
+    assert.equal(parseLocalFixtureSchedules({
+      schedules: [{ ...schedule, missedOccurrences: 3, lastMissedAt: NOW }],
+      count: 1,
+    })[0]?.missedOccurrences, 3);
+    assert.throws(() => parseLocalFixtureSchedules({
+      schedules: [{ ...schedule, customerId: "customer-other" }],
+      count: 1,
+    }), /invalid/u);
+    assert.throws(() => parseLocalFixtureSchedules({
+      schedules: [{ ...schedule, everyMs: 999 }],
+      count: 1,
+    }), /invalid/u);
+    assert.throws(() => parseLocalFixtureSchedules({
+      schedules: [{ ...schedule, capacityState: "healthy", capacityBlockedAt: NOW }],
+      count: 1,
+    }), /invalid/u);
+    assert.throws(() => parseLocalFixtureSchedules({
+      schedules: [{ ...schedule, missedOccurrences: 1, lastMissedAt: null }],
+      count: 1,
+    }), /invalid/u);
   });
 });

@@ -35,6 +35,11 @@ export type SafePilotFailureCode =
   | "TRUST_POLICY_UNSAFE"
   | "VALIDATION_FAILED";
 
+export interface OffboardConnectionRequest {
+  readonly connectionId: string;
+  readonly awsAccountId: string;
+}
+
 export type PilotSecurityErrorCode =
   | "INVALID_INPUT"
   | "INVALID_STATE"
@@ -76,6 +81,24 @@ export interface AwsOnboardingInput {
   readonly enabledRegions: readonly string[];
 }
 
+/**
+ * Browser input for the first, recoverable trust handoff. The operation ID is
+ * an opaque retry key only; account/customer scope and the ExternalId remain
+ * server controlled.
+ */
+export interface AwsConnectionDraftRequest {
+  readonly operationId: string;
+  readonly customerName: string;
+  readonly awsAccountId: string;
+  readonly partition: AwsPartition;
+  readonly enabledRegions: readonly string[];
+}
+
+export interface LocalAwsConnectionIdentity {
+  readonly customerId: string;
+  readonly connectionId: string;
+}
+
 export interface PilotSyncRequest {
   readonly connectionId: string;
   readonly idempotencyKey: string;
@@ -114,6 +137,7 @@ const ACCOUNT_ID = /^\d{12}$/;
 const ROLE_COMPONENTS = /^[A-Za-z0-9+=,.@_/-]+$/;
 const KEY_VERSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
+const ONBOARDING_OPERATION_ID = /^onb_[a-f0-9]{32}$/u;
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const AES_GCM_FORMAT = "aesgcm1";
 const EXTERNAL_ID_BYTES = 24;
@@ -139,8 +163,8 @@ const FAILURE_CODES = new Set<SafePilotFailureCode>([
 const CONNECTION_TRANSITIONS: Readonly<Record<PilotConnectionStatus, ReadonlySet<PilotConnectionStatus>>> = {
   pending: new Set(["validating", "disabled"]),
   validating: new Set(["active", "needs_attention", "disabled"]),
-  active: new Set(["validating", "needs_attention", "disabled"]),
-  needs_attention: new Set(["validating", "disabled"]),
+  active: new Set(["pending", "validating", "needs_attention", "disabled"]),
+  needs_attention: new Set(["pending", "validating", "disabled"]),
   disabled: new Set(),
 };
 
@@ -188,8 +212,104 @@ export function parseAwsOnboardingInput(value: unknown): AwsOnboardingInput {
   return { awsAccountId, partition, roleArn: role.arn, enabledRegions };
 }
 
+/**
+ * Strict boundary for the initial connection route. A client-generated retry
+ * key makes a committed response recoverable without accepting client scope,
+ * trust material, role policy, credentials, or lifecycle state.
+ */
+export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDraftRequest {
+  const record = exactRecord(value, [
+    "operationId",
+    "customerName",
+    "awsAccountId",
+    "partition",
+    "enabledRegions",
+  ]);
+  if (
+    typeof record.operationId !== "string" ||
+    !ONBOARDING_OPERATION_ID.test(record.operationId)
+  ) {
+    invalidInput("The onboarding retry identifier is invalid");
+  }
+  if (typeof record.customerName !== "string") {
+    invalidInput("Enter a customer name");
+  }
+  const customerName = record.customerName.trim().replace(/\s+/gu, " ");
+  if (
+    customerName.length < 2 ||
+    customerName.length > 80 ||
+    /[<>\u0000-\u001f]/u.test(customerName)
+  ) {
+    invalidInput("Enter a customer name between 2 and 80 characters");
+  }
+  const awsAccountId = parseAwsAccountId(record.awsAccountId);
+  const partition = parseAwsPartition(record.partition);
+  const enabledRegions = parseRegions(record.enabledRegions, partition);
+  if (enabledRegions.length === 0) {
+    invalidInput("Choose at least one AWS region");
+  }
+  return {
+    operationId: record.operationId,
+    customerName,
+    awsAccountId,
+    partition,
+    enabledRegions,
+  };
+}
+
+/**
+ * The local pilot deliberately has one durable customer/connection identity
+ * for an AWS account. Stable IDs turn concurrent first-create requests into a
+ * database primary-key race instead of duplicate connections.
+ */
+export async function deriveLocalAwsConnectionIdentity(
+  accountIdValue: unknown,
+  partitionValue: unknown,
+): Promise<LocalAwsConnectionIdentity> {
+  const accountId = parseAwsAccountId(accountIdValue);
+  const partition = parseAwsPartition(partitionValue);
+  const digest = async (domain: string): Promise<string> => {
+    const bytes = new TextEncoder().encode(`${domain}\u0000${partition}\u0000${accountId}`);
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(hash)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 32);
+  };
+  return {
+    customerId: `cust_${await digest("sutra-local-customer-v1")}`,
+    connectionId: `conn_${await digest("sutra-local-aws-connection-v1")}`,
+  };
+}
+
 export function parseAwsAccountId(value: unknown): string {
   return requiredAccountId(value);
+}
+
+/** Requires a second server-checked account identifier for destructive offboarding. */
+export function parseOffboardConnectionRequest(value: unknown): OffboardConnectionRequest {
+  const record = exactRecord(value, ["connectionId", "awsAccountId"]);
+  if (
+    typeof record.connectionId !== "string" ||
+    !/^conn_[a-f0-9]{32}$/u.test(record.connectionId)
+  ) {
+    invalidInput("The offboarding request is invalid");
+  }
+  return {
+    connectionId: record.connectionId,
+    awsAccountId: parseAwsAccountId(record.awsAccountId),
+  };
+}
+
+export function assertOffboardAccountConfirmation(
+  providedAccountId: string,
+  expectedAccountId: string,
+): void {
+  const provided = parseAwsAccountId(providedAccountId);
+  const expected = parseAwsAccountId(expectedAccountId);
+  if (provided !== expected) {
+    invalidInput("The AWS account confirmation does not match");
+  }
 }
 
 export function parseAwsPartition(value: unknown): AwsPartition {

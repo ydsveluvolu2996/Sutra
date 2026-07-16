@@ -47,6 +47,10 @@ export function InventoryBrowser() {
   const successfulCoverage = state?.coverage.filter((entry) => entry.status === "succeeded").length ?? 0;
   const coverageTotal = state?.coverage.length ?? 0;
   const coveragePercent = coverageTotal === 0 ? 0 : Math.round((successfulCoverage / coverageTotal) * 100);
+  const latestRunCoverage = state?.latestRunCoverage ?? null;
+  const latestRun = latestRunCoverage === null
+    ? null
+    : state?.syncRuns.find((run) => run.id === latestRunCoverage.syncRunId) ?? null;
 
   async function runSync() {
     if (!connection) return;
@@ -84,6 +88,12 @@ export function InventoryBrowser() {
             <article><small>Resource types</small><strong>{new Set(resources.map((item) => item.resourceType)).size}</strong><span>{services.length} observed AWS services</span></article>
             <article><small>Collector coverage</small><strong>{coverageTotal > 0 ? `${coveragePercent}%` : "—"}</strong><span>{successfulCoverage} of {coverageTotal} collector-region checks succeeded</span></article>
           </section>
+
+          {latestRunCoverage ? <section className="panel coverage-panel">
+            <div className="panel-heading"><div><p className="eyebrow">Latest collection attempt</p><h2>Run-scoped collector coverage</h2></div><span className={`status-pill ${latestRun?.status === "succeeded" ? "status-positive" : "status-medium"}`}>{latestRun?.status ?? "unknown"} run</span></div>
+            <p className="panel-footnote">This evidence belongs only to run <code>{compactIdentifier(latestRunCoverage.syncRunId, 24)}</code>. {state?.activeSnapshot ? "A partial or failed attempt does not replace the active complete CMDB projection shown below." : "No complete CMDB projection is active; this run evidence is not presented as authoritative inventory."}</p>
+            {latestRunCoverage.entries.length > 0 ? <div className="coverage-grid">{latestRunCoverage.entries.map((entry) => <article key={`${latestRunCoverage.syncRunId}:${entry.collectorKey}:${entry.region}`} title={entry.message}><span className={`coverage-state coverage-${entry.status}`} /> <div><strong>{entry.collectorKey}</strong><small>{entry.region}{entry.message ? ` · ${entry.message}` : ` · ${entry.pagesObserved} page${entry.pagesObserved === 1 ? "" : "s"}`}</small></div><b>{entry.status}</b><span>{entry.errorCode ?? `${entry.itemsObserved} items`}</span></article>)}</div> : <div className="empty-state"><strong>No collector-region detail was recorded for this run</strong><span>The latest attempt has no coverage rows; Sutra does not reuse details from an earlier complete snapshot.</span></div>}
+          </section> : null}
 
           {!state?.activeSnapshot ? <section className="panel empty-workspace compact-empty"><h2>No complete snapshot has been published</h2><p>{connection.sourceKind === "simulated_fixture" ? "Complete and publish a durable simulated collection to create this CMDB projection." : connection.status === "active" ? "Run inventory to collect the first authoritative CMDB projection." : "Return to onboarding and validate the customer trust role before collecting inventory."}</p><a className="button button-primary" href={connection.sourceKind === "simulated_fixture" ? "/operations" : "/onboard"}>{connection.sourceKind === "simulated_fixture" ? "Open simulations" : "Open onboarding"}</a></section> : null}
 
@@ -129,7 +139,7 @@ export function InventoryBrowser() {
           </section> : null}
 
           {state?.activeSnapshot ? <section className="panel coverage-panel">
-            <div className="panel-heading"><div><p className="eyebrow">Collection evidence</p><h2>Coverage by collector and region</h2></div><span className={`status-pill ${state.activeSnapshot.coverageState === "complete" ? "status-positive" : "status-medium"}`}>{state.activeSnapshot.coverageState} snapshot</span></div>
+            <div className="panel-heading"><div><p className="eyebrow">Active snapshot evidence</p><h2>Published coverage by collector and region</h2></div><span className={`status-pill ${state.activeSnapshot.coverageState === "complete" ? "status-positive" : "status-medium"}`}>{state.activeSnapshot.coverageState} snapshot</span></div>
             <div className="coverage-grid">{state.coverage.map((entry) => <article key={`${entry.collectorKey}:${entry.region}`}><span className={`coverage-state coverage-${entry.status}`} /> <div><strong>{entry.collectorKey}</strong><small>{entry.region}</small></div><b>{entry.status}</b><span>{entry.itemsObserved} items</span></article>)}</div>
           </section> : null}
         </>

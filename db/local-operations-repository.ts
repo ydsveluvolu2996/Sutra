@@ -38,6 +38,8 @@ interface SyncRow {
   org_id: string;
   customer_id: string;
   connection_id: string;
+  trigger_kind: "manual" | "scheduled";
+  schedule_id: string | null;
   status: "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
   created_at: number;
 }
@@ -63,6 +65,7 @@ interface PublicationRow {
   snapshot_id: string;
   fixture_id: string;
   fixture_version: string;
+  schedule_id: string | null;
   published_at: number;
 }
 
@@ -74,6 +77,7 @@ export interface LocalJobPublication {
   readonly snapshotId: string;
   readonly fixtureId: string;
   readonly fixtureVersion: LocalFixtureVersion;
+  readonly scheduleId: string | null;
   readonly publishedAt: string;
 }
 
@@ -101,6 +105,7 @@ function publication(row: PublicationRow): LocalJobPublication {
     snapshotId: row.snapshot_id,
     fixtureId: row.fixture_id,
     fixtureVersion: row.fixture_version as LocalFixtureVersion,
+    scheduleId: row.schedule_id,
     publishedAt: new Date(row.published_at).toISOString(),
   };
 }
@@ -122,7 +127,10 @@ function assertFixtureResult(
     result.job.fixtureId !== fixture.fixtureId ||
     result.job.customerId !== fixture.customerId ||
     result.job.connectionId !== fixture.connectionId ||
+    (result.job.triggerKind !== "manual" && result.job.triggerKind !== "scheduled") ||
+    (result.job.triggerKind === "manual") !== (result.job.scheduleId === null) ||
     !fixture.availableVersions.includes(result.version) ||
+    result.snapshot.coverageState !== "complete" ||
     result.snapshot.connectionId !== fixture.connectionId ||
     result.snapshot.accountId !== fixture.accountId
   ) {
@@ -243,7 +251,7 @@ async function findPublication(
 ): Promise<LocalJobPublication | null> {
   const row = await db.prepare(
     `SELECT job_id, org_id, customer_id, connection_id, sync_run_id,
-            snapshot_id, fixture_id, fixture_version, published_at
+            snapshot_id, fixture_id, fixture_version, schedule_id, published_at
        FROM local_job_publications
       WHERE org_id = ? AND job_id = ? LIMIT 1`,
   ).bind(LOCAL_ORG_ID, jobId).first<PublicationRow>();
@@ -258,6 +266,7 @@ async function insertPublication(
     readonly version: LocalFixtureVersion;
     readonly syncRunId: string;
     readonly snapshotId: string;
+    readonly scheduleId: string | null;
     readonly actorId: string;
   },
 ): Promise<LocalJobPublication> {
@@ -265,8 +274,8 @@ async function insertPublication(
   await db.prepare(
     `INSERT OR IGNORE INTO local_job_publications
       (job_id, org_id, customer_id, connection_id, sync_run_id, snapshot_id,
-       fixture_id, fixture_version, actor_id, published_at)
-     SELECT ?, r.org_id, r.customer_id, r.connection_id, r.id, s.id, ?, ?, ?, ?
+       fixture_id, fixture_version, schedule_id, actor_id, published_at)
+     SELECT ?, r.org_id, r.customer_id, r.connection_id, r.id, s.id, ?, ?, ?, ?, ?
        FROM sync_runs r
        JOIN cmdb_snapshots s ON s.id = ? AND s.sync_run_id = r.id
         AND s.org_id = r.org_id AND s.customer_id = r.customer_id
@@ -282,6 +291,7 @@ async function insertPublication(
     input.jobId,
     input.fixture.fixtureId,
     input.version,
+    input.scheduleId,
     input.actorId,
     now,
     input.snapshotId,
@@ -302,7 +312,8 @@ async function insertPublication(
     stored.syncRunId !== input.syncRunId ||
     stored.snapshotId !== input.snapshotId ||
     stored.fixtureId !== input.fixture.fixtureId ||
-    stored.fixtureVersion !== input.version
+    stored.fixtureVersion !== input.version ||
+    stored.scheduleId !== input.scheduleId
   ) {
     throw new PilotRepositoryError("CONFLICT", "The fixture job publication conflicts with existing workspace data");
   }
@@ -418,7 +429,8 @@ export async function publishLocalFixtureJob(input: {
       existing.customerId !== input.fixture.customerId ||
       existing.connectionId !== input.fixture.connectionId ||
       existing.fixtureId !== input.fixture.fixtureId ||
-      existing.fixtureVersion !== input.result.version
+      existing.fixtureVersion !== input.result.version ||
+      existing.scheduleId !== input.result.job.scheduleId
     ) {
       throw new PilotRepositoryError("CONFLICT", "The fixture job was already published to another workspace scope");
     }
@@ -430,28 +442,32 @@ export async function publishLocalFixtureJob(input: {
   const now = Date.now();
   const insertedRun = await db.prepare(
     `INSERT OR IGNORE INTO sync_runs
-      (id, org_id, customer_id, connection_id, trigger_kind, status,
+      (id, org_id, customer_id, connection_id, trigger_kind, schedule_id, status,
        coverage_state, collector_pack_version, totals_json, idempotency_key,
        started_at, created_at)
-     VALUES (?, ?, ?, ?, 'scheduled', 'running', 'unknown', ?, '{}', ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, 'running', 'unknown', ?, '{}', ?, ?, ?)`,
   ).bind(
     syncRunId,
     LOCAL_ORG_ID,
     input.fixture.customerId,
     input.fixture.connectionId,
+    input.result.job.triggerKind,
+    input.result.job.scheduleId,
     LOCAL_FIXTURE_PACK,
     input.result.job.jobId,
     now,
     now,
   ).run();
   const run = await db.prepare(
-    `SELECT id, org_id, customer_id, connection_id, status, created_at
+    `SELECT id, org_id, customer_id, connection_id, trigger_kind, schedule_id, status, created_at
        FROM sync_runs
       WHERE org_id = ? AND connection_id = ? AND idempotency_key = ? LIMIT 1`,
   ).bind(LOCAL_ORG_ID, input.fixture.connectionId, input.result.job.jobId).first<SyncRow>();
   if (
     run === null || run.id !== syncRunId || run.org_id !== LOCAL_ORG_ID ||
-    run.customer_id !== input.fixture.customerId || run.connection_id !== input.fixture.connectionId
+    run.customer_id !== input.fixture.customerId || run.connection_id !== input.fixture.connectionId ||
+    run.trigger_kind !== input.result.job.triggerKind ||
+    run.schedule_id !== input.result.job.scheduleId
   ) {
     throw new PilotRepositoryError("CONFLICT", "The fixture job idempotency key conflicts with another sync");
   }
@@ -469,6 +485,7 @@ export async function publishLocalFixtureJob(input: {
       fixtureVersion: input.result.version,
     },
     input.result.job.jobId,
+    input.result.job.scheduleId,
   );
   const stored = await insertPublication(db, {
     jobId: input.result.job.jobId,
@@ -476,6 +493,7 @@ export async function publishLocalFixtureJob(input: {
     version: input.result.version,
     syncRunId,
     snapshotId,
+    scheduleId: input.result.job.scheduleId,
     actorId: input.actorId,
   });
   return stored;
@@ -493,7 +511,7 @@ export async function getLocalJobPublications(
   const placeholders = jobIds.map(() => "?").join(", ");
   const result = await db.prepare(
     `SELECT job_id, org_id, customer_id, connection_id, sync_run_id,
-            snapshot_id, fixture_id, fixture_version, published_at
+            snapshot_id, fixture_id, fixture_version, schedule_id, published_at
        FROM local_job_publications
       WHERE org_id = ? AND job_id IN (${placeholders})`,
   ).bind(orgId, ...jobIds).all<PublicationRow>();

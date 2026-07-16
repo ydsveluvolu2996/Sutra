@@ -8,11 +8,82 @@ import { test } from "node:test";
 
 import { executeLocalFixtureCollectionJob } from "../src/local-fixture-catalog.js";
 import { MemoryLocalJobStateStore } from "../src/local-job-state.js";
-import { createLocalCollectorServer } from "../src/local-server.js";
+import {
+  createLocalCollectorServer,
+  isPublicSshIngressCandidate,
+  normalizeCollectorCoverage,
+} from "../src/local-server.js";
 
 const NOW = new Date("2026-07-15T10:00:00.000Z");
 const TENANT_ID = "org_local_sutra";
 const CONNECTION_ID = "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const CUSTOMER_ID = "cust_11111111111111111111111111111111";
+const MERIDIAN_CUSTOMER_ID = "cust_22222222222222222222222222222222";
+const SCHEDULE_ID = `sched_${createHash("sha256")
+  .update(`local-fixture-schedule\u0000${TENANT_ID}\u0000northstar-retail`, "utf8")
+  .digest("hex")
+  .slice(0, 48)}`;
+const UPSERT_MUTATION_ID = `schedop_${"a".repeat(48)}`;
+const ENABLE_MUTATION_ID = `schedop_${"b".repeat(48)}`;
+const DISABLE_MUTATION_ID = `schedop_${"c".repeat(48)}`;
+const REENABLE_MUTATION_ID = `schedop_${"d".repeat(48)}`;
+const STALE_MUTATION_ID = `schedop_${"e".repeat(48)}`;
+
+test("public SSH candidates are protocol-aware and include IPv6 and all-protocol rules", () => {
+  assert.equal(isPublicSshIngressCandidate([
+    { protocol: "-1", ipv4Cidrs: ["0.0.0.0/0"], ipv6Cidrs: [] },
+  ]), true);
+  assert.equal(isPublicSshIngressCandidate([
+    { protocol: "tcp", fromPort: 22, toPort: 22, ipv4Cidrs: [], ipv6Cidrs: ["::/0"] },
+  ]), true);
+  assert.equal(isPublicSshIngressCandidate([
+    { protocol: "icmp", fromPort: 22, toPort: 22, ipv4Cidrs: ["0.0.0.0/0"], ipv6Cidrs: [] },
+  ]), false);
+  assert.equal(isPublicSshIngressCandidate([
+    { protocol: "tcp", fromPort: 443, toPort: 443, ipv4Cidrs: ["0.0.0.0/0"], ipv6Cidrs: [] },
+  ]), false);
+});
+
+test("live collector coverage is normalized without collapsing adapter failures", () => {
+  assert.deepEqual(
+    normalizeCollectorCoverage([
+      {
+        collectorKey: "ec2.instances",
+        region: "us-east-1",
+        status: "SUCCEEDED",
+        itemsObserved: 25,
+        pagesObserved: 3,
+      },
+      {
+        collectorKey: "rds.db-instances",
+        region: "us-west-2",
+        status: "FAILED",
+        itemsObserved: 0,
+        pagesObserved: 0,
+        errorCode: "AccessDeniedException",
+        message: "The read-only AWS collector did not return a usable page.",
+      },
+    ]),
+    [
+      {
+        collectorKey: "ec2.instances",
+        region: "us-east-1",
+        status: "succeeded",
+        itemsObserved: 25,
+        pagesObserved: 3,
+      },
+      {
+        collectorKey: "rds.db-instances",
+        region: "us-west-2",
+        status: "failed",
+        itemsObserved: 0,
+        pagesObserved: 0,
+        errorCode: "AccessDeniedException",
+        message: "The read-only AWS collector did not return a usable page.",
+      },
+    ],
+  );
+});
 
 test("live AWS mode is denied unless a sandbox is explicitly authorized", () => {
   assert.throws(
@@ -112,6 +183,74 @@ test("signed loopback fixture API completes register, trust verification, and sy
     assert.equal((snapshot.resources as unknown[]).length, 13);
     assert.equal((snapshot.findings as unknown[]).length, 11);
     assert.match(snapshot.snapshotSha256 as string, /^[a-f0-9]{64}$/u);
+
+    const disabled = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${CONNECTION_ID}/disable`,
+      { tenantId: TENANT_ID, connectionId: CONNECTION_ID },
+    );
+    assert.equal(disabled.status, 200);
+    assert.deepEqual(disabled.value, { disabled: true });
+    assert.doesNotMatch(JSON.stringify(disabled.value), /externalId|roleArn|credentials/iu);
+
+    const disabledSync = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${CONNECTION_ID}/sync`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: CONNECTION_ID,
+        jobId: "sync_disabled_aaaaaaaaaaaaaaaaaaaaaa",
+      },
+    );
+    assert.equal(disabledSync.status, 409);
+
+    const delayedRegistration = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/connections/${CONNECTION_ID}`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: CONNECTION_ID,
+        accountId: "123456789012",
+        partition: "aws",
+        roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+        externalId: "sutra_rotated_external_id_123456789",
+        enabledRegions: ["us-east-1", "ap-south-1"],
+      },
+    );
+    assert.equal(delayedRegistration.status, 409);
+
+    const offboarded = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${CONNECTION_ID}/offboard`,
+      { tenantId: TENANT_ID, connectionId: CONNECTION_ID },
+    );
+    assert.equal(offboarded.status, 200);
+    assert.deepEqual(offboarded.value, { offboarded: true });
+
+    const offboardedRegistration = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/connections/${CONNECTION_ID}`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: CONNECTION_ID,
+        accountId: "123456789012",
+        partition: "aws",
+        roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+        externalId: "sutra_rotated_external_id_123456789",
+        enabledRegions: ["us-east-1", "ap-south-1"],
+      },
+    );
+    assert.equal(offboardedRegistration.status, 409);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
@@ -229,10 +368,17 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
     assert.equal(enqueued.status, 202);
     const enqueuedValue = enqueued.value as {
       created: boolean;
-      job: { jobId: string; status: string };
+      job: {
+        jobId: string;
+        status: string;
+        triggerKind: string;
+        scheduleId: string | null;
+      };
     };
     assert.equal(enqueuedValue.created, true);
     assert.equal(enqueuedValue.job.status, "pending");
+    assert.equal(enqueuedValue.job.triggerKind, "manual");
+    assert.equal(enqueuedValue.job.scheduleId, null);
     jobId = enqueuedValue.job.jobId;
     assert.match(jobId, /^job_[a-f0-9]{48}$/u);
 
@@ -272,6 +418,20 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
       code: "IDEMPOTENCY_CONFLICT",
       message: "The idempotency key is already bound to another local fixture request",
     });
+
+    const reservedScheduleProvenance = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      "/v1/local/jobs/simulated-sync",
+      {
+        tenantId: TENANT_ID,
+        fixtureId: "northstar-retail",
+        version: "2026.07.0",
+        idempotencyKey: `schedule:${SCHEDULE_ID}:${NOW.toISOString()}`,
+      },
+    );
+    assert.equal(reservedScheduleProvenance.status, 400);
 
     const jobs = await signedRequest(
       firstBaseUrl,
@@ -337,7 +497,7 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
           restartedBaseUrl,
           sharedSecret,
           "GET",
-          `/v1/local/jobs/${jobId}/result`,
+          `/v1/local/jobs/${jobId}/result?tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
         ),
       (response) => response.status === 200,
     );
@@ -359,6 +519,41 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
     assert.equal(completedValue.result.snapshot.resources.length, 13);
     assert.match(completedValue.result.snapshot.snapshotSha256, /^[a-f0-9]{64}$/u);
 
+    const wrongResultScope = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs/${jobId}/result?tenantId=${TENANT_ID}&customerId=cust_22222222222222222222222222222222`,
+    );
+    assert.equal(wrongResultScope.status, 404);
+    const reviewBeforePublication = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}&reviewRequired=true`,
+    );
+    assert.equal((reviewBeforePublication.value as { count: number }).count, 1);
+    const acknowledged = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/jobs/${jobId}/published`,
+      {
+        tenantId: TENANT_ID,
+        customerId: CUSTOMER_ID,
+        publicationId: "snapshot_local_test",
+        publishedAt: NOW.toISOString(),
+      },
+    );
+    assert.deepEqual(acknowledged.value, { acknowledged: true });
+    const reviewAfterPublication = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}&reviewRequired=true`,
+    );
+    assert.equal((reviewAfterPublication.value as { count: number }).count, 0);
+
     const compactJobs = await signedRequest(
       restartedBaseUrl,
       sharedSecret,
@@ -366,6 +561,291 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
       "/v1/local/jobs?limit=1",
     );
     assert.doesNotMatch(JSON.stringify(compactJobs.value), /snapshot|leaseToken/iu);
+  } finally {
+    await close(restartedServer);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("signed local schedules persist, enforce catalog scope, and create provenance-safe jobs", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-local-schedules-api-"));
+  const sharedSecret = randomBytes(32).toString("base64url");
+  const localJobStatePath = join(directory, "local-jobs.json");
+  let clock = NOW;
+  const createServerOptions = {
+    sharedSecret,
+    registryEncryptionKey: randomBytes(32).toString("base64url"),
+    registryPath: join(directory, "registry.enc"),
+    localJobStatePath,
+    mode: "fixture" as const,
+    now: () => clock,
+    localJobPollIntervalMs: 5,
+    localJobLeaseMs: 1_000,
+    localJobWorkerId: "schedule-api-test-worker",
+    localScheduleMaxCatchUpPerTick: 2,
+  };
+  const firstServer = createLocalCollectorServer({
+    ...createServerOptions,
+    localJobWorkerEnabled: false,
+  });
+  const firstBaseUrl = await listen(firstServer);
+  const initialRunAt = new Date(NOW.getTime() - 60_000).toISOString();
+  try {
+    const invalidScope = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/local/schedules/${SCHEDULE_ID}`,
+      {
+        tenantId: "org_other_tenant",
+        mutationId: UPSERT_MUTATION_ID,
+        mutationSequence: 1,
+        fixtureId: "northstar-retail",
+        version: "2026.07.1",
+        everyMs: 1_000,
+        enabled: false,
+        firstRunAt: initialRunAt,
+      },
+    );
+    assert.equal(invalidScope.status, 400);
+
+    const extraField = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/local/schedules/${SCHEDULE_ID}`,
+      {
+        tenantId: TENANT_ID,
+        mutationId: UPSERT_MUTATION_ID,
+        mutationSequence: 1,
+        fixtureId: "northstar-retail",
+        version: "2026.07.1",
+        everyMs: 1_000,
+        enabled: false,
+        firstRunAt: initialRunAt,
+        customerId: CUSTOMER_ID,
+      },
+    );
+    assert.equal(extraField.status, 400);
+
+    const upserted = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/local/schedules/${SCHEDULE_ID}`,
+      {
+        tenantId: TENANT_ID,
+        mutationId: UPSERT_MUTATION_ID,
+        mutationSequence: 1,
+        fixtureId: "northstar-retail",
+        version: "2026.07.1",
+        everyMs: 1_000,
+        enabled: false,
+        firstRunAt: initialRunAt,
+      },
+    );
+    assert.equal(upserted.status, 200);
+    const upsertedSchedule = (upserted.value as { schedule: Record<string, unknown> })
+      .schedule;
+    assert.deepEqual(Object.keys(upsertedSchedule).sort(), [
+      "capacityBlockedAt",
+      "capacitySkippedOccurrences",
+      "capacityState",
+      "connectionId",
+      "createdAt",
+      "customerId",
+      "enabled",
+      "everyMs",
+      "fixtureId",
+      "lastMissedAt",
+      "maxAttempts",
+      "missedOccurrences",
+      "nextRunAt",
+      "scheduleId",
+      "tenantId",
+      "updatedAt",
+      "version",
+    ]);
+    assert.equal(upsertedSchedule.scheduleId, SCHEDULE_ID);
+    assert.equal(upsertedSchedule.customerId, CUSTOMER_ID);
+    assert.equal(upsertedSchedule.connectionId, CONNECTION_ID);
+    assert.equal(upsertedSchedule.nextRunAt, initialRunAt);
+    assert.equal(upsertedSchedule.enabled, false);
+    assert.doesNotMatch(
+      JSON.stringify(upserted.value),
+      /payload|idempotencyKey|externalId|roleArn|credentials/iu,
+    );
+
+    const listed = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/schedules?tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+    );
+    assert.equal(listed.status, 200);
+    assert.equal((listed.value as { count: number }).count, 1);
+
+    const incompleteScope = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/schedules?tenantId=${TENANT_ID}`,
+    );
+    assert.equal(incompleteScope.status, 400);
+
+    const wrongTenantToggle = await signedRequest(
+      firstBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/schedules/${SCHEDULE_ID}/enabled`,
+      {
+        tenantId: "org_other_tenant",
+        enabled: true,
+        mutationId: ENABLE_MUTATION_ID,
+        mutationSequence: 2,
+      },
+    );
+    assert.equal(wrongTenantToggle.status, 404);
+  } finally {
+    await close(firstServer);
+  }
+
+  const restartedServer = createLocalCollectorServer(createServerOptions);
+  const restartedBaseUrl = await listen(restartedServer);
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const jobsWhileDisabled = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+    );
+    assert.equal((jobsWhileDisabled.value as { count: number }).count, 0);
+
+    const persisted = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/schedules?tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+    );
+    const [persistedSchedule] = (persisted.value as {
+      schedules: Array<{ scheduleId: string; enabled: boolean; nextRunAt: string }>;
+    }).schedules;
+    assert.equal(persistedSchedule?.scheduleId, SCHEDULE_ID);
+    assert.equal(persistedSchedule?.enabled, false);
+    assert.equal(persistedSchedule?.nextRunAt, initialRunAt);
+
+    clock = new Date(NOW.getTime() + 20_000);
+    const enabled = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/schedules/${SCHEDULE_ID}/enabled`,
+      {
+        tenantId: TENANT_ID,
+        enabled: true,
+        mutationId: ENABLE_MUTATION_ID,
+        mutationSequence: 2,
+      },
+    );
+    const enabledSchedule = (enabled.value as {
+      schedule: { enabled: boolean; nextRunAt: string };
+    }).schedule;
+    assert.equal(enabled.status, 200);
+    assert.equal(enabledSchedule.enabled, true);
+    assert.equal(enabledSchedule.nextRunAt, clock.toISOString());
+
+    const firstScheduledJob = await pollSignedRequest(
+      () =>
+        signedRequest(
+          restartedBaseUrl,
+          sharedSecret,
+          "GET",
+          `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+        ),
+      (response) => {
+        const jobs = (response.value as {
+          jobs: Array<{ status: string; triggerKind: string; scheduleId: string | null }>;
+        }).jobs;
+        return jobs.length === 1 && jobs[0]?.status === "succeeded";
+      },
+    );
+    const [scheduledJob] = (firstScheduledJob.value as {
+      jobs: Array<{ triggerKind: string; scheduleId: string | null }>;
+    }).jobs;
+    assert.equal(scheduledJob?.triggerKind, "scheduled");
+    assert.equal(scheduledJob?.scheduleId, SCHEDULE_ID);
+
+    const disabled = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/schedules/${SCHEDULE_ID}/enabled`,
+      {
+        tenantId: TENANT_ID,
+        enabled: false,
+        mutationId: DISABLE_MUTATION_ID,
+        mutationSequence: 3,
+      },
+    );
+    assert.equal(
+      (disabled.value as { schedule: { enabled: boolean } }).schedule.enabled,
+      false,
+    );
+    clock = new Date(NOW.getTime() + 40_000);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    const stillOneJob = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "GET",
+      `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+    );
+    assert.equal((stillOneJob.value as { count: number }).count, 1);
+
+    const reenabled = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/schedules/${SCHEDULE_ID}/enabled`,
+      {
+        tenantId: TENANT_ID,
+        enabled: true,
+        mutationId: REENABLE_MUTATION_ID,
+        mutationSequence: 4,
+      },
+    );
+    assert.equal(
+      (reenabled.value as { schedule: { nextRunAt: string } }).schedule.nextRunAt,
+      clock.toISOString(),
+    );
+    const stale = await signedRequest(
+      restartedBaseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/local/schedules/${SCHEDULE_ID}/enabled`,
+      {
+        tenantId: TENANT_ID,
+        enabled: false,
+        mutationId: STALE_MUTATION_ID,
+        mutationSequence: 3,
+      },
+    );
+    assert.equal(stale.status, 409);
+    assert.equal((stale.value as { code: string }).code, "STALE_SCHEDULE_MUTATION");
+    const secondScheduledJob = await pollSignedRequest(
+      () =>
+        signedRequest(
+          restartedBaseUrl,
+          sharedSecret,
+          "GET",
+          `/v1/local/jobs?limit=100&tenantId=${TENANT_ID}&customerId=${CUSTOMER_ID}`,
+        ),
+      (response) => {
+        const jobs = (response.value as { jobs: Array<{ status: string }> }).jobs;
+        return jobs.length === 2 && jobs.every((job) => job.status === "succeeded");
+      },
+    );
+    assert.equal((secondScheduledJob.value as { count: number }).count, 2);
   } finally {
     await close(restartedServer);
     await rm(directory, { recursive: true, force: true });
@@ -426,7 +906,7 @@ test("local fixture worker retries a failed lease with backoff before succeeding
           baseUrl,
           sharedSecret,
           "GET",
-          `/v1/local/jobs/${jobId}/result`,
+          `/v1/local/jobs/${jobId}/result?tenantId=${TENANT_ID}&customerId=${MERIDIAN_CUSTOMER_ID}`,
         ),
       (response) => response.status === 200,
     );

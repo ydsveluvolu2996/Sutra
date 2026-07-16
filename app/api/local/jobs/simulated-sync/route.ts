@@ -1,4 +1,5 @@
 import { assertSessionCapability } from "../../../../../lib/api-auth";
+import { getConnection } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import type { LocalFixtureVersion } from "../../../../../lib/local-ops-types";
 import {
@@ -45,6 +46,20 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("The simulated fixture or version was not found"), { code: "NOT_FOUND" });
     }
     assertSessionCapability(actor.authenticated, "sync:run", fixture.customerId);
+    const connection = await getConnection(fixture.connectionId);
+    if (connection === null) {
+      assertSessionCapability(actor.authenticated, "customer:create");
+      assertSessionCapability(actor.authenticated, "connection:manage", fixture.customerId);
+    } else if (
+      connection.customerId !== fixture.customerId ||
+      connection.sourceKind !== "simulated_fixture" ||
+      connection.fixtureId !== fixture.fixtureId ||
+      connection.status !== "active"
+    ) {
+      throw Object.assign(new Error("The simulated connection is not active for collection"), {
+        code: "INVALID_STATE",
+      });
+    }
     const result = await enqueueLocalFixtureJob({
       fixture,
       version: body.version,

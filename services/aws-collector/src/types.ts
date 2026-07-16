@@ -69,6 +69,32 @@ export type CallerIdentityClientFactory = (
   credentials: AwsTemporaryCredentials,
 ) => CallerIdentityClient;
 
+export interface RoleContractClient {
+  getRole(roleName: string): Promise<{
+    readonly arn?: string;
+    readonly roleName?: string;
+    readonly path?: string;
+    readonly maxSessionDuration?: number;
+    readonly assumeRolePolicyDocument?: string;
+    readonly tags?: readonly { readonly key?: string; readonly value?: string }[];
+  }>;
+  listRolePolicies(
+    roleName: string,
+    marker?: string,
+  ): Promise<{
+    readonly policyNames: readonly string[];
+    readonly isTruncated: boolean;
+    readonly marker?: string;
+  }>;
+  getRolePolicy(roleName: string, policyName: string): Promise<{
+    readonly policyDocument?: string;
+  }>;
+}
+
+export type RoleContractClientFactory = (
+  credentials: AwsTemporaryCredentials,
+) => RoleContractClient;
+
 export interface ParsedIamRoleArn {
   readonly arn: string;
   readonly partition: AwsPartition;
@@ -99,6 +125,10 @@ export interface OnboardingTrustVerification {
   readonly roleSessionName: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: "live-demo-2026-07";
 }
 
 export interface InventoryJobRequest {
@@ -113,6 +143,26 @@ export interface OnboardingVerificationJobRequest {
 
 export type InventoryCoverage = "COMPLETE" | "PARTIAL";
 
+export type InventoryCollectorCoverageStatus =
+  | "SUCCEEDED"
+  | "PARTIAL"
+  | "FAILED";
+
+/**
+ * Safe, adapter-scoped coverage. Counts describe normalized items that reached
+ * the sink and primary AWS list/describe pages that returned successfully.
+ * Raw AWS messages are deliberately excluded.
+ */
+export interface InventoryCollectorCoverage {
+  readonly collectorKey: string;
+  readonly region: string;
+  readonly status: InventoryCollectorCoverageStatus;
+  readonly itemsObserved: number;
+  readonly pagesObserved: number;
+  readonly errorCode?: string;
+  readonly message?: string;
+}
+
 export type SafeJsonPrimitive = string | number | boolean | null;
 export type SafeJsonValue =
   | SafeJsonPrimitive
@@ -124,8 +174,9 @@ export interface SafeJsonObject {
 }
 
 /**
- * Allowlisted CMDB record. Raw AWS SDK responses, tags, environment variables,
- * credentials, and arbitrary error messages are not valid persistence objects.
+ * Allowlisted CMDB record. Raw AWS SDK responses, unbounded/sensitive tags,
+ * environment variables, credentials, and arbitrary error messages are not
+ * valid persistence objects.
  */
 export interface NormalizedAwsResource {
   readonly schemaVersion: 1;
@@ -138,6 +189,7 @@ export interface NormalizedAwsResource {
   readonly resourceId: string;
   readonly arn?: string;
   readonly observedAt: string;
+  readonly tags: Readonly<Record<string, string>>;
   readonly configuration: SafeJsonObject;
 }
 
@@ -188,6 +240,7 @@ export interface InventoryCollectionResult {
   readonly resourcesObserved: number;
   readonly findingsObserved: number;
   readonly coverage: InventoryCoverage;
+  readonly collectorCoverage: readonly InventoryCollectorCoverage[];
 }
 
 export interface InventoryRunner {
@@ -216,6 +269,10 @@ export interface OnboardingVerificationJobResult {
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: "live-demo-2026-07";
   readonly verifiedAt: string;
 }
 
@@ -316,13 +373,16 @@ export class IdentityMismatchError extends CollectorError {
 
 export type NegativeExternalIdProbe =
   | "MISSING_EXTERNAL_ID"
-  | "WRONG_EXTERNAL_ID";
+  | "WRONG_EXTERNAL_ID"
+  | "ROLE_CONTRACT";
 
 export class UnsafeTrustPolicyError extends CollectorError {
   public constructor(public readonly probe: NegativeExternalIdProbe) {
     super(
       "TRUST_POLICY_UNSAFE",
-      "Customer role accepted an onboarding request that did not contain the registered External ID",
+      probe === "ROLE_CONTRACT"
+        ? "Customer role does not match the reviewed Sutra trust and permission contract"
+        : "Customer role accepted an onboarding request that did not contain the exact registered External ID",
     );
   }
 }

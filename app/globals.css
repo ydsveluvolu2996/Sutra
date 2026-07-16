@@ -350,6 +350,7 @@ h3 { letter-spacing: -.02em; }
 .inline-warning { display: grid; gap: 4px; margin-bottom: 15px; padding: 11px 12px; border: 1px solid #ead4b7; border-radius: 7px; background: #fffaf2; }.inline-warning strong { color: #8f5b21; font-size: 9px; }.inline-warning span { color: var(--ink-soft); font-size: 8px; line-height: 1.45; }
 .role-registration { margin-top: 15px; padding-top: 17px; border-top: 1px solid var(--line); }
 .onboard-validation-action { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-top: 22px; padding: 18px; border: 1px solid #cce7e8; border-radius: 9px; background: linear-gradient(120deg,#f1fbfb,#fff); }.onboard-validation-action h2 { margin-bottom: 5px; }.onboard-validation-action p:last-child { max-width: 560px; margin: 0; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }
+.connection-lifecycle { display: grid; gap: 14px; margin-top: 16px; padding: 18px; border: 1px solid #edd9d6; border-radius: 9px; background: linear-gradient(120deg,#fffafa,#fff); }.connection-lifecycle h2 { margin-bottom: 5px; font-size: 15px; }.connection-lifecycle p:last-child { margin: 0; color: var(--ink-soft); font-size: 9px; line-height: 1.5; }.connection-lifecycle-actions { display: flex; flex-wrap: wrap; gap: 8px; }.offboard-confirmation { display: grid; gap: 9px; padding: 13px; border: 1px solid #e8c4c0; border-radius: 8px; background: #fff; }.offboard-confirmation > strong { color: #8c2929; font-size: 10px; }.offboard-confirmation input { width: min(280px,100%); min-height: 38px; padding: 0 10px; border: 1px solid #dca0a0; border-radius: 7px; color: var(--ink); font-size: 10px; }
 
 .coverage-panel { margin-bottom: 13px; }
 .coverage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
@@ -676,6 +677,24 @@ h3 { letter-spacing: -.02em; }
 .operations-fixture-card label { display: grid; gap: 6px; margin-bottom: 10px; }
 .operations-fixture-card select { width: 100%; min-height: 36px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: #fff; color: var(--ink); font-size: 10px; }
 .operations-fixture-card > .button { width: 100%; }
+.operations-schedule-panel { margin-bottom: 13px; }
+.schedule-review-note { margin: 0 0 13px; }
+.operations-schedule-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.operations-schedule-card { min-width: 0; display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: 9px; background: linear-gradient(145deg, #f8fcfb, #fff); }
+.operations-schedule-head { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.operations-schedule-head > div { min-width: 0; display: grid; gap: 4px; }
+.operations-schedule-head strong { overflow: hidden; text-overflow: ellipsis; font-size: 12px; white-space: nowrap; }
+.operations-schedule-head small { color: var(--ink-faint); font: 8px var(--font-geist-mono), monospace; }
+.operations-schedule-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.operations-schedule-fields label { min-width: 0; display: grid; gap: 6px; }
+.operations-schedule-fields label > span, .operations-schedule-card dt { color: var(--ink-faint); font-size: 8px; }
+.operations-schedule-fields select { width: 100%; min-width: 0; min-height: 36px; padding: 0 9px; border: 1px solid var(--line-dark); border-radius: 7px; background: #fff; color: var(--ink); font-size: 9px; }
+.operations-schedule-card dl { display: grid; grid-template-columns: 1.4fr .6fr; gap: 9px; margin: 0; }
+.operations-schedule-card dl div { min-width: 0; display: grid; gap: 4px; }
+.operations-schedule-card dd { margin: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: 9px; white-space: nowrap; }
+.operations-schedule-actions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+.operations-schedule-actions .button-primary { flex: 1; }
+.operations-schedule-readonly { margin: auto 0 0; color: var(--ink-faint); font-size: 9px; line-height: 1.5; }
 .operations-job-table { margin: 0 -20px -19px; }
 .operations-job-row { min-height: 64px; display: grid; grid-template-columns: 78px minmax(190px, 1.4fr) 110px 65px 135px minmax(150px, 1fr); gap: 12px; align-items: center; padding: 9px 20px; border-top: 1px solid #edf0ed; font-size: 10px; }
 .operations-job-row:hover:not(.operations-job-header) { background: #fbfcfb; }
@@ -696,7 +715,7 @@ h3 { letter-spacing: -.02em; }
   .inventory-stats { grid-template-columns: repeat(2, 1fr); }
   .finding-summary { grid-template-columns: repeat(3, 1fr); }
   .roadmap-phase-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .operations-fixture-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .operations-fixture-grid, .operations-schedule-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .site-nav { display: none; }
   .site-header { grid-template-columns: 1fr auto auto; }
   .site-mobile-nav { display: block; position: relative; order: 2; }
@@ -783,7 +802,8 @@ h3 { letter-spacing: -.02em; }
   .mfa-secret-block .button { justify-self: start; }
   .mfa-badge { display: none; }
   .simulation-trust-strip { align-items: flex-start; flex-direction: column; }
-  .operations-fixture-grid { grid-template-columns: 1fr; }
+  .operations-fixture-grid, .operations-schedule-grid { grid-template-columns: 1fr; }
+  .operations-schedule-fields { grid-template-columns: 1fr; }
   .demo-badge, .icon-button { display: none; }
   .page-heading { display: grid; align-items: start; }
   .heading-actions { width: 100%; }

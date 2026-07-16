@@ -9,12 +9,14 @@ import {
 } from "@aws-sdk/client-cloudtrail";
 import {
   DescribeInstancesCommand,
+  DescribeRegionsCommand,
   DescribeSecurityGroupsCommand,
   DescribeSubnetsCommand,
   DescribeVpcsCommand,
   EC2Client,
   type DescribeInstancesCommandInput,
   type DescribeInstancesCommandOutput,
+  type DescribeRegionsCommandOutput,
   type DescribeSecurityGroupsCommandInput,
   type DescribeSecurityGroupsCommandOutput,
   type DescribeSubnetsCommandInput,
@@ -46,12 +48,9 @@ import {
   type DescribeDBInstancesCommandOutput,
 } from "@aws-sdk/client-rds";
 import {
-  GetBucketLocationCommand,
   GetPublicAccessBlockCommand,
   ListBucketsCommand,
   S3Client,
-  type GetBucketLocationCommandInput,
-  type GetBucketLocationCommandOutput,
   type GetPublicAccessBlockCommandInput,
   type GetPublicAccessBlockCommandOutput,
   type ListBucketsCommandInput,
@@ -69,6 +68,7 @@ import type {
   AwsTemporaryCredentials,
   InventoryCollectionContext,
   InventoryCollectionResult,
+  InventoryCollectorCoverage,
   InventoryEvidenceStatus,
   InventoryRunner,
   NormalizedAwsEvidence,
@@ -80,12 +80,33 @@ import type {
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+$/;
 const MAX_REGIONS = 64;
 const MAX_PAGES = 10_000;
+const SAFE_TAG_KEYS = new Set([
+  "name",
+  "environment",
+  "env",
+  "service",
+  "application",
+  "app",
+  "project",
+  "owner",
+  "team",
+  "costcenter",
+  "costcentre",
+  "managedby",
+]);
+const DANGEROUS_TAG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const HIGH_CONFIDENCE_SECRET_VALUE =
+  /(?:\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:password|passwd|secret|session[_ -]?token|api[_ -]?key)\s*[:=]|\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{12,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b)/iu;
+const CREDENTIAL_URI_OR_SIGNED_URL =
+  /(?:(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/|https?:\/\/[^\s]+[?&](?:x-amz-(?:credential|signature|security-token)|signature|sig|token|api[_-]?key)=)/iu;
+const LONG_OPAQUE_TAG_TOKEN = /\b[A-Za-z0-9_-]{40,}\b/u;
 
 export interface InventorySelectionContext {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly accountId: string;
   readonly partition: string;
+  readonly credentials: AwsTemporaryCredentials;
 }
 
 export interface InventoryRegionSelector {
@@ -99,6 +120,71 @@ export class StaticInventoryRegionSelector implements InventoryRegionSelector {
 
   public selectRegions(): readonly string[] {
     return this.regions;
+  }
+}
+
+export interface AwsRegionDiscoveryClient {
+  describeRegions(): Promise<DescribeRegionsCommandOutput>;
+}
+
+export interface AwsEnabledRegionSelectorOptions {
+  readonly controlRegion: string;
+  readonly requestedRegions: readonly string[];
+  readonly maxAttempts?: number;
+  readonly clientFactory?: (
+    controlRegion: string,
+    credentials: AwsTemporaryCredentials,
+  ) => AwsRegionDiscoveryClient;
+}
+
+/** Discovers account-enabled Regions and refuses to silently skip a requested Region. */
+export class AwsEnabledRegionSelector implements InventoryRegionSelector {
+  private readonly maxAttempts: number;
+
+  public constructor(private readonly options: AwsEnabledRegionSelectorOptions) {
+    if (!REGION.test(options.controlRegion)) {
+      throw new InventoryConfigurationError("A valid Region discovery endpoint is required");
+    }
+    this.maxAttempts = validateMaxAttempts(options.maxAttempts ?? 4);
+  }
+
+  public async selectRegions(
+    context: InventorySelectionContext,
+  ): Promise<readonly string[]> {
+    const client = this.options.clientFactory?.(
+      this.options.controlRegion,
+      context.credentials,
+    ) ?? this.createClient(context.credentials);
+    const output = await client.describeRegions();
+    const enabled = new Set(
+      (output.Regions ?? []).flatMap((region) =>
+        typeof region.RegionName === "string" &&
+        (region.OptInStatus === "opted-in" || region.OptInStatus === "opt-in-not-required")
+          ? [region.RegionName]
+          : [],
+      ),
+    );
+    const requested = normalizeRegions(this.options.requestedRegions);
+    const unavailable = requested.filter((region) => !enabled.has(region));
+    if (unavailable.length > 0) {
+      throw new InventoryConfigurationError(
+        `Selected AWS Regions are not enabled: ${unavailable.join(", ")}`,
+      );
+    }
+    return requested;
+  }
+
+  private createClient(credentials: AwsTemporaryCredentials): AwsRegionDiscoveryClient {
+    const client = new EC2Client({
+      region: this.options.controlRegion,
+      credentials,
+      retryMode: "standard",
+      maxAttempts: this.maxAttempts,
+    });
+    return {
+      describeRegions: () =>
+        client.send(new DescribeRegionsCommand({ AllRegions: true })),
+    };
   }
 }
 
@@ -117,9 +203,6 @@ export interface Ec2InventoryClient {
 
 export interface S3InventoryClient {
   listBuckets(input: ListBucketsCommandInput): Promise<ListBucketsCommandOutput>;
-  getBucketLocation(
-    input: GetBucketLocationCommandInput,
-  ): Promise<GetBucketLocationCommandOutput>;
   getPublicAccessBlock(
     input: GetPublicAccessBlockCommandInput,
   ): Promise<GetPublicAccessBlockCommandOutput>;
@@ -198,7 +281,6 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
     const client = new S3Client(this.clientConfig(region, credentials));
     return {
       listBuckets: (input) => client.send(new ListBucketsCommand(input)),
-      getBucketLocation: (input) => client.send(new GetBucketLocationCommand(input)),
       getPublicAccessBlock: (input) =>
         client.send(new GetPublicAccessBlockCommand(input)),
     };
@@ -273,10 +355,11 @@ export interface SingleAccountAwsInventoryRunnerDependencies {
 }
 
 interface CollectionTask {
+  readonly collectorKey: string;
   readonly service: string;
   readonly subject: string;
   readonly region: string;
-  run(): Promise<void>;
+  run(state: TaskCollectionState): Promise<void>;
 }
 
 /**
@@ -303,6 +386,7 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         connectionId: context.connectionId,
         accountId: context.accountId,
         partition: context.partition,
+        credentials: context.credentials,
       }),
     );
     const controlRegion = this.dependencies.globalControlRegion ?? regions[0];
@@ -312,16 +396,18 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
 
     const observedAt = this.now().toISOString();
     const state = new BatchState(this.dependencies.sink);
-    const tasks = this.buildTasks(context, regions, controlRegion, observedAt, state);
+    const tasks = this.buildTasks(context, regions, controlRegion, observedAt);
+    const collectorCoverage = new Array<InventoryCollectorCoverage>(tasks.length);
 
-    await runBounded(tasks, this.maxConcurrency, async (task) => {
+    await runBounded(tasks.map((value, index) => ({ value, index })), this.maxConcurrency, async ({ value: task, index }) => {
+      const taskState = new TaskCollectionState(state, task);
       try {
-        await task.run();
+        await task.run(taskState);
+        collectorCoverage[index] = taskState.finish();
       } catch (error: unknown) {
         if (error instanceof InventorySinkWriteError) {
           throw error;
         }
-        state.markPartial();
         await state.emit({
           resources: [],
           evidence: [
@@ -337,13 +423,17 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
             ),
           ],
         });
+        collectorCoverage[index] = taskState.finish(error);
       }
     });
+
+    const partial = collectorCoverage.some((entry) => entry.status !== "SUCCEEDED");
 
     return {
       resourcesObserved: state.resourcesObserved,
       findingsObserved: state.evidenceObserved,
-      coverage: state.partial ? "PARTIAL" : "COMPLETE",
+      coverage: partial ? "PARTIAL" : "COMPLETE",
+      collectorCoverage,
     };
   }
 
@@ -352,36 +442,21 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
     regions: readonly string[],
     controlRegion: string,
     observedAt: string,
-    state: BatchState,
   ): CollectionTask[] {
     const credentials = context.credentials;
     const tasks: CollectionTask[] = [];
     const iam = this.dependencies.clients.iam(controlRegion, credentials);
-    const s3 = this.dependencies.clients.s3(controlRegion, credentials);
-    const s3ByRegion = new Map<string, S3InventoryClient>([[controlRegion, s3]]);
-    const s3ForRegion = (region: string): S3InventoryClient => {
-      const existing = s3ByRegion.get(region);
-      if (existing !== undefined) return existing;
-      const created = this.dependencies.clients.s3(region, credentials);
-      s3ByRegion.set(region, created);
-      return created;
-    };
-
+    const collectCloudTrailRegion = createCloudTrailCollector(
+      context,
+      observedAt,
+      this.dependencies.clients,
+    );
     tasks.push(
-      task("iam", "account-summary", "global", () =>
+      task("iam.account", "iam", "account-summary", "global", (state) =>
         collectIamSummary(context, iam, observedAt, state),
       ),
-      task("iam", "password-policy", "global", () =>
+      task("iam.password-policy", "iam", "password-policy", "global", (state) =>
         collectIamPasswordPolicy(context, iam, observedAt, state),
-      ),
-      task("s3", "buckets", "global", () =>
-        collectS3(
-          context,
-          s3,
-          s3ForRegion,
-          observedAt,
-          state,
-        ),
       ),
     );
 
@@ -391,30 +466,34 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
       const cloudTrail = this.dependencies.clients.cloudTrail(region, credentials);
       const guardDuty = this.dependencies.clients.guardDuty(region, credentials);
       const securityHub = this.dependencies.clients.securityHub(region, credentials);
+      const s3 = this.dependencies.clients.s3(region, credentials);
 
       tasks.push(
-        task("ec2", "instances", region, () =>
+        task("s3.buckets", "s3", "buckets", region, (state) =>
+          collectS3(context, region, s3, observedAt, state),
+        ),
+        task("ec2.instances", "ec2", "instances", region, (state) =>
           collectEc2Instances(context, region, ec2, observedAt, state),
         ),
-        task("ec2", "vpcs", region, () =>
+        task("ec2.vpcs", "ec2", "vpcs", region, (state) =>
           collectVpcs(context, region, ec2, observedAt, state),
         ),
-        task("ec2", "subnets", region, () =>
+        task("ec2.subnets", "ec2", "subnets", region, (state) =>
           collectSubnets(context, region, ec2, observedAt, state),
         ),
-        task("ec2", "security-groups", region, () =>
+        task("ec2.security-groups", "ec2", "security-groups", region, (state) =>
           collectSecurityGroups(context, region, ec2, observedAt, state),
         ),
-        task("rds", "db-instances", region, () =>
+        task("rds.db-instances", "rds", "db-instances", region, (state) =>
           collectRds(context, region, rds, observedAt, state),
         ),
-        task("cloudtrail", "trails", region, () =>
-          collectCloudTrail(context, region, cloudTrail, observedAt, state),
+        task("cloudtrail.trails", "cloudtrail", "trails", region, (state) =>
+          collectCloudTrailRegion(region, cloudTrail, state),
         ),
-        task("guardduty", "detectors", region, () =>
+        task("guardduty.detectors", "guardduty", "detectors", region, (state) =>
           collectGuardDuty(context, region, guardDuty, observedAt, state),
         ),
-        task("securityhub", "hub", region, () =>
+        task("securityhub.hub", "securityhub", "hub", region, (state) =>
           collectSecurityHub(context, region, securityHub, observedAt, state),
         ),
       );
@@ -428,7 +507,7 @@ async function collectEc2Instances(
   region: string,
   client: Ec2InventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let token: string | undefined;
   const seen = new Set<string>();
@@ -465,11 +544,13 @@ async function collectEc2Instances(
                 (instance.SecurityGroups ?? []).map((group) => group.GroupId),
               ),
             }),
+            instance.Tags,
           ),
         );
       }
     }
     await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
     token = nextToken(output.NextToken, seen, "EC2 DescribeInstances");
     if (token === undefined) return;
   }
@@ -481,7 +562,7 @@ async function collectVpcs(
   region: string,
   client: Ec2InventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let token: string | undefined;
   const seen = new Set<string>();
@@ -512,10 +593,12 @@ async function collectVpcs(
                   ),
                 ),
               }),
+              vpc.Tags,
             ),
           ],
     );
     await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
     token = nextToken(output.NextToken, seen, "EC2 DescribeVpcs");
     if (token === undefined) return;
   }
@@ -527,7 +610,7 @@ async function collectSubnets(
   region: string,
   client: Ec2InventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let token: string | undefined;
   const seen = new Set<string>();
@@ -557,10 +640,12 @@ async function collectSubnets(
                 mapPublicIpOnLaunch: subnet.MapPublicIpOnLaunch,
                 availableIpAddressCount: subnet.AvailableIpAddressCount,
               }),
+              subnet.Tags,
             ),
           ],
     );
     await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
     token = nextToken(output.NextToken, seen, "EC2 DescribeSubnets");
     if (token === undefined) return;
   }
@@ -572,7 +657,7 @@ async function collectSecurityGroups(
   region: string,
   client: Ec2InventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let token: string | undefined;
   const seen = new Set<string>();
@@ -598,10 +683,12 @@ async function collectSecurityGroups(
                 ingress: (group.IpPermissions ?? []).map(normalizeIpPermission),
                 egress: (group.IpPermissionsEgress ?? []).map(normalizeIpPermission),
               }),
+              group.Tags,
             ),
           ],
     );
     await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
     token = nextToken(output.NextToken, seen, "EC2 DescribeSecurityGroups");
     if (token === undefined) return;
   }
@@ -610,44 +697,48 @@ async function collectSecurityGroups(
 
 async function collectS3(
   context: InventoryCollectionContext,
-  listClient: S3InventoryClient,
-  clientForRegion: (region: string) => S3InventoryClient,
+  region: string,
+  client: S3InventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let continuationToken: string | undefined;
   const seen = new Set<string>();
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const output = await listClient.listBuckets(
+    // BucketRegion is a server-side scope boundary. Do not enumerate bucket
+    // names from Regions the customer did not select for this connection.
+    const output = await client.listBuckets(
       continuationToken === undefined
-        ? { MaxBuckets: 1000 }
-        : { MaxBuckets: 1000, ContinuationToken: continuationToken },
+        ? { MaxBuckets: 1000, BucketRegion: region }
+        : { MaxBuckets: 1000, BucketRegion: region, ContinuationToken: continuationToken },
     );
+    state.observePage();
     for (const bucket of output.Buckets ?? []) {
       if (bucket.Name === undefined) continue;
-      const locationOutput = await listClient.getBucketLocation({ Bucket: bucket.Name });
-      const bucketRegion = normalizeBucketRegion(locationOutput.LocationConstraint);
       const resourceRecord = resource(
         context,
         observedAt,
-        bucketRegion,
+        region,
         "s3",
         "aws.s3.bucket",
         bucket.Name,
         `arn:${context.partition}:s3:::${bucket.Name}`,
         compact({
           creationDate: iso(bucket.CreationDate),
-          bucketRegion,
+          bucketRegion: region,
         }),
       );
 
       let blockStatus: InventoryEvidenceStatus = "CONFIGURED";
       let blockData: SafeJsonObject;
       try {
-        const block = await clientForRegion(bucketRegion).getPublicAccessBlock({
+        const block = await client.getPublicAccessBlock({
           Bucket: bucket.Name,
         });
         blockData = publicAccessBlockData(block);
+        if (!publicAccessBlockFullyConfigured(blockData)) {
+          blockStatus = "NOT_CONFIGURED";
+        }
       } catch (error: unknown) {
         if (isNamedError(error, "NoSuchPublicAccessBlockConfiguration")) {
           blockStatus = "NOT_CONFIGURED";
@@ -658,7 +749,7 @@ async function collectS3(
             restrictPublicBuckets: false,
           };
         } else {
-          state.markPartial();
+          state.markPartial(error);
           blockStatus = "ERROR";
           blockData = { errorName: safeErrorName(error) };
         }
@@ -670,7 +761,7 @@ async function collectS3(
           evidence(
             context,
             observedAt,
-            bucketRegion,
+            region,
             "s3",
             "S3_PUBLIC_ACCESS_BLOCK",
             bucket.Name,
@@ -679,6 +770,7 @@ async function collectS3(
           ),
         ],
       });
+      state.observeItems(1);
     }
     continuationToken = nextToken(
       output.ContinuationToken,
@@ -695,7 +787,7 @@ async function collectRds(
   region: string,
   client: RdsInventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let marker: string | undefined;
   const seen = new Set<string>();
@@ -733,10 +825,12 @@ async function collectRds(
                 ),
                 kmsKeyId: database.KmsKeyId,
               }),
+              database.TagList,
             ),
           ],
     );
     await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
     marker = nextToken(output.Marker, seen, "RDS DescribeDBInstances");
     if (marker === undefined) return;
   }
@@ -747,7 +841,7 @@ async function collectIamSummary(
   context: InventoryCollectionContext,
   client: IamInventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   const output = await client.getAccountSummary();
   const summary: Record<string, SafeJsonValue> = {};
@@ -771,13 +865,14 @@ async function collectIamSummary(
     ],
     evidence: [],
   });
+  state.observePage(1);
 }
 
 async function collectIamPasswordPolicy(
   context: InventoryCollectionContext,
   client: IamInventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   try {
     const output = await client.getAccountPasswordPolicy();
@@ -808,6 +903,7 @@ async function collectIamPasswordPolicy(
         ),
       ],
     });
+    state.observePage(1);
   } catch (error: unknown) {
     if (!isNamedError(error, "NoSuchEntity")) throw error;
     await state.emit({
@@ -825,66 +921,157 @@ async function collectIamPasswordPolicy(
         ),
       ],
     });
+    state.observePage(1);
   }
 }
 
-async function collectCloudTrail(
+type CloudTrailDescription = NonNullable<DescribeTrailsCommandOutput["trailList"]>[number];
+
+interface ObservedCloudTrail {
+  readonly identity: string;
+  readonly trailId: string;
+  readonly homeRegion: string;
+  readonly trail: CloudTrailDescription;
+}
+
+/**
+ * CloudTrail returns shadow copies of multi-Region trails outside their home
+ * Region. Coordinate all regional tasks so a shadow copy contributes coverage
+ * without becoming a second CMDB resource or causing a second status call.
+ */
+function createCloudTrailCollector(
   context: InventoryCollectionContext,
+  observedAt: string,
+  clients: AwsInventoryClientFactory,
+): (
   region: string,
   client: CloudTrailInventoryClient,
-  observedAt: string,
-  state: BatchState,
-): Promise<void> {
-  const output = await client.describeTrails({ includeShadowTrails: false });
-  const resources: NormalizedAwsResource[] = [];
-  const trailEvidence: NormalizedAwsEvidence[] = [];
-  for (const trail of output.trailList ?? []) {
-    const trailId = trail.TrailARN ?? trail.Name;
-    if (trailId === undefined) continue;
-    const status = await client.getTrailStatus({ Name: trailId });
-    resources.push(
-      resource(
-        context,
-        observedAt,
-        region,
-        "cloudtrail",
-        "aws.cloudtrail.trail",
-        trailId,
-        trail.TrailARN,
-        compact({
-          name: trail.Name,
-          homeRegion: trail.HomeRegion,
-          isMultiRegionTrail: trail.IsMultiRegionTrail,
-          includeGlobalServiceEvents: trail.IncludeGlobalServiceEvents,
-          logFileValidationEnabled: trail.LogFileValidationEnabled,
-          hasCustomEventSelectors: trail.HasCustomEventSelectors,
-          hasInsightSelectors: trail.HasInsightSelectors,
-          s3BucketName: trail.S3BucketName,
-          kmsKeyId: trail.KmsKeyId,
-          cloudWatchLogsLogGroupArn: trail.CloudWatchLogsLogGroupArn,
-        }),
-      ),
+  state: TaskCollectionState,
+) => Promise<void> {
+  const statusClients = new Map<string, CloudTrailInventoryClient>();
+  const statuses = new Map<string, Promise<GetTrailStatusCommandOutput>>();
+  const emittedTrailResources = new Set<string>();
+
+  const statusFor = (
+    observed: ObservedCloudTrail,
+  ): Promise<GetTrailStatusCommandOutput> => {
+    const cached = statuses.get(observed.identity);
+    if (cached !== undefined) return cached;
+    let statusClient = statusClients.get(observed.homeRegion);
+    if (statusClient === undefined) {
+      statusClient = clients.cloudTrail(observed.homeRegion, context.credentials);
+      statusClients.set(observed.homeRegion, statusClient);
+    }
+    const operation = statusClient.getTrailStatus({ Name: observed.trailId })
+      .then((status) => {
+        if (typeof status.IsLogging !== "boolean") {
+          throw new InventoryProtocolError("CloudTrail status omitted IsLogging");
+        }
+        return status;
+      });
+    statuses.set(observed.identity, operation);
+    return operation;
+  };
+
+  return async (region, client, state) => {
+    if (!statusClients.has(region)) statusClients.set(region, client);
+    const output = await client.describeTrails({ includeShadowTrails: true });
+    state.observePage();
+
+    const observedByIdentity = new Map<string, ObservedCloudTrail>();
+    for (const trail of output.trailList ?? []) {
+      const trailId = trail.TrailARN ?? trail.Name;
+      if (trailId === undefined) continue;
+      const homeRegion =
+        trail.HomeRegion !== undefined && REGION.test(trail.HomeRegion)
+          ? trail.HomeRegion
+          : region;
+      const identity = trail.TrailARN ?? `${homeRegion}:${trail.Name ?? trailId}`;
+      if (!observedByIdentity.has(identity)) {
+        observedByIdentity.set(identity, { identity, trailId, homeRegion, trail });
+      }
+    }
+
+    const observations = [...observedByIdentity.values()];
+    const withStatus = await Promise.all(
+      observations.map(async (observed) => ({
+        observed,
+        status: await statusFor(observed),
+      })),
     );
-    trailEvidence.push(
-      evidence(
-        context,
-        observedAt,
-        region,
-        "cloudtrail",
-        "CLOUDTRAIL_LOGGING_STATUS",
-        trailId,
-        status.IsLogging === true ? "ENABLED" : "DISABLED",
-        compact({
-          isLogging: status.IsLogging,
-          latestDeliveryTime: iso(status.LatestDeliveryTime),
-          latestDigestDeliveryTime: iso(status.LatestDigestDeliveryTime),
-          startLoggingTime: iso(status.StartLoggingTime),
-          stopLoggingTime: iso(status.StopLoggingTime),
-        }),
-      ),
+    const applicable = withStatus.filter(
+      ({ observed }) =>
+        observed.trail.IsMultiRegionTrail === true || observed.homeRegion === region,
     );
-  }
-  await state.emit({ resources, evidence: trailEvidence });
+    const logging = applicable.filter(({ status }) => status.IsLogging === true);
+    const resources: NormalizedAwsResource[] = [];
+
+    for (const { observed, status } of withStatus) {
+      if (emittedTrailResources.has(observed.identity)) continue;
+      emittedTrailResources.add(observed.identity);
+      const trail = observed.trail;
+      resources.push(
+        resource(
+          context,
+          observedAt,
+          observed.homeRegion,
+          "cloudtrail",
+          "aws.cloudtrail.trail",
+          observed.trailId,
+          trail.TrailARN,
+          compact({
+            name: trail.Name,
+            homeRegion: observed.homeRegion,
+            isMultiRegionTrail: trail.IsMultiRegionTrail,
+            isOrganizationTrail: trail.IsOrganizationTrail,
+            includeGlobalServiceEvents: trail.IncludeGlobalServiceEvents,
+            logFileValidationEnabled: trail.LogFileValidationEnabled,
+            hasCustomEventSelectors: trail.HasCustomEventSelectors,
+            hasInsightSelectors: trail.HasInsightSelectors,
+            s3BucketName: trail.S3BucketName,
+            kmsKeyId: trail.KmsKeyId,
+            cloudWatchLogsLogGroupArn: trail.CloudWatchLogsLogGroupArn,
+            isLogging: status.IsLogging,
+            latestDeliveryTime: iso(status.LatestDeliveryTime),
+            latestDigestDeliveryTime: iso(status.LatestDigestDeliveryTime),
+            startLoggingTime: iso(status.StartLoggingTime),
+            stopLoggingTime: iso(status.StopLoggingTime),
+          }),
+        ),
+      );
+    }
+
+    const coverageBasis = logging.some(
+      ({ observed }) => observed.trail.IsMultiRegionTrail === true,
+    )
+      ? "multi-region-trail"
+      : logging.length > 0
+        ? "regional-trail"
+        : applicable.length > 0
+          ? "applicable-trails-not-logging"
+          : "no-applicable-trail";
+    await state.emit({
+      resources,
+      evidence: [
+        evidence(
+          context,
+          observedAt,
+          region,
+          "cloudtrail",
+          "CLOUDTRAIL_LOGGING_STATUS",
+          context.accountId,
+          logging.length > 0 ? "ENABLED" : "DISABLED",
+          {
+            trailsObserved: observations.length,
+            applicableTrailsObserved: applicable.length,
+            loggingTrailsObserved: logging.length,
+            coverageBasis,
+          },
+        ),
+      ],
+    });
+    state.observeItems(applicable.length);
+  };
 }
 
 async function collectGuardDuty(
@@ -892,7 +1079,7 @@ async function collectGuardDuty(
   region: string,
   client: GuardDutyInventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   let token: string | undefined;
   const seen = new Set<string>();
@@ -903,6 +1090,7 @@ async function collectGuardDuty(
     const output = await client.listDetectors(
       token === undefined ? { MaxResults: 50 } : { MaxResults: 50, NextToken: token },
     );
+    state.observePage();
     const resources: NormalizedAwsResource[] = [];
     for (const detectorId of output.DetectorIds ?? []) {
       const detector = await client.getDetector({ DetectorId: detectorId });
@@ -928,6 +1116,7 @@ async function collectGuardDuty(
       );
     }
     await state.emit({ resources, evidence: [] });
+    state.observeItems(resources.length);
     token = nextToken(output.NextToken, seen, "GuardDuty ListDetectors");
     if (token === undefined) break;
     if (page === MAX_PAGES - 1) {
@@ -957,7 +1146,7 @@ async function collectSecurityHub(
   region: string,
   client: SecurityHubInventoryClient,
   observedAt: string,
-  state: BatchState,
+  state: TaskCollectionState,
 ): Promise<void> {
   try {
     const hub = await client.describeHub();
@@ -992,6 +1181,7 @@ async function collectSecurityHub(
         ),
       ],
     });
+    state.observePage(1);
   } catch (error: unknown) {
     if (!isNamedError(error, "InvalidAccessException")) throw error;
     await state.emit({
@@ -1009,20 +1199,16 @@ async function collectSecurityHub(
         ),
       ],
     });
+    state.observePage();
   }
 }
 
 class BatchState {
   public resourcesObserved = 0;
   public evidenceObserved = 0;
-  public partial = false;
   private writeTail: Promise<void> = Promise.resolve();
 
   public constructor(private readonly sink: AwsInventorySink) {}
-
-  public markPartial(): void {
-    this.partial = true;
-  }
 
   public async emit(batch: AwsInventoryBatch): Promise<void> {
     if (batch.resources.length === 0 && batch.evidence.length === 0) return;
@@ -1035,6 +1221,75 @@ class BatchState {
     }
     this.resourcesObserved += batch.resources.length;
     this.evidenceObserved += batch.evidence.length;
+  }
+}
+
+class TaskCollectionState {
+  private itemsObserved = 0;
+  private pagesObserved = 0;
+  private partialErrorCode: string | undefined;
+
+  public constructor(
+    private readonly parent: BatchState,
+    private readonly task: CollectionTask,
+  ) {}
+
+  public emit(batch: AwsInventoryBatch): Promise<void> {
+    return this.parent.emit(batch);
+  }
+
+  /** Record one successfully returned primary list/describe page. */
+  public observePage(itemsObserved = 0): void {
+    this.pagesObserved += 1;
+    this.observeItems(itemsObserved);
+  }
+
+  /** Record normalized collector items only after their sink write succeeds. */
+  public observeItems(itemsObserved: number): void {
+    if (!Number.isSafeInteger(itemsObserved) || itemsObserved < 0) {
+      throw new InventoryProtocolError("Collector produced an invalid item count");
+    }
+    this.itemsObserved += itemsObserved;
+  }
+
+  public markPartial(error: unknown): void {
+    this.partialErrorCode ??= coverageErrorCode(error);
+  }
+
+  public finish(error?: unknown): InventoryCollectorCoverage {
+    if (error !== undefined) {
+      return {
+        collectorKey: this.task.collectorKey,
+        region: this.task.region,
+        status:
+          this.pagesObserved > 0 || this.itemsObserved > 0 ? "PARTIAL" : "FAILED",
+        itemsObserved: this.itemsObserved,
+        pagesObserved: this.pagesObserved,
+        errorCode: coverageErrorCode(error),
+        message:
+          this.pagesObserved > 0 || this.itemsObserved > 0
+            ? "The read-only AWS collector returned only partial coverage."
+            : "The read-only AWS collector did not return a usable page.",
+      };
+    }
+    if (this.partialErrorCode !== undefined) {
+      return {
+        collectorKey: this.task.collectorKey,
+        region: this.task.region,
+        status: "PARTIAL",
+        itemsObserved: this.itemsObserved,
+        pagesObserved: this.pagesObserved,
+        errorCode: this.partialErrorCode,
+        message: "One or more read-only AWS API calls did not complete.",
+      };
+    }
+    return {
+      collectorKey: this.task.collectorKey,
+      region: this.task.region,
+      status: "SUCCEEDED",
+      itemsObserved: this.itemsObserved,
+      pagesObserved: this.pagesObserved,
+    };
   }
 }
 
@@ -1060,12 +1315,13 @@ export class InventoryProtocolError extends Error {
 }
 
 function task(
+  collectorKey: string,
   service: string,
   subject: string,
   region: string,
-  run: () => Promise<void>,
+  run: (state: TaskCollectionState) => Promise<void>,
 ): CollectionTask {
-  return { service, subject, region, run };
+  return { collectorKey, service, subject, region, run };
 }
 
 function resource(
@@ -1077,6 +1333,7 @@ function resource(
   resourceId: string,
   arn: string | undefined,
   configuration: SafeJsonObject,
+  rawTags: readonly { readonly Key?: string | undefined; readonly Value?: string | undefined }[] = [],
 ): NormalizedAwsResource {
   const base = {
     schemaVersion: 1 as const,
@@ -1088,9 +1345,40 @@ function resource(
     resourceType,
     resourceId,
     observedAt,
+    tags: normalizeTags(rawTags),
     configuration,
   };
   return arn === undefined ? base : { ...base, arn };
+}
+
+function normalizeTags(
+  values: readonly { readonly Key?: string | undefined; readonly Value?: string | undefined }[],
+): Readonly<Record<string, string>> {
+  const result: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const tag of values.slice(0, 50)) {
+    const key = tag.Key;
+    const value = tag.Value;
+    if (
+      typeof key !== "string" ||
+      key.length === 0 ||
+      key.length > 128 ||
+      typeof value !== "string" ||
+      value.length > 256 ||
+      /[\u0000-\u001f\u007f]/u.test(value) ||
+      HIGH_CONFIDENCE_SECRET_VALUE.test(value) ||
+      CREDENTIAL_URI_OR_SIGNED_URL.test(value) ||
+      LONG_OPAQUE_TAG_TOKEN.test(value) ||
+      DANGEROUS_TAG_KEYS.has(key.toLowerCase()) ||
+      !SAFE_TAG_KEYS.has(key.toLowerCase().replace(/[^a-z0-9]/gu, "")) ||
+      /(?:secret|password|passwd|token|credential|private[_. -]?key|api[_. -]?key)/iu.test(key)
+    ) {
+      continue;
+    }
+    result[key] = value;
+  }
+  return Object.fromEntries(
+    Object.entries(result).sort(([left], [right]) => left.localeCompare(right)),
+  );
 }
 
 function evidence(
@@ -1144,6 +1432,13 @@ function publicAccessBlockData(output: GetPublicAccessBlockCommandOutput): SafeJ
   };
 }
 
+function publicAccessBlockFullyConfigured(data: SafeJsonObject): boolean {
+  return data.blockPublicAcls === true &&
+    data.ignorePublicAcls === true &&
+    data.blockPublicPolicy === true &&
+    data.restrictPublicBuckets === true;
+}
+
 function compact(
   values: Readonly<Record<string, SafeJsonValue | undefined>>,
 ): SafeJsonObject {
@@ -1162,12 +1457,6 @@ function iso(value: Date | undefined): string | undefined {
   return value instanceof Date && Number.isFinite(value.getTime())
     ? value.toISOString()
     : undefined;
-}
-
-function normalizeBucketRegion(value: string | undefined): string {
-  if (value === undefined || value.length === 0) return "us-east-1";
-  if (value === "EU") return "eu-west-1";
-  return value;
 }
 
 function nextToken(
@@ -1250,4 +1539,10 @@ function safeErrorName(error: unknown): string {
     return error.name;
   }
   return "UnknownError";
+}
+
+function coverageErrorCode(error: unknown): string {
+  if (error instanceof InventoryProtocolError) return "COLLECTOR_PROTOCOL_ERROR";
+  const name = safeErrorName(error);
+  return name === "Error" || name === "UnknownError" ? "AWS_API_ERROR" : name;
 }

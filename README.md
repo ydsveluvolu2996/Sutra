@@ -137,7 +137,7 @@ The minimum P0 exit gates are:
 | Identity | Production OIDC/session lifecycle, MFA/step-up policy, CSRF protection, invitation expiry and revocation |
 | Tenant isolation | Central server authorization plus negative tests across at least two organizations and customers for every route, job, cache, object, and export |
 | AWS broker | Deployed AWS workload identity, authenticated/replay-resistant broker protocol, fixed action/role allowlists, short STS sessions, and no long-lived AWS keys |
-| Trust validation | Canonical ARN/account/partition checks, `GetCallerIdentity`, correct-ExternalId success, missing/wrong-ExternalId failure, rotation, disable, and offboarding tests |
+| Trust validation | Canonical ARN/account/partition checks, restrictive STS session policy, fetched role/trust-policy attestation, `GetCallerIdentity`, identical-field correct/missing/wrong ExternalId probes, disable, and truthful local offboarding tests. Rotation is rejected until a two-phase AWS-side workflow is implemented. |
 | Job integrity | Durable outbox/queue, scoped opaque payloads, leases, idempotency, retries/backoff, deadlines, cancellation, DLQ, and audited replay |
 | CMDB integrity | Paginated collectors, schema/size validation, manifests/checksums, atomic complete-run promotion, provenance, partial coverage, and safe retirement behavior |
 | Secrets and privacy | Managed encryption and key rotation, environment separation, allowlist logging/redaction tests, retention/deletion behavior, and canary credential scans |
@@ -175,6 +175,20 @@ no AWS account. See
 separate live AWS sandbox procedure. The `DB` D1 binding is declared in
 `.openai/hosting.json` and simulated locally by the development stack.
 
+For a laptop demo backed by a real persistent PostgreSQL database, Docker Desktop
+can run the web application, collector, and PostgreSQL together:
+
+```bash
+pnpm docker:up
+```
+
+The command generates ignored high-entropy owner/runtime database secrets, applies migrations,
+and waits for the complete stack to become healthy. See
+[`docs/local-postgres.md`](docs/local-postgres.md) for restart persistence,
+integration testing, backup, restore, and reset procedures. Database volumes,
+runtime secrets, backups, AWS inventory, and customer evidence are deliberately
+excluded from Git; GitHub stores the source and migrations, never live customer data.
+
 Never use a production AWS access key locally. Real broker development must use an
 isolated sandbox AWS account, workload identity or short-lived developer federation,
 and separate non-production roles and keys. Do not paste a real RoleArn, ExternalId,
@@ -200,11 +214,13 @@ screenshots, logs, issues, or pull requests.
 Run the same checks as CI:
 
 ```bash
+pnpm security:secrets
 pnpm typecheck
 pnpm typecheck:collector
 pnpm lint
 pnpm test
 pnpm test:collector
+pnpm db:postgres:test
 pnpm build
 pnpm test:rendered
 ```

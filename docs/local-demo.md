@@ -30,9 +30,28 @@ After MFA verification, open `http://localhost:3000/operations`:
 3. When the job succeeds, select **Publish to CMDB**. Publication revalidates the
    complete tenant/customer/connection/job lineage and atomically promotes the
    immutable snapshot.
-4. Open the snapshot to inspect resources, relationships, coverage, security groups,
+4. To demonstrate unattended collection, configure a fixture under **Scheduled
+   fixture collections**. Choose its evidence version and cadence, then select
+   **Enable & run now**. The durable collector creates the first signed job
+   immediately and future occurrences at the saved interval. Pausing suppresses
+   new occurrences; resuming schedules one immediate occurrence without replaying
+   the paused interval as a backlog. After laptop downtime, Sutra runs only the
+   newest bounded set of due occurrences, records the count and time of older runs
+   it skipped, and advances the durable cursor, so a restart cannot flood or block
+   already-queued work. The collector retains the
+   newest 10,000 terminal job records for each manual/scheduled trigger class;
+   published CMDB snapshots remain durable in D1 while old collector execution
+   receipts are pruned. The file store also enforces a byte-safe 16 MiB envelope:
+   new work is admitted only below a 90% target, while the reserve remains available
+   for leases and settlement so a full queue can drain. Old terminal receipts are
+   pruned when needed, and an oversized active update never replaces the last
+   readable state. Job-count saturation is persisted and shown as a queue-capacity
+   warning on the affected schedule instead of failing silently.
+5. Review each completed scheduled result and select **Publish to CMDB**. Scheduling
+   never bypasses the explicit RBAC and provenance checks at the publication gate.
+6. Open the snapshot to inspect resources, relationships, coverage, security groups,
    findings, and exports.
-5. For a change demo, publish Northstar Retail `2026.07.0`, then `2026.07.1`, and
+7. For a change demo, publish Northstar Retail `2026.07.0`, then `2026.07.1`, and
    open **Change history**. The evolved version deterministically records one added,
    one changed, and one removed resource.
 
@@ -41,13 +60,25 @@ both identify the source as `SIMULATED FIXTURE`. Signed broker responses, snapsh
 hashes, durable job state, D1 publication, CMDB queries, finding workflows, and
 exports are real local application paths rather than static demo cards.
 
+Schedule mutations are also real cross-process operations. Sutra writes the exact
+scoped command to a D1 outbox before contacting the collector, sends a deterministic
+mutation identifier through the signed loopback boundary, and completes one
+hash-chained audit event after the collector accepts it. A process interruption
+leaves the command pending; the next Operations load replays it idempotently and
+finishes the audit record rather than silently losing or duplicating the change.
+Every outbox row also carries a durable monotonic sequence that the collector
+enforces per schedule, so a delayed older replay cannot overwrite newer automation
+state. Concurrent retries of one operation converge on the timestamp stored by the
+winning insert.
+
 The generated `.dev.vars` and `.sutra/` directory contain local secrets and
 encrypted connection state. They are permission-restricted and ignored by Git.
 Delete both to reset all collector trust material. Local D1 data is managed by
 the vinext/Miniflare development runtime.
 
-To reset local application data while preserving the generated local keys, stop the
-dev server, run `pnpm pilot:reset`, then start `pnpm dev:pilot` again.
+To reset all local application data—including schedules and durable jobs—while
+preserving the generated local keys, stop the dev server, run `pnpm pilot:reset`,
+then start `pnpm dev:pilot` again.
 
 ## Local backup and restore
 
@@ -71,24 +102,30 @@ source control.
 
 ## Real AWS sandbox demo
 
-Use a disposable non-production AWS account. The local collector uses the AWS
-SDK default credential provider chain; it does not accept long-lived AWS keys in
-the Sutra UI or `.dev.vars`.
+Use only the guarded host launcher and the complete runbook in
+`docs/local-live-aws.md`. It isolates live PostgreSQL data and encryption keys from
+the fixture stack, requires an explicit acknowledgement plus a short-lived named
+AWS SSO/profile, performs the source-identity preflight, and starts the built web
+and collector processes on the host. Do not enable live mode by editing `.dev.vars`,
+do not run the manual collector preflight as a substitute for the launcher, and do
+not place an AWS profile cache, access key, or session token in any Sutra file or
+container.
 
-1. Configure a short-lived AWS profile, SSO session, or workload identity whose
-   IAM role exactly matches `SUTRA_COLLECTOR_PRINCIPAL_ARN`.
-2. Change `SUTRA_COLLECTOR_MODE=live`, set `SUTRA_ALLOW_LIVE_AWS=true`, and set
-   that exact collector principal ARN in `.dev.vars`. Without both live-mode
-   settings the collector refuses to start.
-3. Start Sutra with `pnpm dev:pilot`.
-4. Create the connection in Sutra. Copy its generated ExternalId and collector
-   principal.
-5. Deploy `public/sutra-customer-role.yaml` once in the customer account with
-   those values. The default customer role is `/sutra/SutraReadOnlyRole`.
-6. Register the stack output RoleArn. Sutra activates it only after the correct
-   ExternalId succeeds, `GetCallerIdentity` matches, and missing/wrong ExternalId
-   probes are denied.
-7. Run inventory and review the collector coverage before relying on results.
+Disable and offboard requests update Sutra's durable control-plane state before
+they attempt local collector cleanup. They therefore still block new work when
+the collector is stopped or is running in fixture mode. The onboarding page
+reports collector cleanup as pending and provides an idempotent reconcile action
+that can be repeated after the collector returns. Registering or replacing a
+customer role and the initial irreversible offboard action require a fresh
+six-digit authenticator code; emergency disable and idempotent cleanup retries do
+not wait for a new step-up.
+
+Local offboarding removes the role ARN and ExternalId material held by Sutra and
+then asks the local collector to erase its copy. It does **not** call IAM,
+CloudFormation, or otherwise delete or change the customer-owned AWS role. To
+revoke AWS-side trust, the customer must separately delete the CloudFormation
+stack or remove the role's trust policy. Confirm that revocation in AWS before
+treating offboarding as complete.
 
 Temporary STS credentials exist only inside the collector process. Browser and
 control-plane responses contain normalized metadata and safe status codes, never
@@ -102,6 +139,9 @@ credentials, ExternalIds after creation, or raw AWS errors.
 - persistent local identities, MFA, sessions, RBAC, and customer grants;
 - collector-owned fixture discovery plus durable jobs, bounded retries, and explicit
   idempotent publication;
+- persistent fixture schedules with signed scope, pause/resume controls, bounded
+  catch-up, crash-safe audited mutation replay, and manual-versus-scheduled job
+  provenance;
 - versioned resource, relationship, finding, and coverage payloads;
 - strict byte/schema/count/reference/hash validation before persistence;
 - immutable snapshots with source provenance and complete-only CMDB head promotion;

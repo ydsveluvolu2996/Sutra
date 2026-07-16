@@ -10,7 +10,7 @@ import type {
 } from "@aws-sdk/client-sts";
 
 import { AwsCollectorJobHandler } from "../src/job-handler.js";
-import { AwsRoleBroker } from "../src/role-broker.js";
+import { AwsRoleBroker, readonlyMetadataSessionPolicy } from "../src/role-broker.js";
 import {
   IdentityMismatchError,
   InvalidJobError,
@@ -26,6 +26,7 @@ import {
 } from "../src/types.js";
 
 const scope: ConnectionScope = { tenantId: "tenant-01", subjectId: "queue-worker" };
+const COLLECTOR_PRINCIPAL_ARN = "arn:aws:iam::999988887777:role/SutraLocalCollector";
 
 class Registry implements ScopedConnectionRegistry {
   public resolveCalls = 0;
@@ -91,6 +92,15 @@ class CapturingInventoryRunner implements InventoryRunner {
       resourcesObserved: 12,
       findingsObserved: 3,
       coverage: "COMPLETE",
+      collectorCoverage: [
+        {
+          collectorKey: "ec2.instances",
+          region: "us-east-1",
+          status: "SUCCEEDED",
+          itemsObserved: 12,
+          pagesObserved: 1,
+        },
+      ],
       // Deliberate runtime extra field: the handler must not spread collector output.
       credentials: "must-not-escape",
     } as InventoryCollectionResult;
@@ -102,7 +112,7 @@ function storedConnection(status: "ACTIVE" | "PENDING" = "ACTIVE"): StoredAwsCon
     tenantId: "tenant-01",
     connectionId: "conn-01",
     expectedAccountId: "123456789012",
-    roleArn: "arn:aws:iam::123456789012:role/mspcmdb/MSPCMDBReadRole",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status,
     sessionNamePrefix: "mspcmdb-",
@@ -231,6 +241,62 @@ function createHandler(
   const broker = new AwsRoleBroker({
     registry,
     assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => {
+      const stored = registry.stored;
+      const capped = JSON.parse(readonlyMetadataSessionPolicy(stored.roleArn)) as {
+        Statement: Array<{ Action: string[] }>;
+      };
+      return {
+        getRole: async () => ({
+          arn: stored.roleArn,
+          roleName: "SutraReadOnlyRole",
+          path: "/sutra/",
+          maxSessionDuration: 3_600,
+          assumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [{
+              Sid: "ExactCollectorWithConnectionExternalId",
+              Effect: "Allow",
+              Principal: { AWS: COLLECTOR_PRINCIPAL_ARN },
+              Action: "sts:AssumeRole",
+              Condition: {
+                StringEquals: { "sts:ExternalId": stored.externalId },
+                StringLike: { "sts:RoleSessionName": `${stored.sessionNamePrefix ?? "mspcmdb-"}*` },
+              },
+            }],
+          })),
+          tags: [
+            { key: "sutra:access-mode", value: "read-only" },
+            { key: "sutra:permission-pack", value: "live-demo-2026-07" },
+            { key: "sutra:managed-by", value: "cloudformation" },
+          ],
+        }),
+        listRolePolicies: async () => ({
+          policyNames: ["SutraImplementedMetadataCollectors"],
+          isTruncated: false,
+        }),
+        getRolePolicy: async () => ({
+          policyDocument: encodeURIComponent(JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [
+              {
+                Sid: "ImplementedMetadataApis",
+                Effect: "Allow",
+                Action: capped.Statement[0]?.Action ?? [],
+                Resource: "*",
+              },
+              {
+                Sid: "TrustContractAttestation",
+                Effect: "Allow",
+                Action: capped.Statement[1]?.Action ?? [],
+                Resource: stored.roleArn,
+              },
+            ],
+          })),
+        }),
+      };
+    },
     callerIdentityClientFactory: () =>
       new IdentityClient(() => {
         const sessionName = assume.calls[0]?.RoleSessionName;
@@ -238,7 +304,7 @@ function createHandler(
         return {
           $metadata: {},
           Account: identityAccountId,
-          Arn: `arn:aws:sts::${identityAccountId}:assumed-role/MSPCMDBReadRole/${sessionName}`,
+          Arn: `arn:aws:sts::${identityAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
           UserId: `AROATEST:${sessionName}`,
         };
       }),

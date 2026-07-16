@@ -103,6 +103,16 @@ export interface PilotSyncRun {
   readonly createdAt: string;
 }
 
+/**
+ * Coverage evidence for the newest collection attempt. This is intentionally
+ * separate from `PilotState.coverage`, which always belongs to the active,
+ * complete CMDB projection.
+ */
+export interface PilotRunCoverage {
+  readonly syncRunId: string;
+  readonly entries: readonly PilotCoverageEntry[];
+}
+
 export interface SnapshotOrigin {
   readonly kind: "unknown" | "simulated_fixture" | "aws_sandbox";
   readonly fixtureId: string | null;
@@ -115,7 +125,10 @@ export interface PilotState {
   readonly resources: readonly PilotResource[];
   readonly relationships: readonly PilotRelationship[];
   readonly findings: readonly PilotFinding[];
+  /** Coverage of the active complete snapshot, never a partial attempt. */
   readonly coverage: readonly PilotCoverageEntry[];
+  /** Coverage for the newest sync run, even when that run was not promoted. */
+  readonly latestRunCoverage: PilotRunCoverage | null;
   readonly syncRuns: readonly PilotSyncRun[];
   readonly activeSnapshot: {
     readonly id: string;

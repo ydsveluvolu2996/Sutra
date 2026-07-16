@@ -41,7 +41,7 @@ The customer role trusts the **exact ARN** of the vendor collector workload role
 not the vendor account root. Its trust policy requires both:
 
 1. `sts:ExternalId` equal to a platform-generated value unique among MSP tenants.
-2. `sts:RoleSessionName` matching `mspcmdb-*` so customer CloudTrail records are
+2. `sts:RoleSessionName` matching `sutra-*` so customer CloudTrail records are
    easy to identify.
 
 AWS explicitly recommends an External ID for third parties that access multiple
@@ -66,8 +66,9 @@ from a canonical connection record:
 ```text
 RoleArn:        stored customer role ARN (never arbitrary request input)
 ExternalId:     stored tenant/account External ID
-RoleSessionName:mspcmdb-<scanJobUlid>       # <= 64 valid STS characters
+RoleSessionName:sutra-<scanJobUlid>         # <= 64 valid STS characters
 DurationSeconds: 900-3600                   # template maximum is 3600
+Policy:          fixed versioned metadata-read ceiling (never browser supplied)
 ```
 
 After the first successful call, immediately call `sts:GetCallerIdentity` with the
@@ -93,7 +94,7 @@ for example:
   "Effect": "Allow",
   "Action": "sts:AssumeRole",
   "Resource": [
-    "arn:aws:iam::*:role/mspcmdb/MSPCMDBReadRole"
+    "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
   ]
 }
 ```
@@ -140,7 +141,7 @@ correct External ID.
 
 ### 3.2 Template decisions
 
-`customer-role-template.yaml` uses explicit versioned policies rather than attaching
+`infrastructure/customer-role-live-demo.yaml` uses explicit versioned policies rather than attaching
 AWS `ReadOnlyAccess`. It also avoids relying solely on the evolving AWS-managed
 `SecurityAudit` policy. The template intentionally excludes data-plane and write
 actions such as:
@@ -207,6 +208,12 @@ Official references:
 - [CloudFormation StackSets and Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/services-that-can-integrate-cloudformation.html)
 
 ### 3.4 Offboarding
+
+The local pilot implements only the Sutra-side portions of this sequence. Its
+offboard action removes local control-plane trust material and performs
+best-effort, retriable collector cleanup; it cannot delete a customer IAM role or
+edit its trust policy. The customer-owned CloudFormation stack or IAM trust must
+still be removed directly in AWS.
 
 1. Set connection state to `DISABLING`; stop enqueueing and revoke worker leases.
 2. Customer deletes the CloudFormation stack or removes the role trust.

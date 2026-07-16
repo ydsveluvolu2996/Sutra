@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { backupLocalState, restoreLocalState } from "../scripts/local-data-utils.mjs";
+import {
+  backupLocalState,
+  resetLocalState,
+  restoreLocalState,
+} from "../scripts/local-data-utils.mjs";
 
 const LOCAL_CONFIGURATION = [
   "SUTRA_CONNECTION_ENCRYPTION_KEY=connection-key-material-0000000000000000",
@@ -75,6 +79,34 @@ test("local restore rejects a modified backup before replacing current state", a
     );
     assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), LOCAL_CONFIGURATION);
     assert.equal(await readFile(join(root, ".wrangler", "state", "v3", "d1", "state.sqlite"), "utf8"), "database");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local reset clears D1, registry, schedules, and jobs while preserving keys", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sutra-reset-test-"));
+  let assertedAction = "";
+  try {
+    await mkdir(join(root, ".sutra"), { recursive: true });
+    await mkdir(join(root, ".wrangler", "state", "v3", "d1"), { recursive: true });
+    await writeFile(join(root, ".dev.vars"), LOCAL_CONFIGURATION, "utf8");
+    await writeFile(join(root, ".sutra", "collector-registry.enc"), "registry", "utf8");
+    await writeFile(join(root, ".sutra", "local-jobs.json"), "jobs", "utf8");
+    await writeFile(join(root, ".sutra", "local-jobs.json.lock"), "lock", "utf8");
+    await writeFile(join(root, ".wrangler", "state", "v3", "d1", "state.sqlite"), "db", "utf8");
+
+    await resetLocalState({
+      root,
+      assertStopped: async (action) => { assertedAction = action; },
+    });
+
+    assert.equal(assertedAction, "resetting local state");
+    assert.equal(await readFile(join(root, ".dev.vars"), "utf8"), LOCAL_CONFIGURATION);
+    await assert.rejects(readFile(join(root, ".sutra", "collector-registry.enc"), "utf8"));
+    await assert.rejects(readFile(join(root, ".sutra", "local-jobs.json"), "utf8"));
+    await assert.rejects(readFile(join(root, ".sutra", "local-jobs.json.lock"), "utf8"));
+    await assert.rejects(readFile(join(root, ".wrangler", "state", "v3", "d1", "state.sqlite"), "utf8"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

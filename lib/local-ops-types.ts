@@ -3,6 +3,7 @@ import type { PilotSnapshotPayload } from "./pilot-types";
 
 export type LocalFixtureVersion = "2026.07.0" | "2026.07.1";
 export type LocalFixtureJobStatus = "pending" | "leased" | "succeeded" | "dead_letter";
+export type LocalFixtureJobTriggerKind = "manual" | "scheduled";
 
 export interface LocalFixtureDescriptor {
   readonly fixtureId: string;
@@ -24,6 +25,8 @@ export interface LocalFixtureJobSummary {
   readonly customerId: string;
   readonly connectionId: string;
   readonly version: LocalFixtureVersion;
+  readonly triggerKind: LocalFixtureJobTriggerKind;
+  readonly scheduleId: string | null;
   readonly status: LocalFixtureJobStatus;
   readonly attempts: number;
   readonly maxAttempts: number;
@@ -37,6 +40,26 @@ export interface LocalFixtureJobSummary {
     readonly failedAt: string;
     readonly retryAt: string | null;
   } | null;
+}
+
+export interface LocalFixtureSchedule {
+  readonly scheduleId: string;
+  readonly tenantId: string;
+  readonly fixtureId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly version: LocalFixtureVersion;
+  readonly everyMs: number;
+  readonly nextRunAt: string;
+  readonly enabled: boolean;
+  readonly maxAttempts: number;
+  readonly capacityState: "healthy" | "degraded";
+  readonly capacitySkippedOccurrences: number;
+  readonly capacityBlockedAt: string | null;
+  readonly missedOccurrences: number;
+  readonly lastMissedAt: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
 }
 
 export interface LocalFixtureJobResult {
@@ -53,6 +76,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
 const CUSTOMER_ID = /^cust_[a-f0-9]{32}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const JOB_ID = /^job_[a-f0-9]{48}$/u;
+const SCHEDULE_ID = /^sched_[a-f0-9]{48}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/u;
 
@@ -150,10 +174,13 @@ function parseFailure(value: unknown): LocalFixtureJobSummary["lastFailure"] {
 export function parseLocalFixtureJob(value: unknown): LocalFixtureJobSummary {
   const item = exact(value, [
     "jobId", "tenantId", "kind", "fixtureId", "customerId", "connectionId", "version",
-    "status", "attempts", "maxAttempts", "availableAt", "createdAt", "updatedAt", "completedAt",
-    "lastFailure",
+    "triggerKind", "scheduleId", "status", "attempts", "maxAttempts", "availableAt", "createdAt",
+    "updatedAt", "completedAt", "lastFailure",
   ]);
   if (item.kind !== "fixture.inventory.collect") invalid();
+  if (item.triggerKind !== "manual" && item.triggerKind !== "scheduled") invalid();
+  const scheduleId = item.scheduleId === null ? null : text(item.scheduleId, SCHEDULE_ID);
+  if ((item.triggerKind === "manual") !== (scheduleId === null)) invalid();
   if (item.status !== "pending" && item.status !== "leased" && item.status !== "succeeded" && item.status !== "dead_letter") invalid();
   const attempts = nonnegativeInteger(item.attempts, 1_000);
   const maxAttempts = positiveInteger(item.maxAttempts, 1_000);
@@ -176,6 +203,8 @@ export function parseLocalFixtureJob(value: unknown): LocalFixtureJobSummary {
     customerId: text(item.customerId, CUSTOMER_ID),
     connectionId: text(item.connectionId, CONNECTION_ID),
     version: version(item.version),
+    triggerKind: item.triggerKind,
+    scheduleId,
     status: item.status,
     attempts,
     maxAttempts,
@@ -185,6 +214,70 @@ export function parseLocalFixtureJob(value: unknown): LocalFixtureJobSummary {
     completedAt,
     lastFailure,
   };
+}
+
+export function parseLocalFixtureSchedule(value: unknown): LocalFixtureSchedule {
+  const item = exact(value, [
+    "scheduleId", "tenantId", "fixtureId", "customerId", "connectionId", "version",
+    "everyMs", "nextRunAt", "enabled", "maxAttempts", "capacityState",
+    "capacitySkippedOccurrences", "capacityBlockedAt", "missedOccurrences", "lastMissedAt",
+    "createdAt", "updatedAt",
+  ]);
+  if (
+    typeof item.enabled !== "boolean" ||
+    (item.capacityState !== "healthy" && item.capacityState !== "degraded")
+  ) invalid();
+  const createdAt = timestamp(item.createdAt);
+  const updatedAt = timestamp(item.updatedAt);
+  const nextRunAt = timestamp(item.nextRunAt);
+  const capacityBlockedAt = nullableTimestamp(item.capacityBlockedAt);
+  const missedOccurrences = nonnegativeInteger(
+    item.missedOccurrences,
+    Number.MAX_SAFE_INTEGER,
+  );
+  const lastMissedAt = nullableTimestamp(item.lastMissedAt);
+  if (Date.parse(updatedAt) < Date.parse(createdAt)) invalid();
+  if (
+    (item.capacityState === "degraded") !== (capacityBlockedAt !== null) ||
+    (capacityBlockedAt !== null && Date.parse(capacityBlockedAt) < Date.parse(createdAt)) ||
+    (missedOccurrences > 0) !== (lastMissedAt !== null) ||
+    (lastMissedAt !== null && Date.parse(lastMissedAt) < Date.parse(createdAt))
+  ) invalid();
+  const everyMs = positiveInteger(item.everyMs, 31_536_000_000);
+  if (everyMs < 1_000) invalid();
+  return {
+    scheduleId: text(item.scheduleId, SCHEDULE_ID),
+    tenantId: text(item.tenantId, ID),
+    fixtureId: text(item.fixtureId, ID),
+    customerId: text(item.customerId, CUSTOMER_ID),
+    connectionId: text(item.connectionId, CONNECTION_ID),
+    version: version(item.version),
+    everyMs,
+    nextRunAt,
+    enabled: item.enabled,
+    maxAttempts: positiveInteger(item.maxAttempts, 1_000),
+    capacityState: item.capacityState,
+    capacitySkippedOccurrences: nonnegativeInteger(item.capacitySkippedOccurrences, Number.MAX_SAFE_INTEGER),
+    capacityBlockedAt,
+    missedOccurrences,
+    lastMissedAt,
+    createdAt,
+    updatedAt,
+  };
+}
+
+export function parseLocalFixtureSchedules(value: unknown): readonly LocalFixtureSchedule[] {
+  const root = exact(value, ["schedules", "count"]);
+  if (!Array.isArray(root.schedules) || root.schedules.length > 100) invalid();
+  const schedules = root.schedules.map(parseLocalFixtureSchedule);
+  if (nonnegativeInteger(root.count, 100) !== schedules.length) invalid();
+  if (new Set(schedules.map((schedule) => schedule.scheduleId)).size !== schedules.length) invalid();
+  return schedules;
+}
+
+export function parseLocalFixtureScheduleResponse(value: unknown): LocalFixtureSchedule {
+  const root = exact(value, ["schedule"]);
+  return parseLocalFixtureSchedule(root.schedule);
 }
 
 export function parseLocalFixtureJobs(value: unknown): readonly LocalFixtureJobSummary[] {

@@ -4,18 +4,22 @@ import test from "node:test";
 import {
   AesGcmSecretKeyring,
   PilotSecurityError,
+  assertOffboardAccountConfirmation,
   assertConnectionTransition,
   assertSameOrigin,
   assertSyncTransition,
   decryptExternalId,
+  deriveLocalAwsConnectionIdentity,
   encryptExternalId,
   generateExternalId,
   mayAdvanceSuccessfulSync,
   mayRetireUnseenResources,
   parseAwsAccountId,
+  parseAwsConnectionDraftRequest,
   parseAwsOnboardingInput,
   parseAwsPartition,
   parseIamRoleArn,
+  parseOffboardConnectionRequest,
   parsePilotScope,
   parsePilotSyncRequest,
   parsePilotSyncSummary,
@@ -24,6 +28,11 @@ import {
   readBoundedJson,
   type SecretContext,
 } from "../lib/aws-pilot-security.ts";
+import {
+  applyControlPlaneLifecycleThenReconcileCollector,
+  commitRoleThenRegisterCollector,
+} from "../lib/local-aws-lifecycle.ts";
+import { withLocalOnboardingAccountLock } from "../lib/local-onboarding-lock.ts";
 
 const validScope = {
   orgId: "org-01",
@@ -116,6 +125,89 @@ test("onboarding boundary rejects client scope, ExternalId, credentials, and pol
   }
 });
 
+test("initial connection route boundary requires an opaque retry operation and canonicalizes evidence", () => {
+  const request = {
+    operationId: `onb_${"a".repeat(32)}`,
+    customerName: "  Pilot   Customer  ",
+    awsAccountId: "123456789012",
+    partition: "aws",
+    enabledRegions: ["us-west-2", "us-east-1"],
+  };
+  assert.deepEqual(parseAwsConnectionDraftRequest(request), {
+    ...request,
+    customerName: "Pilot Customer",
+    enabledRegions: ["us-east-1", "us-west-2"],
+  });
+
+  for (const invalid of [
+    { ...request, operationId: crypto.randomUUID() },
+    { ...request, operationId: `onb_${"A".repeat(32)}` },
+    { ...request, operationId: `onb_${"a".repeat(31)}` },
+    { ...request, externalId: "client-controlled" },
+    { ...request, customerId: "cust_attacker" },
+    { ...request, roleArn: validOnboarding.roleArn },
+    { ...request, enabledRegions: [] },
+  ]) {
+    assert.throws(
+      () => parseAwsConnectionDraftRequest(invalid),
+      isPilotError("INVALID_INPUT"),
+    );
+  }
+});
+
+test("local one-account identity is stable and partition-bound", async () => {
+  const first = await deriveLocalAwsConnectionIdentity("123456789012", "aws");
+  const replay = await deriveLocalAwsConnectionIdentity("123456789012", "aws");
+  const otherPartition = await deriveLocalAwsConnectionIdentity("123456789012", "aws-us-gov");
+  const otherAccount = await deriveLocalAwsConnectionIdentity("210987654321", "aws");
+  assert.deepEqual(replay, first);
+  assert.match(first.customerId, /^cust_[a-f0-9]{32}$/u);
+  assert.match(first.connectionId, /^conn_[a-f0-9]{32}$/u);
+  assert.notDeepEqual(otherPartition, first);
+  assert.notDeepEqual(otherAccount, first);
+});
+
+test("local onboarding handoff and role registration serialize per AWS account", async () => {
+  const events: string[] = [];
+  let releaseFirst = (): void => undefined;
+  const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const first = withLocalOnboardingAccountLock("aws", "123456789012", async () => {
+    events.push("first-start");
+    await firstGate;
+    events.push("first-end");
+  });
+  const second = withLocalOnboardingAccountLock("aws", "123456789012", async () => {
+    events.push("second-start");
+    events.push("second-end");
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(events, ["first-start"]);
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, ["first-start", "first-end", "second-start", "second-end"]);
+});
+
+test("offboarding requires an exact server-validated account confirmation shape", () => {
+  const connectionId = `conn_${"a".repeat(32)}`;
+  assert.deepEqual(
+    parseOffboardConnectionRequest({ connectionId, awsAccountId: "123456789012" }),
+    { connectionId, awsAccountId: "123456789012" },
+  );
+  for (const invalid of [
+    { connectionId },
+    { connectionId, awsAccountId: "12345678901" },
+    { connectionId, awsAccountId: "123456789012", confirmed: true },
+    { connectionId: `conn_${"A".repeat(32)}`, awsAccountId: "123456789012" },
+  ]) {
+    assert.throws(() => parseOffboardConnectionRequest(invalid), isPilotError("INVALID_INPUT"));
+  }
+  assert.doesNotThrow(() => assertOffboardAccountConfirmation("123456789012", "123456789012"));
+  assert.throws(
+    () => assertOffboardAccountConfirmation("210987654321", "123456789012"),
+    isPilotError("INVALID_INPUT"),
+  );
+});
+
 test("trusted scope is still strictly validated and cannot be inherited from prototypes", () => {
   assert.deepEqual(parsePilotScope(validScope), validScope);
   assert.throws(
@@ -194,14 +286,15 @@ test("connection and sync state machines reject stale or terminal transitions", 
     ["pending", "validating"],
     ["validating", "active"],
     ["validating", "needs_attention"],
+    ["active", "pending"],
     ["active", "disabled"],
+    ["needs_attention", "pending"],
     ["needs_attention", "validating"],
   ] as const) {
     assert.doesNotThrow(() => assertConnectionTransition(from, to));
   }
   for (const [from, to] of [
     ["pending", "active"],
-    ["active", "pending"],
     ["disabled", "active"],
     ["validating", "pending"],
   ] as const) {
@@ -225,6 +318,102 @@ test("connection and sync state machines reject stale or terminal transitions", 
   ] as const) {
     assert.throws(() => assertSyncTransition(from, to), isPilotError("INVALID_STATE"));
   }
+});
+
+test("lifecycle changes become authoritative before best-effort collector cleanup", async () => {
+  const events: string[] = [];
+  const completed = await applyControlPlaneLifecycleThenReconcileCollector({
+    transitionControlPlane: async () => {
+      events.push("control-plane");
+      return { status: "disabled" as const };
+    },
+    reconcileCollector: async () => {
+      events.push("collector");
+    },
+  });
+  assert.deepEqual(events, ["control-plane", "collector"]);
+  assert.deepEqual(completed, {
+    connection: { status: "disabled" },
+    collectorCleanup: "completed",
+  });
+});
+
+test("role registration keeps the durable pending role when collector reconciliation fails", async () => {
+  const events: string[] = [];
+  let durableRole: string | null = null;
+  await assert.rejects(
+    commitRoleThenRegisterCollector({
+      commitControlPlaneRole: async () => {
+        events.push("control-plane-role");
+        durableRole = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
+        return { status: "pending" as const, roleArn: durableRole };
+      },
+      registerCollector: async () => {
+        events.push("collector-register");
+        throw new Error("collector unavailable");
+      },
+    }),
+    /collector unavailable/u,
+  );
+  assert.deepEqual(events, ["control-plane-role", "collector-register"]);
+  assert.equal(durableRole, "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole");
+
+  let collectorCalled = false;
+  await assert.rejects(
+    commitRoleThenRegisterCollector({
+      commitControlPlaneRole: async () => { throw new Error("database unavailable"); },
+      registerCollector: async () => { collectorCalled = true; },
+    }),
+    /database unavailable/u,
+  );
+  assert.equal(collectorCalled, false);
+});
+
+test("collector lifecycle cleanup is safe to retry after an unavailable collector", async () => {
+  let transitions = 0;
+  let cleanupAttempts = 0;
+  const transitionControlPlane = async () => {
+    transitions += 1;
+    return { status: "disabled" as const };
+  };
+  const reconcileCollector = async () => {
+    cleanupAttempts += 1;
+    if (cleanupAttempts === 1) throw new Error("sensitive collector detail");
+  };
+
+  const pending = await applyControlPlaneLifecycleThenReconcileCollector({
+    transitionControlPlane,
+    reconcileCollector,
+  });
+  assert.deepEqual(pending, {
+    connection: { status: "disabled" },
+    collectorCleanup: "pending",
+  });
+  assert.doesNotMatch(JSON.stringify(pending), /sensitive collector detail/u);
+
+  const retried = await applyControlPlaneLifecycleThenReconcileCollector({
+    transitionControlPlane,
+    reconcileCollector,
+  });
+  assert.equal(retried.collectorCleanup, "completed");
+  assert.equal(transitions, 2);
+  assert.equal(cleanupAttempts, 2);
+});
+
+test("failed control-plane lifecycle transitions never mutate collector state", async () => {
+  let collectorCalled = false;
+  await assert.rejects(
+    applyControlPlaneLifecycleThenReconcileCollector({
+      transitionControlPlane: async () => {
+        throw new Error("active inventory");
+      },
+      reconcileCollector: async () => {
+        collectorCalled = true;
+      },
+    }),
+    /active inventory/u,
+  );
+  assert.equal(collectorCalled, false);
 });
 
 test("only complete successful syncs can retire resources or advance freshness", () => {

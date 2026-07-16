@@ -39,6 +39,7 @@ try {
 
 const variables = parseVariables(await readFile(variablesPath, "utf8"));
 const environment = { ...process.env, ...variables };
+const webHost = environment.SUTRA_WEB_HOST ?? "127.0.0.1";
 await run(resolve(root, "node_modules/.bin/tsc"), ["-p", "services/aws-collector/tsconfig.json"], { env: environment });
 
 const collector = spawn(process.execPath, [resolve(root, "services/aws-collector/dist/src/local-server.js")], {
@@ -46,7 +47,7 @@ const collector = spawn(process.execPath, [resolve(root, "services/aws-collector
   env: environment,
   stdio: "inherit",
 });
-const web = spawn(resolve(root, "node_modules/.bin/vinext"), ["dev", "--host", "127.0.0.1"], {
+const web = spawn(resolve(root, "node_modules/.bin/vinext"), ["dev", "--hostname", webHost], {
   cwd: root,
   env: { ...environment, WRANGLER_LOG_PATH: ".wrangler/wrangler.log" },
   stdio: "inherit",

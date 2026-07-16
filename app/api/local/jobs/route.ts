@@ -2,6 +2,7 @@ import { getLocalJobPublications } from "../../../../db/local-operations-reposit
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { authorize } from "../../../../lib/auth-policy";
 import {
+  acknowledgeLocalFixtureJobPublication,
   errorResponse,
   getLocalFixtureCatalog,
   jsonResponse,
@@ -35,10 +36,14 @@ export async function GET(request: Request): Promise<Response> {
         customerId: fixture.customerId,
       }).allowed);
     const scopedLists = await Promise.all(visibleFixtures.map(async (fixture) => {
-      const jobs = await listLocalFixtureJobs(limit, {
-        tenantId: fixture.tenantId,
-        customerId: fixture.customerId,
-      });
+      const scope = { tenantId: fixture.tenantId, customerId: fixture.customerId };
+      const [latest, reviewRequired] = await Promise.all([
+        listLocalFixtureJobs(limit, scope),
+        listLocalFixtureJobs(100, scope, { reviewRequired: true }),
+      ]);
+      const jobs = [...new Map(
+        [...latest, ...reviewRequired].map((job) => [job.jobId, job]),
+      ).values()];
       if (jobs.some((job) =>
         job.tenantId !== fixture.tenantId ||
         job.customerId !== fixture.customerId ||
@@ -51,16 +56,49 @@ export async function GET(request: Request): Promise<Response> {
       }
       return jobs;
     }));
-    const visible = scopedLists
+    const candidates = scopedLists
       .flat()
       .sort((left, right) =>
         Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
-        right.jobId.localeCompare(left.jobId))
-      .slice(0, limit);
-    const publications = await getLocalJobPublications(
-      authenticated.subject.orgId,
-      visible.map((job) => job.jobId),
+        right.jobId.localeCompare(left.jobId));
+    const publicationMaps = await Promise.all(
+      Array.from({ length: Math.ceil(candidates.length / 100) }, (_, index) =>
+        getLocalJobPublications(
+          authenticated.subject.orgId,
+          candidates.slice(index * 100, index * 100 + 100).map((job) => job.jobId),
+        )),
     );
+    const publications = new Map(
+      publicationMaps.flatMap((publicationMap) => [...publicationMap.entries()]),
+    );
+    const reviewRequired = candidates.filter((job) =>
+      (job.status === "pending" || job.status === "leased" || job.status === "succeeded") &&
+      publications.get(job.jobId) === undefined);
+    const visibleById = new Map(reviewRequired.map((job) => [job.jobId, job]));
+    for (const job of candidates) {
+      if (visibleById.size >= reviewRequired.length + limit) break;
+      visibleById.set(job.jobId, job);
+    }
+    const visible = [...visibleById.values()].sort((left, right) =>
+      Date.parse(right.updatedAt) - Date.parse(left.updatedAt) ||
+      right.jobId.localeCompare(left.jobId));
+    const fixtureById = new Map(visibleFixtures.map((fixture) => [fixture.fixtureId, fixture]));
+    await Promise.all(visible.map(async (job) => {
+      const stored = publications.get(job.jobId);
+      if (stored === undefined) return;
+      const fixture = fixtureById.get(job.fixtureId);
+      if (fixture === undefined) {
+        throw Object.assign(new Error("The local job escaped its visible fixture scope"), {
+          code: "INVALID_STATE",
+        });
+      }
+      await acknowledgeLocalFixtureJobPublication({
+        fixture,
+        jobId: job.jobId,
+        publicationId: stored.snapshotId,
+        publishedAt: stored.publishedAt,
+      });
+    }));
     const jobs = visible.map((job) => {
       const stored = publications.get(job.jobId) ?? null;
       if (
@@ -75,7 +113,7 @@ export async function GET(request: Request): Promise<Response> {
       }
       return { ...job, publication: stored };
     });
-    return jsonResponse({ jobs });
+    return jsonResponse({ jobs, recentLimit: limit, reviewRequired: reviewRequired.length });
   } catch (error) {
     return errorResponse(error);
   }

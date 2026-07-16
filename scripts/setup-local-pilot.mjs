@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
-const variablesPath = resolve(root, ".dev.vars");
+const variablesPath = resolve(root, process.env.SUTRA_LOCAL_CONFIG_PATH ?? ".dev.vars");
 const stateDirectory = resolve(root, ".sutra");
 
 await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
@@ -17,6 +17,10 @@ try {
 }
 
 const secret = () => randomBytes(32).toString("base64url");
+const databaseUrl = process.env.DATABASE_URL?.trim();
+if (databaseUrl !== undefined && /[\r\n]/u.test(databaseUrl)) {
+  throw new Error("DATABASE_URL must be a single line");
+}
 
 if (existingContents === null) {
   const values = [
@@ -35,10 +39,12 @@ if (existingContents === null) {
     "SUTRA_COLLECTOR_PRINCIPAL_ARN=arn:aws:iam::999988887777:role/SutraLocalCollector",
     "SUTRA_FIXTURE_ACCOUNT_ID=123456789012",
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",
+    ...(databaseUrl ? [`DATABASE_URL=${databaseUrl}`] : []),
     "",
   ];
   await writeFile(variablesPath, values.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
 } else {
+  let updatedContents = existingContents;
   const additions = [];
   if (!/^SUTRA_LOCAL_BOOTSTRAP_TOKEN=/mu.test(existingContents)) {
     additions.push(`SUTRA_LOCAL_BOOTSTRAP_TOKEN=${secret()}`);
@@ -49,8 +55,15 @@ if (existingContents === null) {
   if (!/^SUTRA_AUTH_KEY_VERSION=/mu.test(existingContents)) {
     additions.push("SUTRA_AUTH_KEY_VERSION=local-auth-v1");
   }
-  if (additions.length > 0) {
-    const prefix = existingContents.endsWith("\n") ? existingContents : `${existingContents}\n`;
+  if (databaseUrl) {
+    if (/^DATABASE_URL=/mu.test(updatedContents)) {
+      updatedContents = updatedContents.replace(/^DATABASE_URL=.*$/mu, `DATABASE_URL=${databaseUrl}`);
+    } else {
+      additions.push(`DATABASE_URL=${databaseUrl}`);
+    }
+  }
+  if (additions.length > 0 || updatedContents !== existingContents) {
+    const prefix = updatedContents.endsWith("\n") ? updatedContents : `${updatedContents}\n`;
     await writeFile(variablesPath, `${prefix}${additions.join("\n")}\n`, { encoding: "utf8", mode: 0o600 });
   }
 }

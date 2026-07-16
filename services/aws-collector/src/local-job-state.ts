@@ -13,6 +13,8 @@ import { dirname } from "node:path";
 import type { SafeJsonObject, SafeJsonValue } from "./types.js";
 
 const STATE_FILE_LIMIT = 16 * 1024 * 1024;
+const MIN_STATE_FILE_LIMIT = 4 * 1024;
+const STATE_WRITE_TARGET_RATIO = 0.9;
 const MAX_JOBS = 100_000;
 const MAX_SCHEDULES = 10_000;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/;
@@ -40,6 +42,11 @@ export interface LocalJobDisposition {
   readonly recordedAt: string;
 }
 
+export interface LocalJobPublicationReceipt {
+  readonly publicationId: string;
+  readonly publishedAt: string;
+}
+
 export interface LocalJobRecord {
   readonly jobId: string;
   readonly tenantId: string;
@@ -58,6 +65,7 @@ export interface LocalJobRecord {
   readonly lastDisposition?: LocalJobDisposition;
   readonly result?: SafeJsonObject;
   readonly completedAt?: string;
+  readonly publication?: LocalJobPublicationReceipt;
 }
 
 export interface LocalScheduleRecord {
@@ -69,6 +77,13 @@ export interface LocalScheduleRecord {
   readonly nextRunAt: string;
   readonly enabled: boolean;
   readonly maxAttempts: number;
+  readonly lastMutationId?: string;
+  readonly lastMutationSha256?: string;
+  readonly lastMutationSequence?: number;
+  readonly capacitySkippedOccurrences?: number;
+  readonly capacityBlockedAt?: string;
+  readonly missedOccurrences?: number;
+  readonly lastMissedAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -87,13 +102,21 @@ export interface LocalJobStateStore {
   read(): Promise<LocalJobState>;
   update<Result>(
     mutator: (draft: LocalJobState) => Result | Promise<Result>,
+    options?: LocalJobStateUpdateOptions,
   ): Promise<Result>;
+}
+
+export interface LocalJobStateUpdateOptions {
+  /** Admission keeps headroom; operational transitions may consume the reserve. */
+  readonly mode?: "admission" | "operational";
 }
 
 export interface JsonFileLocalJobStateStoreOptions {
   readonly filePath: string;
   readonly lockTimeoutMs?: number;
   readonly staleLockMs?: number;
+  /** Test/embedding override; production remains capped at 16 MiB. */
+  readonly stateFileLimitBytes?: number;
 }
 
 /**
@@ -105,6 +128,8 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
   private readonly lockPath: string;
   private readonly lockTimeoutMs: number;
   private readonly staleLockMs: number;
+  private readonly stateFileLimitBytes: number;
+  private readonly stateWriteTargetBytes: number;
   private writeTail: Promise<void> = Promise.resolve();
 
   public constructor(options: JsonFileLocalJobStateStoreOptions) {
@@ -117,16 +142,30 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
     }
     const lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
     const staleLockMs = options.staleLockMs ?? 300_000;
+    const stateFileLimitBytes = options.stateFileLimitBytes ?? STATE_FILE_LIMIT;
     if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 100 || lockTimeoutMs > 60_000) {
       throw new LocalJobStateConfigurationError("lockTimeoutMs must be between 100 and 60000");
     }
     if (!Number.isInteger(staleLockMs) || staleLockMs < 10_000 || staleLockMs > 3_600_000) {
       throw new LocalJobStateConfigurationError("staleLockMs must be between 10000 and 3600000");
     }
+    if (
+      !Number.isInteger(stateFileLimitBytes) ||
+      stateFileLimitBytes < MIN_STATE_FILE_LIMIT ||
+      stateFileLimitBytes > STATE_FILE_LIMIT
+    ) {
+      throw new LocalJobStateConfigurationError(
+        `stateFileLimitBytes must be between ${MIN_STATE_FILE_LIMIT} and ${STATE_FILE_LIMIT}`,
+      );
+    }
     this.filePath = options.filePath;
     this.lockPath = `${options.filePath}.lock`;
     this.lockTimeoutMs = lockTimeoutMs;
     this.staleLockMs = staleLockMs;
+    this.stateFileLimitBytes = stateFileLimitBytes;
+    this.stateWriteTargetBytes = Math.floor(
+      stateFileLimitBytes * STATE_WRITE_TARGET_RATIO,
+    );
   }
 
   public async read(): Promise<LocalJobState> {
@@ -136,13 +175,23 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
 
   public async update<Result>(
     mutator: (draft: LocalJobState) => Result | Promise<Result>,
+    options: LocalJobStateUpdateOptions = {},
   ): Promise<Result> {
     const operation = this.writeTail.then(() =>
       this.withFileLock(async () => {
-        const draft = structuredClone(await this.readState());
+        const previous = await this.readState();
+        const draft = structuredClone(previous);
         const result = await mutator(draft);
         const validated = parseState(draft);
-        await this.writeState(validated);
+        if (JSON.stringify(previous) !== JSON.stringify(validated)) {
+          await this.writeState(
+            validated,
+            options.mode === "operational"
+              ? this.stateFileLimitBytes
+              : this.stateWriteTargetBytes,
+            terminalJobsChangedByMutation(previous, validated),
+          );
+        }
         return structuredClone(result);
       }),
     );
@@ -156,11 +205,15 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
   private async readState(): Promise<LocalJobState> {
     try {
       const metadata = await lstat(this.filePath);
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > STATE_FILE_LIMIT) {
+      if (
+        !metadata.isFile() ||
+        metadata.isSymbolicLink() ||
+        metadata.size > this.stateFileLimitBytes
+      ) {
         throw new LocalJobStateIntegrityError();
       }
       const raw = await readFile(this.filePath, "utf8");
-      if (Buffer.byteLength(raw, "utf8") > STATE_FILE_LIMIT) {
+      if (Buffer.byteLength(raw, "utf8") > this.stateFileLimitBytes) {
         throw new LocalJobStateIntegrityError();
       }
       return parseState(JSON.parse(raw) as unknown);
@@ -171,14 +224,23 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
     }
   }
 
-  private async writeState(state: LocalJobState): Promise<void> {
+  private async writeState(
+    state: LocalJobState,
+    maximumBytes: number,
+    protectedTerminalJobIds: ReadonlySet<string>,
+  ): Promise<void> {
+    const serialized = serializeStateWithinLimit(
+      state,
+      maximumBytes,
+      protectedTerminalJobIds,
+    );
     const directory = dirname(this.filePath);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const temporaryPath = `${this.filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
     let handle;
     try {
       handle = await open(temporaryPath, "wx", 0o600);
-      await handle.writeFile(JSON.stringify(state), "utf8");
+      await handle.writeFile(serialized, "utf8");
       await handle.sync();
       await handle.close();
       handle = undefined;
@@ -249,7 +311,9 @@ export class MemoryLocalJobStateStore implements LocalJobStateStore {
 
   public async update<Result>(
     mutator: (draft: LocalJobState) => Result | Promise<Result>,
+    _options: LocalJobStateUpdateOptions = {},
   ): Promise<Result> {
+    void _options;
     const operation = this.writeTail.then(async () => {
       const draft = structuredClone(this.state);
       const result = await mutator(draft);
@@ -285,6 +349,78 @@ export class LocalJobStateLockTimeoutError extends LocalJobStateError {
     super("Timed out acquiring the durable local job state lock");
     this.name = "LocalJobStateLockTimeoutError";
   }
+}
+
+export class LocalJobStateCapacityError extends LocalJobStateError {
+  public constructor() {
+    super("The durable local job state has reached its safe byte capacity");
+    this.name = "LocalJobStateCapacityError";
+  }
+}
+
+function terminalJobsChangedByMutation(
+  previous: LocalJobState,
+  next: LocalJobState,
+): ReadonlySet<string> {
+  const protectedJobIds = new Set<string>();
+  for (const job of Object.values(next.jobs)) {
+    if (!isTerminalJob(job)) continue;
+    const previousJob = previous.jobs[job.jobId];
+    if (previousJob === undefined || JSON.stringify(previousJob) !== JSON.stringify(job)) {
+      protectedJobIds.add(job.jobId);
+    }
+  }
+  return protectedJobIds;
+}
+
+function serializeStateWithinLimit(
+  state: LocalJobState,
+  maximumBytes: number,
+  protectedTerminalJobIds: ReadonlySet<string>,
+): string {
+  let serialized = JSON.stringify(state);
+  let serializedBytes = Buffer.byteLength(serialized, "utf8");
+  if (serializedBytes <= maximumBytes) return serialized;
+
+  const candidates = Object.values(state.jobs)
+    .filter((job) => isPrunableTerminalJob(job) && !protectedTerminalJobIds.has(job.jobId))
+    .sort(compareOldestTerminalJobs);
+  let remainingJobCount = Object.keys(state.jobs).length;
+  for (const job of candidates) {
+    const entryBytes =
+      Buffer.byteLength(JSON.stringify(job.jobId), "utf8") +
+      1 +
+      Buffer.byteLength(JSON.stringify(job), "utf8");
+    delete state.jobs[job.jobId];
+    serializedBytes -= entryBytes + (remainingJobCount > 1 ? 1 : 0);
+    remainingJobCount -= 1;
+    if (serializedBytes <= maximumBytes) break;
+  }
+
+  serialized = JSON.stringify(state);
+  if (Buffer.byteLength(serialized, "utf8") > maximumBytes) {
+    throw new LocalJobStateCapacityError();
+  }
+  return serialized;
+}
+
+function isTerminalJob(job: LocalJobRecord): boolean {
+  return job.status === "succeeded" || job.status === "dead_letter";
+}
+
+function isPrunableTerminalJob(job: LocalJobRecord): boolean {
+  return job.status === "dead_letter" ||
+    (job.status === "succeeded" && job.publication !== undefined);
+}
+
+function compareOldestTerminalJobs(
+  left: LocalJobRecord,
+  right: LocalJobRecord,
+): number {
+  return (
+    Date.parse(left.updatedAt) - Date.parse(right.updatedAt) ||
+    left.jobId.localeCompare(right.jobId)
+  );
 }
 
 function emptyState(): LocalJobState {
@@ -369,10 +505,16 @@ function parseJob(value: unknown): LocalJobRecord {
   const result = value.result === undefined ? undefined : parseSafeObject(value.result);
   const completedAt =
     value.completedAt === undefined ? undefined : parseTimestamp(value.completedAt);
+  const publication = value.publication === undefined
+    ? undefined
+    : parsePublicationReceipt(value.publication);
   if ((status === "succeeded" || status === "dead_letter") !== (completedAt !== undefined)) {
     throw new LocalJobStateIntegrityError();
   }
   if (status === "succeeded" && result === undefined) {
+    throw new LocalJobStateIntegrityError();
+  }
+  if (publication !== undefined && status !== "succeeded") {
     throw new LocalJobStateIntegrityError();
   }
   return {
@@ -393,7 +535,15 @@ function parseJob(value: unknown): LocalJobRecord {
     ...(lastDisposition === undefined ? {} : { lastDisposition }),
     ...(result === undefined ? {} : { result }),
     ...(completedAt === undefined ? {} : { completedAt }),
+    ...(publication === undefined ? {} : { publication }),
   };
+}
+
+function parsePublicationReceipt(value: unknown): LocalJobPublicationReceipt {
+  if (!isRecord(value)) throw new LocalJobStateIntegrityError();
+  assertIdentifier(value.publicationId);
+  assertTimestamp(value.publishedAt);
+  return { publicationId: value.publicationId, publishedAt: value.publishedAt };
 }
 
 function parseSchedule(value: unknown): LocalScheduleRecord {
@@ -412,6 +562,48 @@ function parseSchedule(value: unknown): LocalScheduleRecord {
   assertTimestamp(value.nextRunAt);
   assertTimestamp(value.createdAt);
   assertTimestamp(value.updatedAt);
+  const lastMutationId = value.lastMutationId;
+  const lastMutationSha256 = value.lastMutationSha256;
+  const lastMutationSequence = value.lastMutationSequence;
+  const capacitySkippedOccurrences = value.capacitySkippedOccurrences;
+  const capacityBlockedAt = value.capacityBlockedAt;
+  const missedOccurrences = value.missedOccurrences;
+  const lastMissedAt = value.lastMissedAt;
+  if (
+    (lastMutationId === undefined) !== (lastMutationSha256 === undefined) ||
+    (lastMutationId !== undefined && (
+      typeof lastMutationId !== "string" ||
+      !/^schedop_[a-f0-9]{48}$/u.test(lastMutationId) ||
+      typeof lastMutationSha256 !== "string" ||
+      !SHA256.test(lastMutationSha256)
+    ))
+  ) {
+    throw new LocalJobStateIntegrityError();
+  }
+  if (
+    lastMutationSequence !== undefined &&
+    (!isIntegerInRange(lastMutationSequence, 1, Number.MAX_SAFE_INTEGER) ||
+      lastMutationId === undefined)
+  ) {
+    throw new LocalJobStateIntegrityError();
+  }
+  if (
+    (capacitySkippedOccurrences !== undefined &&
+      !isIntegerInRange(capacitySkippedOccurrences, 0, Number.MAX_SAFE_INTEGER)) ||
+    (capacityBlockedAt !== undefined && typeof capacityBlockedAt !== "string")
+  ) {
+    throw new LocalJobStateIntegrityError();
+  }
+  if (capacityBlockedAt !== undefined) assertTimestamp(capacityBlockedAt);
+  if (
+    (missedOccurrences !== undefined &&
+      !isIntegerInRange(missedOccurrences, 0, Number.MAX_SAFE_INTEGER)) ||
+    (lastMissedAt !== undefined && typeof lastMissedAt !== "string") ||
+    ((missedOccurrences ?? 0) > 0) !== (lastMissedAt !== undefined)
+  ) {
+    throw new LocalJobStateIntegrityError();
+  }
+  if (lastMissedAt !== undefined) assertTimestamp(lastMissedAt);
   return {
     scheduleId: value.scheduleId,
     tenantId: value.tenantId,
@@ -421,6 +613,14 @@ function parseSchedule(value: unknown): LocalScheduleRecord {
     nextRunAt: value.nextRunAt,
     enabled: value.enabled,
     maxAttempts: value.maxAttempts,
+    ...(typeof lastMutationId === "string" && typeof lastMutationSha256 === "string"
+      ? { lastMutationId, lastMutationSha256 }
+      : {}),
+    ...(typeof lastMutationSequence === "number" ? { lastMutationSequence } : {}),
+    ...(typeof capacitySkippedOccurrences === "number" ? { capacitySkippedOccurrences } : {}),
+    ...(typeof capacityBlockedAt === "string" ? { capacityBlockedAt } : {}),
+    ...(typeof missedOccurrences === "number" ? { missedOccurrences } : {}),
+    ...(typeof lastMissedAt === "string" ? { lastMissedAt } : {}),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
   };

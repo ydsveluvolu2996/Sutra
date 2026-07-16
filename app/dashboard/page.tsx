@@ -51,7 +51,7 @@ export default function Home() {
         <div>
           <p className="eyebrow">MSP operations</p>
           <h1>{connection ? `${connection.customerName} cloud overview` : "Your AWS pilot workspace"}</h1>
-          <p className="page-subtitle">Current connection health, inventory coverage, asset context, and explainable security priorities.</p>
+          <p className="page-subtitle">AWS trust health, collection outcomes, active inventory coverage, asset context, and explainable security priorities.</p>
         </div>
         <div className="heading-actions">
           {connection && canRunAwsSync ? <button className="button button-secondary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync now"}</button> : null}
@@ -75,7 +75,7 @@ export default function Home() {
         <>
           <section className="metrics-grid" aria-label="Pilot summary">
             <article className="metric-card metric-card-featured">
-              <div className="metric-topline"><span>Connection health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
+              <div className="metric-topline"><span>Trust health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
               <strong className="connection-account">{connection.awsAccountId}</strong>
               <p>{connection.enabledRegions.length} enabled regions · {connection.sourceKind === "simulated_fixture" ? `fixture ${connection.fixtureVersion ?? "not published"}` : `validated ${formatTimestamp(connection.lastValidatedAt)}`}</p>
             </article>
@@ -90,7 +90,7 @@ export default function Home() {
               <p><span className="severity-dot severity-critical" /> {openFindings.filter((finding) => finding.severity === "critical" || finding.severity === "high").length} critical or high</p>
             </article>
             <article className="metric-card">
-              <div className="metric-topline"><span>Collector coverage</span><span className="metric-glyph">AWS</span></div>
+              <div className="metric-topline"><span>Active snapshot coverage</span><span className="metric-glyph">AWS</span></div>
               <strong className="metric-value">{totalCoverage ? `${coveragePercent}%` : "—"}</strong>
               <p>{succeededCoverage} of {totalCoverage} checks succeeded</p>
             </article>

@@ -359,11 +359,24 @@ export function parseVerificationResponse(
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: "live-demo-2026-07";
 } {
   const record = exactRecord(value, [
     "verified", "accountId", "callerIdentityArn", "missingExternalIdDenied", "wrongExternalIdDenied",
+    "trustPolicyAttested", "permissionPolicyAttested", "sessionPolicyApplied", "permissionPackVersion",
   ]);
-  if (record.verified !== true || record.missingExternalIdDenied !== true || record.wrongExternalIdDenied !== true) invalid();
+  if (
+    record.verified !== true ||
+    record.missingExternalIdDenied !== true ||
+    record.wrongExternalIdDenied !== true ||
+    record.trustPolicyAttested !== true ||
+    record.permissionPolicyAttested !== true ||
+    record.sessionPolicyApplied !== true ||
+    record.permissionPackVersion !== "live-demo-2026-07"
+  ) invalid();
   const accountId = awsAccountId(record.accountId);
   const arn = string(record.callerIdentityArn, 2_048);
   const match = /^arn:(aws|aws-us-gov|aws-cn):sts::(\d{12}):assumed-role\/.+$/u.exec(arn);
@@ -374,5 +387,9 @@ export function parseVerificationResponse(
     callerIdentityArn: arn,
     missingExternalIdDenied: true,
     wrongExternalIdDenied: true,
+    trustPolicyAttested: true,
+    permissionPolicyAttested: true,
+    sessionPolicyApplied: true,
+    permissionPackVersion: "live-demo-2026-07",
   };
 }
