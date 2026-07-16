@@ -16,6 +16,7 @@ import type {
 } from "../lib/pilot-types";
 import {
   deriveLocalAwsConnectionIdentity,
+  parseIamRoleArn,
   parseSafePilotFailure,
 } from "../lib/aws-pilot-security";
 import {
@@ -25,10 +26,12 @@ import {
   type CmdbResourceChangeType,
 } from "../lib/cmdb-change-history";
 import { canonicalJson } from "../lib/canonical-json";
+import type { AwsRegionSelection } from "../lib/aws-region-selection.ts";
+import { LIVE_AWS_RUN_RECLAIM_AFTER_MS } from "../services/aws-collector/src/live-collection-limits";
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "live-demo-2026-07";
+const PILOT_PERMISSION_PACK = "live-demo-2026-07.1";
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
 
@@ -54,7 +57,7 @@ export interface CreateConnectionDraftInput {
   readonly customerSlug: string;
   readonly accountId: string;
   readonly partition: AwsPartition;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly externalIdCiphertext: string;
   readonly externalIdKeyVersion: string;
 }
@@ -74,8 +77,28 @@ export interface StoredConnectionSecret {
   readonly roleArn: string;
   readonly externalIdCiphertext: string;
   readonly externalIdKeyVersion: string;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly status: ConnectionStatus;
+}
+
+export interface VerifiedRoleEvidence {
+  readonly verified: true;
+  readonly accountId: string;
+  readonly callerIdentityArn: string;
+  readonly missingExternalIdDenied: true;
+  readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: "live-demo-2026-07.1";
+}
+
+export interface CommitVerifiedConnectionRoleInput {
+  readonly connectionId: string;
+  readonly expectedPreviousRoleArn: string | null;
+  readonly roleArn: string;
+  readonly actorId: string;
+  readonly verification: VerifiedRoleEvidence;
 }
 
 interface ConnectionRow {
@@ -481,25 +504,17 @@ export async function getLatestConnection(): Promise<PilotConnection | null> {
   return row === null ? null : toPilotConnection(row);
 }
 
-export function setConnectionRole(
-  connectionId: string,
-  roleArn: string,
-  actorId: string,
+export function commitVerifiedConnectionRole(
+  input: CommitVerifiedConnectionRoleInput,
 ): Promise<PilotConnection> {
-  return serializeAuditOperation(() => setConnectionRoleWithAtomicAudit(
-    connectionId,
-    roleArn,
-    actorId,
-  ));
+  return serializeAuditOperation(() => commitVerifiedConnectionRoleWithAtomicAudit(input));
 }
 
-async function setConnectionRoleWithAtomicAudit(
-  connectionId: string,
-  roleArn: string,
-  actorId: string,
+async function commitVerifiedConnectionRoleWithAtomicAudit(
+  input: CommitVerifiedConnectionRoleInput,
 ): Promise<PilotConnection> {
   const db = await readyDatabase();
-  const current = await getConnection(connectionId);
+  const current = await getConnection(input.connectionId);
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -515,18 +530,73 @@ async function setConnectionRoleWithAtomicAudit(
   if (current.sourceKind === "simulated_fixture") {
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections do not accept IAM roles");
   }
+  try {
+    const parsedRole = parseIamRoleArn(input.roleArn, {
+      accountId: current.awsAccountId,
+      partition: current.partition,
+    });
+    if (parsedRole.rolePathAndName !== "sutra/SutraReadOnlyRole") {
+      throw new Error("unexpected role path");
+    }
+  } catch {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The verified IAM role does not match the reviewed Sutra role contract",
+    );
+  }
+  const expectedCallerIdentity = new RegExp(
+    `^arn:${current.partition}:sts::${current.awsAccountId}:assumed-role/SutraReadOnlyRole/sutra-[A-Za-z0-9_+=,.@-]+$`,
+    "u",
+  );
+  if (
+    input.verification.verified !== true ||
+    input.verification.accountId !== current.awsAccountId ||
+    !expectedCallerIdentity.test(input.verification.callerIdentityArn) ||
+    input.verification.missingExternalIdDenied !== true ||
+    input.verification.wrongExternalIdDenied !== true ||
+    input.verification.trustPolicyAttested !== true ||
+    input.verification.permissionPolicyAttested !== true ||
+    input.verification.sessionPolicyApplied !== true ||
+    input.verification.permissionPackVersion !== PILOT_PERMISSION_PACK
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The collector trust proof is incomplete or does not match this AWS connection",
+    );
+  }
+  const expectedPreviousRole = input.expectedPreviousRoleArn ?? "";
+  const alreadyCommitted = current.roleArn === input.roleArn &&
+    current.status === "active" && current.lastValidatedAt !== null;
+  if (!alreadyCommitted && (current.roleArn ?? "") !== expectedPreviousRole) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The AWS connection changed while the customer role was being verified",
+    );
+  }
   const now = nextMutationTimestamp(current);
   const audit = resolveAuditInput({
-    actorId,
+    actorId: input.actorId,
     action: "aws.connection.role_registered",
     targetType: "aws_connection",
-    targetId: connectionId,
+    targetId: input.connectionId,
     customerId: current.customerId,
     outcome: "allowed",
-    metadata: { roleArn },
-    requestId: `aws.connection.role_registered:${connectionId}:${(await sha256Hex(roleArn)).slice(0, 32)}`,
+    metadata: {
+      roleArn: input.roleArn,
+      trustProof: {
+        assumeRoleSucceeded: true,
+        expectedCallerIdentityMatched: true,
+        missingExternalIdDenied: true,
+        wrongExternalIdDenied: true,
+        exactTrustPolicyAttested: true,
+        exactPermissionPolicyAttested: true,
+        sessionPolicyApplied: true,
+        permissionPackVersion: PILOT_PERMISSION_PACK,
+      },
+    },
+    requestId: `aws.connection.role_verified:${input.connectionId}:${(await sha256Hex(input.roleArn)).slice(0, 32)}`,
   });
-  if (await connectionHasActiveWork(db, connectionId)) {
+  if (await connectionHasActiveWork(db, input.connectionId)) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
       "The AWS connection changed or has active work; retry role registration after it settles",
@@ -534,33 +604,54 @@ async function setConnectionRoleWithAtomicAudit(
   }
   const mutation = db.prepare(
     `UPDATE aws_connections
-        SET role_arn = ?, status = 'pending', last_validated_at = NULL, updated_at = ?
+        SET role_arn = ?, permission_pack_version = ?, status = 'active',
+            last_validated_at = ?, updated_at = ?
       WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
         AND status IN ('pending', 'active', 'needs_attention')
+        AND role_arn = ?
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs
            WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
         )`,
-  ).bind(roleArn, now, LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId);
+  ).bind(
+    input.roleArn,
+    PILOT_PERMISSION_PACK,
+    now,
+    now,
+    LOCAL_ORG_ID,
+    input.connectionId,
+    expectedPreviousRole,
+    LOCAL_ORG_ID,
+    input.connectionId,
+  );
   return commitAuditedConnectionMutation({
     db,
-    connectionId,
+    connectionId: input.connectionId,
     mutation,
     audit,
     mutationGuard: {
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
-               AND role_arn = ? AND status = 'pending'
-               AND last_validated_at IS NULL AND updated_at = ?`,
-      values: [LOCAL_ORG_ID, connectionId, roleArn, now],
+               AND role_arn = ? AND status = 'active'
+               AND permission_pack_version = ?
+               AND last_validated_at = ? AND updated_at = ?`,
+      values: [
+        LOCAL_ORG_ID,
+        input.connectionId,
+        input.roleArn,
+        PILOT_PERMISSION_PACK,
+        now,
+        now,
+      ],
     },
     committedState: {
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
-               AND role_arn = ? AND status IN ('pending', 'validating', 'active', 'needs_attention')`,
-      values: [LOCAL_ORG_ID, connectionId, roleArn],
+               AND role_arn = ? AND status = 'active'
+               AND permission_pack_version = ? AND last_validated_at IS NOT NULL`,
+      values: [LOCAL_ORG_ID, input.connectionId, input.roleArn, PILOT_PERMISSION_PACK],
     },
-    persistenceMessage: "The IAM role and its audit evidence could not be committed atomically",
+    persistenceMessage: "The verified IAM role and its audit evidence could not be committed atomically",
   });
 }
 
@@ -966,7 +1057,7 @@ export async function markConnectionNeedsAttention(
 
 export async function createSyncRun(connectionId: string): Promise<string> {
   const db = await readyDatabase();
-  const abandonedBefore = Date.now() - 60 * 60 * 1000;
+  const abandonedBefore = Date.now() - LIVE_AWS_RUN_RECLAIM_AFTER_MS;
   await db.batch([
     db.prepare(
       `UPDATE cmdb_snapshots SET status = 'failed', completed_at = ?

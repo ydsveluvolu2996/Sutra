@@ -21,6 +21,7 @@ import {
 } from "./local-ops-types";
 import { authorizePilotRequest, type AuthorizedPilotActor } from "./api-auth";
 import type { Capability } from "./auth-policy";
+import { LIVE_AWS_BROKER_TIMEOUT_MS } from "../services/aws-collector/src/live-collection-limits";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
@@ -306,6 +307,32 @@ export async function registerCollectorConnection(input: {
   );
 }
 
+export async function activateCollectorConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly roleArn: string;
+}): Promise<void> {
+  const response = await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/activate`,
+    "POST",
+    input,
+  );
+  assertLifecycleAcknowledgement(response, "activated");
+}
+
+export async function discardStagedCollectorConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly roleArn: string;
+}): Promise<void> {
+  const response = await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/discard`,
+    "POST",
+    input,
+  );
+  assertLifecycleAcknowledgement(response, "discarded");
+}
+
 export async function disableCollectorConnection(input: {
   readonly tenantId: string;
   readonly connectionId: string;
@@ -332,7 +359,7 @@ export async function offboardCollectorConnection(input: {
 
 function assertLifecycleAcknowledgement(
   value: unknown,
-  key: "disabled" | "offboarded",
+  key: "activated" | "discarded" | "disabled" | "offboarded",
 ): void {
   if (
     typeof value !== "object" ||
@@ -362,6 +389,10 @@ export async function verifyCollectorConnection(input: {
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: "live-demo-2026-07.1";
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parseVerificationResponse(
@@ -379,7 +410,12 @@ export async function runCollectorSync(input: {
 }): Promise<PilotSnapshotPayload> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parsePilotSnapshot(
-    await brokerFetch<unknown>(`/v1/connections/${input.connectionId}/sync`, "POST", payload, 180_000),
+    await brokerFetch<unknown>(
+      `/v1/connections/${input.connectionId}/sync`,
+      "POST",
+      payload,
+      LIVE_AWS_BROKER_TIMEOUT_MS,
+    ),
     {
       jobId: input.jobId,
       connectionId: input.connectionId,

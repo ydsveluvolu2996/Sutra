@@ -12,6 +12,8 @@ import {
   buildLiveRuntimeConfig,
   ensureLiveRuntimeConfiguration,
   parseRuntimeConfig,
+  resolveValidatedSsoLoginProfile,
+  scrubAwsEndpointOverrideEnvironment,
   validateAwsProfileCredentialSource,
   validateLiveAwsLaunchEnvironment,
 } from "../scripts/live-aws-host.mjs";
@@ -20,6 +22,7 @@ import { PROTECTED_POSTGRES_VOLUMES } from "../scripts/docker-local-env.mjs";
 const PROFILE = "sutra-demo-sso";
 const PRINCIPAL = "arn:aws:iam::111122223333:role/aws-reserved/sso.amazonaws.com/SutraDemoCollector";
 const DATABASE_URL = "postgresql://sutra_app:local-password@127.0.0.1:54329/sutra";
+const TEMPLATE_URL = "https://sutra-onboarding-111122223333-us-east-1.s3.us-east-1.amazonaws.com/templates/live-demo/template.yaml?versionId=reviewed-version";
 
 function validLaunchEnvironment(overrides = {}) {
   return {
@@ -136,6 +139,26 @@ test("live host launcher rejects every process-level static or token credential 
   }
 });
 
+test("live host launcher rejects and scrubs AWS endpoint URL environment overrides", async (t) => {
+  for (const key of ["AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_STS", "AWS_ENDPOINT_URL_S3_CONTROL"]) {
+    await t.test(key, () => {
+      assert.throws(
+        () => validateLiveAwsLaunchEnvironment(validLaunchEnvironment({ [key]: "https://attacker.invalid" })),
+        (error) => error instanceof Error && error.message.includes(key) && !error.message.includes("attacker.invalid"),
+      );
+    });
+  }
+  assert.deepEqual(scrubAwsEndpointOverrideEnvironment({
+    PATH: "/safe/bin",
+    AWS_ENDPOINT_URL: "",
+    AWS_ENDPOINT_URL_STS: "",
+    AWS_PROFILE: PROFILE,
+  }), {
+    PATH: "/safe/bin",
+    AWS_PROFILE: PROFILE,
+  });
+});
+
 test("live host launcher accepts a role source_profile chain that terminates in an SSO session", async () => {
   const environment = await awsSharedFiles(`
 [sso-session sutra-demo]
@@ -160,6 +183,27 @@ role_session_name = sutra-local-demo
     configFile: environment.AWS_CONFIG_FILE,
     credentialsFile: environment.AWS_SHARED_CREDENTIALS_FILE,
   });
+});
+
+test("SSO login profile resolution accepts only the validated terminal profile", () => {
+  assert.equal(resolveValidatedSsoLoginProfile({
+    selectedProfile: PROFILE,
+    chain: [PROFILE, "sutra-operator", "sutra-identity-center"],
+    terminal: "sso",
+  }, PROFILE), "sutra-identity-center");
+
+  for (const profileSource of [
+    { selectedProfile: PROFILE, chain: [PROFILE, "loop", PROFILE], terminal: "sso" },
+    { selectedProfile: PROFILE, chain: [PROFILE, "invalid profile"], terminal: "sso" },
+    { selectedProfile: "different", chain: ["different"], terminal: "sso" },
+    { selectedProfile: PROFILE, chain: [PROFILE], terminal: "static" },
+    { selectedProfile: PROFILE, chain: [], terminal: "sso" },
+  ]) {
+    assert.throws(
+      () => resolveValidatedSsoLoginProfile(profileSource, PROFILE),
+      /did not return a safe SSO profile chain/u,
+    );
+  }
 });
 
 test("live host launcher accepts a role chain that terminates in a legacy SSO profile", async () => {
@@ -243,6 +287,42 @@ credential_process = do-not-run
     await assert.rejects(validateAwsProfileCredentialSource({ environment }), /must not use credential_process/u);
   });
 
+  for (const endpointKey of ["endpoint_url", "services"]) {
+    await t.test(`selected profile ${endpointKey}`, async () => {
+      const environment = await awsSharedFiles(`
+[profile ${PROFILE}]
+${endpointKey} = do-not-use
+sso_start_url = https://example.awsapps.com/start
+sso_region = us-east-1
+sso_account_id = 111122223333
+sso_role_name = SutraOperator
+`);
+      await assert.rejects(
+        validateAwsProfileCredentialSource({ environment }),
+        new RegExp(`must not use ${endpointKey}`, "u"),
+      );
+    });
+
+    await t.test(`source profile ${endpointKey}`, async () => {
+      const environment = await awsSharedFiles(`
+[profile ${PROFILE}]
+role_arn = ${PRINCIPAL}
+source_profile = sutra-demo-operator
+
+[profile sutra-demo-operator]
+${endpointKey} = do-not-use
+sso_start_url = https://example.awsapps.com/start
+sso_region = us-east-1
+sso_account_id = 111122223333
+sso_role_name = SutraOperator
+`);
+      await assert.rejects(
+        validateAwsProfileCredentialSource({ environment }),
+        new RegExp(`must not use ${endpointKey}`, "u"),
+      );
+    });
+  }
+
   await t.test("relative config path", async () => {
     await assert.rejects(
       validateAwsProfileCredentialSource({
@@ -293,6 +373,7 @@ test("runtime configuration contains no AWS profile, acknowledgement, access key
   const built = buildLiveRuntimeConfig({
     databaseUrl: DATABASE_URL,
     principalArn: PRINCIPAL,
+    publicTemplateUrl: TEMPLATE_URL,
     createSecret: deterministicSecrets(),
   });
   assert.equal(/^AWS_/mu.test(built.contents), false);
@@ -303,6 +384,45 @@ test("runtime configuration contains no AWS profile, acknowledgement, access key
   assert.equal(built.variables.get("SUTRA_COLLECTOR_MODE"), "live");
   assert.equal(built.variables.get("SUTRA_ALLOW_LIVE_AWS"), "true");
   assert.equal(built.variables.get("SUTRA_COLLECTOR_PRINCIPAL_ARN"), PRINCIPAL);
+  assert.equal(built.variables.get("SUTRA_CUSTOMER_ROLE_TEMPLATE_URL"), TEMPLATE_URL);
+
+  assert.throws(
+    () => buildLiveRuntimeConfig({
+      databaseUrl: DATABASE_URL,
+      principalArn: PRINCIPAL,
+      publicTemplateUrl: TEMPLATE_URL.replace("?versionId=reviewed-version", ""),
+      createSecret: deterministicSecrets(),
+    }),
+    /immutable commercial-AWS S3 HTTPS object URL/u,
+  );
+  assert.throws(
+    () => buildLiveRuntimeConfig({
+      databaseUrl: DATABASE_URL,
+      principalArn: PRINCIPAL,
+      publicTemplateUrl: TEMPLATE_URL.replace("reviewed-version", "null"),
+      createSecret: deterministicSecrets(),
+    }),
+    /immutable commercial-AWS S3 HTTPS object URL/u,
+  );
+
+  assert.throws(
+    () => buildLiveRuntimeConfig({
+      databaseUrl: DATABASE_URL,
+      principalArn: PRINCIPAL,
+      publicTemplateUrl: "http://127.0.0.1/template.yaml",
+      createSecret: deterministicSecrets(),
+    }),
+    /commercial-AWS S3 HTTPS object URL/u,
+  );
+  assert.throws(
+    () => buildLiveRuntimeConfig({
+      databaseUrl: DATABASE_URL,
+      principalArn: PRINCIPAL,
+      publicTemplateUrl: `${TEMPLATE_URL}&X-Amz-Signature=temporary`,
+      createSecret: deterministicSecrets(),
+    }),
+    /commercial-AWS S3 HTTPS object URL/u,
+  );
 
   assert.throws(
     () => parseRuntimeConfig("AWS_PROFILE=must-never-be-persisted\n"),

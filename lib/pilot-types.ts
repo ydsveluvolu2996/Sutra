@@ -1,3 +1,5 @@
+import type { AwsRegionSelection } from "./aws-region-selection.ts";
+
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 export type ConnectionStatus = "pending" | "validating" | "active" | "needs_attention" | "disabled";
 export type SyncStatus = "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
@@ -18,7 +20,7 @@ export interface PilotConnection {
   readonly awsAccountId: string;
   readonly roleArn: string | null;
   readonly status: ConnectionStatus;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly permissionPackVersion: string;
   readonly lastValidatedAt: string | null;
   readonly lastSuccessfulSyncAt: string | null;

@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyEveryNonAssumeRoleAction",
+      "Effect": "Deny",
+      "NotAction": "sts:AssumeRole",
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyAssumeRoleOutsideFixedCustomerRole",
+      "Effect": "Deny",
+      "Action": "sts:AssumeRole",
+      "NotResource": "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
+    },
+    {
+      "Sid": "AssumeFixedSutraCustomerRoleOnly",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
+    }
+  ]
+}

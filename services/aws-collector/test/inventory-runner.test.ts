@@ -3,14 +3,18 @@ import { setImmediate } from "node:timers";
 import { test } from "node:test";
 
 import {
+  AWS_INVENTORY_CONNECTION_TIMEOUT_MS,
+  AWS_INVENTORY_REQUEST_TIMEOUT_MS,
   AwsEnabledRegionSelector,
   SingleAccountAwsInventoryRunner,
   StaticInventoryRegionSelector,
+  awsInventorySdkClientConfig,
   type AwsInventoryClientFactory,
   type CloudTrailInventoryClient,
   type Ec2InventoryClient,
   type GuardDutyInventoryClient,
   type IamInventoryClient,
+  type InspectorInventoryClient,
   type RdsInventoryClient,
   type S3InventoryClient,
   type SecurityHubInventoryClient,
@@ -21,6 +25,29 @@ import type {
   AwsInventorySink,
   InventoryCollectionContext,
 } from "../src/types.js";
+import { ALL_ENABLED_AWS_REGIONS } from "../src/aws-region-selection.js";
+import {
+  LIVE_AWS_COVERAGE_ROW_LIMIT,
+  LIVE_AWS_GLOBAL_COLLECTOR_COUNT,
+  LIVE_AWS_MAX_REGIONS,
+  LIVE_AWS_REGIONAL_COLLECTOR_COUNT,
+} from "../src/live-collection-limits.js";
+
+test("real AWS inventory clients bound each transport attempt inside the command deadline", () => {
+  const credentials = context().credentials;
+  assert.deepEqual(awsInventorySdkClientConfig("us-east-1", credentials, 4), {
+    region: "us-east-1",
+    credentials,
+    retryMode: "standard",
+    maxAttempts: 4,
+    requestHandler: {
+      connectionTimeout: AWS_INVENTORY_CONNECTION_TIMEOUT_MS,
+      requestTimeout: AWS_INVENTORY_REQUEST_TIMEOUT_MS,
+    },
+  });
+  assert.equal(AWS_INVENTORY_CONNECTION_TIMEOUT_MS, 5_000);
+  assert.equal(AWS_INVENTORY_REQUEST_TIMEOUT_MS, 10_000);
+});
 
 test("discovers enabled AWS Regions and rejects disabled selections", async () => {
   const calls: string[] = [];
@@ -58,6 +85,38 @@ test("discovers enabled AWS Regions and rejects disabled selections", async () =
   await assert.rejects(
     () => disabled.selectRegions(context()),
     /Selected AWS Regions are not enabled: ap-east-1/,
+  );
+
+  const allEnabled = new AwsEnabledRegionSelector({
+    controlRegion: "us-east-1",
+    requestedRegions: [ALL_ENABLED_AWS_REGIONS],
+    clientFactory: () => ({
+      describeRegions: async () => ({
+        $metadata: {},
+        Regions: [
+          { RegionName: "us-west-2", OptInStatus: "opted-in" },
+          { RegionName: "ap-east-1", OptInStatus: "not-opted-in" },
+          { RegionName: "us-east-1", OptInStatus: "opt-in-not-required" },
+        ],
+      }),
+    }),
+  });
+  assert.deepEqual(await allEnabled.selectRegions(context()), ["us-east-1", "us-west-2"]);
+  assert.equal((await allEnabled.selectRegions(context())).includes(ALL_ENABLED_AWS_REGIONS), false);
+
+  const mixed = new AwsEnabledRegionSelector({
+    controlRegion: "us-east-1",
+    requestedRegions: [ALL_ENABLED_AWS_REGIONS, "us-east-1"],
+    clientFactory: () => ({
+      describeRegions: async () => ({
+        $metadata: {},
+        Regions: [{ RegionName: "us-east-1", OptInStatus: "opt-in-not-required" }],
+      }),
+    }),
+  });
+  await assert.rejects(
+    () => mixed.selectRegions(context()),
+    /cannot be combined with an explicit Region/u,
   );
 });
 
@@ -342,6 +401,15 @@ class FakeClientFactory implements AwsInventoryClientFactory {
           CreatedAt: "2026-01-01T00:00:00Z",
           UpdatedAt: "2026-07-01T00:00:00Z",
         })),
+      listFindings: (input) =>
+        this.tracker.run(() => ({
+          $metadata: {},
+          FindingIds: [],
+          NextToken: undefined,
+          DetectorId: input.DetectorId,
+        })),
+      getFindings: () =>
+        this.tracker.run(() => ({ $metadata: {}, Findings: [] })),
     };
   }
 
@@ -364,6 +432,30 @@ class FakeClientFactory implements AwsInventoryClientFactory {
             ControlFindingGenerator: "SECURITY_CONTROL",
           };
         }),
+      getFindings: () =>
+        this.tracker.run(() => ({ $metadata: {}, Findings: [] })),
+    };
+  }
+
+  public inspector(_region: string): InspectorInventoryClient {
+    void _region;
+    return {
+      batchGetAccountStatus: (input) =>
+        this.tracker.run(() => ({
+          $metadata: {},
+          accounts: [{
+            accountId: input.accountIds?.[0],
+            state: { status: "DISABLED", errorCode: undefined, errorMessage: undefined },
+            resourceState: {
+              ec2: { status: "DISABLED", errorCode: undefined, errorMessage: undefined },
+              ecr: { status: "DISABLED", errorCode: undefined, errorMessage: undefined },
+            },
+          }],
+          failedAccounts: [],
+        })),
+      listFindings: () => {
+        throw new Error("listFindings must not run when Inspector is disabled");
+      },
     };
   }
 }
@@ -490,6 +582,12 @@ class RegionalAccountSignalClientFactory extends FakeClientFactory {
       getDetector: async () => {
         throw new Error("getDetector must not run without a detector");
       },
+      listFindings: async () => {
+        throw new Error("listFindings must not run without a detector");
+      },
+      getFindings: async () => {
+        throw new Error("getFindings must not run without a detector");
+      },
     };
   }
 
@@ -499,6 +597,307 @@ class RegionalAccountSignalClientFactory extends FakeClientFactory {
         const error = new Error("hub disabled");
         error.name = "InvalidAccessException";
         throw error;
+      },
+      getFindings: async () => {
+        throw new Error("getFindings must not run when Security Hub is disabled");
+      },
+    };
+  }
+}
+
+class NativeFindingsClientFactory extends FakeClientFactory {
+  public readonly guardDutyFindingTokens: (string | undefined)[] = [];
+  public readonly securityHubFindingTokens: (string | undefined)[] = [];
+  public readonly inspectorFindingTokens: (string | undefined)[] = [];
+  public readonly securityHubFilters: unknown[] = [];
+
+  public override guardDuty(region: string): GuardDutyInventoryClient {
+    return {
+      listDetectors: async () => ({ $metadata: {}, DetectorIds: ["detector-native"] }),
+      getDetector: async () => ({
+        $metadata: {},
+        Status: "ENABLED",
+        ServiceRole: "service-role",
+      }),
+      listFindings: async (input) => {
+        this.guardDutyFindingTokens.push(input.NextToken);
+        return input.NextToken === undefined
+          ? { $metadata: {}, FindingIds: ["gd-native-1"], NextToken: "gd-native-next" }
+          : { $metadata: {}, FindingIds: [] };
+      },
+      getFindings: async () => ({
+        $metadata: {},
+        Findings: [{
+          AccountId: "123456789012",
+          Arn: `arn:aws:guardduty:${region}:123456789012:detector/detector-native/finding/gd-native-1`,
+          CreatedAt: "2026-07-01T00:00:00Z",
+          Description: "password=must-not-cross-native-finding-boundary",
+          Id: "gd-native-1",
+          Partition: "aws",
+          Region: region,
+          Resource: {
+            ResourceType: "Instance",
+            InstanceDetails: { InstanceId: "i-east-1" },
+            AccessKeyDetails: { AccessKeyId: "INVALID_TEST_ACCESS_KEY" },
+          },
+          SchemaVersion: "2.0",
+          Service: {
+            Archived: false,
+            EventFirstSeen: "2026-07-01T00:00:00Z",
+            EventLastSeen: "2026-07-15T00:00:00Z",
+          },
+          Severity: 8,
+          Title: "GuardDuty native threat",
+          Type: "UnauthorizedAccess:EC2/SSHBruteForce",
+          UpdatedAt: "2026-07-15T00:00:00Z",
+        }],
+      }),
+    };
+  }
+
+  public override securityHub(region: string): SecurityHubInventoryClient {
+    return {
+      describeHub: async () => ({
+        $metadata: {},
+        HubArn: `arn:aws:securityhub:${region}:123456789012:hub/default`,
+      }),
+      getFindings: async (input) => {
+        this.securityHubFindingTokens.push(input.NextToken);
+        this.securityHubFilters.push(input.Filters);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "securityhub-native-next",
+              Findings: [{
+                SchemaVersion: "2018-10-08",
+                Id: `arn:aws:securityhub:${region}:123456789012:subscription/cis-aws-foundations-benchmark/v/1.4.0/1.1`,
+                ProductArn: `arn:aws:securityhub:${region}::product/aws/securityhub`,
+                ProductName: "Security Hub",
+                CompanyName: "AWS",
+                Region: region,
+                GeneratorId: "security-control/IAM.1",
+                AwsAccountId: "123456789012",
+                Types: ["Software and Configuration Checks/Industry and Regulatory Standards"],
+                FirstObservedAt: "2026-07-01T00:00:00Z",
+                LastObservedAt: "2026-07-15T00:00:00Z",
+                CreatedAt: "2026-07-01T00:00:00Z",
+                UpdatedAt: "2026-07-15T00:00:00Z",
+                Severity: { Label: "CRITICAL", Normalized: 95 },
+                Title: "Security Hub native control failure",
+                Description: "An AWS-native Security Hub control failed.",
+                Remediation: { Recommendation: { Text: "Apply the approved IAM remediation." } },
+                Resources: [{
+                  Type: "AwsEc2Instance",
+                  Id: `arn:aws:ec2:${region}:123456789012:instance/i-east-1`,
+                  Partition: "aws",
+                  Region: region,
+                }],
+                Workflow: { Status: "SUPPRESSED" },
+                RecordState: "ACTIVE",
+                Compliance: { Status: "FAILED", SecurityControlId: "IAM.1" },
+              }],
+            }
+          : { $metadata: {}, Findings: [] };
+      },
+    };
+  }
+
+  public override inspector(region: string): InspectorInventoryClient {
+    return {
+      batchGetAccountStatus: async (input) => ({
+        $metadata: {},
+        accounts: [{
+          accountId: input.accountIds?.[0],
+          state: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+          resourceState: {
+            ec2: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+            ecr: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+          },
+        }],
+        failedAccounts: [],
+      }),
+      listFindings: async (input) => {
+        this.inspectorFindingTokens.push(input.nextToken);
+        return input.nextToken === undefined
+          ? {
+              $metadata: {},
+              nextToken: "inspector-native-next",
+              findings: [{
+                findingArn: `arn:aws:inspector2:${region}:123456789012:finding/inspector-native-1`,
+                awsAccountId: "123456789012",
+                type: "PACKAGE_VULNERABILITY",
+                description: "Amazon Inspector identified a package vulnerability.",
+                title: "Inspector native package vulnerability",
+                remediation: { recommendation: { text: "Upgrade to the fixed package version." } },
+                severity: "MEDIUM",
+                firstObservedAt: new Date("2026-07-01T00:00:00Z"),
+                lastObservedAt: new Date("2026-07-15T00:00:00Z"),
+                updatedAt: new Date("2026-07-15T00:00:00Z"),
+                status: "CLOSED",
+                resources: [{
+                  type: "AWS_EC2_INSTANCE",
+                  id: "i-east-1",
+                  partition: "aws",
+                  region,
+                }],
+                inspectorScore: 6.5,
+                fixAvailable: "YES",
+                exploitAvailable: "NO",
+              }],
+            }
+          : { $metadata: {}, findings: [] };
+      },
+    };
+  }
+}
+
+class RepeatedNativeFindingTokenClientFactory extends FakeClientFactory {
+  public override securityHub(region: string): SecurityHubInventoryClient {
+    return {
+      describeHub: async () => ({
+        $metadata: {},
+        HubArn: `arn:aws:securityhub:${region}:123456789012:hub/default`,
+      }),
+      getFindings: async () => ({
+        $metadata: {},
+        Findings: [],
+        NextToken: "repeated-native-token",
+      }),
+    };
+  }
+}
+
+class FinalPageOverflowNativeFindingsClientFactory extends FakeClientFactory {
+  public override guardDuty(region: string): GuardDutyInventoryClient {
+    return {
+      listDetectors: async () => ({
+        $metadata: {},
+        DetectorIds: ["detector-final-page-overflow"],
+      }),
+      getDetector: async () => ({
+        $metadata: {},
+        Status: "ENABLED",
+        ServiceRole: "service-role",
+      }),
+      listFindings: async (input) => {
+        const page = input.NextToken === undefined ? 0 : Number(input.NextToken);
+        assert.ok(Number.isInteger(page) && page >= 0 && page <= 20);
+        const finalPage = page === 20;
+        return {
+          $metadata: {},
+          FindingIds: Array.from(
+            { length: finalPage ? 1 : 50 },
+            (_, index) => `gd-overflow-${page}-${index}`,
+          ),
+          ...(finalPage ? {} : { NextToken: String(page + 1) }),
+        };
+      },
+      getFindings: async (input) => ({
+        $metadata: {},
+        Findings: (input.FindingIds ?? []).map((findingId) => ({
+          AccountId: "123456789012",
+          Arn: `arn:aws:guardduty:${region}:123456789012:detector/detector-final-page-overflow/finding/${findingId}`,
+          CreatedAt: "2026-07-01T00:00:00Z",
+          Description: "GuardDuty bounded import regression evidence.",
+          Id: findingId,
+          Partition: "aws",
+          Region: region,
+          Resource: { ResourceType: "Instance" },
+          SchemaVersion: "2.0",
+          Service: { Archived: false },
+          Severity: 5,
+          Title: "GuardDuty bounded import regression",
+          Type: "Recon:EC2/PortProbeUnprotectedPort",
+          UpdatedAt: "2026-07-15T00:00:00Z",
+        })),
+      }),
+    };
+  }
+
+  public override securityHub(region: string): SecurityHubInventoryClient {
+    return {
+      describeHub: async () => ({
+        $metadata: {},
+        HubArn: `arn:aws:securityhub:${region}:123456789012:hub/default`,
+      }),
+      getFindings: async (input) => {
+        const page = input.NextToken === undefined ? 0 : Number(input.NextToken);
+        assert.ok(Number.isInteger(page) && page >= 0 && page <= 10);
+        const finalPage = page === 10;
+        return {
+          $metadata: {},
+          Findings: Array.from(
+            { length: finalPage ? 1 : 100 },
+            (_, index) => ({
+              SchemaVersion: "2018-10-08",
+              Id: `securityhub-overflow-${page}-${index}`,
+              ProductArn: `arn:aws:securityhub:${region}::product/aws/securityhub`,
+              ProductName: "Security Hub",
+              CompanyName: "AWS",
+              Region: region,
+              GeneratorId: "security-control/IAM.1",
+              AwsAccountId: "123456789012",
+              Types: ["Software and Configuration Checks"],
+              FirstObservedAt: "2026-07-01T00:00:00Z",
+              LastObservedAt: "2026-07-15T00:00:00Z",
+              CreatedAt: "2026-07-01T00:00:00Z",
+              UpdatedAt: "2026-07-15T00:00:00Z",
+              Severity: { Label: "MEDIUM" as const, Normalized: 50 },
+              Title: "Security Hub bounded import regression",
+              Description: "Security Hub bounded import regression evidence.",
+              Resources: [],
+              Workflow: { Status: "NEW" as const },
+              RecordState: "ACTIVE" as const,
+            }),
+          ),
+          ...(finalPage ? {} : { NextToken: String(page + 1) }),
+        };
+      },
+    };
+  }
+
+  public override inspector(region: string): InspectorInventoryClient {
+    return {
+      batchGetAccountStatus: async (input) => ({
+        $metadata: {},
+        accounts: [{
+          accountId: input.accountIds?.[0],
+          state: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+          resourceState: {
+            ec2: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+            ecr: { status: "ENABLED", errorCode: undefined, errorMessage: undefined },
+          },
+        }],
+        failedAccounts: [],
+      }),
+      listFindings: async (input) => {
+        const page = input.nextToken === undefined ? 0 : Number(input.nextToken);
+        assert.ok(Number.isInteger(page) && page >= 0 && page <= 10);
+        const finalPage = page === 10;
+        return {
+          $metadata: {},
+          findings: Array.from(
+            { length: finalPage ? 1 : 100 },
+            (_, index) => ({
+              findingArn: `arn:aws:inspector2:${region}:123456789012:finding/inspector-overflow-${page}-${index}`,
+              awsAccountId: "123456789012",
+              type: "PACKAGE_VULNERABILITY" as const,
+              description: "Inspector bounded import regression evidence.",
+              title: "Inspector bounded import regression",
+              remediation: { recommendation: { text: "Apply the approved update." } },
+              severity: "MEDIUM" as const,
+              firstObservedAt: new Date("2026-07-01T00:00:00Z"),
+              lastObservedAt: new Date("2026-07-15T00:00:00Z"),
+              updatedAt: new Date("2026-07-15T00:00:00Z"),
+              status: "ACTIVE" as const,
+              resources: [],
+              inspectorScore: 5,
+              fixAvailable: "YES" as const,
+              exploitAvailable: "NO" as const,
+            }),
+          ),
+          ...(finalPage ? {} : { nextToken: String(page + 1) }),
+        };
       },
     };
   }
@@ -541,10 +940,10 @@ test("collects, paginates, normalizes, and bounds regional concurrency", async (
   const { collectorCoverage, ...summary } = result;
   assert.deepEqual(summary, {
     resourcesObserved: 20,
-    findingsObserved: 9,
+    findingsObserved: 15,
     coverage: "COMPLETE",
   });
-  assert.equal(collectorCoverage.length, 20);
+  assert.equal(collectorCoverage.length, 26);
   assert.ok(collectorCoverage.every((entry) => entry.status === "SUCCEEDED"));
   assert.deepEqual(
     collectorCoverage.find(
@@ -578,7 +977,12 @@ test("collects, paginates, normalizes, and bounds regional concurrency", async (
     "us-west-2:us-west-2-buckets-next",
   ]);
   assert.deepEqual(clients.rdsMarkers["us-east-1"], [undefined, "rds-next"]);
-  assert.deepEqual(clients.guardDutyTokens["us-east-1"], [undefined, "gd-next"]);
+  assert.deepEqual(clients.guardDutyTokens["us-east-1"], [
+    undefined,
+    undefined,
+    "gd-next",
+    "gd-next",
+  ]);
   assert.equal(clients.tracker.maximum, 2);
 
   assert.equal(
@@ -628,6 +1032,237 @@ test("collects, paginates, normalizes, and bounds regional concurrency", async (
   ]) {
     assert.equal(serialized.includes(forbidden), false, `leaked forbidden value: ${forbidden}`);
   }
+});
+
+test("imports sanitized AWS-native findings with stable severity, status, fingerprints, and resource links", async () => {
+  const sink = new CapturingSink();
+  const clients = new NativeFindingsClientFactory();
+  const now = new Date("2026-07-15T12:00:00Z");
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 3,
+    now: () => now,
+  });
+
+  const collection = await runner.collect(context());
+  const normalized = sink.batches.flatMap((batch) => batch.resources);
+  const evidence = sink.batches.flatMap((batch) => batch.evidence);
+  const nativeEvidence = evidence.filter(
+    (item) => item.evidenceType === "AWS_NATIVE_FINDING",
+  );
+  const availability = evidence.filter(
+    (item) => item.evidenceType === "AWS_NATIVE_FINDINGS_AVAILABILITY",
+  );
+
+  assert.equal(collection.coverage, "COMPLETE");
+  assert.equal(nativeEvidence.length, 3);
+  assert.deepEqual(
+    collection.collectorCoverage
+      .filter((entry) => entry.collectorKey.endsWith(".findings"))
+      .map((entry) => ({
+        key: entry.collectorKey,
+        status: entry.status,
+        items: entry.itemsObserved,
+      })),
+    [
+      { key: "guardduty.findings", status: "SUCCEEDED", items: 1 },
+      { key: "securityhub.findings", status: "SUCCEEDED", items: 1 },
+      { key: "inspector2.findings", status: "SUCCEEDED", items: 1 },
+    ],
+  );
+  assert.deepEqual(clients.guardDutyFindingTokens, [undefined, "gd-native-next"]);
+  assert.deepEqual(clients.securityHubFindingTokens, [undefined, "securityhub-native-next"]);
+  assert.deepEqual(clients.inspectorFindingTokens, [undefined, "inspector-native-next"]);
+  assert.deepEqual(clients.securityHubFilters, [
+    {
+      AwsAccountId: [{ Value: "123456789012", Comparison: "EQUALS" }],
+      Region: [{ Value: "us-east-1", Comparison: "EQUALS" }],
+    },
+    {
+      AwsAccountId: [{ Value: "123456789012", Comparison: "EQUALS" }],
+      Region: [{ Value: "us-east-1", Comparison: "EQUALS" }],
+    },
+  ]);
+  assert.equal(availability.length, 3);
+  assert.ok(availability.every((item) => item.status === "ENABLED"));
+  assert.equal(
+    JSON.stringify(nativeEvidence).includes("must-not-cross-native-finding-boundary"),
+    false,
+  );
+  assert.equal(JSON.stringify(nativeEvidence).includes("INVALID_TEST_ACCESS_KEY"), false);
+  assert.match(JSON.stringify(nativeEvidence), /\[redacted by Sutra\]/u);
+
+  const connection = {
+    tenantId: "tenant-01",
+    connectionId: "conn-01",
+    expectedAccountId: "123456789012",
+    partition: "aws" as const,
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+    externalId: "sutra_external_id_1234567890abcd",
+    status: "ACTIVE" as const,
+    enabledRegions: ["us-east-1"],
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+  const snapshot = normalizeLiveSnapshot(
+    connection,
+    "job-native-findings-01",
+    "sutra-job-native-findings-01",
+    normalized,
+    evidence,
+    collection.coverage,
+    collection.collectorCoverage,
+    now,
+  );
+  const nativeFindings = snapshot.findings.filter((finding) =>
+    finding.controlKey.startsWith("AWS.NATIVE."),
+  );
+  assert.deepEqual(
+    nativeFindings
+      .map((finding) => ({
+        controlKey: finding.controlKey,
+        severity: finding.severity,
+        status: finding.status,
+        linked: finding.resourceKey?.includes("i-east-1") ?? false,
+      }))
+      .sort((left, right) => left.controlKey.localeCompare(right.controlKey)),
+    [
+      {
+        controlKey: "AWS.NATIVE.GUARDDUTY.FINDING",
+        severity: "high",
+        status: "open",
+        linked: true,
+      },
+      {
+        controlKey: "AWS.NATIVE.INSPECTOR2.FINDING",
+        severity: "medium",
+        status: "resolved",
+        linked: true,
+      },
+      {
+        controlKey: "AWS.NATIVE.SECURITYHUB.FINDING",
+        severity: "critical",
+        status: "suppressed",
+        linked: true,
+      },
+    ],
+  );
+  const laterSnapshot = normalizeLiveSnapshot(
+    connection,
+    "job-native-findings-02",
+    "sutra-job-native-findings-02",
+    normalized,
+    evidence,
+    collection.coverage,
+    collection.collectorCoverage,
+    new Date("2026-07-16T12:00:00Z"),
+  );
+  assert.deepEqual(
+    laterSnapshot.findings
+      .filter((finding) => finding.controlKey.startsWith("AWS.NATIVE."))
+      .map((finding) => finding.fingerprint),
+    nativeFindings.map((finding) => finding.fingerprint),
+  );
+});
+
+test("disabled native services are complete observations and repeated native pagination is partial", async () => {
+  const disabledSink = new CapturingSink();
+  const disabledRunner = new SingleAccountAwsInventoryRunner({
+    clients: new RegionalAccountSignalClientFactory(),
+    sink: disabledSink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+  });
+  const disabled = await disabledRunner.collect(context());
+  const disabledAvailability = disabledSink.batches
+    .flatMap((batch) => batch.evidence)
+    .filter((item) => item.evidenceType === "AWS_NATIVE_FINDINGS_AVAILABILITY");
+  assert.equal(disabled.coverage, "COMPLETE");
+  assert.equal(disabledAvailability.length, 3);
+  assert.ok(disabledAvailability.every((item) => item.status === "DISABLED"));
+  assert.ok(
+    disabled.collectorCoverage
+      .filter((entry) => entry.collectorKey.endsWith(".findings"))
+      .every((entry) => entry.status === "SUCCEEDED" && entry.itemsObserved === 0),
+  );
+
+  const partialSink = new CapturingSink();
+  const partialRunner = new SingleAccountAwsInventoryRunner({
+    clients: new RepeatedNativeFindingTokenClientFactory(),
+    sink: partialSink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+  });
+  const partial = await partialRunner.collect(context());
+  assert.equal(partial.coverage, "PARTIAL");
+  assert.deepEqual(
+    partial.collectorCoverage.find(
+      (entry) => entry.collectorKey === "securityhub.findings",
+    ),
+    {
+      collectorKey: "securityhub.findings",
+      region: "us-east-1",
+      status: "PARTIAL",
+      itemsObserved: 0,
+      pagesObserved: 3,
+      errorCode: "COLLECTOR_PROTOCOL_ERROR",
+      message: "The read-only AWS collector returned only partial coverage.",
+    },
+  );
+});
+
+test("native finding adapters mark a final over-cap page partial even without a continuation token", async () => {
+  const sink = new CapturingSink();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients: new FinalPageOverflowNativeFindingsClientFactory(),
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 3,
+    now: () => new Date("2026-07-15T12:00:00Z"),
+  });
+
+  const result = await runner.collect(context());
+  const nativeCoverage = result.collectorCoverage
+    .filter((entry) => entry.collectorKey.endsWith(".findings"))
+    .map((entry) => ({
+      collectorKey: entry.collectorKey,
+      status: entry.status,
+      itemsObserved: entry.itemsObserved,
+      errorCode: entry.errorCode,
+    }));
+
+  assert.equal(result.coverage, "PARTIAL");
+  assert.deepEqual(nativeCoverage, [
+    {
+      collectorKey: "guardduty.findings",
+      status: "PARTIAL",
+      itemsObserved: 1_000,
+      errorCode: "COLLECTOR_PROTOCOL_ERROR",
+    },
+    {
+      collectorKey: "securityhub.findings",
+      status: "PARTIAL",
+      itemsObserved: 1_000,
+      errorCode: "COLLECTOR_PROTOCOL_ERROR",
+    },
+    {
+      collectorKey: "inspector2.findings",
+      status: "PARTIAL",
+      itemsObserved: 1_000,
+      errorCode: "COLLECTOR_PROTOCOL_ERROR",
+    },
+  ]);
+  assert.equal(
+    sink.batches
+      .flatMap((batch) => batch.evidence)
+      .filter((item) => item.evidenceType === "AWS_NATIVE_FINDING")
+      .length,
+    3_000,
+  );
 });
 
 test("partial S3 blocking and absent CloudTrail produce explicit noncompliant evidence", async () => {
@@ -941,4 +1576,240 @@ test("a repeated pagination token marks only that adapter partial and retains co
     2,
   );
   assert.equal(JSON.stringify(result).includes("pagination token"), false);
+});
+
+class DeadlineRdsClientFactory extends FakeClientFactory {
+  public commandWasAborted = false;
+
+  public override rds(region: string): RdsInventoryClient {
+    if (region !== "us-east-1") return super.rds(region);
+    return {
+      describeDBInstances: (_input, abortSignal) => new Promise((resolve, reject) => {
+        void resolve;
+        abortSignal?.addEventListener("abort", () => {
+          this.commandWasAborted = true;
+          reject(abortSignal.reason);
+        }, { once: true });
+      }),
+    };
+  }
+}
+
+class RetryableOnceRdsClientFactory extends FakeClientFactory {
+  public calls = 0;
+
+  public override rds(region: string): RdsInventoryClient {
+    if (region !== "us-east-1") return super.rds(region);
+    return {
+      describeDBInstances: async () => {
+        this.calls += 1;
+        if (this.calls === 1) {
+          const error = new Error("transient transport timeout");
+          error.name = "TimeoutError";
+          throw error;
+        }
+        return { $metadata: {}, DBInstances: [] };
+      },
+    };
+  }
+}
+
+test("a pristine collector retries one exhausted transient transport failure", async () => {
+  const sink = new CapturingSink();
+  const clients = new RetryableOnceRdsClientFactory();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    maxConcurrency: 4,
+    now: () => new Date("2026-07-15T12:00:00Z"),
+  });
+
+  const result = await runner.collect(context());
+  const rds = result.collectorCoverage.find(
+    (entry) => entry.collectorKey === "rds.db-instances",
+  );
+
+  assert.equal(clients.calls, 2);
+  assert.equal(result.coverage, "COMPLETE");
+  assert.equal(rds?.status, "SUCCEEDED");
+  assert.equal(
+    sink.batches
+      .flatMap((batch) => batch.evidence)
+      .some((item) => item.evidenceType === "COLLECTION_ERROR" && item.service === "rds"),
+    false,
+  );
+});
+
+test("a per-command deadline aborts AWS work and publishes sanitized partial coverage", async () => {
+  const sink = new CapturingSink();
+  const clients = new DeadlineRdsClientFactory();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    commandDeadlineMs: 20,
+    collectionDeadlineMs: 1_000,
+    maxConcurrency: 4,
+    now: () => new Date("2026-07-15T12:00:00Z"),
+  });
+
+  const result = await runner.collect(context());
+  const timedOut = result.collectorCoverage.find(
+    (entry) => entry.collectorKey === "rds.db-instances",
+  );
+  const errorEvidence = sink.batches
+    .flatMap((batch) => batch.evidence)
+    .find((item) => item.evidenceType === "COLLECTION_ERROR" && item.service === "rds");
+
+  assert.equal(clients.commandWasAborted, true);
+  assert.equal(result.coverage, "PARTIAL");
+  assert.deepEqual(timedOut, {
+    collectorKey: "rds.db-instances",
+    region: "us-east-1",
+    status: "PARTIAL",
+    itemsObserved: 0,
+    pagesObserved: 0,
+    errorCode: "COLLECTION_TIMEOUT",
+    message: "The read-only AWS collector reached its bounded deadline.",
+  });
+  assert.deepEqual(errorEvidence?.data, {
+    errorName: "InventoryCommandDeadlineError",
+  });
+  assert.equal(JSON.stringify({ result, errorEvidence }).includes("deadline was reached"), false);
+});
+
+class OverallDeadlineRdsClientFactory extends FakeClientFactory {
+  public commandWasAborted = false;
+  private page = 0;
+
+  public override rds(region: string): RdsInventoryClient {
+    if (region !== "us-east-1") return super.rds(region);
+    return {
+      describeDBInstances: (_input, abortSignal) => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.page += 1;
+          resolve({
+            $metadata: {},
+            Marker: `page-${this.page}`,
+            DBInstances: [database(`overall-${this.page}`, region)],
+          });
+        }, 30);
+        abortSignal?.addEventListener("abort", () => {
+          clearTimeout(timer);
+          this.commandWasAborted = true;
+          reject(abortSignal.reason);
+        }, { once: true });
+      }),
+    };
+  }
+}
+
+test("the shared overall deadline aborts a multi-page adapter without publishing complete", async () => {
+  const sink = new CapturingSink();
+  const clients = new OverallDeadlineRdsClientFactory();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    commandDeadlineMs: 50,
+    collectionDeadlineMs: 85,
+    maxConcurrency: 4,
+    now: () => new Date("2026-07-15T12:00:00Z"),
+  });
+
+  const result = await runner.collect(context());
+  const timedOut = result.collectorCoverage.find(
+    (entry) => entry.collectorKey === "rds.db-instances",
+  );
+  assert.equal(clients.commandWasAborted, true);
+  assert.equal(result.coverage, "PARTIAL");
+  assert.equal(timedOut?.status, "PARTIAL");
+  assert.equal(timedOut?.errorCode, "COLLECTION_TIMEOUT");
+  assert.ok((timedOut?.pagesObserved ?? 0) >= 1);
+  assert.deepEqual(
+    result.collectorCoverage.find(
+      (entry) => entry.collectorKey === "sutra.collection-deadline",
+    ),
+    {
+      collectorKey: "sutra.collection-deadline",
+      region: "global",
+      status: "PARTIAL",
+      itemsObserved: 0,
+      pagesObserved: 0,
+      errorCode: "COLLECTION_TIMEOUT",
+      message: "The bounded AWS collection reached its overall deadline.",
+    },
+  );
+});
+
+class SlowIamClientFactory extends FakeClientFactory {
+  public slowWorkerSettled = false;
+
+  public override iam(): IamInventoryClient {
+    const client = super.iam();
+    return {
+      getAccountSummary: (signal) => client.getAccountSummary(signal),
+      getAccountPasswordPolicy: async (signal) => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 40));
+        const output = await client.getAccountPasswordPolicy(signal);
+        this.slowWorkerSettled = true;
+        return output;
+      },
+    };
+  }
+}
+
+class FailFirstSink implements AwsInventorySink {
+  private failed = false;
+
+  public async writeBatch(batch: AwsInventoryBatch): Promise<void> {
+    void batch;
+    if (!this.failed) {
+      this.failed = true;
+      throw new Error("private sink detail");
+    }
+  }
+}
+
+test("sink failure is propagated only after every bounded worker settles", async () => {
+  const clients = new SlowIamClientFactory();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink: new FailFirstSink(),
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    maxConcurrency: 2,
+  });
+
+  await assert.rejects(
+    runner.collect(context()),
+    /Normalized AWS inventory sink write failed/u,
+  );
+  assert.equal(clients.slowWorkerSettled, true);
+});
+
+test("Region capacity cannot exceed the 500-row signed coverage boundary", async () => {
+  assert.equal(
+    LIVE_AWS_GLOBAL_COLLECTOR_COUNT +
+      LIVE_AWS_REGIONAL_COLLECTOR_COUNT * LIVE_AWS_MAX_REGIONS,
+    494,
+  );
+  assert.ok(
+    LIVE_AWS_GLOBAL_COLLECTOR_COUNT +
+      LIVE_AWS_REGIONAL_COLLECTOR_COUNT * (LIVE_AWS_MAX_REGIONS + 1) >
+      LIVE_AWS_COVERAGE_ROW_LIMIT,
+  );
+  const regions = Array.from(
+    { length: LIVE_AWS_MAX_REGIONS + 1 },
+    (_, index) => `us-test-${index + 1}`,
+  );
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients: new FakeClientFactory(),
+    sink: new CapturingSink(),
+    regionSelector: new StaticInventoryRegionSelector(regions),
+  });
+  await assert.rejects(
+    runner.collect(context()),
+    /Selected AWS Regions are invalid/u,
+  );
 });

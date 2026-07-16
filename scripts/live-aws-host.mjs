@@ -31,7 +31,12 @@ const UNSUPPORTED_CREDENTIAL_PROVIDER_KEYS = Object.freeze([
   "credential_source",
   "web_identity_token_file",
 ]);
-const STATIC_CREDENTIAL_ENVIRONMENT_KEYS = Object.freeze([
+const UNSUPPORTED_PROFILE_ENDPOINT_KEYS = Object.freeze([
+  "endpoint_url",
+  "services",
+]);
+const AWS_ENDPOINT_OVERRIDE_ENVIRONMENT = /^AWS_ENDPOINT_URL(?:_[A-Z0-9_]+)?$/u;
+export const STATIC_CREDENTIAL_ENVIRONMENT_KEYS = Object.freeze([
   "AWS_ACCESS_KEY_ID",
   "AWS_SECRET_ACCESS_KEY",
   "AWS_SESSION_TOKEN",
@@ -57,6 +62,7 @@ const RUNTIME_KEYS = Object.freeze([
   "SUTRA_COLLECTOR_MODE",
   "SUTRA_ALLOW_LIVE_AWS",
   "SUTRA_COLLECTOR_PRINCIPAL_ARN",
+  "SUTRA_CUSTOMER_ROLE_TEMPLATE_URL",
   "SUTRA_REGISTRY_PATH",
   "SUTRA_LOCAL_JOBS_PATH",
   "SUTRA_WEB_HOST",
@@ -74,6 +80,8 @@ const SECRET_VALUE = /^[A-Za-z0-9_-]{43}$/u;
 const DEFAULT_POSTGRES_PORT = 54329;
 const DEFAULT_WEB_PORT = 3000;
 const COLLECTOR_PORT = 8788;
+const S3_TEMPLATE_HOST =
+  /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\.s3\.[a-z]{2}-[a-z0-9-]+-[0-9]+\.amazonaws\.com$/u;
 
 export function validateLiveAwsLaunchEnvironment(environment) {
   if (environment.SUTRA_LIVE_AWS_ACK !== LIVE_AWS_ACKNOWLEDGEMENT) {
@@ -82,13 +90,8 @@ export function validateLiveAwsLaunchEnvironment(environment) {
     );
   }
 
-  for (const key of STATIC_CREDENTIAL_ENVIRONMENT_KEYS) {
-    if (typeof environment[key] === "string" && environment[key].trim().length > 0) {
-      throw new Error(
-        `${key} must be unset; the live demo accepts only a short-lived AWS_PROFILE session`,
-      );
-    }
-  }
+  assertNoStaticAwsCredentialEnvironment(environment);
+  assertNoAwsEndpointOverrideEnvironment(environment);
 
   const awsProfile = exactEnvironmentValue(environment, "AWS_PROFILE");
   if (!PROFILE_NAME.test(awsProfile)) {
@@ -120,6 +123,40 @@ export function validateLiveAwsLaunchEnvironment(environment) {
     webPort,
     region: optionalRegion(environment.AWS_REGION ?? environment.AWS_DEFAULT_REGION),
   };
+}
+
+export function assertNoStaticAwsCredentialEnvironment(environment) {
+  for (const key of STATIC_CREDENTIAL_ENVIRONMENT_KEYS) {
+    if (typeof environment[key] === "string" && environment[key].trim().length > 0) {
+      throw new Error(
+        `${key} must be unset; Sutra accepts only a short-lived AWS_PROFILE session`,
+      );
+    }
+  }
+}
+
+export function assertNoAwsEndpointOverrideEnvironment(environment) {
+  for (const [key, value] of Object.entries(environment)) {
+    if (
+      AWS_ENDPOINT_OVERRIDE_ENVIRONMENT.test(key) &&
+      typeof value === "string" &&
+      value.trim().length > 0
+    ) {
+      throw new Error(
+        `${key} must be unset; Sutra contacts only the standard AWS service endpoints`,
+      );
+    }
+  }
+}
+
+export function scrubAwsEndpointOverrideEnvironment(environment) {
+  const safe = {};
+  for (const [key, value] of Object.entries(environment)) {
+    if (!AWS_ENDPOINT_OVERRIDE_ENVIRONMENT.test(key) && value !== undefined) {
+      safe[key] = value;
+    }
+  }
+  return safe;
 }
 
 function sharedFilePath(environment, key, fallback) {
@@ -292,6 +329,11 @@ function validateSsoProfileChain({ selectedProfile, config, credentials }) {
           throw new Error(`AWS profile chain must not use ${key}`);
         }
       }
+      for (const key of UNSUPPORTED_PROFILE_ENDPOINT_KEYS) {
+        if (allProfileSections.some((section) => section.has(key))) {
+          throw new Error(`AWS profile chain must not use ${key}`);
+        }
+      }
 
       const roleArn = getSingleProfileValue(configSections, "role_arn");
       const sourceProfile = getSingleProfileValue(configSections, "source_profile");
@@ -326,6 +368,7 @@ function validateSsoProfileChain({ selectedProfile, config, credentials }) {
 }
 
 export async function validateAwsProfileCredentialSource({ environment, homeDirectory = homedir() }) {
+  assertNoAwsEndpointOverrideEnvironment(environment);
   const selectedProfile = exactEnvironmentValue(environment, "AWS_PROFILE");
   if (!PROFILE_NAME.test(selectedProfile)) throw new Error("AWS_PROFILE must be a plain named profile");
 
@@ -349,6 +392,34 @@ export async function validateAwsProfileCredentialSource({ environment, homeDire
     configFile: configFile.path,
     credentialsFile: credentialsFile.path,
   };
+}
+
+export function resolveValidatedSsoLoginProfile(profileSource, expectedSelectedProfile) {
+  if (
+    typeof expectedSelectedProfile !== "string" ||
+    !PROFILE_NAME.test(expectedSelectedProfile) ||
+    profileSource?.terminal !== "sso" ||
+    profileSource?.selectedProfile !== expectedSelectedProfile ||
+    !Array.isArray(profileSource?.chain) ||
+    profileSource.chain.length === 0 ||
+    profileSource.chain[0] !== expectedSelectedProfile
+  ) {
+    throw new Error("AWS profile validation did not return a safe SSO profile chain");
+  }
+
+  const visited = new Set();
+  for (const profileName of profileSource.chain) {
+    if (
+      typeof profileName !== "string" ||
+      !PROFILE_NAME.test(profileName) ||
+      visited.has(profileName)
+    ) {
+      throw new Error("AWS profile validation did not return a safe SSO profile chain");
+    }
+    visited.add(profileName);
+  }
+
+  return profileSource.chain.at(-1);
 }
 
 export function assertLiveRuntimeRecoveryState({
@@ -392,6 +463,35 @@ function optionalRegion(value) {
   return value;
 }
 
+function optionalPublicTemplateUrl(value) {
+  if (value === undefined || value === "") return "";
+  if (typeof value !== "string" || value.length > 2_048 || value !== value.trim()) {
+    throw new Error("SUTRA_CUSTOMER_ROLE_TEMPLATE_URL must be a bounded HTTPS URL");
+  }
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("SUTRA_CUSTOMER_ROLE_TEMPLATE_URL must be a valid HTTPS URL");
+  }
+  const queryEntries = [...parsed.searchParams.entries()];
+  if (
+    parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" ||
+    parsed.port !== "" || parsed.hash !== "" ||
+    queryEntries.length !== 1 ||
+    queryEntries[0]?.[0] !== "versionId" ||
+    queryEntries[0][1] === "" ||
+    queryEntries[0][1] === "null" ||
+    !S3_TEMPLATE_HOST.test(parsed.hostname) ||
+    !/\.ya?ml$/u.test(parsed.pathname)
+  ) {
+    throw new Error(
+      "SUTRA_CUSTOMER_ROLE_TEMPLATE_URL must be an immutable commercial-AWS S3 HTTPS object URL",
+    );
+  }
+  return parsed.href;
+}
+
 export function parseRuntimeConfig(text) {
   const values = new Map();
   for (const rawLine of text.split(/\r?\n/u)) {
@@ -414,6 +514,7 @@ export function parseRuntimeConfig(text) {
 export function buildLiveRuntimeConfig({
   databaseUrl,
   principalArn,
+  publicTemplateUrl = "",
   existingContents = "",
   createSecret = () => randomBytes(32).toString("base64url"),
 }) {
@@ -450,6 +551,7 @@ export function buildLiveRuntimeConfig({
     SUTRA_COLLECTOR_MODE: "live",
     SUTRA_ALLOW_LIVE_AWS: "true",
     SUTRA_COLLECTOR_PRINCIPAL_ARN: principalArn,
+    SUTRA_CUSTOMER_ROLE_TEMPLATE_URL: optionalPublicTemplateUrl(publicTemplateUrl),
     SUTRA_REGISTRY_PATH: ".sutra/live-aws-collector-registry.enc",
     SUTRA_LOCAL_JOBS_PATH: ".sutra/live-aws-jobs.json",
     SUTRA_WEB_HOST: "127.0.0.1",
@@ -470,7 +572,13 @@ export function buildLiveRuntimeConfig({
   return { contents, variables: values };
 }
 
-export async function ensureLiveRuntimeConfiguration({ root, databaseUrl, principalArn, createSecret }) {
+export async function ensureLiveRuntimeConfiguration({
+  root,
+  databaseUrl,
+  principalArn,
+  publicTemplateUrl = "",
+  createSecret,
+}) {
   const stateDirectory = resolve(root, ".sutra");
   const configPath = resolve(root, LIVE_RUNTIME_CONFIG);
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
@@ -495,6 +603,7 @@ export async function ensureLiveRuntimeConfiguration({ root, databaseUrl, princi
   const built = buildLiveRuntimeConfig({
     databaseUrl,
     principalArn,
+    publicTemplateUrl,
     existingContents,
     ...(createSecret === undefined ? {} : { createSecret }),
   });
@@ -718,6 +827,7 @@ async function main() {
       root,
       databaseUrl: runtimeDatabaseUrl,
       principalArn: launch.principalArn,
+      publicTemplateUrl: process.env.SUTRA_CUSTOMER_ROLE_TEMPLATE_URL,
     });
 
     await run(process.execPath, [resolve(root, "scripts/postgres-migrate.mjs")], {

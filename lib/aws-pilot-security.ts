@@ -6,6 +6,11 @@
  * not import the AWS collector and never accepts AWS credentials from callers.
  */
 
+import {
+  ALL_ENABLED_AWS_REGIONS,
+  type AwsRegionSelection,
+} from "./aws-region-selection.ts";
+
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 
 export type PilotConnectionStatus =
@@ -78,7 +83,7 @@ export interface AwsOnboardingInput {
   readonly awsAccountId: string;
   readonly partition: AwsPartition;
   readonly roleArn: string;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
 }
 
 /**
@@ -91,7 +96,7 @@ export interface AwsConnectionDraftRequest {
   readonly customerName: string;
   readonly awsAccountId: string;
   readonly partition: AwsPartition;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
 }
 
 export interface LocalAwsConnectionIdentity {
@@ -682,9 +687,16 @@ export class AesGcmSecretKeyring {
   }
 }
 
-function parseEnabledRegions(value: unknown, partition: AwsPartition): readonly string[] {
+function parseEnabledRegions(value: unknown, partition: AwsPartition): AwsRegionSelection {
   if (!Array.isArray(value) || value.length > MAX_ENABLED_REGIONS) {
     invalidInput("The enabled AWS regions are invalid");
+  }
+
+  if (value.length === 1 && value[0] === ALL_ENABLED_AWS_REGIONS) {
+    return [ALL_ENABLED_AWS_REGIONS];
+  }
+  if (value.includes(ALL_ENABLED_AWS_REGIONS)) {
+    invalidInput("All enabled AWS regions cannot be combined with an explicit region");
   }
 
   const unique = new Set<string>();

@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import {
   CloudTrailClient,
   DescribeTrailsCommand,
@@ -26,14 +28,31 @@ import {
   type IpPermission,
 } from "@aws-sdk/client-ec2";
 import {
+  GetFindingsCommand as GetGuardDutyFindingsCommand,
   GetDetectorCommand,
   GuardDutyClient,
   ListDetectorsCommand,
+  ListFindingsCommand as ListGuardDutyFindingsCommand,
+  type Finding as GuardDutyFinding,
   type GetDetectorCommandInput,
   type GetDetectorCommandOutput,
+  type GetFindingsCommandInput as GetGuardDutyFindingsCommandInput,
+  type GetFindingsCommandOutput as GetGuardDutyFindingsCommandOutput,
   type ListDetectorsCommandInput,
   type ListDetectorsCommandOutput,
+  type ListFindingsCommandInput as ListGuardDutyFindingsCommandInput,
+  type ListFindingsCommandOutput as ListGuardDutyFindingsCommandOutput,
 } from "@aws-sdk/client-guardduty";
+import {
+  BatchGetAccountStatusCommand,
+  Inspector2Client,
+  ListFindingsCommand as ListInspectorFindingsCommand,
+  type BatchGetAccountStatusCommandInput,
+  type BatchGetAccountStatusCommandOutput,
+  type Finding as InspectorFinding,
+  type ListFindingsCommandInput as ListInspectorFindingsCommandInput,
+  type ListFindingsCommandOutput as ListInspectorFindingsCommandOutput,
+} from "@aws-sdk/client-inspector2";
 import {
   GetAccountPasswordPolicyCommand,
   GetAccountSummaryCommand,
@@ -58,8 +77,12 @@ import {
 } from "@aws-sdk/client-s3";
 import {
   DescribeHubCommand,
+  GetFindingsCommand as GetSecurityHubFindingsCommand,
   SecurityHubClient,
+  type AwsSecurityFinding,
   type DescribeHubCommandOutput,
+  type GetFindingsCommandInput as GetSecurityHubFindingsCommandInput,
+  type GetFindingsCommandOutput as GetSecurityHubFindingsCommandOutput,
 } from "@aws-sdk/client-securityhub";
 
 import type {
@@ -76,10 +99,22 @@ import type {
   SafeJsonObject,
   SafeJsonValue,
 } from "./types.js";
+import {
+  ALL_ENABLED_AWS_REGIONS,
+  isAllEnabledAwsRegionSelection,
+} from "./aws-region-selection.js";
+import {
+  LIVE_AWS_COLLECTION_DEADLINE_MS,
+  LIVE_AWS_COMMAND_DEADLINE_MS,
+  LIVE_AWS_MAX_REGIONS,
+} from "./live-collection-limits.js";
 
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+$/;
-const MAX_REGIONS = 64;
+const MAX_REGIONS = LIVE_AWS_MAX_REGIONS;
 const MAX_PAGES = 10_000;
+const MAX_NATIVE_FINDING_PAGES = 50;
+const MAX_NATIVE_FINDINGS_PER_SERVICE_REGION = 1_000;
+const MAX_NATIVE_FINDING_RESOURCES = 20;
 const SAFE_TAG_KEYS = new Set([
   "name",
   "environment",
@@ -95,6 +130,20 @@ const SAFE_TAG_KEYS = new Set([
   "managedby",
 ]);
 const DANGEROUS_TAG_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const RETRYABLE_TASK_ERRORS = new Set([
+  "TimeoutError",
+  "RequestTimeout",
+  "RequestTimeoutException",
+  "NetworkingError",
+  "Throttling",
+  "ThrottlingException",
+  "TooManyRequestsException",
+  "RequestLimitExceeded",
+  "ServiceUnavailable",
+  "ServiceUnavailableException",
+  "InternalFailure",
+  "InternalServerError",
+]);
 const HIGH_CONFIDENCE_SECRET_VALUE =
   /(?:\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:password|passwd|secret|session[_ -]?token|api[_ -]?key)\s*[:=]|\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{16,}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}\b|\b(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{12,}\b|\bAIza[0-9A-Za-z_-]{20,}\b|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b)/iu;
 const CREDENTIAL_URI_OR_SIGNED_URL =
@@ -112,6 +161,7 @@ export interface InventorySelectionContext {
 export interface InventoryRegionSelector {
   selectRegions(
     context: InventorySelectionContext,
+    abortSignal?: AbortSignal,
   ): Promise<readonly string[]> | readonly string[];
 }
 
@@ -124,11 +174,12 @@ export class StaticInventoryRegionSelector implements InventoryRegionSelector {
 }
 
 export interface AwsRegionDiscoveryClient {
-  describeRegions(): Promise<DescribeRegionsCommandOutput>;
+  describeRegions(abortSignal?: AbortSignal): Promise<DescribeRegionsCommandOutput>;
 }
 
 export interface AwsEnabledRegionSelectorOptions {
   readonly controlRegion: string;
+  /** Either a strict explicit Region list or the sole `all-enabled` marker. */
   readonly requestedRegions: readonly string[];
   readonly maxAttempts?: number;
   readonly clientFactory?: (
@@ -137,7 +188,11 @@ export interface AwsEnabledRegionSelectorOptions {
   ) => AwsRegionDiscoveryClient;
 }
 
-/** Discovers account-enabled Regions and refuses to silently skip a requested Region. */
+/**
+ * Discovers account-enabled Regions after AssumeRole. Explicit selections are
+ * checked against AWS; `all-enabled` returns the actual discovered names so
+ * the selection marker can never leak into inventory or coverage evidence.
+ */
 export class AwsEnabledRegionSelector implements InventoryRegionSelector {
   private readonly maxAttempts: number;
 
@@ -150,22 +205,45 @@ export class AwsEnabledRegionSelector implements InventoryRegionSelector {
 
   public async selectRegions(
     context: InventorySelectionContext,
+    abortSignal?: AbortSignal,
   ): Promise<readonly string[]> {
+    const allEnabledSelection = isAllEnabledAwsRegionSelection(
+      this.options.requestedRegions,
+    );
+    if (
+      !allEnabledSelection &&
+      this.options.requestedRegions.includes(ALL_ENABLED_AWS_REGIONS)
+    ) {
+      throw new InventoryConfigurationError(
+        "All enabled Regions cannot be combined with an explicit Region",
+      );
+    }
+    const requested = allEnabledSelection
+      ? null
+      : normalizeRegions(this.options.requestedRegions);
     const client = this.options.clientFactory?.(
       this.options.controlRegion,
       context.credentials,
     ) ?? this.createClient(context.credentials);
-    const output = await client.describeRegions();
-    const enabled = new Set(
+    const output = await client.describeRegions(abortSignal);
+    const enabled = normalizeDiscoveredRegions(
       (output.Regions ?? []).flatMap((region) =>
         typeof region.RegionName === "string" &&
-        (region.OptInStatus === "opted-in" || region.OptInStatus === "opt-in-not-required")
+          (region.OptInStatus === "opted-in" || region.OptInStatus === "opt-in-not-required")
           ? [region.RegionName]
           : [],
       ),
     );
-    const requested = normalizeRegions(this.options.requestedRegions);
-    const unavailable = requested.filter((region) => !enabled.has(region));
+    if (requested === null) {
+      if (enabled.length === 0) {
+        throw new InventoryConfigurationError(
+          "AWS did not return any enabled Regions for this account",
+        );
+      }
+      return enabled;
+    }
+    const enabledSet = new Set(enabled);
+    const unavailable = requested.filter((region) => !enabledSet.has(region));
     if (unavailable.length > 0) {
       throw new InventoryConfigurationError(
         `Selected AWS Regions are not enabled: ${unavailable.join(", ")}`,
@@ -182,8 +260,8 @@ export class AwsEnabledRegionSelector implements InventoryRegionSelector {
       maxAttempts: this.maxAttempts,
     });
     return {
-      describeRegions: () =>
-        client.send(new DescribeRegionsCommand({ AllRegions: true })),
+      describeRegions: (abortSignal) =>
+        sendSdkCommand(client, new DescribeRegionsCommand({ AllRegions: true }), abortSignal),
     };
   }
 }
@@ -191,48 +269,94 @@ export class AwsEnabledRegionSelector implements InventoryRegionSelector {
 export interface Ec2InventoryClient {
   describeInstances(
     input: DescribeInstancesCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<DescribeInstancesCommandOutput>;
-  describeVpcs(input: DescribeVpcsCommandInput): Promise<DescribeVpcsCommandOutput>;
+  describeVpcs(
+    input: DescribeVpcsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeVpcsCommandOutput>;
   describeSubnets(
     input: DescribeSubnetsCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<DescribeSubnetsCommandOutput>;
   describeSecurityGroups(
     input: DescribeSecurityGroupsCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<DescribeSecurityGroupsCommandOutput>;
 }
 
 export interface S3InventoryClient {
-  listBuckets(input: ListBucketsCommandInput): Promise<ListBucketsCommandOutput>;
+  listBuckets(
+    input: ListBucketsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListBucketsCommandOutput>;
   getPublicAccessBlock(
     input: GetPublicAccessBlockCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<GetPublicAccessBlockCommandOutput>;
 }
 
 export interface RdsInventoryClient {
   describeDBInstances(
     input: DescribeDBInstancesCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<DescribeDBInstancesCommandOutput>;
 }
 
 export interface IamInventoryClient {
-  getAccountSummary(): Promise<GetAccountSummaryCommandOutput>;
-  getAccountPasswordPolicy(): Promise<GetAccountPasswordPolicyCommandOutput>;
+  getAccountSummary(abortSignal?: AbortSignal): Promise<GetAccountSummaryCommandOutput>;
+  getAccountPasswordPolicy(
+    abortSignal?: AbortSignal,
+  ): Promise<GetAccountPasswordPolicyCommandOutput>;
 }
 
 export interface CloudTrailInventoryClient {
-  describeTrails(input: DescribeTrailsCommandInput): Promise<DescribeTrailsCommandOutput>;
+  describeTrails(
+    input: DescribeTrailsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeTrailsCommandOutput>;
   getTrailStatus(
     input: GetTrailStatusCommandInput,
+    abortSignal?: AbortSignal,
   ): Promise<GetTrailStatusCommandOutput>;
 }
 
 export interface GuardDutyInventoryClient {
-  listDetectors(input: ListDetectorsCommandInput): Promise<ListDetectorsCommandOutput>;
-  getDetector(input: GetDetectorCommandInput): Promise<GetDetectorCommandOutput>;
+  listDetectors(
+    input: ListDetectorsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListDetectorsCommandOutput>;
+  getDetector(
+    input: GetDetectorCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<GetDetectorCommandOutput>;
+  listFindings(
+    input: ListGuardDutyFindingsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListGuardDutyFindingsCommandOutput>;
+  getFindings(
+    input: GetGuardDutyFindingsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<GetGuardDutyFindingsCommandOutput>;
 }
 
 export interface SecurityHubInventoryClient {
-  describeHub(): Promise<DescribeHubCommandOutput>;
+  describeHub(abortSignal?: AbortSignal): Promise<DescribeHubCommandOutput>;
+  getFindings(
+    input: GetSecurityHubFindingsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<GetSecurityHubFindingsCommandOutput>;
+}
+
+export interface InspectorInventoryClient {
+  batchGetAccountStatus(
+    input: BatchGetAccountStatusCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<BatchGetAccountStatusCommandOutput>;
+  listFindings(
+    input: ListInspectorFindingsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListInspectorFindingsCommandOutput>;
 }
 
 export interface AwsInventoryClientFactory {
@@ -252,10 +376,61 @@ export interface AwsInventoryClientFactory {
     region: string,
     credentials: AwsTemporaryCredentials,
   ): SecurityHubInventoryClient;
+  inspector(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): InspectorInventoryClient;
 }
 
 export interface AwsSdkInventoryClientFactoryOptions {
   readonly maxAttempts?: number;
+}
+
+export const AWS_INVENTORY_CONNECTION_TIMEOUT_MS = 5_000;
+export const AWS_INVENTORY_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface AwsInventorySdkClientConfig {
+  readonly region: string;
+  readonly credentials: AwsTemporaryCredentials;
+  readonly retryMode: "standard";
+  readonly maxAttempts: number;
+  readonly requestHandler: {
+    readonly connectionTimeout: number;
+    readonly requestTimeout: number;
+  };
+}
+
+export function awsInventorySdkClientConfig(
+  region: string,
+  credentials: AwsTemporaryCredentials,
+  maxAttempts: number,
+): AwsInventorySdkClientConfig {
+  return {
+    region,
+    credentials,
+    retryMode: "standard",
+    maxAttempts,
+    requestHandler: {
+      connectionTimeout: AWS_INVENTORY_CONNECTION_TIMEOUT_MS,
+      requestTimeout: AWS_INVENTORY_REQUEST_TIMEOUT_MS,
+    },
+  };
+}
+
+function sendSdkCommand<Command, Output>(
+  client: unknown,
+  command: Command,
+  abortSignal?: AbortSignal,
+): Promise<Output> {
+  const sender = client as {
+    send(
+      command: Command,
+      options?: { readonly abortSignal?: AbortSignal },
+    ): Promise<Output>;
+  };
+  return abortSignal === undefined
+    ? sender.send(command)
+    : sender.send(command, { abortSignal });
 }
 
 /** Real SDK v3 client factory. Every client uses bounded standard-mode retries. */
@@ -269,37 +444,37 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
   public ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient {
     const client = new EC2Client(this.clientConfig(region, credentials));
     return {
-      describeInstances: (input) => client.send(new DescribeInstancesCommand(input)),
-      describeVpcs: (input) => client.send(new DescribeVpcsCommand(input)),
-      describeSubnets: (input) => client.send(new DescribeSubnetsCommand(input)),
-      describeSecurityGroups: (input) =>
-        client.send(new DescribeSecurityGroupsCommand(input)),
+      describeInstances: (input, signal) => sendSdkCommand(client, new DescribeInstancesCommand(input), signal),
+      describeVpcs: (input, signal) => sendSdkCommand(client, new DescribeVpcsCommand(input), signal),
+      describeSubnets: (input, signal) => sendSdkCommand(client, new DescribeSubnetsCommand(input), signal),
+      describeSecurityGroups: (input, signal) =>
+        sendSdkCommand(client, new DescribeSecurityGroupsCommand(input), signal),
     };
   }
 
   public s3(region: string, credentials: AwsTemporaryCredentials): S3InventoryClient {
     const client = new S3Client(this.clientConfig(region, credentials));
     return {
-      listBuckets: (input) => client.send(new ListBucketsCommand(input)),
-      getPublicAccessBlock: (input) =>
-        client.send(new GetPublicAccessBlockCommand(input)),
+      listBuckets: (input, signal) => sendSdkCommand(client, new ListBucketsCommand(input), signal),
+      getPublicAccessBlock: (input, signal) =>
+        sendSdkCommand(client, new GetPublicAccessBlockCommand(input), signal),
     };
   }
 
   public rds(region: string, credentials: AwsTemporaryCredentials): RdsInventoryClient {
     const client = new RDSClient(this.clientConfig(region, credentials));
     return {
-      describeDBInstances: (input) =>
-        client.send(new DescribeDBInstancesCommand(input)),
+      describeDBInstances: (input, signal) =>
+        sendSdkCommand(client, new DescribeDBInstancesCommand(input), signal),
     };
   }
 
   public iam(region: string, credentials: AwsTemporaryCredentials): IamInventoryClient {
     const client = new IAMClient(this.clientConfig(region, credentials));
     return {
-      getAccountSummary: () => client.send(new GetAccountSummaryCommand({})),
-      getAccountPasswordPolicy: () =>
-        client.send(new GetAccountPasswordPolicyCommand({})),
+      getAccountSummary: (signal) => sendSdkCommand(client, new GetAccountSummaryCommand({}), signal),
+      getAccountPasswordPolicy: (signal) =>
+        sendSdkCommand(client, new GetAccountPasswordPolicyCommand({}), signal),
     };
   }
 
@@ -309,8 +484,8 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
   ): CloudTrailInventoryClient {
     const client = new CloudTrailClient(this.clientConfig(region, credentials));
     return {
-      describeTrails: (input) => client.send(new DescribeTrailsCommand(input)),
-      getTrailStatus: (input) => client.send(new GetTrailStatusCommand(input)),
+      describeTrails: (input, signal) => sendSdkCommand(client, new DescribeTrailsCommand(input), signal),
+      getTrailStatus: (input, signal) => sendSdkCommand(client, new GetTrailStatusCommand(input), signal),
     };
   }
 
@@ -320,8 +495,11 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
   ): GuardDutyInventoryClient {
     const client = new GuardDutyClient(this.clientConfig(region, credentials));
     return {
-      listDetectors: (input) => client.send(new ListDetectorsCommand(input)),
-      getDetector: (input) => client.send(new GetDetectorCommand(input)),
+      listDetectors: (input, signal) => sendSdkCommand(client, new ListDetectorsCommand(input), signal),
+      getDetector: (input, signal) => sendSdkCommand(client, new GetDetectorCommand(input), signal),
+      listFindings: (input, signal) =>
+        sendSdkCommand(client, new ListGuardDutyFindingsCommand(input), signal),
+      getFindings: (input, signal) => sendSdkCommand(client, new GetGuardDutyFindingsCommand(input), signal),
     };
   }
 
@@ -331,17 +509,126 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
   ): SecurityHubInventoryClient {
     const client = new SecurityHubClient(this.clientConfig(region, credentials));
     return {
-      describeHub: () => client.send(new DescribeHubCommand({})),
+      describeHub: (signal) => sendSdkCommand(client, new DescribeHubCommand({}), signal),
+      getFindings: (input, signal) =>
+        sendSdkCommand(client, new GetSecurityHubFindingsCommand(input), signal),
+    };
+  }
+
+  public inspector(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): InspectorInventoryClient {
+    const client = new Inspector2Client(this.clientConfig(region, credentials));
+    return {
+      batchGetAccountStatus: (input, signal) =>
+        sendSdkCommand(client, new BatchGetAccountStatusCommand(input), signal),
+      listFindings: (input, signal) => sendSdkCommand(client, new ListInspectorFindingsCommand(input), signal),
     };
   }
 
   private clientConfig(region: string, credentials: AwsTemporaryCredentials) {
+    return awsInventorySdkClientConfig(region, credentials, this.maxAttempts);
+  }
+}
+
+class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
+  public constructor(
+    private readonly delegate: AwsInventoryClientFactory,
+    private readonly overallSignal: AbortSignal,
+    private readonly commandDeadlineMs: number,
+  ) {}
+
+  public ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient {
+    const client = this.delegate.ec2(region, credentials);
     return {
-      region,
-      credentials,
-      retryMode: "standard" as const,
-      maxAttempts: this.maxAttempts,
+      describeInstances: (input) => this.run((signal) => client.describeInstances(input, signal)),
+      describeVpcs: (input) => this.run((signal) => client.describeVpcs(input, signal)),
+      describeSubnets: (input) => this.run((signal) => client.describeSubnets(input, signal)),
+      describeSecurityGroups: (input) =>
+        this.run((signal) => client.describeSecurityGroups(input, signal)),
     };
+  }
+
+  public s3(region: string, credentials: AwsTemporaryCredentials): S3InventoryClient {
+    const client = this.delegate.s3(region, credentials);
+    return {
+      listBuckets: (input) => this.run((signal) => client.listBuckets(input, signal)),
+      getPublicAccessBlock: (input) =>
+        this.run((signal) => client.getPublicAccessBlock(input, signal)),
+    };
+  }
+
+  public rds(region: string, credentials: AwsTemporaryCredentials): RdsInventoryClient {
+    const client = this.delegate.rds(region, credentials);
+    return {
+      describeDBInstances: (input) =>
+        this.run((signal) => client.describeDBInstances(input, signal)),
+    };
+  }
+
+  public iam(region: string, credentials: AwsTemporaryCredentials): IamInventoryClient {
+    const client = this.delegate.iam(region, credentials);
+    return {
+      getAccountSummary: () => this.run((signal) => client.getAccountSummary(signal)),
+      getAccountPasswordPolicy: () =>
+        this.run((signal) => client.getAccountPasswordPolicy(signal)),
+    };
+  }
+
+  public cloudTrail(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): CloudTrailInventoryClient {
+    const client = this.delegate.cloudTrail(region, credentials);
+    return {
+      describeTrails: (input) => this.run((signal) => client.describeTrails(input, signal)),
+      getTrailStatus: (input) => this.run((signal) => client.getTrailStatus(input, signal)),
+    };
+  }
+
+  public guardDuty(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): GuardDutyInventoryClient {
+    const client = this.delegate.guardDuty(region, credentials);
+    return {
+      listDetectors: (input) => this.run((signal) => client.listDetectors(input, signal)),
+      getDetector: (input) => this.run((signal) => client.getDetector(input, signal)),
+      listFindings: (input) => this.run((signal) => client.listFindings(input, signal)),
+      getFindings: (input) => this.run((signal) => client.getFindings(input, signal)),
+    };
+  }
+
+  public securityHub(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): SecurityHubInventoryClient {
+    const client = this.delegate.securityHub(region, credentials);
+    return {
+      describeHub: () => this.run((signal) => client.describeHub(signal)),
+      getFindings: (input) => this.run((signal) => client.getFindings(input, signal)),
+    };
+  }
+
+  public inspector(
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ): InspectorInventoryClient {
+    const client = this.delegate.inspector(region, credentials);
+    return {
+      batchGetAccountStatus: (input) =>
+        this.run((signal) => client.batchGetAccountStatus(input, signal)),
+      listFindings: (input) => this.run((signal) => client.listFindings(input, signal)),
+    };
+  }
+
+  private run<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return runWithCommandDeadline(
+      this.overallSignal,
+      this.commandDeadlineMs,
+      operation,
+    );
   }
 }
 
@@ -351,6 +638,8 @@ export interface SingleAccountAwsInventoryRunnerDependencies {
   readonly regionSelector: InventoryRegionSelector;
   readonly globalControlRegion?: string;
   readonly maxConcurrency?: number;
+  readonly commandDeadlineMs?: number;
+  readonly collectionDeadlineMs?: number;
   readonly now?: () => Date;
 }
 
@@ -368,73 +657,129 @@ interface CollectionTask {
  */
 export class SingleAccountAwsInventoryRunner implements InventoryRunner {
   private readonly maxConcurrency: number;
+  private readonly commandDeadlineMs: number;
+  private readonly collectionDeadlineMs: number;
   private readonly now: () => Date;
 
   public constructor(
     private readonly dependencies: SingleAccountAwsInventoryRunnerDependencies,
   ) {
     this.maxConcurrency = validateConcurrency(dependencies.maxConcurrency ?? 4);
+    this.commandDeadlineMs = validateDeadline(
+      dependencies.commandDeadlineMs ?? LIVE_AWS_COMMAND_DEADLINE_MS,
+      "AWS command deadline",
+    );
+    this.collectionDeadlineMs = validateDeadline(
+      dependencies.collectionDeadlineMs ?? LIVE_AWS_COLLECTION_DEADLINE_MS,
+      "AWS collection deadline",
+    );
+    if (this.collectionDeadlineMs <= this.commandDeadlineMs) {
+      throw new InventoryConfigurationError(
+        "The AWS collection deadline must exceed the per-command deadline",
+      );
+    }
     this.now = dependencies.now ?? (() => new Date());
   }
 
   public async collect(
     context: InventoryCollectionContext,
   ): Promise<InventoryCollectionResult> {
-    const regions = normalizeRegions(
-      await this.dependencies.regionSelector.selectRegions({
+    const overallController = new AbortController();
+    const overallDeadline = new InventoryDeadlineError("collection");
+    const collectionDeadlineAt = Date.now() + this.collectionDeadlineMs;
+    const overallTimer = setTimeout(
+      () => overallController.abort(overallDeadline),
+      this.collectionDeadlineMs,
+    );
+    try {
+      const selectionContext = {
         tenantId: context.tenantId,
         connectionId: context.connectionId,
         accountId: context.accountId,
         partition: context.partition,
         credentials: context.credentials,
-      }),
-    );
-    const controlRegion = this.dependencies.globalControlRegion ?? regions[0];
-    if (controlRegion === undefined || !REGION.test(controlRegion)) {
-      throw new InventoryConfigurationError("A valid global control Region is required");
-    }
-
-    const observedAt = this.now().toISOString();
-    const state = new BatchState(this.dependencies.sink);
-    const tasks = this.buildTasks(context, regions, controlRegion, observedAt);
-    const collectorCoverage = new Array<InventoryCollectorCoverage>(tasks.length);
-
-    await runBounded(tasks.map((value, index) => ({ value, index })), this.maxConcurrency, async ({ value: task, index }) => {
-      const taskState = new TaskCollectionState(state, task);
-      try {
-        await task.run(taskState);
-        collectorCoverage[index] = taskState.finish();
-      } catch (error: unknown) {
-        if (error instanceof InventorySinkWriteError) {
-          throw error;
-        }
-        await state.emit({
-          resources: [],
-          evidence: [
-            evidence(
-              context,
-              observedAt,
-              task.region,
-              task.service,
-              "COLLECTION_ERROR",
-              task.subject,
-              "ERROR",
-              { errorName: safeErrorName(error) },
-            ),
-          ],
-        });
-        collectorCoverage[index] = taskState.finish(error);
+      };
+      const regions = normalizeRegions(
+        await runWithCommandDeadline(
+          overallController.signal,
+          this.commandDeadlineMs,
+          (signal) => this.dependencies.regionSelector.selectRegions(selectionContext, signal),
+        ),
+      );
+      const controlRegion = this.dependencies.globalControlRegion ?? regions[0];
+      if (controlRegion === undefined || !REGION.test(controlRegion)) {
+        throw new InventoryConfigurationError("A valid global control Region is required");
       }
-    });
 
-    const partial = collectorCoverage.some((entry) => entry.status !== "SUCCEEDED");
+      const observedAt = this.now().toISOString();
+      const state = new BatchState(this.dependencies.sink);
+      const clients = new DeadlineAwsInventoryClientFactory(
+        this.dependencies.clients,
+        overallController.signal,
+        this.commandDeadlineMs,
+      );
+      const tasks = this.buildTasks(context, regions, controlRegion, observedAt, clients);
+      const collectorCoverage = new Array<InventoryCollectorCoverage>(tasks.length);
 
-    return {
-      resourcesObserved: state.resourcesObserved,
-      findingsObserved: state.evidenceObserved,
-      coverage: partial ? "PARTIAL" : "COMPLETE",
-      collectorCoverage,
-    };
+      await runBounded(tasks.map((value, index) => ({ value, index })), this.maxConcurrency, async ({ value: task, index }) => {
+        let taskState = new TaskCollectionState(state, task);
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await task.run(taskState);
+            collectorCoverage[index] = taskState.finish();
+            return;
+          } catch (error: unknown) {
+            if (error instanceof InventorySinkWriteError) {
+              throw error;
+            }
+            if (attempt === 0 && taskState.canRetry(error)) {
+              taskState = new TaskCollectionState(state, task);
+              continue;
+            }
+            await state.emit({
+              resources: [],
+              evidence: [
+                evidence(
+                  context,
+                  observedAt,
+                  task.region,
+                  task.service,
+                  "COLLECTION_ERROR",
+                  task.subject,
+                  "ERROR",
+                  { errorName: safeErrorName(error) },
+                ),
+              ],
+            });
+            collectorCoverage[index] = taskState.finish(error);
+            return;
+          }
+        }
+      });
+
+      if (overallController.signal.aborted || Date.now() >= collectionDeadlineAt) {
+        collectorCoverage.push({
+          collectorKey: "sutra.collection-deadline",
+          region: "global",
+          status: "PARTIAL",
+          itemsObserved: 0,
+          pagesObserved: 0,
+          errorCode: "COLLECTION_TIMEOUT",
+          message: "The bounded AWS collection reached its overall deadline.",
+        });
+      }
+
+      const partial = collectorCoverage.some((entry) => entry.status !== "SUCCEEDED");
+
+      return {
+        resourcesObserved: state.resourcesObserved,
+        findingsObserved: state.evidenceObserved,
+        coverage: partial ? "PARTIAL" : "COMPLETE",
+        collectorCoverage,
+      };
+    } finally {
+      clearTimeout(overallTimer);
+    }
   }
 
   private buildTasks(
@@ -442,14 +787,15 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
     regions: readonly string[],
     controlRegion: string,
     observedAt: string,
+    clients: AwsInventoryClientFactory,
   ): CollectionTask[] {
     const credentials = context.credentials;
     const tasks: CollectionTask[] = [];
-    const iam = this.dependencies.clients.iam(controlRegion, credentials);
+    const iam = clients.iam(controlRegion, credentials);
     const collectCloudTrailRegion = createCloudTrailCollector(
       context,
       observedAt,
-      this.dependencies.clients,
+      clients,
     );
     tasks.push(
       task("iam.account", "iam", "account-summary", "global", (state) =>
@@ -461,12 +807,13 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
     );
 
     for (const region of regions) {
-      const ec2 = this.dependencies.clients.ec2(region, credentials);
-      const rds = this.dependencies.clients.rds(region, credentials);
-      const cloudTrail = this.dependencies.clients.cloudTrail(region, credentials);
-      const guardDuty = this.dependencies.clients.guardDuty(region, credentials);
-      const securityHub = this.dependencies.clients.securityHub(region, credentials);
-      const s3 = this.dependencies.clients.s3(region, credentials);
+      const ec2 = clients.ec2(region, credentials);
+      const rds = clients.rds(region, credentials);
+      const cloudTrail = clients.cloudTrail(region, credentials);
+      const guardDuty = clients.guardDuty(region, credentials);
+      const securityHub = clients.securityHub(region, credentials);
+      const inspector = clients.inspector(region, credentials);
+      const s3 = clients.s3(region, credentials);
 
       tasks.push(
         task("s3.buckets", "s3", "buckets", region, (state) =>
@@ -493,8 +840,17 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         task("guardduty.detectors", "guardduty", "detectors", region, (state) =>
           collectGuardDuty(context, region, guardDuty, observedAt, state),
         ),
+        task("guardduty.findings", "guardduty", "aws-native-findings", region, (state) =>
+          collectGuardDutyFindings(context, region, guardDuty, observedAt, state),
+        ),
         task("securityhub.hub", "securityhub", "hub", region, (state) =>
           collectSecurityHub(context, region, securityHub, observedAt, state),
+        ),
+        task("securityhub.findings", "securityhub", "aws-native-findings", region, (state) =>
+          collectSecurityHubFindings(context, region, securityHub, observedAt, state),
+        ),
+        task("inspector2.findings", "inspector2", "aws-native-findings", region, (state) =>
+          collectInspectorFindings(context, region, inspector, observedAt, state),
         ),
       );
     }
@@ -1203,6 +1559,701 @@ async function collectSecurityHub(
   }
 }
 
+async function collectGuardDutyFindings(
+  context: InventoryCollectionContext,
+  region: string,
+  client: GuardDutyInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const detectorIds: string[] = [];
+  let detectorToken: string | undefined;
+  const seenDetectorTokens = new Set<string>();
+  for (let page = 0; page < MAX_NATIVE_FINDING_PAGES; page += 1) {
+    const output = await client.listDetectors(
+      detectorToken === undefined
+        ? { MaxResults: 50 }
+        : { MaxResults: 50, NextToken: detectorToken },
+    );
+    state.observePage();
+    for (const detectorId of output.DetectorIds ?? []) {
+      if (safeNativeIdentifier(detectorId, 300) !== null) detectorIds.push(detectorId);
+    }
+    detectorToken = nextToken(
+      output.NextToken,
+      seenDetectorTokens,
+      "GuardDuty ListDetectors for native findings",
+    );
+    if (detectorToken === undefined) break;
+    if (page === MAX_NATIVE_FINDING_PAGES - 1) {
+      throw new InventoryProtocolError(
+        "GuardDuty detector discovery exceeded the native finding pagination limit",
+      );
+    }
+  }
+
+  let enabledDetectorCount = 0;
+  const enabledDetectorIds: string[] = [];
+  for (const detectorId of [...new Set(detectorIds)]) {
+    const detector = await client.getDetector({ DetectorId: detectorId });
+    if (detector.Status === "ENABLED") {
+      enabledDetectorCount += 1;
+      enabledDetectorIds.push(detectorId);
+    }
+  }
+
+  if (enabledDetectorIds.length === 0) {
+    await emitNativeFindingsAvailability(
+      context,
+      observedAt,
+      region,
+      "guardduty",
+      "DISABLED",
+      {
+        nativeService: "AWS GuardDuty",
+        detectorCount: detectorIds.length,
+        enabledDetectorCount,
+        importMode: "existing-findings-only",
+      },
+      state,
+    );
+    return;
+  }
+
+  let importedFindings = 0;
+  for (const detectorId of enabledDetectorIds) {
+    let token: string | undefined;
+    const seen = new Set<string>();
+    for (let page = 0; page < MAX_NATIVE_FINDING_PAGES; page += 1) {
+      const output = await client.listFindings(
+        token === undefined
+          ? { DetectorId: detectorId, MaxResults: 50 }
+          : { DetectorId: detectorId, MaxResults: 50, NextToken: token },
+      );
+      state.observePage();
+      const remaining = MAX_NATIVE_FINDINGS_PER_SERVICE_REGION - importedFindings;
+      const pageFindingIds = [...new Set(output.FindingIds ?? [])]
+        .filter((findingId) => safeNativeIdentifier(findingId, 512) !== null);
+      const pageWasTruncated = pageFindingIds.length > Math.max(0, remaining);
+      const findingIds = pageFindingIds.slice(0, Math.max(0, remaining));
+      if (findingIds.length > 0) {
+        const findings = await client.getFindings({
+          DetectorId: detectorId,
+          FindingIds: findingIds,
+        });
+        const normalized = (findings.Findings ?? []).map((finding) =>
+          normalizeGuardDutyFinding(context, region, observedAt, finding),
+        );
+        await state.emit({ resources: [], evidence: normalized });
+        state.observeItems(normalized.length);
+        importedFindings += normalized.length;
+      }
+      token = nextToken(
+        output.NextToken,
+        seen,
+        "GuardDuty ListFindings",
+      );
+      if (pageWasTruncated) {
+        throw new InventoryProtocolError(
+          "GuardDuty native finding import exceeded its bounded collection limit",
+        );
+      }
+      if (token === undefined) break;
+      if (
+        importedFindings >= MAX_NATIVE_FINDINGS_PER_SERVICE_REGION ||
+        page === MAX_NATIVE_FINDING_PAGES - 1
+      ) {
+        throw new InventoryProtocolError(
+          "GuardDuty native finding import exceeded its bounded collection limit",
+        );
+      }
+    }
+  }
+
+  await emitNativeFindingsAvailability(
+    context,
+    observedAt,
+    region,
+    "guardduty",
+    "ENABLED",
+    {
+      nativeService: "AWS GuardDuty",
+      detectorCount: detectorIds.length,
+      enabledDetectorCount,
+      importedFindings,
+      importMode: "existing-findings-only",
+    },
+    state,
+  );
+}
+
+async function collectSecurityHubFindings(
+  context: InventoryCollectionContext,
+  region: string,
+  client: SecurityHubInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  try {
+    await client.describeHub();
+    state.observePage();
+  } catch (error: unknown) {
+    if (!isNamedError(error, "InvalidAccessException")) throw error;
+    await emitNativeFindingsAvailability(
+      context,
+      observedAt,
+      region,
+      "securityhub",
+      "DISABLED",
+      {
+        nativeService: "AWS Security Hub",
+        reason: "NOT_SUBSCRIBED",
+        importMode: "existing-findings-only",
+      },
+      state,
+    );
+    return;
+  }
+
+  let token: string | undefined;
+  const seen = new Set<string>();
+  let importedFindings = 0;
+  for (let page = 0; page < MAX_NATIVE_FINDING_PAGES; page += 1) {
+    const output = await client.getFindings({
+      Filters: {
+        AwsAccountId: [{ Value: context.accountId, Comparison: "EQUALS" }],
+        Region: [{ Value: region, Comparison: "EQUALS" }],
+      },
+      MaxResults: 100,
+      ...(token === undefined ? {} : { NextToken: token }),
+    });
+    state.observePage();
+    const remaining = MAX_NATIVE_FINDINGS_PER_SERVICE_REGION - importedFindings;
+    const pageFindings = output.Findings ?? [];
+    const pageWasTruncated = pageFindings.length > Math.max(0, remaining);
+    const normalized = pageFindings
+      .slice(0, Math.max(0, remaining))
+      .map((finding) =>
+        normalizeSecurityHubFinding(context, region, observedAt, finding),
+      );
+    await state.emit({ resources: [], evidence: normalized });
+    state.observeItems(normalized.length);
+    importedFindings += normalized.length;
+    token = nextToken(output.NextToken, seen, "Security Hub GetFindings");
+    if (pageWasTruncated) {
+      throw new InventoryProtocolError(
+        "Security Hub native finding import exceeded its bounded collection limit",
+      );
+    }
+    if (token === undefined) break;
+    if (
+      importedFindings >= MAX_NATIVE_FINDINGS_PER_SERVICE_REGION ||
+      page === MAX_NATIVE_FINDING_PAGES - 1
+    ) {
+      throw new InventoryProtocolError(
+        "Security Hub native finding import exceeded its bounded collection limit",
+      );
+    }
+  }
+
+  await emitNativeFindingsAvailability(
+    context,
+    observedAt,
+    region,
+    "securityhub",
+    "ENABLED",
+    {
+      nativeService: "AWS Security Hub",
+      importedFindings,
+      importMode: "existing-findings-only",
+    },
+    state,
+  );
+}
+
+async function collectInspectorFindings(
+  context: InventoryCollectionContext,
+  region: string,
+  client: InspectorInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const accountStatus = await client.batchGetAccountStatus({
+    accountIds: [context.accountId],
+  });
+  state.observePage();
+  if ((accountStatus.failedAccounts ?? []).length > 0) {
+    throw new InventoryProtocolError(
+      "Amazon Inspector account status could not be established",
+    );
+  }
+  const account = (accountStatus.accounts ?? []).find(
+    (candidate) => candidate.accountId === context.accountId,
+  );
+  if (account === undefined || account.state?.status === undefined) {
+    throw new InventoryProtocolError(
+      "Amazon Inspector account status omitted the requested account",
+    );
+  }
+  const inspectorStatus = account.state.status;
+  if (inspectorStatus !== "ENABLED") {
+    await emitNativeFindingsAvailability(
+      context,
+      observedAt,
+      region,
+      "inspector2",
+      "DISABLED",
+      compact({
+        nativeService: "Amazon Inspector",
+        accountStatus: inspectorStatus,
+        ec2Status: account.resourceState?.ec2?.status,
+        ecrStatus: account.resourceState?.ecr?.status,
+        lambdaStatus: account.resourceState?.lambda?.status,
+        lambdaCodeStatus: account.resourceState?.lambdaCode?.status,
+        importMode: "existing-findings-only",
+      }),
+      state,
+    );
+    return;
+  }
+
+  let token: string | undefined;
+  const seen = new Set<string>();
+  let importedFindings = 0;
+  for (let page = 0; page < MAX_NATIVE_FINDING_PAGES; page += 1) {
+    const output = await client.listFindings({
+      maxResults: 100,
+      filterCriteria: {
+        awsAccountId: [{ comparison: "EQUALS", value: context.accountId }],
+      },
+      ...(token === undefined ? {} : { nextToken: token }),
+    });
+    state.observePage();
+    const remaining = MAX_NATIVE_FINDINGS_PER_SERVICE_REGION - importedFindings;
+    const pageFindings = output.findings ?? [];
+    const pageWasTruncated = pageFindings.length > Math.max(0, remaining);
+    const normalized = pageFindings
+      .slice(0, Math.max(0, remaining))
+      .map((finding) => normalizeInspectorFinding(context, region, observedAt, finding));
+    await state.emit({ resources: [], evidence: normalized });
+    state.observeItems(normalized.length);
+    importedFindings += normalized.length;
+    token = nextToken(output.nextToken, seen, "Amazon Inspector ListFindings");
+    if (pageWasTruncated) {
+      throw new InventoryProtocolError(
+        "Amazon Inspector native finding import exceeded its bounded collection limit",
+      );
+    }
+    if (token === undefined) break;
+    if (
+      importedFindings >= MAX_NATIVE_FINDINGS_PER_SERVICE_REGION ||
+      page === MAX_NATIVE_FINDING_PAGES - 1
+    ) {
+      throw new InventoryProtocolError(
+        "Amazon Inspector native finding import exceeded its bounded collection limit",
+      );
+    }
+  }
+
+  await emitNativeFindingsAvailability(
+    context,
+    observedAt,
+    region,
+    "inspector2",
+    "ENABLED",
+    compact({
+      nativeService: "Amazon Inspector",
+      accountStatus: inspectorStatus,
+      ec2Status: account.resourceState?.ec2?.status,
+      ecrStatus: account.resourceState?.ecr?.status,
+      lambdaStatus: account.resourceState?.lambda?.status,
+      lambdaCodeStatus: account.resourceState?.lambdaCode?.status,
+      importedFindings,
+      importMode: "existing-findings-only",
+    }),
+    state,
+  );
+}
+
+function normalizeGuardDutyFinding(
+  context: InventoryCollectionContext,
+  region: string,
+  observedAt: string,
+  finding: GuardDutyFinding,
+): NormalizedAwsEvidence {
+  if (finding.AccountId !== context.accountId || finding.Region !== region) {
+    throw new InventoryProtocolError(
+      "GuardDuty returned a finding outside the scoped account or Region",
+    );
+  }
+  const nativeFindingId = requiredNativeIdentifier(finding.Id, "GuardDuty finding ID");
+  const resourceIds = guardDutyResourceIds(finding);
+  return nativeFindingEvidence(
+    context,
+    observedAt,
+    region,
+    "guardduty",
+    nativeFindingId,
+    resourceIds,
+    compact({
+      origin: "aws-native-finding",
+      nativeService: "AWS GuardDuty",
+      nativeFindingId,
+      nativeFindingArn: safeNativeIdentifier(finding.Arn, 2_048) ?? undefined,
+      nativeType: safeNativeText(finding.Type, 256),
+      nativeSeverity: finiteNumber(finding.Severity),
+      normalizedSeverity: guardDutySeverity(finding.Severity),
+      normalizedStatus: finding.Service?.Archived === true ? "resolved" : "open",
+      title: safeNativeText(finding.Title, 180) ?? "AWS GuardDuty finding",
+      summary: safeNativeText(finding.Description, 1_200) ??
+        "AWS GuardDuty reported a native security finding.",
+      remediation: "Review the finding in AWS GuardDuty, validate the affected resource, and follow the customer-approved response runbook.",
+      resourceIds,
+      resourceType: safeNativeText(finding.Resource?.ResourceType, 128),
+      createdAt: safeIso(finding.CreatedAt),
+      updatedAt: safeIso(finding.UpdatedAt),
+      firstObservedAt: safeIso(finding.Service?.EventFirstSeen),
+      lastObservedAt: safeIso(finding.Service?.EventLastSeen),
+      archived: finding.Service?.Archived,
+    }),
+  );
+}
+
+function normalizeSecurityHubFinding(
+  context: InventoryCollectionContext,
+  region: string,
+  observedAt: string,
+  finding: AwsSecurityFinding,
+): NormalizedAwsEvidence {
+  if (finding.AwsAccountId !== context.accountId || finding.Region !== region) {
+    throw new InventoryProtocolError(
+      "Security Hub returned a finding outside the scoped account or Region",
+    );
+  }
+  const nativeFindingId = requiredNativeIdentifier(
+    finding.Id,
+    "Security Hub finding ID",
+  );
+  const resources = (finding.Resources ?? [])
+    .slice(0, MAX_NATIVE_FINDING_RESOURCES)
+    .flatMap((resource) => {
+      const id = safeNativeIdentifier(resource.Id, 2_048);
+      if (id === null) return [];
+      return [compact({
+        id,
+        type: safeNativeText(resource.Type, 256),
+        region: safeRegion(resource.Region),
+        partition: safeNativeText(resource.Partition, 32),
+      })];
+    });
+  const resourceIds = resources.flatMap((resource) =>
+    typeof resource.id === "string" ? [resource.id] : [],
+  );
+  return nativeFindingEvidence(
+    context,
+    observedAt,
+    region,
+    "securityhub",
+    nativeFindingId,
+    resourceIds,
+    compact({
+      origin: "aws-native-finding",
+      nativeService: "AWS Security Hub",
+      nativeFindingId,
+      nativeProductArn: safeNativeIdentifier(finding.ProductArn, 2_048) ?? undefined,
+      nativeProductName: safeNativeText(finding.ProductName, 128),
+      nativeGeneratorId: safeNativeIdentifier(finding.GeneratorId, 512) ?? undefined,
+      nativeTypes: safeNativeStrings(finding.Types, 10, 256),
+      nativeSeverity: safeNativeText(finding.Severity?.Label, 32),
+      normalizedSeverity: securityHubSeverity(
+        finding.Severity?.Label,
+        finding.Severity?.Normalized,
+      ),
+      normalizedStatus: securityHubStatus(
+        finding.Workflow?.Status,
+        finding.RecordState,
+        finding.Compliance?.Status,
+      ),
+      title: safeNativeText(finding.Title, 180) ?? "AWS Security Hub finding",
+      summary: safeNativeText(finding.Description, 1_200) ??
+        "AWS Security Hub reported a native security finding.",
+      remediation: safeNativeText(finding.Remediation?.Recommendation?.Text, 2_000) ??
+        "Review the finding in AWS Security Hub and follow the customer-approved remediation runbook.",
+      resourceIds,
+      resources,
+      workflowStatus: safeNativeText(finding.Workflow?.Status, 32),
+      recordState: safeNativeText(finding.RecordState, 32),
+      complianceStatus: safeNativeText(finding.Compliance?.Status, 32),
+      controlId: safeNativeIdentifier(finding.Compliance?.SecurityControlId, 512) ?? undefined,
+      firstObservedAt: safeIso(finding.FirstObservedAt),
+      lastObservedAt: safeIso(finding.LastObservedAt),
+      createdAt: safeIso(finding.CreatedAt),
+      updatedAt: safeIso(finding.UpdatedAt),
+    }),
+  );
+}
+
+function normalizeInspectorFinding(
+  context: InventoryCollectionContext,
+  region: string,
+  observedAt: string,
+  finding: InspectorFinding,
+): NormalizedAwsEvidence {
+  if (finding.awsAccountId !== context.accountId) {
+    throw new InventoryProtocolError(
+      "Amazon Inspector returned a finding outside the scoped account",
+    );
+  }
+  const nativeFindingId = requiredNativeIdentifier(
+    finding.findingArn,
+    "Amazon Inspector finding ARN",
+  );
+  const resources = (finding.resources ?? [])
+    .slice(0, MAX_NATIVE_FINDING_RESOURCES)
+    .flatMap((resource) => {
+      const id = safeNativeIdentifier(resource.id, 2_048);
+      if (id === null) return [];
+      if (resource.region !== undefined && resource.region !== region) {
+        throw new InventoryProtocolError(
+          "Amazon Inspector returned a finding resource outside the scoped Region",
+        );
+      }
+      return [compact({
+        id,
+        type: safeNativeText(resource.type, 128),
+        region: safeRegion(resource.region),
+        partition: safeNativeText(resource.partition, 32),
+      })];
+    });
+  const resourceIds = resources.flatMap((resource) =>
+    typeof resource.id === "string" ? [resource.id] : [],
+  );
+  return nativeFindingEvidence(
+    context,
+    observedAt,
+    region,
+    "inspector2",
+    nativeFindingId,
+    resourceIds,
+    compact({
+      origin: "aws-native-finding",
+      nativeService: "Amazon Inspector",
+      nativeFindingId,
+      nativeType: safeNativeText(finding.type, 128),
+      nativeSeverity: safeNativeText(finding.severity, 32),
+      normalizedSeverity: inspectorSeverity(finding.severity),
+      normalizedStatus: inspectorStatus(finding.status),
+      title: safeNativeText(finding.title, 180) ?? "Amazon Inspector finding",
+      summary: safeNativeText(finding.description, 1_200) ??
+        "Amazon Inspector reported a native security finding.",
+      remediation: safeNativeText(finding.remediation?.recommendation?.text, 2_000) ??
+        "Review the finding in Amazon Inspector and follow the customer-approved remediation runbook.",
+      resourceIds,
+      resources,
+      inspectorScore: finiteNumber(finding.inspectorScore),
+      fixAvailable: safeNativeText(finding.fixAvailable, 32),
+      exploitAvailable: safeNativeText(finding.exploitAvailable, 32),
+      firstObservedAt: safeIso(finding.firstObservedAt),
+      lastObservedAt: safeIso(finding.lastObservedAt),
+      updatedAt: safeIso(finding.updatedAt),
+    }),
+  );
+}
+
+async function emitNativeFindingsAvailability(
+  context: InventoryCollectionContext,
+  observedAt: string,
+  region: string,
+  service: "guardduty" | "securityhub" | "inspector2",
+  status: "ENABLED" | "DISABLED",
+  data: SafeJsonObject,
+  state: TaskCollectionState,
+): Promise<void> {
+  await state.emit({
+    resources: [],
+    evidence: [
+      evidence(
+        context,
+        observedAt,
+        region,
+        service,
+        "AWS_NATIVE_FINDINGS_AVAILABILITY",
+        context.accountId,
+        status,
+        data,
+      ),
+    ],
+  });
+}
+
+function nativeFindingEvidence(
+  context: InventoryCollectionContext,
+  observedAt: string,
+  region: string,
+  service: "guardduty" | "securityhub" | "inspector2",
+  nativeFindingId: string,
+  resourceIds: readonly string[],
+  data: SafeJsonObject,
+): NormalizedAwsEvidence {
+  const digest = createHash("sha256")
+    .update(`${service}\u0000${nativeFindingId}`, "utf8")
+    .digest("hex");
+  return {
+    schemaVersion: 1,
+    provider: "aws",
+    evidenceKey: `${context.partition}:${context.accountId}:${region}:${service}:AWS_NATIVE_FINDING:${digest}`,
+    accountId: context.accountId,
+    region,
+    service,
+    evidenceType: "AWS_NATIVE_FINDING",
+    subjectId: resourceIds[0] ?? digest,
+    status: "OBSERVED",
+    observedAt,
+    data,
+  };
+}
+
+function guardDutyResourceIds(finding: GuardDutyFinding): readonly string[] {
+  const resource = finding.Resource;
+  return uniqueNativeIds([
+    resource?.InstanceDetails?.InstanceId,
+    resource?.EcsClusterDetails?.Arn,
+    resource?.EcsClusterDetails?.Name,
+    resource?.EksClusterDetails?.Arn,
+    resource?.EksClusterDetails?.Name,
+    resource?.LambdaDetails?.FunctionArn,
+    resource?.LambdaDetails?.FunctionName,
+    resource?.RdsDbInstanceDetails?.DbInstanceArn,
+    resource?.RdsDbInstanceDetails?.DbInstanceIdentifier,
+    ...(resource?.S3BucketDetails ?? []).flatMap((bucket) => [bucket.Arn, bucket.Name]),
+  ]);
+}
+
+function uniqueNativeIds(values: readonly (string | undefined)[]): readonly string[] {
+  const result: string[] = [];
+  for (const value of values) {
+    const safe = safeNativeIdentifier(value, 2_048);
+    if (safe !== null && !result.includes(safe)) result.push(safe);
+    if (result.length >= MAX_NATIVE_FINDING_RESOURCES) break;
+  }
+  return result;
+}
+
+function requiredNativeIdentifier(value: string | undefined, label: string): string {
+  const safe = safeNativeIdentifier(value, 2_048);
+  if (safe === null) {
+    throw new InventoryProtocolError(`${label} was missing or unsafe`);
+  }
+  return safe;
+}
+
+function safeNativeIdentifier(value: string | undefined, maxLength: number): string | null {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > maxLength ||
+    /[\u0000-\u001f\u007f]/u.test(value) ||
+    HIGH_CONFIDENCE_SECRET_VALUE.test(value) ||
+    CREDENTIAL_URI_OR_SIGNED_URL.test(value)
+  ) {
+    return null;
+  }
+  return value;
+}
+
+function safeNativeText(
+  value: string | undefined,
+  maxLength: number,
+): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  if (
+    HIGH_CONFIDENCE_SECRET_VALUE.test(value) ||
+    CREDENTIAL_URI_OR_SIGNED_URL.test(value)
+  ) {
+    return "[redacted by Sutra]";
+  }
+  const normalized = value.replace(/[\u0000-\u001f\u007f]+/gu, " ").trim();
+  return normalized.length === 0 ? undefined : normalized.slice(0, maxLength);
+}
+
+function safeNativeStrings(
+  values: readonly string[] | undefined,
+  maxItems: number,
+  maxLength: number,
+): readonly string[] {
+  return (values ?? [])
+    .flatMap((value) => {
+      const safe = safeNativeText(value, maxLength);
+      return safe === undefined ? [] : [safe];
+    })
+    .slice(0, maxItems);
+}
+
+function safeIso(value: string | Date | undefined): string | undefined {
+  if (value instanceof Date) return iso(value);
+  if (typeof value !== "string" || value.length > 64) return undefined;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+
+function safeRegion(value: string | undefined): string | undefined {
+  return typeof value === "string" && REGION.test(value) ? value : undefined;
+}
+
+function finiteNumber(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function guardDutySeverity(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "informational";
+  }
+  if (value >= 7) return "high";
+  if (value >= 4) return "medium";
+  return "low";
+}
+
+function securityHubSeverity(label: string | undefined, normalized: number | undefined): string {
+  if (label === "CRITICAL") return "critical";
+  if (label === "HIGH") return "high";
+  if (label === "MEDIUM") return "medium";
+  if (label === "LOW") return "low";
+  if (typeof normalized === "number" && Number.isFinite(normalized)) {
+    if (normalized >= 90) return "critical";
+    if (normalized >= 70) return "high";
+    if (normalized >= 40) return "medium";
+    if (normalized > 0) return "low";
+  }
+  return "informational";
+}
+
+function securityHubStatus(
+  workflow: string | undefined,
+  recordState: string | undefined,
+  complianceStatus: string | undefined,
+): string {
+  if (workflow === "SUPPRESSED") return "suppressed";
+  if (workflow === "RESOLVED" || recordState === "ARCHIVED" || complianceStatus === "PASSED") {
+    return "resolved";
+  }
+  if (workflow === "NOTIFIED") return "acknowledged";
+  return "open";
+}
+
+function inspectorSeverity(value: string | undefined): string {
+  if (value === "CRITICAL") return "critical";
+  if (value === "HIGH") return "high";
+  if (value === "MEDIUM") return "medium";
+  if (value === "LOW") return "low";
+  return "informational";
+}
+
+function inspectorStatus(value: string | undefined): string {
+  if (value === "SUPPRESSED") return "suppressed";
+  if (value === "CLOSED") return "resolved";
+  return "open";
+}
+
 class BatchState {
   public resourcesObserved = 0;
   public evidenceObserved = 0;
@@ -1228,14 +2279,18 @@ class TaskCollectionState {
   private itemsObserved = 0;
   private pagesObserved = 0;
   private partialErrorCode: string | undefined;
+  private emittedObservations = false;
 
   public constructor(
     private readonly parent: BatchState,
     private readonly task: CollectionTask,
   ) {}
 
-  public emit(batch: AwsInventoryBatch): Promise<void> {
-    return this.parent.emit(batch);
+  public async emit(batch: AwsInventoryBatch): Promise<void> {
+    await this.parent.emit(batch);
+    if (batch.resources.length > 0 || batch.evidence.length > 0) {
+      this.emittedObservations = true;
+    }
   }
 
   /** Record one successfully returned primary list/describe page. */
@@ -1256,18 +2311,34 @@ class TaskCollectionState {
     this.partialErrorCode ??= coverageErrorCode(error);
   }
 
+  /** Retry only a pristine task so normalized observations can never be duplicated. */
+  public canRetry(error: unknown): boolean {
+    return (
+      this.itemsObserved === 0 &&
+      this.pagesObserved === 0 &&
+      this.partialErrorCode === undefined &&
+      !this.emittedObservations &&
+      RETRYABLE_TASK_ERRORS.has(safeErrorName(error))
+    );
+  }
+
   public finish(error?: unknown): InventoryCollectorCoverage {
     if (error !== undefined) {
+      const timedOut = coverageErrorCode(error) === "COLLECTION_TIMEOUT";
       return {
         collectorKey: this.task.collectorKey,
         region: this.task.region,
         status:
-          this.pagesObserved > 0 || this.itemsObserved > 0 ? "PARTIAL" : "FAILED",
+          timedOut || this.pagesObserved > 0 || this.itemsObserved > 0
+            ? "PARTIAL"
+            : "FAILED",
         itemsObserved: this.itemsObserved,
         pagesObserved: this.pagesObserved,
         errorCode: coverageErrorCode(error),
         message:
-          this.pagesObserved > 0 || this.itemsObserved > 0
+          timedOut
+            ? "The read-only AWS collector reached its bounded deadline."
+            : this.pagesObserved > 0 || this.itemsObserved > 0
             ? "The read-only AWS collector returned only partial coverage."
             : "The read-only AWS collector did not return a usable page.",
       };
@@ -1484,6 +2555,17 @@ function normalizeRegions(values: readonly string[]): readonly string[] {
   return regions;
 }
 
+function normalizeDiscoveredRegions(values: readonly string[]): readonly string[] {
+  const regions = [...new Set(values)].sort();
+  if (
+    regions.length > MAX_REGIONS ||
+    regions.some((region) => !REGION.test(region))
+  ) {
+    throw new InventoryConfigurationError("AWS returned invalid enabled Region data");
+  }
+  return regions;
+}
+
 function validateConcurrency(value: number): number {
   if (!Number.isInteger(value) || value < 1 || value > 16) {
     throw new InventoryConfigurationError("Inventory concurrency must be between 1 and 16");
@@ -1496,6 +2578,83 @@ function validateMaxAttempts(value: number): number {
     throw new InventoryConfigurationError("AWS SDK max attempts must be between 1 and 10");
   }
   return value;
+}
+
+function validateDeadline(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1 || value > 15 * 60_000) {
+    throw new InventoryConfigurationError(`${label} must be between 1 ms and 15 minutes`);
+  }
+  return value;
+}
+
+class InventoryDeadlineError extends Error {
+  public constructor(public readonly scope: "command" | "collection") {
+    super("The bounded AWS inventory deadline was reached");
+    this.name = scope === "command"
+      ? "InventoryCommandDeadlineError"
+      : "InventoryCollectionDeadlineError";
+  }
+}
+
+async function runWithCommandDeadline<T>(
+  overallSignal: AbortSignal,
+  commandDeadlineMs: number,
+  operation: (signal: AbortSignal) => Promise<T> | T,
+): Promise<T> {
+  if (overallSignal.aborted) {
+    throw overallSignal.reason instanceof InventoryDeadlineError
+      ? overallSignal.reason
+      : new InventoryDeadlineError("collection");
+  }
+
+  const commandController = new AbortController();
+  const forwardOverallAbort = () => {
+    commandController.abort(
+      overallSignal.reason instanceof InventoryDeadlineError
+        ? overallSignal.reason
+        : new InventoryDeadlineError("collection"),
+    );
+  };
+  overallSignal.addEventListener("abort", forwardOverallAbort, { once: true });
+  const commandTimer = setTimeout(
+    () => commandController.abort(new InventoryDeadlineError("command")),
+    commandDeadlineMs,
+  );
+
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const finish = (callback: () => void) => {
+        if (settled) return;
+        settled = true;
+        callback();
+      };
+      const rejectForAbort = () => {
+        const reason = commandController.signal.reason;
+        finish(() => reject(
+          reason instanceof InventoryDeadlineError
+            ? reason
+            : new InventoryDeadlineError(
+              overallSignal.aborted ? "collection" : "command",
+            ),
+        ));
+      };
+      commandController.signal.addEventListener("abort", rejectForAbort, { once: true });
+      Promise.resolve()
+        .then(() => operation(commandController.signal))
+        .then(
+          (value) => finish(() => resolve(value)),
+          (error: unknown) => finish(() => reject(
+            commandController.signal.aborted
+              ? commandController.signal.reason
+              : error,
+          )),
+        );
+    });
+  } finally {
+    clearTimeout(commandTimer);
+    overallSignal.removeEventListener("abort", forwardOverallAbort);
+  }
 }
 
 async function runBounded<T>(
@@ -1516,7 +2675,11 @@ async function runBounded<T>(
       }
     },
   );
-  await Promise.all(workers);
+  const results = await Promise.allSettled(workers);
+  const failure = results.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failure !== undefined) throw failure.reason;
 }
 
 function isNamedError(error: unknown, name: string): boolean {
@@ -1542,6 +2705,9 @@ function safeErrorName(error: unknown): string {
 }
 
 function coverageErrorCode(error: unknown): string {
+  if (error instanceof InventoryDeadlineError || isNamedError(error, "AbortError")) {
+    return "COLLECTION_TIMEOUT";
+  }
   if (error instanceof InventoryProtocolError) return "COLLECTOR_PROTOCOL_ERROR";
   const name = safeErrorName(error);
   return name === "Error" || name === "UnknownError" ? "AWS_API_ERROR" : name;

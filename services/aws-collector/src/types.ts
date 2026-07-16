@@ -9,6 +9,7 @@ export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 
 export type AwsConnectionStatus =
   | "PENDING"
+  | "VERIFIED"
   | "ACTIVE"
   | "DEGRADED"
   | "DISABLED";
@@ -128,7 +129,7 @@ export interface OnboardingTrustVerification {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07";
+  readonly permissionPackVersion: "live-demo-2026-07.1";
 }
 
 export interface InventoryJobRequest {
@@ -272,7 +273,7 @@ export interface OnboardingVerificationJobResult {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07";
+  readonly permissionPackVersion: "live-demo-2026-07.1";
   readonly verifiedAt: string;
 }
 

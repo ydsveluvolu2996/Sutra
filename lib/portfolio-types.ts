@@ -1,4 +1,5 @@
 import type { ConnectionStatus } from "./pilot-types";
+import type { AwsRegionSelection } from "./aws-region-selection.ts";
 
 export interface PortfolioConnectionSummary {
   readonly id: string;
@@ -10,7 +11,7 @@ export interface PortfolioConnectionSummary {
   readonly partition: "aws" | "aws-us-gov" | "aws-cn";
   readonly status: ConnectionStatus;
   readonly roleArn: string | null;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly permissionPackVersion: string;
   readonly lastSuccessfulSyncAt: string | null;
   readonly latestSnapshotAt: string | null;

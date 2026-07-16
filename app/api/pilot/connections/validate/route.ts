@@ -7,6 +7,7 @@ import {
 } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, decryptExternalId, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import {
+  activateCollectorConnection,
   errorResponse,
   getCollectorHealth,
   getPilotSecrets,
@@ -75,6 +76,11 @@ export async function POST(request: Request): Promise<Response> {
       partition: stored.partition,
     });
     await markConnectionValidated(connectionId, actor.id);
+    await activateCollectorConnection({
+      tenantId: LOCAL_ORG_ID,
+      connectionId,
+      roleArn: stored.roleArn,
+    });
     return jsonResponse({ verification, connectionId });
   } catch (error) {
     if (validationClaimed && connectionId !== null && actorId !== null) {

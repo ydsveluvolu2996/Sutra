@@ -17,6 +17,20 @@ import type {
   PilotState,
   PilotSyncRun,
 } from "../lib/pilot-types.ts";
+import {
+  LIVE_AWS_BROKER_TIMEOUT_MS,
+  LIVE_AWS_COLLECTION_DEADLINE_MS,
+  LIVE_AWS_COMMAND_DEADLINE_MS,
+  LIVE_AWS_RUN_RECLAIM_AFTER_MS,
+} from "../services/aws-collector/src/live-collection-limits.ts";
+
+describe("live AWS bounded-run timing contract", () => {
+  it("keeps command, collection, web, and crash-reclaim windows safely ordered", () => {
+    assert.ok(LIVE_AWS_COMMAND_DEADLINE_MS < LIVE_AWS_COLLECTION_DEADLINE_MS);
+    assert.ok(LIVE_AWS_COLLECTION_DEADLINE_MS < LIVE_AWS_BROKER_TIMEOUT_MS);
+    assert.ok(LIVE_AWS_BROKER_TIMEOUT_MS < LIVE_AWS_RUN_RECLAIM_AFTER_MS);
+  });
+});
 
 async function snapshot(): Promise<PilotSnapshotPayload> {
   const collectedAt = new Date().toISOString();

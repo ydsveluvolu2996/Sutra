@@ -9,10 +9,14 @@ import { test } from "node:test";
 import { executeLocalFixtureCollectionJob } from "../src/local-fixture-catalog.js";
 import { MemoryLocalJobStateStore } from "../src/local-job-state.js";
 import {
+  BoundedLiveInventorySink,
   createLocalCollectorServer,
   isPublicSshIngressCandidate,
+  LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES,
   normalizeCollectorCoverage,
+  normalizeLiveSnapshot,
 } from "../src/local-server.js";
+import type { NormalizedAwsEvidence, NormalizedAwsResource } from "../src/types.js";
 
 const NOW = new Date("2026-07-15T10:00:00.000Z");
 const TENANT_ID = "org_local_sutra";
@@ -28,6 +32,68 @@ const ENABLE_MUTATION_ID = `schedop_${"b".repeat(48)}`;
 const DISABLE_MUTATION_ID = `schedop_${"c".repeat(48)}`;
 const REENABLE_MUTATION_ID = `schedop_${"d".repeat(48)}`;
 const STALE_MUTATION_ID = `schedop_${"e".repeat(48)}`;
+
+function liveEvidence(
+  sequence: number,
+  evidenceType: "AWS_NATIVE_FINDING" | "CLOUDTRAIL_LOGGING_STATUS",
+): NormalizedAwsEvidence {
+  return {
+    schemaVersion: 1,
+    provider: "aws",
+    evidenceKey: `aws:123456789012:us-east-1:test:${evidenceType}:${sequence}`,
+    accountId: "123456789012",
+    region: "us-east-1",
+    service: evidenceType === "AWS_NATIVE_FINDING" ? "guardduty" : "cloudtrail",
+    evidenceType,
+    subjectId: `subject-${sequence}`,
+    status: "OBSERVED",
+    observedAt: NOW.toISOString(),
+    data:
+      evidenceType === "AWS_NATIVE_FINDING"
+        ? {
+            nativeService: "GuardDuty",
+            normalizedSeverity: "medium",
+            normalizedStatus: "open",
+            title: `Finding ${sequence}`,
+          }
+        : { coverageBasis: "test" },
+  };
+}
+
+function liveResource(sequence: number, padding = ""): NormalizedAwsResource {
+  const resourceId = `node-${sequence.toString().padStart(5, "0")}`;
+  return {
+    schemaVersion: 1,
+    provider: "aws",
+    resourceKey: `aws:123456789012:us-east-1:ec2:aws.ec2.instance:${resourceId}`,
+    accountId: "123456789012",
+    region: "us-east-1",
+    service: "ec2",
+    resourceType: "aws.ec2.instance",
+    resourceId,
+    arn: `arn:aws:ec2:us-east-1:123456789012:instance/${resourceId}`,
+    observedAt: NOW.toISOString(),
+    tags: {},
+    configuration: {
+      state: "running",
+      ...(sequence === 0 ? { vpcId: "node-00001" } : {}),
+      ...(padding.length === 0 ? {} : { padding }),
+    },
+  };
+}
+
+const LIVE_CONNECTION = {
+  tenantId: TENANT_ID,
+  connectionId: CONNECTION_ID,
+  expectedAccountId: "123456789012",
+  partition: "aws" as const,
+  roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+  externalId: "sutra_external_id_1234567890abcd",
+  status: "ACTIVE" as const,
+  enabledRegions: ["us-east-1"],
+  createdAt: NOW.toISOString(),
+  updatedAt: NOW.toISOString(),
+};
 
 test("public SSH candidates are protocol-aware and include IPv6 and all-protocol rules", () => {
   assert.equal(isPublicSshIngressCandidate([
@@ -85,6 +151,269 @@ test("live collector coverage is normalized without collapsing adapter failures"
   );
 });
 
+test("bounded live evidence capture keeps the exact limit and fails safe on overflow", async () => {
+  const sink = new BoundedLiveInventorySink(3);
+  await sink.writeBatch({
+    resources: [],
+    evidence: [
+      liveEvidence(1, "AWS_NATIVE_FINDING"),
+      liveEvidence(2, "AWS_NATIVE_FINDING"),
+      liveEvidence(3, "AWS_NATIVE_FINDING"),
+    ],
+  });
+
+  assert.equal(sink.evidence.length, 3);
+  assert.equal(sink.evidenceTruncation, null);
+
+  await assert.doesNotReject(() =>
+    sink.writeBatch({
+      resources: [],
+      evidence: [liveEvidence(4, "CLOUDTRAIL_LOGGING_STATUS")],
+    }),
+  );
+  await assert.doesNotReject(() =>
+    sink.writeBatch({
+      resources: [],
+      evidence: [liveEvidence(5, "AWS_NATIVE_FINDING")],
+    }),
+  );
+
+  assert.equal(sink.evidence.length, 2);
+  assert.equal(
+    sink.evidence.filter((item) => item.evidenceType === "AWS_NATIVE_FINDING").length,
+    1,
+  );
+  assert.ok(
+    sink.evidence.some((item) => item.evidenceType === "CLOUDTRAIL_LOGGING_STATUS"),
+  );
+  assert.deepEqual(sink.evidenceTruncation, {
+    evidenceLimit: 3,
+    retainedEvidence: 2,
+    droppedEvidence: 3,
+    nativeFindingsDropped: 3,
+    otherEvidenceDropped: 0,
+  });
+  assert.throws(() => new BoundedLiveInventorySink(0), /positive safe integer/u);
+});
+
+test("default live evidence budget turns the 5,001st observation into bounded truncation", async () => {
+  const sink = new BoundedLiveInventorySink();
+  await sink.writeBatch({
+    resources: [],
+    evidence: Array.from(
+      { length: 5_000 },
+      (_, index) => liveEvidence(index, "AWS_NATIVE_FINDING"),
+    ),
+  });
+
+  assert.equal(sink.evidence.length, 5_000);
+  assert.equal(sink.evidenceTruncation, null);
+
+  await assert.doesNotReject(() =>
+    sink.writeBatch({
+      resources: [],
+      evidence: [liveEvidence(5_001, "CLOUDTRAIL_LOGGING_STATUS")],
+    }),
+  );
+  assert.equal(sink.evidence.length, 4_999);
+  assert.ok(
+    sink.evidence.some((item) => item.evidenceType === "CLOUDTRAIL_LOGGING_STATUS"),
+  );
+  assert.deepEqual(sink.evidenceTruncation, {
+    evidenceLimit: 5_000,
+    retainedEvidence: 4_999,
+    droppedEvidence: 2,
+    nativeFindingsDropped: 2,
+    otherEvidenceDropped: 0,
+  });
+});
+
+test("live snapshot exposes bounded evidence overflow as partial coverage and a finding", async () => {
+  const sink = new BoundedLiveInventorySink(2);
+  await sink.writeBatch({
+    resources: [],
+    evidence: [
+      liveEvidence(1, "AWS_NATIVE_FINDING"),
+      liveEvidence(2, "AWS_NATIVE_FINDING"),
+      liveEvidence(3, "CLOUDTRAIL_LOGGING_STATUS"),
+    ],
+  });
+
+  const snapshot = normalizeLiveSnapshot(
+    {
+      tenantId: TENANT_ID,
+      connectionId: CONNECTION_ID,
+      expectedAccountId: "123456789012",
+      partition: "aws",
+      roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+      externalId: "sutra_external_id_1234567890abcd",
+      status: "ACTIVE",
+      enabledRegions: ["us-east-1"],
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    },
+    "job_evidence_budget_aaaaaaaaaaaaaaaaaaaa",
+    "sutra-job-evidence-budget",
+    [],
+    sink.evidence,
+    "COMPLETE",
+    [],
+    NOW,
+    sink.evidenceTruncation,
+  );
+
+  assert.equal(snapshot.coverageState, "partial");
+  assert.deepEqual(snapshot.coverage, [
+    {
+      collectorKey: "sutra.evidence-budget",
+      region: "global",
+      status: "partial",
+      itemsObserved: 1,
+      pagesObserved: 0,
+      errorCode: "EVIDENCE_BUDGET_EXCEEDED",
+      message: "The bounded local collector omitted evidence and returned a partial snapshot.",
+    },
+  ]);
+  const truncationFinding = snapshot.findings.find(
+    (finding) => finding.controlKey === "SUTRA.COLLECTOR.EVIDENCE_BUDGET",
+  );
+  assert.ok(truncationFinding);
+  assert.equal(truncationFinding.resourceKey, null);
+  assert.deepEqual(truncationFinding.evidence, {
+    evidenceLimit: 2,
+    retainedEvidence: 1,
+    droppedEvidence: 2,
+    nativeFindingsDropped: 2,
+    otherEvidenceDropped: 0,
+  });
+});
+
+test("resource overflow retains a deterministic subset and is published as partial", async () => {
+  const sink = new BoundedLiveInventorySink(10, 2);
+  await assert.doesNotReject(() => sink.writeBatch({
+    resources: [liveResource(3), liveResource(1), liveResource(2)],
+    evidence: [],
+  }));
+
+  assert.deepEqual(
+    sink.resources.map((resource) => resource.resourceId),
+    ["node-00001", "node-00002"],
+  );
+  assert.deepEqual(sink.resourceTruncation, {
+    resourceLimit: 2,
+    retainedResources: 2,
+    droppedResources: 1,
+  });
+
+  const snapshot = normalizeLiveSnapshot(
+    LIVE_CONNECTION,
+    "job_resource_budget_aaaaaaaaaaaaaaaaaaaa",
+    "sutra-job-resource-budget",
+    sink.resources,
+    sink.evidence,
+    "COMPLETE",
+    [],
+    NOW,
+    sink.evidenceTruncation,
+    sink.resourceTruncation,
+  );
+  assert.equal(snapshot.coverageState, "partial");
+  assert.equal(
+    snapshot.coverage.find((entry) => entry.collectorKey === "sutra.resource-budget")
+      ?.errorCode,
+    "RESOURCE_BUDGET_EXCEEDED",
+  );
+  assert.deepEqual(
+    snapshot.findings.find(
+      (finding) => finding.controlKey === "SUTRA.COLLECTOR.RESOURCE_BUDGET",
+    )?.evidence,
+    {
+      resourceLimit: 2,
+      retainedResources: 2,
+      droppedResources: 1,
+    },
+  );
+  assert.throws(
+    () => new BoundedLiveInventorySink(10, 0),
+    /resource limit must be a positive safe integer/u,
+  );
+});
+
+test("over-12MiB normalized inputs become a deterministic relationship-safe partial snapshot", async () => {
+  const padding = "x".repeat(4_000);
+  const completedAt = new Date();
+  const normalized = Array.from({ length: 4_000 }, (_, index) =>
+    ({ ...liveResource(index, padding), observedAt: completedAt.toISOString() }));
+  assert.ok(Buffer.byteLength(JSON.stringify(normalized), "utf8") > 12 * 1024 * 1024);
+
+  const snapshot = normalizeLiveSnapshot(
+    LIVE_CONNECTION,
+    "job_snapshot_budget_aaaaaaaaaaaaaaaaaaaa",
+    "sutra-job-snapshot-budget",
+    normalized,
+    [],
+    "COMPLETE",
+    [],
+    completedAt,
+  );
+  const reversed = normalizeLiveSnapshot(
+    LIVE_CONNECTION,
+    "job_snapshot_budget_aaaaaaaaaaaaaaaaaaaa",
+    "sutra-job-snapshot-budget",
+    [...normalized].reverse(),
+    [],
+    "COMPLETE",
+    [],
+    completedAt,
+  );
+  const serializedBytes = Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+
+  assert.equal(snapshot.coverageState, "partial");
+  assert.ok(snapshot.resources.length > 0);
+  assert.ok(snapshot.resources.length < normalized.length);
+  assert.ok(serializedBytes <= LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES);
+  assert.ok(serializedBytes < 12 * 1024 * 1024);
+  assert.deepEqual(reversed.resources, snapshot.resources);
+  assert.deepEqual(reversed.relationships, snapshot.relationships);
+  assert.deepEqual(reversed.findings, snapshot.findings);
+  assert.equal(reversed.snapshotSha256, snapshot.snapshotSha256);
+  const resourceKeys = new Set(snapshot.resources.map((resource) => resource.resourceKey));
+  assert.ok(snapshot.relationships.length > 0);
+  assert.ok(snapshot.relationships.every((relationship) =>
+    resourceKeys.has(relationship.fromResourceKey) &&
+    resourceKeys.has(relationship.toResourceKey)));
+  assert.equal(
+    snapshot.coverage.find((entry) => entry.collectorKey === "sutra.snapshot-budget")
+      ?.errorCode,
+    "SNAPSHOT_BUDGET_EXCEEDED",
+  );
+  const budgetFinding = snapshot.findings.find(
+    (finding) => finding.controlKey === "SUTRA.COLLECTOR.SNAPSHOT_BUDGET",
+  );
+  assert.ok(budgetFinding);
+  assert.ok((budgetFinding.evidence.resourcesDropped as number) > 0);
+
+  const boundaryModule = await import(
+    new URL("../../../../lib/pilot-boundary.ts", import.meta.url).href
+  ) as {
+    readonly parsePilotSnapshot: (
+      value: unknown,
+      expected: {
+        readonly jobId: string;
+        readonly connectionId: string;
+        readonly accountId: string;
+        readonly partition: "aws";
+      },
+    ) => Promise<unknown>;
+  };
+  await boundaryModule.parsePilotSnapshot(snapshot, {
+    jobId: "job_snapshot_budget_aaaaaaaaaaaaaaaaaaaa",
+    connectionId: CONNECTION_ID,
+    accountId: "123456789012",
+    partition: "aws",
+  });
+});
+
 test("live AWS mode is denied unless a sandbox is explicitly authorized", () => {
   assert.throws(
     () =>
@@ -129,6 +458,45 @@ test("signed loopback fixture API completes register, trust verification, and sy
       message: "Fixture collector ready; no AWS API calls will be made.",
     });
 
+    const compensatedConnectionId = "conn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const compensatedRegistration = {
+      tenantId: TENANT_ID,
+      connectionId: compensatedConnectionId,
+      accountId: "123456789012",
+      partition: "aws",
+      roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+      externalId: "sutra_external_id_1234567890abcd",
+      enabledRegions: ["us-east-1", "ap-south-1"],
+    };
+    assert.equal((await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/connections/${compensatedConnectionId}`,
+      compensatedRegistration,
+    )).status, 200);
+    const discarded = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${compensatedConnectionId}/discard`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: compensatedConnectionId,
+        roleArn: compensatedRegistration.roleArn,
+      },
+    );
+    assert.equal(discarded.status, 200);
+    assert.deepEqual(discarded.value, { discarded: true });
+    // Compensation does not write an offboarding tombstone, so retry works.
+    assert.equal((await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "PUT",
+      `/v1/connections/${compensatedConnectionId}`,
+      compensatedRegistration,
+    )).status, 200);
+
     const registration = await signedRequest(
       baseUrl,
       sharedSecret,
@@ -164,6 +532,33 @@ test("signed loopback fixture API completes register, trust verification, and sy
     assert.equal(verificationValue.accountId, "123456789012");
     assert.equal(verificationValue.missingExternalIdDenied, true);
     assert.equal(verificationValue.wrongExternalIdDenied, true);
+
+    const stagedSync = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${CONNECTION_ID}/sync`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: CONNECTION_ID,
+        jobId: "sync_staged_aaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    );
+    assert.equal(stagedSync.status, 409);
+
+    const activated = await signedRequest(
+      baseUrl,
+      sharedSecret,
+      "POST",
+      `/v1/connections/${CONNECTION_ID}/activate`,
+      {
+        tenantId: TENANT_ID,
+        connectionId: CONNECTION_ID,
+        roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+      },
+    );
+    assert.equal(activated.status, 200);
+    assert.deepEqual(activated.value, { activated: true });
 
     const sync = await signedRequest(
       baseUrl,

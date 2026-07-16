@@ -21,22 +21,26 @@ import type {
   ScopedConnectionRegistry,
   StoredAwsConnection,
 } from "./types.js";
+import {
+  isValidAwsRegionSelection,
+  type AwsRegionSelection,
+  type LocalAwsPartition,
+} from "./aws-region-selection.js";
 
 const REGISTRY_AAD = Buffer.from("sutra-local-registry:v1", "utf8");
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
-const REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d$/;
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
 const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
 const MAX_CONNECTIONS = 10_000;
 
-export type LocalAwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+export type { LocalAwsPartition } from "./aws-region-selection.js";
 
 export interface RegisteredAwsConnection extends StoredAwsConnection {
   readonly partition: LocalAwsPartition;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -48,7 +52,7 @@ export interface RegisterAwsConnectionInput {
   readonly partition: LocalAwsPartition;
   readonly roleArn: string;
   readonly externalId: string;
-  readonly enabledRegions: readonly string[];
+  readonly enabledRegions: AwsRegionSelection;
   readonly sessionNamePrefix?: string;
 }
 
@@ -252,6 +256,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       }
       if (
         connection.status !== "PENDING" &&
+        connection.status !== "VERIFIED" &&
         connection.status !== "DEGRADED" &&
         connection.status !== "ACTIVE"
       ) {
@@ -267,10 +272,52 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         verification.trustPolicyAttested !== true ||
         verification.permissionPolicyAttested !== true ||
         verification.sessionPolicyApplied !== true ||
-        verification.permissionPackVersion !== "live-demo-2026-07"
+        verification.permissionPackVersion !== "live-demo-2026-07.1"
       ) {
         throw new RegistryIntegrityError();
       }
+      return {
+        version: 2,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            // An already-active, unchanged role can remain runnable. Every new
+            // or changed candidate remains fail-closed until the control plane
+            // commits and calls activateOnboarding with the exact role ARN.
+            status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /**
+   * Make an attested candidate runnable only after the durable control plane
+   * has committed the same exact role ARN. The role comparison is an optimistic
+   * concurrency guard against delayed activation of a replaced candidate.
+   */
+  public async activateOnboarding(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined) throw new RegistryConnectionNotFoundError();
+      if (
+        connection.tenantId !== scope.tenantId ||
+        connection.connectionId !== connectionId ||
+        connection.roleArn !== expectedRoleArn
+      ) {
+        throw new RegistryStateError();
+      }
+      if (connection.status === "ACTIVE") return document;
+      if (connection.status !== "VERIFIED") throw new RegistryStateError();
       return {
         version: 2,
         connections: {
@@ -283,6 +330,36 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         },
         tombstones: document.tombstones,
       };
+    });
+  }
+
+  /**
+   * Remove an uncommitted candidate without writing an offboarding tombstone.
+   * Only fail-closed staging states can be discarded; an ACTIVE connection can
+   * never be removed through this compensating path.
+   */
+  public async discardStagedOnboarding(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      if (document.tombstones[key] !== undefined) throw new RegistryStateError();
+      const connection = document.connections[key];
+      if (connection === undefined) return document;
+      if (
+        connection.tenantId !== scope.tenantId ||
+        connection.connectionId !== connectionId ||
+        connection.roleArn !== expectedRoleArn ||
+        (connection.status !== "PENDING" && connection.status !== "VERIFIED")
+      ) {
+        throw new RegistryStateError();
+      }
+      const connections = { ...document.connections };
+      delete connections[key];
+      return { version: 2, connections, tombstones: document.tombstones };
     });
   }
 
@@ -432,12 +509,7 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
     throw new RegistryIntegrityError();
   }
   if (!EXTERNAL_ID.test(input.externalId)) throw new RegistryIntegrityError();
-  if (
-    input.enabledRegions.length === 0 ||
-    input.enabledRegions.length > 32 ||
-    new Set(input.enabledRegions).size !== input.enabledRegions.length ||
-    input.enabledRegions.some((region) => !REGION.test(region))
-  ) {
+  if (!isValidAwsRegionSelection(input.enabledRegions, input.partition)) {
     throw new RegistryIntegrityError();
   }
   const prefix = input.sessionNamePrefix ?? "sutra-";
@@ -571,6 +643,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   });
   if (
     record.status !== "PENDING" &&
+    record.status !== "VERIFIED" &&
     record.status !== "ACTIVE" &&
     record.status !== "DEGRADED" &&
     record.status !== "DISABLED"

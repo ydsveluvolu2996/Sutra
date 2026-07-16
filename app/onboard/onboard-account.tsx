@@ -12,6 +12,15 @@ import {
   AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   AWS_CUSTOMER_ROLE_TEMPLATE_VERSION,
 } from "../../lib/aws-template-contract";
+import {
+  buildOneTimeCloudFormationQuickCreateUrl,
+  selectCommercialQuickCreateRegion,
+} from "../../lib/aws-cloudformation-quick-launch";
+import {
+  ALL_ENABLED_AWS_REGIONS,
+  isAllEnabledAwsRegionSelection,
+  type AwsRegionSelectionMode,
+} from "../../lib/aws-region-selection.ts";
 import type { CollectorHealth, PilotConnection, PilotState } from "../../lib/pilot-types";
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 
@@ -25,6 +34,7 @@ interface CreateConnectionResponse {
     readonly customerTenantId: string;
     readonly roleName: string;
   };
+  readonly deployment: { readonly publicTemplateUrl: string | null };
   readonly collector: CollectorHealth;
 }
 
@@ -105,6 +115,8 @@ export function OnboardAccount() {
   const [customerName, setCustomerName] = useState("Pilot Customer");
   const [accountId, setAccountId] = useState("123456789012");
   const [partition, setPartition] = useState("aws");
+  const [regionSelectionMode, setRegionSelectionMode] =
+    useState<AwsRegionSelectionMode>(ALL_ENABLED_AWS_REGIONS);
   const [regions, setRegions] = useState("us-east-1, ap-south-1");
   const [roleArn, setRoleArn] = useState("");
   const [roleStepUpCode, setRoleStepUpCode] = useState("");
@@ -135,6 +147,8 @@ export function OnboardAccount() {
   const collectionHealth = state && connection ? describeLatestCollection(state) : null;
   const connectionOffboarded = connection?.status === "disabled" && connection.roleArn === null;
   const connectionDisabled = connection?.status === "disabled" && connection.roleArn !== null;
+  const collectorMode = created?.collector.mode ?? health?.mode;
+  const principalArn = created?.trust.vendorCollectorRoleArn ?? health?.principalArn;
   const recoverableDraft = useMemo(() => {
     if (!connection || connection.roleArn || connection.status !== "pending") return null;
     return [...handoffDrafts].reverse().find((draft) =>
@@ -146,6 +160,33 @@ export function OnboardAccount() {
   const canDisplayInitialExternalId = Boolean(
     oneTimeExternalId && connection?.status === "pending" && !connection.roleArn,
   );
+  const quickLaunchUrl = useMemo(() => {
+    if (
+      !canDisplayInitialExternalId ||
+      !connection ||
+      !created ||
+      !oneTimeExternalId ||
+      !principalArn
+    ) return null;
+    try {
+      return buildOneTimeCloudFormationQuickCreateUrl({
+        handoffVisible: true,
+        partition: connection.partition,
+        templateUrl: created.deployment.publicTemplateUrl,
+        region: selectCommercialQuickCreateRegion(connection.enabledRegions),
+        stackName: `sutra-customer-role-${connection.awsAccountId}`,
+        externalId: oneTimeExternalId,
+        vendorCollectorRoleArn: principalArn,
+        sessionNamePrefix: created.trust.sessionNamePrefix,
+        customerTenantId: created.trust.customerTenantId,
+        roleName: created.trust.roleName,
+      });
+    } catch {
+      // The server validates the public template URL before creating a handoff.
+      // Any unexpected contract mismatch fails closed to the manual download.
+      return null;
+    }
+  }, [canDisplayInitialExternalId, connection, created, oneTimeExternalId, principalArn]);
 
   async function createConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -153,9 +194,11 @@ export function OnboardAccount() {
     setError(null);
     setNotice(null);
     const normalizedName = customerName.trim().replace(/\s+/gu, " ");
-    const enabledRegions = [...new Set(
-      regions.split(",").map((region) => region.trim()).filter(Boolean),
-    )].sort();
+    const enabledRegions = regionSelectionMode === ALL_ENABLED_AWS_REGIONS
+      ? [ALL_ENABLED_AWS_REGIONS]
+      : [...new Set(
+          regions.split(",").map((region) => region.trim()).filter(Boolean),
+        )].sort();
     const existingDraft = readHandoffDrafts().find((draft) =>
       draft.customerName === normalizedName && draft.awsAccountId === accountId &&
       draft.partition === partition &&
@@ -211,7 +254,7 @@ export function OnboardAccount() {
       setNotice({
         tone: "success",
         title: "Trust handoff recovered",
-        message: "Sutra returned the same actor-bound pending ExternalId. It will close permanently when the role is registered.",
+        message: "Sutra returned the same actor-bound pending ExternalId. It closes only after AWS proves the role contract and registration commits.",
       });
       await refresh();
     } catch (caught) {
@@ -231,8 +274,9 @@ export function OnboardAccount() {
     try {
       await postPilot("/api/auth/mfa/step-up", { code: roleStepUpCode });
       setRoleStepUpCode("");
-      // Role registration closes the one-time server handoff before collector
-      // reconciliation. Hide the value before that request can commit.
+      // Hide the value during proof so it cannot linger on screen. The server
+      // keeps the same actor-bound handoff recoverable if AWS proof or the
+      // atomic database commit fails.
       setOneTimeExternalId(null);
       const response = await postPilot<{ connection: PilotConnection }>("/api/pilot/connections/role", {
         connectionId: connection.id,
@@ -245,8 +289,8 @@ export function OnboardAccount() {
       }
       setNotice({
         tone: "success",
-        title: "Customer role registered",
-        message: "Sutra is ready to prove the expected identity and ExternalId trust-policy behavior.",
+        title: "Trust verified and customer role registered",
+        message: "AWS returned the expected caller identity, missing and incorrect ExternalIds were denied, and Sutra atomically activated the verified role.",
       });
       await refresh();
     } catch (caught) {
@@ -410,9 +454,6 @@ export function OnboardAccount() {
     }
   }
 
-  const collectorMode = created?.collector.mode ?? health?.mode;
-  const principalArn = created?.trust.vendorCollectorRoleArn ?? health?.principalArn;
-
   return (
     <>
       <section className="page-heading onboard-heading">
@@ -444,8 +485,9 @@ export function OnboardAccount() {
                   <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                   <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
                 </div>
-                <label><span>Enabled regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS regions. Global IAM is collected once; S3 buckets are retained only when their server-reported Region is enabled.</small></label>
-                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
+                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
+                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
+                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>
             </>
           ) : null}
@@ -455,7 +497,7 @@ export function OnboardAccount() {
               <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below as CloudFormation parameters. Sutra never creates or stores long-lived customer access keys.</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{connection.customerName}</strong><span>{connection.awsAccountId} · {connection.partition}</span></div>
-                <div><small>Regions</small><strong>{connection.enabledRegions.length}</strong><span>{connection.enabledRegions.join(", ")}</span></div>
+                <div><small>Region scope</small><strong>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All" : connection.enabledRegions.length}</strong><span>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All account-enabled Regions; discovered at collection time" : connection.enabledRegions.join(", ")}</span></div>
                 <div><small>Trust health</small><strong className={`connection-status connection-${connection.status}`} title={trustHealth?.detail}>{trustHealth?.label}</strong><span>Validated {formatTimestamp(connection.lastValidatedAt)}</span></div>
               </div>
 
@@ -475,6 +517,24 @@ export function OnboardAccount() {
 
               <label className="contract-field"><span>Exact collector principal</span><div className="copy-field"><code>{principalArn ?? "Collector principal unavailable"}</code><button type="button" disabled={!principalArn} onClick={() => principalArn && void navigator.clipboard?.writeText(principalArn)}>Copy</button></div></label>
 
+              {canDisplayInitialExternalId && quickLaunchUrl ? (
+                <section className="quick-launch-panel" aria-labelledby="quick-launch-title">
+                  <div className="quick-launch-heading">
+                    <div><p className="eyebrow">Customer-owned deployment</p><h3 id="quick-launch-title">Create the reviewed role in AWS</h3><p>Sutra pre-fills the exact trust parameters in AWS CloudFormation. The customer reviews and creates the stack in their own account.</p></div>
+                    <a className="button button-primary" href={quickLaunchUrl} target="_blank" rel="noreferrer">Open AWS CloudFormation ↗</a>
+                  </div>
+                  <ol className="deployment-checklist">
+                    <li><b>1</b><span><strong>Confirm the AWS account.</strong> Sign in to account <code>{connection.awsAccountId}</code> and check the account banner before continuing.</span></li>
+                    <li><b>2</b><span><strong>Review the prefilled contract.</strong> Keep the template URL, collector principal, ExternalId, tenant ID, session prefix, and fixed role name unchanged.</span></li>
+                    <li><b>3</b><span><strong>Create and wait.</strong> Acknowledge <code>CAPABILITY_NAMED_IAM</code>, create the stack, and wait for <code>CREATE_COMPLETE</code>.</span></li>
+                    <li><b>4</b><span><strong>Return the output.</strong> Copy <code>CustomerReadRoleArn</code> from the Outputs tab, paste it below, then verify and register the role.</span></li>
+                  </ol>
+                  <div className="quick-launch-history-warning"><strong>One-time browser handoff</strong><span>The ExternalId is placed only in the AWS Console URL fragment and this button disappears when the handoff closes. A visited URL can remain in browser history, so use a private customer-demo window and close it after role registration. Never paste the URL into chat, tickets, or logs.</span></div>
+                </section>
+              ) : canDisplayInitialExternalId ? (
+                <div className="inline-warning"><strong>Use the manual CloudFormation path.</strong><span>{connection.partition !== "aws" ? "Quick launch currently supports only commercial AWS accounts." : !created?.deployment.publicTemplateUrl ? "The server does not have a reviewed public regional-S3 template URL configured." : "Sutra could not safely construct the quick-launch URL."} Download the template, upload it in the customer&apos;s CloudFormation console, and copy the displayed trust values into the matching parameters.</span></div>
+              ) : null}
+
               <div className="template-actions"><a className="button button-secondary" href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>Download least-privilege CloudFormation</a><span>Version <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> · SHA-256 <code>{AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}</code>. Deploy with <code>CAPABILITY_NAMED_IAM</code>. This version permits only the metadata APIs implemented by the live demo collector and never enables AWS security services.</span></div>
 
               {!connectionOffboarded ? <form className="onboard-form role-registration" onSubmit={registerRole}>
@@ -484,7 +544,7 @@ export function OnboardAccount() {
               </form> : null}
 
               <div className="onboard-validation-action">
-                <div><p className="eyebrow">Step 3 of 4</p><h2>Prove the trust boundary</h2><p>Sutra checks the expected caller identity and confirms missing or incorrect ExternalIds cannot assume the role.</p></div>
+                <div><p className="eyebrow">Step 3 of 4</p><h2>{connection.status === "active" ? "Trust boundary proven" : "Prove the trust boundary"}</h2><p>{connection.status === "active" ? "The expected caller identity, exact trust and permission policies, restrictive session policy, and both negative ExternalId probes passed." : "Sutra checks the expected caller identity and confirms missing or incorrect ExternalIds cannot assume the role before registration commits."}</p></div>
                 {connection.status === "active" ? <div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void revalidateTrust()}>{busy === "validate" ? "Revalidating trust…" : "Revalidate trust"}</button><button className="button button-primary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : collectorMode === "live" ? "Run inventory sync" : "Live collector required"}</button></div> : connection.status === "disabled" ? <span className="status-pill status-medium">{connectionOffboarded ? "Trust offboarded" : "Connection disabled"}</span> : <button className="button button-primary" type="button" disabled={!connection.roleArn || busy !== null || collectorMode !== "live"} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating trust…" : busy === "sync" ? "Publishing first snapshot…" : collectorMode === "live" ? "Validate trust & run first sync" : "Live collector required"}</button>}
               </div>
 
