@@ -385,6 +385,63 @@ export class KubernetesRepository {
     return stored;
   }
 
+  public async listPostureTrend(
+    scope: KubernetesTenantScope,
+    clusterId: string,
+    limit = 30,
+  ): Promise<readonly {
+    readonly scanId: string;
+    readonly collectedAt: string;
+    readonly status: "complete" | "partial" | "failed";
+    readonly resourceCount: number;
+    readonly findingCount: number;
+    readonly coverageCount: number;
+    readonly severity: { critical: number; high: number; medium: number; low: number };
+  }[]> {
+    assertScope(scope);
+    if (!validIdentifier(clusterId)) throw new KubernetesRepositoryError("INVALID_INPUT");
+    const bounded = Math.max(1, Math.min(120, Math.trunc(limit)));
+    const db = await this.ready();
+    const runs = await db.prepare(
+      `SELECT id, status, collected_at, resource_count, finding_count, coverage_count
+         FROM kubernetes_scan_runs
+        WHERE org_id = ? AND customer_id = ? AND cluster_id = ?
+        ORDER BY collected_at DESC
+        LIMIT ?`,
+    ).bind(scope.orgId, scope.customerId, clusterId, bounded).all<{
+      id: string; status: string; collected_at: number;
+      resource_count: number; finding_count: number; coverage_count: number;
+    }>();
+    const runRows = runs.results ?? [];
+    if (runRows.length === 0) return [];
+    const severityRows = await db.prepare(
+      `SELECT scan_run_id, severity, COUNT(*) AS count
+         FROM kubernetes_scan_findings
+        WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND state = 'FAIL'
+        GROUP BY scan_run_id, severity`,
+    ).bind(scope.orgId, scope.customerId, clusterId).all<{
+      scan_run_id: string; severity: string; count: number;
+    }>();
+    const severityByRun = new Map<string, { critical: number; high: number; medium: number; low: number }>();
+    for (const row of severityRows.results ?? []) {
+      const bucket = severityByRun.get(row.scan_run_id) ?? { critical: 0, high: 0, medium: 0, low: 0 };
+      const key = row.severity.toLowerCase();
+      if (key === "critical" || key === "high" || key === "medium" || key === "low") {
+        bucket[key] = Number(row.count);
+      }
+      severityByRun.set(row.scan_run_id, bucket);
+    }
+    return runRows.map((row) => ({
+      scanId: row.id,
+      collectedAt: new Date(Number(row.collected_at)).toISOString(),
+      status: (row.status === "complete" || row.status === "partial" ? row.status : "failed") as "complete" | "partial" | "failed",
+      resourceCount: Number(row.resource_count),
+      findingCount: Number(row.finding_count),
+      coverageCount: Number(row.coverage_count),
+      severity: severityByRun.get(row.id) ?? { critical: 0, high: 0, medium: 0, low: 0 },
+    }));
+  }
+
   public async getLatestCompleteScan(
     scope: KubernetesTenantScope,
     clusterId: string,

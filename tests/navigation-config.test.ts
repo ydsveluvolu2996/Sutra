@@ -36,6 +36,7 @@ describe("grouped workspace navigation", () => {
       [
         "Cluster overview",
         "Fleet health",
+        "Posture trends",
         "Onboard cluster",
         "Clusters",
         "Namespaces",
