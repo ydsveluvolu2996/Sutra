@@ -109,6 +109,8 @@ Resources:
                   - dynamodb:ListTables
                   - dynamodb:DescribeTable
                   - ecr:DescribeRepositories
+                  - eks:ListClusters
+                  - eks:DescribeCluster
                   - s3:ListAllMyBuckets
                   - s3:GetBucketPublicAccessBlock
                   - rds:DescribeDBInstances
@@ -149,6 +151,8 @@ Resources:
                   - dynamodb:ListTables
                   - dynamodb:DescribeTable
                   - ecr:DescribeRepositories
+                  - eks:ListClusters
+                  - eks:DescribeCluster
                   - s3:ListAllMyBuckets
                   - s3:GetBucketPublicAccessBlock
                   - rds:DescribeDBInstances
@@ -183,7 +187,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: live-demo-2026-07.2
+          Value: live-demo-2026-07.3
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -197,4 +201,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: live-demo-2026-07.2
+    Value: live-demo-2026-07.3

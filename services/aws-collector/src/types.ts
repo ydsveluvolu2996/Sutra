@@ -6,7 +6,7 @@ import type {
 } from "@aws-sdk/client-sts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
-export const CURRENT_PERMISSION_PACK_VERSION = "live-demo-2026-07.2" as const;
+export const CURRENT_PERMISSION_PACK_VERSION = "live-demo-2026-07.3" as const;
 export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION

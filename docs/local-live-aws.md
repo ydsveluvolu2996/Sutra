@@ -219,7 +219,7 @@ in the generated runtime file:
 ```bash
 AWS_PROFILE=sutra-demo-collector \
 SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::111122223333:role/sutra/SutraLocalCollectorRole' \
-SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/live-demo-2026-07.2/ed73f5738f951782977f31735a79f36148c591b5ab359f6c761369b16276b238.yaml?versionId=publisher-output' \
+SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/live-demo-2026-07.3/3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml?versionId=publisher-output' \
 SUTRA_LIVE_AWS_ACK='I_ACKNOWLEDGE_THIS_WILL_CONTACT_AWS' \
 pnpm live:aws:host
 ```

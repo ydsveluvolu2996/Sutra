@@ -362,7 +362,7 @@ export function parseVerificationResponse(
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.2";
+  readonly permissionPackVersion: "live-demo-2026-07.3";
 } {
   const record = exactRecord(value, [
     "verified", "accountId", "callerIdentityArn", "missingExternalIdDenied", "wrongExternalIdDenied",
@@ -375,7 +375,7 @@ export function parseVerificationResponse(
     record.trustPolicyAttested !== true ||
     record.permissionPolicyAttested !== true ||
     record.sessionPolicyApplied !== true ||
-    record.permissionPackVersion !== "live-demo-2026-07.2"
+    record.permissionPackVersion !== "live-demo-2026-07.3"
   ) invalid();
   const accountId = awsAccountId(record.accountId);
   const arn = string(record.callerIdentityArn, 2_048);
@@ -390,6 +390,6 @@ export function parseVerificationResponse(
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "live-demo-2026-07.2",
+    permissionPackVersion: "live-demo-2026-07.3",
   };
 }

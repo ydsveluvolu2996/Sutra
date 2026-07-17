@@ -69,9 +69,9 @@ export function KubernetesOnboarding() {
   async function publishArtifact(file: File): Promise<void> {
     if (
       registered == null || state?.connection === null || state?.connection === undefined ||
-      file.size < 2 || file.size > 900 * 1024
+      file.size < 2 || file.size > 2_750 * 1024
     ) {
-      setOperationError("Select a registered cluster and a JSON artifact smaller than 900 KiB");
+      setOperationError("Select a registered cluster and a JSON artifact smaller than 2.7 MiB");
       return;
     }
     setWorking(true);
@@ -168,7 +168,7 @@ export function KubernetesOnboarding() {
               </div> : <div className="limitation-note"><strong>No command is executed by Sutra.</strong> Generate the plan, review it with the customer, then run it only from an authenticated customer administrator terminal.</div>}
               {registered ? <div className="kubernetes-command-preview">
                 <div><strong>Credential-free evidence command</strong><span>Runs locally</span></div>
-                <pre>{`pnpm kubernetes:scan -- --context ${selected.resource.nativeId} \\\n  --cluster-id ${registered.clusterUid} \\\n  --cluster-name ${selected.displayName}`}</pre>
+                <pre>{`pnpm kubernetes:scan --context ${selected.resource.nativeId} \\\n  --cluster-id ${registered.clusterUid} \\\n  --cluster-name ${selected.displayName}`}</pre>
               </div> : null}
               <div className="kubernetes-values-preview"><p className="eyebrow">Generated non-secret values</p><pre>{`cluster:\n  id: ${JSON.stringify(selected.resource.nativeId)}\n  name: ${JSON.stringify(selected.displayName)}\n  region: ${JSON.stringify(selected.resource.region)}\nmode: visibility-only\nruntime:\n  enabled: false\nsecrets:\n  collect: false`}</pre></div>
             </> : <div className="empty-state"><strong>No cluster selected</strong><span>Return to cluster selection before generating an installation plan.</span></div>}

@@ -59,7 +59,7 @@ test("registry stages verified trust until the control plane explicitly activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "live-demo-2026-07.2" as const,
+      permissionPackVersion: "live-demo-2026-07.3" as const,
     };
     await registry.markOnboardingVerified(
       { tenantId: "org_local_sutra" },
@@ -78,7 +78,7 @@ test("registry stages verified trust until the control plane explicitly activate
         { tenantId: "org_local_sutra" },
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.permissionPackVersion,
-      "live-demo-2026-07.2",
+      "live-demo-2026-07.3",
     );
     await registry.activateOnboarding(
       { tenantId: "org_local_sutra" },
@@ -232,7 +232,7 @@ test("staged activation is role-bound and cannot remove an active connection", a
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "live-demo-2026-07.2" as const,
+      permissionPackVersion: "live-demo-2026-07.3" as const,
     };
     await registry.markOnboardingVerified(
       { tenantId: candidate.tenantId },

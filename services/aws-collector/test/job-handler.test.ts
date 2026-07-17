@@ -119,7 +119,7 @@ function storedConnection(status: "ACTIVE" | "PENDING" = "ACTIVE"): StoredAwsCon
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status,
-    permissionPackVersion: "live-demo-2026-07.2",
+    permissionPackVersion: "live-demo-2026-07.3",
     sessionNamePrefix: "mspcmdb-",
   };
 }
@@ -270,7 +270,7 @@ function createHandler(
           })),
           tags: [
             { key: "sutra:access-mode", value: "read-only" },
-            { key: "sutra:permission-pack", value: "live-demo-2026-07.2" },
+            { key: "sutra:permission-pack", value: "live-demo-2026-07.3" },
             { key: "sutra:managed-by", value: "cloudformation" },
           ],
         }),
