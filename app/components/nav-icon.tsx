@@ -87,6 +87,57 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   notification_settings: "bell",
 };
 
+// Feature colors, Wiz-style: each destination carries a semantic hue so the
+// sidebar reads as a colorful, scannable map. Security is red, governance is
+// green, discovery is blue, supply chain is violet, cost/ops is amber, and so
+// on. The tone drives the icon chip color in globals.css via a data attribute.
+export type NavTone =
+  | "blue" | "indigo" | "cyan" | "teal" | "green"
+  | "amber" | "orange" | "red" | "violet" | "slate";
+
+const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
+  overview: "cyan",
+  customers: "blue",
+  onboard: "green",
+  connection_health: "teal",
+  cmdb: "indigo",
+  changes: "slate",
+  kubernetes_overview: "blue",
+  kubernetes_fleet: "teal",
+  kubernetes_onboard: "green",
+  kubernetes_clusters: "blue",
+  kubernetes_namespaces: "amber",
+  kubernetes_workloads: "indigo",
+  kubernetes_images: "violet",
+  kubernetes_supply_chain: "violet",
+  kubernetes_exposure: "orange",
+  kubernetes_attack_paths: "red",
+  kubernetes_rbac: "amber",
+  kubernetes_network: "cyan",
+  kubernetes_runtime: "red",
+  kubernetes_compliance: "green",
+  kubernetes_admission: "green",
+  kubernetes_policies: "blue",
+  "kubernetes_scan-history": "slate",
+  kubernetes_coverage: "teal",
+  findings: "orange",
+  vulnerabilities: "red",
+  security_events: "red",
+  cases: "amber",
+  compliance: "green",
+  controls: "blue",
+  reports: "violet",
+  costs: "amber",
+  operations: "cyan",
+  roadmap: "violet",
+  access: "blue",
+  notification_settings: "amber",
+};
+
+export function navTone(navKey: NavKey): NavTone {
+  return KEY_TONE[navKey] ?? "slate";
+}
+
 export function NavIcon({ navKey }: { readonly navKey: NavKey }) {
   const name = KEY_ICON[navKey] ?? "dot";
   return (
