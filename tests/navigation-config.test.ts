@@ -33,7 +33,22 @@ describe("grouped workspace navigation", () => {
     );
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "kubernetes")?.items.map((item) => item.label),
-      ["Cluster overview", "Workload inventory", "Kubernetes security"],
+      [
+        "Cluster overview",
+        "Onboard cluster",
+        "Clusters",
+        "Namespaces",
+        "Workloads",
+        "Images & vulnerabilities",
+        "Exposure",
+        "RBAC",
+        "Network",
+        "Runtime",
+        "Compliance",
+        "Policies",
+        "Scan history",
+        "Coverage",
+      ],
     );
   });
 

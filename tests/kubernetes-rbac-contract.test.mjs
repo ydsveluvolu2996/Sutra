@@ -23,3 +23,20 @@ test("collector service account does not mount a credential into arbitrary pods"
   assert.match(manifest, /pod-security\.kubernetes\.io\/enforce: restricted/u);
   assert.match(manifest, /namespace: sutra-system/u);
 });
+
+test("optional Trivy Operator access is limited to exact non-secret report CRDs", () => {
+  assert.match(manifest, /apiGroups: \[aquasecurity\.github\.io\]/u);
+  for (const resource of [
+    "vulnerabilityreports",
+    "configauditreports",
+    "rbacassessmentreports",
+    "clusterrbacassessmentreports",
+    "sbomreports",
+  ]) assert.match(manifest, new RegExp(`^\\s*-\\s+${resource}$`, "mu"));
+  for (const forbidden of [
+    "exposedsecretreports",
+    "clustercompliancereports",
+    "clustervulnerabilityreports",
+    "clustersbomreports",
+  ]) assert.doesNotMatch(manifest, new RegExp(`^\\s*-\\s+${forbidden}$`, "mu"));
+});

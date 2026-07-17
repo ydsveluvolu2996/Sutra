@@ -1,0 +1,8 @@
+# Group configured on the customer's EKS access entry. The chart never creates
+# cloud IAM identities, credentials, tokens, workloads, webhooks or agents.
+kubernetesGroup: sutra:readers
+
+# Permit Sutra to import reports only when the customer separately installs and
+# operates Trivy Operator. Sutra does not install Trivy or claim scanner coverage.
+trivyReports:
+  enabled: false

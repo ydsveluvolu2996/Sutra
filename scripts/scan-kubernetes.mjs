@@ -141,6 +141,14 @@ async function main() {
     },
   }).collect();
   const posture = evaluateKubernetesPosture(toKubernetesEvidenceSnapshot(snapshot));
+  const vulnerabilityCoverage = snapshot.coverage.find((entry) =>
+    entry.collectorKey === "trivy.vulnerabilityreports");
+  const imageVulnerabilities = snapshot.trivyFindings.some((finding) =>
+    finding.source === "vulnerability_report")
+    ? "TRIVY_REPORTS_IMPORTED"
+    : vulnerabilityCoverage?.status === "succeeded"
+      ? "TRIVY_REPORT_API_OBSERVED_EMPTY"
+      : "NOT_CONFIGURED";
   const artifact = {
     schemaVersion: "sutra.kubernetes.scan-artifact.v1",
     generatedAt: new Date().toISOString(),
@@ -148,7 +156,7 @@ async function main() {
     posture,
     limitations: {
       secretsCollected: false,
-      imageVulnerabilities: "NOT_CONFIGURED",
+      imageVulnerabilities,
       runtimeDetection: "NOT_CONFIGURED",
       admissionControl: "NOT_CONFIGURED",
     },

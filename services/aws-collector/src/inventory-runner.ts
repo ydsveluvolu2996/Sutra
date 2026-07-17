@@ -67,6 +67,15 @@ import {
   type DescribeRepositoriesCommandOutput,
 } from "@aws-sdk/client-ecr";
 import {
+  DescribeClusterCommand,
+  EKSClient,
+  ListClustersCommand,
+  type DescribeClusterCommandInput,
+  type DescribeClusterCommandOutput,
+  type ListClustersCommandInput,
+  type ListClustersCommandOutput,
+} from "@aws-sdk/client-eks";
+import {
   GetFindingsCommand as GetGuardDutyFindingsCommand,
   GetDetectorCommand,
   GuardDutyClient,
@@ -372,6 +381,17 @@ export interface EcrInventoryClient {
   ): Promise<DescribeRepositoriesCommandOutput>;
 }
 
+export interface EksInventoryClient {
+  listClusters(
+    input: ListClustersCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListClustersCommandOutput>;
+  describeCluster(
+    input: DescribeClusterCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeClusterCommandOutput>;
+}
+
 export interface S3InventoryClient {
   listBuckets(
     input: ListBucketsCommandInput,
@@ -452,6 +472,8 @@ export interface AwsInventoryClientFactory {
   kms(region: string, credentials: AwsTemporaryCredentials): KmsInventoryClient;
   dynamodb(region: string, credentials: AwsTemporaryCredentials): DynamoDbInventoryClient;
   ecr(region: string, credentials: AwsTemporaryCredentials): EcrInventoryClient;
+  /** Optional only so existing isolated test factories remain source-compatible. */
+  eks?(region: string, credentials: AwsTemporaryCredentials): EksInventoryClient;
   s3(region: string, credentials: AwsTemporaryCredentials): S3InventoryClient;
   rds(region: string, credentials: AwsTemporaryCredentials): RdsInventoryClient;
   iam(region: string, credentials: AwsTemporaryCredentials): IamInventoryClient;
@@ -580,6 +602,16 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
     };
   }
 
+  public eks(region: string, credentials: AwsTemporaryCredentials): EksInventoryClient {
+    const client = new EKSClient(this.clientConfig(region, credentials));
+    return {
+      listClusters: (input, signal) =>
+        sendSdkCommand(client, new ListClustersCommand(input), signal),
+      describeCluster: (input, signal) =>
+        sendSdkCommand(client, new DescribeClusterCommand(input), signal),
+    };
+  }
+
   public s3(region: string, credentials: AwsTemporaryCredentials): S3InventoryClient {
     const client = new S3Client(this.clientConfig(region, credentials));
     return {
@@ -661,11 +693,29 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
 }
 
 class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
+  public readonly eks?: (
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ) => EksInventoryClient;
+
   public constructor(
     private readonly delegate: AwsInventoryClientFactory,
     private readonly overallSignal: AbortSignal,
     private readonly commandDeadlineMs: number,
-  ) {}
+  ) {
+    if (delegate.eks !== undefined) {
+      this.eks = (region, credentials) => {
+        const client = delegate.eks?.(region, credentials);
+        if (client === undefined) {
+          throw new InventoryConfigurationError("The EKS inventory client is unavailable");
+        }
+        return {
+          listClusters: (input) => this.run((signal) => client.listClusters(input, signal)),
+          describeCluster: (input) => this.run((signal) => client.describeCluster(input, signal)),
+        };
+      };
+    }
+  }
 
   public ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient {
     const client = this.delegate.ec2(region, credentials);
@@ -982,6 +1032,7 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
       const kms = clients.kms(region, credentials);
       const dynamodb = clients.dynamodb(region, credentials);
       const ecr = clients.ecr(region, credentials);
+      const eks = clients.eks?.(region, credentials);
 
       tasks.push(
         task("s3.buckets", "s3", "buckets", region, (state) =>
@@ -1017,6 +1068,11 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         task("ecr.repositories", "ecr", "repositories", region, (state) =>
           collectEcrRepositories(context, region, ecr, observedAt, state),
         ),
+        ...(eks === undefined ? [] : [
+          task("eks.clusters", "eks", "clusters", region, (state) =>
+            collectEksClusters(context, region, eks, observedAt, state),
+          ),
+        ]),
         task("rds.db-instances", "rds", "db-instances", region, (state) =>
           collectRds(context, region, rds, observedAt, state),
         ),
@@ -1572,6 +1628,76 @@ async function collectEcrRepositories(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("ECR DescribeRepositories exceeded pagination limit");
+}
+
+async function collectEksClusters(
+  context: InventoryCollectionContext,
+  region: string,
+  client: EksInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const listed = await client.listClusters(
+      token === undefined ? { maxResults: 100 } : { maxResults: 100, nextToken: token },
+    );
+    const resources: NormalizedAwsResource[] = [];
+    for (const clusterName of listed.clusters ?? []) {
+      if (
+        typeof clusterName !== "string" || clusterName.length === 0 ||
+        clusterName.length > 100 || /[\u0000-\u001f\u007f]/u.test(clusterName)
+      ) continue;
+      const described = await client.describeCluster({ name: clusterName });
+      const cluster = described.cluster;
+      if (cluster?.name === undefined) continue;
+      const enabledLogTypes = (cluster.logging?.clusterLogging ?? [])
+        .filter((entry) => entry.enabled === true)
+        .flatMap((entry) => entry.types ?? []);
+      const encryptionResources = (cluster.encryptionConfig ?? [])
+        .flatMap((entry) => entry.resources ?? []);
+      resources.push(resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "eks",
+        "aws.eks.cluster",
+        cluster.name,
+        cluster.arn,
+        "eks:ListClusters+eks:DescribeCluster",
+        compact({
+          state: cluster.status,
+          clusterName: cluster.name,
+          kubernetesVersion: cluster.version,
+          platformVersion: cluster.platformVersion,
+          createdAt: iso(cluster.createdAt),
+          roleArn: cluster.roleArn,
+          endpointPublicAccess: cluster.resourcesVpcConfig?.endpointPublicAccess,
+          endpointPrivateAccess: cluster.resourcesVpcConfig?.endpointPrivateAccess,
+          publicAccessCidrs: strings(cluster.resourcesVpcConfig?.publicAccessCidrs ?? []),
+          vpcId: cluster.resourcesVpcConfig?.vpcId,
+          subnetIds: strings(cluster.resourcesVpcConfig?.subnetIds ?? []),
+          securityGroupIds: strings(cluster.resourcesVpcConfig?.securityGroupIds ?? []),
+          clusterSecurityGroupId: cluster.resourcesVpcConfig?.clusterSecurityGroupId,
+          enabledLogTypes: strings(enabledLogTypes),
+          encryptionResources: strings(encryptionResources),
+          encryptionProviderKeyArn: cluster.encryptionConfig?.[0]?.provider?.keyArn,
+          authenticationMode: cluster.accessConfig?.authenticationMode,
+          bootstrapClusterCreatorAdminPermissions:
+            cluster.accessConfig?.bootstrapClusterCreatorAdminPermissions,
+          upgradeSupportType: cluster.upgradePolicy?.supportType,
+          deletionProtection: cluster.deletionProtection,
+        }),
+        Object.entries(cluster.tags ?? {}).map(([Key, Value]) => ({ Key, Value })),
+      ));
+    }
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(listed.nextToken, seen, "EKS ListClusters");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EKS ListClusters exceeded pagination limit");
 }
 
 async function collectS3(

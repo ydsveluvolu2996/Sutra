@@ -1,4 +1,5 @@
 import type { Capability } from "../../lib/auth-policy";
+import type { KubernetesSection } from "../kubernetes/kubernetes-sections";
 
 export type NavKey =
   | "overview"
@@ -19,6 +20,8 @@ export type NavKey =
   | "kubernetes_overview"
   | "kubernetes_inventory"
   | "kubernetes_security"
+  | "kubernetes_onboard"
+  | `kubernetes_${KubernetesSection}`
   | "onboard"
   | "connection_health";
 
@@ -69,8 +72,19 @@ export const navGroups: readonly NavGroup[] = [
     label: "Kubernetes",
     items: [
       { key: "kubernetes_overview", label: "Cluster overview", href: "/kubernetes", icon: "KO", capabilities: readConnection },
-      { key: "kubernetes_inventory", label: "Workload inventory", href: "/kubernetes/inventory", icon: "KI", capabilities: readConnection },
-      { key: "kubernetes_security", label: "Kubernetes security", href: "/kubernetes/security", icon: "KS", capabilities: readConnection },
+      { key: "kubernetes_onboard", label: "Onboard cluster", href: "/kubernetes/onboard", icon: "+", capabilities: ["connection:manage"] },
+      { key: "kubernetes_clusters", label: "Clusters", href: "/kubernetes/clusters", icon: "CL", capabilities: readConnection },
+      { key: "kubernetes_namespaces", label: "Namespaces", href: "/kubernetes/namespaces", icon: "NS", capabilities: readConnection },
+      { key: "kubernetes_workloads", label: "Workloads", href: "/kubernetes/workloads", icon: "WL", capabilities: readConnection },
+      { key: "kubernetes_images", label: "Images & vulnerabilities", href: "/kubernetes/images", icon: "IM", capabilities: readConnection },
+      { key: "kubernetes_exposure", label: "Exposure", href: "/kubernetes/exposure", icon: "EX", capabilities: readConnection },
+      { key: "kubernetes_rbac", label: "RBAC", href: "/kubernetes/rbac", icon: "RB", capabilities: readConnection },
+      { key: "kubernetes_network", label: "Network", href: "/kubernetes/network", icon: "NW", capabilities: readConnection },
+      { key: "kubernetes_runtime", label: "Runtime", href: "/kubernetes/runtime", icon: "RT", capabilities: readConnection },
+      { key: "kubernetes_compliance", label: "Compliance", href: "/kubernetes/compliance", icon: "CO", capabilities: readConnection },
+      { key: "kubernetes_policies", label: "Policies", href: "/kubernetes/policies", icon: "PO", capabilities: readConnection },
+      { key: "kubernetes_scan-history", label: "Scan history", href: "/kubernetes/scan-history", icon: "SH", capabilities: readConnection },
+      { key: "kubernetes_coverage", label: "Coverage", href: "/kubernetes/coverage", icon: "CV", capabilities: readConnection },
     ],
   },
   {

@@ -14,6 +14,7 @@ import {
   type DynamoDbInventoryClient,
   type Ec2InventoryClient,
   type EcrInventoryClient,
+  type EksInventoryClient,
   type Elbv2InventoryClient,
   type GuardDutyInventoryClient,
   type IamInventoryClient,
@@ -691,6 +692,51 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
       },
     };
   }
+
+  public eks(region: string): EksInventoryClient {
+    return {
+      listClusters: async (input) => {
+        this.record("eks", input.nextToken);
+        return input.nextToken === undefined
+          ? { $metadata: {}, clusters: ["production"], nextToken: "eks-next" }
+          : { $metadata: {}, clusters: [] };
+      },
+      describeCluster: async (input) => ({
+        $metadata: {},
+        cluster: {
+          name: input.name,
+          arn: `arn:aws:eks:${region}:123456789012:cluster/${input.name}`,
+          status: "ACTIVE",
+          version: "1.33",
+          platformVersion: "eks.16",
+          roleArn: "arn:aws:iam::123456789012:role/eks-control-plane",
+          resourcesVpcConfig: {
+            vpcId: "vpc-east",
+            subnetIds: ["subnet-east"],
+            securityGroupIds: ["sg-east"],
+            endpointPublicAccess: false,
+            endpointPrivateAccess: true,
+            publicAccessCidrs: [],
+          },
+          logging: {
+            clusterLogging: [{
+              enabled: true,
+              types: ["api", "audit", "authenticator"],
+            }],
+          },
+          encryptionConfig: [{
+            resources: ["secrets"],
+            provider: { keyArn: `arn:aws:kms:${region}:123456789012:key/key-expanded` },
+          }],
+          accessConfig: {
+            authenticationMode: "API",
+            bootstrapClusterCreatorAdminPermissions: false,
+          },
+          tags: { Environment: "production" },
+        },
+      }),
+    };
+  }
 }
 
 test("expanded CMDB families paginate, preserve API provenance, and create safe graph edges", async () => {
@@ -714,6 +760,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     "aws.kms.key",
     "aws.dynamodb.table",
     "aws.ecr.repository",
+    "aws.eks.cluster",
   ];
 
   assert.equal(collection.coverage, "COMPLETE");
@@ -722,9 +769,28 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
-  for (const key of ["volumes", "network-interfaces", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr"]) {
+  for (const key of ["volumes", "network-interfaces", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
+  const eks = resources.find((resource) => resource.resourceType === "aws.eks.cluster");
+  assert.deepEqual(eks?.configuration, {
+    state: "ACTIVE",
+    clusterName: "production",
+    kubernetesVersion: "1.33",
+    platformVersion: "eks.16",
+    roleArn: "arn:aws:iam::123456789012:role/eks-control-plane",
+    endpointPublicAccess: false,
+    endpointPrivateAccess: true,
+    publicAccessCidrs: [],
+    vpcId: "vpc-east",
+    subnetIds: ["subnet-east"],
+    securityGroupIds: ["sg-east"],
+    enabledLogTypes: ["api", "audit", "authenticator"],
+    encryptionResources: ["secrets"],
+    encryptionProviderKeyArn: "arn:aws:kms:us-east-1:123456789012:key/key-expanded",
+    authenticationMode: "API",
+    bootstrapClusterCreatorAdminPermissions: false,
+  });
 
   const connection = {
     tenantId: "tenant-01",
