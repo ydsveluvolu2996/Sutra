@@ -10,6 +10,7 @@ import type {
 const TRIVY_API_VERSION = "aquasecurity.github.io/v1alpha1";
 const MAX_FINDINGS_PER_REPORT = 5_000;
 const MAX_COMPONENTS_PER_SBOM = 5_000;
+const MAX_LICENSES_PER_COMPONENT = 16;
 
 /** Official v1alpha1 Go/CRD contract pinned for the implemented field allowlist. */
 export const TRIVY_OPERATOR_CONTRACT = {
@@ -102,6 +103,20 @@ function optionalString(value: unknown, maximum = 2_048): string | null {
 
 function nonNegativeInteger(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : null;
+}
+
+function componentLicenses(value: unknown): readonly string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_LICENSES_PER_COMPONENT) invalid();
+  const result: string[] = [];
+  for (const raw of value) {
+    const item = optionalRecord(raw);
+    const license = optionalRecord(item.license);
+    const identifier = optionalString(license.id, 128) ?? optionalString(license.name, 128);
+    if (identifier === null) continue;
+    result.push(identifier);
+  }
+  return [...new Set(result)].sort((left, right) => left.localeCompare(right));
 }
 
 function severity(value: unknown): TrivyOperatorSeverity {
@@ -273,6 +288,7 @@ function sbomEvidence(item: Record<string, unknown>, clusterId: string): TrivySb
       name,
       version,
       packageUrl,
+      licenses: componentLicenses(component.licenses),
     };
   });
   const repository = optionalString(artifact.repository, 1_024);

@@ -12,6 +12,7 @@ import postgresKubernetesSupplyChainSql from "../postgres/migrations/0010_kubern
 import postgresNotificationDestinationsOutboxSql from "../postgres/migrations/0011_notification_destinations_outbox.sql?raw";
 import postgresHubbleNetworkVisibilitySql from "../postgres/migrations/0012_hubble_network_visibility.sql?raw";
 import postgresRuntimeEventCasesSql from "../postgres/migrations/0013_runtime_event_cases.sql?raw";
+import postgresKubernetesSbomLicensePolicySql from "../postgres/migrations/0014_kubernetes_sbom_license_policy.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -28,6 +29,7 @@ const migrations = [
   { id: "0011_notification_destinations_outbox", source: postgresNotificationDestinationsOutboxSql },
   { id: "0012_hubble_network_visibility", source: postgresHubbleNetworkVisibilitySql },
   { id: "0013_runtime_event_cases", source: postgresRuntimeEventCasesSql },
+  { id: "0014_kubernetes_sbom_license_policy", source: postgresKubernetesSbomLicensePolicySql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

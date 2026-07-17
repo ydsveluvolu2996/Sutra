@@ -25,16 +25,6 @@ Resources:
       LifecyclePolicy:
         LifecyclePolicyText: >-
           {"rules":[{"rulePriority":1,"description":"Retain 30 immutable releases","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}}]}
-      RepositoryPolicyText:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: "*"
-            Action: ecr:*
-            Condition:
-              Bool:
-                aws:SecureTransport: "false"
   GitHubReleaseRole:
     Type: AWS::IAM::Role
     Properties:

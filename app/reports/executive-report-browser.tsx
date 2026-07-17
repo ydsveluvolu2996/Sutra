@@ -20,6 +20,7 @@ export function ExecutiveReportBrowser() {
   const kubernetes = useKubernetesEvidence(state);
   const [compliance, setCompliance] = useState<ComplianceReportResponse | null>(null);
   const [complianceError, setComplianceError] = useState<string | null>(null);
+  const [generatedAt] = useState(() => Date.now());
   const connection = state?.connection ?? null;
   const connectionId = connection?.id ?? null;
 
@@ -57,6 +58,7 @@ export function ExecutiveReportBrowser() {
     .filter((finding) => finding.severity === "critical" || finding.severity === "high")
     .slice(0, 5);
   const kubernetesCompleteCoverage = kubernetesWorkspace?.coverage.filter((entry) => entry.state === "COMPLETE").length ?? 0;
+  const coverageGaps = state?.coverage.filter((entry) => entry.status !== "succeeded") ?? [];
 
   if (loading) return <div className="loading-state" role="status"><span className="loading-spinner" />Preparing executive evidence report…</div>;
   if (error) return <div className="page-alert page-alert-error" role="alert"><strong>Report is unavailable</strong><span>{error}</span></div>;
@@ -64,6 +66,14 @@ export function ExecutiveReportBrowser() {
 
   const successfulCoverage = state.coverage.filter((entry) => entry.status === "succeeded").length;
   const coveragePercent = state.coverage.length ? Math.round(successfulCoverage / state.coverage.length * 100) : 0;
+  const snapshotAgeHours = Math.max(
+    0,
+    Math.floor((generatedAt - Date.parse(state.activeSnapshot.collectedAt)) / (60 * 60 * 1_000)),
+  );
+  const evidenceFreshness = snapshotAgeHours < 24 ? "Current" : snapshotAgeHours < 48 ? "Review due" : "Stale";
+  const readinessOutcome = coverageGaps.length > 0 || assessment?.summary.unknown
+    ? "Evidence gaps require review"
+    : "Readiness evidence complete";
   return <>
     <section className="page-heading no-print"><div><p className="eyebrow">Customer communication</p><h1>Executive evidence report</h1><p className="page-subtitle">A print-ready summary generated from the current immutable CMDB and compliance evidence.</p></div><div className="heading-actions"><a className="button button-secondary" href={`/api/v1/compliance?connectionId=${encodeURIComponent(connection.id)}&format=json`}>Evidence JSON</a><a className="button button-secondary" href={`/api/v1/compliance?connectionId=${encodeURIComponent(connection.id)}&format=csv`}>Evidence CSV</a><button className="button button-primary" type="button" onClick={() => window.print()}>Print / Save PDF</button></div></section>
 
@@ -78,7 +88,7 @@ export function ExecutiveReportBrowser() {
 
       <section className="report-two-column"><div className="report-section"><div className="report-section-heading"><div><p className="eyebrow">04 · Asset profile</p><h2>Observed services</h2></div></div><div className="report-service-list">{serviceCounts.map(([service, count]) => <div key={service}><span>{service.toUpperCase()}</span><strong>{count}</strong></div>)}</div></div><div className="report-section"><div className="report-section-heading"><div><p className="eyebrow">05 · Control evidence</p><h2>Assessment outcomes</h2></div></div>{assessment ? <div className="report-control-summary"><div><span>Pass</span><strong>{assessment.summary.pass}</strong></div><div><span>Fail</span><strong>{assessment.summary.fail}</strong></div><div><span>Unknown</span><strong>{assessment.summary.unknown}</strong></div><div><span>Excepted</span><strong>{assessment.summary.excepted}</strong></div><div><span>Not applicable</span><strong>{assessment.summary.notApplicable}</strong></div></div> : <p>{complianceError ?? "Compliance evidence is being prepared."}</p>}</div></section>
 
-      <section className="report-section report-evidence"><div className="report-section-heading"><div><p className="eyebrow">06 · Evidence and limitations</p><h2>Traceable source record</h2></div></div><dl><div><dt>Evidence source</dt><dd>{snapshotOriginLabel(state.activeSnapshot.origin)}</dd></div><div><dt>Snapshot collected</dt><dd>{formatTimestamp(state.activeSnapshot.collectedAt)}</dd></div><div><dt>Snapshot ID</dt><dd>{state.activeSnapshot.id}</dd></div><div><dt>Snapshot SHA-256</dt><dd>{state.activeSnapshot.snapshotSha256}</dd></div>{compliance?.reportSha256 ? <div><dt>Compliance report SHA-256</dt><dd>{compliance.reportSha256}</dd></div> : null}{kubernetesWorkspace?.scan ? <><div><dt>Kubernetes scan ID</dt><dd>{kubernetesWorkspace.scan.id}</dd></div><div><dt>Kubernetes evidence SHA-256</dt><dd>{kubernetesWorkspace.scan.evidenceSha256}</dd></div></> : null}<div><dt>Connection permission pack</dt><dd>{connection.permissionPackVersion}</dd></div></dl><p>This report is a point-in-time interpretation of collected AWS configuration metadata, Kubernetes metadata, source-native scanner reports, and explicit collector coverage. It is not an audit opinion, certification, penetration test, proof of exploitability, or proof that threats are absent. Native GuardDuty, Security Hub, and Inspector findings are imported only when those services are enabled and accessible. Kubernetes runtime detection and admission enforcement are reported only when their independent evidence sources are configured.</p></section>
+      <section className="report-section report-evidence"><div className="report-section-heading"><div><p className="eyebrow">06 · Evidence and limitations</p><h2>Traceable source record</h2></div><span className={`report-posture ${evidenceFreshness === "Current" ? "report-posture-good" : "report-posture-risk"}`}>{evidenceFreshness} · {snapshotAgeHours}h old</span></div><div className="report-metrics"><div><small>Readiness outcome</small><strong>{readinessOutcome}</strong><span>Informative mapping only</span></div><div><small>Coverage gaps</small><strong>{coverageGaps.length}</strong><span>{coverageGaps.length ? coverageGaps.slice(0, 3).map((entry) => entry.collectorKey).join(", ") : "No collector gap recorded"}</span></div><div><small>Unknown controls</small><strong>{assessment?.summary.unknown ?? "—"}</strong><span>Never treated as passing</span></div><div><small>Evidence age</small><strong>{snapshotAgeHours}h</strong><span>24-hour review target</span></div></div><dl><div><dt>Evidence source</dt><dd>{snapshotOriginLabel(state.activeSnapshot.origin)}</dd></div><div><dt>Snapshot collected</dt><dd>{formatTimestamp(state.activeSnapshot.collectedAt)}</dd></div><div><dt>Snapshot ID</dt><dd>{state.activeSnapshot.id}</dd></div><div><dt>Snapshot SHA-256</dt><dd>{state.activeSnapshot.snapshotSha256}</dd></div>{compliance?.reportSha256 ? <div><dt>Compliance report SHA-256</dt><dd>{compliance.reportSha256}</dd></div> : null}{kubernetesWorkspace?.scan ? <><div><dt>Kubernetes scan ID</dt><dd>{kubernetesWorkspace.scan.id}</dd></div><div><dt>Kubernetes evidence SHA-256</dt><dd>{kubernetesWorkspace.scan.evidenceSha256}</dd></div></> : null}<div><dt>Connection permission pack</dt><dd>{connection.permissionPackVersion}</dd></div></dl><p>This report is a point-in-time interpretation of collected AWS configuration metadata, Kubernetes metadata, source-native scanner reports, and explicit collector coverage. Framework relationships are readiness mappings only; they do not establish conformity, certification, or audit assurance. Unknown and unavailable evidence remains visible and is never treated as passing. This report is not an audit opinion, certification, penetration test, proof of exploitability, or proof that threats are absent. Native GuardDuty, Security Hub, and Inspector findings are imported only when those services are enabled and accessible. Kubernetes runtime detection and admission enforcement are reported only when their independent evidence sources are configured.</p></section>
 
       <footer className="report-footer"><span>Sutra · cloud operations and assurance</span><span>Snapshot {compactIdentifier(state.activeSnapshot.snapshotSha256, 18)}</span></footer>
     </article>

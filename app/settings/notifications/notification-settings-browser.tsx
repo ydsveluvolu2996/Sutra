@@ -7,11 +7,13 @@ import type {
   NotificationDestination,
   NotificationOutboxJob,
 } from "../../../lib/notification-destination-types";
+import type { NotificationDeliveryHealth } from "../../../lib/notification-delivery-health";
 
 interface Workspace {
   readonly destinations: readonly NotificationDestination[];
   readonly jobs: readonly NotificationOutboxJob[];
   readonly worker: { readonly configured: boolean; readonly message: string };
+  readonly health: NotificationDeliveryHealth;
 }
 
 function idempotencyKey(): string {
@@ -202,6 +204,14 @@ export function NotificationSettingsBrowser() {
           </span>
         </div>
         <p className="limitation-note">{workspace?.worker.message}</p>
+        {workspace?.health ? (
+          <div className="report-metrics" aria-label="Notification delivery health">
+            <div><small>Delivery health</small><strong>{workspace.health.state.replaceAll("_", " ")}</strong><span>{workspace.health.message}</span></div>
+            <div><small>Enabled routes</small><strong>{workspace.health.enabledDestinations}</strong><span>{workspace.health.configuredDestinations} adapter-ready</span></div>
+            <div><small>Actionable queue</small><strong>{workspace.health.queued + workspace.health.processing + workspace.health.retrying}</strong><span>{workspace.health.oldestActionableAgeSeconds === null ? "No queued work" : `Oldest ${workspace.health.oldestActionableAgeSeconds}s`}</span></div>
+            <div><small>Delivery failures</small><strong>{workspace.health.deadLetter}</strong><span>{workspace.health.retrying} retrying · {workspace.health.adapterMissing} adapter-blocked</span></div>
+          </div>
+        ) : null}
         <form className="auth-form" onSubmit={(event) => void save(event)}>
           <div className="auth-field-pair">
             <label>

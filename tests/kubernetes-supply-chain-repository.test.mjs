@@ -12,6 +12,10 @@ const {
   KubernetesSupplyChainRepository,
   KubernetesSupplyChainRepositoryError,
 } = await import("../db/kubernetes-supply-chain-repository.ts");
+const {
+  KubernetesSbomRepository,
+  KubernetesSbomRepositoryError,
+} = await import("../db/kubernetes-sbom-repository.ts");
 const { normalizeKubernetesSupplyChainEvidence } = await import("../lib/kubernetes-supply-chain.ts");
 
 const ORG_A = "org_supply_chain_a";
@@ -160,6 +164,47 @@ test("rejects cluster and evidence digest mismatches", async () => {
       ),
       (error) => error instanceof KubernetesSupplyChainRepositoryError &&
         error.code === "EVIDENCE_MISMATCH",
+    );
+  });
+});
+
+test("license policy versions are scoped, append-only, and concurrency checked", async () => {
+  await withDatabase(async (database, _repository, clusterA) => {
+    const policies = new KubernetesSbomRepository(database);
+    const scope = { orgId: ORG_A, customerId: CUSTOMER_A, clusterId: clusterA };
+    const first = await policies.publishPolicyVersion(scope, {
+      name: "Production policy",
+      deniedLicenses: ["GPL-3.0-only"],
+      allowedLicenses: ["MIT"],
+      requireIdentifiedLicense: true,
+    }, "user_security_admin", 0);
+    assert.equal(first.version, 1);
+    const second = await policies.publishPolicyVersion(scope, {
+      ...first.policy,
+      allowedLicenses: ["Apache-2.0", "MIT"],
+    }, "user_security_admin", 1);
+    assert.equal(second.version, 2);
+    assert.equal((await policies.listPolicies(scope))[0].version, 2);
+    assert.equal((await policies.listPolicies({
+      orgId: ORG_B,
+      customerId: CUSTOMER_B,
+      clusterId: clusterA,
+    })).length, 0);
+    await assert.rejects(
+      policies.publishPolicyVersion(scope, {
+        ...second.policy,
+        deniedLicenses: ["AGPL-3.0-only", "GPL-3.0-only"],
+      }, "user_security_admin", 1),
+      (error) => error instanceof KubernetesSbomRepositoryError &&
+        error.code === "VERSION_CONFLICT",
+    );
+    const version = await database.prepare(
+      "SELECT id FROM kubernetes_sbom_license_policy_versions WHERE policy_id = ? AND version = 1",
+    ).bind(first.id).first();
+    await assert.rejects(
+      database.prepare("DELETE FROM kubernetes_sbom_license_policy_versions WHERE id = ?")
+        .bind(version.id).run(),
+      /immutable/u,
     );
   });
 });

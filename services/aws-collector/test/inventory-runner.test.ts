@@ -2090,6 +2090,15 @@ class OverallDeadlineRdsClientFactory extends FakeClientFactory {
     if (region !== "us-east-1") return super.rds(region);
     return {
       describeDBInstances: (_input, abortSignal) => new Promise((resolve, reject) => {
+        if (this.page === 0) {
+          this.page = 1;
+          resolve({
+            $metadata: {},
+            Marker: "page-1",
+            DBInstances: [database("overall-1", region)],
+          });
+          return;
+        }
         const timer = setTimeout(() => {
           this.page += 1;
           resolve({

@@ -67,6 +67,6 @@ test("ECR release is protected, OIDC-only, scanned, inventoried, and keyless-sig
   assert.match(role, /ImageTagMutability: IMMUTABLE/u);
   assert.match(role, /environment:kubernetes-production-release/u);
   assert.match(role, /sts:AssumeRoleWithWebIdentity/u);
-  assert.equal(role.match(/\becr:\*/gu)?.length, 1);
-  assert.match(role, /Sid: DenyInsecureTransport[\s\S]*?Effect: Deny[\s\S]*?Action: ecr:\*/u);
+  assert.doesNotMatch(role, /\becr:\*/u);
+  assert.doesNotMatch(role, /RepositoryPolicyText|Principal:\s*["']?\*["']?/u);
 });

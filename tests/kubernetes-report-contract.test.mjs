@@ -13,6 +13,10 @@ test("executive report presents Kubernetes evidence without inventing runtime pr
   assert.match(report, /kubernetesWorkspace\.scannerEvidence\.sboms/u);
   assert.match(report, /Kubernetes evidence SHA-256/u);
   assert.match(report, /Runtime detection and admission enforcement are not configured/u);
+  assert.match(report, /Framework relationships are readiness mappings only/u);
+  assert.match(report, /Unknown and unavailable evidence remains visible/u);
+  assert.match(report, /Evidence age/u);
+  assert.match(report, /Coverage gaps/u);
   assert.match(report, /finding\.severity === "critical" \|\| finding\.severity === "high"/u);
   assert.doesNotMatch(report, /runtime protection is enabled/iu);
 });
