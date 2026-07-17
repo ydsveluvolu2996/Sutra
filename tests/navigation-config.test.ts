@@ -43,6 +43,7 @@ describe("grouped workspace navigation", () => {
         "Images & vulnerabilities",
         "Software supply chain",
         "Exposure",
+        "Issues",
         "Attack paths",
         "RBAC",
         "Network",
