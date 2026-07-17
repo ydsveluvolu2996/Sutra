@@ -166,6 +166,11 @@ class SoakControlChannel implements KubernetesControlChannel {
       throw new Error("soak: upload response lost after durable acceptance");
     }
   }
+
+  public async uploadHubbleFlows(credential: RotatingAgentCredential): Promise<void> {
+    this.assertReachable();
+    this.assertActive(credential);
+  }
 }
 
 class MeasuringStateStore implements KubernetesAgentStateStore {

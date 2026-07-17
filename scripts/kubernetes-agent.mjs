@@ -4,6 +4,7 @@ import {
   ContinuousKubernetesAgent,
   FileKubernetesAgentStateStore,
   HttpsKubernetesControlChannel,
+  HubbleExportFileFlowSource,
   readKubernetesAgentSecretFile,
 } from "../services/kubernetes-collector/src/index.ts";
 
@@ -30,6 +31,14 @@ const statePath = process.env.SUTRA_KUBERNETES_AGENT_STATE_FILE ??
 const scanIntervalSeconds = Number(process.env.SUTRA_KUBERNETES_SCAN_INTERVAL_SECONDS ?? 900);
 if (!Number.isSafeInteger(scanIntervalSeconds)) throw new Error("Kubernetes scan interval is invalid");
 
+const hubbleExportFile = process.env.SUTRA_HUBBLE_EXPORT_FILE?.trim() ?? "";
+const hubbleFlowSource = hubbleExportFile === ""
+  ? undefined
+  : new HubbleExportFileFlowSource({
+    path: hubbleExportFile,
+    hubbleVersion: safeIdentity("SUTRA_HUBBLE_VERSION", required("SUTRA_HUBBLE_VERSION")),
+  });
+
 const agent = new ContinuousKubernetesAgent({
   clusterId: safeIdentity("SUTRA_KUBERNETES_CLUSTER_ID", required("SUTRA_KUBERNETES_CLUSTER_ID")),
   clusterName: required("SUTRA_KUBERNETES_CLUSTER_NAME"),
@@ -41,6 +50,7 @@ const agent = new ContinuousKubernetesAgent({
     "trivy-operator.v1alpha1",
     "module-health.v1",
     "durable-idempotency.v1",
+    ...(hubbleFlowSource === undefined ? [] : ["hubble-flows.v1"]),
   ],
   scanIntervalMs: scanIntervalSeconds * 1_000,
   stateStore: new FileKubernetesAgentStateStore(statePath),
@@ -53,6 +63,7 @@ const agent = new ContinuousKubernetesAgent({
     podName: safeIdentity("POD_NAME", required("POD_NAME")),
     startedAt: new Date().toISOString(),
   },
+  ...(hubbleFlowSource === undefined ? {} : { hubbleFlowSource }),
 });
 
 const controller = new AbortController();

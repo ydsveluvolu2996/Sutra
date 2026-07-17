@@ -7,4 +7,5 @@ export * from "./agent-state.ts";
 export * from "./control-channel.ts";
 export * from "./module-health.ts";
 export * from "./continuous-agent.ts";
+export * from "./hubble-flow-source.ts";
 export * from "./soak-harness.ts";
