@@ -10,6 +10,8 @@ import scheduleProvenanceSchemaSql from "../drizzle/0008_far_nicolaos.sql?raw";
 import costSnapshotsSchemaSql from "../drizzle/0009_acoustic_moondragon.sql?raw";
 import operationsWaveSchemaSql from "../drizzle/0010_sutra_operations_wave.sql?raw";
 import hostedIdentityLifecycleSchemaSql from "../drizzle/0011_blushing_logan.sql?raw";
+import kubernetesPersistenceSchemaSql from "../drizzle/0012_nasty_satana.sql?raw";
+import kubernetesScannerEvidenceSchemaSql from "../drizzle/0013_gorgeous_mercury.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -37,6 +39,8 @@ const migrations = [
   { id: "0009_acoustic_moondragon", statements: statementsFrom(costSnapshotsSchemaSql) },
   { id: "0010_sutra_operations_wave", statements: statementsFrom(operationsWaveSchemaSql) },
   { id: "0011_blushing_logan", statements: statementsFrom(hostedIdentityLifecycleSchemaSql) },
+  { id: "0012_nasty_satana", statements: statementsFrom(kubernetesPersistenceSchemaSql) },
+  { id: "0013_gorgeous_mercury", statements: statementsFrom(kubernetesScannerEvidenceSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

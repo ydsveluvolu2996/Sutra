@@ -1,31 +1,11 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: sutra-system
-  labels:
-    app.kubernetes.io/name: sutra
-    app.kubernetes.io/component: collector-access
-    pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/audit: restricted
-    pod-security.kubernetes.io/warn: restricted
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: sutra-readonly
-  namespace: sutra-system
-  labels:
-    app.kubernetes.io/name: sutra
-    app.kubernetes.io/component: collector-access
-automountServiceAccountToken: false
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: sutra-readonly
+  name: sutra-visibility
   labels:
     app.kubernetes.io/name: sutra
-    app.kubernetes.io/component: collector-access
+    app.kubernetes.io/component: visibility-access
+    app.kubernetes.io/managed-by: Helm
 rules:
   - apiGroups: [""]
     resources:
@@ -77,29 +57,16 @@ rules:
       - storageclasses
       - csidrivers
     verbs: [get, list]
-  # Optional Trivy Operator evidence. These are the only Aqua Security CRDs
-  # Sutra can read; exposed-secret and raw scan/log resources are excluded.
+{{- if .Values.trivyReports.enabled }}
   - apiGroups: [aquasecurity.github.io]
     resources:
       - vulnerabilityreports
       - configauditreports
       - rbacassessmentreports
       - clusterrbacassessmentreports
+      - clusterinfraassessmentreports
+      - infraassessmentreports
+      - clustercompliancereports
       - sbomreports
     verbs: [get, list]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: sutra-readonly
-  labels:
-    app.kubernetes.io/name: sutra
-    app.kubernetes.io/component: collector-access
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: sutra-readonly
-subjects:
-  - kind: ServiceAccount
-    name: sutra-readonly
-    namespace: sutra-system
+{{- end }}

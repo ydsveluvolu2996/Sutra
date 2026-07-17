@@ -4,6 +4,8 @@ import postgresCaseManagementSql from "../postgres/migrations/0002_case_manageme
 import postgresSecurityEventsSql from "../postgres/migrations/0003_security_events.sql?raw";
 import postgresComplianceExceptionsSql from "../postgres/migrations/0004_compliance_exceptions.sql?raw";
 import postgresHostedIdentityLifecycleSql from "../postgres/migrations/0005_hosted_identity_lifecycle.sql?raw";
+import postgresKubernetesPersistenceSql from "../postgres/migrations/0006_kubernetes_persistence.sql?raw";
+import postgresKubernetesScannerEvidenceSql from "../postgres/migrations/0007_kubernetes_scanner_evidence.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -12,6 +14,8 @@ const migrations = [
   { id: "0003_security_events", source: postgresSecurityEventsSql },
   { id: "0004_compliance_exceptions", source: postgresComplianceExceptionsSql },
   { id: "0005_hosted_identity_lifecycle", source: postgresHostedIdentityLifecycleSql },
+  { id: "0006_kubernetes_persistence", source: postgresKubernetesPersistenceSql },
+  { id: "0007_kubernetes_scanner_evidence", source: postgresKubernetesScannerEvidenceSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

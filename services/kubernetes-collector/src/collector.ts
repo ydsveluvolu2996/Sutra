@@ -11,8 +11,15 @@ import type {
   KubernetesResourceKind,
   KubernetesSnapshot,
   SafeKubernetesValue,
+  TrivyOperatorFinding,
+  TrivySbomEvidence,
   TrustedKubernetesConnection,
 } from "./types.ts";
+import {
+  normalizeTrivyOperatorReport,
+  trivyOperatorReports,
+  TrivyOperatorEvidenceError,
+} from "./trivy-operator.ts";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const COLLECTION_TIMEOUT_MS = 60_000;
@@ -20,6 +27,9 @@ const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const PAGE_LIMIT = 500;
 const MAX_PAGES_PER_COLLECTOR = 20;
 const MAX_TOTAL_RESOURCES = 10_000;
+const TRIVY_REPORT_PAGE_LIMIT = 50;
+const MAX_TRIVY_FINDINGS = 20_000;
+const MAX_TRIVY_SBOM_COMPONENTS = 20_000;
 
 export type KubernetesCollectorErrorCode =
   | "AUTHENTICATION_FAILED"
@@ -428,9 +438,9 @@ function normalizedResource(
   };
 }
 
-function listPage(value: unknown): { readonly items: readonly unknown[]; readonly continuation: string | null } {
+function listPage(value: unknown, maximumItems = PAGE_LIMIT): { readonly items: readonly unknown[]; readonly continuation: string | null } {
   const page = record(value);
-  if (!Array.isArray(page.items) || page.items.length > PAGE_LIMIT) {
+  if (!Array.isArray(page.items) || page.items.length > maximumItems) {
     throw new KubernetesCollectorError("INVALID_API_RESPONSE", "Kubernetes metadata page exceeded its item contract");
   }
   const continuation = safeString(optionalRecord(page.metadata).continue, 2_048);
@@ -465,6 +475,9 @@ export class ReadOnlyKubernetesCollector {
       provenance: { apiPath: "server-side-registration", collectedAt, resourceVersion: null },
     }];
     const coverage: KubernetesCollectorCoverage[] = [];
+    const trivyFindings: TrivyOperatorFinding[] = [];
+    const trivySboms: TrivySbomEvidence[] = [];
+    let trivySbomComponentCount = 0;
     const overall = new AbortController();
     const overallTimer = setTimeout(() => overall.abort(), COLLECTION_TIMEOUT_MS);
     try {
@@ -516,6 +529,73 @@ export class ReadOnlyKubernetesCollector {
           });
         }
       }
+      for (const definition of trivyOperatorReports) {
+        let pagesObserved = 0;
+        let itemsObserved = 0;
+        let continuation: string | null = null;
+        try {
+          do {
+            if (pagesObserved >= MAX_PAGES_PER_COLLECTOR) {
+              throw new KubernetesCollectorError("COLLECTION_LIMIT_REACHED", "Trivy Operator report collection reached its bounded limit");
+            }
+            const url = new URL(definition.path, this.connection.server);
+            url.searchParams.set("limit", String(TRIVY_REPORT_PAGE_LIMIT));
+            if (continuation !== null) url.searchParams.set("continue", continuation);
+            const page = listPage(await this.transport({
+              url,
+              token: this.connection.token,
+              certificateAuthorityPem: this.connection.certificateAuthorityPem,
+              signal: overall.signal,
+            }), TRIVY_REPORT_PAGE_LIMIT);
+            pagesObserved += 1;
+            for (const item of page.items) {
+              const normalized = normalizeTrivyOperatorReport(definition, item, this.connection.clusterId);
+              const addedComponentCount = normalized.sboms.reduce((sum, sbom) => sum + sbom.components.length, 0);
+              if (
+                trivyFindings.length + normalized.findings.length > MAX_TRIVY_FINDINGS ||
+                trivySbomComponentCount + addedComponentCount > MAX_TRIVY_SBOM_COMPONENTS
+              ) {
+                throw new KubernetesCollectorError("COLLECTION_LIMIT_REACHED", "Trivy Operator evidence reached its bounded limit");
+              }
+              trivyFindings.push(...normalized.findings);
+              trivySboms.push(...normalized.sboms);
+              trivySbomComponentCount += addedComponentCount;
+              itemsObserved += 1;
+            }
+            continuation = page.continuation;
+          } while (continuation !== null);
+          coverage.push({
+            collectorKey: definition.collectorKey,
+            apiPath: definition.path,
+            status: "succeeded",
+            itemsObserved,
+            pagesObserved,
+            ...(itemsObserved === 0 ? {
+              message: "Trivy Operator report API is available, but zero reports were observed; this is not a clean scan result",
+            } : {}),
+          });
+        } catch (error) {
+          const normalizedError = error instanceof TrivyOperatorEvidenceError
+            ? new KubernetesCollectorError(
+                error.code === "TRIVY_REPORT_LIMIT_REACHED" ? "COLLECTION_LIMIT_REACHED" : "INVALID_API_RESPONSE",
+                "Trivy Operator report evidence was rejected",
+              )
+            : error;
+          const safe = sanitizedCollectorError(normalizedError, overall.signal.aborted);
+          const notConfigured = safe.code === "API_UNAVAILABLE";
+          coverage.push({
+            collectorKey: definition.collectorKey,
+            apiPath: definition.path,
+            status: notConfigured ? "not_configured" : "failed",
+            itemsObserved,
+            pagesObserved,
+            errorCode: notConfigured ? "NOT_CONFIGURED" : safe.code,
+            message: notConfigured
+              ? "Trivy Operator report CRD is not installed or served; no clean result is inferred"
+              : safe.message,
+          });
+        }
+      }
     } finally {
       clearTimeout(overallTimer);
     }
@@ -526,6 +606,8 @@ export class ReadOnlyKubernetesCollector {
       collectedAt,
       resources,
       coverage,
+      trivyFindings,
+      trivySboms,
     };
   }
 }

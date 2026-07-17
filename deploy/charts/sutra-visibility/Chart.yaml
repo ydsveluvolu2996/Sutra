@@ -1,0 +1,11 @@
+apiVersion: v2
+name: sutra-visibility
+description: Least-privilege Kubernetes metadata and security-report access for Sutra
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.25.0-0"
+annotations:
+  artifacthub.io/changes: |
+    - kind: added
+      description: Initial read-only EKS and Kubernetes visibility role.

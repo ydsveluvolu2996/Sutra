@@ -3,9 +3,13 @@ import { createServer } from "node:http";
 import test from "node:test";
 import {
   KubernetesConnectionError,
+  KubernetesCollectorError,
   ReadOnlyKubernetesCollector,
   resolveTrustedKubernetesConnection,
   toKubernetesEvidenceSnapshot,
+  normalizeTrivyOperatorReport,
+  trivyOperatorReports,
+  TRIVY_OPERATOR_CONTRACT,
   type KubernetesTransport,
   type TrustedKubernetesConnection,
 } from "../services/kubernetes-collector/src/index.ts";
@@ -153,7 +157,156 @@ test("default transport performs authenticated read-only loopback API requests",
     serverUrl: `http://127.0.0.1:${address.port}`,
   })).collect();
   assert.equal(snapshot.coverage.every((entry) => entry.status === "succeeded"), true);
-  assert.equal(requests.length, 13);
-  assert.equal(requests.every((request) => request.method === "GET" && request.url?.includes("limit=500")), true);
+  assert.equal(requests.length, 18);
+  assert.equal(requests.every((request) => request.method === "GET" && request.url?.includes("limit=")), true);
   assert.equal(JSON.stringify(snapshot).includes(TOKEN), false);
+});
+
+test("normalizes the official VulnerabilityReport v1alpha1 contract with stable CVE evidence", () => {
+  assert.equal(TRIVY_OPERATOR_CONTRACT.apiVersion, "aquasecurity.github.io/v1alpha1");
+  const definition = trivyOperatorReports.find((item) => item.kind === "VulnerabilityReport");
+  assert.ok(definition);
+  const report = {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "VulnerabilityReport",
+    metadata: {
+      name: "replicaset-api-api",
+      namespace: "production",
+      uid: "report-uid-vulnerability",
+      resourceVersion: "101",
+      ownerReferences: [{ apiVersion: "apps/v1", kind: "ReplicaSet", name: "api-7d9", uid: "owner", controller: true }],
+    },
+    report: {
+      updateTimestamp: "2026-07-17T12:00:00Z",
+      scanner: { name: "Trivy", vendor: "Aqua Security", version: "0.69.3" },
+      artifact: { repository: "registry.example.test/api", tag: "1.0.0" },
+      summary: { criticalCount: 1, highCount: 0, mediumCount: 0, lowCount: 0, unknownCount: 0 },
+      vulnerabilities: [{
+        vulnerabilityID: "CVE-2026-1234",
+        resource: "openssl",
+        installedVersion: "3.0.1",
+        fixedVersion: "3.0.2",
+        publishedDate: "2026-01-01T00:00:00Z",
+        lastModifiedDate: "2026-02-01T00:00:00Z",
+        severity: "CRITICAL",
+        title: "OpenSSL issue",
+        description: "raw scanner description is intentionally excluded",
+        packageType: "debian",
+        target: "container-layer",
+        score: 9.8,
+      }],
+    },
+  };
+  const first = normalizeTrivyOperatorReport(definition, report, "cluster_demo_1");
+  const recreated = structuredClone(report);
+  recreated.metadata.uid = "recreated-report-uid";
+  recreated.report.vulnerabilities[0]!.installedVersion = "3.0.1-r1";
+  recreated.report.vulnerabilities[0]!.fixedVersion = "3.0.2-r1";
+  const second = normalizeTrivyOperatorReport(definition, recreated, "cluster_demo_1");
+  assert.equal(first.findings.length, 1);
+  assert.equal(first.findings[0]?.fingerprint, second.findings[0]?.fingerprint);
+  assert.equal(first.findings[0]?.cveId, "CVE-2026-1234");
+  assert.equal(first.findings[0]?.packageName, "openssl");
+  assert.equal(first.findings[0]?.fixedVersion, "3.0.2");
+  assert.equal(first.findings[0]?.scanner.name, "Trivy");
+  assert.equal(JSON.stringify(first).includes("raw scanner description"), false);
+});
+
+test("imports only failed official audit checks and bounded SBOM component fields", () => {
+  const configDefinition = trivyOperatorReports.find((item) => item.kind === "ConfigAuditReport");
+  const sbomDefinition = trivyOperatorReports.find((item) => item.kind === "SbomReport");
+  assert.ok(configDefinition && sbomDefinition);
+  const commonMetadata = { name: "deployment-api", namespace: "production", uid: "report-uid", resourceVersion: "12" };
+  const scanner = { name: "Trivy", vendor: "Aqua Security", version: "0.69.3" };
+  const audit = normalizeTrivyOperatorReport(configDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ConfigAuditReport",
+    metadata: commonMetadata,
+    report: {
+      scanner,
+      summary: { criticalCount: 1, highCount: 0, mediumCount: 0, lowCount: 0 },
+      checks: [
+        { checkID: "KSV001", title: "Failed check", severity: "CRITICAL", success: false, remediation: "Set the safe field", messages: ["raw report message"] },
+        { checkID: "KSV002", title: "Passing check", severity: "LOW", success: true, messages: ["raw passing output"] },
+      ],
+    },
+  }, "cluster_demo_1");
+  assert.equal(audit.findings.length, 1);
+  assert.equal(audit.findings[0]?.checkId, "KSV001");
+  assert.equal(JSON.stringify(audit).includes("raw report message"), false);
+
+  const sbom = normalizeTrivyOperatorReport(sbomDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "SbomReport",
+    metadata: { ...commonMetadata, uid: "sbom-uid" },
+    report: {
+      updateTimestamp: "2026-07-17T12:00:00Z",
+      scanner,
+      artifact: { repository: "registry.example.test/api", digest: "sha256:abc", tag: "1.0.0" },
+      summary: { componentsCount: 1, dependenciesCount: 0 },
+      components: {
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        components: [{
+          "bom-ref": "sensitive-internal-ref",
+          type: "library",
+          name: "openssl",
+          version: "3.0.1",
+          purl: "pkg:deb/openssl@3.0.1",
+          hashes: [{ alg: "SHA-256", content: "raw-hash" }],
+          properties: [{ name: "raw", value: "raw-property" }],
+        }],
+      },
+    },
+  }, "cluster_demo_1");
+  assert.equal(sbom.sboms[0]?.components[0]?.packageUrl, "pkg:deb/openssl@3.0.1");
+  for (const excluded of ["sensitive-internal-ref", "raw-hash", "raw-property"]) {
+    assert.equal(JSON.stringify(sbom).includes(excluded), false);
+  }
+});
+
+test("normalizes namespaced and cluster-scoped RBAC assessment report contracts", () => {
+  const scanner = { name: "Trivy", vendor: "Aqua Security", version: "0.69.3" };
+  for (const [kind, namespace, expectedSource] of [
+    ["RbacAssessmentReport", "kube-system", "rbac_assessment_report"],
+    ["ClusterRbacAssessmentReport", undefined, "cluster_rbac_assessment_report"],
+  ] as const) {
+    const definition = trivyOperatorReports.find((item) => item.kind === kind);
+    assert.ok(definition);
+    const normalized = normalizeTrivyOperatorReport(definition, {
+      apiVersion: "aquasecurity.github.io/v1alpha1",
+      kind,
+      metadata: {
+        name: `${kind.toLocaleLowerCase("en-US")}-admin`,
+        ...(namespace === undefined ? {} : { namespace }),
+        uid: `${kind}-uid`,
+        ownerReferences: [{ apiVersion: "rbac.authorization.k8s.io/v1", kind: kind.startsWith("Cluster") ? "ClusterRole" : "Role", name: "admin", uid: "owner", controller: true }],
+      },
+      report: {
+        scanner,
+        summary: { criticalCount: 1, highCount: 0, mediumCount: 0, lowCount: 0 },
+        checks: [{ checkID: "KSV041", title: "Do not manage secrets", severity: "CRITICAL", success: false, messages: ["raw RBAC detail"] }],
+      },
+    }, "cluster_demo_1");
+    assert.equal(normalized.findings[0]?.source, expectedSource);
+    assert.equal(normalized.findings[0]?.namespace, namespace ?? null);
+    assert.equal(normalized.findings[0]?.affectedResource.name, "admin");
+    assert.equal(JSON.stringify(normalized).includes("raw RBAC detail"), false);
+  }
+});
+
+test("reports absent Trivy CRDs as NOT_CONFIGURED and never as clean", async () => {
+  const transport: KubernetesTransport = async ({ url }) => {
+    if (url.pathname.startsWith("/apis/aquasecurity.github.io/")) {
+      throw new KubernetesCollectorError("API_UNAVAILABLE", "provider body must not survive");
+    }
+    return { metadata: {}, items: [] };
+  };
+  const snapshot = await new ReadOnlyKubernetesCollector(connection(), transport).collect();
+  const trivyCoverage = snapshot.coverage.filter((entry) => entry.collectorKey.startsWith("trivy-operator."));
+  assert.equal(trivyCoverage.length, 5);
+  assert.equal(trivyCoverage.every((entry) => entry.status === "not_configured" && entry.errorCode === "NOT_CONFIGURED"), true);
+  assert.equal(JSON.stringify(trivyCoverage).includes("provider body"), false);
+  assert.equal(snapshot.trivyFindings.length, 0);
+  assert.equal(snapshot.trivySboms.length, 0);
 });

@@ -677,3 +677,128 @@ export const securityEventDetections = sqliteTable("security_event_detections", 
   uniqueIndex("security_event_detections_scope_id_uq").on(table.orgId, table.connectionId, table.id),
   index("security_event_detections_scope_status_idx").on(table.orgId, table.customerId, table.connectionId, table.status, table.severity, table.lastEventAt, table.id),
 ]);
+
+/** Credential-free Kubernetes cluster identity scoped to one MSP customer. */
+export const kubernetesClusters = sqliteTable("kubernetes_clusters", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterUid: text("cluster_uid").notNull(),
+  name: text("name").notNull(),
+  distribution: text("distribution"),
+  version: text("version"),
+  status: text("status", { enum: ["active", "disabled"] }).notNull().default("active"),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("kubernetes_clusters_scope_uid_uq").on(table.orgId, table.customerId, table.clusterUid),
+  uniqueIndex("kubernetes_clusters_scope_id_uq").on(table.orgId, table.customerId, table.id),
+  index("kubernetes_clusters_scope_status_idx").on(table.orgId, table.customerId, table.status, table.name),
+]);
+
+/** Immutable normalized scan publication; partial scans never replace the complete head. */
+export const kubernetesScanRuns = sqliteTable("kubernetes_scan_runs", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterId: text("cluster_id").notNull().references(() => kubernetesClusters.id),
+  status: text("status", { enum: ["complete", "partial", "failed"] }).notNull(),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  evidenceSha256: text("evidence_sha256").notNull(),
+  postureSha256: text("posture_sha256").notNull(),
+  resourceCount: integer("resource_count").notNull(),
+  findingCount: integer("finding_count").notNull(),
+  coverageCount: integer("coverage_count").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("kubernetes_scan_runs_scope_idempotency_uq")
+    .on(table.orgId, table.clusterId, table.idempotencyKey),
+  uniqueIndex("kubernetes_scan_runs_scope_id_uq")
+    .on(table.orgId, table.customerId, table.clusterId, table.id),
+  index("kubernetes_scan_runs_scope_time_idx")
+    .on(table.orgId, table.customerId, table.clusterId, table.collectedAt, table.id),
+]);
+
+export const kubernetesScanHeads = sqliteTable("kubernetes_scan_heads", {
+  clusterId: text("cluster_id").primaryKey().references(() => kubernetesClusters.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  scanRunId: text("scan_run_id").notNull().references(() => kubernetesScanRuns.id),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("kubernetes_scan_heads_scope_idx").on(table.orgId, table.customerId, table.clusterId),
+]);
+
+export const kubernetesScanResources = sqliteTable("kubernetes_scan_resources", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterId: text("cluster_id").notNull().references(() => kubernetesClusters.id),
+  scanRunId: text("scan_run_id").notNull().references(() => kubernetesScanRuns.id),
+  resourceKey: text("resource_key").notNull(),
+  kind: text("kind").notNull(),
+  namespace: text("namespace"),
+  name: text("name").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  evidenceSha256: text("evidence_sha256").notNull(),
+}, (table) => [
+  uniqueIndex("kubernetes_scan_resources_run_key_uq").on(table.scanRunId, table.resourceKey),
+  index("kubernetes_scan_resources_scope_kind_idx")
+    .on(table.orgId, table.customerId, table.clusterId, table.kind, table.namespace, table.name),
+]);
+
+export const kubernetesScanFindings = sqliteTable("kubernetes_scan_findings", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterId: text("cluster_id").notNull().references(() => kubernetesClusters.id),
+  scanRunId: text("scan_run_id").notNull().references(() => kubernetesScanRuns.id),
+  controlId: text("control_id").notNull(),
+  subject: text("subject").notNull(),
+  state: text("state", { enum: ["PASS", "FAIL", "UNKNOWN"] }).notNull(),
+  severity: text("severity", { enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] }).notNull(),
+  message: text("message").notNull(),
+  evidenceJson: text("evidence_json").notNull(),
+  findingSha256: text("finding_sha256").notNull(),
+}, (table) => [
+  uniqueIndex("kubernetes_scan_findings_run_control_subject_uq")
+    .on(table.scanRunId, table.controlId, table.subject),
+  index("kubernetes_scan_findings_scope_state_idx")
+    .on(table.orgId, table.customerId, table.clusterId, table.state, table.severity, table.controlId),
+]);
+
+export const kubernetesScanCoverage = sqliteTable("kubernetes_scan_coverage", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterId: text("cluster_id").notNull().references(() => kubernetesClusters.id),
+  scanRunId: text("scan_run_id").notNull().references(() => kubernetesScanRuns.id),
+  evidenceKind: text("evidence_kind").notNull(),
+  state: text("state", { enum: ["COMPLETE", "PARTIAL", "UNKNOWN", "FAILED"] }).notNull(),
+  itemsObserved: integer("items_observed").notNull(),
+  errorCode: text("error_code"),
+}, (table) => [
+  uniqueIndex("kubernetes_scan_coverage_run_kind_uq").on(table.scanRunId, table.evidenceKind),
+  index("kubernetes_scan_coverage_scope_state_idx")
+    .on(table.orgId, table.customerId, table.clusterId, table.state, table.evidenceKind),
+]);
+
+/** Immutable, sanitized Trivy Operator findings and SBOM summaries for one scan. */
+export const kubernetesScanScannerEvidence = sqliteTable("kubernetes_scan_scanner_evidence", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  clusterId: text("cluster_id").notNull().references(() => kubernetesClusters.id),
+  scanRunId: text("scan_run_id").notNull().references(() => kubernetesScanRuns.id),
+  findingsJson: text("findings_json").notNull(),
+  sbomsJson: text("sboms_json").notNull(),
+  evidenceSha256: text("evidence_sha256").notNull(),
+  findingCount: integer("finding_count").notNull(),
+  sbomCount: integer("sbom_count").notNull(),
+}, (table) => [
+  uniqueIndex("kubernetes_scan_scanner_evidence_run_uq").on(table.scanRunId),
+  index("kubernetes_scan_scanner_evidence_scope_idx")
+    .on(table.orgId, table.customerId, table.clusterId, table.scanRunId),
+]);

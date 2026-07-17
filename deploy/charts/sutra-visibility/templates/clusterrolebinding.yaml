@@ -1,0 +1,19 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sutra-visibility
+  labels:
+    app.kubernetes.io/name: sutra
+    app.kubernetes.io/component: visibility-access
+    app.kubernetes.io/managed-by: Helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sutra-visibility
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: {{ .Values.kubernetesGroup | quote }}
+  - kind: ServiceAccount
+    name: sutra-readonly
+    namespace: {{ .Release.Namespace }}

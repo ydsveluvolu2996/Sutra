@@ -72,11 +72,84 @@ export interface KubernetesResource {
 export interface KubernetesCollectorCoverage {
   readonly collectorKey: string;
   readonly apiPath: string;
-  readonly status: "succeeded" | "failed";
+  readonly status: "succeeded" | "failed" | "not_configured";
   readonly itemsObserved: number;
   readonly pagesObserved: number;
   readonly errorCode?: string;
   readonly message?: string;
+}
+
+export type TrivyOperatorSource =
+  | "vulnerability_report"
+  | "config_audit_report"
+  | "rbac_assessment_report"
+  | "cluster_rbac_assessment_report";
+
+export type TrivyOperatorSeverity = "critical" | "high" | "medium" | "low" | "unknown";
+
+export interface TrivyScannerProvenance {
+  readonly name: string;
+  readonly vendor: string;
+  readonly version: string;
+  readonly reportUid: string;
+  readonly reportResourceVersion: string | null;
+  readonly reportUpdatedAt: string | null;
+}
+
+export interface TrivyOperatorFinding {
+  readonly fingerprint: string;
+  readonly clusterId: string;
+  readonly source: TrivyOperatorSource;
+  readonly severity: TrivyOperatorSeverity;
+  readonly namespace: string | null;
+  readonly reportName: string;
+  readonly affectedResource: {
+    readonly kind: string | null;
+    readonly namespace: string | null;
+    readonly name: string | null;
+  };
+  readonly title: string;
+  readonly checkId: string | null;
+  readonly cveId: string | null;
+  readonly packageName: string | null;
+  readonly packageType: string | null;
+  readonly installedVersion: string | null;
+  readonly fixedVersion: string | null;
+  readonly target: string | null;
+  readonly score: number | null;
+  readonly remediation: string | null;
+  readonly scanner: TrivyScannerProvenance;
+}
+
+export interface TrivySbomComponent {
+  readonly fingerprint: string;
+  readonly type: string | null;
+  readonly name: string;
+  readonly version: string | null;
+  readonly packageUrl: string | null;
+}
+
+export interface TrivySbomEvidence {
+  readonly fingerprint: string;
+  readonly clusterId: string;
+  readonly namespace: string | null;
+  readonly reportName: string;
+  readonly affectedResource: {
+    readonly kind: string | null;
+    readonly namespace: string | null;
+    readonly name: string | null;
+  };
+  readonly artifact: {
+    readonly repository: string | null;
+    readonly digest: string | null;
+    readonly tag: string | null;
+  };
+  readonly bomFormat: string | null;
+  readonly specVersion: string | null;
+  readonly declaredComponentCount: number | null;
+  readonly declaredDependencyCount: number | null;
+  readonly components: readonly TrivySbomComponent[];
+  readonly scanner: TrivyScannerProvenance;
 }
 
 export interface KubernetesSnapshot {
@@ -86,4 +159,7 @@ export interface KubernetesSnapshot {
   readonly collectedAt: string;
   readonly resources: readonly KubernetesResource[];
   readonly coverage: readonly KubernetesCollectorCoverage[];
+  /** Optional evidence imported from exact Trivy Operator report CRDs. */
+  readonly trivyFindings: readonly TrivyOperatorFinding[];
+  readonly trivySboms: readonly TrivySbomEvidence[];
 }
