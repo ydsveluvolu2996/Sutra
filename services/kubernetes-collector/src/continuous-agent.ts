@@ -14,10 +14,13 @@ import {
 import { type HubbleFlowSource } from "./hubble-flow-source.ts";
 import { ReadOnlyKubernetesCollector } from "./collector.ts";
 import {
+  HttpFalcoGatewayHealthProbe,
   KubernetesDiscoveryModuleHealthProbe,
   mergeKubernetesModuleHealth,
+  type FalcoGatewayHealthProbe,
   type KubernetesModuleHealth,
   type KubernetesModuleHealthProbe,
+  type KubernetesModuleState,
 } from "./module-health.ts";
 import { toKubernetesEvidenceSnapshot } from "./posture-adapter.ts";
 
@@ -45,6 +48,10 @@ export interface KubernetesAgentConfiguration extends KubernetesAgentIdentity {
   };
   readonly moduleHealthProbe?: KubernetesModuleHealthProbe;
   readonly hubbleFlowSource?: HubbleFlowSource;
+  readonly falcoGateway?: {
+    readonly healthUrl: string;
+    readonly probe?: FalcoGatewayHealthProbe;
+  };
   readonly now?: () => number;
 }
 
@@ -89,6 +96,8 @@ export class ContinuousKubernetesAgent {
   private readonly now: () => number;
   private readonly server: URL;
   private readonly moduleHealthProbe: KubernetesModuleHealthProbe;
+  private readonly falcoGatewayUrl: URL | null;
+  private readonly falcoGatewayProbe: FalcoGatewayHealthProbe;
 
   public constructor(configuration: KubernetesAgentConfiguration) {
     if (
@@ -121,6 +130,43 @@ export class ContinuousKubernetesAgent {
       throw new Error("Kubernetes agent API server must use HTTPS");
     }
     this.moduleHealthProbe = configuration.moduleHealthProbe ?? new KubernetesDiscoveryModuleHealthProbe();
+    if (configuration.falcoGateway === undefined) {
+      this.falcoGatewayUrl = null;
+    } else {
+      const gatewayUrl = new URL(configuration.falcoGateway.healthUrl);
+      if (
+        (gatewayUrl.protocol !== "http:" && gatewayUrl.protocol !== "https:") ||
+        gatewayUrl.username !== "" ||
+        gatewayUrl.password !== "" ||
+        gatewayUrl.search !== "" ||
+        gatewayUrl.hash !== ""
+      ) {
+        throw new Error("Falco gateway health URL is invalid");
+      }
+      this.falcoGatewayUrl = gatewayUrl;
+    }
+    this.falcoGatewayProbe = configuration.falcoGateway?.probe ?? new HttpFalcoGatewayHealthProbe();
+  }
+
+  private async falcoGatewayState(): Promise<KubernetesModuleState | null> {
+    if (this.falcoGatewayUrl === null) return null;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      return await this.falcoGatewayProbe.inspect({
+        url: this.falcoGatewayUrl,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private withFalcoGateway(
+    modules: KubernetesModuleHealth,
+    gatewayState: KubernetesModuleState | null,
+  ): KubernetesAgentHeartbeat["modules"] {
+    return gatewayState === null ? modules : { ...modules, "falco-gateway": gatewayState };
   }
 
   public async runCycle(): Promise<void> {
@@ -167,9 +213,10 @@ export class ContinuousKubernetesAgent {
     } finally {
       clearTimeout(discoveryTimeout);
     }
+    const gatewayState = await this.falcoGatewayState();
     await this.configuration.controlChannel.heartbeat(
       credential,
-      this.heartbeat(credential.agentId, discovery, state),
+      this.heartbeat(credential.agentId, this.withFalcoGateway(discovery, gatewayState), state),
     );
     state = {
       ...state,
@@ -225,7 +272,7 @@ export class ContinuousKubernetesAgent {
     await this.configuration.stateStore.save(state);
     await this.configuration.controlChannel.heartbeat(
       credential,
-      this.heartbeat(credential.agentId, modules, state),
+      this.heartbeat(credential.agentId, this.withFalcoGateway(modules, gatewayState), state),
     );
 
     if (this.configuration.hubbleFlowSource !== undefined) {
@@ -273,7 +320,7 @@ export class ContinuousKubernetesAgent {
 
   private heartbeat(
     agentId: string,
-    modules: KubernetesModuleHealth,
+    modules: KubernetesAgentHeartbeat["modules"],
     state: KubernetesAgentState,
   ): KubernetesAgentHeartbeat {
     return {

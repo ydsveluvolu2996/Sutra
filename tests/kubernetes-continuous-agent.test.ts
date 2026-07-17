@@ -9,6 +9,7 @@ import {
   ContinuousKubernetesAgent,
   emptyKubernetesAgentState,
   FileKubernetesAgentStateStore,
+  HttpFalcoGatewayHealthProbe,
   HttpsKubernetesControlChannel,
   KubernetesDiscoveryModuleHealthProbe,
   mergeKubernetesModuleHealth,
@@ -294,6 +295,74 @@ test("a not-configured or empty flow source performs no hubble upload", async ()
       assert.equal(channel.uploads.length, 1, "the scan upload must still happen");
     }
   });
+});
+
+test("heartbeats report falco signing-gateway liveness when a health URL is configured", async () => {
+  await withKubernetesApi(async (url) => {
+    const state = new MemoryState();
+    const channel = new MemoryChannel();
+    const probed: string[] = [];
+    const instance = new ContinuousKubernetesAgent({
+      clusterId: "cluster_demo",
+      clusterName: "Demo",
+      clusterServerUrl: url,
+      agentVersion: "0.2.0-test",
+      capabilities: ["inventory.v1"],
+      scanIntervalMs: 5 * 60_000,
+      stateStore: state,
+      controlChannel: channel,
+      bootstrapToken: async () => bootstrap,
+      serviceAccountToken: async () => kubeToken,
+      deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+      moduleHealthProbe: { async inspect() { return healthyModules; } },
+      falcoGateway: {
+        healthUrl: "http://sutra-falco-gateway.sutra-falco.svc:8080",
+        probe: {
+          async inspect(input) {
+            probed.push(input.url.href);
+            return "AVAILABLE";
+          },
+        },
+      },
+      now: () => Date.parse("2026-07-17T12:00:00.000Z"),
+    });
+    await instance.runCycle();
+    assert.equal(probed.length, 1);
+    assert.equal(channel.heartbeats.length, 2);
+    for (const heartbeat of channel.heartbeats) {
+      assert.equal(heartbeat.modules["falco-gateway"], "AVAILABLE");
+    }
+    assert.throws(() => new ContinuousKubernetesAgent({
+      clusterId: "cluster_demo",
+      clusterName: "Demo",
+      clusterServerUrl: url,
+      agentVersion: "0.2.0-test",
+      capabilities: ["inventory.v1"],
+      scanIntervalMs: 5 * 60_000,
+      stateStore: state,
+      controlChannel: channel,
+      bootstrapToken: async () => bootstrap,
+      serviceAccountToken: async () => kubeToken,
+      deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+      falcoGateway: { healthUrl: "http://user:secret@gateway.example/readyz?x=1" },
+    }), /Falco gateway health URL is invalid/u);
+  });
+});
+
+test("falco gateway probe maps readiness statuses without sending credentials", async () => {
+  const seen: { url: string; headers: boolean }[] = [];
+  const probeWith = (status: number | Error) => new HttpFalcoGatewayHealthProbe(async (input) => {
+    seen.push({ url: input.url.href, headers: false });
+    if (status instanceof Error) throw status;
+    return status;
+  });
+  const url = new URL("http://sutra-falco-gateway.sutra-falco.svc:8080");
+  const signal = AbortSignal.timeout(1_000);
+  assert.equal(await probeWith(200).inspect({ url, signal }), "AVAILABLE");
+  assert.equal(await probeWith(503).inspect({ url, signal }), "DEGRADED");
+  assert.equal(await probeWith(404).inspect({ url, signal }), "DEGRADED");
+  assert.equal(await probeWith(new Error("unreachable")).inspect({ url, signal }), "UNKNOWN");
+  assert.ok(seen.every((entry) => entry.url.endsWith("/readyz")));
 });
 
 test("retry backoff is bounded and jittered", () => {
