@@ -68,7 +68,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check cfn-lint==1.53.0
 
       - name: Validate CloudFormation templates
-        run: cfn-lint infrastructure/local-collector-role.yaml infrastructure/customer-role-live-demo.yaml public/sutra-customer-role-live-demo.yaml
+        run: cfn-lint infrastructure/local-collector-role.yaml infrastructure/customer-role-live-demo.yaml infrastructure/hosted-identity.yaml public/sutra-customer-role-live-demo.yaml
 
       - name: Test PostgreSQL adapter and repositories
         run: pnpm db:postgres:test
