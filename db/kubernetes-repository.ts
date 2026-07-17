@@ -8,6 +8,7 @@ import {
 } from "../lib/kubernetes-posture";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
+import { normalizeObservedLicenses } from "../lib/kubernetes-sbom-license";
 import type {
   TrivyOperatorFinding,
   TrivySbomEvidence,
@@ -723,15 +724,31 @@ function normalizeScannerFinding(value: unknown): TrivyOperatorFinding {
 }
 
 function normalizeSbomComponent(value: unknown): TrivySbomEvidence["components"][number] {
-  const record = exactObject(value, ["fingerprint", "type", "name", "version", "packageUrl"]);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new KubernetesRepositoryError("INVALID_INPUT");
+  }
+  const record = value as Record<string, unknown>;
+  const keys = ["fingerprint", "type", "name", "version", "packageUrl", "licenses"];
+  const required = keys.slice(0, 5);
+  if (
+    required.some((key) => !(key in record)) ||
+    Object.keys(record).some((key) => !keys.includes(key))
+  ) throw new KubernetesRepositoryError("INVALID_INPUT");
   const fingerprint = boundedString(record.fingerprint, 64) ?? "";
   if (!HASH.test(fingerprint)) throw new KubernetesRepositoryError("INVALID_INPUT");
+  let licenses: readonly string[] | undefined;
+  try {
+    licenses = "licenses" in record ? normalizeObservedLicenses(record.licenses) : undefined;
+  } catch {
+    throw new KubernetesRepositoryError("INVALID_INPUT");
+  }
   return {
     fingerprint,
     type: boundedString(record.type, 128, true),
     name: boundedString(record.name, 256) ?? "",
     version: boundedString(record.version, 256, true),
     packageUrl: boundedString(record.packageUrl, 1_024, true),
+    ...(licenses === undefined ? {} : { licenses }),
   };
 }
 

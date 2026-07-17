@@ -6,6 +6,7 @@ import { appendAuditEvent } from "../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import type { NotificationDestinationConfig } from "../../../../lib/notification-destination-types";
+import { assessNotificationDeliveryHealth } from "../../../../lib/notification-delivery-health";
 import {
   buildSecurityNotificationPayloads,
   normalizeSecurityNotificationEvent,
@@ -85,13 +86,21 @@ export async function GET(request: Request): Promise<Response> {
       repository.listDestinations(authenticated.subject.orgId, scopedCustomerId),
       repository.listJobs(authenticated.subject.orgId, scopedCustomerId),
     ]);
+    const workerConfigured = process.env.SUTRA_NOTIFICATION_WORKER_CONFIGURED === "true";
     return jsonResponse({
       destinations,
       jobs,
       worker: {
-        configured: false,
-        message: "Delivery remains queued until the notification worker receives managed-secret and workload-IAM adapters.",
+        configured: workerConfigured,
+        message: workerConfigured
+          ? "The notification worker is configured. Delivery outcomes remain visible in the durable outbox."
+          : "Delivery remains queued until the notification worker receives managed-secret and workload-IAM adapters.",
       },
+      health: assessNotificationDeliveryHealth({
+        destinations,
+        jobs,
+        workerConfigured,
+      }),
     });
   } catch (error) {
     return errorResponse(error);

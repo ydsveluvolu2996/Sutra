@@ -127,6 +127,8 @@ export interface TrivySbomComponent {
   readonly name: string;
   readonly version: string | null;
   readonly packageUrl: string | null;
+  /** Exact license identifiers reported by the SBOM; never inferred. */
+  readonly licenses?: readonly string[];
 }
 
 export interface TrivySbomEvidence {

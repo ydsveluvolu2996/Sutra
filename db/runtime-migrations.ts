@@ -18,6 +18,7 @@ import kubernetesSupplyChainSchemaSql from "../drizzle/0016_kubernetes_supply_ch
 import notificationDestinationsOutboxSchemaSql from "../drizzle/0017_notification_destinations_outbox.sql?raw";
 import hubbleNetworkVisibilitySchemaSql from "../drizzle/0018_hubble_network_visibility.sql?raw";
 import runtimeEventCasesSchemaSql from "../drizzle/0019_runtime_event_cases.sql?raw";
+import kubernetesSbomLicensePolicySchemaSql from "../drizzle/0020_kubernetes_sbom_license_policy.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -53,6 +54,7 @@ const migrations = [
   { id: "0017_notification_destinations_outbox", statements: statementsFrom(notificationDestinationsOutboxSchemaSql) },
   { id: "0018_hubble_network_visibility", statements: statementsFrom(hubbleNetworkVisibilitySchemaSql) },
   { id: "0019_runtime_event_cases", statements: statementsFrom(runtimeEventCasesSchemaSql) },
+  { id: "0020_kubernetes_sbom_license_policy", statements: statementsFrom(kubernetesSbomLicensePolicySchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

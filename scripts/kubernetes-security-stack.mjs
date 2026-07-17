@@ -58,12 +58,14 @@ function parse(argv) {
     execute: false,
     allowCniChange: false,
     deleteNamespaces: false,
+    format: "text",
   };
   for (let index = 1; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
     else if (value === "--allow-cni-change") result.allowCniChange = true;
     else if (value === "--delete-namespaces") result.deleteNamespaces = true;
+    else if (value === "--format") result.format = argv[++index] ?? "";
     else if (value === "--context") result.context = argv[++index] ?? "";
     else if (value === "--modules") result.modules = (argv[++index] ?? "").split(",").filter(Boolean);
     else fail(`Unknown argument: ${value}`);
@@ -76,6 +78,7 @@ function parse(argv) {
     result.modules.some((moduleName) => !supported.includes(moduleName)) ||
     new Set(result.modules).size !== result.modules.length
   ) fail("Modules must be a unique comma-separated subset of cilium,trivy,kyverno,falco");
+  if (!new Set(["text", "json"]).has(result.format)) fail("Format must be text or json");
   if (result.modules.includes("cilium") && !result.allowCniChange && command !== "plan") {
     fail("Cilium changes the cluster datapath; review the plan and pass --allow-cni-change");
   }
@@ -168,7 +171,13 @@ async function preflight(options) {
   await run("kubectl", kubectlArgs(options, "version", "--output=json"));
   await run("helm", ["version", "--short"]);
   const nodes = JSON.parse(await run("kubectl", kubectlArgs(options, "get", "nodes", "-o", "json")));
-  if (!Array.isArray(nodes.items) || nodes.items.length < 1) fail("The cluster has no ready worker nodes");
+  if (!Array.isArray(nodes.items) || nodes.items.length < 1) fail("The cluster has no worker nodes");
+  const readyNodes = nodes.items.filter((node) =>
+    node?.status?.conditions?.some((condition) =>
+      condition?.type === "Ready" && condition?.status === "True"
+    )
+  );
+  if (readyNodes.length < 1) fail("The cluster has no ready worker nodes");
   if (options.modules.includes("cilium")) {
     await run("kubectl", kubectlArgs(options, "-n", "kube-system", "get", "daemonset", "aws-node", "-o", "name"));
     const provider = await run("kubectl", kubectlArgs(
@@ -230,7 +239,18 @@ async function applyModule(options, moduleName) {
   }
 }
 
+function validationTime() {
+  const configured = process.env.SUTRA_VALIDATION_TIME?.trim();
+  if (!configured) return new Date().toISOString();
+  const parsed = new Date(configured);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== configured) {
+    fail("SUTRA_VALIDATION_TIME must be an exact ISO-8601 timestamp");
+  }
+  return configured;
+}
+
 async function health(options) {
+  const checks = [];
   for (const moduleName of options.modules) {
     const item = definitions[moduleName];
     await run("helm", helmArgs(options, "status", item.release, "--namespace", item.namespace));
@@ -238,21 +258,55 @@ async function health(options) {
       options, "-n", item.namespace, "wait", "--for=condition=Ready", "pod",
       "-l", `app.kubernetes.io/instance=${item.release}`, "--timeout=5m",
     ));
+    checks.push({ module: moduleName, check: "helm-release", status: "passed" });
+    checks.push({ module: moduleName, check: "workload-readiness", status: "passed" });
     if (moduleName === "falco") {
       await run("kubectl", kubectlArgs(
         options, "-n", item.namespace, "rollout", "status",
         "deployment/sutra-falco-signing-gateway", "--timeout=5m",
       ));
+      checks.push({ module: moduleName, check: "signing-gateway-rollout", status: "passed" });
     }
     if (moduleName === "cilium") {
       await run("kubectl", kubectlArgs(
+        options, "-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=5m",
+      ));
+      await run("kubectl", kubectlArgs(
+        options, "-n", "kube-system", "rollout", "status", "deployment/cilium-operator", "--timeout=5m",
+      ));
+      await run("kubectl", kubectlArgs(
         options, "-n", "kube-system", "rollout", "status", "deployment/hubble-relay", "--timeout=5m",
       ));
+      checks.push({ module: moduleName, check: "cilium-datapath-rollout", status: "passed" });
+      checks.push({ module: moduleName, check: "cilium-operator-rollout", status: "passed" });
+      checks.push({ module: moduleName, check: "hubble-relay-rollout", status: "passed" });
     }
+  }
+  return {
+    schema: "sutra.kubernetes-module-health.v1",
+    generatedAt: validationTime(),
+    context: options.context || "current",
+    overallStatus: "passed",
+    modules: [...options.modules],
+    checks,
+  };
+}
+
+async function assertAwsCniHealthy(options) {
+  const raw = await run("kubectl", kubectlArgs(
+    options, "-n", "kube-system", "get", "daemonset", "aws-node", "-o", "json",
+  ));
+  const daemonset = JSON.parse(raw);
+  const desired = Number(daemonset?.status?.desiredNumberScheduled ?? 0);
+  const ready = Number(daemonset?.status?.numberReady ?? 0);
+  const unavailable = Number(daemonset?.status?.numberUnavailable ?? 0);
+  if (desired < 1 || ready !== desired || unavailable !== 0) {
+    fail("Refusing Cilium cleanup because the AWS VPC CNI aws-node DaemonSet is not fully ready");
   }
 }
 
 async function uninstall(options) {
+  if (options.modules.includes("cilium")) await assertAwsCniHealthy(options);
   for (const moduleName of [...options.modules].reverse()) {
     const item = definitions[moduleName];
     if (moduleName === "falco") {
@@ -279,6 +333,66 @@ async function uninstall(options) {
       ));
     }
   }
+  if (options.modules.includes("cilium")) {
+    await run("kubectl", kubectlArgs(
+      options, "-n", "kube-system", "rollout", "status", "daemonset/aws-node", "--timeout=5m",
+    ));
+  }
+}
+
+async function verifyCleanup(options) {
+  const checks = [];
+  for (const moduleName of options.modules) {
+    const item = definitions[moduleName];
+    try {
+      await run("helm", helmArgs(options, "status", item.release, "--namespace", item.namespace));
+      fail(`${moduleName} cleanup is incomplete: Helm release still exists`);
+    } catch (error) {
+      if (!String(error.message).includes("not found")) throw error;
+    }
+    checks.push({ module: moduleName, check: "helm-release-absent", status: "passed" });
+    if (moduleName === "falco") {
+      const result = await run("kubectl", kubectlArgs(
+        options, "-n", item.namespace, "get", "deployment",
+        "sutra-falco-signing-gateway", "--ignore-not-found", "-o", "name",
+      ));
+      if (result) fail("Falco cleanup is incomplete: signing gateway still exists");
+      checks.push({ module: moduleName, check: "signing-gateway-absent", status: "passed" });
+    }
+    if (moduleName === "kyverno") {
+      for (const policy of [
+        "sutra-workload-security-audit",
+        "sutra-workload-reliability-audit",
+        "sutra-image-supply-chain-audit",
+      ]) {
+        const result = await run("kubectl", kubectlArgs(
+          options, "get", "clusterpolicy", policy, "--ignore-not-found", "-o", "name",
+        ));
+        if (result) fail(`Kyverno cleanup is incomplete: ${policy} still exists`);
+      }
+      checks.push({ module: moduleName, check: "audit-policies-absent", status: "passed" });
+    }
+  }
+  if (options.modules.includes("cilium")) {
+    await assertAwsCniHealthy(options);
+    checks.push({ module: "cilium", check: "aws-vpc-cni-ready", status: "passed" });
+  }
+  return {
+    schema: "sutra.kubernetes-module-cleanup.v1",
+    generatedAt: validationTime(),
+    context: options.context || "current",
+    overallStatus: "passed",
+    modules: [...options.modules],
+    checks,
+  };
+}
+
+function outputEvidence(evidence, format, successMessage) {
+  if (format === "json") {
+    process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);
+  } else {
+    process.stdout.write(`${successMessage}\n`);
+  }
 }
 
 const options = parse(process.argv.slice(2));
@@ -297,12 +411,17 @@ if (options.command === "plan") {
 } else if (options.command === "apply") {
   await preflight(options);
   for (const moduleName of options.modules) await applyModule(options, moduleName);
-  await health(options);
-  process.stdout.write("Selected Kubernetes security modules are installed and healthy.\n");
+  const evidence = await health(options);
+  outputEvidence(evidence, options.format, "Selected Kubernetes security modules are installed and healthy.");
 } else if (options.command === "health") {
-  await health(options);
-  process.stdout.write("Selected Kubernetes security modules are healthy.\n");
+  const evidence = await health(options);
+  outputEvidence(evidence, options.format, "Selected Kubernetes security modules are healthy.");
 } else {
   await uninstall(options);
-  process.stdout.write("Selected Kubernetes security modules were removed in reverse order.\n");
+  const evidence = await verifyCleanup(options);
+  outputEvidence(
+    evidence,
+    options.format,
+    "Selected Kubernetes security modules were removed and cleanup was verified in reverse order.",
+  );
 }

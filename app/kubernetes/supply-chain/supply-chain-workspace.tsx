@@ -14,6 +14,82 @@ interface SupplyChainBody {
   readonly error?: { readonly message?: string };
 }
 
+interface SbomHistoryBody {
+  readonly schemaVersion: "sutra.kubernetes-sbom-history.v1";
+  readonly history: readonly {
+    readonly scanRunId: string;
+    readonly collectedAt: string;
+    readonly reportFingerprint: string;
+    readonly namespace: string | null;
+    readonly reportName: string;
+    readonly imageRepository: string | null;
+    readonly imageDigest: string | null;
+    readonly format: string | null;
+    readonly specVersion: string | null;
+    readonly componentCount: number;
+    readonly declaredComponentCount: number | null;
+    readonly scannerName: string;
+    readonly scannerVersion: string;
+  }[];
+}
+
+interface ComponentSearchBody {
+  readonly schemaVersion: "sutra.kubernetes-sbom-component-search.v1";
+  readonly matches: readonly {
+    readonly scanRunId: string;
+    readonly collectedAt: string;
+    readonly imageRepository: string | null;
+    readonly imageDigest: string | null;
+    readonly namespace: string | null;
+    readonly component: {
+      readonly fingerprint: string;
+      readonly type: string | null;
+      readonly name: string;
+      readonly version: string | null;
+      readonly packageUrl: string | null;
+      readonly licenses: readonly string[];
+    };
+  }[];
+  readonly componentsInspected: number;
+  readonly truncated: boolean;
+}
+
+interface LicensePolicyBody {
+  readonly schemaVersion: "sutra.kubernetes-sbom-license-policies.v1";
+  readonly policies: readonly {
+    readonly id: string;
+    readonly version: number;
+    readonly policySha256: string;
+    readonly policy: {
+      readonly name: string;
+      readonly deniedLicenses: readonly string[];
+      readonly allowedLicenses: readonly string[];
+      readonly requireIdentifiedLicense: boolean;
+    };
+  }[];
+}
+
+interface LicenseEvaluationBody {
+  readonly schemaVersion: "sutra.kubernetes-sbom-license-evaluation.v1";
+  readonly policy: LicensePolicyBody["policies"][number];
+  readonly scanRunId: string | null;
+  readonly collectedAt: string | null;
+  readonly evaluation: {
+    readonly status: "pass" | "fail" | "not_evaluated";
+    readonly componentsEvaluated: number;
+    readonly compliantComponents: number;
+    readonly truncated: boolean;
+    readonly claimBoundary: "OBSERVED_SBOM_LICENSE_METADATA_ONLY";
+    readonly violations: readonly {
+      readonly componentFingerprint: string;
+      readonly componentName: string;
+      readonly componentVersion: string | null;
+      readonly reason: "DENIED_LICENSE" | "UNIDENTIFIED_LICENSE" | "NOT_IN_ALLOWLIST";
+      readonly observedLicenses: readonly string[];
+    }[];
+  };
+}
+
 function imageReference(evidence: KubernetesSupplyChainEvidence): string {
   return `${evidence.image.repository}@${evidence.image.digest}`;
 }
@@ -25,6 +101,16 @@ export function SupplyChainWorkspace() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [componentQuery, setComponentQuery] = useState("");
+  const [history, setHistory] = useState<SbomHistoryBody["history"]>([]);
+  const [componentSearch, setComponentSearch] = useState<ComponentSearchBody | null>(null);
+  const [policies, setPolicies] = useState<LicensePolicyBody["policies"]>([]);
+  const [licenseEvaluation, setLicenseEvaluation] = useState<LicenseEvaluationBody | null>(null);
+  const [policyName, setPolicyName] = useState("Production workload license policy");
+  const [deniedLicenses, setDeniedLicenses] = useState("GPL-3.0-only, AGPL-3.0-only");
+  const [allowedLicenses, setAllowedLicenses] = useState("");
+  const [requireIdentifiedLicense, setRequireIdentifiedLicense] = useState(true);
+  const [workflowBusy, setWorkflowBusy] = useState(false);
   const [selectedClusterId, setSelectedClusterId] = useState("");
   const activeClusters = useMemo(
     () => kubernetes.clusters.filter((cluster) => cluster.status === "active"),
@@ -55,12 +141,106 @@ export function SupplyChainWorkspace() {
         !Array.isArray(body.evidence)
       ) throw new Error(body?.error?.message ?? "Supply-chain evidence could not be loaded");
       setPayload(body);
+      const scope = `connectionId=${encodeURIComponent(connectionId)}&clusterId=${encodeURIComponent(activeCluster.id)}`;
+      const [historyResponse, policyResponse] = await Promise.all([
+        fetch(`/api/v1/kubernetes/sboms?${scope}&view=history&limit=20`, { cache: "no-store" }),
+        fetch(`/api/v1/kubernetes/sboms?${scope}&view=policies`, { cache: "no-store" }),
+      ]);
+      const historyBody = await historyResponse.json().catch(() => null) as SbomHistoryBody | null;
+      const policyBody = await policyResponse.json().catch(() => null) as LicensePolicyBody | null;
+      if (
+        !historyResponse.ok || historyBody?.schemaVersion !== "sutra.kubernetes-sbom-history.v1" ||
+        !policyResponse.ok || policyBody?.schemaVersion !== "sutra.kubernetes-sbom-license-policies.v1"
+      ) throw new Error("SBOM history or license policy state could not be loaded");
+      setHistory(historyBody.history);
+      setPolicies(policyBody.policies);
       setError(null);
     } catch (caught) {
       setPayload(null);
       setError(caught instanceof Error ? caught.message : "Supply-chain evidence could not be loaded");
     } finally {
       setLoading(false);
+    }
+  }, [activeCluster, connectionId]);
+
+  const searchComponents = useCallback(async () => {
+    const normalized = componentQuery.trim();
+    if (connectionId === null || activeCluster === null || normalized.length < 2) {
+      setComponentSearch(null);
+      return;
+    }
+    setWorkflowBusy(true);
+    try {
+      const response = await fetch(
+        `/api/v1/kubernetes/sboms?connectionId=${encodeURIComponent(connectionId)}&clusterId=${encodeURIComponent(activeCluster.id)}&view=components&query=${encodeURIComponent(normalized)}&limit=100&scanLimit=20`,
+        { cache: "no-store" },
+      );
+      const body = await response.json().catch(() => null) as ComponentSearchBody | null;
+      if (!response.ok || body?.schemaVersion !== "sutra.kubernetes-sbom-component-search.v1") {
+        throw new Error("Component search could not be completed");
+      }
+      setComponentSearch(body);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Component search could not be completed");
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }, [activeCluster, componentQuery, connectionId]);
+
+  const publishPolicy = useCallback(async () => {
+    if (connectionId === null || activeCluster === null) return;
+    const existing = policies.find((item) => item.policy.name === policyName);
+    const values = (text: string) => text.split(",").map((item) => item.trim()).filter(Boolean);
+    setWorkflowBusy(true);
+    try {
+      const response = await fetch("/api/v1/kubernetes/sboms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: "publish-license-policy-version",
+          connectionId,
+          clusterId: activeCluster.id,
+          expectedVersion: existing?.version ?? 0,
+          policy: {
+            name: policyName,
+            deniedLicenses: values(deniedLicenses),
+            allowedLicenses: values(allowedLicenses),
+            requireIdentifiedLicense,
+          },
+        }),
+      });
+      const body = await response.json().catch(() => null) as { readonly error?: { readonly message?: string } } | null;
+      if (!response.ok) throw new Error(body?.error?.message ?? "License policy version could not be published");
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "License policy version could not be published");
+    } finally {
+      setWorkflowBusy(false);
+    }
+  }, [
+    activeCluster, allowedLicenses, connectionId, deniedLicenses, policies,
+    policyName, refresh, requireIdentifiedLicense,
+  ]);
+
+  const evaluatePolicy = useCallback(async (policyId: string) => {
+    if (connectionId === null || activeCluster === null) return;
+    setWorkflowBusy(true);
+    try {
+      const response = await fetch(
+        `/api/v1/kubernetes/sboms?connectionId=${encodeURIComponent(connectionId)}&clusterId=${encodeURIComponent(activeCluster.id)}&view=evaluation&policyId=${encodeURIComponent(policyId)}&limit=2000`,
+        { cache: "no-store" },
+      );
+      const body = await response.json().catch(() => null) as LicenseEvaluationBody | null;
+      if (!response.ok || body?.schemaVersion !== "sutra.kubernetes-sbom-license-evaluation.v1") {
+        throw new Error("License policy evaluation could not be completed");
+      }
+      setLicenseEvaluation(body);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "License policy evaluation could not be completed");
+    } finally {
+      setWorkflowBusy(false);
     }
   }, [activeCluster, connectionId]);
 
@@ -91,7 +271,7 @@ export function SupplyChainWorkspace() {
         <div><p className="eyebrow">Kubernetes · Software supply chain</p><h1>Images, SBOMs & provenance</h1><p className="page-subtitle">Review immutable image-digest evidence normalized from Trivy, SBOM metadata, Cosign verification and build provenance signals.</p></div>
         <div className="heading-actions"><Link className="button button-secondary" href="/kubernetes/admission">Admission governance</Link><Link className="button button-primary" href="/kubernetes">Kubernetes overview</Link></div>
       </section>
-      <div className="trust-strip" role="note"><span className="trust-icon">D</span><span><strong>Digest-bound evidence only.</strong> Sutra stores vulnerability counts, SBOM document hashes and bounded verifier identities for one immutable image digest. Raw manifests, package lists, attestations, certificates, tokens and registry credentials are not retained or requested by this browser.</span></div>
+      <div className="trust-strip" role="note"><span className="trust-icon">D</span><span><strong>Digest-bound evidence only.</strong> Sutra stores vulnerability counts, SBOM document hashes, bounded component metadata and observed license identifiers for immutable scanner snapshots. Raw manifests, attestations, certificates, tokens and registry credentials are not retained or requested by this browser.</span></div>
       {pilotError || kubernetes.error || error ? <div className="page-alert page-alert-error" role="alert"><strong>Supply-chain workspace unavailable</strong><span>{pilotError ?? kubernetes.error ?? error}</span><button onClick={() => void Promise.all([refreshPilot(), kubernetes.refresh(), refresh()])} type="button">Retry</button></div> : null}
       {pilotLoading || kubernetes.loading || loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading normalized image evidence…</div> : null}
       {!pilotLoading && !kubernetes.loading && !loading ? <>
@@ -122,6 +302,33 @@ export function SupplyChainWorkspace() {
             </details>)}</div>
             {filtered.length === 0 ? <div className="empty-state"><strong>No matching digest evidence</strong><span>Adjust the filter; stored evidence was not modified.</span></div> : null}
           </> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">SC</span><h2>Supply-chain evidence is not configured</h2><p>{activeCluster ? `${activeCluster.name} is registered, but no normalized, digest-bound Trivy/SBOM/Cosign/provenance artifact exists in this authorized tenant scope.` : "Register and scan a Kubernetes cluster before publishing supply-chain evidence."} Sutra does not infer verification from an image name or tag.</p><Link className="button button-secondary" href="/kubernetes/coverage">Review collector coverage</Link></section>}
+        </section>
+        <section className="panel supply-chain-panel">
+          <div className="panel-heading"><div><p className="eyebrow">Immutable scan timeline</p><h2>SBOM history</h2></div><span className="status-pill">{history.length} report{history.length === 1 ? "" : "s"}</span></div>
+          {history.length > 0 ? <div className="supply-chain-list">{history.map((item) => <article className="supply-chain-card" key={`${item.scanRunId}:${item.reportFingerprint}`}>
+            <div className="supply-chain-detail">
+              <section><h3>{item.imageRepository ?? item.reportName}</h3><dl><div><dt>Collected</dt><dd>{formatTimestamp(item.collectedAt)}</dd></div><div><dt>Namespace</dt><dd>{item.namespace ?? "cluster"}</dd></div><div><dt>Digest</dt><dd><code>{item.imageDigest ?? "Not reported"}</code></dd></div></dl></section>
+              <section><h3>Document evidence</h3><dl><div><dt>Format</dt><dd>{item.format ?? "Not reported"} {item.specVersion ?? ""}</dd></div><div><dt>Stored components</dt><dd>{item.componentCount}</dd></div><div><dt>Declared components</dt><dd>{item.declaredComponentCount ?? "Not reported"}</dd></div><div><dt>Scanner</dt><dd>{item.scannerName} {item.scannerVersion}</dd></div></dl></section>
+            </div>
+          </article>)}</div> : <div className="empty-state"><strong>No historical SBOM evidence</strong><span>Sutra reports only immutable scanner snapshots received in this tenant and cluster scope.</span></div>}
+        </section>
+        <section className="panel supply-chain-panel">
+          <div className="panel-heading"><div><p className="eyebrow">Bounded evidence search</p><h2>Components and licenses</h2></div>{componentSearch ? <span className="status-pill">{componentSearch.componentsInspected} inspected</span> : null}</div>
+          <form className="supply-chain-panel-actions" onSubmit={(event) => { event.preventDefault(); void searchComponents(); }}>
+            <label className="search-field supply-chain-search"><span className="sr-only">Search SBOM components</span><input className="filter-control" minLength={2} maxLength={128} placeholder="Search package, version, purl or observed license" value={componentQuery} onChange={(event) => setComponentQuery(event.target.value)} /></label>
+            <button className="button button-secondary" disabled={workflowBusy || componentQuery.trim().length < 2} type="submit">Search evidence</button>
+          </form>
+          {componentSearch ? <>{componentSearch.truncated ? <div className="page-alert" role="note"><strong>Bounded result</strong><span>The result limit was reached. Refine the search to narrow the evidence set.</span></div> : null}<div className="supply-chain-list">{componentSearch.matches.map((item) => <article className="supply-chain-card" key={`${item.scanRunId}:${item.component.fingerprint}`}>
+            <div className="supply-chain-detail"><section><h3>{item.component.name}</h3><dl><div><dt>Version</dt><dd>{item.component.version ?? "Not reported"}</dd></div><div><dt>Type</dt><dd>{item.component.type ?? "Not reported"}</dd></div><div><dt>Observed licenses</dt><dd>{item.component.licenses.join(", ") || "Not reported"}</dd></div><div><dt>Package URL</dt><dd><code>{item.component.packageUrl ?? "Not reported"}</code></dd></div></dl></section><section><h3>Evidence source</h3><dl><div><dt>Image</dt><dd>{item.imageRepository ?? "Not reported"}</dd></div><div><dt>Digest</dt><dd><code>{item.imageDigest ?? "Not reported"}</code></dd></div><div><dt>Collected</dt><dd>{formatTimestamp(item.collectedAt)}</dd></div><div><dt>Namespace</dt><dd>{item.namespace ?? "cluster"}</dd></div></dl></section></div>
+          </article>)}</div>{componentSearch.matches.length === 0 ? <div className="empty-state"><strong>No component evidence matched</strong><span>No package or license metadata was inferred.</span></div> : null}</> : <p className="panel-footnote">Searches inspect at most 20 recent snapshots and 25,000 sanitized component records.</p>}
+        </section>
+        <section className="panel supply-chain-panel">
+          <div className="panel-heading"><div><p className="eyebrow">Versioned governance</p><h2>License policy</h2></div><span className="status-pill">{policies.length} active polic{policies.length === 1 ? "y" : "ies"}</span></div>
+          <div className="supply-chain-detail">
+            <section><h3>Publish a policy version</h3><label className="search-field"><span>Policy name</span><input className="filter-control" maxLength={128} value={policyName} onChange={(event) => setPolicyName(event.target.value)} /></label><label className="search-field"><span>Denied identifiers</span><input className="filter-control" placeholder="GPL-3.0-only, AGPL-3.0-only" value={deniedLicenses} onChange={(event) => setDeniedLicenses(event.target.value)} /></label><label className="search-field"><span>Optional allowlist</span><input className="filter-control" placeholder="Apache-2.0, MIT" value={allowedLicenses} onChange={(event) => setAllowedLicenses(event.target.value)} /></label><label><input checked={requireIdentifiedLicense} onChange={(event) => setRequireIdentifiedLicense(event.target.checked)} type="checkbox" /> Require an observed license identifier</label><button className="button button-primary" disabled={workflowBusy || policyName.trim().length < 3} onClick={() => void publishPolicy()} type="button">Publish immutable version</button></section>
+            <section><h3>Current policies</h3>{policies.length > 0 ? <dl>{policies.map((item) => <div key={item.id}><dt>{item.policy.name} · v{item.version}</dt><dd>Denied: {item.policy.deniedLicenses.join(", ") || "none"} · Allowed: {item.policy.allowedLicenses.join(", ") || "any reported identifier"} · Unknown: {item.policy.requireIdentifiedLicense ? "fail" : "allowed"} <button className="button button-secondary" disabled={workflowBusy} onClick={() => void evaluatePolicy(item.id)} type="button">Evaluate latest snapshot</button></dd></div>)}</dl> : <p className="panel-footnote">No policy has been published. A policy evaluates only license identifiers observed in imported SBOM evidence; it is not legal advice.</p>}</section>
+          </div>
+          {licenseEvaluation ? <div className={`page-alert ${licenseEvaluation.evaluation.status === "fail" ? "page-alert-error" : ""}`} role="status"><strong>{licenseEvaluation.policy.policy.name}: {licenseEvaluation.evaluation.status}</strong><span>{licenseEvaluation.scanRunId === null ? "No scanner snapshot was available; this result is not evidence of compliance." : `${licenseEvaluation.evaluation.compliantComponents}/${licenseEvaluation.evaluation.componentsEvaluated} components passed against observed license metadata from ${formatTimestamp(licenseEvaluation.collectedAt ?? "")}.`} {licenseEvaluation.evaluation.violations.length} violation{licenseEvaluation.evaluation.violations.length === 1 ? "" : "s"}.</span></div> : null}
         </section>
       </> : null}
     </>
