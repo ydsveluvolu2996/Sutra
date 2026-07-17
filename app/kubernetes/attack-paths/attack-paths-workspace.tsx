@@ -15,6 +15,7 @@ import { usePilotState } from "../../components/use-pilot-state";
 import { formatTimestamp } from "../../components/use-pilot-state";
 import { useKubernetesEvidence } from "../use-kubernetes-evidence";
 import { SecurityGraph } from "./security-graph";
+import { buildKubernetesRiskQueue, toRiskQueueCsv } from "../../../lib/kubernetes-risk-queue";
 
 const typeLabels: Readonly<Record<AttackPathType, string>> = {
   cloud_to_kubernetes: "Cloud → Kubernetes → AWS",
@@ -171,6 +172,38 @@ export function AttackPathsWorkspace() {
     findings: kubernetes.projectionInput.findings,
     ...signals,
   }), [kubernetes.projectionInput, signals]);
+  const riskQueue = useMemo(() => buildKubernetesRiskQueue({
+    attackPaths: projection.paths,
+    postureFindings: (kubernetes.workspace?.findings ?? []).map((finding) => ({
+      controlId: finding.controlId,
+      subject: finding.subject,
+      state: finding.state,
+      severity: finding.severity,
+      message: finding.message,
+    })),
+    scannerFindings: (kubernetes.workspace?.scannerEvidence.findings ?? []).map((finding) => ({
+      fingerprint: finding.fingerprint,
+      severity: finding.severity,
+      title: finding.title,
+      cveId: finding.cveId,
+      checkId: finding.checkId,
+      fixedVersion: finding.fixedVersion,
+      packageName: finding.packageName,
+      affectedResource: { namespace: finding.affectedResource.namespace, name: finding.affectedResource.name },
+    })),
+  }), [projection.paths, kubernetes.workspace]);
+  const downloadRiskQueue = useCallback((format: "csv" | "json") => {
+    const body = format === "csv" ? toRiskQueueCsv(riskQueue) : JSON.stringify(riskQueue, null, 2);
+    const blob = new Blob([body], { type: format === "csv" ? "text/csv" : "application/json" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = `sutra-kubernetes-risk-queue.${format}`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(href);
+  }, [riskQueue]);
   const paths = type === "all" ? projection.paths : projection.paths.filter((path) => path.type === type);
   const critical = projection.paths.filter((path) => path.risk === "critical").length;
   const evidencedEdges = new Set(projection.paths.flatMap((path) =>
@@ -193,6 +226,30 @@ export function AttackPathsWorkspace() {
           <article><small>Critical paths</small><strong>{critical}</strong><span>Score 80 or above</span></article>
           <article><small>Cited edges</small><strong>{evidencedEdges}</strong><span>Used by displayed paths</span></article>
           <article><small>Correlated signals</small><strong>{projection.correlatedRuntimeEventCount + projection.correlatedNetworkFlowCount + projection.correlatedSupplyChainEvidenceCount}</strong><span>{projection.correlatedRuntimeEventCount} runtime · {projection.correlatedNetworkFlowCount} flow · {projection.correlatedSupplyChainEvidenceCount} image</span></article>
+        </section>
+        <section className="panel attack-path-workspace">
+          <div className="panel-heading">
+            <div><p className="eyebrow">Prioritized remediation queue</p><h2>Triage worklist</h2></div>
+            <div className="heading-actions">
+              <span className="result-count">{riskQueue.totals.items} item{riskQueue.totals.items === 1 ? "" : "s"}</span>
+              <button className="button button-secondary" disabled={riskQueue.totals.items === 0} onClick={() => downloadRiskQueue("csv")} type="button">Export CSV</button>
+              <button className="button button-secondary" disabled={riskQueue.totals.items === 0} onClick={() => downloadRiskQueue("json")} type="button">Export JSON</button>
+            </div>
+          </div>
+          <div className="trust-strip" role="note"><span className="trust-icon">Q</span><span>{riskQueue.disclaimer}</span></div>
+          {riskQueue.items.length > 0 ? <div className="risk-queue-list">
+            {riskQueue.items.slice(0, 50).map((item, index) => <article className="risk-queue-item" key={item.id}>
+              <span className="risk-queue-rank">{index + 1}</span>
+              <span className={`severity-badge severity-${item.severity}`}>{item.severity}</span>
+              <div className="risk-queue-body">
+                <strong>{item.title}</strong>
+                <small>{item.source.replaceAll("_", " ")} · {item.subject}{item.blastRadius > 0 ? ` · blast radius ${item.blastRadius}` : ""}</small>
+                <span>{item.recommendation}</span>
+              </div>
+              <div className="risk-queue-priority"><strong>{item.priority}</strong><small>priority</small></div>
+            </article>)}
+          </div> : <div className="empty-state"><strong>No prioritized risks in the current evidence</strong><span>No attack path, failing posture control, or scanner finding is present. This does not prove absence of risk; it may reflect collector coverage.</span></div>}
+          {riskQueue.items.length > 50 ? <p className="panel-footnote">Showing the top 50 of {riskQueue.items.length} ranked items; export for the full list.</p> : null}
         </section>
         <section className="panel attack-path-workspace">
           <div className="panel-heading">
