@@ -4,7 +4,7 @@ import {
   securityEventCollectionWindow,
   updateSecurityDetectionStatus,
 } from "../../../../db/security-event-repository";
-import { CURRENT_PILOT_PERMISSION_PACK, getConnection } from "../../../../db/pilot-repository";
+import { CURRENT_PILOT_PERMISSION_PACK, getConnectionForOrg } from "../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import {
@@ -52,7 +52,7 @@ export async function GET(request: Request): Promise<Response> {
     const limit = Number(rawLimit);
     if (limit < 1 || limit > 200) invalid();
     const authenticated = await requireApiSession(request);
-    const connection = await getConnection(selectedConnectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, selectedConnectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const workspace = await getSecurityEventsWorkspace({
@@ -80,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
       Object.keys(body).length !== 1 || !("connectionId" in body)
     ) invalid();
     const selectedConnectionId = connectionId((body as { connectionId?: unknown }).connectionId);
-    const connection = await getConnection(selectedConnectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, selectedConnectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "sync:run", connection.customerId);
     if (connection.sourceKind !== "aws_trust_role" || connection.status !== "active") {
@@ -157,7 +157,7 @@ export async function PATCH(request: Request): Promise<Response> {
       ? null
       : typeof record.note === "string" ? record.note.trim() : invalid();
     if (note !== null && (note.length > 500 || /[\u0000-\u001f\u007f]/u.test(note))) invalid();
-    const connection = await getConnection(selectedConnectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, selectedConnectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "finding:manage", connection.customerId);
     const detection = await updateSecurityDetectionStatus({

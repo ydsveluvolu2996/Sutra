@@ -1,4 +1,4 @@
-import { appendAuditEvent, CURRENT_PILOT_PERMISSION_PACK, getConnection, getStoredConnectionSecret, LOCAL_ORG_ID } from "../../../../db/pilot-repository";
+import { appendAuditEvent, CURRENT_PILOT_PERMISSION_PACK, getConnectionForOrg, getStoredConnectionSecretForOrg } from "../../../../db/pilot-repository";
 import { getLatestCostSnapshot, persistCostSnapshot } from "../../../../db/cost-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
@@ -28,7 +28,7 @@ export async function GET(request: Request): Promise<Response> {
     }
     const connectionId = parseConnectionId(url.searchParams.get("connectionId"));
     const authenticated = await requireApiSession(request);
-    const connection = await getConnection(connectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const snapshot = await getLatestCostSnapshot({
@@ -52,7 +52,7 @@ export async function POST(request: Request): Promise<Response> {
       Object.keys(body).length !== 1 || !("connectionId" in body)
     ) throw Object.assign(new Error("The cost request is invalid"), { code: "INVALID_INPUT" });
     const connectionId = parseConnectionId((body as { connectionId?: unknown }).connectionId);
-    const stored = await getStoredConnectionSecret(connectionId);
+    const stored = await getStoredConnectionSecretForOrg(authenticated.subject.orgId, connectionId);
     assertSessionCapability(authenticated, "sync:run", stored.customerId);
     if (stored.status !== "active") {
       throw Object.assign(new Error("Activate the AWS connection before collecting cost evidence"), { code: "INVALID_STATE" });
@@ -66,7 +66,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const jobId = `cost_${crypto.randomUUID().replaceAll("-", "")}`;
     const payload = await runCollectorCostCollection({
-      tenantId: LOCAL_ORG_ID,
+      tenantId: authenticated.subject.orgId,
       connectionId,
       jobId,
       accountId: stored.accountId,
@@ -79,6 +79,7 @@ export async function POST(request: Request): Promise<Response> {
       payload,
     });
     await appendAuditEvent({
+      orgId: authenticated.subject.orgId,
       actorId: authenticated.subject.userId,
       action: "aws.costs.collected",
       targetType: "aws_connection",

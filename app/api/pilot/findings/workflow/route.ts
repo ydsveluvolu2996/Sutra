@@ -1,4 +1,4 @@
-import { getConnection, setFindingWorkflowStatus } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, setFindingWorkflowStatus } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
@@ -46,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     // Workflow authorization needs only tenant-scoped connection metadata. It
     // must not load AWS trust ciphertext, and simulated connections do not have
     // such a secret by design.
-    const connection = await getConnection(body.connectionId);
+    const connection = await getConnectionForOrg(actor.orgId, body.connectionId);
     if (connection === null) {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }

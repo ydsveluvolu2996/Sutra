@@ -1,4 +1,5 @@
-import { revokeLocalSession } from "../../../../db/auth-repository";
+import { getLocalSession } from "../../../../db/auth-repository";
+import { revokeManagedSession } from "../../../../db/session-administration-repository";
 import {
   expiredSessionCookie,
   sessionTokenFromRequest,
@@ -12,7 +13,10 @@ export async function POST(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
     const token = sessionTokenFromRequest(request);
-    if (token !== null) await revokeLocalSession(token);
+    if (token !== null) {
+      const authenticated = await getLocalSession(token);
+      if (authenticated !== null) await revokeManagedSession(authenticated, authenticated.session.id);
+    }
     return jsonResponse(
       { signedOut: true },
       { headers: { "set-cookie": expiredSessionCookie(request) } },

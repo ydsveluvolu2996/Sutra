@@ -31,6 +31,12 @@ function slug(value: string, customerId: string): string {
 export async function POST(request: Request): Promise<Response> {
   try {
     const actor = await requirePilotActor(request, "customer:create");
+    if (actor.orgId !== LOCAL_ORG_ID) {
+      throw Object.assign(
+        new Error("Hosted AWS onboarding remains disabled until the tenant-scoped durable job adapter is active"),
+        { code: "AUTHORIZATION_DENIED" },
+      );
+    }
     assertSameOrigin(request);
     const body = parseAwsConnectionDraftRequest(await readBoundedJson(request));
     // Fetch and authenticate the immutable deployment artifact before

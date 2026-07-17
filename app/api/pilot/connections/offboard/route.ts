@@ -1,7 +1,6 @@
 import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
-  getConnection,
-  LOCAL_ORG_ID,
+  getConnectionForOrg,
   offboardAwsConnection,
 } from "../../../../../db/pilot-repository";
 import {
@@ -27,7 +26,7 @@ export async function POST(request: Request): Promise<Response> {
     assertSameOrigin(request);
     const body = parseOffboardConnectionRequest(await readBoundedJson(request));
     const connectionId = body.connectionId;
-    const current = await getConnection(connectionId);
+    const current = await getConnectionForOrg(actor.orgId, connectionId);
     if (current === null) {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }
@@ -40,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!alreadyOffboarded) requireRecentMfa(actor.authenticated);
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
       transitionControlPlane: () => offboardAwsConnection(connectionId, actor.id),
-      reconcileCollector: () => offboardCollectorConnection({ tenantId: LOCAL_ORG_ID, connectionId }),
+      reconcileCollector: () => offboardCollectorConnection({ tenantId: actor.orgId, connectionId }),
     });
     return jsonResponse({
       connection: result.connection,

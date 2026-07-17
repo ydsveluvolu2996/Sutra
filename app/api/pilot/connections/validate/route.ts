@@ -1,6 +1,5 @@
 import {
-  getStoredConnectionSecret,
-  LOCAL_ORG_ID,
+  getStoredConnectionSecretForOrg,
   markConnectionNeedsAttention,
   markConnectionValidated,
   markConnectionValidating,
@@ -42,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     actorId = actor.id;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
-    const stored = await getStoredConnectionSecret(connectionId);
+    const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
     const health = await getCollectorHealth(stored.partition);
     if (health.mode !== "live") {
@@ -57,10 +56,10 @@ export async function POST(request: Request): Promise<Response> {
     const externalId = await decryptExternalId(
       { ciphertext: stored.externalIdCiphertext, keyVersion: stored.externalIdKeyVersion },
       secrets.connectionEncryptionKey,
-      { orgId: LOCAL_ORG_ID, customerId: stored.customerId, connectionId },
+      { orgId: actor.orgId, customerId: stored.customerId, connectionId },
     );
     await registerCollectorConnection({
-      tenantId: LOCAL_ORG_ID,
+      tenantId: actor.orgId,
       connectionId,
       accountId: stored.accountId,
       partition: stored.partition,
@@ -69,7 +68,7 @@ export async function POST(request: Request): Promise<Response> {
       enabledRegions: stored.enabledRegions,
     });
     const verification = await verifyCollectorConnection({
-      tenantId: LOCAL_ORG_ID,
+      tenantId: actor.orgId,
       connectionId,
       jobId: `verify_${crypto.randomUUID().replaceAll("-", "")}`,
       accountId: stored.accountId,
@@ -77,7 +76,7 @@ export async function POST(request: Request): Promise<Response> {
     });
     await markConnectionValidated(connectionId, actor.id, verification);
     await activateCollectorConnection({
-      tenantId: LOCAL_ORG_ID,
+      tenantId: actor.orgId,
       connectionId,
       roleArn: stored.roleArn,
     });

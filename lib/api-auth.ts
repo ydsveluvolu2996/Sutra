@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import {
-  LOCAL_AUTH_ORG_ID,
   LocalAuthError,
   getLocalSession,
   requireMfa,
@@ -135,7 +134,7 @@ export function assertSessionCapability(
   customerId?: string,
 ): void {
   const decision = authorize(authenticated.subject, {
-    orgId: LOCAL_AUTH_ORG_ID,
+    orgId: authenticated.subject.orgId,
     capability,
     ...(customerId === undefined ? {} : { customerId }),
   });

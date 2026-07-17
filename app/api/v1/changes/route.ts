@@ -1,4 +1,4 @@
-import { getChangeHistory, getConnection } from "../../../../db/pilot-repository";
+import { getChangeHistory, getConnectionForOrg } from "../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../lib/pilot-server";
 
@@ -19,7 +19,7 @@ export async function GET(request: Request): Promise<Response> {
       throw Object.assign(new Error("The change-history request is invalid"), { code: "INVALID_INPUT" });
     }
     const authenticated = await requireApiSession(request);
-    const connection = await getConnection(connectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     }

@@ -2,9 +2,8 @@ import {
   createSyncRun,
   CURRENT_PILOT_PERMISSION_PACK,
   failSyncRun,
-  getPilotState,
-  getStoredConnectionSecret,
-  LOCAL_ORG_ID,
+  getPilotStateForOrg,
+  getStoredConnectionSecretForOrg,
   persistSnapshot,
 } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
@@ -41,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
     actorId = actor.id;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
-    const stored = await getStoredConnectionSecret(connectionId);
+    const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
     assertSessionCapability(actor.authenticated, "sync:run", stored.customerId);
     if (stored.permissionPackVersion !== CURRENT_PILOT_PERMISSION_PACK) {
       throw Object.assign(new Error("Revalidate the current AWS permission pack before running inventory"), { code: "INVALID_STATE" });
@@ -55,7 +54,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     runId = await createSyncRun(connectionId);
     const snapshot = await runCollectorSync({
-      tenantId: LOCAL_ORG_ID,
+      tenantId: actor.orgId,
       connectionId,
       jobId: runId,
       accountId: stored.accountId,
@@ -66,7 +65,7 @@ export async function POST(request: Request): Promise<Response> {
       fixtureId: null,
       fixtureVersion: null,
     });
-    return jsonResponse({ runId, state: await getPilotState(connectionId) });
+    return jsonResponse({ runId, state: await getPilotStateForOrg(actor.orgId, connectionId) });
   } catch (error) {
     if (runId !== null && connectionId !== null && actorId !== null) {
       try {

@@ -8,7 +8,7 @@ const routeSource = await readFile(
 );
 
 test("finding workflow authorizes with connection metadata, never AWS trust ciphertext", () => {
-  assert.match(routeSource, /getConnection\(body\.connectionId\)/u);
+  assert.match(routeSource, /getConnectionForOrg\(actor\.orgId, body\.connectionId\)/u);
   assert.doesNotMatch(routeSource, /getStoredConnectionSecret/u);
   assert.match(
     routeSource,

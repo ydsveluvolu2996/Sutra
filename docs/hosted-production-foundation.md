@@ -71,10 +71,23 @@ The application-side Cognito boundary now implements:
   identity/membership activation;
 - immutable hash-linked invitation create, accept and revoke activity in both
   D1 and PostgreSQL;
+- organization-scoped session inventory, self-service and administrator
+  revocation, recent-MFA enforcement, and atomic hash-linked revocation audit
+  evidence;
+- organization-scoped customer assignment administration with explicit
+  all-customer or bounded customer grants, protected owner/administrator
+  boundaries, recent-MFA enforcement and atomic audit evidence;
+- organization-bound connection, trust-secret, CMDB, compliance, cost,
+  security-event and export reads, backed by an adversarial two-organization
+  D1 acceptance suite;
+- an Ed25519 hosted-broker request boundary with exact tenant, connection and
+  job binding, bounded bodies, timestamp checks and an atomic replay-store
+  contract;
 - hosted session lookup through the existing centralized authorization policy,
   plus local-auth compatibility for the laptop demo.
 
-The identity release hold remains in place. Recovery administration, membership
-switching, session/device administration, hosted step-up authentication,
-distributed rate limiting, customer-assignment administration and the complete
-two-organization route/job/export isolation suite are not yet implemented.
+The hosted release hold remains in place. Recovery administration, membership
+switching, hosted step-up authentication, distributed rate limiting, a shared
+durable nonce store, tenant-scoped durable collector mutations/jobs, managed
+key deployment, hosted backup/restore drills and the deployed two-organization
+end-to-end acceptance suite are not yet implemented.

@@ -49,7 +49,8 @@ test("callback requires exact state and creates a bounded token request", async 
   const body = oidcTokenRequestBody(configuration, code, transaction.codeVerifier);
   assert.equal(body.get("grant_type"), "authorization_code");
   assert.equal(body.get("code_verifier"), transaction.codeVerifier);
-  callback.searchParams.set("state", `${transaction.state.slice(0, -1)}A`);
+  const replacement = transaction.state.endsWith("A") ? "B" : "A";
+  callback.searchParams.set("state", `${transaction.state.slice(0, -1)}${replacement}`);
   assert.throws(() => validateOidcCallback(callback.toString(), transaction));
 });
 
