@@ -1,11 +1,12 @@
 import { LocalAuthError } from "../db/auth-repository";
 import { assertSameOrigin, readBoundedJson } from "./aws-pilot-security";
-import { assertLocalAuthRequest } from "./api-auth";
+import { assertAuthenticationRequest, assertLocalAuthRequest } from "./api-auth";
 import { jsonResponse } from "./pilot-server";
 
 const PUBLIC_AUTH_CODES = new Set([
   "AUTHENTICATION_REQUIRED",
   "BOOTSTRAP_ALREADY_COMPLETED",
+  "IDENTITY_NOT_PROVISIONED",
   "INVALID_CREDENTIALS",
   "INVALID_INPUT",
   "MFA_ALREADY_ENROLLED",
@@ -18,6 +19,11 @@ const PUBLIC_AUTH_CODES = new Set([
 
 export function assertLocalAuthMutation(request: Request): void {
   assertLocalAuthRequest(request);
+  assertSameOrigin(request);
+}
+
+export function assertAuthMutation(request: Request): void {
+  assertAuthenticationRequest(request);
   assertSameOrigin(request);
 }
 

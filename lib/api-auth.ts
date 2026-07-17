@@ -12,7 +12,10 @@ import { authorize, type Capability } from "./auth-policy";
 export const LOCAL_SESSION_COOKIE = "sutra_session";
 
 interface LocalAuthRuntimeEnv {
+  readonly SUTRA_DEPLOYMENT_ENV?: string;
   readonly SUTRA_LOCAL_MODE?: string;
+  readonly SUTRA_IDENTITY_MODE?: string;
+  readonly SUTRA_PUBLIC_ORIGIN?: string;
   readonly SUTRA_AUTH_ENCRYPTION_KEY?: string;
   readonly SUTRA_AUTH_KEY_VERSION?: string;
   readonly SUTRA_LOCAL_BOOTSTRAP_TOKEN?: string;
@@ -21,7 +24,7 @@ interface LocalAuthRuntimeEnv {
 export interface AuthorizedPilotActor {
   readonly id: string;
   readonly email: string;
-  readonly local: true;
+  readonly local: boolean;
   readonly orgId: string;
   readonly authenticated: AuthenticatedLocalSession;
 }
@@ -38,6 +41,32 @@ export function assertLocalAuthRequest(request: Request): void {
   const url = new URL(request.url);
   if (runtimeEnv().SUTRA_LOCAL_MODE !== "true" || !isLoopbackHostname(url.hostname)) {
     throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Local authentication is unavailable");
+  }
+}
+
+export function isHostedOidcRuntime(): boolean {
+  const config = runtimeEnv();
+  return (
+    (config.SUTRA_DEPLOYMENT_ENV === "staging" || config.SUTRA_DEPLOYMENT_ENV === "production") &&
+    config.SUTRA_LOCAL_MODE !== "true" &&
+    config.SUTRA_IDENTITY_MODE === "oidc"
+  );
+}
+
+export function assertAuthenticationRequest(request: Request): void {
+  if (!isHostedOidcRuntime()) {
+    assertLocalAuthRequest(request);
+    return;
+  }
+  const configuredOrigin = runtimeEnv().SUTRA_PUBLIC_ORIGIN?.trim();
+  let requestOrigin: string;
+  try {
+    requestOrigin = new URL(request.url).origin;
+  } catch {
+    throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Authentication is unavailable");
+  }
+  if (!configuredOrigin || requestOrigin !== configuredOrigin) {
+    throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Authentication is unavailable");
   }
 }
 
@@ -90,7 +119,7 @@ export async function requireApiSession(
   request: Request,
   options: { readonly requireMfa?: boolean } = {},
 ): Promise<AuthenticatedLocalSession> {
-  assertLocalAuthRequest(request);
+  assertAuthenticationRequest(request);
   const token = sessionTokenFromRequest(request);
   const authenticated = token === null ? null : await getLocalSession(token);
   if (authenticated === null) {
@@ -125,7 +154,7 @@ export async function authorizePilotRequest(
   return {
     id: authenticated.subject.userId,
     email: authenticated.session.user.email,
-    local: true,
+    local: !isHostedOidcRuntime(),
     orgId: authenticated.subject.orgId,
     authenticated,
   };

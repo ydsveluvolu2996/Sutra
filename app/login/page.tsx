@@ -11,7 +11,7 @@ import {
   useSession,
 } from "../components/use-session";
 
-type AuthMode = "checking" | "bootstrap" | "login";
+type AuthMode = "checking" | "bootstrap" | "login" | "hosted";
 
 interface LoginResult {
   readonly session: PublicLocalSession;
@@ -38,6 +38,9 @@ export default function LoginPage() {
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [returnTo] = useState(() =>
+    typeof window === "undefined" ? "/dashboard" : safeReturnTo(window.location.search),
+  );
 
   useEffect(() => {
     let active = true;
@@ -47,7 +50,13 @@ export default function LoginPage() {
         if (active) setMode(body.bootstrapRequired ? "bootstrap" : "login");
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : "Sutra could not check the local workspace");
+        if (!active) return;
+        if (caught instanceof AuthRequestError && caught.status === 404) {
+          setMode("hosted");
+          setError(null);
+          return;
+        }
+        setError(caught instanceof Error ? caught.message : "Sutra could not check the local workspace");
       });
     return () => {
       active = false;
@@ -128,6 +137,20 @@ export default function LoginPage() {
               <strong>Checking your local workspace</strong>
               <p>Sutra is verifying the encrypted identity store.</p>
             </div>
+          ) : mode === "hosted" ? (
+            <>
+              <div className="auth-heading">
+                <span>Enterprise identity</span>
+                <h2>Sign in to Sutra</h2>
+                <p>Continue through the organization identity service. Sutra accepts only verified, pre-provisioned memberships.</p>
+              </div>
+              <a
+                className="button button-primary auth-submit"
+                href={`/api/auth/oidc/start?returnTo=${encodeURIComponent(returnTo)}`}
+              >
+                Continue with secure sign-in
+              </a>
+            </>
           ) : mode === "bootstrap" ? (
             <>
               <div className="auth-heading">
@@ -213,7 +236,10 @@ export default function LoginPage() {
               </form>
             </>
           )}
-          <p className="auth-local-note"><span aria-hidden="true">●</span> Local access only · external sign-in is disabled</p>
+          <p className="auth-local-note">
+            <span aria-hidden="true">●</span>
+            {mode === "hosted" ? " Hosted identity · server-side membership required" : " Local access only · external sign-in is disabled"}
+          </p>
         </div>
       </section>
     </main>

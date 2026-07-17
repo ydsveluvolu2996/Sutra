@@ -3,14 +3,14 @@ import {
   expiredSessionCookie,
   sessionTokenFromRequest,
 } from "../../../../lib/api-auth";
-import { assertLocalAuthMutation, authErrorResponse } from "../../../../lib/auth-http";
+import { assertAuthMutation, authErrorResponse } from "../../../../lib/auth-http";
 import { jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    assertLocalAuthMutation(request);
+    assertAuthMutation(request);
     const token = sessionTokenFromRequest(request);
     if (token !== null) await revokeLocalSession(token);
     return jsonResponse(
