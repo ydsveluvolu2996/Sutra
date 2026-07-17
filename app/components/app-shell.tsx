@@ -6,6 +6,7 @@ import type { PublicLocalSession } from "../../db/auth-repository";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 import { groupContainsActiveItem, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
+import { NavIcon } from "./nav-icon";
 
 function connectionTone(status: string | undefined): string {
   if (status === "active") return "healthy";
@@ -203,7 +204,7 @@ function NavigationGroup({
               className={isActive ? "active" : undefined}
               aria-current={isActive ? "page" : undefined}
             >
-              <span aria-hidden="true">{item.icon}</span>{item.label}
+              <span className="nav-glyph-chip" aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
               {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
             </Link>
           );
