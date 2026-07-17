@@ -373,9 +373,9 @@ export async function persistSecurityEventCollection(input: {
                AND r.payload_sha256 = ?
                AND s.id = ? AND s.status = ? AND s.last_run_id = ?
                AND s.last_collected_at = ? AND s.updated_at = ?
-               AND ((s.last_window_start = ?) OR (s.last_window_start IS NULL AND ? IS NULL))
-               AND ((s.last_window_end = ?) OR (s.last_window_end IS NULL AND ? IS NULL))
-               AND ((s.last_error_code = ?) OR (s.last_error_code IS NULL AND ? IS NULL))`,
+               AND ((s.last_window_start = ?) OR (s.last_window_start IS NULL AND CAST(? AS BIGINT) IS NULL))
+               AND ((s.last_window_end = ?) OR (s.last_window_end IS NULL AND CAST(? AS BIGINT) IS NULL))
+               AND ((s.last_error_code = ?) OR (s.last_error_code IS NULL AND CAST(? AS TEXT) IS NULL))`,
       values: [
         runId, input.orgId, input.customerId, input.connectionId,
         payload.status, inserted, duplicateEvents, payloadSha256,

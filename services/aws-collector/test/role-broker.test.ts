@@ -13,6 +13,8 @@ import {
   AWS_BROKER_CONNECTION_TIMEOUT_MS,
   AWS_BROKER_REQUEST_TIMEOUT_MS,
   AwsRoleBroker,
+  IMPLEMENTED_READ_ACTIONS,
+  TRUST_ATTESTATION_ACTIONS,
   accountIdFromRoleArn,
   parseIamRoleArn,
   readonlyMetadataSessionPolicy,
@@ -142,15 +144,6 @@ class FakeCallerIdentityClient implements CallerIdentityClient {
 }
 
 function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractClient {
-  const capped = JSON.parse(readonlyMetadataSessionPolicy(stored.roleArn)) as {
-    Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
-  };
-  const metadata = capped.Statement.find(
-    (statement) => statement.Effect === "Allow" && statement.Resource === "*",
-  );
-  const attestation = capped.Statement.find(
-    (statement) => statement.Effect === "Allow" && statement.Resource === stored.roleArn,
-  );
   return {
     getRole: async () => ({
       arn: stored.roleArn,
@@ -187,19 +180,19 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
           {
             Sid: "DenyUnimplementedActions",
             Effect: "Deny",
-            NotAction: [...(metadata?.Action ?? []), ...(attestation?.Action ?? [])],
+            NotAction: [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
             Resource: "*",
           },
           {
             Sid: "ImplementedMetadataApis",
             Effect: "Allow",
-            Action: metadata?.Action ?? [],
+            Action: IMPLEMENTED_READ_ACTIONS,
             Resource: "*",
           },
           {
             Sid: "TrustContractAttestation",
             Effect: "Allow",
-            Action: attestation?.Action ?? [],
+            Action: TRUST_ATTESTATION_ACTIONS,
             Resource: stored.roleArn,
           },
         ],
@@ -275,7 +268,7 @@ test("sanitizeRoleSessionName is deterministic, bounded, and collision resistant
   );
 });
 
-test("the fixed STS session policy caps an overprivileged customer role to implemented reads", () => {
+test("the compact STS session policy caps an overprivileged customer role to reviewed read families", () => {
   const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
   const serialized = readonlyMetadataSessionPolicy(roleArn);
   const policy = JSON.parse(serialized) as {
@@ -289,52 +282,22 @@ test("the fixed STS session policy caps an overprivileged customer role to imple
   };
   const allows = policy.Statement.filter((statement) => statement.Effect === "Allow");
   const actions = allows.flatMap((statement) => statement.Action ?? []);
-  const denyOutside = policy.Statement.find(
-    (statement) => statement.Effect === "Deny" && statement.NotAction !== undefined,
-  );
-  const denyTrustScope = policy.Statement.find(
-    (statement) => statement.Effect === "Deny" && statement.NotResource === roleArn,
-  );
 
-  assert.ok(serialized.length <= 1_800);
+  assert.ok(serialized.length <= 900);
+  assert.equal(policy.Statement.length, 2);
   assert.equal(policy.Statement.some((statement) => "Sid" in statement), false);
-  assert.ok(actions.includes("ec2:DescribeInstances"));
-  assert.ok(actions.includes("ce:GetCostAndUsage"));
-  assert.ok(actions.includes("ce:GetCostForecast"));
-  assert.ok(actions.includes("cloudtrail:LookupEvents"));
-  assert.ok(actions.includes("ec2:DescribeVolumes"));
-  assert.ok(actions.includes("ec2:DescribeNetworkInterfaces"));
-  assert.ok(actions.includes("elasticloadbalancing:DescribeLoadBalancers"));
-  assert.ok(actions.includes("kms:DescribeKey"));
-  assert.ok(actions.includes("dynamodb:DescribeTable"));
-  assert.ok(actions.includes("ecr:DescribeRepositories"));
-  assert.ok(actions.includes("iam:GetRole"));
-  assert.equal(actions.some((action) => /(?:Put|Create|Delete|Update|Attach|PassRole|AssumeRole)/u.test(action)), false);
+  assert.equal(policy.Statement.every((statement) => statement.Effect === "Allow"), true);
+  assert.equal(
+    actions.every((action) => /^[a-z0-9]+:(?:Get|List|Describe|Lookup|BatchGet)[A-Za-z*]+$/u.test(action)),
+    true,
+  );
   assert.equal(
     allows.find((statement) => statement.Resource === roleArn)?.Resource,
     roleArn,
   );
-  assert.equal(denyOutside?.Effect, "Deny");
-  assert.deepEqual(new Set(denyOutside?.NotAction), new Set([
-    "sts:GetCallerIdentity", "ec2:Describe*", "s3:ListAllMyBuckets",
-    "s3:GetBucketPublicAccessBlock", "rds:Describe*", "iam:Get*", "iam:List*",
-    "cloudtrail:Describe*", "cloudtrail:GetTrailStatus", "cloudtrail:LookupEvents",
-    "guardduty:List*", "guardduty:Get*", "securityhub:Describe*", "securityhub:Get*",
-    "inspector2:BatchGet*", "inspector2:List*", "ce:Get*",
-    "elasticloadbalancing:Describe*", "kms:List*", "kms:Describe*",
-    "dynamodb:List*", "dynamodb:Describe*", "ecr:Describe*",
-  ]));
-  assert.equal(denyOutside?.Resource, "*");
-  assert.equal(denyTrustScope?.Effect, "Deny");
-  assert.deepEqual(new Set(denyTrustScope?.Action), new Set([
-    "iam:GetRole",
-    "iam:ListRolePolicies",
-    "iam:GetRolePolicy",
-  ]));
-  assert.equal(denyTrustScope?.NotResource, roleArn);
 });
 
-test("the permission pack exact Allows and compact deny exceptions have independent full parity", () => {
+test("the compact session cap covers every exact permission-pack action", () => {
   const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
   const policy = JSON.parse(readonlyMetadataSessionPolicy(roleArn)) as {
     Statement: Array<{ Effect: string; Action?: string[]; NotAction?: string[]; Resource?: string }>;
@@ -345,13 +308,8 @@ test("the permission pack exact Allows and compact deny exceptions have independ
   const trust = policy.Statement.find(
     (statement) => statement.Effect === "Allow" && statement.Resource === roleArn,
   );
-  const deny = policy.Statement.find(
-    (statement) => statement.Effect === "Deny" && statement.NotAction !== undefined,
-  );
-  assert.deepEqual(new Set(metadata?.Action), new Set(EXPECTED_IMPLEMENTED_READ_ACTIONS));
-  assert.deepEqual(new Set(trust?.Action), new Set(EXPECTED_TRUST_ACTIONS));
-  const patterns = deny?.NotAction ?? [];
-  for (const action of [...EXPECTED_IMPLEMENTED_READ_ACTIONS, ...EXPECTED_TRUST_ACTIONS]) {
+  const patterns = metadata?.Action ?? [];
+  for (const action of EXPECTED_IMPLEMENTED_READ_ACTIONS) {
     assert.equal(
       patterns.some((pattern) => pattern.endsWith("*")
         ? action.startsWith(pattern.slice(0, -1))
@@ -360,6 +318,7 @@ test("the permission pack exact Allows and compact deny exceptions have independ
       action,
     );
   }
+  assert.deepEqual(new Set(trust?.Action), new Set(EXPECTED_TRUST_ACTIONS));
 });
 
 test("workload STS and IAM clients use bounded standard-retry HTTP timeouts", () => {

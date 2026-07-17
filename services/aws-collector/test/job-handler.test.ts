@@ -10,7 +10,11 @@ import type {
 } from "@aws-sdk/client-sts";
 
 import { AwsCollectorJobHandler } from "../src/job-handler.js";
-import { AwsRoleBroker, readonlyMetadataSessionPolicy } from "../src/role-broker.js";
+import {
+  AwsRoleBroker,
+  IMPLEMENTED_READ_ACTIONS,
+  TRUST_ATTESTATION_ACTIONS,
+} from "../src/role-broker.js";
 import {
   IdentityMismatchError,
   InvalidJobError,
@@ -245,15 +249,6 @@ function createHandler(
     expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
     roleContractClientFactory: () => {
       const stored = registry.stored;
-      const capped = JSON.parse(readonlyMetadataSessionPolicy(stored.roleArn)) as {
-        Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
-      };
-      const metadata = capped.Statement.find(
-        (statement) => statement.Effect === "Allow" && statement.Resource === "*",
-      );
-      const attestation = capped.Statement.find(
-        (statement) => statement.Effect === "Allow" && statement.Resource === stored.roleArn,
-      );
       return {
         getRole: async () => ({
           arn: stored.roleArn,
@@ -290,19 +285,19 @@ function createHandler(
               {
                 Sid: "DenyUnimplementedActions",
                 Effect: "Deny",
-                NotAction: [...(metadata?.Action ?? []), ...(attestation?.Action ?? [])],
+                NotAction: [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
                 Resource: "*",
               },
               {
                 Sid: "ImplementedMetadataApis",
                 Effect: "Allow",
-                Action: metadata?.Action ?? [],
+                Action: IMPLEMENTED_READ_ACTIONS,
                 Resource: "*",
               },
               {
                 Sid: "TrustContractAttestation",
                 Effect: "Allow",
-                Action: attestation?.Action ?? [],
+                Action: TRUST_ATTESTATION_ACTIONS,
                 Resource: stored.roleArn,
               },
             ],

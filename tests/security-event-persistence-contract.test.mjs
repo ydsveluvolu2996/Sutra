@@ -21,6 +21,9 @@ test("only complete runs advance the durable checkpoint and incomplete attempts 
   assert.match(source, /last_window_start = CASE WHEN \? = 'COMPLETE' THEN \? ELSE last_window_start END/u);
   assert.match(source, /last_window_end = CASE WHEN \? = 'COMPLETE' THEN \? ELSE last_window_end END/u);
   assert.match(source, /SELECT status, window_start[\s\S]+status <> 'PERSISTING'[\s\S]+ORDER BY collected_at DESC/u);
+  assert.match(source, /last_window_start IS NULL AND CAST\(\? AS BIGINT\) IS NULL/u);
+  assert.match(source, /last_window_end IS NULL AND CAST\(\? AS BIGINT\) IS NULL/u);
+  assert.match(source, /last_error_code IS NULL AND CAST\(\? AS TEXT\) IS NULL/u);
   assert.match(source, /CHECKPOINT_GAP_TRUNCATED_TO_24_HOURS/u);
 });
 
