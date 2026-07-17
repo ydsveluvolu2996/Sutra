@@ -62,6 +62,13 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .main-nav a.active, .secondary-nav a.active { background: linear-gradient(100deg, #eafafa, #f7fbfc); color: #132d30; box-shadow: inset 3px 0 0 #04a6a8, inset 0 0 0 1px rgba(255,255,255,.12); }
 .main-nav a > span, .secondary-nav a > span { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid currentColor; border-radius: 6px; font: 700 9px var(--font-geist-mono), monospace; opacity: .7; }
 .grouped-nav a > span { width: 21px; height: 21px; border-radius: 5px; font-size: 7px; }
+/* SVG nav glyphs: interactive icon chips replace the legacy two-letter codes. */
+.nav-glyph-chip { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 8px; background: rgba(255,255,255,.05); color: #9fb6bd; opacity: 1; transition: background .18s ease, color .18s ease, transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .18s ease; }
+.grouped-nav a > span.nav-glyph-chip { width: 26px; height: 26px; border-radius: 8px; }
+.nav-glyph { display: block; transition: transform .2s cubic-bezier(.2,.8,.3,1); }
+.main-nav a:hover > span.nav-glyph-chip, .secondary-nav a:hover > span.nav-glyph-chip { background: rgba(66,220,229,.16); color: #dcf8fa; }
+.main-nav a:hover .nav-glyph, .secondary-nav a:hover .nav-glyph { transform: scale(1.08); }
+.main-nav a.active > span.nav-glyph-chip, .secondary-nav a.active > span.nav-glyph-chip { background: rgba(4,166,168,.15); color: #06817f; box-shadow: inset 0 0 0 1px rgba(4,166,168,.22); opacity: 1; }
 .main-nav a b { margin-left: auto; min-width: 23px; padding: 3px 6px; border-radius: 20px; text-align: center; background: rgba(255,255,255,.09); color: inherit; font-size: 10px; }
 .sidebar-spacer { display: none; }
 .sidebar-note { display: flex; gap: 10px; align-items: center; padding: 12px; margin-bottom: 8px; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: rgba(255,255,255,.045); }
