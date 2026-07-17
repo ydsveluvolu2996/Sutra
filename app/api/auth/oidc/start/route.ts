@@ -9,8 +9,13 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
   try {
     const runtime = hostedOidcRuntimeConfiguration(request);
-    const requestedReturnTo = new URL(request.url).searchParams.get("returnTo");
-    const authorization = await createOidcAuthorization(runtime.client, requestedReturnTo);
+    const parameters = new URL(request.url).searchParams;
+    const authorization = await createOidcAuthorization(
+      runtime.client,
+      parameters.get("returnTo"),
+      Date.now(),
+      parameters.get("invitation"),
+    );
     const sealed = await sealOidcTransaction(authorization.transaction, runtime.transactionKey);
     return new Response(null, {
       status: 302,

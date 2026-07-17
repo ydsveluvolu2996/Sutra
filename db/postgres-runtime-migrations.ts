@@ -3,6 +3,7 @@ import postgresFinopsSql from "../postgres/migrations/0001_finops_cost_snapshots
 import postgresCaseManagementSql from "../postgres/migrations/0002_case_management.sql?raw";
 import postgresSecurityEventsSql from "../postgres/migrations/0003_security_events.sql?raw";
 import postgresComplianceExceptionsSql from "../postgres/migrations/0004_compliance_exceptions.sql?raw";
+import postgresHostedIdentityLifecycleSql from "../postgres/migrations/0005_hosted_identity_lifecycle.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -10,6 +11,7 @@ const migrations = [
   { id: "0002_case_management", source: postgresCaseManagementSql },
   { id: "0003_security_events", source: postgresSecurityEventsSql },
   { id: "0004_compliance_exceptions", source: postgresComplianceExceptionsSql },
+  { id: "0005_hosted_identity_lifecycle", source: postgresHostedIdentityLifecycleSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

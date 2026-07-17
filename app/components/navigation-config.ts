@@ -15,6 +15,7 @@ export type NavKey =
   | "controls"
   | "roadmap"
   | "operations"
+  | "access"
   | "onboard"
   | "connection_health";
 
@@ -27,7 +28,7 @@ export interface NavItem {
 }
 
 export interface NavGroup {
-  readonly key: "overview" | "onboarding" | "cmdb" | "security" | "compliance" | "finops" | "operations";
+  readonly key: "overview" | "onboarding" | "cmdb" | "security" | "compliance" | "finops" | "operations" | "administration";
   readonly label: string;
   readonly items: readonly NavItem[];
 }
@@ -92,6 +93,13 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "operations", label: "Collection runs", href: "/operations", icon: "CR", capabilities: ["sync:run"] },
       { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "PR", capabilities: readWorkspace },
+    ],
+  },
+  {
+    key: "administration",
+    label: "Administration",
+    items: [
+      { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage"] },
     ],
   },
 ] as const;

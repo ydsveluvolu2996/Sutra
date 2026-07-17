@@ -60,3 +60,11 @@ test("return paths reject external and authentication-loop targets", () => {
   assert.equal(safeOidcReturnTo("/login"), "/dashboard");
   assert.equal(safeOidcReturnTo("/findings?severity=high"), "/findings?severity=high");
 });
+
+test("a valid invitation is sealed into the transaction and malformed values are discarded", async () => {
+  const token = "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII";
+  const invited = await createOidcAuthorization(configuration, "/dashboard", 4_000_000, token);
+  assert.equal(invited.transaction.invitationToken, token);
+  const malformed = await createOidcAuthorization(configuration, "/dashboard", 4_000_000, "not-a-token");
+  assert.equal(malformed.transaction.invitationToken, null);
+});

@@ -17,6 +17,7 @@ export interface OidcAuthorizationTransaction {
   readonly nonce: string;
   readonly codeVerifier: string;
   readonly returnTo: string;
+  readonly invitationToken: string | null;
   readonly createdAt: number;
   readonly expiresAt: number;
 }
@@ -80,6 +81,7 @@ export async function createOidcAuthorization(
   configuration: OidcClientConfiguration,
   returnTo: string | null | undefined,
   now = Date.now(),
+  invitationToken?: string | null,
 ): Promise<{ readonly url: string; readonly transaction: OidcAuthorizationTransaction }> {
   validateOidcClientConfiguration(configuration);
   const transaction: OidcAuthorizationTransaction = {
@@ -88,6 +90,9 @@ export async function createOidcAuthorization(
     nonce: base64UrlEncode(randomBytes(32)),
     codeVerifier: base64UrlEncode(randomBytes(32)),
     returnTo: safeOidcReturnTo(returnTo),
+    invitationToken: invitationToken && /^[A-Za-z0-9_-]{43}$/u.test(invitationToken)
+      ? invitationToken
+      : null,
     createdAt: now,
     expiresAt: now + TRANSACTION_TTL_MS,
   };
@@ -127,7 +132,7 @@ export async function sealOidcTransaction(
 function parsedTransaction(value: unknown, now: number): OidcAuthorizationTransaction {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("OIDC transaction is invalid");
   const candidate = value as Record<string, unknown>;
-  const exactKeys = ["version", "state", "nonce", "codeVerifier", "returnTo", "createdAt", "expiresAt"];
+  const exactKeys = ["version", "state", "nonce", "codeVerifier", "returnTo", "invitationToken", "createdAt", "expiresAt"];
   if (Object.keys(candidate).sort().join("\0") !== exactKeys.sort().join("\0")) throw new Error("OIDC transaction shape is invalid");
   if (
     candidate.version !== TRANSACTION_VERSION ||
@@ -135,6 +140,8 @@ function parsedTransaction(value: unknown, now: number): OidcAuthorizationTransa
     typeof candidate.nonce !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.nonce) ||
     typeof candidate.codeVerifier !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.codeVerifier) ||
     typeof candidate.returnTo !== "string" || safeOidcReturnTo(candidate.returnTo) !== candidate.returnTo ||
+    (candidate.invitationToken !== null &&
+      (typeof candidate.invitationToken !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.invitationToken))) ||
     typeof candidate.createdAt !== "number" || !Number.isSafeInteger(candidate.createdAt) ||
     typeof candidate.expiresAt !== "number" || !Number.isSafeInteger(candidate.expiresAt) ||
     candidate.expiresAt - candidate.createdAt !== TRANSACTION_TTL_MS ||
