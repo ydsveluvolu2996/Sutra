@@ -143,7 +143,7 @@ async function validateLocalInputs(options) {
   if (options.modules.includes("falco")) {
     await requireFile("deploy/kubernetes/security-stack/falco-signing-gateway.contract.yaml");
     const image = process.env.SUTRA_FALCO_GATEWAY_IMAGE?.trim() ?? "";
-    if (options.command !== "plan" && !/^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/u.test(image)) {
+    if (options.command === "apply" && !/^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/u.test(image)) {
       fail("SUTRA_FALCO_GATEWAY_IMAGE must be an immutable image digest");
     }
   }
