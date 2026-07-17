@@ -16,7 +16,7 @@ const CONNECTION: RegisteredAwsConnection = {
   roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
   externalId: "sutra_external_id_1234567890abcd",
   status: "ACTIVE",
-  permissionPackVersion: "live-demo-2026-07.2",
+  permissionPackVersion: "live-demo-2026-07.3",
   sessionNamePrefix: "sutra-",
   enabledRegions: ["us-east-1", "ap-south-1"],
   createdAt: "2026-07-15T09:00:00.000Z",

@@ -39,7 +39,7 @@ function verifiedRoleEvidence(accountId = LIVE_ACCOUNT_ID, partition = "aws") {
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "live-demo-2026-07.2",
+    permissionPackVersion: "live-demo-2026-07.3",
   };
 }
 
@@ -72,7 +72,7 @@ async function provisionValidatedLiveConnection(database) {
          role_arn, external_id_ciphertext, external_id_key_version,
          permission_pack_version, status, enabled_regions_json, last_validated_at)
        VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, 'test-ciphertext',
-               'test-key-v1', 'live-demo-2026-07.2', 'active', '["us-east-1"]', ?)`,
+               'test-key-v1', 'live-demo-2026-07.3', 'active', '["us-east-1"]', ?)`,
     ).bind(
       LIVE_CONNECTION_ID,
       FIXTURE.tenantId,
@@ -658,7 +658,7 @@ describe("AWS trust health remains separate from collection health", () => {
       assert.equal(
         (await database.prepare("SELECT permission_pack_version FROM aws_connections WHERE id = ?")
           .bind(LIVE_CONNECTION_ID).first())?.permission_pack_version,
-        "live-demo-2026-07.2",
+        "live-demo-2026-07.3",
       );
       await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
       await assert.rejects(
@@ -717,7 +717,7 @@ describe("AWS trust connection lifecycle", () => {
         exactTrustPolicyAttested: true,
         expectedCallerIdentityMatched: true,
         missingExternalIdDenied: true,
-        permissionPackVersion: "live-demo-2026-07.2",
+        permissionPackVersion: "live-demo-2026-07.3",
         sessionPolicyApplied: true,
         wrongExternalIdDenied: true,
       });

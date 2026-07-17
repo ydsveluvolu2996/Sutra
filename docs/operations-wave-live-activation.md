@@ -1,6 +1,9 @@
-# Sutra operations-wave live activation
+# Sutra operations-wave live activation record
 
-The source, database migrations, and automated tests for permission pack `live-demo-2026-07.2` are complete. The current laptop process intentionally remains on the previously attested permission pack until the following AWS changes are explicitly approved and completed. Restarting first would make new inventory runs partial and would prevent a new complete CMDB snapshot from being promoted.
+Permission pack `live-demo-2026-07.3` was activated and attested on
+2026-07-17. The existing customer role was updated in place, its External ID
+trust boundary was re-proven with positive and negative probes, and a complete
+AWS CMDB snapshot containing the temporary EKS cluster was promoted.
 
 ## Exact customer-role read delta
 
@@ -16,6 +19,8 @@ The reviewed template adds only these metadata/history actions to the existing r
 - `dynamodb:DescribeTable`
 - `ecr:DescribeRepositories`
 - `cloudtrail:LookupEvents`
+- `eks:ListClusters`
+- `eks:DescribeCluster`
 
 All actions use `Resource: '*'` because these AWS list/describe APIs do not consistently support resource-level authorization. The role still grants no resource mutation, object/database/secret payload read, decryption, credential creation, remediation, security-service enablement, purchase, or commitment action.
 
@@ -23,22 +28,26 @@ The customer role carries an explicit Deny with the exact implemented-action exc
 
 ## Reviewed artifacts
 
-- Permission pack: `live-demo-2026-07.2`
+- Permission pack: `live-demo-2026-07.3`
 - Template: `public/sutra-customer-role-live-demo.yaml`
-- Template SHA-256: `ed73f5738f951782977f31735a79f36148c591b5ab359f6c761369b16276b238`
+- Template SHA-256: `3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f`
 - Operator policy source: `infrastructure/sutra-operator-permission-set-policy.json`
 
-## Activation sequence
+## Completed activation sequence
 
-1. Approve the exact ten-action read-only delta above and the publication of the reviewed immutable template object.
-2. Update the SutraOperator Identity Center permission set with the checked-in operator policy so it can publish only the exact new template object path.
-3. Publish the template and retain its versioned immutable HTTPS URL.
-4. Update the existing `sutra-customer-role-738663485493` CloudFormation stack in place, preserving its current trust parameters and External ID. Review the change set; the role must not be replaced.
-5. Restart the local live-AWS launcher with the validated `sutra-demo-collector` SSO profile.
-6. In Sutra, re-register the unchanged `/sutra/SutraReadOnlyRole` ARN with a fresh MFA code. This repeats the positive identity check, both External-ID negative probes, fetched trust/policy attestation and session-policy proof, then records permission pack `.2`.
-7. Run one CMDB sync. It must complete without a permission-denied collector and promote a new immutable snapshot before the expanded services are described as live.
-8. Open **Security events**, choose **Collect live events**, and confirm the source coverage, time window, payload hash, normalized management events and any evidence-linked detections.
-9. Run Costs, Compliance, Cases and the executive report smoke path. Record unavailable AWS services as unavailable; do not substitute fixtures.
+1. The exact read-only delta and reviewed template were approved.
+2. The operator permission set was updated with the checked-in policy.
+3. The customer-role stack was updated in place without replacing the role.
+4. The unchanged role ARN was re-registered using fresh MFA.
+5. The positive trust probe, wrong-External-ID probe, missing-External-ID
+   probe, fetched trust/policy attestation and session-policy proof passed.
+6. A complete CMDB snapshot was promoted with EKS discovery enabled.
+7. A live EKS cluster was registered and its Kubernetes evidence was published.
+8. The Kubernetes customer portal, specialist views and executive report were
+   exercised against real collected evidence.
+
+The full Kubernetes evidence and cleanup record is in
+`docs/live-kubernetes-validation-2026-07-17.md`.
 
 ## Honest product boundary
 

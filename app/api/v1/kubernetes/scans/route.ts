@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const CLUSTER_ID = /^kcluster_[a-f0-9]{48}$/u;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{7,127}$/u;
-const MAX_SCAN_BODY_BYTES = 1024 * 1024;
+const MAX_SCAN_BODY_BYTES = 3 * 1024 * 1024;
 
 const collectors = {
   Workload: ["kubernetes.deployments", "kubernetes.statefulsets", "kubernetes.daemonsets", "kubernetes.pods"],

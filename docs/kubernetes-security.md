@@ -21,10 +21,20 @@ commands, or volume contents.
 - RBAC wildcard and escalation-verb checks
 - Namespace Pod Security label and default-deny NetworkPolicy checks
 - Per-API collector coverage and `UNKNOWN` results when evidence is absent
+- Tenant-scoped cluster registration, encrypted trust data, immutable scan
+  history and promoted complete-scan evidence
+- Trivy Operator vulnerability, misconfiguration and CycloneDX SBOM evidence
+  import with source coverage and artifact-integrity metadata
+- Kubernetes assurance in the customer-facing executive report
 
-The module does **not** claim image/package CVEs, SBOM coverage, runtime threat
-detection, Kubernetes audit-log detections, or admission-control enforcement
-unless those independent evidence sources are installed and connected.
+The module claims image/package CVEs and SBOM coverage only when a connected
+scanner supplied that evidence. It does **not** claim runtime threat detection,
+Kubernetes audit-log detections, or admission-control enforcement unless those
+independent evidence sources are installed and connected.
+
+The first live AWS validation used a temporary EKS cluster and Trivy Operator.
+The reproducible results and teardown proof are recorded in
+`docs/live-kubernetes-validation-2026-07-17.md`.
 
 ## Onboard a cluster
 
@@ -47,7 +57,7 @@ The first command must return `yes`; the Secret check must return `no`.
 Run the scanner:
 
 ```bash
-pnpm kubernetes:scan -- --context <customer-context> --cluster-id <stable-id> --cluster-name "<display name>"
+pnpm kubernetes:scan --context <customer-context> --cluster-id <stable-id> --cluster-name "<display name>"
 ```
 
 The command uses the existing `kubectl` login to mint a 10-minute
@@ -73,13 +83,11 @@ only normalized inventory, coverage and posture results under
 
 Before general availability, Sutra still requires:
 
-1. Tenant-scoped encrypted cluster registration and scheduled scan persistence
-2. Signed import of image vulnerability/SBOM evidence from a supported scanner
-3. Kubernetes audit-log and runtime sensor integrations
-4. Admission policy assessment/enforcement workflows
-5. CIS benchmark mapping with licensed content review where applicable
-6. Scan history, drift, exceptions, case management and exportable reports
-7. Multiple representative live-cluster validations, scale tests and chaos tests
-8. Independent penetration testing and production runbooks
+1. Kubernetes audit-log and runtime sensor integrations
+2. Admission policy assessment/enforcement workflows
+3. CIS benchmark mapping with licensed content review where applicable
+4. Scheduled collection, drift, exceptions and case-routing workflows
+5. Multiple representative live-cluster validations, scale tests and chaos tests
+6. Independent penetration testing and hosted-production runbooks
 
 These are explicit release gates, not implied current functionality.

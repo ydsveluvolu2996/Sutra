@@ -396,7 +396,7 @@ export async function verifyCollectorConnection(input: {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.2";
+  readonly permissionPackVersion: "live-demo-2026-07.3";
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parseVerificationResponse(
