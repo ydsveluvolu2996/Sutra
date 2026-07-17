@@ -17,6 +17,7 @@ export type NavKey =
   | "roadmap"
   | "operations"
   | "access"
+  | "settings"
   | "notification_settings"
   | "kubernetes_overview"
   | "kubernetes_fleet"
@@ -138,6 +139,7 @@ export const navGroups: readonly NavGroup[] = [
     key: "administration",
     label: "Administration",
     items: [
+      { key: "settings", label: "Settings", href: "/settings", icon: "SG", capabilities: readWorkspace },
       { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage"] },
       { key: "notification_settings", label: "Notification destinations", href: "/settings/notifications", icon: "NT", capabilities: readConnection },
     ],
