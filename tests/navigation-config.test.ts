@@ -35,6 +35,7 @@ describe("grouped workspace navigation", () => {
       visibleNavigation(allCapabilities).find((group) => group.key === "kubernetes")?.items.map((item) => item.label),
       [
         "Cluster overview",
+        "Fleet health",
         "Onboard cluster",
         "Clusters",
         "Namespaces",

@@ -1473,3 +1473,14 @@ h3 { letter-spacing: -.02em; }
 .security-graph-evidence code { font-size: 10px; overflow-wrap: anywhere; }
 .attack-path-header-actions { display: flex; align-items: center; gap: 12px; }
 .security-graph-backedge path { stroke-dasharray: 5 4; stroke: #a83b3b; color: #a83b3b; }
+
+.fleet-health-list { display: flex; flex-direction: column; gap: 10px; }
+.fleet-health-row { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(0, 1.8fr) minmax(160px, 0.8fr); gap: 16px; align-items: center; border: 1px solid var(--border, #e3e7ea); border-radius: 12px; padding: 12px 16px; }
+.fleet-health-cluster { display: flex; align-items: center; gap: 10px; }
+.fleet-health-modules { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.fleet-module { display: inline-flex; align-items: center; font-size: 11px; color: #3a4a53; }
+.fleet-health-times { display: flex; flex-direction: column; gap: 2px; text-align: right; }
+@media (max-width: 800px) {
+  .fleet-health-row { grid-template-columns: 1fr; }
+  .fleet-health-times { text-align: left; }
+}
