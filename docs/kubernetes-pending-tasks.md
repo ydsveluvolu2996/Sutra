@@ -21,16 +21,48 @@ The EKS cluster is disposable and must not be left running. AWS account: `738663
 | P0 | Test disposable blocking policy | A deliberately invalid test deployment is denied; valid deployment succeeds; policy is reverted | Blocking is allowed only in disposable namespace/cluster |
 | P0 | Install Falco/Falcosidekick | A deliberate test event is detected, signed/validated, stored in timeline, and routed to notification queue | Generate harmless test event; no destructive commands |
 | P0 | Configure and test notifications | SES/email, Slack, and Teams deliveries succeed; retry and dead-letter behavior is visible | Store endpoints in managed secrets, never Git |
-| P1 | Install Cilium/Hubble safely | Connectivity remains healthy; bounded flow evidence and service map appear in Sutra | Highest-risk change; snapshot/rollback plan required |
+| P1 | Install Cilium/Hubble safely | Connectivity remains healthy; bounded flow evidence and service map appear in Sutra | Highest-risk change; snapshot/rollback plan required. Code complete 2026-07-17: the agent reads the Cilium hubble-export file and uploads aggregated flow metadata; live-cluster validation remains |
 | P1 | Validate network rollback | CNI rollback restores pod/service connectivity and Sutra records the event | Run only on disposable EKS |
 | P1 | Run Cosign/Syft/GitHub OIDC workflow | Image has SBOM, signature, attestation, ECR evidence, and admission decision | Use ephemeral test repository/image |
 | P1 | Validate attack paths | Cloud, IAM, RBAC, exposure, network, and vulnerability signals produce explainable ranked paths | Evidence links must point to stored observations |
-| P1 | Compliance report validation | CIS Kubernetes, NSA/CISA, and SOC 2 readiness report renders with evidence and timestamps | Label as readiness mapping, not certification |
+| P1 | Compliance report validation | CIS Kubernetes, NSA/CISA, and SOC 2 readiness report renders with evidence and timestamps | Label as readiness mapping, not certification. Code complete 2026-07-17: framework readiness renders in the compliance workspace and executive report; validation against live evidence remains |
 | P1 | Upgrade and multi-namespace test | Repeat collectors and integrations across multiple namespaces and a version upgrade | Capture before/after inventory and failures |
-| P2 | Agent soak test | Agent remains healthy through restarts, temporary network loss, credential rotation, and replayed evidence | Run bounded duration; monitor local resources |
-| P2 | Demo teardown automation | One command deletes EKS, node group, ECR test assets, IAM role/policies, and temporary notifications | Teardown must print remaining tagged resources |
+| P2 | Agent soak test | Agent remains healthy through restarts, temporary network loss, credential rotation, and replayed evidence | Run bounded duration; monitor local resources. Complete 2026-07-17: `pnpm kubernetes:agent:soak` runs the deterministic fault-injection harness with seven asserted invariants |
+| P2 | Demo teardown automation | One command deletes EKS, node group, ECR test assets, IAM role/policies, and temporary notifications | Teardown must print remaining tagged resources. Code complete 2026-07-17: guarded teardown deletes tag-verified role stacks, disposable notification secrets, and the control-plane log group, then fails until the sutra:disposable tag query is empty; final live run remains |
 | P2 | Customer-facing runbook | Screenshots, prerequisites, least-privilege policy, onboarding steps, evidence interpretation, and teardown are documented | Remove account-specific secrets and identifiers |
 | P2 | Reliability validation | Backup/restore, load, chaos, monitoring, and recovery objectives are tested | Required before claiming production SaaS |
+
+## Local functionality completed on 2026-07-17 (no AWS calls made)
+
+These were built and verified with local tests only; nothing below claims live
+AWS validation.
+
+1. Guarded teardown completion: tag-verified IAM role-stack deletion,
+   disposable `sutra/notifications/` secret deletion, control-plane log-group
+   deletion, resumable operation when the cluster is already gone, and a final
+   Resource Groups Tagging API audit that fails until zero `sutra:disposable`
+   resources remain (`scripts/eks-disposable-guard.mjs`).
+2. CIS Kubernetes / NSA-CISA / SOC 2 readiness rendering with evidence counts
+   and timestamps in the Kubernetes compliance workspace and the executive
+   report (`lib/kubernetes-compliance-readiness.ts`).
+3. Deterministic agent soak harness with fault injection
+   (`pnpm kubernetes:agent:soak`).
+4. Real Hubble flow collection: the agent reads a bounded tail of the Cilium
+   hubble-export file and uploads aggregated flow metadata through the
+   authenticated agent route; the demo simulation is no longer the only flow
+   producer (`services/kubernetes-collector/src/hubble-flow-source.ts`).
+5. Falco signing-gateway liveness reported as a `falco-gateway` module state in
+   agent heartbeats (`SUTRA_FALCO_GATEWAY_HEALTH_URL`).
+6. Interactive attack-path security graph with per-entity evidence inspection
+   (`/kubernetes/attack-paths`).
+7. Agent chart options for the read-only hubble-export mount and the gateway
+   health URL, both off by default and render-validated.
+8. Operator-visible agent deployment health: `GET /api/v1/kubernetes/agents`
+   lists heartbeat module states per enrolled agent and the onboarding wizard
+   renders them.
+
+Known deferred item: per-node DaemonSet agent coverage requires per-node
+enrollment; the one-time bootstrap design cannot authenticate multiple pods.
 
 ## Required evidence for the demo
 
