@@ -9,6 +9,35 @@ function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : "Sutra could not run inventory collection";
 }
 
+const SEVERITY_KEYS = ["critical", "high", "medium", "low"] as const;
+const SLA_TARGET_DAYS: Readonly<Record<(typeof SEVERITY_KEYS)[number], number>> = {
+  critical: 3, high: 30, medium: 90, low: 180,
+};
+
+function scoreBand(value: number): "good" | "warn" | "risk" {
+  return value >= 80 ? "good" : value >= 55 ? "warn" : "risk";
+}
+
+// Semicircular gauge drawn with a single arc whose dash length encodes the
+// fraction, so the value reads at a glance without any charting dependency.
+function ScoreGauge({ value, caption }: { readonly value: number; readonly caption: string }) {
+  const clamped = Math.max(0, Math.min(100, value));
+  const radius = 52;
+  const length = Math.PI * radius;
+  const band = scoreBand(clamped);
+  return (
+    <div className={`score-gauge score-gauge-${band}`}>
+      <svg viewBox="0 0 128 74" role="img" aria-label={`${caption}: ${clamped} out of 100`}>
+        <path className="score-gauge-track" d="M 12 66 A 52 52 0 0 1 116 66" fill="none" strokeWidth="10" strokeLinecap="round" />
+        <path className="score-gauge-value" d="M 12 66 A 52 52 0 0 1 116 66" fill="none" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${(clamped / 100) * length} ${length}`} />
+        <text x="64" y="58" textAnchor="middle" className="score-gauge-number">{clamped}</text>
+      </svg>
+      <span className="score-gauge-caption">{caption}</span>
+    </div>
+  );
+}
+
 export default function Home() {
   const { state, health, loading, refreshing, error, refresh } = usePilotState();
   const [syncing, setSyncing] = useState(false);
@@ -38,6 +67,21 @@ export default function Home() {
     : false;
   const coveragePercent = totalCoverage ? Math.round((succeededCoverage / totalCoverage) * 100) : 0;
   const priorityFindings = openFindings.filter((finding) => finding.severity === "critical" || finding.severity === "high").slice(0, 5);
+  const openBySeverity = {
+    critical: openFindings.filter((finding) => finding.severity === "critical").length,
+    high: openFindings.filter((finding) => finding.severity === "high").length,
+    medium: openFindings.filter((finding) => finding.severity === "medium").length,
+    low: openFindings.filter((finding) => finding.severity === "low").length,
+  };
+  const maxSeverityCount = Math.max(1, openBySeverity.critical, openBySeverity.high, openBySeverity.medium, openBySeverity.low);
+  // Deterministic security score: 100 minus a bounded penalty from the open
+  // finding severity mix. Purely from current evidence; trend over time arrives
+  // with the posture-history work.
+  const securityScore = Math.max(
+    2,
+    Math.round(100 - Math.min(98, openBySeverity.critical * 14 + openBySeverity.high * 6 + openBySeverity.medium * 2 + openBySeverity.low * 0.5)),
+  );
+  const resolvedCount = findings.filter((finding) => finding.status === "resolved" || finding.status === "suppressed").length;
 
   async function runSync() {
     if (!connection) return;
@@ -102,6 +146,40 @@ export default function Home() {
               <div className="metric-topline"><span>Active snapshot coverage</span><span className="metric-glyph">AWS</span></div>
               <strong className="metric-value">{totalCoverage ? `${coveragePercent}%` : "—"}</strong>
               <p>{succeededCoverage} of {totalCoverage} checks succeeded</p>
+            </article>
+          </section>
+
+          <section className="exec-cards" aria-label="Security posture summary">
+            <article className="panel exec-card exec-card-score">
+              <div className="panel-heading"><div><p className="eyebrow">Posture</p><h2>Security score</h2></div></div>
+              <ScoreGauge value={securityScore} caption="Computed from open findings" />
+              <p className="panel-footnote">100 minus a bounded penalty from the open-finding severity mix. Trend over time arrives with posture history.</p>
+            </article>
+            <article className="panel exec-card">
+              <div className="panel-heading"><div><p className="eyebrow">Open issues</p><h2>By severity</h2></div><span className="result-count">{openFindings.length} open</span></div>
+              <div className="severity-bars">
+                {SEVERITY_KEYS.map((severity) => <div className="severity-bar" key={severity}>
+                  <span className={`severity-badge severity-${severity}`}>{severity}</span>
+                  <i><b className={`severity-fill severity-fill-${severity}`} style={{ width: `${(openBySeverity[severity] / maxSeverityCount) * 100}%` }} /></i>
+                  <strong>{openBySeverity[severity]}</strong>
+                </div>)}
+              </div>
+            </article>
+            <article className="panel exec-card">
+              <div className="panel-heading"><div><p className="eyebrow">Remediation</p><h2>Open vs. SLA target</h2></div></div>
+              <div className="sla-list">
+                {SEVERITY_KEYS.map((severity) => <div className="sla-row" key={severity}>
+                  <span className={`severity-dot severity-${severity}`} />
+                  <div><strong>{severity}</strong><small>SLA target {SLA_TARGET_DAYS[severity]} days</small></div>
+                  <b>{openBySeverity[severity]} open</b>
+                </div>)}
+              </div>
+              <p className="panel-footnote">Per-issue age and SLA-breach tracking arrive with posture history.</p>
+            </article>
+            <article className="panel exec-card">
+              <div className="panel-heading"><div><p className="eyebrow">Coverage &amp; throughput</p><h2>Collection</h2></div></div>
+              <ScoreGauge value={coveragePercent} caption="Collector checks succeeded" />
+              <div className="throughput-row"><div><small>Open</small><strong>{openFindings.length}</strong></div><div><small>Resolved / excepted</small><strong>{resolvedCount}</strong></div></div>
             </article>
           </section>
 
