@@ -75,6 +75,14 @@ const ecrRepository = process.env.SUTRA_ECR_REPOSITORY?.trim() ?? "";
 if (ecrRepository && !/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/u.test(ecrRepository)) {
   throw new Error("SUTRA_ECR_REPOSITORY is invalid");
 }
+const roleStacksValue = process.env.SUTRA_DISPOSABLE_ROLE_STACKS?.trim() ?? "";
+const roleStacks = roleStacksValue === ""
+  ? []
+  : roleStacksValue.split(",").map((name) => name.trim());
+if (roleStacks.some((name) => !/^[A-Za-z][A-Za-z0-9-]{0,127}$/u.test(name))) {
+  throw new Error("SUTRA_DISPOSABLE_ROLE_STACKS must be comma-separated CloudFormation stack names");
+}
+const NOTIFICATION_SECRET_PREFIX = "sutra/notifications/";
 
 async function run(program, args) {
   if (args.some((value) => /(?:secret|token|password|access.?key)[=:]/iu.test(value))) {
@@ -260,36 +268,109 @@ async function createCluster() {
   await aws("eks", "update-kubeconfig", "--name", cluster);
 }
 
+async function deleteDisposableRoleStacks() {
+  for (const stackName of roleStacks) {
+    let described;
+    try {
+      described = JSON.parse(await aws("cloudformation", "describe-stacks", "--stack-name", stackName));
+    } catch (error) {
+      if (!String(error.message).includes("does not exist")) throw error;
+      continue;
+    }
+    const stackTags = new Map(
+      (described.Stacks?.[0]?.Tags ?? []).map((tag) => [tag.Key, tag.Value]),
+    );
+    if (stackTags.get("sutra:disposable") !== "true") {
+      throw new Error(`Refusing to delete stack ${stackName} without the sutra:disposable=true tag`);
+    }
+    await aws("cloudformation", "delete-stack", "--stack-name", stackName);
+    await aws("cloudformation", "wait", "stack-delete-complete", "--stack-name", stackName);
+  }
+}
+
+async function deleteDisposableNotificationSecrets() {
+  const listed = JSON.parse(await aws(
+    "secretsmanager", "list-secrets",
+    "--filters", "Key=tag-key,Values=sutra:disposable", "Key=tag-value,Values=true",
+  ));
+  for (const secret of listed.SecretList ?? []) {
+    const name = secret.Name ?? "";
+    const secretTags = new Map((secret.Tags ?? []).map((tag) => [tag.Key, tag.Value]));
+    if (!name.startsWith(NOTIFICATION_SECRET_PREFIX) || secretTags.get("sutra:disposable") !== "true") {
+      continue;
+    }
+    await aws("secretsmanager", "delete-secret", "--secret-id", name, "--force-delete-without-recovery");
+  }
+}
+
+async function auditRemainingTaggedResources() {
+  const result = JSON.parse(await aws(
+    "resourcegroupstaggingapi", "get-resources",
+    "--tag-filters", "Key=sutra:disposable,Values=true",
+  ));
+  const remaining = (result.ResourceTagMappingList ?? [])
+    .map((entry) => entry.ResourceARN)
+    .filter((arn) => typeof arn === "string" && arn !== "");
+  if (remaining.length === 0) {
+    process.stdout.write("Remaining sutra:disposable resources: none\n");
+    return;
+  }
+  process.stdout.write(`Remaining sutra:disposable resources (${remaining.length}):\n`);
+  for (const arn of remaining) {
+    process.stdout.write(`  ${arn}\n`);
+  }
+  throw new Error("Teardown incomplete: tagged disposable resources remain");
+}
+
 async function teardown() {
   if (confirmation !== cluster) {
     throw new Error(`Teardown requires --confirm ${cluster}`);
   }
-  await identityAndCluster();
-  await run(process.execPath, [
-    "scripts/kubernetes-security-stack.mjs", "uninstall",
-    "--context", kubernetesContext,
-    "--modules", "cilium,trivy,kyverno,falco",
-    "--allow-cni-change", "--delete-namespaces", "--execute",
-  ]);
-  const stackNames = [
-    `eksctl-${cluster}-nodegroup-sutra-validation-workers`,
-    `eksctl-${cluster}-cluster`,
-  ];
-  for (const stackName of stackNames) {
-    try {
-      await aws(
-        "cloudformation", "update-termination-protection",
-        "--stack-name", stackName,
-        "--no-enable-termination-protection",
-      );
-    } catch (error) {
-      if (!String(error.message).includes("does not exist")) throw error;
+  await identity();
+  let clusterPresent = true;
+  try {
+    const described = JSON.parse(await aws("eks", "describe-cluster", "--name", cluster));
+    const tags = described.cluster?.tags ?? {};
+    if (tags["sutra:disposable"] !== "true" || tags["sutra:expires-at"] !== expiration) {
+      throw new Error("Cluster is missing the exact sutra:disposable and sutra:expires-at safety tags");
     }
+  } catch (error) {
+    if (!String(error.message).includes("ResourceNotFoundException")) throw error;
+    clusterPresent = false;
+    process.stdout.write("Disposable EKS cluster is already absent; continuing cleanup.\n");
   }
-  await run("eksctl", [
-    "delete", "cluster", "--name", cluster, "--region", region,
-    "--wait",
-  ]);
+  if (clusterPresent) {
+    await run(process.execPath, [
+      "scripts/kubernetes-security-stack.mjs", "uninstall",
+      "--context", kubernetesContext,
+      "--modules", "cilium,trivy,kyverno,falco",
+      "--allow-cni-change", "--delete-namespaces", "--execute",
+    ]);
+    const stackNames = [
+      `eksctl-${cluster}-nodegroup-sutra-validation-workers`,
+      `eksctl-${cluster}-cluster`,
+    ];
+    for (const stackName of stackNames) {
+      try {
+        await aws(
+          "cloudformation", "update-termination-protection",
+          "--stack-name", stackName,
+          "--no-enable-termination-protection",
+        );
+      } catch (error) {
+        if (!String(error.message).includes("does not exist")) throw error;
+      }
+    }
+    await run("eksctl", [
+      "delete", "cluster", "--name", cluster, "--region", region,
+      "--wait",
+    ]);
+  }
+  try {
+    await aws("logs", "delete-log-group", "--log-group-name", `/aws/eks/${cluster}/cluster`);
+  } catch (error) {
+    if (!String(error.message).includes("ResourceNotFoundException")) throw error;
+  }
   if (ecrRepository) {
     try {
       await aws("ecr", "delete-repository", "--repository-name", ecrRepository, "--force");
@@ -302,6 +383,9 @@ async function teardown() {
   } catch (error) {
     if (!String(error.message).includes("NotFoundException")) throw error;
   }
+  await deleteDisposableRoleStacks();
+  await deleteDisposableNotificationSecrets();
+  await auditRemainingTaggedResources();
 }
 
 if (command === "plan") {
@@ -317,7 +401,7 @@ if (command === "plan") {
     "create=one EKS 1.35 control plane; one on-demand t3.large node; encrypted 20-GiB gp3; no NAT gateway; no SSH; IMDSv2; all control-plane logs with 7-day retention",
     "network=public endpoint restricted to the explicit SUTRA_VALIDATOR_CIDR /32",
     "preflight=verify caller account, EKS status and exact disposable/expiry tags",
-    "teardown=uninstall security stack; disable eksctl stack termination protection; delete cluster and nodegroup stacks; optionally delete ECR; delete budget",
+    "teardown=uninstall security stack; disable eksctl stack termination protection; delete cluster and nodegroup stacks; delete control-plane log group; optionally delete ECR; delete budget; delete tag-verified SUTRA_DISPOSABLE_ROLE_STACKS and disposable sutra/notifications secrets; report remaining sutra:disposable resources and fail unless empty",
     `teardownConfirmation=--confirm ${cluster}`,
     "",
   ].join("\n"));

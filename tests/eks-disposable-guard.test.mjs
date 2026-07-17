@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 
@@ -35,6 +37,10 @@ test("disposable plan makes no AWS call and fixes the budget at USD 40", async (
   assert.match(stdout, /no NAT gateway; no SSH; IMDSv2/u);
   assert.match(stdout, /SUTRA_VALIDATOR_CIDR \/32/u);
   assert.match(stdout, /delete cluster and nodegroup stacks/u);
+  assert.match(stdout, /delete control-plane log group/u);
+  assert.match(stdout, /SUTRA_DISPOSABLE_ROLE_STACKS/u);
+  assert.match(stdout, /sutra\/notifications secrets/u);
+  assert.match(stdout, /report remaining sutra:disposable resources and fail unless empty/u);
 });
 
 test("AWS calls require execution, exact account/tag checks, and typed teardown confirmation", async () => {
@@ -63,6 +69,100 @@ test("AWS calls require execution, exact account/tag checks, and typed teardown 
   assert.match(source, /IncludeCredit: false/u);
   assert.match(source, /gateway: Disable/u);
   assert.doesNotMatch(source, /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY/u);
+  assert.match(source, /"logs", "delete-log-group"/u);
+  assert.match(source, /"resourcegroupstaggingapi", "get-resources"/u);
+  assert.match(source, /Key=sutra:disposable,Values=true/u);
+  assert.match(source, /Refusing to delete stack .+ without the sutra:disposable=true tag/u);
+  assert.match(source, /startsWith\(NOTIFICATION_SECRET_PREFIX\)/u);
+  assert.match(source, /--force-delete-without-recovery/u);
+  assert.match(source, /Teardown incomplete: tagged disposable resources remain/u);
+});
+
+function fakeAwsScript(logPath, remainingResourcesJson) {
+  return [
+    "#!/bin/sh",
+    `printf '%s\\n' "$*" >> '${logPath}'`,
+    'case "$1 $2" in',
+    '"sts get-caller-identity") echo \'{"Account":"738663485493"}\' ;;',
+    '"eks describe-cluster") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
+    '"logs delete-log-group") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
+    '"ecr delete-repository") echo "An error occurred (RepositoryNotFoundException)" 1>&2; exit 254 ;;',
+    '"budgets delete-budget") echo "An error occurred (NotFoundException)" 1>&2; exit 254 ;;',
+    '"cloudformation describe-stacks") echo \'{"Stacks":[{"Tags":[{"Key":"sutra:disposable","Value":"true"}]}]}\' ;;',
+    '"cloudformation delete-stack") echo \'{}\' ;;',
+    '"cloudformation wait") echo \'\' ;;',
+    '"secretsmanager list-secrets") echo \'{"SecretList":[{"Name":"sutra/notifications/slack-demo","Tags":[{"Key":"sutra:disposable","Value":"true"}]},{"Name":"sutra/other-secret","Tags":[{"Key":"sutra:disposable","Value":"true"}]}]}\' ;;',
+    '"secretsmanager delete-secret") echo \'{}\' ;;',
+    `"resourcegroupstaggingapi get-resources") echo '${remainingResourcesJson}' ;;`,
+    '*) echo "unexpected fake aws call: $*" 1>&2; exit 64 ;;',
+    "esac",
+    "",
+  ].join("\n");
+}
+
+async function withFakeAws(remainingResourcesJson, execution) {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-guard-test-"));
+  const logPath = join(directory, "aws-calls.log");
+  try {
+    await writeFile(logPath, "", "utf8");
+    const awsPath = join(directory, "aws");
+    await writeFile(awsPath, fakeAwsScript(logPath, remainingResourcesJson), "utf8");
+    await chmod(awsPath, 0o755);
+    return await execution({
+      path: directory,
+      readLog: async () => await readFile(logPath, "utf8"),
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("resumable teardown cleans role stacks, notification secrets, and audits remaining tagged resources", async () => {
+  await withFakeAws('{"ResourceTagMappingList":[]}', async ({ path, readLog }) => {
+    const { stdout } = await execute(process.execPath, [
+      "scripts/eks-disposable-guard.mjs", "teardown",
+      "--confirm", "sutra-disposable-test", "--execute",
+    ], {
+      cwd: new URL("..", import.meta.url),
+      env: {
+        ...environment(),
+        SUTRA_DISPOSABLE_ROLE_STACKS: "sutra-validation-customer-role",
+        PATH: path,
+      },
+    });
+    assert.match(stdout, /already absent; continuing cleanup/u);
+    assert.match(stdout, /Remaining sutra:disposable resources: none/u);
+    const log = await readLog();
+    const calls = log.trim().split("\n");
+    assert.match(log, /logs delete-log-group --log-group-name \/aws\/eks\/sutra-disposable-test\/cluster/u);
+    assert.match(log, /cloudformation describe-stacks --stack-name sutra-validation-customer-role/u);
+    assert.match(log, /cloudformation delete-stack --stack-name sutra-validation-customer-role/u);
+    assert.match(log, /cloudformation wait stack-delete-complete --stack-name sutra-validation-customer-role/u);
+    assert.match(log, /secretsmanager delete-secret --secret-id sutra\/notifications\/slack-demo --force-delete-without-recovery/u);
+    assert.doesNotMatch(log, /delete-secret --secret-id sutra\/other-secret/u);
+    assert.match(calls.at(-1) ?? "", /^resourcegroupstaggingapi get-resources/u);
+    assert.doesNotMatch(log, /^eksctl/mu);
+  });
+});
+
+test("teardown fails and prints each remaining tagged resource when cleanup is incomplete", async () => {
+  const remaining = '{"ResourceTagMappingList":[{"ResourceARN":"arn:aws:ec2:ap-south-1:738663485493:volume/vol-0abc"}]}';
+  await withFakeAws(remaining, async ({ path }) => {
+    try {
+      await execute(process.execPath, [
+        "scripts/eks-disposable-guard.mjs", "teardown",
+        "--confirm", "sutra-disposable-test", "--execute",
+      ], {
+        cwd: new URL("..", import.meta.url),
+        env: { ...environment(), PATH: path },
+      });
+      assert.fail("teardown must fail while tagged resources remain");
+    } catch (error) {
+      assert.match(String(error.stderr), /Teardown incomplete: tagged disposable resources remain/u);
+      assert.match(String(error.stdout), /Remaining sutra:disposable resources \(1\):/u);
+      assert.match(String(error.stdout), /arn:aws:ec2:ap-south-1:738663485493:volume\/vol-0abc/u);
+    }
+  });
 });
 
 test("cluster creation requires an exact validator address and explicit execution", async () => {

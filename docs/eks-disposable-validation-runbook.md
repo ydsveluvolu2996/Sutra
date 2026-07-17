@@ -239,19 +239,32 @@ node scripts/kubernetes-security-stack.mjs uninstall \
 ```
 
 After verifying the exact disposable tags, the guard repeats module cleanup,
-deletes managed node groups, waits, deletes the EKS cluster, optionally deletes
-the disposable ECR repository, and removes the budget:
+deletes managed node groups, waits, deletes the EKS cluster, deletes the
+control-plane log group, optionally deletes the disposable ECR repository, and
+removes the budget. If the cluster is already absent — for example after a
+partially completed earlier teardown — the guard reports that and continues
+with the remaining cleanup instead of failing.
+
+Validation-only IAM role stacks (such as the customer trust-role stack) are
+deleted when they are listed explicitly and carry the disposable tag. Create
+those stacks with the `sutra:disposable=true` stack tag; the guard refuses to
+delete any listed stack without it. Temporary notification webhook secrets are
+deleted only when the secret name starts with `sutra/notifications/` and the
+secret carries the `sutra:disposable=true` tag.
 
 ```bash
+export SUTRA_DISPOSABLE_ROLE_STACKS=<comma-separated validation role stacks>
+
 node scripts/eks-disposable-guard.mjs teardown \
   --confirm "$SUTRA_EKS_CLUSTER_NAME" \
   --execute
 ```
 
-Finally inspect Resource Groups Tagging API, CloudFormation stacks, load
-balancers, ENIs, EBS volumes, snapshots, log groups, NAT gateways, Elastic IPs,
-ECR, and AWS Budgets. Teardown is incomplete until the tagged-resource query is
-empty and the billing owner records the final cost.
+The teardown finishes with a Resource Groups Tagging API audit: it prints every
+remaining `sutra:disposable=true` resource ARN and exits with a failure until
+that query is empty. Still inspect CloudFormation stacks, load balancers, ENIs,
+EBS volumes, snapshots, log groups, NAT gateways, Elastic IPs, ECR, and AWS
+Budgets afterwards; the billing owner records the final cost.
 
 ## Validation record — 2026-07-17
 
