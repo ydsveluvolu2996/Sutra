@@ -327,12 +327,63 @@ test("heartbeats report falco signing-gateway liveness when a health URL is conf
       now: () => Date.parse("2026-07-17T12:00:00.000Z"),
     });
     await instance.runCycle();
-    assert.equal(probed.length, 1);
+    assert.equal(probed.length, 2, "gateway health is probed once per heartbeat");
     assert.equal(channel.heartbeats.length, 2);
     for (const heartbeat of channel.heartbeats) {
       assert.equal(heartbeat.modules["falco-gateway"], "AVAILABLE");
     }
-    assert.throws(() => new ContinuousKubernetesAgent({
+    const rejectedGatewayUrls = [
+      "http://user:secret@gateway.example/readyz?x=1",
+      "http://gateway.public.example.com:8080",
+      "http://93.184.216.34:8080",
+      "ftp://sutra-falco-gateway.sutra-falco.svc",
+    ];
+    for (const healthUrl of rejectedGatewayUrls) {
+      assert.throws(() => new ContinuousKubernetesAgent({
+        clusterId: "cluster_demo",
+        clusterName: "Demo",
+        clusterServerUrl: url,
+        agentVersion: "0.2.0-test",
+        capabilities: ["inventory.v1"],
+        scanIntervalMs: 5 * 60_000,
+        stateStore: state,
+        controlChannel: channel,
+        bootstrapToken: async () => bootstrap,
+        serviceAccountToken: async () => kubeToken,
+        deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+        falcoGateway: { healthUrl },
+      }), /Falco gateway health URL is invalid/u, `must reject ${healthUrl}`);
+    }
+    for (const healthUrl of [
+      "https://gateway.public.example.com/readyz",
+      "http://sutra-falco-gateway.sutra-falco.svc:8080/readyz",
+      "http://10.4.1.9:8080",
+    ]) {
+      assert.doesNotThrow(() => new ContinuousKubernetesAgent({
+        clusterId: "cluster_demo",
+        clusterName: "Demo",
+        clusterServerUrl: url,
+        agentVersion: "0.2.0-test",
+        capabilities: ["inventory.v1"],
+        scanIntervalMs: 5 * 60_000,
+        stateStore: state,
+        controlChannel: channel,
+        bootstrapToken: async () => bootstrap,
+        serviceAccountToken: async () => kubeToken,
+        deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+        falcoGateway: { healthUrl },
+      }), `must accept ${healthUrl}`);
+    }
+  });
+});
+
+test("the post-scan heartbeat re-probes gateway health rather than reusing the pre-scan reading", async () => {
+  await withKubernetesApi(async (url) => {
+    const state = new MemoryState();
+    const channel = new MemoryChannel();
+    const states = ["AVAILABLE", "DEGRADED"] as const;
+    let probeCount = 0;
+    const instance = new ContinuousKubernetesAgent({
       clusterId: "cluster_demo",
       clusterName: "Demo",
       clusterServerUrl: url,
@@ -344,8 +395,17 @@ test("heartbeats report falco signing-gateway liveness when a health URL is conf
       bootstrapToken: async () => bootstrap,
       serviceAccountToken: async () => kubeToken,
       deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
-      falcoGateway: { healthUrl: "http://user:secret@gateway.example/readyz?x=1" },
-    }), /Falco gateway health URL is invalid/u);
+      moduleHealthProbe: { async inspect() { return healthyModules; } },
+      falcoGateway: {
+        healthUrl: "http://sutra-falco-gateway.sutra-falco.svc:8080",
+        probe: { async inspect() { return states[Math.min(probeCount++, states.length - 1)]; } },
+      },
+      now: () => Date.parse("2026-07-17T12:00:00.000Z"),
+    });
+    await instance.runCycle();
+    assert.equal(probeCount, 2, "the gateway is probed once per heartbeat, not reused");
+    assert.equal(channel.heartbeats[0]?.modules["falco-gateway"], "AVAILABLE");
+    assert.equal(channel.heartbeats[1]?.modules["falco-gateway"], "DEGRADED");
   });
 });
 

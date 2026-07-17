@@ -107,10 +107,10 @@ export function SecurityGraph({
           {layout.edges.map((entry) => (
             <g
               key={`${entry.edge.from}:${entry.edge.to}:${entry.edge.relation}`}
-              className={`security-graph-edge${isEdgeActive(entry) ? "" : " security-graph-dimmed"}`}
+              className={`security-graph-edge${entry.isBackEdge ? " security-graph-backedge" : ""}${isEdgeActive(entry) ? "" : " security-graph-dimmed"}`}
             >
               <path d={edgeCurve(entry)} fill="none" markerEnd="url(#security-graph-arrow)">
-                <title>{`${entry.edge.relation} — evidence: ${entry.edge.evidence.source}${entry.edge.evidence.observedAt ? ` @ ${entry.edge.evidence.observedAt}` : ""}`}</title>
+                <title>{`${entry.edge.relation}${entry.isBackEdge ? " (cycle / back-reference)" : ""} — evidence: ${entry.edge.evidence.source}${entry.edge.evidence.observedAt ? ` @ ${entry.edge.evidence.observedAt}` : ""}`}</title>
               </path>
               <text x={(entry.fromX + entry.toX) / 2} y={(entry.fromY + entry.toY) / 2 - 6} textAnchor="middle">
                 {entry.edge.relation}
