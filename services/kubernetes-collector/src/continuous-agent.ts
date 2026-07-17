@@ -11,6 +11,7 @@ import {
   type KubernetesAgentIdentity,
   type KubernetesControlChannel,
 } from "./control-channel.ts";
+import { type HubbleFlowSource } from "./hubble-flow-source.ts";
 import { ReadOnlyKubernetesCollector } from "./collector.ts";
 import {
   KubernetesDiscoveryModuleHealthProbe,
@@ -43,6 +44,7 @@ export interface KubernetesAgentConfiguration extends KubernetesAgentIdentity {
     readonly startedAt: string;
   };
   readonly moduleHealthProbe?: KubernetesModuleHealthProbe;
+  readonly hubbleFlowSource?: HubbleFlowSource;
   readonly now?: () => number;
 }
 
@@ -225,6 +227,18 @@ export class ContinuousKubernetesAgent {
       credential,
       this.heartbeat(credential.agentId, modules, state),
     );
+
+    if (this.configuration.hubbleFlowSource !== undefined) {
+      const collection = await this.configuration.hubbleFlowSource.collect({ now: this.now() });
+      if (collection !== null && collection.flows.length > 0) {
+        await this.configuration.controlChannel.uploadHubbleFlows(credential, {
+          schema: "sutra.hubble-agent-upload.v1",
+          collectedAt: new Date(this.now()).toISOString(),
+          hubbleVersion: collection.hubbleVersion,
+          flows: collection.flows,
+        });
+      }
+    }
   }
 
   public async run(signal: AbortSignal): Promise<void> {

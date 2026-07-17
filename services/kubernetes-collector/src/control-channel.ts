@@ -2,6 +2,7 @@ import type { RotatingAgentCredential } from "./agent-state.ts";
 
 const MAX_RESPONSE_BYTES = 256 * 1024;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_HUBBLE_UPLOAD_BYTES = 2 * 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 20_000;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const BOOTSTRAP = /^[A-Za-z0-9_-]{32,512}$/u;
@@ -25,6 +26,13 @@ export interface KubernetesAgentHeartbeat extends KubernetesAgentIdentity {
   readonly lastSuccessfulScanAt: string | null;
 }
 
+export interface KubernetesHubbleFlowUpload {
+  readonly schema: "sutra.hubble-agent-upload.v1";
+  readonly collectedAt: string;
+  readonly hubbleVersion: string;
+  readonly flows: readonly unknown[];
+}
+
 export interface KubernetesControlChannel {
   enroll(bootstrapToken: string, identity: KubernetesAgentIdentity): Promise<RotatingAgentCredential>;
   rotate(credential: RotatingAgentCredential): Promise<RotatingAgentCredential>;
@@ -33,6 +41,10 @@ export interface KubernetesControlChannel {
     credential: RotatingAgentCredential,
     idempotencyKey: string,
     payload: unknown,
+  ): Promise<void>;
+  uploadHubbleFlows(
+    credential: RotatingAgentCredential,
+    payload: KubernetesHubbleFlowUpload,
   ): Promise<void>;
 }
 
@@ -165,6 +177,18 @@ export class HttpsKubernetesControlChannel implements KubernetesControlChannel {
       },
       body: payload,
       maximumRequestBytes: MAX_UPLOAD_BYTES,
+    });
+  }
+
+  public async uploadHubbleFlows(
+    credential: RotatingAgentCredential,
+    payload: KubernetesHubbleFlowUpload,
+  ): Promise<void> {
+    await this.send(`/v1/kubernetes/agents/${encodeURIComponent(credential.agentId)}/hubble-flows`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${credential.token}` },
+      body: payload,
+      maximumRequestBytes: MAX_HUBBLE_UPLOAD_BYTES,
     });
   }
 

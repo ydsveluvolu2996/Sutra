@@ -44,6 +44,7 @@ class MemoryState implements KubernetesAgentStateStore {
 
 class MemoryChannel implements KubernetesControlChannel {
   public readonly uploads: { key: string; payload: unknown }[] = [];
+  public readonly hubbleUploads: unknown[] = [];
   public readonly heartbeats: KubernetesAgentHeartbeat[] = [];
   public enrollments = 0;
   public rotations = 0;
@@ -67,6 +68,9 @@ class MemoryChannel implements KubernetesControlChannel {
       throw new Error("simulated outage");
     }
     this.uploads.push({ key, payload });
+  }
+  public async uploadHubbleFlows(_credential: RotatingAgentCredential, payload: unknown) {
+    this.hubbleUploads.push(payload);
   }
 }
 
@@ -217,6 +221,79 @@ test("control channel requires an HTTPS origin, bounded requests and no redirect
     /exceeded its safe limit/u,
   );
   assert.equal(requests.length, 1);
+});
+
+test("uploads aggregated hubble flow evidence after the scan when a flow source is configured", async () => {
+  await withKubernetesApi(async (url) => {
+    const state = new MemoryState();
+    const channel = new MemoryChannel();
+    const flow = {
+      observedAt: "2026-07-17T11:59:00.000Z",
+      source: { namespace: "payments", workloadKind: "Deployment", workloadName: "frontend", serviceName: null, world: false },
+      destination: { namespace: null, workloadKind: null, workloadName: null, serviceName: null, world: true },
+      direction: "egress" as const,
+      verdict: "forwarded" as const,
+      protocol: "TCP" as const,
+      destinationPort: 443,
+      observations: 3,
+    };
+    const instance = new ContinuousKubernetesAgent({
+      clusterId: "cluster_demo",
+      clusterName: "Demo",
+      clusterServerUrl: url,
+      agentVersion: "0.2.0-test",
+      capabilities: ["inventory.v1", "hubble-flows.v1"],
+      scanIntervalMs: 5 * 60_000,
+      stateStore: state,
+      controlChannel: channel,
+      bootstrapToken: async () => bootstrap,
+      serviceAccountToken: async () => kubeToken,
+      deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+      moduleHealthProbe: { async inspect() { return healthyModules; } },
+      hubbleFlowSource: {
+        async collect() {
+          return { hubbleVersion: "1.19.5", flows: [flow], linesRead: 1, flowsSkipped: 0 };
+        },
+      },
+      now: () => Date.parse("2026-07-17T12:00:00.000Z"),
+    });
+    await instance.runCycle();
+    assert.equal(channel.hubbleUploads.length, 1);
+    assert.deepEqual(channel.hubbleUploads[0], {
+      schema: "sutra.hubble-agent-upload.v1",
+      collectedAt: "2026-07-17T12:00:00.000Z",
+      hubbleVersion: "1.19.5",
+      flows: [flow],
+    });
+  });
+});
+
+test("a not-configured or empty flow source performs no hubble upload", async () => {
+  await withKubernetesApi(async (url) => {
+    for (const collection of [null, { hubbleVersion: "1.19.5", flows: [], linesRead: 0, flowsSkipped: 0 }]) {
+      const state = new MemoryState();
+      const channel = new MemoryChannel();
+      const instance = new ContinuousKubernetesAgent({
+        clusterId: "cluster_demo",
+        clusterName: "Demo",
+        clusterServerUrl: url,
+        agentVersion: "0.2.0-test",
+        capabilities: ["inventory.v1"],
+        scanIntervalMs: 5 * 60_000,
+        stateStore: state,
+        controlChannel: channel,
+        bootstrapToken: async () => bootstrap,
+        serviceAccountToken: async () => kubeToken,
+        deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+        moduleHealthProbe: { async inspect() { return healthyModules; } },
+        hubbleFlowSource: { async collect() { return collection; } },
+        now: () => Date.parse("2026-07-17T12:00:00.000Z"),
+      });
+      await instance.runCycle();
+      assert.equal(channel.hubbleUploads.length, 0);
+      assert.equal(channel.uploads.length, 1, "the scan upload must still happen");
+    }
+  });
 });
 
 test("retry backoff is bounded and jittered", () => {
