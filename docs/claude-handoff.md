@@ -8,9 +8,15 @@ This document is the current source of truth for continuing Sutra work in anothe
 - Default branch: `main`
 - Active development branch: `agent/sutra-local-aws-pilot`
 - Open draft PR: https://github.com/ydsveluvolu2996/Sutra/pull/1
-- Latest pushed governance commit: `1e740a6`
 - Repository is private.
 - Working tree was clean and synchronized with origin at handoff.
+- 2026-07-17 local-functionality session: guarded-teardown completion,
+  compliance readiness rendering, agent soak harness, agent Hubble flow
+  collection, Falco gateway heartbeat health, interactive security graph,
+  chart options, and agent deployment-health API/UI were added with tests and
+  pushed. No AWS resources were created or modified; live validation remains
+  deferred by owner instruction. See "Local functionality completed" in
+  `docs/kubernetes-pending-tasks.md`.
 
 ## Product scope
 
