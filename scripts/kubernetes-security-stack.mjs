@@ -15,6 +15,7 @@ const definitions = {
     repository: "https://helm.cilium.io",
     version: "1.19.5",
     values: "deploy/kubernetes/security-stack/cilium-aws-vpc-cni-values.yaml",
+    healthSelector: "k8s-app=cilium",
   },
   trivy: {
     release: "trivy-operator",
@@ -23,6 +24,7 @@ const definitions = {
     repository: "https://aquasecurity.github.io/helm-charts",
     version: "0.32.1",
     values: "deploy/kubernetes/security-stack/trivy-values.yaml",
+    healthSelector: "app.kubernetes.io/instance=trivy-operator",
   },
   kyverno: {
     release: "kyverno",
@@ -31,6 +33,7 @@ const definitions = {
     repository: "https://kyverno.github.io/kyverno",
     version: "3.8.2",
     values: "deploy/kubernetes/security-stack/kyverno-values.yaml",
+    healthSelector: "app.kubernetes.io/instance=kyverno",
   },
   falco: {
     release: "falco",
@@ -39,6 +42,7 @@ const definitions = {
     repository: "https://falcosecurity.github.io/charts",
     version: "9.1.0",
     values: "deploy/kubernetes/security-stack/falco-values.yaml",
+    healthSelector: "app.kubernetes.io/instance=falco",
   },
 };
 
@@ -256,7 +260,7 @@ async function health(options) {
     await run("helm", helmArgs(options, "status", item.release, "--namespace", item.namespace));
     await run("kubectl", kubectlArgs(
       options, "-n", item.namespace, "wait", "--for=condition=Ready", "pod",
-      "-l", `app.kubernetes.io/instance=${item.release}`, "--timeout=5m",
+      "-l", item.healthSelector, "--timeout=5m",
     ));
     checks.push({ module: moduleName, check: "helm-release", status: "passed" });
     checks.push({ module: moduleName, check: "workload-readiness", status: "passed" });
@@ -309,6 +313,38 @@ async function uninstall(options) {
   if (options.modules.includes("cilium")) await assertAwsCniHealthy(options);
   for (const moduleName of [...options.modules].reverse()) {
     const item = definitions[moduleName];
+    let releasePresent = true;
+    try {
+      await run("helm", helmArgs(options, "status", item.release, "--namespace", item.namespace));
+    } catch (error) {
+      if (!String(error.message).includes("not found")) throw error;
+      releasePresent = false;
+    }
+    if (moduleName === "cilium" && releasePresent) {
+      // Cilium intentionally keeps its CNI files during ordinary upgrades.
+      // Enable the chart's official shutdown cleanup immediately before a
+      // deliberate uninstall so kubelet does not retain 05-cilium.conflist.
+      const operatorReplicas = (await run("kubectl", kubectlArgs(
+        options, "-n", "kube-system", "get", "deployment/cilium-operator",
+        "-o", "jsonpath={.spec.replicas}",
+      ))).trim();
+      if (!/^[1-9]$|^10$/u.test(operatorReplicas)) {
+        fail("Refusing Cilium cleanup because the operator replica count is invalid");
+      }
+      await run("helm", helmArgs(
+        options, "upgrade", item.release, item.chart,
+        "--repo", item.repository,
+        "--namespace", item.namespace,
+        "--version", item.version,
+        "--values", resolve(root, item.values),
+        "--set", "cni.uninstall=true",
+        "--set", `operator.replicas=${operatorReplicas}`,
+        "--wait", "--timeout", "10m",
+      ));
+      await run("kubectl", kubectlArgs(
+        options, "-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=5m",
+      ));
+    }
     if (moduleName === "falco") {
       await run("kubectl", kubectlArgs(
         options, "delete", "--ignore-not-found", "-f",
@@ -321,6 +357,7 @@ async function uninstall(options) {
       ));
     }
     try {
+      if (!releasePresent) throw new Error("release: not found");
       await run("helm", helmArgs(
         options, "uninstall", item.release, "--namespace", item.namespace, "--wait", "--timeout", "10m",
       ));
@@ -336,6 +373,14 @@ async function uninstall(options) {
   if (options.modules.includes("cilium")) {
     await run("kubectl", kubectlArgs(
       options, "-n", "kube-system", "rollout", "status", "daemonset/aws-node", "--timeout=5m",
+    ));
+    // A healthy existing pod does not prove kubelet can create a new sandbox
+    // after removing a chained CNI. Recreate CoreDNS and require the rollout.
+    await run("kubectl", kubectlArgs(
+      options, "-n", "kube-system", "rollout", "restart", "deployment/coredns",
+    ));
+    await run("kubectl", kubectlArgs(
+      options, "-n", "kube-system", "rollout", "status", "deployment/coredns", "--timeout=5m",
     ));
   }
 }

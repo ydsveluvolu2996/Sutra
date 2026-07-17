@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertNotificationSecretScope,
   normalizeNotificationDestinationConfig,
   NotificationDestinationValidationError,
 } from "../lib/notification-destination-boundary.ts";
@@ -18,6 +19,26 @@ test("normalizes bounded email destination configuration", () => {
     fromAddress: "alerts@example.com",
     sesRegion: "ap-south-1",
   });
+});
+
+test("requires webhook secret references to remain inside the tenant and channel scope", () => {
+  assert.doesNotThrow(() => assertNotificationSecretScope({
+    channel: "slack",
+    secretReference: "secret://notifications/org-a/customer-a/slack/primary",
+  }, "org-a", "customer-a"));
+  for (const reference of [
+    "secret://notifications/org-a/customer-b/slack/primary",
+    "secret://notifications/org-a/customer-a/microsoft_teams/primary",
+    "secret://notifications/org-a/customer-a/slack/../customer-b",
+  ]) {
+    assert.throws(
+      () => assertNotificationSecretScope({
+        channel: "slack",
+        secretReference: reference,
+      }, "org-a", "customer-a"),
+      NotificationDestinationValidationError,
+    );
+  }
 });
 
 test("allows opaque secret references and rejects raw provider URLs", () => {

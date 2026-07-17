@@ -206,6 +206,7 @@ export class FalcoRuntimeRepository implements FalcoReplayStore {
   ): Promise<{
     readonly coverage: FalcoRuntimeCoverage;
     readonly timeline: readonly FalcoInvestigationTimelineItem[];
+    readonly events: readonly NormalizedFalcoRuntimeEvent[];
   }> {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
       throw new FalcoRuntimeRepositoryError("INVALID_INPUT");
@@ -234,14 +235,15 @@ export class FalcoRuntimeRepository implements FalcoReplayStore {
       evidence_sha256: string;
       id: string;
     }>();
-    const timeline = (rows.results ?? []).map((row) => {
+    const events = (rows.results ?? []).map((row) => {
       const material = JSON.parse(row.evidence_json) as Omit<NormalizedFalcoRuntimeEvent, "eventId" | "evidenceSha256">;
-      return projectFalcoTimeline({
+      return {
         ...material,
         eventId: row.id,
         evidenceSha256: row.evidence_sha256,
-      });
+      };
     });
+    const timeline = events.map(projectFalcoTimeline);
     const heartbeat = source?.last_heartbeat_at ?? null;
     return {
       coverage: {
@@ -254,6 +256,7 @@ export class FalcoRuntimeRepository implements FalcoReplayStore {
         falcoVersion: source?.falco_version ?? null,
       },
       timeline,
+      events,
     };
   }
 }

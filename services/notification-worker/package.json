@@ -1,0 +1,21 @@
+{
+  "name": "@sutra/notification-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "tsx runtime.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "3.1087.0",
+    "@aws-sdk/client-sesv2": "3.1087.0",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.1",
+    "tsx": "4.23.1"
+  }
+}

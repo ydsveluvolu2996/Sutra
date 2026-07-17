@@ -10,6 +10,7 @@ RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
 FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY services/aws-collector/package.json services/aws-collector/package.json
+COPY services/notification-worker/package.json services/notification-worker/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS builder

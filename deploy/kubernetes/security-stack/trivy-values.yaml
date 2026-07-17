@@ -1,11 +1,12 @@
 operator:
   builtInTrivyServer: false
+  scanJobsConcurrentLimit: 1
   vulnerabilityScannerEnabled: true
   configAuditScannerEnabled: true
   rbacAssessmentScannerEnabled: true
   infraAssessmentScannerEnabled: true
   sbomGenerationEnabled: true
-  clusterComplianceEnabled: false
+  clusterComplianceEnabled: true
   accessGlobalSecretsAndServiceAccount: false
   exposedSecretScannerEnabled: false
   webhookBroadcastURL: ""

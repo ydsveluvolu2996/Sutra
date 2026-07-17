@@ -1,7 +1,10 @@
 import {
   SecurityNotificationRepository,
 } from "../../../../db/security-notification-repository";
-import { normalizeNotificationDestinationConfig } from "../../../../lib/notification-destination-boundary";
+import {
+  assertNotificationSecretScope,
+  normalizeNotificationDestinationConfig,
+} from "../../../../lib/notification-destination-boundary";
 import { appendAuditEvent } from "../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
@@ -82,11 +85,17 @@ export async function GET(request: Request): Promise<Response> {
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "connection:read", scopedCustomerId);
     const repository = new SecurityNotificationRepository();
-    const [destinations, jobs] = await Promise.all([
+    const [storedDestinations, jobs] = await Promise.all([
       repository.listDestinations(authenticated.subject.orgId, scopedCustomerId),
       repository.listJobs(authenticated.subject.orgId, scopedCustomerId),
     ]);
     const workerConfigured = process.env.SUTRA_NOTIFICATION_WORKER_CONFIGURED === "true";
+    const destinations = storedDestinations.map((destination) => ({
+      ...destination,
+      deliveryReadiness: workerConfigured
+        ? "configured" as const
+        : "adapter_not_configured" as const,
+    }));
     return jsonResponse({
       destinations,
       jobs,
@@ -126,6 +135,11 @@ export async function POST(request: Request): Promise<Response> {
       ) invalid();
       const parsedConfiguration = configuration(input.configuration);
       if (!CHANNELS.has(parsedConfiguration.channel)) invalid();
+      assertNotificationSecretScope(
+        parsedConfiguration,
+        authenticated.subject.orgId,
+        scopedCustomerId,
+      );
       const destination = await new SecurityNotificationRepository().upsertDestination({
         orgId: authenticated.subject.orgId,
         customerId: scopedCustomerId,

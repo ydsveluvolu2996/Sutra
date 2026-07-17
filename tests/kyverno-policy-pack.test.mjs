@@ -54,6 +54,10 @@ test("audit pack covers every requested workload and supply-chain control", asyn
   assert.match(security, /hostNetwork/u);
   assert.match(security, /runAsNonRoot/u);
   assert.match(supplyChain, /\*@sha256:\*/u);
+  assert.match(supplyChain, /\*\.dkr\.ecr\.\*\.amazonaws\.com\/\*/u);
+  assert.match(supplyChain, /public\.ecr\.aws\/\*/u);
+  assert.match(supplyChain, /ghcr\.io\/\*/u);
+  assert.doesNotMatch(supplyChain, /operator: NotMatches/u);
 });
 
 test("every default policy excludes the reviewed system namespaces", async () => {

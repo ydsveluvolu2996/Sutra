@@ -96,7 +96,7 @@ export function mergeKubernetesModuleHealth(
   discovery: KubernetesModuleHealth,
   snapshot: KubernetesSnapshot,
 ): KubernetesModuleHealth {
-  const trivyCoverage = snapshot.coverage.filter((entry) => entry.collectorKey.startsWith("trivy."));
+  const trivyCoverage = snapshot.coverage.filter((entry) => entry.collectorKey.startsWith("trivy-operator."));
   const trivy = trivyCoverage.some((entry) => entry.status === "succeeded")
     ? "AVAILABLE"
     : trivyCoverage.some((entry) => entry.status === "failed")

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,8 +9,8 @@ const command = process.argv[2] ?? "plan";
 const execute = process.argv.includes("--execute");
 const confirmationIndex = process.argv.indexOf("--confirm");
 const confirmation = confirmationIndex >= 0 ? process.argv[confirmationIndex + 1] ?? "" : "";
-if (!new Set(["plan", "preflight", "budget", "teardown"]).has(command)) {
-  throw new Error("Command must be plan, preflight, budget, or teardown");
+if (!new Set(["plan", "create", "preflight", "budget", "teardown"]).has(command)) {
+  throw new Error("Command must be plan, create, preflight, budget, or teardown");
 }
 if (command !== "plan" && !execute) {
   throw new Error(`${command} can call AWS; re-run with --execute after reviewing the plan`);
@@ -46,15 +47,28 @@ const expiration = required(
 const expirationMs = Date.parse(expiration);
 const maximumBudget = Number(process.env.SUTRA_DISPOSABLE_BUDGET_USD ?? "40");
 if (maximumBudget !== 40) throw new Error("Disposable validation budget must remain exactly USD 40");
+const awsProfile = required(
+  "AWS_PROFILE",
+  /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u,
+  "sutra-administrator",
+);
+const validatorCidr = process.env.SUTRA_VALIDATOR_CIDR?.trim() ?? "";
+function isExactIpv4Cidr(value) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/32$/u.exec(value);
+  return match !== null && match.slice(1).every((octet) => Number(octet) <= 255);
+}
+if (command === "create" && !isExactIpv4Cidr(validatorCidr)) {
+  throw new Error("SUTRA_VALIDATOR_CIDR must be the validator's exact public IPv4 /32");
+}
+if (!Number.isFinite(expirationMs)) {
+  throw new Error("SUTRA_DISPOSABLE_EXPIRES_AT is invalid");
+}
 if (
-  command !== "teardown" &&
-  !Number.isFinite(expirationMs) ||
   command !== "teardown" && (
     expirationMs <= Date.now() ||
     expirationMs - Date.now() > 24 * 60 * 60_000
   )
 ) throw new Error("SUTRA_DISPOSABLE_EXPIRES_AT must be within the next 24 hours");
-if (!Number.isFinite(expirationMs)) throw new Error("SUTRA_DISPOSABLE_EXPIRES_AT is invalid");
 
 const budgetName = `sutra-eks-disposable-${cluster}`;
 const ecrRepository = process.env.SUTRA_ECR_REPOSITORY?.trim() ?? "";
@@ -70,7 +84,12 @@ async function run(program, args) {
     const child = spawn(program, args, {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, AWS_REGION: region },
+      env: {
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+        AWS_PROFILE: awsProfile,
+        AWS_REGION: region,
+      },
     });
     let stdout = "";
     let stderr = "";
@@ -88,9 +107,14 @@ function aws(...args) {
   return run("aws", [...args, "--region", region, "--no-cli-pager", "--output", "json"]);
 }
 
-async function identityAndCluster() {
+async function identity() {
   const identity = JSON.parse(await aws("sts", "get-caller-identity"));
   if (identity.Account !== accountId) throw new Error("AWS caller account does not match SUTRA_AWS_ACCOUNT_ID");
+  return identity;
+}
+
+async function identityAndCluster() {
+  await identity();
   const described = JSON.parse(await aws("eks", "describe-cluster", "--name", cluster));
   const tags = described.cluster?.tags ?? {};
   if (tags["sutra:disposable"] !== "true" || tags["sutra:expires-at"] !== expiration) {
@@ -99,13 +123,70 @@ async function identityAndCluster() {
   return described.cluster;
 }
 
+function clusterConfiguration() {
+  const tags = [
+    `    sutra:disposable: "true"`,
+    `    sutra:expires-at: "${expiration}"`,
+    `    sutra:purpose: "enterprise-validation"`,
+  ];
+  return [
+    "apiVersion: eksctl.io/v1alpha5",
+    "kind: ClusterConfig",
+    "metadata:",
+    `  name: ${cluster}`,
+    `  region: ${region}`,
+    "  version: \"1.35\"",
+    "  tags:",
+    ...tags,
+    "iam:",
+    "  withOIDC: true",
+    "vpc:",
+    "  nat:",
+    "    gateway: Disable",
+    "  clusterEndpoints:",
+    "    publicAccess: true",
+    "    privateAccess: true",
+    "  publicAccessCIDRs:",
+    `    - ${validatorCidr}`,
+    "cloudWatch:",
+    "  clusterLogging:",
+    "    enableTypes:",
+    "      - api",
+    "      - audit",
+    "      - authenticator",
+    "      - controllerManager",
+    "      - scheduler",
+    "managedNodeGroups:",
+    "  - name: sutra-validation-workers",
+    "    instanceType: t3.large",
+    "    desiredCapacity: 1",
+    "    minSize: 1",
+    "    maxSize: 1",
+    "    volumeSize: 20",
+    "    volumeType: gp3",
+    "    volumeEncrypted: true",
+    "    privateNetworking: false",
+    "    disableIMDSv1: true",
+    "    ssh:",
+    "      allow: false",
+    "    labels:",
+    "      sutra-validation: \"true\"",
+    "    tags:",
+    ...tags.map((line) => `  ${line}`),
+    "",
+  ].join("\n");
+}
+
 function budgetDocument() {
   return JSON.stringify({
     BudgetName: budgetName,
     BudgetLimit: { Amount: "40", Unit: "USD" },
     BudgetType: "COST",
     TimeUnit: "MONTHLY",
-    CostFilters: { TagKeyValue: ["user:sutra:disposable$true"] },
+    CostTypes: {
+      IncludeCredit: false,
+      IncludeRefund: false,
+    },
   });
 }
 
@@ -130,6 +211,7 @@ function notificationsDocument() {
 }
 
 async function createBudget() {
+  await identity();
   try {
     await aws(
       "budgets", "create-budget", "--account-id", accountId,
@@ -145,6 +227,39 @@ async function createBudget() {
   }
 }
 
+async function createCluster() {
+  await identity();
+  try {
+    await aws("eks", "describe-cluster", "--name", cluster);
+    throw new Error("Refusing to create because the disposable cluster name already exists");
+  } catch (error) {
+    if (!String(error.message).includes("ResourceNotFoundException")) throw error;
+  }
+  await createBudget();
+  const stateDirectory = resolve(root, ".sutra", "eks-validation");
+  const configurationPath = resolve(stateDirectory, `${cluster}.yaml`);
+  await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await writeFile(configurationPath, clusterConfiguration(), {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  await chmod(configurationPath, 0o600);
+  try {
+    await run("eksctl", ["create", "cluster", "--config-file", configurationPath]);
+  } finally {
+    await rm(configurationPath, { force: true });
+  }
+  await aws("eks", "wait", "cluster-active", "--name", cluster);
+  await aws(
+    "logs", "put-retention-policy",
+    "--log-group-name", `/aws/eks/${cluster}/cluster`,
+    "--retention-in-days", "7",
+  );
+  await identityAndCluster();
+  await aws("eks", "update-kubeconfig", "--name", cluster);
+}
+
 async function teardown() {
   if (confirmation !== cluster) {
     throw new Error(`Teardown requires --confirm ${cluster}`);
@@ -156,15 +271,25 @@ async function teardown() {
     "--modules", "cilium,trivy,kyverno,falco",
     "--allow-cni-change", "--delete-namespaces", "--execute",
   ]);
-  const nodegroups = JSON.parse(await aws("eks", "list-nodegroups", "--cluster-name", cluster));
-  for (const nodegroup of nodegroups.nodegroups ?? []) {
-    await aws("eks", "delete-nodegroup", "--cluster-name", cluster, "--nodegroup-name", nodegroup);
-    await aws(
-      "eks", "wait", "nodegroup-deleted", "--cluster-name", cluster, "--nodegroup-name", nodegroup,
-    );
+  const stackNames = [
+    `eksctl-${cluster}-nodegroup-sutra-validation-workers`,
+    `eksctl-${cluster}-cluster`,
+  ];
+  for (const stackName of stackNames) {
+    try {
+      await aws(
+        "cloudformation", "update-termination-protection",
+        "--stack-name", stackName,
+        "--no-enable-termination-protection",
+      );
+    } catch (error) {
+      if (!String(error.message).includes("does not exist")) throw error;
+    }
   }
-  await aws("eks", "delete-cluster", "--name", cluster);
-  await aws("eks", "wait", "cluster-deleted", "--name", cluster);
+  await run("eksctl", [
+    "delete", "cluster", "--name", cluster, "--region", region,
+    "--wait", "--disable-eviction",
+  ]);
   if (ecrRepository) {
     try {
       await aws("ecr", "delete-repository", "--repository-name", ecrRepository, "--force");
@@ -187,12 +312,18 @@ if (command === "plan") {
     `cluster=${cluster}`,
     `kubernetesContext=${kubernetesContext}`,
     `expiresAt=${expiration}`,
-    "budget=USD 40; email alerts at 80% and 100%; tag-filtered to sutra:disposable=true",
+    `awsProfile=${awsProfile}`,
+    "budget=USD 40 gross account cost before credits/refunds; email alerts at 80% and 100%",
+    "create=one EKS 1.35 control plane; one on-demand t3.large node; encrypted 20-GiB gp3; no NAT gateway; no SSH; IMDSv2; all control-plane logs with 7-day retention",
+    "network=public endpoint restricted to the explicit SUTRA_VALIDATOR_CIDR /32",
     "preflight=verify caller account, EKS status and exact disposable/expiry tags",
-    "teardown=uninstall security stack; delete nodegroups; delete cluster; optionally delete ECR; delete budget",
+    "teardown=uninstall security stack; disable eksctl stack termination protection; delete cluster and nodegroup stacks; optionally delete ECR; delete budget",
     `teardownConfirmation=--confirm ${cluster}`,
     "",
   ].join("\n"));
+} else if (command === "create") {
+  await createCluster();
+  process.stdout.write("Disposable EKS cluster and USD 40 tag-filtered budget are active.\n");
 } else if (command === "preflight") {
   const described = await identityAndCluster();
   if (described.status !== "ACTIVE") throw new Error("Disposable EKS cluster is not ACTIVE");

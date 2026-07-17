@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import type { EksEnrollmentPlan } from "../../lib/eks-enrollment";
+import {
+  KUBERNETES_INSTALLATION_MODULES,
+  type KubernetesInstallationModule,
+  type KubernetesInstallationPlan,
+} from "../../lib/kubernetes-installation-plan";
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 import { buildKubernetesProjection } from "./kubernetes-projection";
 import { useKubernetesEvidence } from "./use-kubernetes-evidence";
@@ -10,10 +15,49 @@ import { useKubernetesEvidence } from "./use-kubernetes-evidence";
 const steps = [
   "Discover EKS",
   "Select cluster",
-  "Visibility tier",
-  "Install plan",
-  "Verify evidence",
+  "Select modules",
+  "Review access",
+  "Installation plan",
+  "Health",
+  "Lifecycle",
 ] as const;
+
+const moduleCards: Readonly<Record<KubernetesInstallationModule, {
+  readonly name: string;
+  readonly summary: string;
+  readonly risk: "Low" | "Medium" | "High";
+}>> = {
+  inventory: {
+    name: "Inventory and KSPM",
+    summary: "Read-only resources, RBAC, exposure, posture and continuous evidence.",
+    risk: "Low",
+  },
+  trivy: {
+    name: "Trivy",
+    summary: "Image CVEs, configuration, RBAC, compliance and CycloneDX SBOM evidence.",
+    risk: "Low",
+  },
+  kyverno: {
+    name: "Kyverno",
+    summary: "Audit-first admission policies, PolicyReports, exceptions and promotion.",
+    risk: "Medium",
+  },
+  falco: {
+    name: "Falco",
+    summary: "Signed runtime detection events from a privileged node sensor.",
+    risk: "Medium",
+  },
+  cilium: {
+    name: "Cilium and Hubble",
+    summary: "AWS VPC CNI-chained network flow metadata and service maps.",
+    risk: "High",
+  },
+  "supply-chain": {
+    name: "Supply chain",
+    summary: "Trivy, Syft, Cosign, provenance and immutable ECR release evidence.",
+    risk: "Medium",
+  },
+};
 
 export function KubernetesOnboarding() {
   const { state, loading, refreshing, error, refresh } = usePilotState();
@@ -21,6 +65,11 @@ export function KubernetesOnboarding() {
   const [step, setStep] = useState(1);
   const [clusterKey, setClusterKey] = useState("");
   const [plan, setPlan] = useState<EksEnrollmentPlan | null>(null);
+  const [installationPlan, setInstallationPlan] = useState<KubernetesInstallationPlan | null>(null);
+  const [selectedModules, setSelectedModules] = useState<readonly KubernetesInstallationModule[]>([
+    "inventory", "trivy", "kyverno", "falco", "supply-chain",
+  ]);
+  const [contextName, setContextName] = useState("");
   const [working, setWorking] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<string | null>(null);
@@ -41,10 +90,14 @@ export function KubernetesOnboarding() {
     : kubernetes.clusters.find((cluster) =>
       cluster.clusterUid === `${state.connection?.awsAccountId}:${selected.resource.region}:${selected.resource.nativeId}`);
   const successfulCoverage = projection.coverage.filter((entry) => entry.status === "succeeded");
-  const canContinue = step === 1 || (step === 2 && selected !== null) || step >= 3;
+  const canContinue =
+    step === 1 ||
+    (step === 2 && selected !== null) ||
+    (step === 3 && selectedModules.length > 0) ||
+    step >= 4;
 
-  async function registerSelected(): Promise<void> {
-    if (selected === null || state?.connection === null || state?.connection === undefined) return;
+  async function registerSelected(): Promise<{ readonly cluster: { readonly id: string } } | null> {
+    if (selected === null || state?.connection === null || state?.connection === undefined) return null;
     setWorking(true);
     setOperationError(null);
     try {
@@ -57,10 +110,60 @@ export function KubernetesOnboarding() {
         },
       );
       setPlan(result.plan);
+      if (!contextName) setContextName(selected.resource.nativeId);
+      window.dispatchEvent(new Event("sutra:kubernetes-changed"));
+      await kubernetes.refresh();
+      return { cluster: result.cluster };
+    } catch (caught) {
+      setOperationError(caught instanceof Error ? caught.message : "Sutra could not register this EKS cluster");
+    } finally {
+      setWorking(false);
+    }
+    return null;
+  }
+
+  function toggleModule(module: KubernetesInstallationModule): void {
+    setInstallationPlan(null);
+    setSelectedModules((current) =>
+      current.includes(module)
+        ? current.filter((candidate) => candidate !== module)
+        : KUBERNETES_INSTALLATION_MODULES.filter((candidate) =>
+          current.includes(candidate) || candidate === module));
+  }
+
+  async function generateInstallationPlan(): Promise<void> {
+    if (selected === null || state?.connection === null || state?.connection === undefined) return;
+    setWorking(true);
+    setOperationError(null);
+    try {
+      let clusterId = registered?.id ?? null;
+      if (clusterId === null) {
+        const result = await postPilot<{ cluster: { id: string }; plan: EksEnrollmentPlan }>(
+          "/api/v1/kubernetes",
+          {
+            operation: "register-discovered-eks",
+            connectionId: state.connection.id,
+            resourceKey: selected.resource.resourceKey,
+          },
+        );
+        clusterId = result.cluster.id;
+        setPlan(result.plan);
+      }
+      const result = await postPilot<{ plan: KubernetesInstallationPlan }>(
+        "/api/v1/kubernetes/installations/plan",
+        {
+          operation: "create-plan",
+          connectionId: state.connection.id,
+          clusterId,
+          context: contextName || selected.resource.nativeId,
+          modules: selectedModules,
+        },
+      );
+      setInstallationPlan(result.plan);
       window.dispatchEvent(new Event("sutra:kubernetes-changed"));
       await kubernetes.refresh();
     } catch (caught) {
-      setOperationError(caught instanceof Error ? caught.message : "Sutra could not register this EKS cluster");
+      setOperationError(caught instanceof Error ? caught.message : "Sutra could not create the installation plan");
     } finally {
       setWorking(false);
     }
@@ -101,10 +204,10 @@ export function KubernetesOnboarding() {
   return (
     <>
       <section className="page-heading">
-        <div><p className="eyebrow">Kubernetes onboarding</p><h1>Connect cluster visibility</h1><p className="page-subtitle">Discover an authorized EKS cluster, review the visibility contract, prepare a Helm installation plan, then verify only evidence actually returned to Sutra.</p></div>
+        <div><p className="eyebrow">Kubernetes onboarding</p><h1>Deploy approved cluster protection</h1><p className="page-subtitle">Discover an authorized EKS cluster, select security modules, review exact access, generate a pinned plan and verify evidence-driven health and rollback.</p></div>
         <div className="heading-actions"><Link className="button button-secondary" href="/kubernetes/coverage">Review coverage</Link><Link className="button button-primary" href="/kubernetes">Kubernetes overview</Link></div>
       </section>
-      <div className="trust-strip" role="note"><span className="trust-icon">!</span><span><strong>Private-beta visibility workflow.</strong> Registration and scan persistence are functional. Customer-admin EKS access and the checked-in read-only Helm role remain explicit review steps; Sutra never accepts kubeconfig, tokens, Secrets, exec access, or runtime privileges here.</span></div>
+      <div className="trust-strip" role="note"><span className="trust-icon">!</span><span><strong>Customer-approved installation workflow.</strong> Registration, tenant-scoped planning and evidence persistence are functional. This browser never accepts kubeconfig, bearer tokens or Kubernetes Secret payloads, and it cannot execute the generated cluster commands.</span></div>
       {error || kubernetes.error || operationError ? <div className="page-alert page-alert-error" role="alert"><strong>Discovery unavailable</strong><span>{error ?? kubernetes.error ?? operationError}</span><button onClick={() => { void refresh(); void kubernetes.refresh(); }} type="button">Retry</button></div> : null}
       {loading || kubernetes.loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Reading authorized cluster evidence…</div> : null}
 
@@ -140,30 +243,48 @@ export function KubernetesOnboarding() {
           </section> : null}
 
           {step === 3 ? <section>
-            <p className="eyebrow">Step 3 · Collection tier</p><h2>Choose the visibility boundary</h2>
-            <div className="kubernetes-tier-grid">
-              <label className="selected"><input checked readOnly type="radio" /><span><strong>Visibility</strong><small>Read-only inventory, selected configuration metadata, RBAC/network posture inputs and explicit coverage.</small><b>Selected</b></span></label>
-              <label aria-disabled="true" className="disabled"><input disabled type="radio" /><span><strong>Advanced</strong><small>Runtime telemetry, admission enforcement and deeper workload signals require an approved sensor release not present in this build.</small><b>Unavailable</b></span></label>
+            <p className="eyebrow">Step 3 · Protection modules</p><h2>Select only the protection the customer approves</h2>
+            <p>Every module is independently reviewable. Cilium changes the cluster datapath and is never preselected.</p>
+            <div className="kubernetes-module-selector">
+              {KUBERNETES_INSTALLATION_MODULES.map((module) => {
+                const card = moduleCards[module];
+                const checked = selectedModules.includes(module);
+                return <label className={checked ? "selected" : ""} key={module}>
+                  <input checked={checked} onChange={() => toggleModule(module)} type="checkbox" />
+                  <span><strong>{card.name}</strong><small>{card.summary}</small></span>
+                  <b className={`module-risk module-risk-${card.risk.toLowerCase()}`}>{card.risk} risk</b>
+                </label>;
+              })}
             </div>
-            <div className="limitation-note"><strong>Visibility does not include:</strong> secrets, ConfigMap values, pod logs, exec access, packet contents, image layers, package SBOMs, runtime events, admission mutation, or workload changes.</div>
+            <div className="limitation-note"><strong>Always excluded:</strong> Kubernetes Secret payloads, ConfigMap values, pod logs, exec access, packet payloads and long-lived cloud credentials.</div>
           </section> : null}
 
           {step === 4 ? <section>
-            <p className="eyebrow">Step 4 · Customer-reviewed installation</p><h2>Generated visibility installation plan</h2>
+            <p className="eyebrow">Step 4 · Access and change review</p><h2>Know what each selected module can do</h2>
             {selected ? <>
               <div className="deployment-parameters">
                 <div><small>Cluster</small><code>{selected.displayName}</code></div>
                 <div><small>Region</small><code>{selected.resource.region}</code></div>
-                <div><small>Mode</small><code>visibility-only</code></div>
+                <div><small>Selected modules</small><code>{selectedModules.length}</code></div>
               </div>
-              <ol className="kubernetes-install-checklist">
-                <li><span>1</span><div><strong>Register the exact discovered cluster</strong><p>Creates only a customer-scoped, credential-free identity in Sutra PostgreSQL.</p></div></li>
-                <li><span>2</span><div><strong>Review customer-owned access</strong><p>The generated EKS access entry maps the existing trust role to the exact <code>sutra:readers</code> Kubernetes group.</p></div></li>
-                <li><span>3</span><div><strong>Install the read-only role</strong><p>The local Helm chart grants get/list only, excludes Secret and ConfigMap access, and performs no workload mutations.</p></div></li>
-              </ol>
-              <button className="button button-primary" disabled={working} onClick={() => void registerSelected()} type="button">{working ? "Preparing…" : registered ? "Regenerate reviewed plan" : "Register and generate plan"}</button>
+              <div className="kubernetes-permission-review">
+                {selectedModules.map((module) => {
+                  const card = moduleCards[module];
+                  const permission = module === "inventory" || module === "trivy"
+                    ? "Read-only metadata and report access"
+                    : module === "kyverno"
+                      ? "Admission webhook; audit-only policies by default"
+                      : module === "falco"
+                        ? "Privileged node sensor and signed event gateway"
+                        : module === "cilium"
+                          ? "Privileged network component; explicit CNI approval required"
+                          : "GitHub OIDC, ECR digest and signature metadata";
+                  return <article key={module}><span>{card.name.slice(0, 2).toUpperCase()}</span><div><strong>{card.name}</strong><small>{permission}</small></div><b className={`module-risk module-risk-${card.risk.toLowerCase()}`}>{card.risk}</b></article>;
+                })}
+              </div>
+              <button className="button button-secondary" disabled={working} onClick={() => void registerSelected()} type="button">{working ? "Preparing…" : registered ? "Regenerate EKS access plan" : "Register cluster and generate EKS access plan"}</button>
               {plan ? <div className="kubernetes-command-preview">
-                <div><strong>Customer administrator commands</strong><span>Review before execution</span></div>
+                <div><strong>Read-only EKS access commands</strong><span>Customer review required</span></div>
                 <pre>{`${plan.commands.createAccessEntry}\n\n${plan.commands.installVisibilityRole}`}</pre>
               </div> : <div className="limitation-note"><strong>No command is executed by Sutra.</strong> Generate the plan, review it with the customer, then run it only from an authenticated customer administrator terminal.</div>}
               {registered ? <div className="kubernetes-command-preview">
@@ -175,14 +296,35 @@ export function KubernetesOnboarding() {
           </section> : null}
 
           {step === 5 ? <section>
-            <p className="eyebrow">Step 5 · Evidence verification</p><h2>Verify reported status</h2>
-            <p>Import the credential-free JSON artifact produced by the Sutra collector. The server validates tenant scope, cluster identity, size, evidence schema and idempotency before one atomic publication.</p>
+            <p className="eyebrow">Step 5 · Reviewed installation</p><h2>Generate a pinned, non-executing plan</h2>
+            <p>The plan API verifies the session, tenant, customer connection and registered cluster. It returns commands but cannot accept credentials or execute cluster mutations.</p>
+            <label className="kubernetes-context-field"><span>Kubernetes context name</span><input maxLength={254} onChange={(event) => { setContextName(event.target.value); setInstallationPlan(null); }} placeholder={selected?.resource.nativeId ?? "customer-cluster"} value={contextName} /></label>
+            <button className="button button-primary" disabled={working || selectedModules.length === 0 || selected === null} onClick={() => void generateInstallationPlan()} type="button">{working ? "Generating reviewed plan…" : "Generate installation plan"}</button>
+            {installationPlan ? <>
+              <div className="page-alert page-alert-success" role="status"><strong>Plan ready; no changes made</strong><span>{installationPlan.modules.length} modules · install order recorded · rollback order verified</span></div>
+              <ol className="kubernetes-install-checklist">
+                {installationPlan.prerequisites.map((item, index) => <li key={item.id}><span>{index + 1}</span><div><strong>{item.label}</strong><p>{item.review}</p></div></li>)}
+              </ol>
+              <div className="kubernetes-command-preview">
+                <div><strong>Preflight command</strong><span>No mutations</span></div>
+                <pre>{installationPlan.lifecycle.preflightCommand}</pre>
+              </div>
+              <div className="kubernetes-plan-modules">
+                {installationPlan.modules.map((module) => <article key={module.id}><div><strong>{module.name}</strong><small>{module.version} · {module.risk} risk</small></div><code>{module.installCommands.join("\n")}</code></article>)}
+              </div>
+            </> : <div className="limitation-note"><strong>Planning is safe.</strong> This action registers the exact cluster if needed and creates a tenant-scoped plan. It does not run Helm, kubectl or AWS commands.</div>}
+          </section> : null}
+
+          {step === 6 ? <section>
+            <p className="eyebrow">Step 6 · Health and evidence</p><h2>Verify only what the cluster reports</h2>
+            <p>Machine-readable health is produced by the reviewed cluster-side command. Inventory evidence can also be imported through the bounded, idempotent publication API.</p>
             <div className="kubernetes-verification-grid">
               <article><span className={selected ? "positive" : "unknown"}>{selected ? "✓" : "—"}</span><div><strong>EKS resource observed</strong><small>{selected ? `${selected.displayName} exists in the normalized CMDB` : "No selected cluster record"}</small></div></article>
               <article><span className={successfulCoverage.length > 0 ? "positive" : "unknown"}>{successfulCoverage.length > 0 ? "✓" : "—"}</span><div><strong>Kubernetes API coverage</strong><small>{successfulCoverage.length > 0 ? `${successfulCoverage.length} successful checks reported for this account` : "No successful Kubernetes collector checks"}</small></div></article>
               <article><span className={registered ? "positive" : "unknown"}>{registered ? "✓" : "—"}</span><div><strong>Sutra registration</strong><small>{registered ? `Customer-scoped cluster ${registered.id}` : "Cluster is not registered"}</small></div></article>
-              <article><span className="unknown">—</span><div><strong>Runtime sensor</strong><small>Not enabled and not supported in this release</small></div></article>
+              <article><span className={installationPlan ? "positive" : "unknown"}>{installationPlan ? "✓" : "—"}</span><div><strong>Module health contract</strong><small>{installationPlan ? "Machine-readable health command generated" : "Generate the installation plan first"}</small></div></article>
             </div>
+            {installationPlan ? <div className="kubernetes-command-preview"><div><strong>Health evidence command</strong><span>JSON output</span></div><pre>{installationPlan.lifecycle.healthCommand}</pre></div> : null}
             <label className="button button-primary" aria-disabled={registered === null || working}>
               {working ? "Validating scan…" : "Import collector JSON"}
               <input accept="application/json,.json" disabled={registered === null || working} hidden onChange={(event) => {
@@ -193,6 +335,23 @@ export function KubernetesOnboarding() {
             </label>
             {scanResult ? <div className="page-alert page-alert-success" role="status"><strong>Evidence published</strong><span>{scanResult}</span></div> : null}
             <button className="button button-secondary" disabled={refreshing || working} onClick={() => { void refresh(); void kubernetes.refresh(); }} type="button">{refreshing ? "Refreshing evidence…" : "Refresh normalized evidence"}</button>
+          </section> : null}
+
+          {step === 7 ? <section>
+            <p className="eyebrow">Step 7 · Upgrade and rollback</p><h2>Review the full module lifecycle</h2>
+            <p>Upgrades remain pinned and atomic. Rollback runs in reverse dependency order; Cilium removal refuses to continue unless the AWS VPC CNI is fully healthy.</p>
+            {installationPlan ? <>
+              <div className="kubernetes-lifecycle-summary">
+                <div><small>Plan state</small><strong>{installationPlan.lifecycle.state}</strong></div>
+                <div><small>Install order</small><strong>{installationPlan.lifecycle.installOrder.join(" → ")}</strong></div>
+                <div><small>Rollback order</small><strong>{installationPlan.lifecycle.rollbackOrder.join(" → ")}</strong></div>
+                <div><small>CNI approval</small><strong>{installationPlan.lifecycle.requiresCniApproval ? "Required" : "Not selected"}</strong></div>
+              </div>
+              <div className="kubernetes-plan-modules">
+                {installationPlan.modules.map((module) => <article key={module.id}><div><strong>{module.name}</strong><small>Expected checks: {module.expectedHealthChecks.join(", ")}</small></div><code>{`Upgrade: ${module.upgradeCommand}\nRollback: ${module.rollbackCommand}`}</code></article>)}
+              </div>
+              <div className="limitation-note"><strong>Live state is evidence-driven.</strong> “Healthy”, “upgraded” or “rolled back” is shown only after a signed agent heartbeat or machine-readable lifecycle result is received.</div>
+            </> : <div className="empty-state"><strong>No lifecycle plan yet</strong><span>Generate an installation plan before reviewing upgrade and rollback operations.</span><button className="button button-secondary" onClick={() => setStep(5)} type="button">Return to plan</button></div>}
           </section> : null}
         </div>
 

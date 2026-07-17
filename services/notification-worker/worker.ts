@@ -2,14 +2,28 @@ import {
   deliverSecurityNotification,
   type SecurityNotificationDeliveryDependencies,
 } from "../../lib/security-notification-delivery.ts";
-import { SecurityNotificationRepository } from "../../db/security-notification-repository";
+import type {
+  ClaimedNotificationJob,
+} from "../../db/security-notification-repository.ts";
+import { assertNotificationSecretScope } from "../../lib/notification-destination-boundary.ts";
+
+export interface SecurityNotificationWorkerRepository {
+  claim(now?: number): Promise<ClaimedNotificationJob | null>;
+  finish(
+    jobId: string,
+    leaseToken: string,
+    status: "delivered" | "retry_scheduled" | "dead_letter" | "not_configured",
+    errorCode: string | null,
+    nextAttemptAt: number | null,
+  ): Promise<void>;
+}
 
 export async function processOneSecurityNotification(input: {
-  readonly repository?: SecurityNotificationRepository;
+  readonly repository: SecurityNotificationWorkerRepository;
   readonly delivery?: SecurityNotificationDeliveryDependencies;
   readonly now?: () => number;
-} = {}): Promise<"idle" | "delivered" | "retry_scheduled" | "dead_letter" | "not_configured"> {
-  const repository = input.repository ?? new SecurityNotificationRepository();
+}): Promise<"idle" | "delivered" | "retry_scheduled" | "dead_letter" | "not_configured"> {
+  const repository = input.repository;
   const now = input.now ?? Date.now;
   const claimed = await repository.claim(now());
   if (claimed === null) return "idle";
@@ -24,6 +38,18 @@ export async function processOneSecurityNotification(input: {
     return "not_configured";
   }
   const configuration = claimed.destination.configuration;
+  try {
+    assertNotificationSecretScope(configuration, claimed.orgId, claimed.customerId);
+  } catch {
+    await repository.finish(
+      claimed.id,
+      claimed.leaseToken,
+      "dead_letter",
+      "DESTINATION_REJECTED",
+      null,
+    );
+    return "dead_letter";
+  }
   const destinations = configuration.channel === "email"
     ? {
         email: {

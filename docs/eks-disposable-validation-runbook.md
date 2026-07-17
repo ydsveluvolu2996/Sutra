@@ -1,8 +1,7 @@
 # Disposable EKS validation and customer install runbook
 
 This runbook is the reviewed EKS-first path for validating Sutra's continuous
-agent and optional Kubernetes security modules. Nothing in this document was
-executed against AWS while it was authored.
+agent and optional Kubernetes security modules.
 
 ## Fixed release inputs
 
@@ -45,16 +44,32 @@ Review without making an AWS call:
 node scripts/eks-disposable-guard.mjs plan
 ```
 
-Only after an administrator has authenticated through SSO:
+Resolve the validator's current public IPv4 address outside the repository and
+restrict the EKS public endpoint to that exact `/32`. Only after an
+administrator has authenticated through SSO:
 
 ```bash
+export AWS_PROFILE=sutra-administrator
+export SUTRA_VALIDATOR_CIDR=<approved-public-ip>/32
+
+node scripts/eks-disposable-guard.mjs create --execute
 node scripts/eks-disposable-guard.mjs preflight --execute
 node scripts/eks-disposable-guard.mjs budget --execute
 ```
 
-The USD 40 budget sends alerts at 80% and 100%. AWS Budgets is an alert, not a
-hard spending cap. The expiry tag and scheduled human/automation teardown are
-still mandatory. Cost data can be delayed.
+The guarded create path provisions Kubernetes 1.35 with one on-demand
+`t3.large` managed node, an encrypted 20-GiB gp3 volume, no NAT gateway, no SSH,
+IMDSv2, OIDC and all EKS control-plane log types with seven-day retention. The private EKS endpoint is enabled
+for node-to-control-plane traffic; the public endpoint remains restricted to
+the exact validator `/32`. The cluster and managed node group receive the
+disposable and expiry tags. The generated eksctl configuration is mode `0600`,
+used once and deleted immediately.
+
+The USD 40 budget sends alerts at 80% and 100% against gross account cost before
+credits and refunds. This is intentionally conservative because a newly created
+allocation tag may not yet be usable. AWS Budgets is an alert, not a hard
+spending cap. The expiry tag and scheduled human/automation teardown are still
+mandatory. Cost data can be delayed.
 
 ## EKS and ECR acceptance setup
 
@@ -63,21 +78,65 @@ or use a private network path. Enable control-plane audit logs. Use the smallest
 supported managed node group that can run Falco, Trivy jobs, Kyverno, Cilium,
 Hubble, and the Sutra agent. Do not use Spot for the first acceptance run.
 
-Create the immutable ECR repository and GitHub OIDC role with
-`infrastructure/github-ecr-release-role.yaml`. The account must already have the
-GitHub OIDC provider. In GitHub, create a protected environment named exactly
-`kubernetes-production-release`, require an independent reviewer, prevent
-self-review, and restrict deployment branches. Configure environment variables:
+First list the account's IAM OIDC providers. If and only if the account does not
+already have `token.actions.githubusercontent.com`, deploy
+`infrastructure/github-oidc-provider.yaml` once at account level. The template
+intentionally omits `ThumbprintList`: IAM retrieves the provider certificate
+authority thumbprint. Do not paste a copied or historical thumbprint into the
+stack. If the provider already exists, reuse its ARN instead of attempting to
+create a duplicate.
 
+Create the immutable ECR repository and repository-scoped GitHub OIDC role with
+`infrastructure/github-ecr-release-role.yaml`, passing the exact, case-sensitive
+`owner/repository` slug and the account-local provider ARN. The role trust
+requires both the `sts.amazonaws.com` audience and the exact default GitHub
+subject:
+
+```text
+repo:owner/repository:environment:kubernetes-production-release
+```
+
+The IAM subject contains the protected environment rather than the branch.
+Therefore, in GitHub create an environment named exactly
+`kubernetes-production-release`, require at least one independent reviewer,
+prevent self-review, and allow only the protected `main` branch. Do not approve
+a run from a changed or unreviewed release workflow. The workflow also fails
+before requesting AWS credentials unless it is a manual run from protected
+`main` in `ydsveluvolu2996/Sutra`.
+
+Configure these environment variables; do not create AWS key secrets:
+
+- `AWS_ACCOUNT_ID`, the exact 12-digit target account
 - `AWS_REGION`
 - `AWS_ROLE_ARN` from the template output
-- `ECR_REPOSITORY`
-- `NODE_IMAGE`, including an immutable `@sha256:` digest
+- `AGENT_ECR_REPOSITORY` from `AgentEcrRepositoryName`
+- `FALCO_GATEWAY_ECR_REPOSITORY` from `FalcoGatewayEcrRepositoryName`
+- `NODE_IMAGE`, set exactly to the reviewed
+  `gcr.io/distroless/nodejs22-debian13:nonroot@sha256:a2723a2817c5b01b8e7b98d567bc8b5a6b0e713e25bfb0a82b6ade4b9db06f50`
+  value enforced by the release workflow
 
-The release workflow has no AWS key secrets. It assumes the narrowly scoped role
-with OIDC, pushes a commit-tagged image, resolves the digest, blocks on Trivy
-HIGH/CRITICAL findings, creates an SPDX SBOM, and keyless-signs and attests the
-digest with Cosign.
+Before the first release, independently review the environment configuration,
+branch protection, workflow action pins, role trust policy, role permissions,
+ECR immutability, scan-on-push setting, and repository URI. Keep environment
+approval separate from the person who requested the release.
+
+The release workflow has no AWS key secrets. It requests a 15-minute credential
+session and verifies the exact AWS account plus both repository controls. It
+builds the agent and Falco signing gateway from their separate Dockerfiles using
+the same digest-pinned `NODE_IMAGE`, pushes each under the commit tag, and
+resolves each immutable digest. Both images must pass Trivy HIGH/CRITICAL gates.
+The workflow produces separate SPDX SBOM artifacts, then keyless-signs and
+attests both digests with Cosign. A failed scan or attestation fails the release.
+After both attestations, it retains a release manifest that binds the agent and
+Falco gateway digest references to the exact commit, repository, workflow ref,
+run ID, and run attempt.
+
+The ECR role is limited to token retrieval and the read/push operations required
+for the two explicit repository ARNs. Both repositories retain tagged images
+and signature/SBOM evidence; their lifecycle policies remove only abandoned
+untagged layers. Obtain `SUTRA_FALCO_GATEWAY_IMAGE` from the
+`falcoSigningGateway` digest reference in the reviewed release-manifest artifact;
+never deploy its mutable commit tag.
 
 ## Customer module install
 
@@ -193,3 +252,36 @@ Finally inspect Resource Groups Tagging API, CloudFormation stacks, load
 balancers, ENIs, EBS volumes, snapshots, log groups, NAT gateways, Elastic IPs,
 ECR, and AWS Budgets. Teardown is incomplete until the tagged-resource query is
 empty and the billing owner records the final cost.
+
+## Validation record — 2026-07-17
+
+The disposable cluster `sutra-validation-20260717` in account `738663485493`,
+region `ap-south-1`, was used for this acceptance run. No long-lived AWS access
+key was created.
+
+- EKS 1.35 and its single managed `t3.large` node became Ready.
+- Trivy Operator 0.32.1 and Kyverno 3.8.2 passed the module health gate.
+- The read-only collector imported 302 normalized resources, 771 Trivy
+  findings and 13 CycloneDX SBOM reports. All 23 collectors succeeded. Secret
+  and ConfigMap values were not collected.
+- Three Sutra Kyverno policies were accepted in Audit mode and generated
+  PolicyReport evidence.
+- Cilium 1.19.5, Hubble Relay and the AWS VPC CNI chaining datapath passed the
+  health gate. Hubble observed forwarded Kubernetes traffic. The Cilium release
+  was then removed and the `aws-node`, CoreDNS and node readiness rollback gates
+  all passed.
+- The Falco signing-gateway Linux/amd64 image at digest
+  `sha256:9b20e5377a934ad8ddd7bf321c4d810884e6b892f0a6d72d81b0e8f5c998557d`
+  passed the ECR scan with no HIGH or CRITICAL findings. End-to-end runtime
+  event delivery still requires the authenticated Sutra control plane to be
+  reachable from the cluster over HTTPS.
+- GitHub OIDC and immutable agent/gateway ECR repositories were created through
+  CloudFormation. The release cannot run until the protected
+  `kubernetes-production-release` environment has an independent reviewer.
+- The USD 40 AWS Budget is an alert only. Credits are included and the new
+  allocation tag was not yet active, so it must not be represented as a hard or
+  gross-spend cap.
+
+The acceptance cluster has an expiry tag, but expiry tags do not delete
+resources. Complete the guarded teardown and the final orphan-resource audit in
+the same validation session.

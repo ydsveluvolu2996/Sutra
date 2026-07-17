@@ -61,6 +61,16 @@ test("mutations require explicit execution and Cilium approval", async () => {
   assert.match(source, /raw secret-like value was rejected/u);
 });
 
+test("module health uses selectors emitted by the pinned charts", async () => {
+  const source = await readFile(
+    new URL("scripts/kubernetes-security-stack.mjs", root),
+    "utf8",
+  );
+  assert.match(source, /healthSelector: "k8s-app=cilium"/u);
+  assert.match(source, /healthSelector: "app\.kubernetes\.io\/instance=trivy-operator"/u);
+  assert.match(source, /"-l", item\.healthSelector/u);
+});
+
 test("Falco gateway contract references existing configuration and secret without embedding values", async () => {
   const manifest = await readFile(
     new URL("deploy/kubernetes/security-stack/falco-signing-gateway.contract.yaml", root),

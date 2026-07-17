@@ -258,7 +258,7 @@ test("module discovery reports real API availability without reading module obje
     collectedAt: "2026-07-17T12:00:00.000Z",
     resources: [],
     coverage: [{
-      collectorKey: "trivy.vulnerabilityreports",
+      collectorKey: "trivy-operator.vulnerabilityreports",
       apiPath: "/apis/aquasecurity.github.io/v1alpha1/vulnerabilityreports",
       status: "failed",
       itemsObserved: 0,

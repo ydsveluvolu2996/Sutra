@@ -35,6 +35,9 @@ if (joined.includes("get daemonset aws-node") && joined.endsWith("-o json")) {
   process.stdout.write(JSON.stringify({
     status: { desiredNumberScheduled: 3, numberReady: 3, numberUnavailable: 0 }
   }));
+} else if (joined.includes("get deployment/cilium-operator") &&
+           joined.includes("jsonpath={.spec.replicas}")) {
+  process.stdout.write("1");
 } else if (joined.includes("get deployment sutra-falco-signing-gateway") ||
            joined.includes("get clusterpolicy sutra-")) {
   process.stdout.write("");
@@ -85,6 +88,7 @@ test("simulated lifecycle emits health evidence and proves reverse cleanup with 
     assert.equal(cleanupEvidence.overallStatus, "passed");
     assert.ok(cleanupEvidence.checks.some((item) => item.check === "aws-vpc-cni-ready"));
     assert.ok(cleanupEvidence.checks.some((item) => item.check === "audit-policies-absent"));
+    assert.match(await readFile(new URL("../scripts/kubernetes-security-stack.mjs", import.meta.url), "utf8"), /cni\.uninstall=true/u);
     assert.deepEqual(JSON.parse(await readFile(state, "utf8")), [
       "falco", "kyverno", "trivy-operator", "cilium",
     ]);

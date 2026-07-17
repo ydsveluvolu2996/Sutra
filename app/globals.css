@@ -774,7 +774,7 @@ h3 { letter-spacing: -.02em; }
 .kubernetes-policy-grid > article > div { display: grid; gap: 3px; }
 .kubernetes-policy-grid strong { font: 9px var(--font-geist-mono),monospace; }
 .kubernetes-policy-grid small { color: var(--ink-faint); font-size: 8px; }
-.kubernetes-onboarding-steps { display: grid; grid-template-columns: repeat(5,1fr); gap: 0; margin: 0 0 24px; padding: 0; list-style: none; }
+.kubernetes-onboarding-steps { display: grid; grid-template-columns: repeat(7,1fr); gap: 0; margin: 0 0 24px; padding: 0; list-style: none; }
 .kubernetes-onboarding-steps li { position: relative; display: grid; justify-items: center; gap: 6px; color: var(--ink-faint); font-size: 8px; text-align: center; }
 .kubernetes-onboarding-steps li::before { content: ""; height: 2px; position: absolute; z-index: 0; top: 13px; right: 50%; left: -50%; background: var(--line); }
 .kubernetes-onboarding-steps li:first-child::before { display: none; }
@@ -822,6 +822,36 @@ h3 { letter-spacing: -.02em; }
 .kubernetes-verification-grid strong { font-size: 9px; }
 .kubernetes-verification-grid small { color: var(--ink-faint); font-size: 8px; }
 .kubernetes-wizard-actions { display: flex; justify-content: space-between; margin-top: 14px; }
+.kubernetes-module-selector { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; margin: 16px 0; }
+.kubernetes-module-selector label { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 13px; border: 1px solid var(--line); border-radius: 9px; background: #fff; cursor: pointer; }
+.kubernetes-module-selector label.selected { border-color: #8eced0; background: #f2fbfa; box-shadow: inset 3px 0 0 var(--blue); }
+.kubernetes-module-selector input { accent-color: var(--blue); }
+.kubernetes-module-selector label > span { min-width: 0; display: grid; gap: 4px; }
+.kubernetes-module-selector strong { font-size: 10px; }
+.kubernetes-module-selector small { color: var(--ink-soft); font-size: 8px; line-height: 1.45; }
+.module-risk { width: fit-content; padding: 4px 7px; border-radius: 12px; font-size: 7px; text-transform: uppercase; white-space: nowrap; }
+.module-risk-low { background: #dcf4ec; color: #167357; }
+.module-risk-medium { background: #fff1cf; color: #8b6115; }
+.module-risk-high { background: #fde4df; color: #a23c2c; }
+.kubernetes-permission-review { display: grid; gap: 7px; margin: 15px 0; }
+.kubernetes-permission-review article { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.kubernetes-permission-review article > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 6px; background: #e5f4f4; color: var(--green); font: 750 7px var(--font-geist-mono),monospace; }
+.kubernetes-permission-review article > div { display: grid; gap: 3px; }
+.kubernetes-permission-review strong { font-size: 9px; }
+.kubernetes-permission-review small { color: var(--ink-soft); font-size: 8px; }
+.kubernetes-context-field { max-width: 520px; display: grid; gap: 6px; margin: 15px 0 10px; }
+.kubernetes-context-field > span { color: var(--ink-soft); font-size: 8px; }
+.kubernetes-context-field input { min-height: 38px; padding: 0 11px; border: 1px solid var(--line-dark); border-radius: 7px; background: #fff; font: 9px var(--font-geist-mono),monospace; }
+.kubernetes-plan-modules { display: grid; gap: 8px; margin-top: 11px; }
+.kubernetes-plan-modules article { min-width: 0; display: grid; grid-template-columns: minmax(150px,.4fr) minmax(0,1.6fr); gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.kubernetes-plan-modules article > div { display: grid; gap: 4px; align-content: start; }
+.kubernetes-plan-modules strong { font-size: 9px; }
+.kubernetes-plan-modules small { color: var(--ink-faint); font-size: 8px; }
+.kubernetes-plan-modules code { overflow-x: auto; color: var(--ink-soft); font: 8px/1.55 var(--font-geist-mono),monospace; white-space: pre-wrap; }
+.kubernetes-lifecycle-summary { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin: 15px 0; }
+.kubernetes-lifecycle-summary > div { min-width: 0; display: grid; gap: 5px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.kubernetes-lifecycle-summary small { color: var(--ink-faint); font-size: 8px; }
+.kubernetes-lifecycle-summary strong { overflow-wrap: anywhere; font-size: 9px; }
 .kubernetes-workload-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px; margin-bottom: 13px; }
 .kubernetes-configuration-list { display: grid; gap: 6px; margin: 0; }
 .kubernetes-configuration-list div { display: grid; grid-template-columns: minmax(100px,.4fr) minmax(0,1.6fr); gap: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
@@ -994,6 +1024,8 @@ h3 { letter-spacing: -.02em; }
   .kubernetes-enterprise-list { overflow-x: auto; }
   .kubernetes-enterprise-list > article { min-width: 720px; }
   .kubernetes-workload-grid { grid-template-columns: 1fr; }
+  .kubernetes-module-selector { grid-template-columns: 1fr; }
+  .kubernetes-plan-modules article { grid-template-columns: 1fr; }
   .sidebar { display: none; }
   .topbar { height: 58px; padding: 0 18px; }
   .mobile-nav { display: block; position: relative; }
@@ -1083,6 +1115,7 @@ h3 { letter-spacing: -.02em; }
   .roadmap-guardrails, .roadmap-inline-callout { align-items: flex-start; flex-direction: column; gap: 20px; padding: 22px; }
   .form-grid { grid-template-columns: 1fr; }
   .connection-contract, .deployment-parameters { grid-template-columns: 1fr; }
+  .kubernetes-lifecycle-summary { grid-template-columns: 1fr; }
   .quick-launch-heading { align-items: flex-start; flex-direction: column; }
   .deployment-checklist { grid-template-columns: 1fr; }
   .onboard-validation-action { align-items: flex-start; flex-direction: column; }
