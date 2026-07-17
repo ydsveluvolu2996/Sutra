@@ -4,11 +4,17 @@ import type {
   PilotRelationship,
   PilotResource,
 } from "./pilot-types.ts";
+import type { NormalizedFalcoRuntimeEvent } from "./falco-runtime-types.ts";
+import type { NormalizedHubbleFlow } from "./hubble-flow-evidence.ts";
+import type { KubernetesSupplyChainEvidence } from "./kubernetes-supply-chain.ts";
 
 export type AttackPathType =
   | "cloud_to_kubernetes"
   | "rbac_privilege_escalation"
-  | "vulnerable_exposed_privileged_workload";
+  | "vulnerable_exposed_privileged_workload"
+  | "runtime_to_aws_blast_radius"
+  | "observed_network_to_workload"
+  | "supply_chain_to_runtime";
 
 export type AttackNodeKind =
   | "internet"
@@ -21,6 +27,8 @@ export type AttackNodeKind =
   | "rbac_role"
   | "iam_role"
   | "aws_resource"
+  | "runtime_event"
+  | "container_image"
   | "other";
 
 export interface AttackGraphNode {
@@ -31,11 +39,13 @@ export interface AttackGraphNode {
 }
 
 export interface AttackEdgeEvidence {
-  readonly source: "relationship" | "configuration";
+  readonly source: "relationship" | "configuration" | "falco" | "hubble" | "supply_chain";
   readonly sourceResourceKey: string;
   readonly relationType: string;
   readonly fieldPath: string | null;
   readonly observedValue: JsonValue;
+  readonly observedAt: string | null;
+  readonly evidenceSha256: string | null;
 }
 
 export interface AttackGraphEdge {
@@ -52,6 +62,14 @@ export interface AttackRiskFactor {
   readonly evidence: string;
 }
 
+export interface AttackPathRemediation {
+  readonly key: string;
+  readonly title: string;
+  readonly guidance: string;
+  readonly breaksAt: string;
+  readonly limitation: "SUGGESTION_REQUIRES_OPERATOR_VALIDATION";
+}
+
 export interface KubernetesAttackPath {
   readonly id: string;
   readonly type: AttackPathType;
@@ -63,6 +81,9 @@ export interface KubernetesAttackPath {
   readonly score: number;
   readonly risk: "critical" | "high" | "medium" | "low";
   readonly blastRadius: readonly AttackGraphNode[];
+  readonly observedFrom: string | null;
+  readonly observedTo: string | null;
+  readonly remediations: readonly AttackPathRemediation[];
 }
 
 export interface KubernetesAttackPathProjection {
@@ -71,6 +92,9 @@ export interface KubernetesAttackPathProjection {
   readonly edges: readonly AttackGraphEdge[];
   readonly unknowns: readonly string[];
   readonly blastRadiusResourceCount: number;
+  readonly correlatedRuntimeEventCount: number;
+  readonly correlatedNetworkFlowCount: number;
+  readonly correlatedSupplyChainEvidenceCount: number;
 }
 
 const KUBERNETES_MARKER = /(?:kubernetes|(?:^|[.:/_-])k8s(?:[.:/_-]|$)|(?:^|[.:/_-])eks(?:[.:/_-]|$))/iu;
@@ -172,6 +196,8 @@ function evidenceEdge(
       relationType: relation,
       fieldPath,
       observedValue,
+      observedAt: null,
+      evidenceSha256: null,
     },
   };
 }
@@ -187,8 +213,213 @@ function relationshipEdges(relationships: readonly PilotRelationship[]): AttackG
       relationType: relationship.relationType,
       fieldPath: null,
       observedValue: relationship.evidence,
+      observedAt: string(object(relationship.evidence)?.observedAt),
+      evidenceSha256: null,
     },
   }));
+}
+
+function signalEdge(input: {
+  readonly from: string;
+  readonly to: string;
+  readonly source: "falco" | "hubble" | "supply_chain";
+  readonly sourceResourceKey: string;
+  readonly relation: string;
+  readonly observedAt: string;
+  readonly evidenceSha256: string;
+  readonly observedValue: JsonValue;
+}): AttackGraphEdge {
+  return {
+    from: input.from,
+    to: input.to,
+    relation: input.relation,
+    evidence: {
+      source: input.source,
+      sourceResourceKey: input.sourceResourceKey,
+      relationType: input.relation,
+      fieldPath: null,
+      observedValue: input.observedValue,
+      observedAt: input.observedAt,
+      evidenceSha256: input.evidenceSha256,
+    },
+  };
+}
+
+function exactWorkload(
+  resources: readonly PilotResource[],
+  identity: { readonly namespace: string | null; readonly name: string | null },
+): PilotResource | undefined {
+  if (identity.name === null) return undefined;
+  return only(resources.filter((resource) =>
+    attackNodeKind(resource) === "kubernetes_workload" &&
+    resourceLabel(resource) === identity.name &&
+    (identity.namespace === null || namespace(resource) === identity.namespace),
+  ));
+}
+
+function resourceHasImage(resource: PilotResource, repository: string, digest: string): boolean {
+  const serialized = JSON.stringify(resource.configuration);
+  return serialized.includes(digest) &&
+    (serialized.includes(`${repository}@${digest}`) || serialized.includes(repository));
+}
+
+function correlatedEvidenceEdges(input: {
+  readonly resources: readonly PilotResource[];
+  readonly runtimeEvents: readonly NormalizedFalcoRuntimeEvent[];
+  readonly networkFlows: readonly NormalizedHubbleFlow[];
+  readonly supplyChainEvidence: readonly KubernetesSupplyChainEvidence[];
+  readonly nodes: Map<string, AttackGraphNode>;
+}): {
+  readonly edges: readonly AttackGraphEdge[];
+  readonly runtimeEvents: ReadonlySet<string>;
+  readonly networkFlows: ReadonlySet<string>;
+  readonly supplyChainEvidence: ReadonlySet<string>;
+} {
+  const edges: AttackGraphEdge[] = [];
+  const correlatedRuntime = new Set<string>();
+  const correlatedFlows = new Set<string>();
+  const correlatedSupplyChain = new Set<string>();
+
+  for (const event of input.runtimeEvents) {
+    const workload = exactWorkload(input.resources, {
+      namespace: event.namespace,
+      name: event.podName,
+    });
+    if (workload === undefined) continue;
+    const eventKey = `falco:${event.eventId}`;
+    input.nodes.set(eventKey, {
+      key: eventKey,
+      label: event.rule,
+      kind: "runtime_event",
+      resourceKey: null,
+    });
+    edges.push(signalEdge({
+      from: eventKey,
+      to: workload.resourceKey,
+      source: "falco",
+      sourceResourceKey: event.eventId,
+      relation: "observed_on_exact_workload_identity",
+      observedAt: event.occurredAt,
+      evidenceSha256: event.evidenceSha256,
+      observedValue: {
+        clusterId: event.clusterId,
+        namespace: event.namespace,
+        podName: event.podName,
+        containerImage: event.containerImage,
+        priority: event.priority,
+      },
+    }));
+    correlatedRuntime.add(event.eventId);
+  }
+
+  for (const flow of input.networkFlows) {
+    if (flow.verdict !== "forwarded" && flow.verdict !== "audit") continue;
+    const sourceWorkload = flow.source.world ? undefined : exactWorkload(input.resources, {
+      namespace: flow.source.namespace,
+      name: flow.source.workloadName,
+    });
+    const destinationWorkload = flow.destination.world ? undefined : exactWorkload(input.resources, {
+      namespace: flow.destination.namespace,
+      name: flow.destination.workloadName,
+    });
+    if (flow.source.world && destinationWorkload !== undefined) {
+      const worldKey = `hubble:world:${flow.evidenceSha256}`;
+      input.nodes.set(worldKey, { key: worldKey, label: "World (observed flow)", kind: "internet", resourceKey: null });
+      edges.push(signalEdge({
+        from: worldKey,
+        to: destinationWorkload.resourceKey,
+        source: "hubble",
+        sourceResourceKey: flow.evidenceSha256,
+        relation: "observed_forwarded_flow_to",
+        observedAt: flow.observedAt,
+        evidenceSha256: flow.evidenceSha256,
+        observedValue: {
+          verdict: flow.verdict,
+          protocol: flow.protocol,
+          destinationPort: flow.destinationPort,
+          observations: flow.observations,
+        },
+      }));
+      correlatedFlows.add(flow.evidenceSha256);
+    } else if (sourceWorkload !== undefined && destinationWorkload !== undefined) {
+      edges.push(signalEdge({
+        from: sourceWorkload.resourceKey,
+        to: destinationWorkload.resourceKey,
+        source: "hubble",
+        sourceResourceKey: flow.evidenceSha256,
+        relation: "observed_forwarded_flow_to",
+        observedAt: flow.observedAt,
+        evidenceSha256: flow.evidenceSha256,
+        observedValue: {
+          verdict: flow.verdict,
+          protocol: flow.protocol,
+          destinationPort: flow.destinationPort,
+          observations: flow.observations,
+        },
+      }));
+      correlatedFlows.add(flow.evidenceSha256);
+    }
+  }
+
+  for (const evidence of input.supplyChainEvidence) {
+    const workloads = input.resources.filter((resource) =>
+      attackNodeKind(resource) === "kubernetes_workload" &&
+      resourceHasImage(resource, evidence.image.repository, evidence.image.digest),
+    );
+    if (workloads.length !== 1) continue;
+    const imageKey = `image:${evidence.image.repository}@${evidence.image.digest}`;
+    input.nodes.set(imageKey, {
+      key: imageKey,
+      label: `${evidence.image.repository}@${evidence.image.digest.slice(0, 19)}…`,
+      kind: "container_image",
+      resourceKey: null,
+    });
+    edges.push(signalEdge({
+      from: imageKey,
+      to: workloads[0]!.resourceKey,
+      source: "supply_chain",
+      sourceResourceKey: evidence.evidenceSha256,
+      relation: "deployed_as_exact_image_digest",
+      observedAt: evidence.collectedAt,
+      evidenceSha256: evidence.evidenceSha256,
+      observedValue: {
+        repository: evidence.image.repository,
+        digest: evidence.image.digest,
+        signatureState: evidence.signature.state,
+        provenanceState: evidence.provenance.state,
+        criticalVulnerabilities: evidence.vulnerabilityScan.critical,
+      },
+    }));
+    for (const event of input.runtimeEvents.filter((candidate) =>
+      candidate.containerImage !== null &&
+      candidate.containerImage.includes(evidence.image.repository) &&
+      candidate.containerImage.includes(evidence.image.digest)
+    )) {
+      const eventKey = `falco:${event.eventId}`;
+      if (!input.nodes.has(eventKey)) continue;
+      edges.push(signalEdge({
+        from: imageKey,
+        to: eventKey,
+        source: "supply_chain",
+        sourceResourceKey: evidence.evidenceSha256,
+        relation: "runtime_observed_exact_image_digest",
+        observedAt: event.occurredAt,
+        evidenceSha256: evidence.evidenceSha256,
+        observedValue: {
+          repository: evidence.image.repository,
+          digest: evidence.image.digest,
+          runtimeEventId: event.eventId,
+        },
+      }));
+    }
+    correlatedSupplyChain.add(evidence.evidenceSha256);
+  }
+  return {
+    edges,
+    runtimeEvents: correlatedRuntime,
+    networkFlows: correlatedFlows,
+    supplyChainEvidence: correlatedSupplyChain,
+  };
 }
 
 function derivedEdges(resources: readonly PilotResource[], nodes: Map<string, AttackGraphNode>): AttackGraphEdge[] {
@@ -303,6 +534,7 @@ function derivedEdges(resources: readonly PilotResource[], nodes: Map<string, At
 function pathRisk(
   type: AttackPathType,
   nodes: readonly AttackGraphNode[],
+  edges: readonly AttackGraphEdge[],
   resourcesByKey: ReadonlyMap<string, PilotResource>,
   findings: readonly PilotFinding[],
 ): readonly AttackRiskFactor[] {
@@ -344,6 +576,15 @@ function pathRisk(
   if (nodes.some((node) => node.kind === "aws_resource")) {
     factors.push({ key: "aws-target", label: "AWS resource in blast radius", points: 15, evidence: "At least one normalized AWS resource is downstream through explicit relationships." });
   }
+  if (nodes.some((node) => node.kind === "runtime_event")) {
+    factors.push({ key: "runtime", label: "Falco runtime detection", points: 20, evidence: "A signed Falco event was correlated by exact workload identity." });
+  }
+  if (edges.some((edge) => edge.evidence.source === "hubble")) {
+    factors.push({ key: "observed-flow", label: "Observed Hubble flow", points: 15, evidence: "A forwarded or audit flow was correlated by exact workload identity. It does not prove general reachability." });
+  }
+  if (nodes.some((node) => node.kind === "container_image")) {
+    factors.push({ key: "supply-chain", label: "Immutable image evidence", points: 10, evidence: "Supply-chain evidence was matched to an exact deployed image digest." });
+  }
   return factors;
 }
 
@@ -357,7 +598,55 @@ function risk(score: number): KubernetesAttackPath["risk"] {
 function title(type: AttackPathType): string {
   if (type === "cloud_to_kubernetes") return "Cloud exposure to AWS blast radius";
   if (type === "rbac_privilege_escalation") return "Kubernetes RBAC privilege-escalation path";
+  if (type === "runtime_to_aws_blast_radius") return "Runtime detection to explicit AWS blast radius";
+  if (type === "observed_network_to_workload") return "Observed network flow to workload context";
+  if (type === "supply_chain_to_runtime") return "Immutable image evidence to runtime detection";
   return "Exposed vulnerable privileged workload";
+}
+
+function remediationSuggestions(
+  nodes: readonly AttackGraphNode[],
+  edges: readonly AttackGraphEdge[],
+  factors: readonly AttackRiskFactor[],
+): readonly AttackPathRemediation[] {
+  const suggestions: AttackPathRemediation[] = [];
+  if (factors.some((factor) => factor.key === "public" || factor.key === "observed-flow")) {
+    suggestions.push({
+      key: "restrict-entry",
+      title: "Review and restrict the observed entry path",
+      guidance: "Validate whether the public or observed network path is required, then narrow the load-balancer, security-group, ingress or NetworkPolicy rule at the cited hop.",
+      breaksAt: edges.find((edge) => edge.evidence.source === "hubble" || edge.relation.includes("public"))?.relation ?? "network entry",
+      limitation: "SUGGESTION_REQUIRES_OPERATOR_VALIDATION",
+    });
+  }
+  if (nodes.some((node) => node.kind === "service_account" || node.kind === "iam_role")) {
+    suggestions.push({
+      key: "least-privilege",
+      title: "Reduce workload identity blast radius",
+      guidance: "Review the cited ServiceAccount, RBAC binding and IAM role; remove unused actions and scope resources without changing the workload until its required access is confirmed.",
+      breaksAt: edges.find((edge) => edge.relation === "assumes_iam_role")?.relation ?? "workload identity",
+      limitation: "SUGGESTION_REQUIRES_OPERATOR_VALIDATION",
+    });
+  }
+  if (factors.some((factor) => factor.key === "vulnerability" || factor.key === "supply-chain")) {
+    suggestions.push({
+      key: "replace-image",
+      title: "Rebuild and redeploy the immutable image",
+      guidance: "Validate a patched base image, regenerate SBOM and provenance, sign the new digest, and promote it through admission policy before replacing the workload image.",
+      breaksAt: edges.find((edge) => edge.evidence.source === "supply_chain")?.relation ?? "container image",
+      limitation: "SUGGESTION_REQUIRES_OPERATOR_VALIDATION",
+    });
+  }
+  if (nodes.some((node) => node.kind === "runtime_event")) {
+    suggestions.push({
+      key: "investigate-runtime",
+      title: "Investigate the runtime detection",
+      guidance: "Open a human-approved case, validate the Falco rule and workload owner, and choose a response only after excluding expected administrative activity. Sutra does not automatically contain workloads.",
+      breaksAt: "runtime event",
+      limitation: "SUGGESTION_REQUIRES_OPERATOR_VALIDATION",
+    });
+  }
+  return suggestions;
 }
 
 function createPath(
@@ -375,8 +664,10 @@ function createPath(
   const pathFindings = findings.filter((finding) =>
     finding.resourceKey !== null && nodeKeys.includes(finding.resourceKey),
   );
-  const factors = pathRisk(type, nodes, resourcesByKey, pathFindings);
+  const factors = pathRisk(type, nodes, edges, resourcesByKey, pathFindings);
   const score = Math.min(100, factors.reduce((sum, factor) => sum + factor.points, 0));
+  const timestamps = edges.flatMap((edge) => edge.evidence.observedAt === null ? [] : [edge.evidence.observedAt])
+    .sort((left, right) => Date.parse(left) - Date.parse(right));
   return {
     id: `${type}:${nodeKeys.join(">")}`,
     type,
@@ -388,6 +679,9 @@ function createPath(
     score,
     risk: risk(score),
     blastRadius: nodes.filter((node) => node.kind === "aws_resource"),
+    observedFrom: timestamps[0] ?? null,
+    observedTo: timestamps.at(-1) ?? null,
+    remediations: remediationSuggestions(nodes, edges, factors),
   };
 }
 
@@ -428,6 +722,9 @@ export function buildKubernetesAttackPaths(input: {
   readonly resources: readonly PilotResource[];
   readonly relationships: readonly PilotRelationship[];
   readonly findings: readonly PilotFinding[];
+  readonly runtimeEvents?: readonly NormalizedFalcoRuntimeEvent[];
+  readonly networkFlows?: readonly NormalizedHubbleFlow[];
+  readonly supplyChainEvidence?: readonly KubernetesSupplyChainEvidence[];
 }): KubernetesAttackPathProjection {
   const resourcesByKey = new Map(input.resources.map((resource) => [resource.resourceKey, resource]));
   const nodes = new Map<string, AttackGraphNode>(input.resources.map((resource) => [
@@ -439,9 +736,17 @@ export function buildKubernetesAttackPaths(input: {
       resourceKey: resource.resourceKey,
     },
   ]));
+  const correlations = correlatedEvidenceEdges({
+    resources: input.resources,
+    runtimeEvents: input.runtimeEvents ?? [],
+    networkFlows: input.networkFlows ?? [],
+    supplyChainEvidence: input.supplyChainEvidence ?? [],
+    nodes,
+  });
   const edges = [
     ...relationshipEdges(input.relationships).filter((edge) => nodes.has(edge.from) && nodes.has(edge.to)),
     ...derivedEdges(input.resources, nodes),
+    ...correlations.edges,
   ];
   const dedupedEdges = [...new Map(edges.map((edge) => [
     `${edge.from}\n${edge.to}\n${edge.relation}\n${edge.evidence.fieldPath ?? ""}`,
@@ -460,6 +765,37 @@ export function buildKubernetesAttackPaths(input: {
     );
     for (const path of cloudPaths) {
       candidates.push(createPath("cloud_to_kubernetes", path.keys, nodes, path.edges, resourcesByKey, input.findings));
+    }
+  }
+
+  for (const node of nodes.values()) {
+    if (node.kind !== "runtime_event") continue;
+    const runtimePaths = enumerate(node.key, adjacency, (keys) =>
+      hasOrderedKinds(keys, nodes, ["kubernetes_workload", "service_account", "iam_role", "aws_resource"]),
+    );
+    for (const path of runtimePaths) {
+      candidates.push(createPath("runtime_to_aws_blast_radius", path.keys, nodes, path.edges, resourcesByKey, input.findings));
+    }
+  }
+
+  for (const node of nodes.values()) {
+    if (node.kind !== "internet") continue;
+    const observedPaths = enumerate(node.key, adjacency, (keys) =>
+      hasOrderedKinds(keys, nodes, ["kubernetes_workload"]) &&
+      keys.some((key) => nodes.get(key)?.kind === "kubernetes_workload"),
+    3).filter((path) => path.edges.some((edge) => edge.evidence.source === "hubble"));
+    for (const path of observedPaths) {
+      candidates.push(createPath("observed_network_to_workload", path.keys, nodes, path.edges, resourcesByKey, input.findings));
+    }
+  }
+
+  for (const node of nodes.values()) {
+    if (node.kind !== "container_image") continue;
+    const supplyPaths = enumerate(node.key, adjacency, (keys) =>
+      hasOrderedKinds(keys, nodes, ["runtime_event", "kubernetes_workload"]),
+    4);
+    for (const path of supplyPaths) {
+      candidates.push(createPath("supply_chain_to_runtime", path.keys, nodes, path.edges, resourcesByKey, input.findings));
     }
   }
 
@@ -512,11 +848,31 @@ export function buildKubernetesAttackPaths(input: {
   if (dedupedEdges.length === 0) {
     unknowns.push("No explicit relationship or supported configuration edge is available; reachability is not inferred.");
   }
+  if ((input.runtimeEvents ?? []).length === 0) {
+    unknowns.push("No signed Falco runtime event is available; runtime behavior is not inferred from configuration.");
+  } else if (correlations.runtimeEvents.size === 0) {
+    unknowns.push("Falco events are present but none match one unambiguous workload identity.");
+  }
+  if ((input.networkFlows ?? []).length === 0) {
+    unknowns.push("No Hubble flow evidence is available; network reachability and isolation are not inferred.");
+  } else if (correlations.networkFlows.size === 0) {
+    unknowns.push("Hubble flows are present but no forwarded or audit flow matches unambiguous workload identities.");
+  }
+  if ((input.supplyChainEvidence ?? []).length === 0) {
+    unknowns.push("No immutable image evidence is available for supply-chain correlation.");
+  } else if (correlations.supplyChainEvidence.size === 0) {
+    unknowns.push("Supply-chain evidence is present but no exact image digest matches one workload.");
+  }
+  unknowns.push("Data sensitivity is not classified; an AWS resource in blast radius must not be described as sensitive without separate evidence.");
+  unknowns.push("Observed Hubble flows demonstrate past metadata observations only; they do not establish general or current reachability.");
   return {
     paths,
     nodes: [...nodes.values()],
     edges: dedupedEdges,
     unknowns,
     blastRadiusResourceCount: blastRadiusKeys.size,
+    correlatedRuntimeEventCount: correlations.runtimeEvents.size,
+    correlatedNetworkFlowCount: correlations.networkFlows.size,
+    correlatedSupplyChainEvidenceCount: correlations.supplyChainEvidence.size,
   };
 }

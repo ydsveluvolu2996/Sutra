@@ -124,7 +124,30 @@ function SectionContent({
       <Link className="text-link" href="/kubernetes/coverage">Evidence →</Link>
     </article></div> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">H</span><h2>No promoted Kubernetes scan</h2><p>{snapshotAt ? `AWS evidence was published ${formatTimestamp(snapshotAt)}, but AWS inventory is not relabelled as a Kubernetes scan.` : "No complete Kubernetes scan has been atomically published."}</p><Link className="button button-secondary" href="/kubernetes/onboard">Import a collector artifact</Link></section>;
   }
-  return projection.coverage.length > 0 ? <div className="coverage-grid">{projection.coverage.map((entry) => <article key={`${entry.collectorKey}:${entry.region}`}><span className={`coverage-state coverage-${entry.status}`} /><div><strong>{entry.collectorKey}</strong><small>{entry.region}</small></div><b>{entry.status}</b><span>{entry.itemsObserved} items</span></article>)}</div> : <div className="empty-state"><strong>Kubernetes coverage is not reported</strong><span>The current API does not establish control-plane, workload, image, runtime, admission, or package-scanning visibility.</span></div>;
+  if (section.key === "coverage") {
+    const scannerEvidence = workspace === null
+      ? []
+      : [...workspace.scannerEvidence.findings, ...workspace.scannerEvidence.sboms];
+    const scannerSources = [...new Map(scannerEvidence.map((item) => {
+      const source = "source" in item ? item.source : "sbom_report";
+      return [`${source}:${item.scanner.name}:${item.scanner.version}`, {
+        source,
+        scanner: item.scanner,
+        count: scannerEvidence.filter((candidate) =>
+          ("source" in candidate ? candidate.source : "sbom_report") === source &&
+          candidate.scanner.name === item.scanner.name &&
+          candidate.scanner.version === item.scanner.version
+        ).length,
+      }] as const;
+    })).values()];
+    return <>
+      {projection.coverage.length > 0 ? <div className="coverage-grid">{projection.coverage.map((entry) => <article key={`${entry.collectorKey}:${entry.region}`}><span className={`coverage-state coverage-${entry.status}`} /><div><strong>{entry.collectorKey}</strong><small>{entry.region}</small></div><b>{entry.status}</b><span>{entry.itemsObserved} items</span></article>)}</div> : <div className="empty-state"><strong>Kubernetes coverage is not reported</strong><span>The current API does not establish control-plane or workload visibility.</span></div>}
+      <section className="kubernetes-subsection"><h3>Trivy report provenance</h3>
+        {scannerSources.length > 0 ? <div className="coverage-grid">{scannerSources.map((entry) => <article key={`${entry.source}:${entry.scanner.name}:${entry.scanner.version}`}><span className="coverage-state coverage-succeeded" /><div><strong>{entry.source}</strong><small>{entry.scanner.name} {entry.scanner.version}</small></div><b>{entry.count} record{entry.count === 1 ? "" : "s"}</b><span>{entry.scanner.reportUpdatedAt ? formatTimestamp(entry.scanner.reportUpdatedAt) : "Update timestamp not reported"}</span></article>)}</div> : <div className="empty-state"><strong>No persisted Trivy report provenance</strong><span>No scanner finding or SBOM proves report generation. Review live collector coverage before interpreting an empty result as clean.</span></div>}
+      </section>
+    </>;
+  }
+  return <div className="empty-state"><strong>Kubernetes coverage is not reported</strong><span>The current API does not establish control-plane, workload, image, runtime, admission, or package-scanning visibility.</span></div>;
 }
 
 export function KubernetesEnterpriseSection({ section }: { readonly section: KubernetesSectionDefinition }) {

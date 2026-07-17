@@ -142,7 +142,7 @@ async function main() {
   }).collect();
   const posture = evaluateKubernetesPosture(toKubernetesEvidenceSnapshot(snapshot));
   const vulnerabilityCoverage = snapshot.coverage.find((entry) =>
-    entry.collectorKey === "trivy.vulnerabilityreports");
+    entry.collectorKey === "trivy-operator.vulnerabilityreports");
   const imageVulnerabilities = snapshot.trivyFindings.some((finding) =>
     finding.source === "vulnerability_report")
     ? "TRIVY_REPORTS_IMPORTED"

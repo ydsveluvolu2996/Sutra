@@ -32,8 +32,14 @@ spec:
               conditions:
                 all:
                   - key: "{{ element.image }}"
-                    operator: NotMatches
-                    value: "^(?:[a-z0-9.-]+\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com|public\\.ecr\\.aws|ghcr\\.io)/"
+                    operator: NotEquals
+                    value: "*.dkr.ecr.*.amazonaws.com/*"
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "public.ecr.aws/*"
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "ghcr.io/*"
     - name: require-image-digest
       match: *pods
       exclude: *systemNamespaces

@@ -1,19 +1,27 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   buildKubernetesAttackPaths,
   type AttackPathType,
   type KubernetesAttackPath,
 } from "../../../lib/kubernetes-attack-paths";
 import type { JsonValue } from "../../../lib/pilot-types";
+import type { NormalizedFalcoRuntimeEvent } from "../../../lib/falco-runtime-types";
+import type { NormalizedHubbleFlow } from "../../../lib/hubble-flow-evidence";
+import type { KubernetesSupplyChainEvidence } from "../../../lib/kubernetes-supply-chain";
 import { usePilotState } from "../../components/use-pilot-state";
+import { formatTimestamp } from "../../components/use-pilot-state";
+import { useKubernetesEvidence } from "../use-kubernetes-evidence";
 
 const typeLabels: Readonly<Record<AttackPathType, string>> = {
   cloud_to_kubernetes: "Cloud → Kubernetes → AWS",
   rbac_privilege_escalation: "RBAC escalation",
   vulnerable_exposed_privileged_workload: "Exposure + vulnerability + privilege",
+  runtime_to_aws_blast_radius: "Runtime → workload → AWS",
+  observed_network_to_workload: "Observed network → workload",
+  supply_chain_to_runtime: "Image digest → runtime",
 };
 
 function evidenceValue(value: JsonValue): string {
@@ -56,7 +64,13 @@ function PathCard({ path }: { readonly path: KubernetesAttackPath }) {
           <h3>Blast radius</h3>
           {path.blastRadius.length > 0 ? <ul>{path.blastRadius.map((node) => <li key={node.key}><Link href={`/cmdb/resource?key=${encodeURIComponent(node.key)}`}>{node.label}</Link><span>{node.kind.replaceAll("_", " ")}</span></li>)}</ul> : <p className="panel-footnote">No downstream AWS resource is established by this path.</p>}
         </section>
+        <section>
+          <h3>Operator-validated breaks</h3>
+          {path.remediations.length > 0 ? <ul>{path.remediations.map((item) => <li key={item.key}><div><strong>{item.title}</strong><small>{item.guidance}</small></div><span>{item.breaksAt}</span></li>)}</ul> : <p className="panel-footnote">No bounded remediation suggestion is available for this evidence sequence.</p>}
+          <p className="panel-footnote">Suggestions do not prove exploitability, successful mitigation or containment.</p>
+        </section>
       </div>
+      {path.observedFrom !== null ? <p className="panel-footnote attack-path-time">Timestamped evidence: {formatTimestamp(path.observedFrom)}{path.observedTo !== path.observedFrom ? ` → ${formatTimestamp(path.observedTo)}` : ""}. Untimestamped configuration edges remain snapshot-bound.</p> : null}
       <details className="attack-evidence">
         <summary>Inspect {path.edges.length} cited edges</summary>
         <div>
@@ -69,6 +83,7 @@ function PathCard({ path }: { readonly path: KubernetesAttackPath }) {
                 ? `relationship:${edge.evidence.relationType}`
                 : `${edge.evidence.fieldPath} = ${evidenceValue(edge.evidence.observedValue)}`}</code>
               <small>Source: {edge.evidence.sourceResourceKey}</small>
+              {edge.evidence.observedAt !== null ? <small>Observed: {formatTimestamp(edge.evidence.observedAt)} · SHA-256 {edge.evidence.evidenceSha256?.slice(0, 12)}</small> : null}
             </div>
           </article>)}
         </div>
@@ -79,12 +94,64 @@ function PathCard({ path }: { readonly path: KubernetesAttackPath }) {
 
 export function AttackPathsWorkspace() {
   const { state, loading, error, refresh } = usePilotState();
+  const kubernetes = useKubernetesEvidence(state);
+  const cluster = kubernetes.clusters.find((item) => item.status === "active") ?? null;
+  const connectionId = state?.connection?.id ?? null;
   const [type, setType] = useState<AttackPathType | "all">("all");
+  const [signals, setSignals] = useState<{
+    readonly runtimeEvents: readonly NormalizedFalcoRuntimeEvent[];
+    readonly networkFlows: readonly NormalizedHubbleFlow[];
+    readonly supplyChainEvidence: readonly KubernetesSupplyChainEvidence[];
+  }>({ runtimeEvents: [], networkFlows: [], supplyChainEvidence: [] });
+  const [signalError, setSignalError] = useState<string | null>(null);
+  const [signalLoading, setSignalLoading] = useState(false);
+  const refreshSignals = useCallback(async () => {
+    if (connectionId === null || cluster === null) {
+      setSignals({ runtimeEvents: [], networkFlows: [], supplyChainEvidence: [] });
+      setSignalError(null);
+      return;
+    }
+    setSignalLoading(true);
+    const scope = `connectionId=${encodeURIComponent(connectionId)}&clusterId=${encodeURIComponent(cluster.id)}&limit=500`;
+    try {
+      const [runtimeResponse, networkResponse, supplyResponse] = await Promise.all([
+        fetch(`/api/v1/kubernetes/runtime-events?${scope}`, { cache: "no-store" }),
+        fetch(`/api/v1/kubernetes/network-flows?${scope}`, { cache: "no-store" }),
+        fetch(`/api/v1/kubernetes/supply-chain?${scope}`, { cache: "no-store" }),
+      ]);
+      const [runtime, network, supply] = await Promise.all([
+        runtimeResponse.json(), networkResponse.json(), supplyResponse.json(),
+      ]) as [
+        { events?: readonly NormalizedFalcoRuntimeEvent[]; error?: { message?: string } },
+        { flows?: readonly NormalizedHubbleFlow[]; error?: { message?: string } },
+        { evidence?: readonly KubernetesSupplyChainEvidence[]; error?: { message?: string } },
+      ];
+      if (!runtimeResponse.ok || !networkResponse.ok || !supplyResponse.ok) {
+        throw new Error(runtime.error?.message ?? network.error?.message ?? supply.error?.message ?? "Context signal APIs are unavailable");
+      }
+      setSignals({
+        runtimeEvents: runtime.events ?? [],
+        networkFlows: network.flows ?? [],
+        supplyChainEvidence: supply.evidence ?? [],
+      });
+      setSignalError(null);
+    } catch (caught) {
+      setSignals({ runtimeEvents: [], networkFlows: [], supplyChainEvidence: [] });
+      setSignalError(caught instanceof Error ? caught.message : "Context signal APIs are unavailable");
+    } finally {
+      setSignalLoading(false);
+    }
+  }, [cluster, connectionId]);
+  useEffect(() => {
+    const task = window.setTimeout(() => void refreshSignals(), 0);
+    return () => window.clearTimeout(task);
+  }, [refreshSignals]);
   const projection = useMemo(() => buildKubernetesAttackPaths({
-    resources: state?.resources ?? [],
-    relationships: state?.relationships ?? [],
-    findings: state?.findings ?? [],
-  }), [state?.findings, state?.relationships, state?.resources]);
+    resources: kubernetes.projectionInput.resources,
+    relationships: kubernetes.projectionInput.relationships,
+    findings: kubernetes.projectionInput.findings,
+    ...signals,
+  }), [kubernetes.projectionInput, signals]);
   const paths = type === "all" ? projection.paths : projection.paths.filter((path) => path.type === type);
   const critical = projection.paths.filter((path) => path.risk === "critical").length;
   const evidencedEdges = new Set(projection.paths.flatMap((path) =>
@@ -98,14 +165,15 @@ export function AttackPathsWorkspace() {
         <div className="heading-actions"><Link className="button button-secondary" href="/kubernetes/security">Security findings</Link><Link className="button button-primary" href="/kubernetes">Kubernetes overview</Link></div>
       </section>
       <div className="trust-strip" role="note"><span className="trust-icon">E</span><span><strong>Evidence graph, not simulated reachability.</strong> Sutra follows directed relationships and a narrow set of exact configuration references. Missing, reversed, or ambiguous links stop a path. Scores use visible fixed factors and are not ML predictions.</span></div>
-      {error ? <div className="page-alert page-alert-error" role="alert"><strong>Attack-path evidence unavailable</strong><span>{error}</span><button onClick={() => void refresh()} type="button">Retry</button></div> : null}
-      {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Building authorized evidence graph…</div> : null}
-      {!loading ? <>
+      {error || kubernetes.error ? <div className="page-alert page-alert-error" role="alert"><strong>Attack-path evidence unavailable</strong><span>{error ?? kubernetes.error}</span><button onClick={() => { void refresh(); void kubernetes.refresh(); }} type="button">Retry</button></div> : null}
+      {signalError ? <div className="page-alert page-alert-warning" role="status"><strong>Context signal correlation unavailable</strong><span>{signalError}. Snapshot-only paths remain visible and no missing signal is inferred.</span><button onClick={() => void refreshSignals()} type="button">Retry signals</button></div> : null}
+      {loading || kubernetes.loading || signalLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Building authorized evidence graph…</div> : null}
+      {!loading && !kubernetes.loading && !signalLoading ? <>
         <section className="inventory-stats">
           <article><small>Evidenced paths</small><strong>{projection.paths.length}</strong><span>Complete supported sequences only</span></article>
           <article><small>Critical paths</small><strong>{critical}</strong><span>Score 80 or above</span></article>
           <article><small>Cited edges</small><strong>{evidencedEdges}</strong><span>Used by displayed paths</span></article>
-          <article><small>AWS blast radius</small><strong>{projection.blastRadiusResourceCount}</strong><span>Unique explicit downstream resources</span></article>
+          <article><small>Correlated signals</small><strong>{projection.correlatedRuntimeEventCount + projection.correlatedNetworkFlowCount + projection.correlatedSupplyChainEvidenceCount}</strong><span>{projection.correlatedRuntimeEventCount} runtime · {projection.correlatedNetworkFlowCount} flow · {projection.correlatedSupplyChainEvidenceCount} image</span></article>
         </section>
         <section className="panel attack-path-workspace">
           <div className="panel-heading">

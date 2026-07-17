@@ -24,10 +24,21 @@ spec:
     spec:
       serviceAccountName: sutra-falco-signing-gateway
       automountServiceAccountToken: false
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
         seccompProfile:
           type: RuntimeDefault
+      terminationGracePeriodSeconds: 15
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: sutra-falco-signing-gateway
       containers:
         - name: gateway
           image: SET_BY_ORCHESTRATOR
@@ -56,19 +67,37 @@ spec:
                 secretKeyRef:
                   name: sutra-falco-signing
                   key: hmacKey
+            - name: SUTRA_FALCO_FORWARD_TIMEOUT_MS
+              value: "5000"
+            - name: SUTRA_FALCO_FORWARD_ATTEMPTS
+              value: "3"
           readinessProbe:
             httpGet:
               path: /readyz
               port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /healthz
               port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 15
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: [ALL]
             readOnlyRootFilesystem: true
+            runAsNonRoot: true
           resources:
             requests:
               cpu: 50m
@@ -89,6 +118,17 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sutra-falco-signing-gateway
+  namespace: sutra-falco
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sutra-falco-signing-gateway
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -111,6 +151,8 @@ spec:
   egress:
     - ports:
         - protocol: UDP
+          port: 53
+        - protocol: TCP
           port: 53
         - protocol: TCP
           port: 443

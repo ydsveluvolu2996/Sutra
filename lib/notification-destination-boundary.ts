@@ -3,6 +3,7 @@ import type { NotificationDestinationConfig } from "./notification-destination-t
 const SECRET_REFERENCE = /^secret:\/\/[A-Za-z0-9][A-Za-z0-9._/-]{2,190}$/u;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/u;
 const AWS_REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
+const SECRET_SCOPE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 
 export class NotificationDestinationValidationError extends Error {
   public readonly code = "INVALID_INPUT";
@@ -46,4 +47,25 @@ export function normalizeNotificationDestinationConfig(
     !SECRET_REFERENCE.test(config.secretReference)
   ) invalid();
   return { channel: config.channel, secretReference: config.secretReference };
+}
+
+export function assertNotificationSecretScope(
+  config: NotificationDestinationConfig,
+  orgId: string,
+  customerId: string,
+): void {
+  if (config.channel === "email") return;
+  if (
+    !SECRET_SCOPE_IDENTIFIER.test(orgId) ||
+    !SECRET_SCOPE_IDENTIFIER.test(customerId)
+  ) invalid();
+  const expected = `secret://notifications/${orgId}/${customerId}/${config.channel}/`;
+  const suffix = config.secretReference.slice(expected.length);
+  if (
+    !config.secretReference.startsWith(expected) ||
+    suffix.length < 1 ||
+    suffix.length > 80 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(suffix) ||
+    suffix.includes("..")
+  ) invalid();
 }

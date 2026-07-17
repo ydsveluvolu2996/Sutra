@@ -40,6 +40,7 @@ services:
     environment:
       DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run pnpm docker:up to generate the ignored local runtime secret}@postgres:5432/sutra
       SUTRA_WEB_HOST: 0.0.0.0
+      SUTRA_NOTIFICATION_WORKER_CONFIGURED: ${SUTRA_NOTIFICATION_WORKER_CONFIGURED:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,6 +61,44 @@ services:
       timeout: 5s
       retries: 30
       start_period: 30s
+    restart: unless-stopped
+
+  notification-worker:
+    profiles: ["notifications"]
+    image: sutra-notification-worker
+    build:
+      context: .
+      dockerfile: services/notification-worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run pnpm docker:up to generate the ignored local runtime secret}@postgres:5432/sutra
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SUTRA_NOTIFICATION_HEALTH_PORT: "8081"
+      SUTRA_NOTIFICATION_POLL_INTERVAL_MS: ${SUTRA_NOTIFICATION_POLL_INTERVAL_MS:-1000}
+      SUTRA_NOTIFICATION_SECRET_PREFIX: ${SUTRA_NOTIFICATION_SECRET_PREFIX:-sutra/notifications/}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8081/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
 volumes:

@@ -253,7 +253,7 @@ export function NotificationSettingsBrowser() {
                 pattern="secret://[A-Za-z0-9][A-Za-z0-9._/-]{2,190}"
                 value={secretReference}
                 onChange={(event) => setSecretReference(event.target.value)}
-                placeholder={`secret://notifications/${channel}/customer`}
+                placeholder={`secret://notifications/<org>/<customer>/${channel}/primary`}
               />
               <small>Enter an opaque secret reference only. Sutra rejects raw webhook URLs.</small>
             </label>

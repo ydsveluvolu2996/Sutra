@@ -115,7 +115,7 @@ test("collects only normalized metadata and never returns credentials, annotatio
   const serialized = JSON.stringify(snapshot);
   assert.equal(snapshot.resources.length, 3);
   assert.equal(snapshot.coverage.every((entry) => entry.status === "succeeded"), true);
-  assert.equal(requestedPaths.some((path) => /secret/iu.test(path)), false);
+  assert.equal(requestedPaths.some((path) => /^\/api\/v1\/(?:namespaces\/[^/]+\/)?secrets(?:\/|$)/u.test(path)), false);
   for (const forbidden of [TOKEN, "annotation-secret", "secret-payload", "pod-env-secret", "PASSWORD"]) {
     assert.equal(serialized.includes(forbidden), false);
   }
@@ -157,13 +157,14 @@ test("default transport performs authenticated read-only loopback API requests",
     serverUrl: `http://127.0.0.1:${address.port}`,
   })).collect();
   assert.equal(snapshot.coverage.every((entry) => entry.status === "succeeded"), true);
-  assert.equal(requests.length, 18);
+  assert.equal(requests.length, 23);
   assert.equal(requests.every((request) => request.method === "GET" && request.url?.includes("limit=")), true);
   assert.equal(JSON.stringify(snapshot).includes(TOKEN), false);
 });
 
 test("normalizes the official VulnerabilityReport v1alpha1 contract with stable CVE evidence", () => {
   assert.equal(TRIVY_OPERATOR_CONTRACT.apiVersion, "aquasecurity.github.io/v1alpha1");
+  assert.equal(TRIVY_OPERATOR_CONTRACT.upstreamCommit, "fa099f9ade081a0432f33d47ef4032e6ff22aa82");
   const definition = trivyOperatorReports.find((item) => item.kind === "VulnerabilityReport");
   assert.ok(definition);
   const report = {
@@ -263,6 +264,153 @@ test("imports only failed official audit checks and bounded SBOM component field
   for (const excluded of ["sensitive-internal-ref", "raw-hash", "raw-property"]) {
     assert.equal(JSON.stringify(sbom).includes(excluded), false);
   }
+
+  const licenseHeavy = normalizeTrivyOperatorReport(sbomDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "SbomReport",
+    metadata: { ...commonMetadata, uid: "license-heavy-sbom-uid" },
+    report: {
+      scanner,
+      artifact: { repository: "registry.example.test/api", digest: "sha256:def", tag: "1.0.1" },
+      summary: { componentsCount: 1, dependenciesCount: 0 },
+      components: {
+        bomFormat: "CycloneDX",
+        specVersion: "1.6",
+        components: [{
+          type: "library",
+          name: "license-heavy-component",
+          version: "1.0.0",
+          licenses: Array.from({ length: 24 }, (_, index) => ({
+            license: { id: `License-${index + 1}` },
+          })),
+        }],
+      },
+    },
+  }, "cluster_demo_1");
+  assert.equal(licenseHeavy.sboms[0]?.components[0]?.licenses?.length, 24);
+});
+
+test("imports ExposedSecretReport metadata without retaining secret match material", () => {
+  const definition = trivyOperatorReports.find((item) => item.kind === "ExposedSecretReport");
+  assert.ok(definition);
+  const normalized = normalizeTrivyOperatorReport(definition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ExposedSecretReport",
+    metadata: {
+      name: "replicaset-api-api",
+      namespace: "production",
+      uid: "secret-report-uid",
+      resourceVersion: "15",
+      ownerReferences: [{ kind: "ReplicaSet", name: "api-7d9", controller: true }],
+    },
+    report: {
+      updateTimestamp: "2026-07-17T12:00:00Z",
+      scanner: { name: "Trivy", vendor: "Aqua Security", version: "0.69.3" },
+      secrets: [{
+        category: "AWS",
+        ruleID: "aws-access-key-id",
+        severity: "CRITICAL",
+        target: "/app/config.yaml",
+        title: "AWS access key",
+        match: "AKIAEXAMPLESHOULDNEVERPERSIST",
+      }],
+    },
+  }, "cluster_demo_1");
+  assert.equal(normalized.findings.length, 1);
+  assert.equal(normalized.findings[0]?.source, "exposed_secret_report");
+  assert.equal(normalized.findings[0]?.checkId, "aws-access-key-id");
+  assert.equal(normalized.findings[0]?.target, "/app/config.yaml");
+  assert.equal(JSON.stringify(normalized).includes("AKIAEXAMPLESHOULDNEVERPERSIST"), false);
+  assert.equal(JSON.stringify(normalized).includes('"match"'), false);
+});
+
+test("imports infra and cluster compliance failures with bounded report health provenance", () => {
+  const infraDefinition = trivyOperatorReports.find((item) => item.kind === "ClusterInfraAssessmentReport");
+  const complianceDefinition = trivyOperatorReports.find((item) => item.kind === "ClusterComplianceReport");
+  assert.ok(infraDefinition && complianceDefinition);
+  const infra = normalizeTrivyOperatorReport(infraDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ClusterInfraAssessmentReport",
+    metadata: { name: "cluster-infra", uid: "infra-uid", resourceVersion: "21" },
+    report: {
+      scanner: { name: "Trivy", vendor: "Aqua Security", version: "0.69.3" },
+      checks: [
+        { checkID: "KCV001", title: "API server setting", severity: "HIGH", success: false, remediation: "Set the safe flag" },
+        { checkID: "KCV002", title: "Passing control", severity: "LOW", success: true },
+      ],
+    },
+  }, "cluster_demo_1");
+  assert.equal(infra.findings.length, 1);
+  assert.equal(infra.findings[0]?.source, "cluster_infra_assessment_report");
+  assert.equal(infra.findings[0]?.affectedResource.namespace, null);
+
+  const compliance = normalizeTrivyOperatorReport(complianceDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ClusterComplianceReport",
+    metadata: {
+      name: "nsa",
+      uid: "compliance-uid",
+      resourceVersion: "22",
+      labels: { "app.kubernetes.io/version": "0.30.1" },
+    },
+    spec: { compliance: { id: "nsa", title: "NSA/CISA", version: "1.2" } },
+    status: {
+      updateTimestamp: "2026-07-17T12:00:00Z",
+      summary: { failCount: 2, passCount: 12 },
+      summaryReport: {
+        controlCheck: [
+          { id: "1.1", name: "Pod security", severity: "HIGH", totalFail: 2 },
+          { id: "1.2", name: "Passing control", severity: "LOW", totalFail: 0 },
+        ],
+      },
+    },
+  }, "cluster_demo_1");
+  assert.equal(compliance.findings.length, 1);
+  assert.equal(compliance.findings[0]?.source, "cluster_compliance_report");
+  assert.equal(compliance.findings[0]?.scanner.version, "0.30.1");
+  assert.equal(compliance.findings[0]?.scanner.reportUpdatedAt, "2026-07-17T12:00:00.000Z");
+
+  const detailCompliance = normalizeTrivyOperatorReport(complianceDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ClusterComplianceReport",
+    metadata: {
+      name: "cis",
+      uid: "compliance-detail-uid",
+      resourceVersion: "23",
+      labels: { "app.kubernetes.io/version": "0.30.1" },
+    },
+    spec: { compliance: { id: "cis", title: "CIS", version: "1.23" } },
+    status: {
+      updateTimestamp: "2026-07-17T12:00:00Z",
+      detailReport: {
+        results: [{
+          id: "1.0",
+          name: "Non-root containers",
+          severity: "MEDIUM",
+          checks: [
+            { checkID: "AVD-KSV-0020", target: "production/deployment-api", title: "Runs as root", severity: "HIGH", success: false, remediation: "Set runAsNonRoot" },
+            { checkID: "AVD-KSV-0021", severity: "LOW", success: true },
+          ],
+        }],
+      },
+    },
+  }, "cluster_demo_1");
+  assert.equal(detailCompliance.findings.length, 1);
+  assert.equal(detailCompliance.findings[0]?.checkId, "AVD-KSV-0020");
+  assert.equal(detailCompliance.findings[0]?.target, "production/deployment-api");
+  assert.equal(detailCompliance.findings[0]?.remediation, "Set runAsNonRoot");
+
+  const pendingCompliance = normalizeTrivyOperatorReport(complianceDefinition, {
+    apiVersion: "aquasecurity.github.io/v1alpha1",
+    kind: "ClusterComplianceReport",
+    metadata: {
+      name: "pending-cis",
+      uid: "pending-compliance-uid",
+      resourceVersion: "24",
+    },
+    spec: { compliance: { id: "cis", title: "CIS", version: "1.23" } },
+  }, "cluster_demo_1");
+  assert.deepEqual(pendingCompliance.findings, []);
 });
 
 test("normalizes namespaced and cluster-scoped RBAC assessment report contracts", () => {
@@ -304,7 +452,7 @@ test("reports absent Trivy CRDs as NOT_CONFIGURED and never as clean", async () 
   };
   const snapshot = await new ReadOnlyKubernetesCollector(connection(), transport).collect();
   const trivyCoverage = snapshot.coverage.filter((entry) => entry.collectorKey.startsWith("trivy-operator."));
-  assert.equal(trivyCoverage.length, 5);
+  assert.equal(trivyCoverage.length, 10);
   assert.equal(trivyCoverage.every((entry) => entry.status === "not_configured" && entry.errorCode === "NOT_CONFIGURED"), true);
   assert.equal(JSON.stringify(trivyCoverage).includes("provider body"), false);
   assert.equal(snapshot.trivyFindings.length, 0);

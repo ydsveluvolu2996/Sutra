@@ -81,9 +81,14 @@ export interface KubernetesCollectorCoverage {
 
 export type TrivyOperatorSource =
   | "vulnerability_report"
+  | "cluster_vulnerability_report"
   | "config_audit_report"
+  | "exposed_secret_report"
   | "rbac_assessment_report"
-  | "cluster_rbac_assessment_report";
+  | "cluster_rbac_assessment_report"
+  | "infra_assessment_report"
+  | "cluster_infra_assessment_report"
+  | "cluster_compliance_report";
 
 export type TrivyOperatorSeverity = "critical" | "high" | "medium" | "low" | "unknown";
 

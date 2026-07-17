@@ -10,6 +10,9 @@ import type {
   PilotRelationship,
   PilotResource,
 } from "../lib/pilot-types.ts";
+import type { NormalizedFalcoRuntimeEvent } from "../lib/falco-runtime-types.ts";
+import type { NormalizedHubbleFlow } from "../lib/hubble-flow-evidence.ts";
+import type { KubernetesSupplyChainEvidence } from "../lib/kubernetes-supply-chain.ts";
 
 const collectedAt = "2026-07-17T08:00:00.000Z";
 
@@ -98,7 +101,7 @@ function completeFixture(): {
           clusterName: "prod",
           spec: {
             serviceAccountName: "payments-sa",
-            template: { spec: { containers: [{ securityContext: { privileged: true } }] } },
+            template: { spec: { containers: [{ image: "registry.example/payments@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", securityContext: { privileged: true } }] } },
           },
         },
       }),
@@ -254,8 +257,106 @@ test("reports evidence gaps instead of emitting paths for unrelated assets", () 
     findings: [],
   });
   assert.deepEqual(result.paths, []);
-  assert.equal(result.unknowns.length, 4);
-  assert.match(result.unknowns.at(-1) ?? "", /reachability is not inferred/u);
+  assert.ok(result.unknowns.length >= 8);
+  assert.equal(result.unknowns.some((gap) => /Data sensitivity is not classified/u.test(gap)), true);
+  assert.equal(result.unknowns.some((gap) => /do not establish general or current reachability/u.test(gap)), true);
+});
+
+function runtimeEvent(): NormalizedFalcoRuntimeEvent {
+  return {
+    schemaVersion: "sutra.falco.runtime-event.v1",
+    eventId: `frte_${"1".repeat(48)}`,
+    clusterId: `kcluster_${"2".repeat(48)}`,
+    occurredAt: "2026-07-17T08:10:00.000Z",
+    rule: "Terminal shell in container",
+    priority: "warning",
+    source: "syscall",
+    nodeName: "node-a",
+    namespace: "payments",
+    podName: "payments",
+    podUid: "pod-uid",
+    containerId: "container-id",
+    containerName: "api",
+    containerImage: "registry.example/payments@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    process: {
+      name: "sh", executable: "/bin/sh", pid: 12, parentPid: 1,
+      userName: "app", userId: "1000", eventType: "execve",
+    },
+    evidenceSha256: "3".repeat(64),
+  };
+}
+
+function hubbleFlow(): NormalizedHubbleFlow {
+  return {
+    observedAt: "2026-07-17T08:09:00.000Z",
+    source: { namespace: null, workloadKind: null, workloadName: null, serviceName: null, world: true },
+    destination: { namespace: "payments", workloadKind: "Deployment", workloadName: "payments", serviceName: null, world: false },
+    direction: "ingress",
+    verdict: "forwarded",
+    protocol: "TCP",
+    destinationPort: 443,
+    observations: 4,
+    evidenceSha256: "4".repeat(64),
+  };
+}
+
+function supplyEvidence(): KubernetesSupplyChainEvidence {
+  return {
+    schemaVersion: "sutra.kubernetes-supply-chain.v1",
+    clusterId: `kcluster_${"2".repeat(48)}`,
+    collectedAt: "2026-07-17T08:05:00.000Z",
+    image: {
+      repository: "registry.example/payments",
+      digest: `sha256:${"a".repeat(64)}`,
+      tag: null,
+    },
+    vulnerabilityScan: {
+      scanner: "Trivy", scannerVersion: "0.60.0", scannedAt: "2026-07-17T08:04:00.000Z",
+      critical: 1, high: 2, medium: 0, low: 0, unknown: 0, fixedAvailable: 1,
+    },
+    sbom: { format: "CycloneDX", componentCount: 42, documentSha256: "5".repeat(64) },
+    signature: { state: "verified", issuer: "https://token.actions.githubusercontent.com", subject: "repo:example/payments", transparencyLogVerified: true },
+    provenance: { state: "verified", builderId: "github-actions", sourceRepository: "example/payments", commitSha: "6".repeat(40) },
+    priority: { score: 40, rating: "medium", factors: ["1 critical package vulnerability"] },
+    evidenceSha256: "7".repeat(64),
+    limitations: [
+      "EVIDENCE_DESCRIBES_ONE_IMMUTABLE_IMAGE_DIGEST",
+      "VULNERABILITY_PRESENCE_DOES_NOT_PROVE_EXPLOITABILITY",
+      "SIGNATURE_VERIFICATION_DOES_NOT_ESTABLISH_SOURCE_CODE_SAFETY",
+    ],
+  };
+}
+
+test("correlates timestamped Falco, Hubble and immutable image evidence without inferring reachability", () => {
+  const fixture = completeFixture();
+  const result = buildKubernetesAttackPaths({
+    ...fixture,
+    runtimeEvents: [runtimeEvent()],
+    networkFlows: [hubbleFlow()],
+    supplyChainEvidence: [supplyEvidence()],
+  });
+  assert.equal(result.correlatedRuntimeEventCount, 1);
+  assert.equal(result.correlatedNetworkFlowCount, 1);
+  assert.equal(result.correlatedSupplyChainEvidenceCount, 1);
+  const runtime = result.paths.find((path) => path.type === "runtime_to_aws_blast_radius");
+  assert.ok(runtime);
+  assert.equal(runtime.nodes[0]?.kind, "runtime_event");
+  assert.equal(runtime.observedFrom, "2026-07-17T08:00:00.000Z");
+  assert.equal(runtime.observedTo, "2026-07-17T08:10:00.000Z");
+  assert.equal(runtime.remediations.some((item) => item.key === "investigate-runtime"), true);
+  assert.equal(runtime.remediations.every((item) => item.limitation === "SUGGESTION_REQUIRES_OPERATOR_VALIDATION"), true);
+  assert.ok(result.paths.some((path) => path.type === "observed_network_to_workload"));
+  assert.ok(result.paths.some((path) => path.type === "supply_chain_to_runtime"));
+});
+
+test("does not treat dropped Hubble evidence as a reachable path", () => {
+  const fixture = completeFixture();
+  const result = buildKubernetesAttackPaths({
+    ...fixture,
+    networkFlows: [{ ...hubbleFlow(), verdict: "dropped" }],
+  });
+  assert.equal(result.correlatedNetworkFlowCount, 0);
+  assert.equal(result.paths.some((path) => path.type === "observed_network_to_workload"), false);
 });
 
 test("scoring is deterministic and finding severity changes only the documented factor", () => {

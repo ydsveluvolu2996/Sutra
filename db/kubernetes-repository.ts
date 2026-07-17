@@ -688,9 +688,14 @@ function normalizeScannerFinding(value: unknown): TrivyOperatorFinding {
   }
   if (
     record.source !== "vulnerability_report" &&
+    record.source !== "cluster_vulnerability_report" &&
     record.source !== "config_audit_report" &&
+    record.source !== "exposed_secret_report" &&
     record.source !== "rbac_assessment_report" &&
-    record.source !== "cluster_rbac_assessment_report"
+    record.source !== "cluster_rbac_assessment_report" &&
+    record.source !== "infra_assessment_report" &&
+    record.source !== "cluster_infra_assessment_report" &&
+    record.source !== "cluster_compliance_report"
   ) throw new KubernetesRepositoryError("INVALID_INPUT");
   if (
     record.severity !== "critical" && record.severity !== "high" &&

@@ -77,14 +77,20 @@ rules:
       - storageclasses
       - csidrivers
     verbs: [get, list]
-  # Optional Trivy Operator evidence. These are the only Aqua Security CRDs
-  # Sutra can read; exposed-secret and raw scan/log resources are excluded.
+  # Optional Trivy Operator evidence. ExposedSecretReport access is deliberate:
+  # the collector discards `match` and retains only rule/file metadata. This
+  # role never permits reading Kubernetes Secret or ConfigMap objects.
   - apiGroups: [aquasecurity.github.io]
     resources:
       - vulnerabilityreports
+      - clustervulnerabilityreports
       - configauditreports
+      - exposedsecretreports
       - rbacassessmentreports
       - clusterrbacassessmentreports
+      - infraassessmentreports
+      - clusterinfraassessmentreports
+      - clustercompliancereports
       - sbomreports
     verbs: [get, list]
 ---
