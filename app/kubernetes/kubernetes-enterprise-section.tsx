@@ -9,6 +9,7 @@ import type { KubernetesSectionDefinition } from "./kubernetes-sections";
 import { useKubernetesEvidence } from "./use-kubernetes-evidence";
 import type { KubernetesStoredWorkspace } from "../../db/kubernetes-repository";
 import { KubernetesRuntimeWorkspace } from "./kubernetes-runtime-workspace";
+import { buildKubernetesComplianceReadinessReport } from "../../lib/kubernetes-compliance-readiness";
 
 function findReportedImages(value: JsonValue, key = "", depth = 0): string[] {
   if (depth > 6) return [];
@@ -109,7 +110,28 @@ function SectionContent({
   }
   if (section.key === "compliance") {
     const controlFindings = projection.findings.filter((finding) => /kubernetes|k8s|eks/iu.test(finding.controlKey));
-    return <><div className="trust-strip" role="note"><span className="trust-icon">!</span><span><strong>Assessment, not certification.</strong> Results are point-in-time interpretations of normalized evidence and do not establish conformity, audit readiness, or absence of risk.</span></div><FindingRows findings={controlFindings} /></>;
+    const readiness = buildKubernetesComplianceReadinessReport({
+      findings: workspace?.findings ?? [],
+      collectedAt: workspace?.scan?.collectedAt ?? null,
+    });
+    return <>
+      <div className="trust-strip" role="note"><span className="trust-icon">!</span><span><strong>Assessment, not certification.</strong> Results are point-in-time interpretations of normalized evidence and do not establish conformity, audit readiness, or absence of risk.</span></div>
+      <section className="kubernetes-subsection">
+        <h3>Framework readiness mappings</h3>
+        <p className="page-subtitle">{readiness.disclaimer}{readiness.collectedAt ? ` Evidence collected ${formatTimestamp(readiness.collectedAt)}.` : " No promoted Kubernetes scan supplies control evidence yet."}</p>
+        {readiness.frameworks.map((entry) => <article className="panel kubernetes-readiness-framework" key={entry.framework.key}>
+          <div className="panel-heading"><div><p className="eyebrow">{entry.framework.availability === "available" ? "Available" : entry.framework.availability === "licensed-content-required" ? "Licensed content required" : "Mapping review required"}{entry.framework.version ? ` · ${entry.framework.version}` : ""}</p><h4>{entry.framework.name}</h4></div><span className="result-count">{entry.summary.PASS} pass · {entry.summary.FAIL} fail · {entry.summary.UNKNOWN} unknown · {entry.summary.NOT_COLLECTED} not collected</span></div>
+          <p className="page-subtitle">{entry.framework.claimBoundary}</p>
+          <div className="kubernetes-policy-grid">{entry.controls.map((control) => <article key={`${entry.framework.key}:${control.controlId}`}>
+            <span className={`severity-dot severity-${control.state === "FAIL" ? "high" : control.state === "PASS" ? "info" : "medium"}`} />
+            <div><strong>{control.title}</strong><small>{control.controlId} · {control.references.join(", ")}</small></div>
+            <span className={`compliance-status compliance-status-${control.state === "FAIL" ? "fail" : control.state === "PASS" ? "pass" : control.state === "UNKNOWN" ? "unknown" : "not-applicable"}`}>{control.state === "NOT_COLLECTED" ? "NOT COLLECTED" : control.state}{control.state === "FAIL" ? ` · ${control.failCount}` : ""}</span>
+          </article>)}</div>
+        </article>)}
+        {readiness.unmappedControlIds.length > 0 ? <div className="empty-state"><strong>{readiness.unmappedControlIds.length} control result{readiness.unmappedControlIds.length === 1 ? "" : "s"} without a framework mapping</strong><span>{readiness.unmappedControlIds.join(", ")}</span></div> : null}
+      </section>
+      <section className="kubernetes-subsection"><h3>Normalized compliance findings</h3><FindingRows findings={controlFindings} /></section>
+    </>;
   }
   if (section.key === "policies") {
     const controls = [...new Map(projection.findings.map((finding) => [finding.controlKey, finding])).values()];
