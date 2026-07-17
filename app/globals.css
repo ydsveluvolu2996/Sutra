@@ -1484,3 +1484,13 @@ h3 { letter-spacing: -.02em; }
   .fleet-health-row { grid-template-columns: 1fr; }
   .fleet-health-times { text-align: left; }
 }
+
+.risk-queue-list { display: flex; flex-direction: column; gap: 8px; }
+.risk-queue-item { display: grid; grid-template-columns: 34px 74px minmax(0, 1fr) 64px; gap: 12px; align-items: center; border: 1px solid var(--border, #e3e7ea); border-radius: 10px; padding: 10px 12px; }
+.risk-queue-rank { font-weight: 750; color: #5d7079; text-align: center; }
+.risk-queue-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.risk-queue-body span { color: #3a4a53; font-size: 12px; }
+.risk-queue-priority { text-align: center; }
+.risk-queue-priority strong { display: block; font-size: 16px; }
+.risk-queue-priority small { color: #5d7079; }
+@media (max-width: 700px) { .risk-queue-item { grid-template-columns: 28px 64px 1fr; } .risk-queue-priority { grid-column: 3; text-align: left; } }
