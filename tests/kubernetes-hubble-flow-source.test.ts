@@ -126,6 +126,21 @@ test("endpoints without workload, service, or world identity are skipped, never 
   assert.equal(flowsSkipped, 3);
 });
 
+test("flow timestamps beyond a small clock-skew margin are rejected at the source", () => {
+  const withinMargin = normalizeHubbleExportLines({
+    lines: [exportLine({ time: new Date(NOW + 30_000).toISOString() })],
+    now: NOW,
+  });
+  assert.equal(withinMargin.flows.length, 1, "a 30s-ahead flow within skew margin is accepted");
+
+  const beyondMargin = normalizeHubbleExportLines({
+    lines: [exportLine({ time: new Date(NOW + 120_000).toISOString() })],
+    now: NOW,
+  });
+  assert.equal(beyondMargin.flows.length, 0, "a 2-minute-future flow is dropped before it can be rejected at ingest");
+  assert.equal(beyondMargin.flowsSkipped, 1);
+});
+
 test("pod-only endpoints fall back to the Pod workload kind", () => {
   const { flows } = normalizeHubbleExportLines({
     lines: [exportLine({ source: { namespace: "payments", pod_name: "job-runner-1", labels: [] } })],
@@ -156,6 +171,33 @@ test("export file source reads a bounded tail, reports missing files as not conf
     assert.equal(collection.flows.length, 1);
     assert.equal(collection.flows[0]?.observations, 2);
     assert.equal(collection.flowsSkipped, 0);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a complete record at a boundary-aligned tail window is not dropped", async () => {
+  const MAX_TAIL_BYTES = 4 * 1024 * 1024;
+  const directory = await mkdtemp(join(tmpdir(), "sutra-hubble-tail-"));
+  try {
+    const path = join(directory, "events.log");
+    // Marker is the first record inside the tail window and has a unique port;
+    // filler records occupy the rest with a different tuple.
+    const marker = exportLine({ l4: { TCP: { destination_port: 9999 } } });
+    const filler = exportLine({ l4: { TCP: { destination_port: 8080 } } });
+    let windowText = `${marker}\n`;
+    while (Buffer.byteLength(windowText, "utf8") < MAX_TAIL_BYTES) windowText += `${filler}\n`;
+    windowText = windowText.slice(0, MAX_TAIL_BYTES);
+    // Prefix ends in a newline, so the window begins exactly on a record boundary.
+    await writeFile(path, `padding\n${windowText}`, "utf8");
+
+    const source = new HubbleExportFileFlowSource({ path, hubbleVersion: "1.19.5" });
+    const collection = await source.collect({ now: NOW });
+    assert.ok(collection !== null);
+    assert.ok(
+      collection.flows.some((flow) => flow.destinationPort === 9999),
+      "the boundary-aligned first in-window record must survive",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

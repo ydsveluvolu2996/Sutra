@@ -4,6 +4,7 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,253}$/u;
 const MAX_TAIL_BYTES = 4 * 1024 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 const MAX_UPLOAD_FLOWS = 2_000;
+const SOURCE_CLOCK_SKEW_MS = 60_000;
 
 export interface HubbleRawEndpoint {
   readonly namespace: string | null;
@@ -128,7 +129,11 @@ function observedAt(flow: Record<string, unknown>, envelope: Record<string, unkn
   const raw = typeof flow.time === "string" ? flow.time : envelope.time;
   if (typeof raw !== "string" || raw.length > 40) return null;
   const parsed = Date.parse(raw);
-  if (!Number.isFinite(parsed) || parsed > now + 300_000) return null;
+  // Hubble observations are past events; allow only a small clock-skew margin.
+  // This stays well inside the control plane's own +5-minute future tolerance,
+  // so a batch the agent accepts is never rejected wholesale on cross-clock
+  // re-validation at ingest.
+  if (!Number.isFinite(parsed) || parsed > now + SOURCE_CLOCK_SKEW_MS) return null;
   return new Date(parsed).toISOString();
 }
 
@@ -202,16 +207,22 @@ async function readTailLines(path: string): Promise<string[] | null> {
   }
   try {
     const { size } = await handle.stat();
-    const start = Math.max(0, size - MAX_TAIL_BYTES);
-    const length = size - start;
+    const windowStart = Math.max(0, size - MAX_TAIL_BYTES);
+    // Read one extra preceding byte so we can tell whether the window begins on
+    // a record boundary (previous byte is a newline) or mid-record.
+    const readStart = windowStart > 0 ? windowStart - 1 : 0;
+    const length = size - readStart;
     if (length === 0) return [];
     const buffer = Buffer.alloc(length);
-    await handle.read(buffer, 0, length, start);
-    const text = buffer.toString("utf8");
-    const lines = text.split("\n");
-    // A tail window can begin mid-record; drop the first partial line.
-    if (start > 0) lines.shift();
-    return lines.filter((line) => Buffer.byteLength(line, "utf8") <= MAX_LINE_BYTES);
+    const { bytesRead } = await handle.read(buffer, 0, length, readStart);
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (windowStart > 0) {
+      // Drop through the first newline: that discards either the preceding
+      // sentinel byte (boundary-aligned window) or a leading partial record.
+      const firstNewline = text.indexOf("\n");
+      text = firstNewline >= 0 ? text.slice(firstNewline + 1) : "";
+    }
+    return text.split("\n").filter((line) => Buffer.byteLength(line, "utf8") <= MAX_LINE_BYTES);
   } finally {
     await handle.close();
   }

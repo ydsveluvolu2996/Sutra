@@ -91,6 +91,26 @@ function needsRotation(credential: RotatingAgentCredential, now: number): boolea
   return Date.parse(credential.expiresAt) - now <= ROTATE_BEFORE_MS;
 }
 
+function isPrivateIpv4(hostname: string): boolean {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(hostname);
+  if (match === null) return false;
+  const octets = match.slice(1).map(Number);
+  if (octets.some((value) => value > 255)) return false;
+  const [a, b] = octets;
+  return a === 127 || a === 10 ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31);
+}
+
+function isInClusterHost(hostname: string): boolean {
+  if (hostname === "localhost" || hostname === "::1") return true;
+  if (isPrivateIpv4(hostname)) return true;
+  // Kubernetes in-cluster DNS: bare service names (no dot) or cluster-suffixed.
+  if (!hostname.includes(".")) return true;
+  return /\.(?:svc|cluster\.local|local|internal)$/u.test(hostname);
+}
+
 export class ContinuousKubernetesAgent {
   private readonly configuration: KubernetesAgentConfiguration;
   private readonly now: () => number;
@@ -139,7 +159,10 @@ export class ContinuousKubernetesAgent {
         gatewayUrl.username !== "" ||
         gatewayUrl.password !== "" ||
         gatewayUrl.search !== "" ||
-        gatewayUrl.hash !== ""
+        gatewayUrl.hash !== "" ||
+        // Plaintext http is only allowed to the in-cluster gateway, never to an
+        // arbitrary public host; https is required otherwise.
+        (gatewayUrl.protocol === "http:" && !isInClusterHost(gatewayUrl.hostname))
       ) {
         throw new Error("Falco gateway health URL is invalid");
       }
@@ -270,9 +293,12 @@ export class ContinuousKubernetesAgent {
       lastHeartbeatAt: createdAt,
     };
     await this.configuration.stateStore.save(state);
+    // Re-probe rather than reuse the pre-scan reading: the collect() above can
+    // run for a while, during which the gateway's health may have changed.
+    const postScanGatewayState = await this.falcoGatewayState();
     await this.configuration.controlChannel.heartbeat(
       credential,
-      this.heartbeat(credential.agentId, this.withFalcoGateway(modules, gatewayState), state),
+      this.heartbeat(credential.agentId, this.withFalcoGateway(modules, postScanGatewayState), state),
     );
 
     if (this.configuration.hubbleFlowSource !== undefined) {
