@@ -1584,3 +1584,32 @@ h3 { letter-spacing: -.02em; }
 .settings-pill.is-risk { background: #fcebed; color: #9f2f3c; }
 .settings-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 .settings-danger { color: #9f2f3c; border-color: rgba(188,61,73,.4); }
+
+/* Executive dashboard cards (Wiz-style board) */
+.exec-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 18px; }
+.exec-card { display: flex; flex-direction: column; gap: 12px; }
+.score-gauge { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.score-gauge svg { width: 100%; max-width: 190px; }
+.score-gauge-track { stroke: #e6ecee; }
+.score-gauge-good .score-gauge-value { stroke: #12a26a; }
+.score-gauge-warn .score-gauge-value { stroke: #d3922a; }
+.score-gauge-risk .score-gauge-value { stroke: #d0505f; }
+.score-gauge-number { font-size: 30px; font-weight: 800; fill: var(--ink, #1d242a); }
+.score-gauge-caption { font-size: 11px; color: #7c8991; }
+.severity-bars { display: grid; gap: 9px; }
+.severity-bar { display: grid; grid-template-columns: 66px 1fr 28px; align-items: center; gap: 10px; }
+.severity-bar i { display: block; height: 8px; border-radius: 6px; background: #eef1f3; overflow: hidden; }
+.severity-bar b { display: block; height: 100%; border-radius: 6px; }
+.severity-fill-critical { background: #bc3d49; } .severity-fill-high { background: #e07a3c; }
+.severity-fill-medium { background: #d3aa2a; } .severity-fill-low { background: #3f9d6c; }
+.severity-bar strong { text-align: right; font-variant-numeric: tabular-nums; }
+.sla-list { display: grid; gap: 8px; }
+.sla-row { display: flex; align-items: center; gap: 10px; }
+.sla-row div { display: flex; flex-direction: column; gap: 1px; }
+.sla-row strong { text-transform: capitalize; font-size: 13px; }
+.sla-row small { color: #7c8991; font-size: 11px; }
+.sla-row b { margin-left: auto; font-variant-numeric: tabular-nums; }
+.throughput-row { display: flex; gap: 18px; justify-content: center; }
+.throughput-row div { text-align: center; }
+.throughput-row small { display: block; color: #7c8991; font-size: 11px; }
+.throughput-row strong { font-size: 18px; }
