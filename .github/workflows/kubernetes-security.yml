@@ -1,0 +1,76 @@
+name: Kubernetes and supply-chain security
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/kubernetes-security.yml"
+      - ".github/workflows/kubernetes-agent-release.yml"
+      - "deploy/**"
+      - "infrastructure/**"
+      - "services/kubernetes-collector/**"
+      - "Dockerfile"
+      - "pnpm-lock.yaml"
+  push:
+    branches: [main, agent/sutra-local-aws-pilot]
+    paths:
+      - ".github/workflows/kubernetes-security.yml"
+      - ".github/workflows/kubernetes-agent-release.yml"
+      - "deploy/**"
+      - "infrastructure/**"
+      - "services/kubernetes-collector/**"
+      - "Dockerfile"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kubernetes-security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-security:
+    name: Manifests, dependencies, and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Scan Kubernetes, Helm, and infrastructure configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan application dependencies
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Generate the review SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          artifact-name: sutra-source-sbom.cyclonedx.json
+
+      - name: Install Cosign for release verification workflows
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Verify Cosign is available
+        run: cosign version

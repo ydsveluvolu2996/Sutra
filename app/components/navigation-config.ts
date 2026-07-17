@@ -17,9 +17,13 @@ export type NavKey =
   | "roadmap"
   | "operations"
   | "access"
+  | "notification_settings"
   | "kubernetes_overview"
   | "kubernetes_inventory"
   | "kubernetes_security"
+  | "kubernetes_attack_paths"
+  | "kubernetes_admission"
+  | "kubernetes_supply_chain"
   | "kubernetes_onboard"
   | `kubernetes_${KubernetesSection}`
   | "onboard"
@@ -77,11 +81,14 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_namespaces", label: "Namespaces", href: "/kubernetes/namespaces", icon: "NS", capabilities: readConnection },
       { key: "kubernetes_workloads", label: "Workloads", href: "/kubernetes/workloads", icon: "WL", capabilities: readConnection },
       { key: "kubernetes_images", label: "Images & vulnerabilities", href: "/kubernetes/images", icon: "IM", capabilities: readConnection },
+      { key: "kubernetes_supply_chain", label: "Software supply chain", href: "/kubernetes/supply-chain", icon: "SC", capabilities: readConnection },
       { key: "kubernetes_exposure", label: "Exposure", href: "/kubernetes/exposure", icon: "EX", capabilities: readConnection },
+      { key: "kubernetes_attack_paths", label: "Attack paths", href: "/kubernetes/attack-paths", icon: "AP", capabilities: readConnection },
       { key: "kubernetes_rbac", label: "RBAC", href: "/kubernetes/rbac", icon: "RB", capabilities: readConnection },
       { key: "kubernetes_network", label: "Network", href: "/kubernetes/network", icon: "NW", capabilities: readConnection },
       { key: "kubernetes_runtime", label: "Runtime", href: "/kubernetes/runtime", icon: "RT", capabilities: readConnection },
       { key: "kubernetes_compliance", label: "Compliance", href: "/kubernetes/compliance", icon: "CO", capabilities: readConnection },
+      { key: "kubernetes_admission", label: "Admission control", href: "/kubernetes/admission", icon: "AD", capabilities: readConnection },
       { key: "kubernetes_policies", label: "Policies", href: "/kubernetes/policies", icon: "PO", capabilities: readConnection },
       { key: "kubernetes_scan-history", label: "Scan history", href: "/kubernetes/scan-history", icon: "SH", capabilities: readConnection },
       { key: "kubernetes_coverage", label: "Coverage", href: "/kubernetes/coverage", icon: "CV", capabilities: readConnection },
@@ -126,6 +133,7 @@ export const navGroups: readonly NavGroup[] = [
     label: "Administration",
     items: [
       { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage"] },
+      { key: "notification_settings", label: "Notification destinations", href: "/settings/notifications", icon: "NT", capabilities: readConnection },
     ],
   },
 ] as const;

@@ -3,3 +3,7 @@ export * from "./connection-boundary.ts";
 export * from "./collector.ts";
 export * from "./posture-adapter.ts";
 export * from "./trivy-operator.ts";
+export * from "./agent-state.ts";
+export * from "./control-channel.ts";
+export * from "./module-health.ts";
+export * from "./continuous-agent.ts";

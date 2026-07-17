@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Sutra disposable EKS validation budget guard; this does not automatically stop resources.
+Parameters:
+  BudgetName:
+    Type: String
+    AllowedPattern: ^sutra-eks-disposable-[A-Za-z0-9_-]+$
+  NotificationEmail:
+    Type: String
+  LimitUsd:
+    Type: Number
+    Default: 40
+    AllowedValues: [40]
+Resources:
+  DisposableValidationBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Ref BudgetName
+        BudgetLimit:
+          Amount: !Ref LimitUsd
+          Unit: USD
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        CostFilters:
+          TagKeyValue:
+            - user:sutra:disposable$true
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref NotificationEmail
+              SubscriptionType: EMAIL
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - Address: !Ref NotificationEmail
+              SubscriptionType: EMAIL

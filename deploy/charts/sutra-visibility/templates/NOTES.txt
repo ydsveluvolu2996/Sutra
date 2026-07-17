@@ -1,0 +1,23 @@
+Sutra visibility {{ .Chart.Version }} installed.
+
+{{- if .Values.agent.enabled }}
+The outbound-only agent is enabled for cluster {{ .Values.agent.cluster.id | quote }}.
+The bootstrap value is read from the existing Secret {{ .Values.agent.enrollment.existingSecret | quote }};
+Helm did not receive or render that value.
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/sutra-visibility-agent
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=visibility-agent
+
+Upgrade:
+  helm upgrade --install {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --reuse-values
+
+Uninstall:
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if .Values.agent.state.keepOnUninstall }}
+The agent state PVC is retained by policy. Delete it separately only after the cluster is offboarded.
+{{- end }}
+{{- else }}
+The continuous agent is disabled. Only the least-privilege visibility role was installed.
+{{- end }}

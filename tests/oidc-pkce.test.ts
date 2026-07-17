@@ -35,7 +35,8 @@ test("encrypted transaction round-trips and rejects tampering, wrong keys, and e
   const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 2_000_000);
   const sealed = await sealOidcTransaction(transaction, key);
   assert.deepEqual(await openOidcTransaction(sealed, key, 2_001_000), transaction);
-  await assert.rejects(openOidcTransaction(`${sealed.slice(0, -1)}A`, key, 2_001_000));
+  const replacement = sealed.endsWith("A") ? "B" : "A";
+  await assert.rejects(openOidcTransaction(`${sealed.slice(0, -1)}${replacement}`, key, 2_001_000));
   await assert.rejects(openOidcTransaction(sealed, "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB", 2_001_000));
   await assert.rejects(openOidcTransaction(sealed, key, transaction.expiresAt));
 });

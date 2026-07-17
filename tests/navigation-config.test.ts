@@ -40,15 +40,22 @@ describe("grouped workspace navigation", () => {
         "Namespaces",
         "Workloads",
         "Images & vulnerabilities",
+        "Software supply chain",
         "Exposure",
+        "Attack paths",
         "RBAC",
         "Network",
         "Runtime",
         "Compliance",
+        "Admission control",
         "Policies",
         "Scan history",
         "Coverage",
       ],
+    );
+    assert.deepEqual(
+      visibleNavigation(allCapabilities).find((group) => group.key === "administration")?.items.map((item) => item.label),
+      ["Access & invitations", "Notification destinations"],
     );
   });
 

@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: OIDC-only GitHub release role and immutable ECR repository for the Sutra Kubernetes agent.
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
+  GitHubRepository:
+    Type: String
+    Description: Exact owner/repository slug.
+    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  RepositoryName:
+    Type: String
+    Default: sutra/kubernetes-agent
+    AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
+Resources:
+  AgentRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Retain 30 immutable releases","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}}]}
+      RepositoryPolicyText:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: ecr:*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+  GitHubReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:kubernetes-production-release
+      Policies:
+        - PolicyName: PushOnlyToSutraAgentRepository
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:ListImages
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource: !GetAtt AgentRepository.Arn
+Outputs:
+  EcrRepositoryName:
+    Value: !Ref AgentRepository
+  GitHubReleaseRoleArn:
+    Value: !GetAtt GitHubReleaseRole.Arn

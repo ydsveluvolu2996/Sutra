@@ -1,0 +1,106 @@
+{{- if .Values.agent.enabled }}
+{{- $repository := required "agent.image.repository is required when agent.enabled=true" .Values.agent.image.repository }}
+{{- $digest := required "agent.image.digest is required when agent.enabled=true" .Values.agent.image.digest }}
+{{- $controlPlane := required "agent.controlPlane.url is required when agent.enabled=true" .Values.agent.controlPlane.url }}
+{{- $clusterId := required "agent.cluster.id is required when agent.enabled=true" .Values.agent.cluster.id }}
+{{- $clusterName := required "agent.cluster.name is required when agent.enabled=true" .Values.agent.cluster.name }}
+{{- $enrollmentSecret := required "agent.enrollment.existingSecret is required when agent.enabled=true" .Values.agent.enrollment.existingSecret }}
+{{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) }}{{ fail "agent.image.digest must be an exact sha256 digest" }}{{- end }}
+{{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]+)?$" $controlPlane) }}{{ fail "agent.controlPlane.url must be an HTTPS origin" }}{{- end }}
+{{- if or (lt (int .Values.agent.schedule.intervalSeconds) 300) (gt (int .Values.agent.schedule.intervalSeconds) 86400) }}{{ fail "agent.schedule.intervalSeconds must be from 300 through 86400" }}{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sutra-visibility-agent
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: sutra
+    app.kubernetes.io/component: visibility-agent
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sutra
+      app.kubernetes.io/component: visibility-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sutra
+        app.kubernetes.io/component: visibility-agent
+      annotations:
+        checksum/enrollment-reference: {{ printf "%s/%s" $enrollmentSecret .Values.agent.enrollment.key | sha256sum }}
+        {{- with .Values.agent.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: sutra-readonly
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: {{ printf "%s@%s" $repository $digest | quote }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          args: ["node", "scripts/kubernetes-agent.mjs"]
+          env:
+            - name: SUTRA_CONTROL_PLANE_URL
+              value: {{ $controlPlane | quote }}
+            - name: SUTRA_KUBERNETES_CLUSTER_ID
+              value: {{ $clusterId | quote }}
+            - name: SUTRA_KUBERNETES_CLUSTER_NAME
+              value: {{ $clusterName | quote }}
+            - name: SUTRA_KUBERNETES_SCAN_INTERVAL_SECONDS
+              value: {{ .Values.agent.schedule.intervalSeconds | quote }}
+            - name: SUTRA_KUBERNETES_AGENT_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          readinessProbe:
+            exec:
+              command: ["node", "-e", "require('fs').accessSync('/var/lib/sutra-agent')"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "process.kill(1,0)"]
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          volumeMounts:
+            - name: enrollment
+              mountPath: /var/run/sutra-enrollment
+              readOnly: true
+            - name: state
+              mountPath: /var/lib/sutra-agent
+      volumes:
+        - name: enrollment
+          secret:
+            secretName: {{ $enrollmentSecret | quote }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.agent.enrollment.key | quote }}
+                path: bootstrap
+        - name: state
+          persistentVolumeClaim:
+            claimName: {{ default "sutra-agent-state" .Values.agent.state.existingClaim | quote }}
+{{- end }}

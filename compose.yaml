@@ -23,7 +23,7 @@ services:
 
   migrate:
     image: sutra-local-app
-    entrypoint: ["pnpm", "db:postgres:migrate"]
+    entrypoint: ["node", "scripts/postgres-migrate.mjs"]
     environment:
       SUTRA_MIGRATOR_DATABASE_URL: postgresql://sutra_owner:${SUTRA_POSTGRES_OWNER_PASSWORD:?Run pnpm docker:up to generate the ignored local owner secret}@postgres:5432/sutra
       SUTRA_POSTGRES_RUNTIME_ROLE: sutra_app
