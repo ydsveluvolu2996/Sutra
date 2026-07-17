@@ -3,35 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { PublicLocalSession } from "../../db/auth-repository";
-import type { Capability } from "../../lib/auth-policy";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
-
-type NavKey = "overview" | "customers" | "cmdb" | "changes" | "findings" | "security_events" | "cases" | "costs" | "compliance" | "reports" | "controls" | "roadmap" | "operations" | "onboard";
-
-interface NavItem {
-  readonly key: Exclude<NavKey, "onboard">;
-  readonly label: string;
-  readonly href: string;
-  readonly icon: string;
-  readonly capability: Capability;
-}
-
-const navItems: readonly NavItem[] = [
-  { key: "overview", label: "Overview", href: "/dashboard", icon: "01", capability: "workspace:read" },
-  { key: "customers", label: "Customers", href: "/customers", icon: "02", capability: "workspace:read" },
-  { key: "cmdb", label: "CMDB inventory", href: "/cmdb", icon: "03", capability: "connection:read" },
-  { key: "changes", label: "Change history", href: "/changes", icon: "04", capability: "connection:read" },
-  { key: "findings", label: "Security findings", href: "/findings", icon: "05", capability: "connection:read" },
-  { key: "security_events", label: "Security events", href: "/security-events", icon: "06", capability: "connection:read" },
-  { key: "cases", label: "Finding cases", href: "/cases", icon: "07", capability: "connection:read" },
-  { key: "costs", label: "Cost & FinOps", href: "/costs", icon: "08", capability: "connection:read" },
-  { key: "compliance", label: "Compliance posture", href: "/compliance", icon: "09", capability: "connection:read" },
-  { key: "reports", label: "Executive reports", href: "/reports", icon: "10", capability: "connection:read" },
-  { key: "controls", label: "Control library", href: "/controls", icon: "11", capability: "workspace:read" },
-  { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "12", capability: "workspace:read" },
-  { key: "operations", label: "Simulation runs", href: "/operations", icon: "13", capability: "sync:run" },
-];
+import { groupContainsActiveItem, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
 
 function connectionTone(status: string | undefined): string {
   if (status === "active") return "healthy";
@@ -106,8 +80,7 @@ function AuthenticatedAppShell({
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const capabilitySet = new Set(session.capabilities);
-  const visibleNav = navItems.filter((item) => capabilitySet.has(item.capability));
-  const canOnboard = capabilitySet.has("customer:create") && capabilitySet.has("connection:manage");
+  const visibleNav = visibleNavigation(capabilitySet);
   const connection = state?.connection ?? null;
   const openFindings = state?.findings.filter((finding) => finding.status === "open").length ?? 0;
   const snapshotOrigin = state?.activeSnapshot?.origin;
@@ -137,15 +110,13 @@ function AuthenticatedAppShell({
       <aside className="sidebar">
         <Link className="brand" href="/dashboard" aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud operations, woven together.</small></span>
+          <em>Private beta</em>
         </Link>
         <div className="workspace-label">{session.organization.name}</div>
-        <nav className="main-nav" aria-label="Primary navigation">
-          {visibleNav.map((item) => (
-            <Link href={item.href} key={item.key} className={active === item.key ? "active" : undefined} aria-current={active === item.key ? "page" : undefined}>
-              <span>{item.icon}</span>{item.label}
-              {item.key === "findings" && openFindings > 0 ? <b>{openFindings}</b> : null}
-            </Link>
+        <nav className="main-nav grouped-nav" aria-label="Primary navigation">
+          {visibleNav.map((group) => (
+            <NavigationGroup active={active} group={group} key={group.key} openFindings={openFindings} />
           ))}
         </nav>
         <div className="sidebar-spacer" />
@@ -157,9 +128,6 @@ function AuthenticatedAppShell({
           </div>
         </div>
         <nav className="secondary-nav" aria-label="Workspace actions">
-          {canOnboard ? (
-            <Link href="/onboard" className={active === "onboard" ? "active" : undefined}><span>+</span>Onboard account</Link>
-          ) : null}
           {capabilitySet.has("workspace:read") ? <Link href="/controls#architecture"><span>?</span>Architecture & trust</Link> : null}
         </nav>
         <div className="user-card">
@@ -173,9 +141,17 @@ function AuthenticatedAppShell({
         <header className="topbar">
           <details className="mobile-nav">
             <summary aria-label="Open navigation">Menu</summary>
-            <div>
-              {visibleNav.map((item) => <Link href={item.href} key={item.key}>{item.label}</Link>)}
-              {canOnboard ? <Link href="/onboard">Onboard account</Link> : null}
+            <div className="mobile-nav-panel">
+              {visibleNav.map((group) => (
+                <section aria-labelledby={`mobile-nav-${group.key}`} key={group.key}>
+                  <strong id={`mobile-nav-${group.key}`}>{group.label}</strong>
+                  {group.items.map((item) => (
+                    <Link aria-current={active === item.key ? "page" : undefined} href={item.href} key={`${group.key}-${item.href}`}>
+                      {item.label}
+                    </Link>
+                  ))}
+                </section>
+              ))}
               <button disabled={signingOut} onClick={() => void signOut()} type="button">Sign out</button>
             </div>
           </details>
@@ -196,5 +172,43 @@ function AuthenticatedAppShell({
         </footer>
       </main>
     </div>
+  );
+}
+
+function NavigationGroup({
+  active,
+  group,
+  openFindings,
+}: {
+  readonly active: NavKey;
+  readonly group: NavGroup;
+  readonly openFindings: number;
+}) {
+  const containsActive = groupContainsActiveItem(group, active);
+  const [open, setOpen] = useState(containsActive || group.key === "overview");
+
+  return (
+    <details className="nav-group" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>
+        <span>{group.label}</span>
+        {containsActive ? <i aria-hidden="true" /> : null}
+      </summary>
+      <div>
+        {group.items.map((item) => {
+          const isActive = active === item.key;
+          return (
+            <Link
+              href={item.href}
+              key={`${group.key}-${item.href}`}
+              className={isActive ? "active" : undefined}
+              aria-current={isActive ? "page" : undefined}
+            >
+              <span aria-hidden="true">{item.icon}</span>{item.label}
+              {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
+            </Link>
+          );
+        })}
+      </div>
+    </details>
   );
 }
