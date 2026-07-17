@@ -37,6 +37,25 @@ test("agent pod is non-root, read-only, outbound-only and persists only its deli
   assert.match(pvc, /helm\.sh\/resource-policy: keep/u);
 });
 
+test("hubble export and falco gateway options stay disabled by default, bounded and read-only", () => {
+  assert.match(values, /hubble:\s*\n\s+exportFile:\s*\n\s+enabled: false/u);
+  assert.match(values, /falcoGateway:\s*\n\s+healthUrl: ""/u);
+  assert.match(deployment, /agent\.hubble\.exportFile\.version must be the exact Hubble version identifier/u);
+  assert.match(deployment, /agent\.hubble\.exportFile\.hostPath must be an absolute node path/u);
+  assert.match(deployment, /agent\.falcoGateway\.healthUrl must be a bounded in-cluster http\(s\) URL/u);
+  assert.match(deployment, /SUTRA_HUBBLE_EXPORT_FILE/u);
+  assert.match(deployment, /SUTRA_HUBBLE_VERSION/u);
+  assert.match(deployment, /SUTRA_FALCO_GATEWAY_HEALTH_URL/u);
+  assert.match(
+    deployment,
+    /- name: hubble-export\s*\n\s+mountPath: \/var\/run\/sutra-hubble\/events\.log\s*\n\s+readOnly: true/u,
+  );
+  const hostPathBlocks = deployment.match(/hostPath:/gu) ?? [];
+  assert.equal(hostPathBlocks.length, 1, "only the guarded hubble export mount may use hostPath");
+  assert.match(deployment, /\{\{- if \$hubbleExport\.enabled \}\}\s*\n\s+- name: hubble-export/u);
+  assert.match(deployment, /type: File/u);
+});
+
 test("continuous agent retains metadata-only RBAC and no Secret or ConfigMap API access", () => {
   assert.doesNotMatch(role, /^\s+- secrets\s*$/mu);
   assert.doesNotMatch(role, /^\s+- configmaps\s*$/mu);

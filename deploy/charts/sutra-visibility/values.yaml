@@ -44,5 +44,20 @@ agent:
     kyverno: true
     falco: true
     cilium: true
+  # Optional bounded Hubble flow-export collection. Mounts the customer's
+  # Cilium hubble export file read-only. Coverage is node-local for this
+  # single-replica agent and the flow evidence carries explicit sampling and
+  # coverage limitations; per-node coverage requires per-node enrollment.
+  hubble:
+    exportFile:
+      enabled: false
+      hostPath: /var/run/cilium/hubble/events.log
+      # Exact Hubble/Cilium version identifier, for example "1.19.5".
+      version: ""
+  # Optional in-cluster Falco signing-gateway readiness URL. When set, the
+  # agent probes /readyz without credentials and reports a falco-gateway
+  # module state in its heartbeat.
+  falcoGateway:
+    healthUrl: ""
   networkPolicy:
     enabled: true
