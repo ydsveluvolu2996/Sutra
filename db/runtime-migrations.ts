@@ -12,6 +12,12 @@ import operationsWaveSchemaSql from "../drizzle/0010_sutra_operations_wave.sql?r
 import hostedIdentityLifecycleSchemaSql from "../drizzle/0011_blushing_logan.sql?raw";
 import kubernetesPersistenceSchemaSql from "../drizzle/0012_nasty_satana.sql?raw";
 import kubernetesScannerEvidenceSchemaSql from "../drizzle/0013_gorgeous_mercury.sql?raw";
+import falcoRuntimeEventsSchemaSql from "../drizzle/0014_falco_runtime_events.sql?raw";
+import kubernetesAgentControlSchemaSql from "../drizzle/0015_kubernetes_agent_control.sql?raw";
+import kubernetesSupplyChainSchemaSql from "../drizzle/0016_kubernetes_supply_chain.sql?raw";
+import notificationDestinationsOutboxSchemaSql from "../drizzle/0017_notification_destinations_outbox.sql?raw";
+import hubbleNetworkVisibilitySchemaSql from "../drizzle/0018_hubble_network_visibility.sql?raw";
+import runtimeEventCasesSchemaSql from "../drizzle/0019_runtime_event_cases.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -41,6 +47,12 @@ const migrations = [
   { id: "0011_blushing_logan", statements: statementsFrom(hostedIdentityLifecycleSchemaSql) },
   { id: "0012_nasty_satana", statements: statementsFrom(kubernetesPersistenceSchemaSql) },
   { id: "0013_gorgeous_mercury", statements: statementsFrom(kubernetesScannerEvidenceSchemaSql) },
+  { id: "0014_falco_runtime_events", statements: statementsFrom(falcoRuntimeEventsSchemaSql) },
+  { id: "0015_kubernetes_agent_control", statements: statementsFrom(kubernetesAgentControlSchemaSql) },
+  { id: "0016_kubernetes_supply_chain", statements: statementsFrom(kubernetesSupplyChainSchemaSql) },
+  { id: "0017_notification_destinations_outbox", statements: statementsFrom(notificationDestinationsOutboxSchemaSql) },
+  { id: "0018_hubble_network_visibility", statements: statementsFrom(hubbleNetworkVisibilitySchemaSql) },
+  { id: "0019_runtime_event_cases", statements: statementsFrom(runtimeEventCasesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

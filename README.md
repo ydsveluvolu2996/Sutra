@@ -15,12 +15,13 @@ and scoped access to findings.
 > active evidence source; simulated results must never be represented as customer AWS
 > observations.
 
-This repository is an implementation foundation, not a production-ready service.
-It does not replace Amazon Inspector, Amazon GuardDuty, AWS Security Hub, an EDR
-agent, or human incident response. Sutra's initial controls are deterministic
-configuration checks. Package/runtime vulnerability analysis and behavioral threat
-detection need different telemetry, detection engineering, and operational response
-capabilities.
+This repository is an implementation foundation and an EKS-first private beta,
+not a generally available, independently penetration-tested or SLA-backed
+service. It does not replace Amazon Inspector, Amazon GuardDuty, AWS Security
+Hub, an EDR agent, or human incident response. In addition to deterministic
+configuration checks, the private beta now accepts bounded real evidence from
+Trivy Operator, Falco, Kyverno and Cilium/Hubble through cluster-bound ingestion
+paths. Missing telemetry is always reported as not configured, partial or stale.
 
 The verified local demo now also includes tenant-scoped Cost Explorer evidence,
 finding-backed case management, approval-controlled compliance exceptions,
@@ -34,6 +35,10 @@ The hosted identity foundation now includes the real Cognito/OIDC PKCE callback
 boundary and an MFA-protected, single-use organization invitation lifecycle.
 Hosted release remains blocked on the remaining tenant-isolation, recovery,
 rate-limit and broker gates documented below.
+
+The Kubernetes private-beta capability matrix, validation sequence and remaining
+general-availability gates are documented in
+[`docs/enterprise-kubernetes-private-beta.md`](docs/enterprise-kubernetes-private-beta.md).
 
 ## Bounded first-release scope
 
@@ -62,13 +67,18 @@ Explicitly outside the first slice:
 
 - Resource changes, automatic remediation, shell access, `iam:PassRole`, credential
   creation, or any other mutation in customer accounts.
-- Inspector-equivalent package, image, Lambda dependency, SBOM, or CVE coverage.
-- GuardDuty-equivalent analysis of CloudTrail, VPC Flow Logs, DNS, Kubernetes audit
-  logs, threat intelligence, or anomalous behavior.
+- Inspector-equivalent host/Lambda dependency coverage or managed vulnerability
+  intelligence. Trivy image/configuration/SBOM evidence is available for enrolled
+  Kubernetes clusters.
+- GuardDuty-equivalent threat intelligence, anomaly detection or managed detection
+  operations. Falco runtime events and bounded Hubble metadata are optional cluster
+  evidence sources, not GuardDuty parity.
 - Security Hub-equivalent standards coverage, delegated administration, ASFF
   federation, or cross-product normalization.
-- Billing, marketplace metering, SAML/SCIM, ticketing/chat integrations, data
-  residency selection, or customer-managed keys.
+- Billing, marketplace metering, SAML/SCIM, ITSM/PSA ticketing, data residency
+  selection, or customer-managed keys. Email, Slack and Teams notification
+  configuration/outbox support exists, but provider delivery requires hosted
+  managed-secret and workload-identity adapters.
 
 Future resource management must be a separate remediation plane with a different
 customer role, narrowly scoped per-action permissions, dry-run/diff, approval,

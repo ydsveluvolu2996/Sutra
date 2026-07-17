@@ -46,6 +46,7 @@ function base64UrlDecode(value: string): Uint8Array {
   const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4));
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  if (base64UrlEncode(bytes) !== value) throw new Error("Invalid base64url value");
   return bytes;
 }
 

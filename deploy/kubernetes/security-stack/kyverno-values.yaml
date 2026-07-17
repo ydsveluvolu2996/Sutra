@@ -1,0 +1,18 @@
+admissionController:
+  replicas: 2
+  container:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+backgroundController:
+  enabled: true
+cleanupController:
+  enabled: true
+reportsController:
+  enabled: true
+config:
+  excludeKyvernoNamespace: true
+features:
+  policyReports:
+    enabled: true

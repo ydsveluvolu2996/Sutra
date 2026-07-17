@@ -1,0 +1,49 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-workload-reliability-audit
+  annotations:
+    policies.kyverno.io/title: Sutra workload reliability audit
+    policies.kyverno.io/category: Reliability
+    policies.kyverno.io/severity: medium
+    sutra.io/promotion-state: audit
+spec:
+  admission: true
+  background: true
+  emitWarning: true
+  failurePolicy: Ignore
+  validationFailureAction: Audit
+  rules:
+    - name: require-resource-requests-and-limits
+      match: &pods
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude: &systemNamespaces
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      validate:
+        message: Every application container must declare CPU and memory requests and limits.
+        foreach:
+          - list: request.object.spec.containers[]
+            pattern:
+              resources:
+                requests:
+                  cpu: "?*"
+                  memory: "?*"
+                limits:
+                  cpu: "?*"
+                  memory: "?*"
+    - name: require-liveness-and-readiness-probes
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Every application container must declare liveness and readiness probes.
+        foreach:
+          - list: request.object.spec.containers[]
+            pattern:
+              livenessProbe:
+                "*": "*"
+              readinessProbe:
+                "*": "*"

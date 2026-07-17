@@ -6,6 +6,7 @@ import pg from "pg";
 import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
 
 const root = resolve(import.meta.dirname, "..");
+const POSTGRES_TEST_PROJECT = "sutra-postgres-test";
 const { environmentPath, ownerPassword, appPassword } = await ensureDockerLocalEnvironment(root);
 // Keep the isolated verification database separate from the live-demo stack,
 // which intentionally uses the normal local PostgreSQL port while Sutra runs.
@@ -54,7 +55,17 @@ async function findAvailableLoopbackPort() {
   });
 }
 
-await run("docker", ["compose", "--env-file", environmentPath, "up", "-d", "--wait", "postgres"], {
+await run("docker", [
+  "compose",
+  "--project-name",
+  POSTGRES_TEST_PROJECT,
+  "--env-file",
+  environmentPath,
+  "up",
+  "-d",
+  "--wait",
+  "postgres",
+], {
   ...process.env,
   SUTRA_POSTGRES_PORT: port,
 });
@@ -107,5 +118,17 @@ try {
   if (databaseName && adminPool) {
     await adminPool.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`);
     await adminPool.end();
+  }
+  if (!suppliedOwnerUrl && !suppliedRuntimeUrl) {
+    await run("docker", [
+      "compose",
+      "--project-name",
+      POSTGRES_TEST_PROJECT,
+      "--env-file",
+      environmentPath,
+      "down",
+      "--volumes",
+      "--remove-orphans",
+    ]);
   }
 }

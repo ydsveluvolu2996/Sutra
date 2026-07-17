@@ -1,0 +1,22 @@
+{{- if and .Values.agent.enabled (not .Values.agent.state.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sutra-agent-state
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: sutra
+    app.kubernetes.io/component: visibility-agent
+  {{- if .Values.agent.state.keepOnUninstall }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.agent.state.size }}
+  {{- with .Values.agent.state.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

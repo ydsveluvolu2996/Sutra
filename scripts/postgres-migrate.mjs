@@ -21,6 +21,12 @@ const migrationFiles = [
   "0005_hosted_identity_lifecycle.sql",
   "0006_kubernetes_persistence.sql",
   "0007_kubernetes_scanner_evidence.sql",
+  "0008_falco_runtime_events.sql",
+  "0009_kubernetes_agent_control.sql",
+  "0010_kubernetes_supply_chain.sql",
+  "0011_notification_destinations_outbox.sql",
+  "0012_hubble_network_visibility.sql",
+  "0013_runtime_event_cases.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

@@ -8,6 +8,7 @@ import { buildKubernetesProjection, type KubernetesResourceRecord } from "./kube
 import type { KubernetesSectionDefinition } from "./kubernetes-sections";
 import { useKubernetesEvidence } from "./use-kubernetes-evidence";
 import type { KubernetesStoredWorkspace } from "../../db/kubernetes-repository";
+import { KubernetesRuntimeWorkspace } from "./kubernetes-runtime-workspace";
 
 function findReportedImages(value: JsonValue, key = "", depth = 0): string[] {
   if (depth > 6) return [];
@@ -64,11 +65,13 @@ function SectionContent({
   projection,
   snapshotAt,
   workspace,
+  connectionId,
 }: {
   readonly section: KubernetesSectionDefinition;
   readonly projection: ReturnType<typeof buildKubernetesProjection>;
   readonly snapshotAt: string | null;
   readonly workspace: KubernetesStoredWorkspace | null;
+  readonly connectionId: string | null;
 }) {
   if (section.key === "clusters") return <ResourceRows records={projection.records.filter((record) => record.category === "cluster")} />;
   if (section.key === "namespaces") return <ResourceRows records={projection.records.filter((record) => record.category === "namespace")} />;
@@ -102,8 +105,7 @@ function SectionContent({
     return <><ResourceRows records={projection.records.filter((record) => record.category === "network")} /><section className="kubernetes-subsection"><h3>Exposure-related findings</h3><FindingRows findings={exposureFindings} /></section></>;
   }
   if (section.key === "runtime") {
-    const runtimeCoverage = projection.coverage.filter((entry) => /runtime|falco|ebpf|sensor/iu.test(entry.collectorKey));
-    return <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">RT</span><h2>Runtime protection is not configured</h2><p>Sutra has no runtime-event API or supported sensor activation in this build. {runtimeCoverage.length > 0 ? `${runtimeCoverage.length} coverage labels mention runtime, but they do not provide event records.` : "No runtime collector coverage is reported."}</p><Link className="button button-secondary" href="/roadmap">Review the product roadmap</Link></section>;
+    return <KubernetesRuntimeWorkspace connectionId={connectionId} clusterId={workspace?.cluster.id ?? null} />;
   }
   if (section.key === "compliance") {
     const controlFindings = projection.findings.filter((finding) => /kubernetes|k8s|eks/iu.test(finding.controlKey));
@@ -163,7 +165,7 @@ export function KubernetesEnterpriseSection({ section }: { readonly section: Kub
       {!loading && !kubernetes.loading ? <section className="panel kubernetes-enterprise-section">
         <div className="panel-heading"><div><p className="eyebrow">Current projection</p><h2>{section.label}</h2></div><span className="result-count">{filteredProjection.records.length} Kubernetes records</span></div>
         {!["runtime", "scan-history", "coverage"].includes(section.key) ? <label className="search-field kubernetes-section-search"><span className="sr-only">Filter this Kubernetes section</span><input className="filter-control" placeholder="Filter by resource, cluster, namespace or finding" value={query} onChange={(event) => setQuery(event.target.value)} /></label> : null}
-        <SectionContent section={section} projection={filteredProjection} snapshotAt={state?.activeSnapshot?.collectedAt ?? null} workspace={kubernetes.workspace} />
+        <SectionContent connectionId={state?.connection?.id ?? null} section={section} projection={filteredProjection} snapshotAt={state?.activeSnapshot?.collectedAt ?? null} workspace={kubernetes.workspace} />
       </section> : null}
     </>
   );

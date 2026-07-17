@@ -2,10 +2,10 @@ apiVersion: v2
 name: sutra-visibility
 description: Least-privilege Kubernetes metadata and security-report access for Sutra
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0-private-beta"
 kubeVersion: ">=1.25.0-0"
 annotations:
   artifacthub.io/changes: |
     - kind: added
-      description: Initial read-only EKS and Kubernetes visibility role.
+      description: Outbound-only continuous visibility agent with durable scan delivery.

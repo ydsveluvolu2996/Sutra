@@ -6,3 +6,43 @@ kubernetesGroup: sutra:readers
 # operates Trivy Operator. Sutra does not install Trivy or claim scanner coverage.
 trivyReports:
   enabled: false
+
+agent:
+  enabled: false
+  image:
+    repository: ""
+    # Production installs pin an immutable sha256 image digest.
+    digest: ""
+    pullPolicy: IfNotPresent
+  controlPlane:
+    url: ""
+  cluster:
+    id: ""
+    name: ""
+  enrollment:
+    # Pre-create this Secret with only the short-lived bootstrap value. Helm
+    # never receives or renders the value.
+    existingSecret: ""
+    key: bootstrap
+  schedule:
+    intervalSeconds: 900
+  state:
+    existingClaim: ""
+    storageClassName: ""
+    size: 1Gi
+    keepOnUninstall: true
+  podAnnotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  modules:
+    trivy: true
+    kyverno: true
+    falco: true
+    cilium: true
+  networkPolicy:
+    enabled: true
