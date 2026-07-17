@@ -10,7 +10,7 @@ type IconName =
   | "layers" | "supplyChain" | "globe" | "target" | "key" | "network"
   | "shieldCheck" | "policy" | "scan" | "alert" | "bug" | "siren"
   | "wrench" | "clipboardCheck" | "listChecks" | "fileText" | "dollar"
-  | "refresh" | "map" | "bell" | "dot";
+  | "refresh" | "map" | "bell" | "alertOctagon" | "dot";
 
 const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.3" /><rect x="14" y="3" width="7" height="5" rx="1.3" /><rect x="14" y="12" width="7" height="9" rx="1.3" /><rect x="3" y="16" width="7" height="5" rx="1.3" /></>,
@@ -45,6 +45,7 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   refresh: <><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8" /><path d="M21 3v5h-5" /></>,
   map: <><path d="M9 3 3 6v15l6-3 6 3 6-3V3l-6 3z" /><path d="M9 3v15M15 6v15" /></>,
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9Z" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>,
+  alertOctagon: <><path d="M7.9 2.6 2.6 7.9a2 2 0 0 0-.6 1.4v5.4a2 2 0 0 0 .6 1.4l5.3 5.3a2 2 0 0 0 1.4.6h5.4a2 2 0 0 0 1.4-.6l5.3-5.3a2 2 0 0 0 .6-1.4V9.3a2 2 0 0 0-.6-1.4L16.1 2.6a2 2 0 0 0-1.4-.6H9.3a2 2 0 0 0-1.4.6Z" /><path d="M12 8v4.5M12 16h.01" /></>,
   dot: <circle cx="12" cy="12" r="3.2" />,
 };
 
@@ -57,6 +58,7 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   changes: "history",
   kubernetes_overview: "hexagon",
   kubernetes_fleet: "pulse",
+  kubernetes_issues: "alertOctagon",
   kubernetes_onboard: "plus",
   kubernetes_clusters: "cube",
   kubernetes_namespaces: "folders",
@@ -104,6 +106,7 @@ const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
   changes: "slate",
   kubernetes_overview: "blue",
   kubernetes_fleet: "teal",
+  kubernetes_issues: "red",
   kubernetes_onboard: "green",
   kubernetes_clusters: "blue",
   kubernetes_namespaces: "amber",

@@ -20,6 +20,7 @@ export type NavKey =
   | "notification_settings"
   | "kubernetes_overview"
   | "kubernetes_fleet"
+  | "kubernetes_issues"
   | "kubernetes_inventory"
   | "kubernetes_security"
   | "kubernetes_attack_paths"
@@ -85,6 +86,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_images", label: "Images & vulnerabilities", href: "/kubernetes/images", icon: "IM", capabilities: readConnection },
       { key: "kubernetes_supply_chain", label: "Software supply chain", href: "/kubernetes/supply-chain", icon: "SC", capabilities: readConnection },
       { key: "kubernetes_exposure", label: "Exposure", href: "/kubernetes/exposure", icon: "EX", capabilities: readConnection },
+      { key: "kubernetes_issues", label: "Issues", href: "/kubernetes/issues", icon: "IS", capabilities: readConnection },
       { key: "kubernetes_attack_paths", label: "Attack paths", href: "/kubernetes/attack-paths", icon: "AP", capabilities: readConnection },
       { key: "kubernetes_rbac", label: "RBAC", href: "/kubernetes/rbac", icon: "RB", capabilities: readConnection },
       { key: "kubernetes_network", label: "Network", href: "/kubernetes/network", icon: "NW", capabilities: readConnection },
