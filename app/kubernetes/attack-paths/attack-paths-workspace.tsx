@@ -14,6 +14,7 @@ import type { KubernetesSupplyChainEvidence } from "../../../lib/kubernetes-supp
 import { usePilotState } from "../../components/use-pilot-state";
 import { formatTimestamp } from "../../components/use-pilot-state";
 import { useKubernetesEvidence } from "../use-kubernetes-evidence";
+import { SecurityGraph } from "./security-graph";
 
 const typeLabels: Readonly<Record<AttackPathType, string>> = {
   cloud_to_kubernetes: "Cloud → Kubernetes → AWS",
@@ -29,7 +30,15 @@ function evidenceValue(value: JsonValue): string {
   return JSON.stringify(value);
 }
 
-function PathCard({ path }: { readonly path: KubernetesAttackPath }) {
+function PathCard({
+  path,
+  highlighted,
+  onHighlight,
+}: {
+  readonly path: KubernetesAttackPath;
+  readonly highlighted: boolean;
+  readonly onHighlight: (pathId: string | null) => void;
+}) {
   return (
     <article className="attack-path-card">
       <header>
@@ -38,7 +47,16 @@ function PathCard({ path }: { readonly path: KubernetesAttackPath }) {
           <p className="eyebrow">{typeLabels[path.type]}</p>
           <h2>{path.title}</h2>
         </div>
-        <div className="attack-path-score"><strong>{path.score}</strong><span>/ 100</span><small>deterministic score</small></div>
+        <div className="attack-path-header-actions">
+          <button
+            type="button"
+            className={`button ${highlighted ? "button-primary" : "button-secondary"}`}
+            onClick={() => onHighlight(highlighted ? null : path.id)}
+          >
+            {highlighted ? "Highlighted in graph" : "Highlight in graph"}
+          </button>
+          <div className="attack-path-score"><strong>{path.score}</strong><span>/ 100</span><small>deterministic score</small></div>
+        </div>
       </header>
       <div className="attack-path-flow" aria-label={`${path.title} evidence sequence`}>
         {path.nodes.map((node, index) => (
@@ -98,6 +116,7 @@ export function AttackPathsWorkspace() {
   const cluster = kubernetes.clusters.find((item) => item.status === "active") ?? null;
   const connectionId = state?.connection?.id ?? null;
   const [type, setType] = useState<AttackPathType | "all">("all");
+  const [selectedPathId, setSelectedPathId] = useState<string | null>(null);
   const [signals, setSignals] = useState<{
     readonly runtimeEvents: readonly NormalizedFalcoRuntimeEvent[];
     readonly networkFlows: readonly NormalizedHubbleFlow[];
@@ -177,10 +196,17 @@ export function AttackPathsWorkspace() {
         </section>
         <section className="panel attack-path-workspace">
           <div className="panel-heading">
+            <div><p className="eyebrow">Interactive evidence graph</p><h2>Security graph</h2></div>
+            <span className="result-count">Click an entity to inspect its cited edges; highlight a path below to trace it.</span>
+          </div>
+          <SecurityGraph paths={paths} selectedPathId={selectedPathId} onSelectPath={setSelectedPathId} />
+        </section>
+        <section className="panel attack-path-workspace">
+          <div className="panel-heading">
             <div><p className="eyebrow">Authorized snapshot</p><h2>Contextual risk sequences</h2></div>
             <label><span className="sr-only">Filter path type</span><select className="filter-control" value={type} onChange={(event) => setType(event.target.value as AttackPathType | "all")}><option value="all">All path types</option>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           </div>
-          {paths.length > 0 ? <div className="attack-path-list">{paths.map((path) => <PathCard key={path.id} path={path} />)}</div> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">G</span><h2>No complete evidenced paths</h2><p>No supported end-to-end sequence is established in the current authorized snapshot. This does not prove absence of risk; it may reflect collector or relationship coverage.</p></section>}
+          {paths.length > 0 ? <div className="attack-path-list">{paths.map((path) => <PathCard key={path.id} path={path} highlighted={selectedPathId === path.id} onHighlight={setSelectedPathId} />)}</div> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">G</span><h2>No complete evidenced paths</h2><p>No supported end-to-end sequence is established in the current authorized snapshot. This does not prove absence of risk; it may reflect collector or relationship coverage.</p></section>}
           {projection.unknowns.length > 0 ? <section className="attack-unknowns"><h3>Evidence gaps</h3><ul>{projection.unknowns.map((unknown) => <li key={unknown}>{unknown}</li>)}</ul></section> : null}
         </section>
       </> : null}
