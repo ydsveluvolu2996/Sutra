@@ -392,6 +392,90 @@ export class KubernetesAgentRepository {
     };
   }
 
+  public async listDeploymentHealth(scope: KubernetesAgentScope): Promise<readonly {
+    readonly agentId: string;
+    readonly state: "online" | "offline" | "revoked";
+    readonly agentVersion: string;
+    readonly capabilities: readonly string[];
+    readonly deployment: {
+      readonly namespace: string;
+      readonly podName: string;
+      readonly startedAt: string;
+    } | null;
+    readonly modules: Readonly<Record<string, string>>;
+    readonly lastHeartbeatAt: string | null;
+    readonly lastScanAt: string | null;
+    readonly enrolledAt: string;
+  }[]> {
+    assertScope(scope);
+    const db = await this.ready();
+    const rows = await db.prepare(
+      `SELECT id, status, agent_version, capabilities_json, deployment_namespace,
+              deployment_pod_name, deployment_started_at, module_health_json,
+              last_heartbeat_at, last_scan_at, enrolled_at
+         FROM kubernetes_agents
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND cluster_id = ?
+        ORDER BY enrolled_at DESC
+        LIMIT 16`,
+    ).bind(scope.orgId, scope.customerId, scope.connectionId, scope.clusterId).all<{
+      id: string;
+      status: string;
+      agent_version: string;
+      capabilities_json: string;
+      deployment_namespace: string | null;
+      deployment_pod_name: string | null;
+      deployment_started_at: number | null;
+      module_health_json: string;
+      last_heartbeat_at: number | null;
+      last_scan_at: number | null;
+      enrolled_at: number;
+    }>();
+    return (rows.results ?? []).map((row) => {
+      const lastHeartbeat = row.last_heartbeat_at === null ? null : Number(row.last_heartbeat_at);
+      let modules: Record<string, string> = {};
+      try {
+        const parsed = JSON.parse(row.module_health_json) as unknown;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          modules = Object.fromEntries(Object.entries(parsed as Record<string, unknown>)
+            .filter(([, value]) => typeof value === "string")) as Record<string, string>;
+        }
+      } catch {
+        modules = {};
+      }
+      let capabilities: string[] = [];
+      try {
+        const parsed = JSON.parse(row.capabilities_json) as unknown;
+        if (Array.isArray(parsed)) capabilities = parsed.filter((value) => typeof value === "string");
+      } catch {
+        capabilities = [];
+      }
+      return {
+        agentId: row.id,
+        state: row.status === "revoked"
+          ? "revoked" as const
+          : lastHeartbeat === null || this.now() - lastHeartbeat > OFFLINE_AFTER_MS
+            ? "offline" as const
+            : "online" as const,
+        agentVersion: row.agent_version,
+        capabilities,
+        deployment:
+          row.deployment_namespace !== null &&
+          row.deployment_pod_name !== null &&
+          row.deployment_started_at !== null
+            ? {
+              namespace: row.deployment_namespace,
+              podName: row.deployment_pod_name,
+              startedAt: new Date(Number(row.deployment_started_at)).toISOString(),
+            }
+            : null,
+        modules,
+        lastHeartbeatAt: lastHeartbeat === null ? null : new Date(lastHeartbeat).toISOString(),
+        lastScanAt: row.last_scan_at === null ? null : new Date(Number(row.last_scan_at)).toISOString(),
+        enrolledAt: new Date(Number(row.enrolled_at)).toISOString(),
+      };
+    });
+  }
+
   public async revoke(scope: KubernetesAgentScope, agentId: string): Promise<void> {
     assertScope(scope);
     assertIdentifier(agentId);

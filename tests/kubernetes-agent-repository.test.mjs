@@ -151,6 +151,62 @@ test("enrollment is one-time, cluster-bound, rotates with overlap, and revocatio
   });
 });
 
+test("deployment health listing reports heartbeat modules, online state, and exact tenant scope", async () => {
+  await withRepository(async ({ repository, cluster, advance }) => {
+    const scope = {
+      orgId: ORG_A,
+      customerId: CUSTOMER_A,
+      connectionId: CONNECTION_A,
+      clusterId: cluster.id,
+    };
+    assert.deepEqual(await repository.listDeploymentHealth(scope), []);
+    const bootstrap = await repository.issueBootstrap({ scope, createdBy: USER_A });
+    const credential = await repository.enroll(bootstrap.token, {
+      clusterId: cluster.clusterUid,
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+    });
+    const agent = await repository.authenticate(credential.agentId, credential.token);
+    await repository.recordHeartbeat({
+      agent,
+      agentVersion: "1.0.1",
+      capabilities: ["inventory", "hubble-flows.v1"],
+      deployment: {
+        namespace: "sutra-system",
+        podName: "sutra-agent-abc",
+        startedAt: "2026-07-17T09:00:00.000Z",
+      },
+      modules: { trivy: "AVAILABLE", falco: "NOT_CONFIGURED", "falco-gateway": "DEGRADED" },
+    });
+    const listed = await repository.listDeploymentHealth(scope);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].agentId, credential.agentId);
+    assert.equal(listed[0].state, "online");
+    assert.equal(listed[0].agentVersion, "1.0.1");
+    assert.deepEqual(listed[0].modules, {
+      trivy: "AVAILABLE",
+      falco: "NOT_CONFIGURED",
+      "falco-gateway": "DEGRADED",
+    });
+    assert.deepEqual(listed[0].deployment, {
+      namespace: "sutra-system",
+      podName: "sutra-agent-abc",
+      startedAt: "2026-07-17T09:00:00.000Z",
+    });
+    assert.ok(listed[0].lastHeartbeatAt !== null);
+    assert.deepEqual(
+      await repository.listDeploymentHealth({ ...scope, connectionId: "conn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+      [],
+      "another connection scope must never see this agent",
+    );
+    advance(30 * 60_000 + 1);
+    assert.equal((await repository.listDeploymentHealth(scope))[0].state, "offline");
+    await repository.revoke(scope, credential.agentId);
+    assert.equal((await repository.listDeploymentHealth(scope))[0].state, "revoked");
+  });
+});
+
 test("heartbeat, immutable scan receipts, offline state, and revocation use server scope", async () => {
   await withRepository(async ({ database, repository, cluster, advance }) => {
     const scope = {
