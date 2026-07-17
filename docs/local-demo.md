@@ -6,6 +6,38 @@ organization, but it includes multiple deterministic simulated customer accounts
 and tenant/customer/connection-scoped contracts. It is not hosted production
 multitenancy.
 
+## One-command morning start
+
+After opening Docker Desktop, start the preserved local demo without rebuilding
+the application image:
+
+```bash
+pnpm morning:start
+```
+
+The command starts PostgreSQL, applies pending migrations, starts Sutra, waits for
+the health endpoint, and prints the login URL. It preserves and reuses the named
+PostgreSQL and application volumes. If the application image is missing, it builds
+it automatically.
+
+After changing application code or dependencies, deliberately rebuild once:
+
+```bash
+pnpm morning:rebuild
+```
+
+Stop all local containers without deleting data:
+
+```bash
+pnpm morning:stop
+```
+
+Neither morning command contacts AWS or creates EKS infrastructure. Live AWS
+collection still requires the guarded `pnpm live:aws:host` launch documented in
+`docs/local-live-aws.md`. Disposable EKS creation remains a separate, explicitly
+acknowledged operation because it incurs hourly charges and requires a fresh
+expiry timestamp and validator `/32`.
+
 ## Reliable sales demo (no AWS account required)
 
 ```bash
