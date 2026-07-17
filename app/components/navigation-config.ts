@@ -16,6 +16,9 @@ export type NavKey =
   | "roadmap"
   | "operations"
   | "access"
+  | "kubernetes_overview"
+  | "kubernetes_inventory"
+  | "kubernetes_security"
   | "onboard"
   | "connection_health";
 
@@ -28,7 +31,7 @@ export interface NavItem {
 }
 
 export interface NavGroup {
-  readonly key: "overview" | "onboarding" | "cmdb" | "security" | "compliance" | "finops" | "operations" | "administration";
+  readonly key: "overview" | "onboarding" | "cmdb" | "kubernetes" | "security" | "compliance" | "finops" | "operations" | "administration";
   readonly label: string;
   readonly items: readonly NavItem[];
 }
@@ -59,6 +62,15 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "cmdb", label: "Resource inventory", href: "/cmdb", icon: "RI", capabilities: readConnection },
       { key: "changes", label: "Change history", href: "/changes", icon: "CH", capabilities: readConnection },
+    ],
+  },
+  {
+    key: "kubernetes",
+    label: "Kubernetes",
+    items: [
+      { key: "kubernetes_overview", label: "Cluster overview", href: "/kubernetes", icon: "KO", capabilities: readConnection },
+      { key: "kubernetes_inventory", label: "Workload inventory", href: "/kubernetes/inventory", icon: "KI", capabilities: readConnection },
+      { key: "kubernetes_security", label: "Kubernetes security", href: "/kubernetes/security", icon: "KS", capabilities: readConnection },
     ],
   },
   {

@@ -20,6 +20,7 @@ describe("grouped workspace navigation", () => {
       "Overview",
       "Onboarding",
       "CMDB",
+      "Kubernetes",
       "Security",
       "Compliance",
       "FinOps",
@@ -29,6 +30,10 @@ describe("grouped workspace navigation", () => {
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "security")?.items.map((item) => item.label),
       ["Posture findings", "Vulnerability & exposure", "Security events", "Remediation cases"],
+    );
+    assert.deepEqual(
+      visibleNavigation(allCapabilities).find((group) => group.key === "kubernetes")?.items.map((item) => item.label),
+      ["Cluster overview", "Workload inventory", "Kubernetes security"],
     );
   });
 
