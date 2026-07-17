@@ -57,7 +57,9 @@ export function CasesBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<CaseStatus | "all">("all");
   const [query, setQuery] = useState("");
-  const [fingerprint, setFingerprint] = useState("");
+  const [fingerprint, setFingerprint] = useState(() => typeof window === "undefined"
+    ? ""
+    : new URLSearchParams(window.location.search).get("finding") ?? "");
   const [createPriority, setCreatePriority] = useState<CasePriority>("high");
   const [createAssignee, setCreateAssignee] = useState("");
   const [notes, setNotes] = useState<Readonly<Record<string, string>>>({});
