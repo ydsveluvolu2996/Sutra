@@ -1,6 +1,6 @@
 import { getLocalSession } from "../../../../db/auth-repository";
 import {
-  assertLocalAuthRequest,
+  assertAuthenticationRequest,
   expiredSessionCookie,
   sessionTokenFromRequest,
 } from "../../../../lib/api-auth";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    assertLocalAuthRequest(request);
+    assertAuthenticationRequest(request);
     const token = sessionTokenFromRequest(request);
     const authenticated = token === null ? null : await getLocalSession(token);
     return jsonResponse(

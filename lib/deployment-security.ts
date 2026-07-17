@@ -7,6 +7,9 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_IDENTITY_MODE?: string;
   readonly SUTRA_OIDC_ISSUER?: string;
   readonly SUTRA_OIDC_CLIENT_ID?: string;
+  readonly SUTRA_OIDC_AUTHORIZATION_ENDPOINT?: string;
+  readonly SUTRA_OIDC_TOKEN_ENDPOINT?: string;
+  readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
   readonly SUTRA_BROKER_URL?: string;
   readonly SUTRA_BROKER_AUTH_MODE?: string;
   readonly SUTRA_DATABASE_MODE?: string;
@@ -91,6 +94,9 @@ export function hostedConfigurationIssues(environment: DeploymentSecurityEnviron
   if (environment.SUTRA_IDENTITY_MODE !== "oidc") issues.push("the hosted OIDC identity adapter is required");
   if (!isExactHttpsUrl(environment.SUTRA_OIDC_ISSUER)) issues.push("a non-loopback HTTPS OIDC issuer is required");
   if (!/^[A-Za-z0-9._:-]{3,256}$/u.test(environment.SUTRA_OIDC_CLIENT_ID ?? "")) issues.push("a bounded OIDC client identifier is required");
+  if (!isExactHttpsUrl(environment.SUTRA_OIDC_AUTHORIZATION_ENDPOINT)) issues.push("a non-loopback HTTPS OIDC authorization endpoint is required");
+  if (!isExactHttpsUrl(environment.SUTRA_OIDC_TOKEN_ENDPOINT)) issues.push("a non-loopback HTTPS OIDC token endpoint is required");
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) issues.push("a managed 256-bit OIDC transaction key is required");
   if (!isExactHttpsUrl(environment.SUTRA_BROKER_URL)) issues.push("a non-loopback HTTPS broker URL is required");
   if (environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") issues.push("asymmetric broker authentication is required");
   if (!new Set(["d1", "postgres-tls"]).has(environment.SUTRA_DATABASE_MODE ?? "")) issues.push("a supported hosted database mode is required");

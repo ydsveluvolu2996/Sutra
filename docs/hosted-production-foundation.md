@@ -47,7 +47,28 @@ Before deployment, choose:
 - the initial administrator identities;
 - the support and recovery ownership model.
 
-The next implementation slice adds the application-side PKCE transaction, ID-token
-verification, invitation-bound membership activation, session rotation/revocation,
-and negative two-organization tenant tests. Only then can the identity release hold
-be removed.
+The hosted identity release is delivered in security-reviewed slices. The
+application-side protocol boundary is present; the remaining lifecycle and
+isolation work is listed below. Only after that evidence exists can the identity
+release hold be removed.
+
+## Application-side identity progress
+
+The application-side Cognito boundary now implements:
+
+- authorization-code login with S256 PKCE, encrypted five-minute transaction
+  cookies, state and nonce binding, and same-origin return paths;
+- bounded, redirect-disabled token exchange that never persists access or refresh
+  tokens;
+- exact issuer JWKS endpoint pinning, bounded key sets, RS256 signature and
+  issuer/audience/nonce/token-use/lifetime/email verification;
+- a rotating opaque server session stored only as an irreversible digest;
+- exact `(issuer, subject, email)` matching to one active, pre-provisioned
+  organization membership, without email-only account linking;
+- hosted session lookup through the existing centralized authorization policy,
+  plus local-auth compatibility for the laptop demo.
+
+The identity release hold remains in place. Administrator invitation creation,
+single-use invitation acceptance, recovery administration, membership switching,
+session/device administration, distributed rate limiting, and the complete
+two-organization route/job/export isolation suite are not yet implemented.

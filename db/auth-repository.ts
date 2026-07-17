@@ -37,6 +37,7 @@ export type LocalAuthErrorCode =
   | "AUTHENTICATION_REQUIRED"
   | "AUTHORIZATION_DENIED"
   | "BOOTSTRAP_ALREADY_COMPLETED"
+  | "IDENTITY_NOT_PROVISIONED"
   | "INVALID_CREDENTIALS"
   | "INVALID_INPUT"
   | "MFA_ALREADY_ENROLLED"
@@ -248,18 +249,18 @@ async function createSession(
   db: D1Database,
   userId: string,
   orgId: string,
-  mfaVerified: boolean,
+  mfaVerifiedAt: number | null,
   now: number,
+  expiresAt = now + LOCAL_SESSION_TTL_MS,
 ): Promise<{ token: string; session: AuthenticatedLocalSession }> {
   const token = generateSessionToken();
   const digest = await digestSessionToken(token);
   const sessionId = opaqueId("sess");
-  const expiresAt = now + LOCAL_SESSION_TTL_MS;
   await db.prepare(
     `INSERT INTO local_sessions
        (id, token_digest, user_id, selected_org_id, created_at, expires_at, last_seen_at, mfa_verified_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-  ).bind(sessionId, digest, userId, orgId, now, expiresAt, now, mfaVerified ? now : null).run();
+  ).bind(sessionId, digest, userId, orgId, now, expiresAt, now, mfaVerifiedAt).run();
   const loaded = await getLocalSession(token, now);
   if (loaded === null) {
     throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The local session could not be read after creation");
@@ -315,7 +316,7 @@ export async function bootstrapLocalAdmin(
   } catch {
     throw new LocalAuthError(409, "BOOTSTRAP_ALREADY_COMPLETED", "Local bootstrap has already been completed");
   }
-  return createSession(db, userId, LOCAL_AUTH_ORG_ID, false, now);
+  return createSession(db, userId, LOCAL_AUTH_ORG_ID, null, now);
 }
 
 export async function isLocalBootstrapRequired(): Promise<boolean> {
@@ -433,8 +434,68 @@ export async function loginLocalUser(
         SET failed_attempts = 0, locked_until = NULL, updated_at = ?
       WHERE user_id = ?`,
   ).bind(now, row.user_id).run();
-  const created = await createSession(db, row.user_id, row.org_id, mfaVerified, now);
+  const created = await createSession(db, row.user_id, row.org_id, mfaVerified ? now : null, now);
   return { ...created, mfaEnrollmentRequired: row.mfa_confirmed_at === null };
+}
+
+export interface HostedIdentity {
+  readonly issuer: string;
+  readonly subject: string;
+  readonly email: string;
+  readonly authenticatedAt: number;
+  readonly expiresAt: number;
+}
+
+/**
+ * Creates a server session only for an identity provisioned into exactly one
+ * active Sutra organization. Email is checked as an attribute and is never
+ * used to link or authorize an otherwise unknown OIDC subject.
+ */
+export async function loginHostedUser(
+  identity: HostedIdentity,
+  now = Date.now(),
+): Promise<{ token: string; session: AuthenticatedLocalSession }> {
+  if (
+    !identity.issuer.startsWith("https://") ||
+    identity.issuer.length > 2048 ||
+    !/^[^\u0000-\u001f\u007f]{1,255}$/u.test(identity.subject) ||
+    !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identity.email) ||
+    identity.authenticatedAt > now + 60_000 ||
+    identity.expiresAt <= now
+  ) {
+    throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The hosted identity is invalid");
+  }
+  const db = await readyDatabase();
+  const rows = await db.prepare(
+    `SELECT u.id AS user_id, m.org_id
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id AND m.status = 'active'
+       JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+      WHERE u.issuer = ? AND u.subject = ? AND u.email = ? AND u.status = 'active'
+      ORDER BY m.created_at
+      LIMIT 2`,
+  ).bind(
+    identity.issuer,
+    identity.subject,
+    identity.email.toLocaleLowerCase("en-US"),
+  ).all<{ user_id: string; org_id: string }>();
+  const memberships = rows.results ?? [];
+  if (memberships.length !== 1) {
+    throw new LocalAuthError(
+      403,
+      "IDENTITY_NOT_PROVISIONED",
+      "This identity does not have one active Sutra organization membership",
+    );
+  }
+  const selected = memberships[0];
+  return createSession(
+    db,
+    selected.user_id,
+    selected.org_id,
+    identity.authenticatedAt,
+    now,
+    Math.min(identity.expiresAt, now + 60 * 60 * 1000),
+  );
 }
 
 export async function getLocalSession(token: string, now = Date.now()): Promise<AuthenticatedLocalSession | null> {
@@ -446,7 +507,7 @@ export async function getLocalSession(token: string, now = Date.now()): Promise<
             u.id AS user_id, u.email, u.display_name,
             o.id AS org_id, o.slug AS org_slug, o.name AS org_name,
             m.id AS membership_id, m.role AS membership_role, m.scope_mode,
-            t.confirmed_at AS mfa_confirmed_at
+            CASE WHEN u.issuer = ? THEN t.confirmed_at ELSE s.mfa_verified_at END AS mfa_confirmed_at
        FROM local_sessions s
        JOIN users u ON u.id = s.user_id AND u.status = 'active'
        JOIN organizations o ON o.id = s.selected_org_id AND o.status = 'active'
@@ -454,7 +515,7 @@ export async function getLocalSession(token: string, now = Date.now()): Promise<
        LEFT JOIN totp_credentials t ON t.user_id = u.id
       WHERE s.token_digest = ? AND s.revoked_at IS NULL AND s.expires_at > ?
       LIMIT 1`,
-  ).bind(digest, now).first<SessionRow>();
+  ).bind(LOCAL_IDENTITY_ISSUER, digest, now).first<SessionRow>();
   if (row === null) return null;
   return sessionFromRow(db, row);
 }
