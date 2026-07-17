@@ -288,7 +288,7 @@ async function teardown() {
   }
   await run("eksctl", [
     "delete", "cluster", "--name", cluster, "--region", region,
-    "--wait", "--disable-eviction",
+    "--wait",
   ]);
   if (ecrRepository) {
     try {

@@ -51,7 +51,8 @@ test("AWS calls require execution, exact account/tag checks, and typed teardown 
   assert.match(source, /confirmation !== cluster/u);
   assert.match(source, /update-termination-protection/u);
   assert.match(source, /"delete", "cluster"/u);
-  assert.match(source, /"--wait", "--disable-eviction"/u);
+  assert.match(source, /"delete", "cluster"[\s\S]*"--wait"/u);
+  assert.doesNotMatch(source, /--disable-eviction/u);
   assert.match(source, /publicAccessCIDRs/u);
   assert.match(source, /privateAccess: true/u);
   assert.match(source, /desiredCapacity: 1/u);
