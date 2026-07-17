@@ -58,7 +58,7 @@ describe("grouped workspace navigation", () => {
     );
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "administration")?.items.map((item) => item.label),
-      ["Access & invitations", "Notification destinations"],
+      ["Settings", "Access & invitations", "Notification destinations"],
     );
   });
 

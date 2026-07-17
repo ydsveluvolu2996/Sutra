@@ -7,6 +7,7 @@ import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 import { groupContainsActiveItem, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
 import { NavIcon, navTone } from "./nav-icon";
+import { AccountMenu } from "./account-menu";
 
 function connectionTone(status: string | undefined): string {
   if (status === "active") return "healthy";
@@ -163,7 +164,17 @@ function AuthenticatedAppShell({
           <div className="topbar-actions">
             <span className="mfa-badge"><i /> MFA verified</span>
             <span className={`demo-badge mode-${modeKind}`}><i /> {modeLabel}</span>
-            <span className="topbar-avatar" aria-label={session.user.displayName}>{initials}</span>
+            <AccountMenu
+              displayName={session.user.displayName}
+              email={session.user.email}
+              roleLabel={roleLabel(session.membership.role)}
+              organizationName={session.organization.name}
+              initials={initials}
+              mfaVerified={session.mfa.verified}
+              capabilities={capabilitySet}
+              signingOut={signingOut}
+              onSignOut={() => void signOut()}
+            />
           </div>
         </header>
         <div className="content-wrap">{children}</div>
