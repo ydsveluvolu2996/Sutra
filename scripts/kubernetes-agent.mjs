@@ -39,6 +39,8 @@ const hubbleFlowSource = hubbleExportFile === ""
     hubbleVersion: safeIdentity("SUTRA_HUBBLE_VERSION", required("SUTRA_HUBBLE_VERSION")),
   });
 
+const falcoGatewayHealthUrl = process.env.SUTRA_FALCO_GATEWAY_HEALTH_URL?.trim() ?? "";
+
 const agent = new ContinuousKubernetesAgent({
   clusterId: safeIdentity("SUTRA_KUBERNETES_CLUSTER_ID", required("SUTRA_KUBERNETES_CLUSTER_ID")),
   clusterName: required("SUTRA_KUBERNETES_CLUSTER_NAME"),
@@ -64,6 +66,7 @@ const agent = new ContinuousKubernetesAgent({
     startedAt: new Date().toISOString(),
   },
   ...(hubbleFlowSource === undefined ? {} : { hubbleFlowSource }),
+  ...(falcoGatewayHealthUrl === "" ? {} : { falcoGateway: { healthUrl: falcoGatewayHealthUrl } }),
 });
 
 const controller = new AbortController();
