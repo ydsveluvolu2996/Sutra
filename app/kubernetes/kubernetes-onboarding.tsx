@@ -12,6 +12,20 @@ import { formatTimestamp, postPilot, usePilotState } from "../components/use-pil
 import { buildKubernetesProjection } from "./kubernetes-projection";
 import { useKubernetesEvidence } from "./use-kubernetes-evidence";
 
+interface AgentDeploymentHealth {
+  readonly agentId: string;
+  readonly state: "online" | "offline" | "revoked";
+  readonly agentVersion: string;
+  readonly deployment: {
+    readonly namespace: string;
+    readonly podName: string;
+    readonly startedAt: string;
+  } | null;
+  readonly modules: Readonly<Record<string, string>>;
+  readonly lastHeartbeatAt: string | null;
+  readonly lastScanAt: string | null;
+}
+
 const steps = [
   "Discover EKS",
   "Select cluster",
@@ -73,6 +87,29 @@ export function KubernetesOnboarding() {
   const [working, setWorking] = useState(false);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<string | null>(null);
+  const [agentHealth, setAgentHealth] = useState<readonly AgentDeploymentHealth[] | null>(null);
+  const [agentHealthError, setAgentHealthError] = useState<string | null>(null);
+
+  async function refreshAgentHealth(): Promise<void> {
+    if (registered == null || state?.connection === null || state?.connection === undefined) {
+      setAgentHealth(null);
+      setAgentHealthError("Register the cluster before reading agent deployment health");
+      return;
+    }
+    try {
+      const response = await fetch(
+        `/api/v1/kubernetes/agents?connectionId=${encodeURIComponent(state.connection.id)}&clusterId=${encodeURIComponent(registered.id)}`,
+        { cache: "no-store", credentials: "same-origin" },
+      );
+      const body = await response.json() as { agents?: readonly AgentDeploymentHealth[]; error?: { message?: string } };
+      if (!response.ok) throw new Error(body.error?.message ?? "Agent deployment health is unavailable");
+      setAgentHealth(body.agents ?? []);
+      setAgentHealthError(null);
+    } catch (caught) {
+      setAgentHealth(null);
+      setAgentHealthError(caught instanceof Error ? caught.message : "Agent deployment health is unavailable");
+    }
+  }
   const discoveryProjection = useMemo(() => buildKubernetesProjection({
     resources: state?.resources ?? [],
     relationships: state?.relationships ?? [],
@@ -325,6 +362,23 @@ export function KubernetesOnboarding() {
               <article><span className={installationPlan ? "positive" : "unknown"}>{installationPlan ? "✓" : "—"}</span><div><strong>Module health contract</strong><small>{installationPlan ? "Machine-readable health command generated" : "Generate the installation plan first"}</small></div></article>
             </div>
             {installationPlan ? <div className="kubernetes-command-preview"><div><strong>Health evidence command</strong><span>JSON output</span></div><pre>{installationPlan.lifecycle.healthCommand}</pre></div> : null}
+            <section className="kubernetes-subsection">
+              <div className="panel-heading"><div><h3>Module deployment health</h3><p className="panel-footnote">Reported only from signed agent heartbeats; a missing agent is shown as absent, never assumed healthy.</p></div><button className="button button-secondary" disabled={registered == null} onClick={() => void refreshAgentHealth()} type="button">Read heartbeat health</button></div>
+              {agentHealthError ? <div className="empty-state"><strong>No heartbeat evidence</strong><span>{agentHealthError}</span></div> : null}
+              {agentHealth !== null && agentHealth.length === 0 ? <div className="empty-state"><strong>No enrolled agent for this cluster</strong><span>Install the visibility agent with a one-time enrollment token to begin heartbeat health reporting.</span></div> : null}
+              {agentHealth !== null && agentHealth.length > 0 ? <div className="kubernetes-verification-grid">
+                {agentHealth.map((agent) => <article key={agent.agentId}>
+                  <span className={agent.state === "online" ? "positive" : "unknown"}>{agent.state === "online" ? "✓" : "—"}</span>
+                  <div>
+                    <strong>{agent.deployment ? `${agent.deployment.namespace}/${agent.deployment.podName}` : agent.agentId} · {agent.state}</strong>
+                    <small>v{agent.agentVersion}{agent.lastHeartbeatAt ? ` · heartbeat ${formatTimestamp(agent.lastHeartbeatAt)}` : " · no heartbeat received"}{agent.lastScanAt ? ` · scan ${formatTimestamp(agent.lastScanAt)}` : ""}</small>
+                    <small>{Object.entries(agent.modules).length > 0
+                      ? Object.entries(agent.modules).map(([name, value]) => `${name}: ${value.toLocaleLowerCase("en-US").replaceAll("_", " ")}`).join(" · ")
+                      : "No module health reported yet"}</small>
+                  </div>
+                </article>)}
+              </div> : null}
+            </section>
             <label className="button button-primary" aria-disabled={registered === null || working}>
               {working ? "Validating scan…" : "Import collector JSON"}
               <input accept="application/json,.json" disabled={registered === null || working} hidden onChange={(event) => {
