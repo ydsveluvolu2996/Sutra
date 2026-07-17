@@ -8,6 +8,13 @@
 {{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) }}{{ fail "agent.image.digest must be an exact sha256 digest" }}{{- end }}
 {{- if not (regexMatch "^https://[A-Za-z0-9.-]+(:[0-9]+)?$" $controlPlane) }}{{ fail "agent.controlPlane.url must be an HTTPS origin" }}{{- end }}
 {{- if or (lt (int .Values.agent.schedule.intervalSeconds) 300) (gt (int .Values.agent.schedule.intervalSeconds) 86400) }}{{ fail "agent.schedule.intervalSeconds must be from 300 through 86400" }}{{- end }}
+{{- $hubbleExport := (.Values.agent.hubble | default dict).exportFile | default dict }}
+{{- if $hubbleExport.enabled }}
+{{- if not (regexMatch "^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,253}$" ($hubbleExport.version | default "")) }}{{ fail "agent.hubble.exportFile.version must be the exact Hubble version identifier" }}{{- end }}
+{{- if not (hasPrefix "/" ($hubbleExport.hostPath | default "")) }}{{ fail "agent.hubble.exportFile.hostPath must be an absolute node path" }}{{- end }}
+{{- end }}
+{{- $falcoGatewayHealthUrl := (.Values.agent.falcoGateway | default dict).healthUrl | default "" }}
+{{- if and $falcoGatewayHealthUrl (not (regexMatch "^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9./_-]*)?$" $falcoGatewayHealthUrl)) }}{{ fail "agent.falcoGateway.healthUrl must be a bounded in-cluster http(s) URL" }}{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -69,6 +76,16 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            {{- if $hubbleExport.enabled }}
+            - name: SUTRA_HUBBLE_EXPORT_FILE
+              value: /var/run/sutra-hubble/events.log
+            - name: SUTRA_HUBBLE_VERSION
+              value: {{ $hubbleExport.version | quote }}
+            {{- end }}
+            {{- if $falcoGatewayHealthUrl }}
+            - name: SUTRA_FALCO_GATEWAY_HEALTH_URL
+              value: {{ $falcoGatewayHealthUrl | quote }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -92,6 +109,11 @@ spec:
               readOnly: true
             - name: state
               mountPath: /var/lib/sutra-agent
+            {{- if $hubbleExport.enabled }}
+            - name: hubble-export
+              mountPath: /var/run/sutra-hubble/events.log
+              readOnly: true
+            {{- end }}
       volumes:
         - name: enrollment
           secret:
@@ -103,4 +125,10 @@ spec:
         - name: state
           persistentVolumeClaim:
             claimName: {{ default "sutra-agent-state" .Values.agent.state.existingClaim | quote }}
+        {{- if $hubbleExport.enabled }}
+        - name: hubble-export
+          hostPath:
+            path: {{ $hubbleExport.hostPath | quote }}
+            type: File
+        {{- end }}
 {{- end }}
