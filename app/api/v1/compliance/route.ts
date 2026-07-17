@@ -1,4 +1,4 @@
-import { getConnection, getPilotState } from "../../../../db/pilot-repository";
+import { getConnectionForOrg, getPilotStateForOrg } from "../../../../db/pilot-repository";
 import { listComplianceExceptions } from "../../../../db/compliance-exception-repository";
 import { assertSessionCapability } from "../../../../lib/api-auth";
 import {
@@ -141,7 +141,7 @@ export async function GET(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "workspace:read");
     const { connectionId, format } = parseRequest(new URL(request.url));
     if (connectionId !== null) {
-      const connection = await getConnection(connectionId);
+      const connection = await getConnectionForOrg(actor.orgId, connectionId);
       if (connection === null) {
         throw Object.assign(new Error("Cloud connection not found"), {
           code: "NOT_FOUND",
@@ -154,7 +154,7 @@ export async function GET(request: Request): Promise<Response> {
       );
     }
 
-    const state = await getPilotState(connectionId ?? undefined);
+    const state = await getPilotStateForOrg(actor.orgId, connectionId ?? undefined);
     if (state.connection !== null) {
       assertSessionCapability(
         actor.authenticated,

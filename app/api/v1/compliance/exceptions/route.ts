@@ -6,7 +6,7 @@ import {
   listComplianceExceptions,
   reviewComplianceException,
 } from "../../../../../db/compliance-exception-repository";
-import { getConnection, getPilotState } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { SUTRA_AWS_BASELINE } from "../../../../../lib/compliance-catalog";
@@ -41,7 +41,7 @@ function connectionIdFrom(value: unknown): string {
 
 async function scopedConnection(request: Request, connectionId: string, capability: "connection:read" | "finding:manage") {
   const authenticated = await requireApiSession(request);
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
   if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
   assertSessionCapability(authenticated, capability, connection.customerId);
   return { authenticated, connection };
@@ -112,7 +112,7 @@ export async function POST(request: Request): Promise<Response> {
       if (!Number.isFinite(expiresAt) || expiresAt < now + 60 * 60 * 1_000 || expiresAt > now + 180 * 24 * 60 * 60 * 1_000) {
         invalid("The exception expiry must be between one hour and 180 days from now");
       }
-      const state = await getPilotState(connectionId);
+      const state = await getPilotStateForOrg(authenticated.subject.orgId, connectionId);
       const finding = state.findings.find((candidate) => candidate.fingerprint === record.findingFingerprint && candidate.controlKey === controlKey);
       if (finding === undefined || finding.status === "resolved") invalid("The active snapshot does not contain the scoped control finding");
       const created = await createComplianceException({

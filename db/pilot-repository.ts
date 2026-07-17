@@ -420,7 +420,7 @@ async function recoverPendingConnectionHandoff(
   audit: ResolvedAuditInput,
   recovered: boolean,
 ): Promise<PendingConnectionHandoff | null> {
-  const existingAudit = await findAuditRequest(db, audit.requestId);
+  const existingAudit = await findAuditRequest(db, audit.requestId, audit.orgId);
   if (existingAudit === null) return null;
   assertMatchingAuditRequest(existingAudit, audit);
   const row = await db.prepare(
@@ -473,7 +473,10 @@ async function recoverPendingConnectionHandoff(
   };
 }
 
-export async function getConnection(connectionId: string): Promise<PilotConnection | null> {
+export async function getConnectionForOrg(
+  orgId: string,
+  connectionId: string,
+): Promise<PilotConnection | null> {
   const db = await readyDatabase();
   const row = await db.prepare(
     `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
@@ -485,11 +488,15 @@ export async function getConnection(connectionId: string): Promise<PilotConnecti
        JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
       WHERE c.org_id = ? AND c.id = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connectionId).first<ConnectionRow>();
+  ).bind(orgId, connectionId).first<ConnectionRow>();
   return row === null ? null : toPilotConnection(row);
 }
 
-export async function getLatestConnection(): Promise<PilotConnection | null> {
+export function getConnection(connectionId: string): Promise<PilotConnection | null> {
+  return getConnectionForOrg(LOCAL_ORG_ID, connectionId);
+}
+
+export async function getLatestConnectionForOrg(orgId: string): Promise<PilotConnection | null> {
   const db = await readyDatabase();
   const row = await db.prepare(
     `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
@@ -502,8 +509,12 @@ export async function getLatestConnection(): Promise<PilotConnection | null> {
       WHERE c.org_id = ?
       ORDER BY c.created_at DESC
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID).first<ConnectionRow>();
+  ).bind(orgId).first<ConnectionRow>();
   return row === null ? null : toPilotConnection(row);
+}
+
+export function getLatestConnection(): Promise<PilotConnection | null> {
+  return getLatestConnectionForOrg(LOCAL_ORG_ID);
 }
 
 export function commitVerifiedConnectionRole(
@@ -944,7 +955,10 @@ async function requireUpdatedConnection(connectionId: string, message: string): 
   return updated;
 }
 
-export async function getStoredConnectionSecret(connectionId: string): Promise<StoredConnectionSecret> {
+export async function getStoredConnectionSecretForOrg(
+  orgId: string,
+  connectionId: string,
+): Promise<StoredConnectionSecret> {
   const db = await readyDatabase();
   const row = await db.prepare(
     `SELECT id, customer_id, source_kind, partition, aws_account_id, role_arn,
@@ -953,7 +967,7 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
        FROM aws_connections
       WHERE org_id = ? AND id = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connectionId).first<{
+  ).bind(orgId, connectionId).first<{
     id: string;
     customer_id: string;
     source_kind: PilotConnection["sourceKind"];
@@ -991,6 +1005,10 @@ export async function getStoredConnectionSecret(connectionId: string): Promise<S
     status: row.status,
     permissionPackVersion: row.permission_pack_version,
   };
+}
+
+export function getStoredConnectionSecret(connectionId: string): Promise<StoredConnectionSecret> {
+  return getStoredConnectionSecretForOrg(LOCAL_ORG_ID, connectionId);
 }
 
 export async function markConnectionValidating(connectionId: string): Promise<void> {
@@ -1620,11 +1638,14 @@ export async function getChangeHistory(scope: ChangeHistoryScope): Promise<reado
   }));
 }
 
-export async function getPilotState(connectionId?: string): Promise<PilotState> {
+export async function getPilotStateForOrg(
+  orgId: string,
+  connectionId?: string,
+): Promise<PilotState> {
   const db = await readyDatabase();
   const connection = connectionId === undefined
-    ? await getLatestConnection()
-    : await getConnection(connectionId);
+    ? await getLatestConnectionForOrg(orgId)
+    : await getConnectionForOrg(orgId, connectionId);
   if (connection === null) {
     return {
       mode: "empty",
@@ -1646,7 +1667,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
        JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
       WHERE h.org_id = ? AND h.connection_id = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connection.id).first<SnapshotHeadRow>();
+  ).bind(orgId, connection.id).first<SnapshotHeadRow>();
 
   const syncResult = await db.prepare(
     `SELECT id, connection_id, status, coverage_state, totals_json,
@@ -1655,7 +1676,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
       WHERE org_id = ? AND connection_id = ?
       ORDER BY created_at DESC
       LIMIT 20`,
-  ).bind(LOCAL_ORG_ID, connection.id).all<SyncRow>();
+  ).bind(orgId, connection.id).all<SyncRow>();
   const syncRuns: PilotSyncRun[] = (syncResult.results ?? []).map((row) => ({
     id: row.id,
     connectionId: row.connection_id,
@@ -1676,7 +1697,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
         WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND sync_run_id = ?
         ORDER BY collector_key, region_key`,
     ).bind(
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       connection.id,
       latestSyncRun.id,
@@ -1718,13 +1739,13 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
          FROM cmdb_resources
         WHERE org_id = ? AND connection_id = ? AND snapshot_id = ?
         ORDER BY service, resource_type, region_key, name, native_id`,
-    ).bind(LOCAL_ORG_ID, connection.id, head.id).all<ResourceRow>(),
+    ).bind(orgId, connection.id, head.id).all<ResourceRow>(),
     db.prepare(
       `SELECT from_resource_key, to_resource_key, relation_type, evidence_json
          FROM cmdb_relationships
         WHERE org_id = ? AND connection_id = ? AND snapshot_id = ?
         ORDER BY relation_type, from_resource_key, to_resource_key`,
-    ).bind(LOCAL_ORG_ID, connection.id, head.id).all<RelationshipRow>(),
+    ).bind(orgId, connection.id, head.id).all<RelationshipRow>(),
     db.prepare(
       `SELECT f.resource_key, f.control_key, f.control_version, f.fingerprint,
               f.severity, f.status AS snapshot_status, w.status AS workflow_status,
@@ -1737,7 +1758,7 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
         ORDER BY CASE f.severity
           WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2
           WHEN 'low' THEN 3 ELSE 4 END, f.title`,
-    ).bind(LOCAL_ORG_ID, connection.id, head.id).all<FindingRow>(),
+    ).bind(orgId, connection.id, head.id).all<FindingRow>(),
   ]);
 
   const resources: PilotResource[] = (resourceResult.results ?? []).map((row) => ({
@@ -1801,6 +1822,10 @@ export async function getPilotState(connectionId?: string): Promise<PilotState> 
   };
 }
 
+export function getPilotState(connectionId?: string): Promise<PilotState> {
+  return getPilotStateForOrg(LOCAL_ORG_ID, connectionId);
+}
+
 export async function setFindingWorkflowStatus(
   connectionId: string,
   fingerprint: string,
@@ -1856,6 +1881,8 @@ export async function setFindingWorkflowStatus(
 }
 
 export interface AuditInput {
+  /** Defaults to the local pilot organization for local-only callers. */
+  readonly orgId?: string;
   readonly actorId: string;
   readonly action: string;
   readonly targetType: string;
@@ -1885,7 +1912,8 @@ interface StoredAuditRequestRow {
   metadata_json: string;
 }
 
-interface ResolvedAuditInput extends AuditInput {
+interface ResolvedAuditInput extends Omit<AuditInput, "orgId"> {
+  readonly orgId: string;
   readonly requestId: string;
   readonly metadataJson: string;
 }
@@ -1896,6 +1924,13 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 function resolveAuditInput(input: AuditInput): ResolvedAuditInput {
+  const orgId = input.orgId ?? LOCAL_ORG_ID;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(orgId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The audit organization identifier is invalid",
+    );
+  }
   const requestId = input.requestId ?? crypto.randomUUID();
   if (!AUDIT_REQUEST_ID.test(requestId)) {
     throw new PilotRepositoryError(
@@ -1912,7 +1947,7 @@ function resolveAuditInput(input: AuditInput): ResolvedAuditInput {
       "The audit event metadata is not safe JSON",
     );
   }
-  return { ...input, requestId, metadataJson };
+  return { ...input, orgId, requestId, metadataJson };
 }
 
 export function appendAuditEvent(input: AuditInput): Promise<void> {
@@ -1980,6 +2015,7 @@ function serializeAuditOperation<T>(operation: () => Promise<T>): Promise<T> {
 async function findAuditRequest(
   db: D1Database,
   requestId: string,
+  orgId = LOCAL_ORG_ID,
 ): Promise<StoredAuditRequestRow | null> {
   return db.prepare(
     `SELECT id, customer_id, actor_type, actor_id, action, target_type,
@@ -1987,7 +2023,7 @@ async function findAuditRequest(
        FROM audit_events
       WHERE org_id = ? AND request_id = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, requestId).first<StoredAuditRequestRow>();
+  ).bind(orgId, requestId).first<StoredAuditRequestRow>();
 }
 
 function assertMatchingAuditRequest(
@@ -2015,7 +2051,7 @@ async function auditRequestAlreadySatisfied(
   db: D1Database,
   input: ResolvedAuditInput,
 ): Promise<boolean> {
-  const existing = await findAuditRequest(db, input.requestId);
+  const existing = await findAuditRequest(db, input.requestId, input.orgId);
   if (existing === null) return false;
   assertMatchingAuditRequest(existing, input);
   return true;
@@ -2055,7 +2091,7 @@ async function prepareAuditEventStatement(
       WHERE org_id = ?
       ORDER BY occurred_at DESC, id DESC
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID).first<{ event_hash: string; occurred_at: number }>();
+  ).bind(input.orgId).first<{ event_hash: string; occurred_at: number }>();
   const eventId = id("audit");
   const occurredAt = Math.max(Date.now(), (previous?.occurred_at ?? -1) + 1);
   const requestId = input.requestId;
@@ -2063,7 +2099,7 @@ async function prepareAuditEventStatement(
   const previousHash = previous?.event_hash ?? null;
   const eventHash = await sha256Hex(JSON.stringify({
     eventId,
-    orgId: LOCAL_ORG_ID,
+    orgId: input.orgId,
     customerId: input.customerId,
     occurredAt,
     actorId: input.actorId,
@@ -2108,12 +2144,12 @@ async function prepareAuditEventStatement(
      ${invalidGuard}`,
   ).bind(
     previousHash,
-    LOCAL_ORG_ID,
-    LOCAL_ORG_ID,
+    input.orgId,
+    input.orgId,
     previousHash,
     ...(mutationGuard?.values ?? []),
     eventId,
-    LOCAL_ORG_ID,
+    input.orgId,
     input.customerId,
     occurredAt,
     input.actorId,

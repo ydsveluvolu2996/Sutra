@@ -1,7 +1,6 @@
 import {
   disableAwsConnection,
-  getConnection,
-  LOCAL_ORG_ID,
+  getConnectionForOrg,
 } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import {
@@ -32,7 +31,7 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const connectionId = connectionIdFrom(await readBoundedJson(request));
-    const current = await getConnection(connectionId);
+    const current = await getConnectionForOrg(actor.orgId, connectionId);
     if (current === null) {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }
@@ -42,7 +41,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
       transitionControlPlane: () => disableAwsConnection(connectionId, actor.id),
-      reconcileCollector: () => disableCollectorConnection({ tenantId: LOCAL_ORG_ID, connectionId }),
+      reconcileCollector: () => disableCollectorConnection({ tenantId: actor.orgId, connectionId }),
     });
     return jsonResponse({
       connection: result.connection,

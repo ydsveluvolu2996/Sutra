@@ -1,4 +1,4 @@
-import { getConnection } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, requirePilotActor } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
@@ -22,7 +22,7 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const connectionId = connectionIdFrom(await readBoundedJson(request));
-    const current = await getConnection(connectionId);
+    const current = await getConnectionForOrg(actor.orgId, connectionId);
     if (current === null) {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }

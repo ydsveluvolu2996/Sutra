@@ -1,8 +1,7 @@
 import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
   commitVerifiedConnectionRole,
-  getStoredConnectionSecret,
-  LOCAL_ORG_ID,
+  getStoredConnectionSecretForOrg,
 } from "../../../../../db/pilot-repository";
 import {
   assertSameOrigin,
@@ -48,14 +47,14 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const body = parseBody(await readBoundedJson(request));
-    const stored = await getStoredConnectionSecret(body.connectionId);
+    const stored = await getStoredConnectionSecretForOrg(actor.orgId, body.connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
     requireRecentMfa(actor.authenticated);
     return await withLocalOnboardingAccountLock(
       stored.partition,
       stored.accountId,
       async () => {
-        const current = await getStoredConnectionSecret(body.connectionId);
+        const current = await getStoredConnectionSecretForOrg(actor.orgId, body.connectionId);
         if (
           current.customerId !== stored.customerId ||
           current.accountId !== stored.accountId ||
@@ -87,10 +86,10 @@ export async function POST(request: Request): Promise<Response> {
         const externalId = await decryptExternalId(
           { ciphertext: current.externalIdCiphertext, keyVersion: current.externalIdKeyVersion },
           secrets.connectionEncryptionKey,
-          { orgId: LOCAL_ORG_ID, customerId: current.customerId, connectionId: current.connectionId },
+          { orgId: actor.orgId, customerId: current.customerId, connectionId: current.connectionId },
         );
         const registerRoleWithCollector = (roleArn: string) => registerCollectorConnection({
-          tenantId: LOCAL_ORG_ID,
+          tenantId: actor.orgId,
           connectionId: current.connectionId,
           accountId: current.accountId,
           partition: current.partition,
@@ -99,14 +98,14 @@ export async function POST(request: Request): Promise<Response> {
           enabledRegions: current.enabledRegions,
         });
         const verifyRoleWithCollector = () => verifyCollectorConnection({
-          tenantId: LOCAL_ORG_ID,
+          tenantId: actor.orgId,
           connectionId: current.connectionId,
           jobId: `verify_role_${crypto.randomUUID().replaceAll("-", "")}`,
           accountId: current.accountId,
           partition: current.partition,
         });
         const activateRoleWithCollector = (roleArn: string) => activateCollectorConnection({
-          tenantId: LOCAL_ORG_ID,
+          tenantId: actor.orgId,
           connectionId: current.connectionId,
           roleArn,
         });
@@ -124,7 +123,7 @@ export async function POST(request: Request): Promise<Response> {
           compensateStagedCollector: async () => {
             if (current.roleArn.length === 0) {
               await discardStagedCollectorConnection({
-                tenantId: LOCAL_ORG_ID,
+                tenantId: actor.orgId,
                 connectionId: current.connectionId,
                 roleArn: role.arn,
               });
@@ -138,7 +137,7 @@ export async function POST(request: Request): Promise<Response> {
             }
             await registerRoleWithCollector(current.roleArn);
             await verifyCollectorConnection({
-              tenantId: LOCAL_ORG_ID,
+              tenantId: actor.orgId,
               connectionId: current.connectionId,
               jobId: `restore_role_${crypto.randomUUID().replaceAll("-", "")}`,
               accountId: current.accountId,

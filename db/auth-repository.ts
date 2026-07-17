@@ -518,6 +518,11 @@ export async function getLocalSession(token: string, now = Date.now()): Promise<
       LIMIT 1`,
   ).bind(LOCAL_IDENTITY_ISSUER, digest, now).first<SessionRow>();
   if (row === null) return null;
+  await db.prepare(
+    `UPDATE local_sessions SET last_seen_at = ?
+      WHERE token_digest = ? AND revoked_at IS NULL AND expires_at > ?
+        AND last_seen_at < ?`,
+  ).bind(now, digest, now, now - 60_000).run();
   return sessionFromRow(db, row);
 }
 

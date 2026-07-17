@@ -8,7 +8,7 @@ import {
   rescheduleFindingCase,
   transitionFindingCase,
 } from "../../../../db/case-repository";
-import { getConnection } from "../../../../db/pilot-repository";
+import { getConnectionForOrg } from "../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import {
@@ -58,7 +58,7 @@ export async function GET(request: Request): Promise<Response> {
     if ([...url.searchParams.keys()].some((key) => key !== "connectionId")) invalid();
     const connectionId = requiredString(url.searchParams.get("connectionId"), CONNECTION_ID, "The connection identifier is invalid");
     const authenticated = await requireApiSession(request);
-    const connection = await getConnection(connectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const [cases, assignees] = await Promise.all([
@@ -88,7 +88,7 @@ export async function POST(request: Request): Promise<Response> {
     ]);
     const operation = requiredString(base.operation, /^(?:create|note|transition|assign|prioritize|reschedule)$/u, "The case operation is invalid");
     const connectionId = requiredString(base.connectionId, CONNECTION_ID, "The connection identifier is invalid");
-    const connection = await getConnection(connectionId);
+    const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "finding:manage", connection.customerId);
     const scope = {
