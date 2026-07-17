@@ -1,0 +1,10 @@
+# Security-sensitive boundaries require the repository owner to review them.
+* @ydsveluvolu2996
+
+# Keep the ownership rules explicit for future team expansion.
+/.github/ @ydsveluvolu2996
+/infrastructure/ @ydsveluvolu2996
+/deploy/ @ydsveluvolu2996
+/services/ @ydsveluvolu2996
+/db/ @ydsveluvolu2996
+/lib/ @ydsveluvolu2996
