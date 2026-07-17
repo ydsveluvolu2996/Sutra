@@ -21,6 +21,7 @@ export type NavKey =
   | "notification_settings"
   | "kubernetes_overview"
   | "kubernetes_fleet"
+  | "kubernetes_trends"
   | "kubernetes_issues"
   | "kubernetes_permissions"
   | "kubernetes_inventory"
@@ -81,6 +82,7 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "kubernetes_overview", label: "Cluster overview", href: "/kubernetes", icon: "KO", capabilities: readConnection },
       { key: "kubernetes_fleet", label: "Fleet health", href: "/kubernetes/fleet", icon: "FH", capabilities: readConnection },
+      { key: "kubernetes_trends", label: "Posture trends", href: "/kubernetes/trends", icon: "TR", capabilities: readConnection },
       { key: "kubernetes_onboard", label: "Onboard cluster", href: "/kubernetes/onboard", icon: "+", capabilities: ["connection:manage"] },
       { key: "kubernetes_clusters", label: "Clusters", href: "/kubernetes/clusters", icon: "CL", capabilities: readConnection },
       { key: "kubernetes_namespaces", label: "Namespaces", href: "/kubernetes/namespaces", icon: "NS", capabilities: readConnection },
