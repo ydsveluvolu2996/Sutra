@@ -877,6 +877,10 @@ async function main() {
       resolve(root, "node_modules/.bin/wrangler"),
       [
         "dev",
+        // Vinext already emitted the complete reviewed module graph. Re-bundling
+        // and watching that immutable output can race its generated RSC manifest
+        // and leave a demo process healthy only until Wrangler's first reload.
+        "--no-bundle",
         "--config", resolve(root, "dist/server/wrangler.json"),
         "--env-file", runtime.configPath,
         "--ip", "127.0.0.1",

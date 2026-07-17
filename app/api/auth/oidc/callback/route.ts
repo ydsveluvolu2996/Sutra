@@ -1,4 +1,5 @@
 import { loginHostedUser } from "../../../../../db/auth-repository";
+import { acceptIdentityInvitation } from "../../../../../db/identity-invitation-repository";
 import { sessionCookie } from "../../../../../lib/api-auth";
 import { exchangeOidcAuthorizationCode, fetchOidcJwks } from "../../../../../lib/hosted-oidc";
 import {
@@ -31,7 +32,9 @@ export async function GET(request: Request): Promise<Response> {
       nonce: transaction.nonce,
       jwks,
     });
-    const result = await loginHostedUser(identity);
+    const result = transaction.invitationToken === null
+      ? await loginHostedUser(identity)
+      : await acceptIdentityInvitation(identity, transaction.invitationToken);
     const maximumAgeSeconds = Math.max(
       1,
       Math.floor((new Date(result.session.session.expiresAt).getTime() - Date.now()) / 1000),

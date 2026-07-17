@@ -30,6 +30,11 @@ off because `ListFunctions` can expose environment-variable values. These local
 capabilities do not clear the hosted production gates below and are not presented
 as a Cloudaware, GuardDuty, Inspector, Security Hub, or SIEM replacement.
 
+The hosted identity foundation now includes the real Cognito/OIDC PKCE callback
+boundary and an MFA-protected, single-use organization invitation lifecycle.
+Hosted release remains blocked on the remaining tenant-isolation, recovery,
+rate-limit and broker gates documented below.
+
 ## Bounded first-release scope
 
 The first production slice is intentionally read-only.

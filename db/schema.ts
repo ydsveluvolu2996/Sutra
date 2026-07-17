@@ -74,6 +74,42 @@ export const memberships = sqliteTable("memberships", {
   index("memberships_org_user_status_idx").on(table.orgId, table.userId, table.status),
 ]);
 
+export const identityInvitations = sqliteTable("identity_invitations", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  email: text("email").notNull(),
+  role: text("role", { enum: ["org_admin", "analyst", "viewer", "customer_admin", "customer_viewer"] }).notNull(),
+  scopeMode: text("scope_mode", { enum: ["all_customers", "assigned_customers"] }).notNull().default("assigned_customers"),
+  tokenDigest: text("token_digest").notNull(),
+  invitedBy: text("invited_by").notNull().references(() => users.id),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
+  acceptedUserId: text("accepted_user_id"),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("identity_invitations_token_uq").on(table.tokenDigest),
+  uniqueIndex("identity_invitations_active_email_uq")
+    .on(table.orgId, table.email)
+    .where(sql`${table.acceptedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+  index("identity_invitations_org_expiry_idx").on(table.orgId, table.expiresAt, table.revokedAt),
+]);
+
+export const identityInvitationEvents = sqliteTable("identity_invitation_events", {
+  id: text("id").primaryKey(),
+  invitationId: text("invitation_id").notNull().references(() => identityInvitations.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  actorId: text("actor_id").notNull(),
+  action: text("action", { enum: ["created", "accepted", "revoked"] }).notNull(),
+  occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  previousEventHash: text("previous_event_hash"),
+  eventHash: text("event_hash").notNull(),
+}, (table) => [
+  uniqueIndex("identity_invitation_events_hash_uq").on(table.invitationId, table.eventHash),
+  index("identity_invitation_events_org_time_idx").on(table.orgId, table.occurredAt, table.id),
+]);
+
 export const customers = sqliteTable("customers", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().references(() => organizations.id),

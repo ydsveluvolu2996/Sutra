@@ -18,6 +18,7 @@ const migrationFiles = [
   "0002_case_management.sql",
   "0003_security_events.sql",
   "0004_compliance_exceptions.sql",
+  "0005_hosted_identity_lifecycle.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

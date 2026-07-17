@@ -65,10 +65,16 @@ The application-side Cognito boundary now implements:
 - a rotating opaque server session stored only as an irreversible digest;
 - exact `(issuer, subject, email)` matching to one active, pre-provisioned
   organization membership, without email-only account linking;
+- MFA-protected organization invitations with one-time token disclosure,
+  digest-only persistence, one active invitation per email, one-hour to
+  seven-day expiry, revocation, exact verified-email acceptance and atomic
+  identity/membership activation;
+- immutable hash-linked invitation create, accept and revoke activity in both
+  D1 and PostgreSQL;
 - hosted session lookup through the existing centralized authorization policy,
   plus local-auth compatibility for the laptop demo.
 
-The identity release hold remains in place. Administrator invitation creation,
-single-use invitation acceptance, recovery administration, membership switching,
-session/device administration, distributed rate limiting, and the complete
+The identity release hold remains in place. Recovery administration, membership
+switching, session/device administration, hosted step-up authentication,
+distributed rate limiting, customer-assignment administration and the complete
 two-organization route/job/export isolation suite are not yet implemented.

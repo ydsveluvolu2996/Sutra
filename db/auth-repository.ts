@@ -442,6 +442,7 @@ export interface HostedIdentity {
   readonly issuer: string;
   readonly subject: string;
   readonly email: string;
+  readonly displayName: string;
   readonly authenticatedAt: number;
   readonly expiresAt: number;
 }

@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import pg from "pg";
 
 const root = resolve(import.meta.dirname, "..");
-const snapshot = JSON.parse(await readFile(resolve(root, "drizzle/meta/0010_snapshot.json"), "utf8"));
+const snapshot = JSON.parse(await readFile(resolve(root, "drizzle/meta/0011_snapshot.json"), "utf8"));
 const postgresMigrations = (
   await Promise.all([
     "0000_sutra_baseline.sql",
@@ -13,6 +13,7 @@ const postgresMigrations = (
     "0002_case_management.sql",
     "0003_security_events.sql",
     "0004_compliance_exceptions.sql",
+    "0005_hosted_identity_lifecycle.sql",
   ].map((file) => readFile(resolve(root, "postgres/migrations", file), "utf8")))
 ).join("\n--> statement-breakpoint\n");
 

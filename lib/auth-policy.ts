@@ -21,6 +21,7 @@ export type CustomerRole = (typeof CUSTOMER_ROLES)[number];
 
 export const CAPABILITIES = [
   "workspace:read",
+  "membership:manage",
   "customer:create",
   "connection:read",
   "connection:manage",

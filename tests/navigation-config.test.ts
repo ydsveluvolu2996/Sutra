@@ -5,6 +5,7 @@ import { groupContainsActiveItem, navGroups, visibleNavigation } from "../app/co
 
 const allCapabilities = new Set<Capability>([
   "workspace:read",
+  "membership:manage",
   "customer:create",
   "connection:read",
   "connection:manage",
@@ -23,6 +24,7 @@ describe("grouped workspace navigation", () => {
       "Compliance",
       "FinOps",
       "Operations",
+      "Administration",
     ]);
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "security")?.items.map((item) => item.label),
