@@ -373,6 +373,22 @@ async function teardown() {
   }
   if (ecrRepository) {
     try {
+      const described = JSON.parse(await aws(
+        "ecr", "describe-repositories", "--repository-names", ecrRepository,
+      ));
+      const repositoryArn = described.repositories?.[0]?.repositoryArn;
+      if (typeof repositoryArn !== "string") {
+        throw new Error(`Refusing to delete ECR repository ${ecrRepository}: repository ARN was not returned`);
+      }
+      const tagList = JSON.parse(await aws(
+        "ecr", "list-tags-for-resource", "--resource-arn", repositoryArn,
+      ));
+      const repositoryTags = new Map(
+        (tagList.tags ?? []).map((tag) => [tag.Key, tag.Value]),
+      );
+      if (repositoryTags.get("sutra:disposable") !== "true") {
+        throw new Error(`Refusing to delete ECR repository ${ecrRepository} without the sutra:disposable=true tag`);
+      }
       await aws("ecr", "delete-repository", "--repository-name", ecrRepository, "--force");
     } catch (error) {
       if (!String(error.message).includes("RepositoryNotFoundException")) throw error;
@@ -401,7 +417,7 @@ if (command === "plan") {
     "create=one EKS 1.35 control plane; one on-demand t3.large node; encrypted 20-GiB gp3; no NAT gateway; no SSH; IMDSv2; all control-plane logs with 7-day retention",
     "network=public endpoint restricted to the explicit SUTRA_VALIDATOR_CIDR /32",
     "preflight=verify caller account, EKS status and exact disposable/expiry tags",
-    "teardown=uninstall security stack; disable eksctl stack termination protection; delete cluster and nodegroup stacks; delete control-plane log group; optionally delete ECR; delete budget; delete tag-verified SUTRA_DISPOSABLE_ROLE_STACKS and disposable sutra/notifications secrets; report remaining sutra:disposable resources and fail unless empty",
+    "teardown=uninstall security stack; disable eksctl stack termination protection; delete cluster and nodegroup stacks; delete control-plane log group; delete ECR only when it carries sutra:disposable=true; delete budget; delete tag-verified SUTRA_DISPOSABLE_ROLE_STACKS and disposable sutra/notifications secrets; report remaining sutra:disposable resources and fail unless empty",
     `teardownConfirmation=--confirm ${cluster}`,
     "",
   ].join("\n"));

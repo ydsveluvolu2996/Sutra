@@ -76,6 +76,9 @@ test("AWS calls require execution, exact account/tag checks, and typed teardown 
   assert.match(source, /startsWith\(NOTIFICATION_SECRET_PREFIX\)/u);
   assert.match(source, /--force-delete-without-recovery/u);
   assert.match(source, /Teardown incomplete: tagged disposable resources remain/u);
+  assert.match(source, /"ecr", "describe-repositories"/u);
+  assert.match(source, /"ecr", "list-tags-for-resource"/u);
+  assert.match(source, /Refusing to delete ECR repository .+ without the sutra:disposable=true tag/u);
 });
 
 function fakeAwsScript(logPath, remainingResourcesJson) {
@@ -86,6 +89,7 @@ function fakeAwsScript(logPath, remainingResourcesJson) {
     '"sts get-caller-identity") echo \'{"Account":"738663485493"}\' ;;',
     '"eks describe-cluster") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
     '"logs delete-log-group") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
+    '"ecr describe-repositories") echo "An error occurred (RepositoryNotFoundException)" 1>&2; exit 254 ;;',
     '"ecr delete-repository") echo "An error occurred (RepositoryNotFoundException)" 1>&2; exit 254 ;;',
     '"budgets delete-budget") echo "An error occurred (NotFoundException)" 1>&2; exit 254 ;;',
     '"cloudformation describe-stacks") echo \'{"Stacks":[{"Tags":[{"Key":"sutra:disposable","Value":"true"}]}]}\' ;;',
@@ -142,6 +146,69 @@ test("resumable teardown cleans role stacks, notification secrets, and audits re
     assert.doesNotMatch(log, /delete-secret --secret-id sutra\/other-secret/u);
     assert.match(calls.at(-1) ?? "", /^resourcegroupstaggingapi get-resources/u);
     assert.doesNotMatch(log, /^eksctl/mu);
+  });
+});
+
+function fakeAwsWithEcr(ecrTagsJson) {
+  return [
+    "#!/bin/sh",
+    'case "$1 $2" in',
+    '"sts get-caller-identity") echo \'{"Account":"738663485493"}\' ;;',
+    '"eks describe-cluster") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
+    '"logs delete-log-group") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
+    '"ecr describe-repositories") echo \'{"repositories":[{"repositoryArn":"arn:aws:ecr:ap-south-1:738663485493:repository/sutra/kubernetes-agent"}]}\' ;;',
+    `"ecr list-tags-for-resource") echo '${ecrTagsJson}' ;;`,
+    '"ecr delete-repository") echo \'{}\' ;;',
+    '"budgets delete-budget") echo "An error occurred (NotFoundException)" 1>&2; exit 254 ;;',
+    '"secretsmanager list-secrets") echo \'{"SecretList":[]}\' ;;',
+    '"resourcegroupstaggingapi get-resources") echo \'{"ResourceTagMappingList":[]}\' ;;',
+    '*) echo "unexpected fake aws call: $*" 1>&2; exit 64 ;;',
+    "esac",
+    "",
+  ].join("\n");
+}
+
+async function withCustomFakeAws(script, execution) {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-guard-ecr-"));
+  try {
+    const awsPath = join(directory, "aws");
+    await writeFile(awsPath, script, "utf8");
+    await chmod(awsPath, 0o755);
+    return await execution(directory);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("teardown refuses to delete an ECR repository that is not tagged sutra:disposable=true", async () => {
+  const untagged = '{"tags":[{"Key":"team","Value":"platform"}]}';
+  await withCustomFakeAws(fakeAwsWithEcr(untagged), async (path) => {
+    try {
+      await execute(process.execPath, [
+        "scripts/eks-disposable-guard.mjs", "teardown",
+        "--confirm", "sutra-disposable-test", "--execute",
+      ], {
+        cwd: new URL("..", import.meta.url),
+        env: { ...environment(), PATH: path },
+      });
+      assert.fail("teardown must refuse an untagged ECR repository");
+    } catch (error) {
+      assert.match(String(error.stderr), /Refusing to delete ECR repository .+ without the sutra:disposable=true tag/u);
+    }
+  });
+});
+
+test("teardown deletes an ECR repository only after confirming the disposable tag", async () => {
+  const tagged = '{"tags":[{"Key":"sutra:disposable","Value":"true"}]}';
+  await withCustomFakeAws(fakeAwsWithEcr(tagged), async (path) => {
+    const { stdout } = await execute(process.execPath, [
+      "scripts/eks-disposable-guard.mjs", "teardown",
+      "--confirm", "sutra-disposable-test", "--execute",
+    ], {
+      cwd: new URL("..", import.meta.url),
+      env: { ...environment(), PATH: path },
+    });
+    assert.match(stdout, /Remaining sutra:disposable resources: none/u);
   });
 });
 
