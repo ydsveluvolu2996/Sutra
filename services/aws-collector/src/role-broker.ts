@@ -55,7 +55,7 @@ const EXPECTED_ROLE_PATH = "/sutra/";
 const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
 const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
-const IMPLEMENTED_READ_ACTIONS = [
+export const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:DescribeRegions",
   "ec2:DescribeInstances",
@@ -90,24 +90,33 @@ const IMPLEMENTED_READ_ACTIONS = [
   "ce:GetCostAndUsage",
   "ce:GetCostForecast",
 ] as const;
-const TRUST_ATTESTATION_ACTIONS = [
+export const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
   "iam:ListRolePolicies",
   "iam:GetRolePolicy",
 ] as const;
 /**
- * Compact exceptions to the STS outer deny. These wildcard read families do
- * not grant permission. The attested customer role also carries an explicit
- * exact-action deny ceiling, so resource-policy grants cannot expand access.
+ * Compact read-only outer cap for STS. The customer role contract is attested
+ * before every collector session and contains the exact-action deny ceiling;
+ * these patterns only keep the STS payload below AWS's packed-policy limit.
  */
-const SESSION_DENY_EXCEPTIONS = [
+const SESSION_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:Describe*",
+  "elasticloadbalancing:Describe*",
+  "kms:List*",
+  "kms:Describe*",
+  "dynamodb:List*",
+  "dynamodb:Describe*",
+  "ecr:Describe*",
   "s3:ListAllMyBuckets",
   "s3:GetBucketPublicAccessBlock",
   "rds:Describe*",
-  "iam:Get*",
-  "iam:List*",
+  "iam:GetAccountSummary",
+  "iam:GetAccountPasswordPolicy",
+  "iam:GetRole",
+  "iam:ListRolePolicies",
+  "iam:GetRolePolicy",
   "cloudtrail:Describe*",
   "cloudtrail:GetTrailStatus",
   "cloudtrail:LookupEvents",
@@ -118,14 +127,7 @@ const SESSION_DENY_EXCEPTIONS = [
   "inspector2:BatchGet*",
   "inspector2:List*",
   "ce:Get*",
-  "elasticloadbalancing:Describe*",
-  "kms:List*",
-  "kms:Describe*",
-  "dynamodb:List*",
-  "dynamodb:Describe*",
-  "ecr:Describe*",
 ] as const;
-
 const EXPECTED_ACCESS_DENIALS = new Set([
   "AccessDenied",
   "AccessDeniedException",
@@ -228,9 +230,10 @@ export function accountIdFromRoleArn(roleArn: string): string {
 }
 
 /**
- * Defense-in-depth cap applied to every STS session. Even if a customer
- * accidentally registers an administrator role, the issued session can use
- * only this release's implemented metadata APIs and trust-attestation reads.
+ * Defense-in-depth cap applied to every STS session. Session policies are an
+ * intersection with the role policy. This compact policy permits only read
+ * families needed by Sutra; the freshly attested customer role supplies the
+ * exact-action deny ceiling that also blocks direct resource-policy grants.
  */
 export function readonlyMetadataSessionPolicy(roleArn: string): string {
   const parsed = parseIamRoleArn(roleArn);
@@ -238,18 +241,8 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
     Version: "2012-10-17",
     Statement: [
       {
-        Effect: "Deny",
-        NotAction: SESSION_DENY_EXCEPTIONS,
-        Resource: "*",
-      },
-      {
-        Effect: "Deny",
-        Action: TRUST_ATTESTATION_ACTIONS,
-        NotResource: parsed.arn,
-      },
-      {
         Effect: "Allow",
-        Action: IMPLEMENTED_READ_ACTIONS,
+        Action: SESSION_READ_ACTIONS,
         Resource: "*",
       },
       {
@@ -259,11 +252,9 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
       },
     ],
   });
-  // STS compresses inline policies and any session tags into a separate packed
-  // representation whose limit can be reached before the documented 2,048-byte
-  // plaintext limit. Optional Sid fields are deliberately omitted, and this
-  // fixed ceiling preserves headroom for the reviewed four-statement policy.
-  if (policy.length > 1_800) {
+  // Keep substantial headroom: a 1,073-character exact-action policy consumed
+  // 107% of AWS's packed limit in live validation despite the 2,048-byte limit.
+  if (policy.length > 900) {
     throw new ConnectionIntegrityError("The fixed STS session policy exceeds its safe limit");
   }
   return policy;
@@ -487,7 +478,11 @@ export class AwsRoleBroker {
     if (resolved.connection.permissionPackVersion !== PERMISSION_PACK_VERSION) {
       throw new ConnectionStateError();
     }
-    return this.assumeAndValidateIdentity(resolved, jobId);
+    const validated = await this.assumeAndValidateIdentity(resolved, jobId);
+    // Re-attest on every collection so customer-side role drift cannot silently
+    // expand the compact read-family session cap.
+    await this.attestRoleContract(resolved, validated.credentials);
+    return validated;
   }
 
   /**
