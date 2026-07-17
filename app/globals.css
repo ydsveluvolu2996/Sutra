@@ -1643,3 +1643,11 @@ h3 { letter-spacing: -.02em; }
 .scorecard-regression { font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; color: #9f2f3c; background: #fcebed; padding: 2px 6px; border-radius: 999px; }
 .trend-up { color: #12a26a; } .trend-down { color: #bc3d49; } .trend-warn { color: #b6862a; } .trend-flat { color: #7c8991; }
 @media (max-width: 680px) { .scorecard-row { grid-template-columns: 52px 1fr; } .trend-sparkline, .scorecard-delta { grid-column: 2; align-items: flex-start; text-align: left; } }
+
+/* Vulnerability updates (new/resolved CVE feed) */
+.vuln-delta-list { display: flex; flex-direction: column; gap: 6px; }
+.vuln-delta-row { display: grid; grid-template-columns: 74px minmax(0,1fr) 150px; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
+.vuln-delta-row small { display: block; color: #7c8991; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.vuln-delta-fix { text-align: right; font-size: 11px; color: #3a4a53; }
+.vuln-delta-resolved { opacity: .82; }
+@media (max-width: 640px) { .vuln-delta-row { grid-template-columns: 70px 1fr; } .vuln-delta-fix { grid-column: 2; text-align: left; } }

@@ -442,6 +442,37 @@ export class KubernetesRepository {
     }));
   }
 
+  public async listVulnerabilityScans(
+    scope: KubernetesTenantScope,
+    clusterId: string,
+  ): Promise<{
+    readonly latest: { readonly collectedAt: string; readonly findings: readonly TrivyOperatorFinding[] } | null;
+    readonly previous: { readonly collectedAt: string; readonly findings: readonly TrivyOperatorFinding[] } | null;
+  }> {
+    assertScope(scope);
+    if (!validIdentifier(clusterId)) throw new KubernetesRepositoryError("INVALID_INPUT");
+    const db = await this.ready();
+    const runs = await db.prepare(
+      `SELECT id, collected_at
+         FROM kubernetes_scan_runs
+        WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND status = 'complete'
+        ORDER BY collected_at DESC
+        LIMIT 2`,
+    ).bind(scope.orgId, scope.customerId, clusterId).all<{ id: string; collected_at: number }>();
+    const runRows = runs.results ?? [];
+    const load = async (run: { id: string; collected_at: number } | undefined) => {
+      if (run === undefined) return null;
+      const row = await db.prepare(
+        `SELECT findings_json FROM kubernetes_scan_scanner_evidence
+          WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND scan_run_id = ?
+          LIMIT 1`,
+      ).bind(scope.orgId, scope.customerId, clusterId, run.id).first<{ findings_json: string }>();
+      const findings = row === null ? [] : parseJsonArray(row.findings_json).map(normalizeScannerFinding);
+      return { collectedAt: new Date(Number(run.collected_at)).toISOString(), findings };
+    };
+    return { latest: await load(runRows[0]), previous: await load(runRows[1]) };
+  }
+
   public async getLatestCompleteScan(
     scope: KubernetesTenantScope,
     clusterId: string,
