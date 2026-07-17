@@ -1448,3 +1448,26 @@ h3 { letter-spacing: -.02em; }
   .hubble-flow-list article { grid-template-columns: 82px minmax(0,1fr); }
   .hubble-flow-list time, .hubble-flow-list code { grid-column: 2; }
 }
+
+.security-graph { display: flex; flex-direction: column; gap: 12px; }
+.security-graph-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.security-graph-actions { display: flex; gap: 8px; }
+.security-graph-actions .button { min-width: 34px; padding: 4px 10px; }
+.security-graph-scroll { overflow: auto; border: 1px solid var(--border, #e3e7ea); border-radius: 12px; background: var(--surface, #fbfcfd); max-height: 520px; }
+.security-graph svg { display: block; }
+.security-graph-edge path { stroke: #8a97a0; stroke-width: 1.4; color: #8a97a0; opacity: 0.9; }
+.security-graph-edge text { font-size: 9px; fill: #5d7079; }
+.security-graph-node { cursor: pointer; }
+.security-graph-node rect { fill: #ffffff; stroke-width: 1.6; }
+.security-graph-node:focus { outline: none; }
+.security-graph-node:focus rect, .security-graph-selected rect { stroke-width: 3; }
+.security-graph-kind { font-size: 8px; text-transform: uppercase; letter-spacing: 0.08em; fill: #5d7079; }
+.security-graph-label { font-size: 11px; font-weight: 700; fill: #22303a; }
+.security-graph-dimmed { opacity: 0.18; }
+.security-graph-detail { border: 1px solid var(--border, #e3e7ea); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.security-graph-detail header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.security-graph-detail h3 { margin: 2px 0 0; font-size: 14px; }
+.security-graph-evidence { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.security-graph-evidence article { display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border, #e3e7ea); border-radius: 10px; padding: 8px 10px; }
+.security-graph-evidence code { font-size: 10px; overflow-wrap: anywhere; }
+.attack-path-header-actions { display: flex; align-items: center; gap: 12px; }
