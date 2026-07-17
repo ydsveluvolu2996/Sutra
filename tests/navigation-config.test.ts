@@ -46,6 +46,7 @@ describe("grouped workspace navigation", () => {
         "Issues",
         "Attack paths",
         "RBAC",
+        "Effective permissions",
         "Network",
         "Runtime",
         "Compliance",

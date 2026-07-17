@@ -383,10 +383,23 @@ function configuration(kind: KubernetesResourceKind, item: Record<string, unknow
   }
   if (kind === "rolebinding" || kind === "clusterrolebinding") {
     const roleRef = optionalRecord(item.roleRef);
+    const rawSubjects = Array.isArray(item.subjects) ? item.subjects.slice(0, 256) : [];
+    // Bounded RBAC identity references (kind/namespace/name) — the same class of
+    // non-sensitive identifier as the role names already retained. Enables
+    // subject-level effective-permission (CIEM) resolution without collecting
+    // any Secret, token, or workload payload.
     return {
       roleRefKind: safeString(roleRef.kind, 64),
       roleRefName: safeString(roleRef.name, 253),
       subjectCount: Array.isArray(item.subjects) ? item.subjects.length : 0,
+      subjects: rawSubjects.map((rawSubject) => {
+        const subject = optionalRecord(rawSubject);
+        return {
+          kind: safeString(subject.kind, 64),
+          namespace: safeString(subject.namespace, 253),
+          name: safeString(subject.name, 253),
+        };
+      }),
     };
   }
   if (kind === "node") {
