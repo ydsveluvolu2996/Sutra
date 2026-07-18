@@ -60,3 +60,37 @@ contents/samples retained, absence of a scan is `unknown` not `clean`.
 
 **Fixture-testable now:** step 1 (the planner) — could be built without AWS.
 **Needs AWS (authorize + cost):** steps 2–4 and any real snapshot/scan.
+
+## Built so far (code, no AWS, tested)
+- `lib/aws-agentless-discovery.ts` — `normalizeDescribedVolumes` (EC2
+  DescribeVolumes → `AgentlessVolume[]`, region from AZ).
+- `lib/aws-agentless-scan-plan.ts` — `buildAgentlessScanPlan` (deterministic
+  snapshot→copy→scan→teardown plan, honest skip reasons, guaranteed teardown,
+  concurrency waves, TTL clamps).
+- `lib/aws-agentless-scan-runner.ts` — `executeAgentlessScan(plan, executor)`:
+  the orchestration engine over an injected `AgentlessExecutor`, with teardown
+  guaranteed even when a scan throws. Fully unit-tested with a fake executor
+  (`tests/aws-agentless-scan.test.ts`), including the teardown-on-failure and
+  teardown-failure-recorded cases.
+- `scripts/agentless-scan.mjs` — CLI: offline `plan`; `apply` hard-refused
+  unless `--execute --i-accept-aws-cost` AND the real executor is wired.
+
+## The AWS executor (the one AWS-authorization-gated piece)
+`AgentlessExecutor` (in the runner) is the exact contract to implement against a
+live account — as a **new AWS-SDK service** (the existing `services/aws-collector`
+uses `rootDir: "."` and cannot import the root-lib interface, so this is its own
+module). Method → AWS SDK mapping:
+
+| Interface method | AWS SDK call |
+|---|---|
+| `createSnapshot` | EC2 `CreateSnapshotCommand` (+ `CreateTagsCommand` sutra-agentless + TTL) |
+| `copySnapshotKms` | EC2 `CopySnapshotCommand` with `Encrypted: true`, `KmsKeyId` = Sutra scan-account key |
+| `createScanVolume` | EC2 `CreateVolumeCommand` from the snapshot in the scan AZ (read-only mount by the worker) |
+| `runScan` | attach to a disposable scanner (EC2/Fargate), mount read-only, run Trivy + the malware ingest; map to `AgentlessScanFinding[]` — **needs a worker instance, not just an SDK call** |
+| `deleteVolume` | EC2 `DeleteVolumeCommand` |
+| `deleteSnapshot` | EC2 `DeleteSnapshotCommand` (copied + source) |
+
+Role assumption reuses `services/aws-collector` `AwsRoleBroker` (STS AssumeRole +
+ExternalId). A TTL sweeper reconciles any `teardownFailures` the runner reports.
+This module is deliberately built + tested **on AWS, service by service**, so
+its SDK calls are validated against real responses rather than guessed.
