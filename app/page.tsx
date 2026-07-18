@@ -1,15 +1,5 @@
 import Link from "next/link";
-
-const capabilities = [
-  { code: "GRAPH", tone: "blue", title: "Evidence-backed security graph", copy: "Explore every cloud, Kubernetes, identity and network relationship on one canvas — and every edge is a cited observation, not a black-box guess.", state: "Live" },
-  { code: "ISSUES", tone: "red", title: "Runtime-informed issues", copy: "Not thousands of CVEs — the handful actually internet-reachable, running and exploitable, proven with observed network and runtime evidence.", state: "Live" },
-  { code: "CIEM", tone: "violet", title: "Effective permissions", copy: "Resolve a workload's effective RBAC and follow its IRSA role into AWS: can this pod read Secrets, or delete an S3 bucket?", state: "Live" },
-  { code: "TRENDS", tone: "green", title: "Posture trends & scorecard", copy: "A per-customer security score over time with regression detection and a resell-ready export — the report an MSP hands over.", state: "Live" },
-  { code: "DRIFT", tone: "orange", title: "Drift & new-CVE detection", copy: "Catch a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan.", state: "Live" },
-  { code: "FIX", tone: "teal", title: "Guided remediation", copy: "Generate the exact Kyverno policy or kubectl patch that fixes an issue — a reviewed suggestion, never an automatic change.", state: "Live" },
-  { code: "RUNTIME", tone: "red", title: "Runtime detection", copy: "Signed, replay-resistant Falco events with Kubernetes context, human-confirmed cases and durable notification delivery.", state: "Live" },
-  { code: "COMPLY", tone: "green", title: "Readiness mappings", copy: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", state: "Live" },
-];
+import { CapabilityExplorer, CorrelationGraph, TrustPanel } from "./components/landing-interactive";
 
 const platformLayers = [
   { number: "01", title: "Customer cloud", copy: "A customer-owned IAM role grants only the metadata APIs in the selected collector pack." },
@@ -17,21 +7,6 @@ const platformLayers = [
   { number: "03", title: "Normalized CMDB", copy: "Assets, relationships and evidence are validated, scoped and promoted only after a complete run." },
   { number: "04", title: "MSP control plane", copy: "Role-aware dashboards, findings, audit history and customer access operate without exposing AWS credentials." },
 ];
-
-const trustPolicy = [
-  "Principal:",
-  "  AWS: arn:aws:iam::VENDOR:role/SutraCollector",
-  "Action: sts:AssumeRole",
-  "Condition:",
-  "  StringEquals:",
-  "    sts:ExternalId: psd_<unique-128-bit-value>",
-  "  StringLike:",
-  "    sts:RoleSessionName: sutra-*",
-  "",
-  "# No resource mutation",
-  "# No object, secret, or database payload reads",
-  "# Maximum one-hour temporary session",
-].join("\n");
 
 const marqueeItems = ["Amazon EKS", "AWS IAM & IRSA", "Trivy Operator", "Falco runtime", "Kyverno admission", "Cilium · Hubble", "Amazon GuardDuty", "Security Hub", "Amazon Inspector", "SBOM & signing", "Kubernetes RBAC", "CIS Benchmarks"];
 
@@ -90,26 +65,19 @@ export default function LandingPage() {
 
         <section className="site-section platform-section" id="platform">
           <div className="section-intro centered" data-reveal><span className="section-kicker">Correlation is the product</span><h2>One graph connects the cloud, the cluster, and the identity.</h2><p>A privileged pod, reachable from the internet, running a critical CVE, with a ServiceAccount that can reach S3 — no single tool sees that whole chain. Sutra correlates it and cites every edge.</p></div>
-          <div className="platform-orbit" data-reveal>
-            <div className="orbit-node orbit-cmdb"><b>CMDB</b><span>Normalized asset graph</span></div>
-            <div className="orbit-line orbit-line-1" /><div className="orbit-line orbit-line-2" /><div className="orbit-line orbit-line-3" /><div className="orbit-line orbit-line-4" />
-            <div className="orbit-node orbit-north"><b>CSPM</b><span>Configuration posture</span></div><div className="orbit-node orbit-east"><b>IAM</b><span>Identity hygiene</span></div><div className="orbit-node orbit-south"><b>EVIDENCE</b><span>Audit & compliance</span></div><div className="orbit-node orbit-west"><b>FINOPS</b><span>Cost signals · planned</span></div>
-            <div className="orbit-customer orbit-customer-1">Customer 01</div><div className="orbit-customer orbit-customer-2">Customer 02</div><div className="orbit-customer orbit-customer-3">Customer 03</div>
-          </div>
+          <div className="orbit-reveal" data-reveal><CorrelationGraph /></div>
         </section>
 
         <section className="site-section capabilities-section" id="capabilities">
           <div className="section-intro" data-reveal><span className="section-kicker">One correlated suite</span><h2>Every other tool floods you with CVEs. Sutra shows what&apos;s reachable.</h2><p>Cloud, Kubernetes, identity, network, runtime and supply-chain evidence in one graph — and only the risks proven to matter surface first. Every capability below is live in the product.</p></div>
-          <div className="capability-grid" data-reveal>
-            {capabilities.map((item) => <article className={`capability-card capability-${item.tone}`} key={item.code}><div><span>{item.code}</span><b className="module-state state-live">{item.state}</b></div><h3>{item.title}</h3><p>{item.copy}</p><Link href="/dashboard">Explore capability <span>→</span></Link></article>)}
-          </div>
+          <div className="cap-ex-wrap" data-reveal><CapabilityExplorer /></div>
         </section>
 
         <section className="trust-section" id="trust">
           <div className="trust-bg" aria-hidden="true"><i /><i /></div>
           <div className="trust-inner">
             <div className="trust-copy" data-reveal><span className="section-kicker light">Trust is a product feature</span><h2>Customer credentials never enter the browser or web control plane.</h2><p>A separate collector workload assumes the customer role with temporary STS credentials. The application receives normalized, scoped evidence—not access keys.</p><ul><li><span>01</span>Exact vendor workload-role principal</li><li><span>02</span>Unique, platform-generated ExternalId</li><li><span>03</span>Positive and negative trust validation</li><li><span>04</span>Metadata-only permission packs</li></ul><Link className="button trust-button" href="/controls#architecture">Review the security architecture</Link></div>
-            <div className="trust-policy-card" data-reveal><div><span>customer-role.yaml</span><b>READ ONLY</b></div><pre><code>{trustPolicy}</code></pre><p><span>✓</span> Customer can revoke access by deleting the role.</p></div>
+            <div className="trust-panel-wrap" data-reveal><TrustPanel /></div>
           </div>
         </section>
 
