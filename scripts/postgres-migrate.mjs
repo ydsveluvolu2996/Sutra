@@ -29,6 +29,7 @@ const migrationFiles = [
   "0013_runtime_event_cases.sql",
   "0014_kubernetes_sbom_license_policy.sql",
   "0015_vulnerability_feed_mirror.sql",
+  "0016_vulnerability_waivers.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

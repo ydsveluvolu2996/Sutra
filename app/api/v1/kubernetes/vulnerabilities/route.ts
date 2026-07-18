@@ -2,15 +2,18 @@ import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { VulnerabilityMirrorRepository } from "../../../../../db/vulnerability-mirror-repository";
+import { VulnerabilityWaiverRepository } from "../../../../../db/vulnerability-waiver-repository";
 import { KEV_AS_OF, KEV_COUNT, isKnownExploited } from "../../../../../lib/kev-snapshot";
 import { mergeVulnerabilityFindings } from "../../../../../lib/vulnerability-finding";
 import { deriveVulnerabilityFindings, scanFindingKey } from "../../../../../lib/vulnerability-finding-evidence";
-import { buildVulnerabilityQueue } from "../../../../../lib/vulnerability-management";
+import { buildVulnerabilityQueue, type VulnWaiver } from "../../../../../lib/vulnerability-management";
+import { toEngineWaiver } from "../../../../../lib/vulnerability-waiver-mapping";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const CLUSTER_ID = /^kcluster_[a-f0-9]{48}$/u;
+const MS_PER_DAY = 86_400_000;
 
 function invalid(): never {
   throw Object.assign(new Error("Vulnerability query rejected"), { code: "INVALID_INPUT" });
@@ -73,8 +76,19 @@ export async function GET(request: Request): Promise<Response> {
     });
     const epssCovered = findings.filter((finding) => finding.epss !== null).length;
 
+    // Accepted-risk waivers that apply to this cluster (org-wide or cluster-scoped).
+    // The engine treats each as an accepted-risk record — it suppresses a matching
+    // OPEN finding only while unexpired, and reports empty/expired waivers in
+    // invalidWaivers rather than silently hiding anything.
+    const storedWaivers = await new VulnerabilityWaiverRepository().applicable(scope, clusterId);
+    const waivers: VulnWaiver[] = storedWaivers.map(toEngineWaiver);
+
     const now = Date.now();
-    const queue = buildVulnerabilityQueue(findings, { nowMs: now, nowDays: Math.floor(now / 86_400_000) });
+    const queue = buildVulnerabilityQueue(findings, {
+      nowMs: now,
+      nowDays: Math.floor(now / MS_PER_DAY),
+      waivers,
+    });
     return jsonResponse({
       queue,
       scannedAt: scans.latest?.collectedAt ?? null,
@@ -82,6 +96,7 @@ export async function GET(request: Request): Promise<Response> {
       totalFindings: findings.length,
       kev: { asOf: KEV_AS_OF, count: KEV_COUNT },
       epss: { covered: epssCovered },
+      waivers: { active: storedWaivers.length },
     });
   } catch (error) {
     return errorResponse(error);

@@ -1724,6 +1724,25 @@ h3 { letter-spacing: -.02em; }
 .vuln-delta-resolved { opacity: .82; }
 @media (max-width: 640px) { .vuln-delta-row { grid-template-columns: 70px 1fr; } .vuln-delta-fix { grid-column: 2; text-align: left; } }
 
+/* Vulnerability waivers (accepted-risk suppression) */
+.vuln-delta-fix { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.vuln-waive-btn { align-self: flex-end; min-height: 26px; padding: 0 10px; border: 1px solid var(--line-dark, #cbd5da); border-radius: 6px; background: #fff; color: var(--ink, #1d242a); font-size: 10px; font-weight: 600; cursor: pointer; }
+.vuln-waive-btn:hover:not(:disabled) { border-color: var(--blue, #04a6a8); color: var(--blue, #04a6a8); }
+.vuln-waive-btn:disabled { opacity: .5; cursor: default; }
+.vuln-waiver-form-panel { border-color: var(--blue, #04a6a8); }
+.vuln-waiver-target { font-size: 11px; color: #55636b; line-height: 1.5; margin: 0 0 10px; }
+.vuln-waiver-target strong { color: var(--ink, #1d242a); }
+.vuln-waiver-form { display: grid; gap: 12px; }
+.vuln-waiver-form label { display: grid; gap: 5px; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #55636b; }
+.vuln-waiver-form textarea, .vuln-waiver-form input { width: 100%; padding: 9px 11px; border: 1px solid var(--line-dark, #cbd5da); border-radius: 7px; background: #fff; color: var(--ink, #1d242a); font-size: 12px; font-family: inherit; }
+.vuln-waiver-form textarea { min-height: 70px; resize: vertical; }
+.vuln-waiver-form-row { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; }
+.vuln-waiver-form-row label { flex: 0 0 200px; }
+.vuln-waiver-form-actions { flex: 1 1 auto; display: flex; justify-content: flex-end; }
+.vuln-waiver-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 10px 12px; }
+.vuln-waiver-row small { display: block; color: #7c8991; margin-top: 2px; overflow-wrap: anywhere; }
+.vuln-waiver-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 10px; color: #7c8991; align-items: center; }
+
 /* Drift detection */
 .drift-list { display: flex; flex-direction: column; gap: 6px; }
 .drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
