@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 import { AppShell } from "../components/app-shell";
 import { formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
@@ -20,7 +20,10 @@ function scoreBand(value: number): "good" | "warn" | "risk" {
 
 // Semicircular gauge drawn with a single arc whose dash length encodes the
 // fraction, so the value reads at a glance without any charting dependency.
+// Healthy scores stroke with the signature aurora gradient (cyan→blue→violet);
+// warn/risk bands fall back to their solid semantic colors from the stylesheet.
 function ScoreGauge({ value, caption }: { readonly value: number; readonly caption: string }) {
+  const gradientId = useId();
   const clamped = Math.max(0, Math.min(100, value));
   const radius = 52;
   const length = Math.PI * radius;
@@ -28,8 +31,16 @@ function ScoreGauge({ value, caption }: { readonly value: number; readonly capti
   return (
     <div className={`score-gauge score-gauge-${band}`}>
       <svg viewBox="0 0 128 74" role="img" aria-label={`${caption}: ${clamped} out of 100`}>
+        <defs>
+          <linearGradient id={gradientId} x1="0" y1="1" x2="1" y2="0">
+            <stop offset="0%" stopColor="#22d3ee" />
+            <stop offset="52%" stopColor="#3b82f6" />
+            <stop offset="100%" stopColor="#8b5cf6" />
+          </linearGradient>
+        </defs>
         <path className="score-gauge-track" d="M 12 66 A 52 52 0 0 1 116 66" fill="none" strokeWidth="10" strokeLinecap="round" />
         <path className="score-gauge-value" d="M 12 66 A 52 52 0 0 1 116 66" fill="none" strokeWidth="10" strokeLinecap="round"
+          style={band === "good" ? { stroke: `url(#${gradientId})` } : undefined}
           strokeDasharray={`${(clamped / 100) * length} ${length}`} />
         <text x="64" y="58" textAnchor="middle" className="score-gauge-number">{clamped}</text>
       </svg>
@@ -100,7 +111,7 @@ export default function Home() {
 
   return (
     <AppShell active="overview">
-      <section className="page-heading">
+      <section className="page-heading dashboard-hero">
         <div>
           <p className="eyebrow">MSP operations</p>
           <h1>{connection ? `${connection.customerName} cloud overview` : "Your AWS pilot workspace"}</h1>
