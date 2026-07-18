@@ -6,7 +6,7 @@ import type { PublicLocalSession } from "../../db/auth-repository";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 import { groupContainsActiveItem, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
-import { NavIcon, navTone } from "./nav-icon";
+import { GlyphIcon, NavIcon, navTone } from "./nav-icon";
 import { AccountMenu } from "./account-menu";
 
 function connectionTone(status: string | undefined): string {
@@ -130,12 +130,12 @@ function AuthenticatedAppShell({
           </div>
         </div>
         <nav className="secondary-nav" aria-label="Workspace actions">
-          {capabilitySet.has("workspace:read") ? <Link href="/controls#architecture"><span>?</span>Architecture & trust</Link> : null}
+          {capabilitySet.has("workspace:read") ? <Link href="/controls#architecture"><span className="nav-glyph-chip" data-tone="cyan" aria-hidden="true"><GlyphIcon name="policy" size={14} /></span>Architecture & trust</Link> : null}
         </nav>
         <div className="user-card">
           <span className="user-avatar">{initials}</span>
           <span><strong>{session.user.displayName}</strong><small>{roleLabel(session.membership.role)} · MFA verified</small></span>
-          <button aria-label="Sign out" disabled={signingOut} onClick={() => void signOut()} title="Sign out" type="button">↗</button>
+          <button aria-label="Sign out" disabled={signingOut} onClick={() => void signOut()} title="Sign out" type="button"><GlyphIcon className="user-signout-glyph" name="logout" size={14} /></button>
         </div>
         {signOutError ? <p className="sidebar-error" role="alert">{signOutError}</p> : null}
       </aside>
@@ -204,6 +204,7 @@ function NavigationGroup({
       <summary>
         <span>{group.label}</span>
         {containsActive ? <i aria-hidden="true" /> : null}
+        <GlyphIcon className="nav-group-chevron" name="chevron" size={13} />
       </summary>
       <div>
         {group.items.map((item) => {
