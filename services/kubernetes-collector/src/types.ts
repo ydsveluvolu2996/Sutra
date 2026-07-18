@@ -46,6 +46,7 @@ export type KubernetesResourceKind =
   | "rolebinding"
   | "clusterrole"
   | "clusterrolebinding"
+  | "serviceaccount"
   | "node";
 
 export type SafeKubernetesValue = string | number | boolean | null |

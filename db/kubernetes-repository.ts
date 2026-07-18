@@ -19,7 +19,7 @@ const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{7,127}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
 const MAX_ATOMIC_ROWS = 1_000;
 const COMPLETE_KINDS = new Set<KubernetesEvidenceKind>([
-  "Workload", "Service", "Ingress", "RbacRole", "Namespace", "NetworkPolicy",
+  "Workload", "Service", "Ingress", "RbacRole", "RbacBinding", "ServiceAccount", "Namespace", "NetworkPolicy",
 ]);
 
 export interface KubernetesTenantScope {
@@ -726,7 +726,8 @@ function recordKind(value: unknown): KubernetesEvidenceKind {
   const kind = (value as Record<string, unknown>).kind;
   if (
     kind !== "Workload" && kind !== "Service" && kind !== "Ingress" &&
-    kind !== "RbacRole" && kind !== "Namespace" && kind !== "NetworkPolicy"
+    kind !== "RbacRole" && kind !== "RbacBinding" && kind !== "ServiceAccount" &&
+    kind !== "Namespace" && kind !== "NetworkPolicy"
   ) {
     throw new KubernetesRepositoryError("INVALID_INPUT");
   }

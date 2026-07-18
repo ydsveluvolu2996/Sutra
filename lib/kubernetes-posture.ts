@@ -22,6 +22,8 @@ export type KubernetesEvidenceKind =
   | "Service"
   | "Ingress"
   | "RbacRole"
+  | "RbacBinding"
+  | "ServiceAccount"
   | "Namespace"
   | "NetworkPolicy";
 
@@ -84,6 +86,25 @@ export interface KubernetesRbacRoleEvidence extends EvidenceBase {
   }[] | null;
 }
 
+export interface KubernetesRbacBindingEvidence extends EvidenceBase {
+  readonly kind: "RbacBinding";
+  readonly clusterScoped: boolean;
+  readonly roleRefKind: string | null;
+  readonly roleRefName: string | null;
+  readonly subjects: readonly {
+    readonly kind: string;
+    readonly namespace: string | null;
+    readonly name: string;
+  }[];
+}
+
+export interface KubernetesServiceAccountEvidence extends EvidenceBase {
+  readonly kind: "ServiceAccount";
+  readonly namespace: string;
+  /** IRSA IAM role ARN from the eks.amazonaws.com/role-arn annotation; null when absent. */
+  readonly iamRoleArn: string | null;
+}
+
 export interface KubernetesNamespaceEvidence extends EvidenceBase {
   readonly kind: "Namespace";
   readonly namespace: null;
@@ -104,6 +125,8 @@ export type KubernetesEvidence =
   | KubernetesServiceEvidence
   | KubernetesIngressEvidence
   | KubernetesRbacRoleEvidence
+  | KubernetesRbacBindingEvidence
+  | KubernetesServiceAccountEvidence
   | KubernetesNamespaceEvidence
   | KubernetesNetworkPolicyEvidence;
 
@@ -278,6 +301,35 @@ function normalizeResource(value: unknown): KubernetesEvidence {
       rules,
     };
   }
+  if (kind === "RbacBinding") {
+    if (typeof item.clusterScoped !== "boolean") throw new KubernetesEvidenceError("INVALID_EVIDENCE");
+    if (!Array.isArray(item.subjects) || item.subjects.length > 2_048) {
+      throw new KubernetesEvidenceError("INVALID_EVIDENCE");
+    }
+    const subjects = item.subjects.map((rawSubject) => {
+      const subject = record(rawSubject);
+      const subjectName = nullableString(subject.name, 253);
+      if (subjectName === null) throw new KubernetesEvidenceError("INVALID_EVIDENCE");
+      return {
+        kind: nullableString(subject.kind, 64) ?? "",
+        namespace: nullableString(subject.namespace, 253),
+        name: subjectName,
+      };
+    });
+    return {
+      kind, name, clusterScoped: item.clusterScoped,
+      namespace: item.clusterScoped ? null : requiredIdentifier(item.namespace),
+      roleRefKind: nullableString(item.roleRefKind, 64),
+      roleRefName: nullableString(item.roleRefName, 253),
+      subjects,
+    };
+  }
+  if (kind === "ServiceAccount") {
+    return {
+      kind, name, namespace: requiredIdentifier(item.namespace),
+      iamRoleArn: nullableString(item.iamRoleArn, 2_048),
+    };
+  }
   if (kind === "Namespace") {
     return {
       kind, name, namespace: null,
@@ -306,7 +358,7 @@ export function normalizeKubernetesEvidence(input: unknown): KubernetesEvidenceS
   }
   if (source.resources.length > MAX_RESOURCES) throw new KubernetesEvidenceError("LIMIT_EXCEEDED");
   const validKinds = new Set<KubernetesEvidenceKind>([
-    "Workload", "Service", "Ingress", "RbacRole", "Namespace", "NetworkPolicy",
+    "Workload", "Service", "Ingress", "RbacRole", "RbacBinding", "ServiceAccount", "Namespace", "NetworkPolicy",
   ]);
   const observedKinds = source.observedKinds.map((kind) => {
     if (typeof kind !== "string" || !validKinds.has(kind as KubernetesEvidenceKind)) {
