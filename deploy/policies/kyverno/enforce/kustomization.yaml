@@ -1,0 +1,56 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Opt-in ENFORCE overlay. This is intentionally NOT referenced by the parent
+# ../kustomization.yaml, which stays audit-first. Apply it deliberately
+# (kubectl apply -k deploy/policies/kyverno/enforce) only after the reviewed,
+# independently-approved Audit->Enforce promotion described in ../README.md.
+# It reuses the exact audit policies as bases and flips them to blocking mode,
+# and adds a NetworkPolicy-generating microsegmentation policy.
+resources:
+  - ../audit-workload-security.yaml
+  - ../audit-workload-reliability.yaml
+  - ../audit-image-supply-chain.yaml
+  - generate-default-deny-networkpolicy.yaml
+
+# Flip each reused audit policy to blocking Enforce + fail-closed. The audit
+# policies already carry these fields, so JSON6902 replace is exact.
+patches:
+  - target:
+      kind: ClusterPolicy
+      name: sutra-workload-security-audit
+    patch: |-
+      - op: replace
+        path: /spec/validationFailureAction
+        value: Enforce
+      - op: replace
+        path: /spec/failurePolicy
+        value: Fail
+      - op: replace
+        path: /metadata/annotations/sutra.io~1promotion-state
+        value: enforce
+  - target:
+      kind: ClusterPolicy
+      name: sutra-workload-reliability-audit
+    patch: |-
+      - op: replace
+        path: /spec/validationFailureAction
+        value: Enforce
+      - op: replace
+        path: /spec/failurePolicy
+        value: Fail
+      - op: replace
+        path: /metadata/annotations/sutra.io~1promotion-state
+        value: enforce
+  - target:
+      kind: ClusterPolicy
+      name: sutra-image-supply-chain-audit
+    patch: |-
+      - op: replace
+        path: /spec/validationFailureAction
+        value: Enforce
+      - op: replace
+        path: /spec/failurePolicy
+        value: Fail
+      - op: replace
+        path: /metadata/annotations/sutra.io~1promotion-state
+        value: enforce

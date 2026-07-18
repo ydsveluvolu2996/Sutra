@@ -28,3 +28,22 @@ templates. Installing them with `SET_ME` values is unsafe and unsupported.
 Configure identity, registry, trust root, attestation predicate, rollback and
 failure behavior; test in Audit; then obtain a separate approval before
 creating an Enforce release.
+
+## Enforce overlay (opt-in blocking + microsegmentation)
+
+`enforce/` is an opt-in Kustomize overlay that is **not** referenced by the
+default `kustomization.yaml`. It reuses the exact audit policies as bases and
+patches them to blocking mode (`validationFailureAction: Enforce`,
+`failurePolicy: Fail`, `sutra.io/promotion-state: enforce`), and adds a
+`generate` policy that creates a default-deny NetworkPolicy in every non-system
+namespace (microsegmentation baseline).
+
+Apply it deliberately, only after the reviewed Audit->Enforce promotion above:
+
+```
+kubectl apply -k deploy/policies/kyverno/enforce
+```
+
+Enforcement and NetworkPolicy generation take effect in-cluster only; whether
+the admission webhook actually blocks, and whether the CNI enforces the
+generated NetworkPolicy, must be validated on the target cluster.
