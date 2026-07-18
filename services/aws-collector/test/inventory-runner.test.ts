@@ -274,6 +274,7 @@ class FakeClientFactory implements AwsInventoryClientFactory {
     return {
       describeLoadBalancers: () =>
         this.tracker.run(() => ({ $metadata: {}, LoadBalancers: [] })),
+      describeListeners: () => this.tracker.run(() => ({ $metadata: {}, Listeners: [] })),
     };
   }
 
@@ -630,6 +631,24 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
             }
           : { $metadata: {}, LoadBalancers: [] };
       },
+      describeListeners: async (input) => {
+        this.record("listeners", input.Marker);
+        return input.Marker === undefined
+          ? {
+              $metadata: {},
+              NextMarker: "listeners-next",
+              Listeners: [{
+                ListenerArn: `${input.LoadBalancerArn}/listener/443`,
+                LoadBalancerArn: input.LoadBalancerArn,
+                Port: 443,
+                Protocol: "HTTPS",
+                SslPolicy: "ELBSecurityPolicy-TLS13-1-2-2021-06",
+                Certificates: [{ CertificateArn: `arn:aws:acm:${region}:123456789012:certificate/demo` }],
+                DefaultActions: [{ Type: "forward" }],
+              }],
+            }
+          : { $metadata: {}, Listeners: [] };
+      },
     };
   }
 
@@ -793,6 +812,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     "aws.ec2.route-table",
     "aws.ec2.internet-gateway",
     "aws.elasticloadbalancingv2.load-balancer",
+    "aws.elasticloadbalancingv2.listener",
     "aws.kms.key",
     "aws.dynamodb.table",
     "aws.ecr.repository",
@@ -805,7 +825,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
-  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
+  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "load-balancers", "listeners", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
   // Route table exposing 0.0.0.0/0 -> igw is the fact aws-network-exposure needs:
@@ -826,6 +846,17 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     attachedVpcIds: ["vpc-east"],
     attachmentStates: ["attached"],
     attached: true,
+  });
+  // Listener records the served ingress port/protocol — the network-exposure fact.
+  const listener = resources.find((resource) => resource.resourceType === "aws.elasticloadbalancingv2.listener");
+  assert.deepEqual(listener?.configuration, {
+    loadBalancerArn: "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/demo/1234",
+    port: 443,
+    protocol: "HTTPS",
+    sslPolicy: "ELBSecurityPolicy-TLS13-1-2-2021-06",
+    certificateCount: 1,
+    defaultActionTypes: ["forward"],
+    alpnPolicy: [],
   });
   const eks = resources.find((resource) => resource.resourceType === "aws.eks.cluster");
   assert.deepEqual(eks?.configuration, {

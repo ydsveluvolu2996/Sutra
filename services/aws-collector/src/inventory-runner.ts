@@ -40,8 +40,11 @@ import {
   type IpPermission,
 } from "@aws-sdk/client-ec2";
 import {
+  DescribeListenersCommand,
   DescribeLoadBalancersCommand,
   ElasticLoadBalancingV2Client,
+  type DescribeListenersCommandInput,
+  type DescribeListenersCommandOutput,
   type DescribeLoadBalancersCommandInput,
   type DescribeLoadBalancersCommandOutput,
 } from "@aws-sdk/client-elastic-load-balancing-v2";
@@ -360,6 +363,10 @@ export interface Elbv2InventoryClient {
     input: DescribeLoadBalancersCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeLoadBalancersCommandOutput>;
+  describeListeners(
+    input: DescribeListenersCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeListenersCommandOutput>;
 }
 
 export interface KmsInventoryClient {
@@ -592,6 +599,8 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
     return {
       describeLoadBalancers: (input, signal) =>
         sendSdkCommand(client, new DescribeLoadBalancersCommand(input), signal),
+      describeListeners: (input, signal) =>
+        sendSdkCommand(client, new DescribeListenersCommand(input), signal),
     };
   }
 
@@ -757,6 +766,7 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
     return {
       describeLoadBalancers: (input) =>
         this.run((signal) => client.describeLoadBalancers(input, signal)),
+      describeListeners: (input) => this.run((signal) => client.describeListeners(input, signal)),
     };
   }
 
@@ -1572,10 +1582,69 @@ async function collectLoadBalancers(
     });
     await state.emit({ resources, evidence: [] });
     state.observePage(resources.length);
+    // Listeners are the ingress side of the balancer — the ports/protocols the
+    // internet can reach. Collected per load balancer (the ELBv2 API scopes
+    // listeners to a LoadBalancerArn) so aws-network-exposure sees which ports
+    // are actually served, not just that a balancer exists.
+    for (const loadBalancer of output.LoadBalancers ?? []) {
+      if (loadBalancer.LoadBalancerArn !== undefined) {
+        await collectListenersForLoadBalancer(
+          context, region, client, observedAt, state, loadBalancer.LoadBalancerArn,
+        );
+      }
+    }
     marker = nextToken(output.NextMarker, seen, "ELBv2 DescribeLoadBalancers");
     if (marker === undefined) return;
   }
   throw new InventoryProtocolError("ELBv2 DescribeLoadBalancers exceeded pagination limit");
+}
+
+async function collectListenersForLoadBalancer(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Elbv2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+  loadBalancerArn: string,
+): Promise<void> {
+  let marker: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeListeners(
+      marker === undefined
+        ? { LoadBalancerArn: loadBalancerArn, PageSize: 400 }
+        : { LoadBalancerArn: loadBalancerArn, PageSize: 400, Marker: marker },
+    );
+    const resources = (output.Listeners ?? []).flatMap((listener) => {
+      const arn = listener.ListenerArn;
+      if (arn === undefined) return [];
+      const certificates = listener.Certificates ?? [];
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "elasticloadbalancing",
+        "aws.elasticloadbalancingv2.listener",
+        arn,
+        arn,
+        "elasticloadbalancing:DescribeListeners",
+        compact({
+          loadBalancerArn: listener.LoadBalancerArn,
+          port: listener.Port,
+          protocol: listener.Protocol,
+          sslPolicy: listener.SslPolicy,
+          certificateCount: certificates.length,
+          defaultActionTypes: strings((listener.DefaultActions ?? []).map((action) => action.Type)),
+          alpnPolicy: strings(listener.AlpnPolicy ?? []),
+        }),
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    marker = nextToken(output.NextMarker, seen, "ELBv2 DescribeListeners");
+    if (marker === undefined) return;
+  }
+  throw new InventoryProtocolError("ELBv2 DescribeListeners exceeded pagination limit");
 }
 
 async function collectKmsKeys(
