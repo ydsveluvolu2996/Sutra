@@ -1972,6 +1972,7 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .product-rail button.product-nav:hover { background: rgba(255,255,255,.13); color: #eaf6f0; }
 .product-rail button.product-nav.active { background: #edf6f0; color: #17332c; box-shadow: 0 0 0 3px rgba(255,255,255,.06); }
 .queue-medium { background: #e9eef8; color: #3c5bbf; }
+.kev-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 20px; background: #b91c1c; color: #fff; font: 700 8px var(--font-geist-mono), monospace; letter-spacing: .06em; vertical-align: middle; }
 .hero-issues { display: grid; gap: 6px; margin-top: 12px; }
 .hero-issue { display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: center; padding: 9px 10px; border: 1px solid #e3e9e4; border-radius: 7px; background: #fff; cursor: pointer; text-align: left; transition: border-color .15s ease, box-shadow .15s ease; }
 .hero-issue:hover { border-color: #c8ded0; }

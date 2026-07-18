@@ -63,6 +63,14 @@ async function main() {
   console.log(
     `Wrote mirror as of ${asOf}: ${mirror.report.kevCount} KEV, ${mirror.report.epssCount} EPSS, ${mirror.report.recordCount} DB records -> ${path}`,
   );
+
+  // Also emit the compact, committed KEV snapshot the app bundles for enrichment.
+  // KEV is small (~1.6k entries) and slow-changing, so a refreshable snapshot is a
+  // reasonable, honest (asOf-stamped) home; the large EPSS set stays in the mirror.
+  const snapshotPath = resolve(process.env.KEV_SNAPSHOT_PATH ?? "./data/kev-snapshot.json");
+  await mkdir(dirname(snapshotPath), { recursive: true });
+  await writeFile(snapshotPath, `${JSON.stringify({ asOf, source: "cisa-kev", entries: serialized.kev }, null, 0)}\n`, "utf8");
+  console.log(`Wrote KEV snapshot: ${mirror.report.kevCount} entries -> ${snapshotPath}`);
 }
 
 main().catch((error) => {
