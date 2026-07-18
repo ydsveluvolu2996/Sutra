@@ -87,6 +87,7 @@ export function ComplianceFrameworksBrowser() {
         </div>
         <div className="heading-actions">
           <a className="button button-secondary" href="/compliance">Compliance posture</a>
+          {connectionId !== null ? <a className="button button-secondary" href={`/api/v1/compliance/frameworks?connectionId=${encodeURIComponent(connectionId)}&format=pack`}>Download evidence pack</a> : null}
           <button className="button button-primary" disabled={busy} onClick={() => { void refresh(); void load(); }} type="button">{busy ? "Refreshing…" : "Refresh"}</button>
         </div>
       </section>
