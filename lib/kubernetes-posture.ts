@@ -37,6 +37,8 @@ export interface KubernetesWorkloadEvidence extends EvidenceBase {
   readonly kind: "Workload";
   readonly namespace: string;
   readonly workloadKind: "Pod" | "Deployment" | "StatefulSet" | "DaemonSet" | "Job" | "CronJob";
+  /** Bound ServiceAccount name; the K8s->AWS reach hop for attack paths (null when default/absent). */
+  readonly serviceAccountName: string | null;
   readonly hostNetwork: TriState;
   readonly hostPid: TriState;
   readonly hostIpc: TriState;
@@ -250,6 +252,7 @@ function normalizeResource(value: unknown): KubernetesEvidence {
       name,
       namespace: requiredIdentifier(item.namespace),
       workloadKind: item.workloadKind as KubernetesWorkloadEvidence["workloadKind"],
+      serviceAccountName: nullableString(item.serviceAccountName ?? null, 253),
       hostNetwork: triState(item.hostNetwork),
       hostPid: triState(item.hostPid),
       hostIpc: triState(item.hostIpc),

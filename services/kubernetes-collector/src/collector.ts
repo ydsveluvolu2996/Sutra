@@ -274,6 +274,7 @@ function workloadSecurityConfiguration(
   }
   return {
     workloadKind: kind === "pod" ? "Pod" : kind === "deployment" ? "Deployment" : kind === "statefulset" ? "StatefulSet" : "DaemonSet",
+    serviceAccountName: safeString(podSpec.serviceAccountName, 253),
     hostNetwork: triBoolean(podSpec.hostNetwork),
     hostPid: triBoolean(podSpec.hostPID),
     hostIpc: triBoolean(podSpec.hostIPC),
