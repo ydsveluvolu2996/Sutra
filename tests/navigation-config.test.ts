@@ -67,6 +67,19 @@ describe("grouped workspace navigation", () => {
     );
   });
 
+  it("sections cover every Kubernetes item exactly once (nothing hidden or duplicated)", () => {
+    const kubernetes = navGroups.find((group) => group.key === "kubernetes");
+    assert.ok(kubernetes?.sections, "the Kubernetes group defines display sections");
+    const sectionKeys = kubernetes.sections.flatMap((section) => section.keys);
+    // No duplicates across sections.
+    assert.equal(sectionKeys.length, new Set(sectionKeys).size);
+    // Exactly the set of item keys — every item is placed, none invented.
+    assert.deepEqual(
+      [...sectionKeys].sort(),
+      [...kubernetes.items.map((item) => item.key)].sort(),
+    );
+  });
+
   it("requires both customer creation and connection management for account onboarding", () => {
     const readerCapabilities = new Set<Capability>(["workspace:read", "connection:read", "export:read"]);
     const readerItems = visibleNavigation(readerCapabilities).flatMap((group) => group.items);

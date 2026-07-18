@@ -49,10 +49,22 @@ export interface NavItem {
   readonly capabilities: readonly Capability[];
 }
 
+export interface NavSection {
+  readonly label: string;
+  readonly keys: readonly NavKey[];
+}
+
 export interface NavGroup {
   readonly key: "overview" | "onboarding" | "cmdb" | "kubernetes" | "security" | "compliance" | "finops" | "operations" | "administration";
   readonly label: string;
   readonly items: readonly NavItem[];
+  /**
+   * Optional display-only sub-sectioning for large groups. `items` stays the
+   * authoritative, capability-filtered list; sections only regroup those items
+   * under labels for rendering. Every visible item must appear in exactly one
+   * section (enforced by tests) so nothing is hidden.
+   */
+  readonly sections?: readonly NavSection[];
 }
 
 const readWorkspace = ["workspace:read"] as const;
@@ -112,6 +124,14 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_policies", label: "Policies", href: "/kubernetes/policies", icon: "PO", capabilities: readConnection },
       { key: "kubernetes_scan-history", label: "Scan history", href: "/kubernetes/scan-history", icon: "SH", capabilities: readConnection },
       { key: "kubernetes_coverage", label: "Coverage", href: "/kubernetes/coverage", icon: "CV", capabilities: readConnection },
+    ],
+    sections: [
+      { label: "Inventory", keys: ["kubernetes_overview", "kubernetes_clusters", "kubernetes_namespaces", "kubernetes_workloads", "kubernetes_coverage", "kubernetes_scan-history"] },
+      { label: "Vulnerabilities", keys: ["kubernetes_images", "kubernetes_vulnerability_updates", "kubernetes_vulnerability_management", "kubernetes_supply_chain"] },
+      { label: "Posture & compliance", keys: ["kubernetes_trends", "kubernetes_compliance", "kubernetes_admission", "kubernetes_policies", "kubernetes_drift"] },
+      { label: "Identity", keys: ["kubernetes_rbac", "kubernetes_permissions", "kubernetes_iam"] },
+      { label: "Threats & network", keys: ["kubernetes_issues", "kubernetes_attack_paths", "kubernetes_exposure", "kubernetes_network", "kubernetes_runtime"] },
+      { label: "Fleet & setup", keys: ["kubernetes_fleet", "kubernetes_onboard"] },
     ],
   },
   {
