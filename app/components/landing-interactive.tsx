@@ -300,14 +300,14 @@ export function CorrelationGraph(): ReactNode {
   const current = ORBIT_NODES.find((n) => n.id === active);
   return (
     <div className="platform-orbit is-interactive" data-active={active}>
-      <button type="button" className={`orbit-node orbit-cmdb${active === "cmdb" ? " is-active" : ""}`} onMouseEnter={() => setActive("cmdb")} onFocus={() => setActive("cmdb")} aria-label="CMDB — normalized asset graph">
+      <button type="button" className={`orbit-node orbit-cmdb${active === "cmdb" ? " is-active" : ""}`} onMouseEnter={() => setActive("cmdb")} onFocus={() => setActive("cmdb")} onClick={() => setActive("cmdb")} aria-label="CMDB — normalized asset graph">
         <b>CMDB</b><span>Normalized asset graph</span>
       </button>
       {ORBIT_NODES.map((n) => (
         <span key={`${n.line}-wrap`} className={`orbit-line ${n.line}${active === n.id ? " is-active" : ""}`} aria-hidden="true" />
       ))}
       {ORBIT_NODES.map((n) => (
-        <button type="button" key={n.id} className={`orbit-node ${n.cls}${active === n.id ? " is-active" : ""}`} onMouseEnter={() => setActive(n.id)} onFocus={() => setActive(n.id)} aria-label={`${n.label} — ${n.sub}`}>
+        <button type="button" key={n.id} className={`orbit-node ${n.cls}${active === n.id ? " is-active" : ""}`} onMouseEnter={() => setActive(n.id)} onFocus={() => setActive(n.id)} onClick={() => setActive(n.id)} aria-label={`${n.label} — ${n.sub}`}>
           <b>{n.label}</b><span>{n.sub}</span>
         </button>
       ))}
