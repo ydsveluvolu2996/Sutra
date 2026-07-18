@@ -2,10 +2,54 @@
 # cloud IAM identities, credentials, tokens, workloads, webhooks or agents.
 kubernetesGroup: sutra:readers
 
-# Permit Sutra to import reports only when the customer separately installs and
-# operates Trivy Operator. Sutra does not install Trivy or claim scanner coverage.
+# Sutra-managed scanner. When true (the default) this chart installs and
+# configures Trivy Operator as a dependency, so vulnerability, config-audit,
+# RBAC-assessment, infra-assessment and SBOM scanning work out of the box.
+# Trivy performs the scanning; the Sutra agent only ingests the reports it
+# produces (Sutra ships no scanner engine of its own and never fabricates a
+# clean scan). Set to false to run your own Trivy Operator — the agent will
+# detect and ingest it instead.
+scanner:
+  managed: true
+
+# Let the Sutra agent import Trivy reports. On by default because the chart
+# now bundles a managed Trivy Operator (scanner.managed). If you disable the
+# managed scanner AND do not run your own Trivy, no vulnerability/SBOM/config
+# evidence is produced, and Sutra reports that honestly (absence of a scanner
+# is never presented as a clean result).
 trivyReports:
-  enabled: false
+  enabled: true
+
+# Configuration applied to the bundled Trivy Operator dependency (only when
+# scanner.managed is true). This is Sutra's recommended, data-minimizing
+# scanner profile: full vulnerability/config/RBAC/infra/SBOM/compliance
+# coverage, but exposed-secret scanning and global secret/ServiceAccount
+# access stay OFF to honor Sutra's no-secrets data boundary.
+trivy-operator:
+  operator:
+    scanJobsConcurrentLimit: 1
+    vulnerabilityScannerEnabled: true
+    configAuditScannerEnabled: true
+    rbacAssessmentScannerEnabled: true
+    infraAssessmentScannerEnabled: true
+    sbomGenerationEnabled: true
+    clusterComplianceEnabled: true
+    builtInTrivyServer: false
+    accessGlobalSecretsAndServiceAccount: false
+    exposedSecretScannerEnabled: false
+    metricsFindingsEnabled: true
+  trivy:
+    ignoreUnfixed: true
+    severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  serviceMonitor:
+    enabled: false
 
 agent:
   enabled: false

@@ -1,11 +1,23 @@
 apiVersion: v2
 name: sutra-visibility
-description: Least-privilege Kubernetes metadata and security-report access for Sutra
+description: Least-privilege Kubernetes metadata and security-report access for Sutra, with an optional Sutra-managed Trivy Operator scanner
 type: application
-version: 0.2.0
-appVersion: "0.2.0-private-beta"
+version: 0.3.0
+appVersion: "0.3.0-private-beta"
 kubeVersion: ">=1.25.0-0"
+dependencies:
+  # Sutra-managed scanner. Installed and configured by this chart when
+  # scanner.managed is true (the default) so vulnerability, config-audit,
+  # RBAC-assessment, infra-assessment and SBOM scanning work out of the box.
+  # Trivy Operator performs the scanning; the Sutra agent only ingests the
+  # reports it produces. Set scanner.managed=false to bring your own Trivy.
+  - name: trivy-operator
+    version: "0.34.0"
+    repository: "https://aquasecurity.github.io/helm-charts"
+    condition: scanner.managed
 annotations:
   artifacthub.io/changes: |
     - kind: added
       description: Outbound-only continuous visibility agent with durable scan delivery.
+    - kind: added
+      description: Bundled Sutra-managed Trivy Operator (scanner.managed, on by default) so vulnerability, config-audit, RBAC-assessment and SBOM scanning are turnkey; the agent relays its reports.

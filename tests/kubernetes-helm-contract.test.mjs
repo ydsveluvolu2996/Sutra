@@ -20,6 +20,9 @@ test("Sutra visibility chart is read-only and excludes credentials and Secret ac
   assert.doesNotMatch(role, /verbs:\s*\[\s*"\*"\s*\]/u);
   assert.match(binding, /kind: Group/u);
   assert.match(binding, /\.Values\.kubernetesGroup/u);
-  assert.match(values, /trivyReports:\s*\n\s+enabled: false/u);
+  // Report import is on by default now that the chart bundles a managed Trivy
+  // Operator; relaying Trivy reports is read-only and the agent's own RBAC above
+  // still grants no Secret/ConfigMap/write access.
+  assert.match(values, /trivyReports:\s*\n\s+enabled: true/u);
   assert.doesNotMatch(`${role}\n${binding}\n${values}`, /\b(token|password|clientSecret|apiKey):\s*\S+/iu);
 });

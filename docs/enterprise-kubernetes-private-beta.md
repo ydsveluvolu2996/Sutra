@@ -18,7 +18,7 @@ credentials, signing private keys or temporary AWS credentials.
 | --- | --- | --- |
 | Cluster onboarding | One-time digest-only bootstrap, exact tenant/customer/connection/cluster binding, rotating one-hour agent credential, immediate revocation | Agent offline or not enrolled |
 | Inventory and KSPM | Scheduled Kubernetes API collection, immutable scan receipts, atomic promotion, deterministic posture controls | Missing and partial collectors remain unknown |
-| Vulnerabilities and SBOM | Trivy Operator reports plus digest-bound Trivy/SBOM normalization | Scanner absent is not a clean scan |
+| Vulnerabilities and SBOM | Sutra-managed Trivy Operator (bundled by the chart, on by default) plus digest-bound Trivy/SBOM normalization and KEV/EPSS/CVSS enrichment | Scanner absent (managed scanner disabled and none brought) is not a clean scan |
 | Software supply chain | Image digest, SBOM document digest, bounded Cosign identity/Rekor result and provenance evidence | Unsigned/unverified/not observed remain explicit |
 | Attack paths | Only cited AWS, Kubernetes, IAM, RBAC, exposure and vulnerability edges | Missing relationships produce evidence gaps, not paths |
 | Runtime detection | Signed, replay-resistant Falco event ingestion and heartbeat, normalized timeline | No heartbeat is not configured; no event is not proof of safety |
@@ -33,6 +33,10 @@ credentials, signing private keys or temporary AWS credentials.
 The reviewed installation orchestrator supports selectable modules:
 
 - Trivy Operator for vulnerability, configuration and SBOM report evidence.
+  Bundled and managed by the `sutra-visibility` chart by default
+  (`scanner.managed=true`), so scanning works out of the box; set
+  `scanner.managed=false` to run your own. Trivy performs the scanning — Sutra
+  ships no scanner engine and never fabricates a clean scan.
 - Falco and Falcosidekick with a separate signing-gateway contract for runtime
   events.
 - Kyverno in audit mode plus Sutra's default audit policy pack.
