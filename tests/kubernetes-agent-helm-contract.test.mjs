@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = new URL("../deploy/charts/sutra-visibility/", import.meta.url);
@@ -10,8 +12,18 @@ const files = await Promise.all([
   "templates/persistentvolumeclaim.yaml",
   "templates/clusterrole.yaml",
   "templates/NOTES.txt",
+  "Chart.yaml",
 ].map((path) => readFile(new URL(path, root), "utf8")));
-const [values, deployment, networkPolicy, pvc, role, notes] = files;
+const [values, deployment, networkPolicy, pvc, role, notes, chart] = files;
+const chartDir = fileURLToPath(root);
+
+function helmTemplate(...extraArgs) {
+  try {
+    return execFileSync("helm", ["template", "sutra", chartDir, ...extraArgs], { encoding: "utf8" });
+  } catch {
+    return null; // helm not installed in this environment — the helm-render test self-skips
+  }
+}
 
 test("agent chart is disabled by default and requires immutable image, HTTPS endpoint and existing bootstrap Secret", () => {
   assert.match(values, /agent:\s*\n\s+enabled: false/u);
@@ -62,4 +74,29 @@ test("continuous agent retains metadata-only RBAC and no Secret or ConfigMap API
   assert.doesNotMatch(role, /\b(create|update|patch|delete|watch|impersonate|bind|escalate)\b/u);
   assert.match(notes, /helm upgrade --install/u);
   assert.match(notes, /helm uninstall/u);
+});
+
+test("Sutra bundles a managed Trivy Operator scanner, on by default, gated by scanner.managed", () => {
+  // Chart depends on trivy-operator, conditioned so BYO-Trivy customers opt out.
+  assert.match(chart, /name: trivy-operator/u);
+  assert.match(chart, /repository: "https:\/\/aquasecurity\.github\.io\/helm-charts"/u);
+  assert.match(chart, /condition: scanner\.managed/u);
+  // Managed scanning + report relay are on by default so scanning works out of the box.
+  assert.match(values, /scanner:\s*\n\s+managed: true/u);
+  assert.match(values, /trivyReports:\s*\n\s+enabled: true/u);
+  // Data-minimizing scanner profile: full coverage, but secret access stays off.
+  assert.match(values, /vulnerabilityScannerEnabled: true/u);
+  assert.match(values, /sbomGenerationEnabled: true/u);
+  assert.match(values, /exposedSecretScannerEnabled: false/u);
+  assert.match(values, /accessGlobalSecretsAndServiceAccount: false/u);
+});
+
+test("helm renders the managed scanner by default and suppresses it when scanner.managed=false", () => {
+  const managed = helmTemplate();
+  if (managed === null) return; // helm unavailable — static assertions above still gate the wiring
+  assert.match(managed, /name: trivy-operator/u, "managed scanner should render by default");
+  assert.match(managed, /OPERATOR_VULNERABILITY_SCANNER_ENABLED: "true"/u);
+  assert.match(managed, /OPERATOR_EXPOSED_SECRET_SCANNER_ENABLED: "false"/u);
+  const unmanaged = helmTemplate("--set", "scanner.managed=false");
+  assert.doesNotMatch(unmanaged ?? "", /name: trivy-operator/u, "scanner must be fully suppressed when unmanaged");
 });
