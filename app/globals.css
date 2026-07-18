@@ -1811,6 +1811,18 @@ h3 { letter-spacing: -.02em; }
 .iac-finding-row .iac-finding-fix { color: #545e80; margin-top: 2px; }
 @media (max-width: 720px) { .iac-input-grid { grid-template-columns: 1fr; } .iac-finding-row { grid-template-columns: 1fr; } }
 
+/* Prioritized posture (context-ranked KSPM) */
+.posture-priority-row { display: grid; grid-template-columns: 78px minmax(0,1fr) auto; gap: 12px; align-items: start; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
+.posture-priority-row small { display: block; color: #7c8991; overflow-wrap: anywhere; }
+.posture-priority-row .posture-priority-msg { color: #3a4a53; margin-top: 3px; }
+.posture-priority-row .posture-priority-fix { color: #55636b; margin-top: 3px; }
+.posture-priority-row .posture-priority-frameworks { color: #8792a8; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.posture-risk-factors { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.posture-priority-score { color: #55636b; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.posture-pss-frac { color: var(--ink-faint, #8792a8); font-size: 13px; font-weight: 500; }
+.posture-workload-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+@media (max-width: 640px) { .posture-priority-row { grid-template-columns: 1fr; } }
+
 /* Case routing rules */
 .case-routing-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
 .case-routing-form label { display: grid; gap: 5px; font-size: 11px; font-weight: 600; color: #545e80; }
