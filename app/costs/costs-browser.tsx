@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StoredCostSnapshot } from "../../lib/cost-types";
+import { buildCostOptimizations } from "../../lib/aws-cost-optimization";
 import { compactIdentifier, formatTimestamp, usePilotState } from "../components/use-pilot-state";
 import styles from "./costs.module.css";
 
@@ -109,6 +110,10 @@ export function CostsBrowser() {
   }
 
   const payload = snapshot?.payload ?? null;
+  const optimizations = useMemo(
+    () => buildCostOptimizations({ snapshot: payload, resources: state?.resources ?? [] }),
+    [payload, state?.resources],
+  );
   const maximumTrend = useMemo(
     () => Math.max(1, ...(payload?.monthlyTrend.map((point) => point.amount) ?? [1])),
     [payload?.monthlyTrend],
@@ -236,6 +241,14 @@ export function CostsBrowser() {
               )}
             </article>
           </section>
+
+          {optimizations.recommendations.length > 0 ? (
+            <section className="panel">
+              <div className="panel-heading"><div><p className="eyebrow">Resource-level optimization</p><h2>Cost optimization opportunities</h2></div><span className="result-count">{optimizations.summary.estimatedMonthlySavings !== null ? `~${money(optimizations.summary.estimatedMonthlySavings, payload.currency)}/mo identifiable` : `${optimizations.recommendations.length} opportunities`}</span></div>
+              <div className={styles.recommendations}>{optimizations.recommendations.map((rec) => <article key={rec.id}><b>{rec.severity === "high" ? "!!" : rec.severity === "medium" ? "!" : "·"}</b><div><h3>{rec.title}</h3><p>{rec.summary}</p><span>{rec.estimatedMonthlySavings !== null ? `~${money(rec.estimatedMonthlySavings, payload.currency)}/mo identifiable` : "savings not derivable without utilization data"}</span></div></article>)}</div>
+              <p className={styles.emptyNote}>{optimizations.disclaimer}</p>
+            </section>
+          ) : null}
 
           <section className={`panel ${styles.provenance}`}>
             <div><p className="eyebrow">Evidence provenance</p><h2>Immutable normalized AWS cost snapshot</h2><p>Account {payload.accountId} · collected {formatTimestamp(payload.collectedAt)} · period {payload.periodStart} to {payload.periodEnd}</p></div>
