@@ -1774,6 +1774,17 @@ h3 { letter-spacing: -.02em; }
 .iac-finding-row .iac-finding-fix { color: #55636b; margin-top: 2px; }
 @media (max-width: 720px) { .iac-input-grid { grid-template-columns: 1fr; } .iac-finding-row { grid-template-columns: 1fr; } }
 
+/* Case routing rules */
+.case-routing-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; align-items: end; }
+.case-routing-form label { display: grid; gap: 5px; font-size: 11px; font-weight: 600; color: #55636b; }
+.case-routing-form input { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--line-dark, #cbd5da); border-radius: 7px; background: #fff; color: var(--ink, #1d242a); font-size: 12px; }
+.case-routing-severities { border: 1px solid var(--line, #e0e6e9); border-radius: 7px; padding: 6px 10px 8px; display: flex; flex-wrap: wrap; gap: 10px; }
+.case-routing-severities legend { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: #7c8991; padding: 0 4px; }
+.case-routing-checkbox { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ink, #1d242a); text-transform: capitalize; }
+.case-routing-actions { display: flex; align-items: end; }
+.case-routing-rule-row { display: grid; grid-template-columns: 56px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
+.case-routing-rule-row small { display: block; color: #7c8991; overflow-wrap: anywhere; }
+
 /* Drift detection */
 .drift-list { display: flex; flex-direction: column; gap: 6px; }
 .drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
