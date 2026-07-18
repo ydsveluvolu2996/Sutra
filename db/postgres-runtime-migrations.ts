@@ -13,6 +13,7 @@ import postgresNotificationDestinationsOutboxSql from "../postgres/migrations/00
 import postgresHubbleNetworkVisibilitySql from "../postgres/migrations/0012_hubble_network_visibility.sql?raw";
 import postgresRuntimeEventCasesSql from "../postgres/migrations/0013_runtime_event_cases.sql?raw";
 import postgresKubernetesSbomLicensePolicySql from "../postgres/migrations/0014_kubernetes_sbom_license_policy.sql?raw";
+import postgresVulnerabilityFeedMirrorSql from "../postgres/migrations/0015_vulnerability_feed_mirror.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -30,6 +31,7 @@ const migrations = [
   { id: "0012_hubble_network_visibility", source: postgresHubbleNetworkVisibilitySql },
   { id: "0013_runtime_event_cases", source: postgresRuntimeEventCasesSql },
   { id: "0014_kubernetes_sbom_license_policy", source: postgresKubernetesSbomLicensePolicySql },
+  { id: "0015_vulnerability_feed_mirror", source: postgresVulnerabilityFeedMirrorSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

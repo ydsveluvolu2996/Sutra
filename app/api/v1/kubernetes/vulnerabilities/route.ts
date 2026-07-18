@@ -1,6 +1,7 @@
 import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { VulnerabilityMirrorRepository } from "../../../../../db/vulnerability-mirror-repository";
 import { KEV_AS_OF, KEV_COUNT, isKnownExploited } from "../../../../../lib/kev-snapshot";
 import { mergeVulnerabilityFindings } from "../../../../../lib/vulnerability-finding";
 import { deriveVulnerabilityFindings, scanFindingKey } from "../../../../../lib/vulnerability-finding-evidence";
@@ -56,10 +57,21 @@ export async function GET(request: Request): Promise<Response> {
       ...deriveVulnerabilityFindings(persisting, tenant, previousMs ?? latestMs),
       ...deriveVulnerabilityFindings(fresh, tenant, latestMs),
     ]);
-    // Enrich with the live CISA KEV snapshot: a known-exploited CVE dominates the
-    // queue ranking and is badged in the UI. Absence from KEV is a real fact
-    // ("not on the exploited list"), never an assumption of safety.
-    const findings = merged.map((finding) => ({ ...finding, knownExploited: isKnownExploited(finding.cveId) }));
+    // Enrich with live feeds: the bundled CISA KEV snapshot (a known-exploited CVE
+    // dominates the ranking and is badged) and the Postgres EPSS/CVSS mirror
+    // (exploit probability + disclosure severity). Absence from either feed is a
+    // real fact ("not on the list" / "no score"), never an assumption of safety.
+    const enrichment = await new VulnerabilityMirrorRepository().enrichmentFor(merged.map((finding) => finding.cveId));
+    const findings = merged.map((finding) => {
+      const record = finding.cveId === null ? undefined : enrichment.get(finding.cveId.toUpperCase());
+      return {
+        ...finding,
+        knownExploited: isKnownExploited(finding.cveId),
+        epss: record?.epssScore ?? null,
+        cvssScore: finding.cvssScore ?? record?.cvssScore ?? null,
+      };
+    });
+    const epssCovered = findings.filter((finding) => finding.epss !== null).length;
 
     const now = Date.now();
     const queue = buildVulnerabilityQueue(findings, { nowMs: now, nowDays: Math.floor(now / 86_400_000) });
@@ -69,6 +81,7 @@ export async function GET(request: Request): Promise<Response> {
       hasPrevious: scans.previous !== null,
       totalFindings: findings.length,
       kev: { asOf: KEV_AS_OF, count: KEV_COUNT },
+      epss: { covered: epssCovered },
     });
   } catch (error) {
     return errorResponse(error);

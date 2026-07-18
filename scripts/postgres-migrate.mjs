@@ -28,6 +28,7 @@ const migrationFiles = [
   "0012_hubble_network_visibility.sql",
   "0013_runtime_event_cases.sql",
   "0014_kubernetes_sbom_license_policy.sql",
+  "0015_vulnerability_feed_mirror.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
