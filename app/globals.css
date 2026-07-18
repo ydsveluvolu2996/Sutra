@@ -70,6 +70,17 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .nav-subsection { display: grid; gap: 2px; }
 .nav-subsection + .nav-subsection { margin-top: 5px; }
 .nav-subsection-label { margin: 3px 0 1px; padding: 0 10px; color: #5d6a92; font-size: 7px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+
+/* Guided client-onboarding steps. */
+.check-list-steps { display: grid; gap: 10px; }
+.onboard-step { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-soft); }
+.onboard-step[data-done="true"] { border-color: #bfe6cf; background: #f2fbf6; }
+.onboard-step-index { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; background: var(--grad); color: #071022; font-weight: 800; font-size: 12px; }
+.onboard-step[data-done="true"] .onboard-step-index { background: #23724b; color: #fff; }
+.onboard-step-body { min-width: 0; }
+.onboard-step-body strong { display: block; font-size: 12px; }
+.onboard-step-body p { margin: 3px 0 0; color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
+.onboard-step-detail { display: block; margin-top: 5px; color: var(--ink-faint); font-size: 8.5px; }
 .main-nav a, .secondary-nav a { min-height: 42px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border-radius: 8px; color: #b9c2db; font-size: 13px; font-weight: 550; transition: background .16s ease, color .16s ease; }
 .grouped-nav a { min-height: 34px; padding: 0 10px; border-radius: 7px; font-size: 11px; }
 .main-nav a:hover, .secondary-nav a:hover { background: rgba(130,155,235,.11); color: #fff; }

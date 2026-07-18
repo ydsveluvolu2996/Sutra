@@ -39,6 +39,7 @@ export type NavKey =
   | "kubernetes_onboard"
   | `kubernetes_${KubernetesSection}`
   | "onboard"
+  | "onboard_client"
   | "connection_health";
 
 export interface NavItem {
@@ -82,6 +83,7 @@ export const navGroups: readonly NavGroup[] = [
     key: "onboarding",
     label: "Onboarding",
     items: [
+      { key: "onboard_client", label: "Onboard a client", href: "/onboard/client", icon: "OC", capabilities: ["customer:create", "connection:manage"] },
       { key: "customers", label: "Customers & accounts", href: "/customers", icon: "CU", capabilities: readWorkspace },
       { key: "onboard", label: "Add AWS account", href: "/onboard", icon: "+", capabilities: ["customer:create", "connection:manage"] },
       { key: "connection_health", label: "Connection health", href: "/onboard#connection-lifecycle", icon: "CH", capabilities: readConnection },
