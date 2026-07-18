@@ -6,6 +6,7 @@ import type { HubbleWorkspace } from "../../../db/hubble-flow-repository";
 import type { HubbleEndpointIdentity } from "../../../lib/hubble-flow-evidence";
 import { formatTimestamp, usePilotState } from "../../components/use-pilot-state";
 import { useKubernetesEvidence } from "../use-kubernetes-evidence";
+import { NetworkPolicyGeneratorPanel } from "./networkpolicy-generator-panel";
 
 interface Body extends HubbleWorkspace {
   readonly schemaVersion: "sutra.hubble-workspace.v1";
@@ -65,6 +66,7 @@ export function NetworkVisibility() {
         {serviceMap.length ? <div className="hubble-map">{serviceMap.map((edge) => <article key={`${edge.source}:${edge.destination}`}><strong>{edge.source}</strong><span>→</span><strong>{edge.destination}</strong><small>{edge.observations} observations · {edge.drops} dropped</small></article>)}</div> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">HB</span><h2>Hubble visibility is not configured</h2><p>No bounded flow metadata is available in this authorized tenant and cluster scope. Sutra does not infer a service map from Kubernetes inventory or NetworkPolicy objects.</p></section>}
         {body?.flows.length ? <div className="hubble-flow-list">{body.flows.slice(0, 100).map((flow) => <article key={flow.evidenceSha256}><span className={`status-pill hubble-${flow.verdict}`}>{flow.verdict}</span><div><strong>{endpoint(flow.source)} → {endpoint(flow.destination)}</strong><small>{flow.direction} · {flow.protocol}{flow.destinationPort ? `/${flow.destinationPort}` : ""} · {flow.observations} observations</small></div><time>{formatTimestamp(flow.observedAt)}</time><code>{flow.evidenceSha256.slice(0, 12)}</code></article>)}</div> : null}
       </section>
+      <NetworkPolicyGeneratorPanel connectionId={connectionId} clusterId={cluster?.id ?? null} />
     </> : null}
   </>;
 }

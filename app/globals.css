@@ -1755,6 +1755,14 @@ h3 { letter-spacing: -.02em; }
 .supply-chain-trust-states { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
 @media (max-width: 640px) { .supply-chain-trust-states { align-items: flex-start; } }
 
+/* NetworkPolicy generator */
+.networkpolicy-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.networkpolicy-row { border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 10px 12px; }
+.networkpolicy-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.networkpolicy-head small { display: block; color: #7c8991; }
+.networkpolicy-yaml { margin: 10px 0 0; padding: 12px; border-radius: 8px; background: #0f1720; color: #d7e2ea; font-size: 11px; line-height: 1.5; overflow-x: auto; }
+.networkpolicy-yaml code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
+
 /* Drift detection */
 .drift-list { display: flex; flex-direction: column; gap: 6px; }
 .drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
