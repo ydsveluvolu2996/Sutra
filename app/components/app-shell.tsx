@@ -196,6 +196,32 @@ function NavigationGroup({
   const containsActive = groupContainsActiveItem(group, active);
   const [open, setOpen] = useState(containsActive || group.key === "overview");
 
+  const renderItem = (item: NavGroup["items"][number]) => {
+    const isActive = active === item.key;
+    return (
+      <Link
+        href={item.href}
+        key={`${group.key}-${item.href}`}
+        className={isActive ? "active" : undefined}
+        aria-current={isActive ? "page" : undefined}
+      >
+        <span className="nav-glyph-chip" data-tone={navTone(item.key)} aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
+        {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
+      </Link>
+    );
+  };
+
+  // Large groups (e.g. Kubernetes) declare display-only sections so their long
+  // item list reads as labelled clusters instead of one dense column.
+  const sections = group.sections
+    ?.map((section) => ({
+      label: section.label,
+      items: section.keys
+        .map((key) => group.items.find((item) => item.key === key))
+        .filter((item): item is NavGroup["items"][number] => item !== undefined),
+    }))
+    .filter((section) => section.items.length > 0);
+
   return (
     <details className="nav-group" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
@@ -204,20 +230,14 @@ function NavigationGroup({
         <GlyphIcon className="nav-group-chevron" name="chevron" size={13} />
       </summary>
       <div>
-        {group.items.map((item) => {
-          const isActive = active === item.key;
-          return (
-            <Link
-              href={item.href}
-              key={`${group.key}-${item.href}`}
-              className={isActive ? "active" : undefined}
-              aria-current={isActive ? "page" : undefined}
-            >
-              <span className="nav-glyph-chip" data-tone={navTone(item.key)} aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
-              {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
-            </Link>
-          );
-        })}
+        {sections && sections.length > 0
+          ? sections.map((section) => (
+              <div className="nav-subsection" key={`${group.key}-${section.label}`}>
+                <p className="nav-subsection-label">{section.label}</p>
+                {section.items.map(renderItem)}
+              </div>
+            ))
+          : group.items.map(renderItem)}
       </div>
     </details>
   );

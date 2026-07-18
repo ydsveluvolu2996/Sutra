@@ -67,6 +67,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .nav-group summary:hover { background: rgba(130,155,235,.08); color: #c6d1ec; }
 .nav-group summary i { width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.09); }
 .nav-group > div { display: grid; gap: 2px; padding: 2px 0 3px; }
+.nav-subsection { display: grid; gap: 2px; }
+.nav-subsection + .nav-subsection { margin-top: 5px; }
+.nav-subsection-label { margin: 3px 0 1px; padding: 0 10px; color: #5d6a92; font-size: 7px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
 .main-nav a, .secondary-nav a { min-height: 42px; display: flex; align-items: center; gap: 11px; padding: 0 12px; border-radius: 8px; color: #b9c2db; font-size: 13px; font-weight: 550; transition: background .16s ease, color .16s ease; }
 .grouped-nav a { min-height: 34px; padding: 0 10px; border-radius: 7px; font-size: 11px; }
 .main-nav a:hover, .secondary-nav a:hover { background: rgba(130,155,235,.11); color: #fff; }
@@ -251,6 +254,17 @@ h3 { letter-spacing: -.02em; }
 .control-row:hover { background: #fafbff; }
 .control-row > div { min-width: 0; }
 .control-row code { color: var(--green); font-size: 9px; font-weight: 750; align-self: center; overflow-wrap: anywhere; line-height: 1.35; }
+
+/* Systemic anti-clustering: dense grid rows across every module must let a
+   long identifier (resource key, ARN, control id, image ref) shrink and wrap
+   within its own track instead of overflowing into the neighbouring column.
+   min-width:0 lets grid/flex cells shrink; overflow-wrap breaks unspaced ids. */
+.data-row > *, .control-row > *, .customer-directory-row > *,
+.finding-item summary > *, .change-event summary > *,
+.roadmap-matrix-row > *, .signal-list > div > *,
+.posture-priority-row > *, .supply-chain-card > *, .vuln-delta-list > article > * { min-width: 0; }
+.data-row code, .customer-directory-row code, .finding-item summary code,
+.cmdb-table code, .account-table code, .posture-priority-row code { overflow-wrap: anywhere; }
 .control-row h3 { margin: 0 0 3px; font-size: 11px; }
 .control-row p { margin: 0; color: var(--ink-faint); font-size: 9px; line-height: 1.4; }
 .control-row > span { color: var(--ink-soft); font-size: 9px; }
