@@ -26,6 +26,7 @@ export type NavKey =
   | "kubernetes_permissions"
   | "kubernetes_iam"
   | "kubernetes_vulnerability_updates"
+  | "kubernetes_vulnerability_management"
   | "kubernetes_drift"
   | "kubernetes_inventory"
   | "kubernetes_security"
@@ -92,6 +93,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_workloads", label: "Workloads", href: "/kubernetes/workloads", icon: "WL", capabilities: readConnection },
       { key: "kubernetes_images", label: "Images & vulnerabilities", href: "/kubernetes/images", icon: "IM", capabilities: readConnection },
       { key: "kubernetes_vulnerability_updates", label: "Vulnerability updates", href: "/kubernetes/vulnerability-updates", icon: "VU", capabilities: readConnection },
+      { key: "kubernetes_vulnerability_management", label: "Vulnerability management", href: "/kubernetes/vulnerability-management", icon: "VM", capabilities: readConnection },
       { key: "kubernetes_supply_chain", label: "Software supply chain", href: "/kubernetes/supply-chain", icon: "SC", capabilities: readConnection },
       { key: "kubernetes_exposure", label: "Exposure", href: "/kubernetes/exposure", icon: "EX", capabilities: readConnection },
       { key: "kubernetes_issues", label: "Issues", href: "/kubernetes/issues", icon: "IS", capabilities: readConnection },
