@@ -23,8 +23,18 @@ trivyReports:
 # Configuration applied to the bundled Trivy Operator dependency (only when
 # scanner.managed is true). This is Sutra's recommended, data-minimizing
 # scanner profile: full vulnerability/config/RBAC/infra/SBOM/compliance
-# coverage, but exposed-secret scanning and global secret/ServiceAccount
-# access stay OFF to honor Sutra's no-secrets data boundary.
+# coverage, with exposed-secret scanning OFF by default and global
+# secret/ServiceAccount access always OFF, to honor Sutra's no-secrets boundary.
+#
+# Exposed-secret detection is a supported OPT-IN. Enable it with:
+#   --set trivy-operator.operator.exposedSecretScannerEnabled=true
+# When enabled, Trivy scans image filesystems for embedded credentials and Sutra
+# ingests only sanitized finding metadata (rule id, category, severity, title,
+# and file target). Sutra never collects or stores the matched secret VALUE:
+# the collector drops Trivy's `match` field at parse time, and the persistence
+# layer rejects any finding object that still carries it. This detection scans
+# image contents and does NOT require accessGlobalSecretsAndServiceAccount, which
+# stays false so Trivy is never granted read access to live cluster Secrets.
 trivy-operator:
   operator:
     scanJobsConcurrentLimit: 1
@@ -35,7 +45,9 @@ trivy-operator:
     sbomGenerationEnabled: true
     clusterComplianceEnabled: true
     builtInTrivyServer: false
+    # Sutra never reads live cluster Secret objects. Keep this false.
     accessGlobalSecretsAndServiceAccount: false
+    # Opt in with --set (see the note above). Metadata-only; value never stored.
     exposedSecretScannerEnabled: false
     metricsFindingsEnabled: true
   trivy:

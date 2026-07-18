@@ -262,3 +262,71 @@ test("sanitized Trivy evidence is immutable, scoped and returned with the promot
     );
   });
 });
+
+function exposedSecretFinding(overrides = {}) {
+  return {
+    fingerprint: "f".repeat(64),
+    clusterId: clusterUid,
+    source: "exposed_secret_report",
+    severity: "critical",
+    namespace: "payments",
+    reportName: "deployment-api",
+    affectedResource: { kind: "Deployment", namespace: "payments", name: "api" },
+    title: "AWS Access Key ID",
+    checkId: "aws-access-key-id",
+    cveId: null,
+    packageName: null,
+    packageType: null,
+    installedVersion: null,
+    fixedVersion: null,
+    target: "/app/config.yaml",
+    score: null,
+    remediation: "Remove the exposed credential from the image, rotate it, and rebuild.",
+    scanner: {
+      name: "Trivy", vendor: "Aqua Security", version: "0.60.0",
+      reportUid: "report-uid", reportResourceVersion: "7", reportUpdatedAt: "2026-07-17T14:00:00.000Z",
+    },
+    ...overrides,
+  };
+}
+
+test("opt-in exposed-secret findings persist as metadata only (rule + target, never the value)", async () => {
+  await withDatabase(async (database, repository) => {
+    const cluster = await repository.registerCluster({
+      scope: { orgId: ORG_A, customerId: CUSTOMER_A }, clusterUid, name: "Production",
+    });
+    await repository.publishScan({
+      scope: { orgId: ORG_A, customerId: CUSTOMER_A }, clusterId: cluster.id,
+      idempotencyKey: "exposed-secret-0001", status: "complete",
+      evidence: evidence("2026-07-17T14:00:00.000Z"), coverage: coverage(),
+      scannerEvidence: { findings: [exposedSecretFinding()], sboms: [] },
+    });
+    const workspace = await repository.getLatestWorkspace({ orgId: ORG_A, customerId: CUSTOMER_A }, cluster.id);
+    const finding = workspace.scannerEvidence.findings.find((item) => item.source === "exposed_secret_report");
+    assert.ok(finding !== undefined, "the exposed-secret finding is stored");
+    assert.equal(finding.checkId, "aws-access-key-id");
+    assert.equal(finding.target, "/app/config.yaml");
+    // The stored evidence carries only sanitized metadata — no field can hold the secret value.
+    assert.equal(JSON.stringify(workspace.scannerEvidence).includes("AKIA"), false);
+  });
+});
+
+test("a scanner finding carrying the raw secret match value is rejected at the DB boundary", async () => {
+  await withDatabase(async (database, repository) => {
+    const cluster = await repository.registerCluster({
+      scope: { orgId: ORG_A, customerId: CUSTOMER_A }, clusterUid, name: "Production",
+    });
+    await assert.rejects(
+      repository.publishScan({
+        scope: { orgId: ORG_A, customerId: CUSTOMER_A }, clusterId: cluster.id,
+        idempotencyKey: "exposed-secret-leak-0001", status: "complete",
+        evidence: evidence("2026-07-17T14:00:00.000Z"), coverage: coverage(),
+        scannerEvidence: {
+          findings: [exposedSecretFinding({ match: "AKIAEXAMPLESHOULDNEVERPERSIST" })],
+          sboms: [],
+        },
+      }),
+      (error) => error instanceof repositoryModule.KubernetesRepositoryError && error.code === "INVALID_INPUT",
+    );
+  });
+});

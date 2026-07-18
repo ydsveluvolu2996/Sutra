@@ -164,6 +164,15 @@ The broker workload role must restrict `sts:AssumeRole` to the vendor's customer
 | Tenant confidential | Role ARN, AWS account ID, inventory, tags, topology, findings, evidence | Encrypt in transit/at rest, tenant authorization, retention/deletion policy, no public objects or telemetry payloads |
 | Public/configuration | Published control descriptions, product metadata | Integrity protected through reviewed source and signed builds |
 
+### Exposed-secret detection (opt-in, presence not value)
+
+Sutra can surface credentials embedded in container images via Trivy's exposed-secret scanner. This is OFF by default and enabled per install with `--set trivy-operator.operator.exposedSecretScannerEnabled=true`. The privacy boundary is *detect the presence, never store the value*, enforced at two independent layers:
+
+- **Collection:** the collector's `ExposedSecretReport` parser reads only `ruleID`, `category`, `severity`, `title`, and `target`, and deliberately drops Trivy's `match` field, which can contain the credential material. The finding type has no field capable of holding a secret value.
+- **Persistence:** the repository normalizes every scanner finding against an exact key allowlist; any object still carrying a `match` (or any other non-allowlisted key) is rejected with `INVALID_INPUT` before it can be written.
+
+This scans image filesystems only and never requires `accessGlobalSecretsAndServiceAccount`, so Trivy is never granted read access to live cluster `Secret` objects. Both layers are covered by tests (collector redaction + DB-boundary rejection).
+
 Requirements:
 
 - Use AWS workload IAM for the broker and CI OIDC for deployment. Do not create an IAM user access key for the Cloudflare worker, repository, developer laptop, or CI secret.

@@ -9,6 +9,12 @@ scanning and the Sutra agent ingests its reports — no scanner install is requi
 of you. First reports appear once Trivy finishes its initial scan jobs:
   kubectl -n {{ .Release.Namespace }} get vulnerabilityreports,sbomreports -A
 To run your own Trivy instead, reinstall with --set scanner.managed=false.
+
+Exposed-secret detection is OFF by default. To opt in (Trivy scans image
+filesystems for embedded credentials; Sutra ingests only sanitized metadata and
+never stores the secret value), reinstall with:
+  --set trivy-operator.operator.exposedSecretScannerEnabled=true
+This scans image contents only; Sutra never reads live cluster Secret objects.
 {{- else }}
 
 Sutra-managed scanning is OFF (scanner.managed=false). Sutra will ingest reports
