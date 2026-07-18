@@ -129,9 +129,6 @@ function AuthenticatedAppShell({
             <small>{loading ? "Checking workspace…" : connection ? `${connection.awsAccountId} · ${connection.status.replace("_", " ")}` : "No cloud account connected"}</small>
           </div>
         </div>
-        <nav className="secondary-nav" aria-label="Workspace actions">
-          {capabilitySet.has("workspace:read") ? <Link href="/controls#architecture"><span className="nav-glyph-chip" data-tone="cyan" aria-hidden="true"><GlyphIcon name="policy" size={14} /></span>Architecture & trust</Link> : null}
-        </nav>
         <div className="user-card">
           <span className="user-avatar">{initials}</span>
           <span><strong>{session.user.displayName}</strong><small>{roleLabel(session.membership.role)} · MFA verified</small></span>
