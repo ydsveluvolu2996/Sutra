@@ -1,6 +1,7 @@
 import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { KEV_AS_OF, KEV_COUNT, isKnownExploited } from "../../../../../lib/kev-snapshot";
 import { mergeVulnerabilityFindings } from "../../../../../lib/vulnerability-finding";
 import { deriveVulnerabilityFindings, scanFindingKey } from "../../../../../lib/vulnerability-finding-evidence";
 import { buildVulnerabilityQueue } from "../../../../../lib/vulnerability-management";
@@ -51,10 +52,14 @@ export async function GET(request: Request): Promise<Response> {
     // scan is dated to the latest scan. We never date a finding earlier than evidence.
     const persisting = latest.filter((finding) => previousKeys.has(scanFindingKey(finding)));
     const fresh = latest.filter((finding) => !previousKeys.has(scanFindingKey(finding)));
-    const findings = mergeVulnerabilityFindings([
+    const merged = mergeVulnerabilityFindings([
       ...deriveVulnerabilityFindings(persisting, tenant, previousMs ?? latestMs),
       ...deriveVulnerabilityFindings(fresh, tenant, latestMs),
     ]);
+    // Enrich with the live CISA KEV snapshot: a known-exploited CVE dominates the
+    // queue ranking and is badged in the UI. Absence from KEV is a real fact
+    // ("not on the exploited list"), never an assumption of safety.
+    const findings = merged.map((finding) => ({ ...finding, knownExploited: isKnownExploited(finding.cveId) }));
 
     const now = Date.now();
     const queue = buildVulnerabilityQueue(findings, { nowMs: now, nowDays: Math.floor(now / 86_400_000) });
@@ -63,6 +68,7 @@ export async function GET(request: Request): Promise<Response> {
       scannedAt: scans.latest?.collectedAt ?? null,
       hasPrevious: scans.previous !== null,
       totalFindings: findings.length,
+      kev: { asOf: KEV_AS_OF, count: KEV_COUNT },
     });
   } catch (error) {
     return errorResponse(error);
