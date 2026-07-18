@@ -71,6 +71,7 @@ function workload(resource: KubernetesResource): KubernetesWorkloadEvidence | nu
     namespace: resource.namespace,
     name: resource.name,
     workloadKind,
+    serviceAccountName: nullableString(configuration.serviceAccountName),
     hostNetwork: nullableBoolean(configuration.hostNetwork),
     hostPid: nullableBoolean(configuration.hostPid),
     hostIpc: nullableBoolean(configuration.hostIpc),

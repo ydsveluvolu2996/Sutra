@@ -100,7 +100,7 @@ export interface KubernetesAttackPathProjection {
 const KUBERNETES_MARKER = /(?:kubernetes|(?:^|[.:/_-])k8s(?:[.:/_-]|$)|(?:^|[.:/_-])eks(?:[.:/_-]|$))/iu;
 const WORKLOAD_MARKER = /(?:deployment|statefulset|daemonset|replicaset|cronjob|job|pod|workload)/iu;
 const EXPOSURE_MARKER = /(?:ingress|service|endpoint|loadbalancer)/iu;
-const ROLE_BINDING_MARKER = /(?:clusterrolebinding|rolebinding)/iu;
+const ROLE_BINDING_MARKER = /(?:clusterrolebinding|rolebinding|rbacbinding)/iu;
 const RBAC_ROLE_MARKER = /(?:clusterrole|rbacrole|(?:^|\W)role(?:\W|$))/iu;
 const PUBLIC_VALUE = /(?:^|[\s,["'])(?:0\.0\.0\.0\/0|::\/0|internet-facing|public)(?:$|[\s,\]"'])/iu;
 const VULNERABILITY_MARKER = /(?:vulnerab|container.?image|package|\bCVE-\d{4}-\d+\b)/iu;
@@ -492,7 +492,9 @@ function derivedEdges(resources: readonly PilotResource[], nodes: Map<string, At
 
     if (attackNodeKind(resource) === "rbac_binding") {
       const roleName = fields.find((entry) =>
-        /(?:^|\.)roleRef\.name$/u.test(entry.path) && typeof entry.value === "string",
+        // Raw K8s manifests nest roleRef.name; the stored posture projection
+        // flattens it to roleRefName. Accept both so bindings link to their role.
+        /(?:(?:^|\.)roleRef\.name|(?:^|\.)roleRefName)$/u.test(entry.path) && typeof entry.value === "string",
       );
       if (roleName !== undefined) {
         const target = only(rbacRoles.filter((candidate) =>

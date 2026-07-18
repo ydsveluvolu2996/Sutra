@@ -370,3 +370,50 @@ test("scoring is deterministic and finding severity changes only the documented 
   assert.equal(highPath?.score, 75);
   assert.equal(build().paths.find((path) => path.type === "vulnerable_exposed_privileged_workload")?.score, 85);
 });
+
+test("derives the cross-plane RBAC/IRSA chain from the stored posture projection shape", () => {
+  // Exactly what projectStoredKubernetesWorkspace emits: configuration.kind is the
+  // evidence kind, roleRef is flattened to roleRefName, and the SA carries a flat
+  // iamRoleArn. Before the CIEM wiring + attack-path classification fix, none of
+  // these K8s->AWS edges materialized.
+  const projection = buildKubernetesAttackPaths({
+    relationships: [],
+    findings: [],
+    resources: [
+      resource({
+        key: "k8s:wl", service: "kubernetes", type: "kubernetes.deployment", name: "checkout-api",
+        configuration: { kind: "Deployment", namespace: "payments", clusterName: "prod", serviceAccountName: "checkout" },
+      }),
+      resource({
+        key: "k8s:sa", service: "kubernetes", type: "kubernetes.serviceaccount", name: "checkout",
+        configuration: { kind: "ServiceAccount", namespace: "payments", clusterName: "prod", iamRoleArn: "arn:aws:iam::111122223333:role/checkout" },
+      }),
+      resource({
+        key: "k8s:rb", service: "kubernetes", type: "kubernetes.rbacbinding", name: "checkout-binding",
+        configuration: {
+          kind: "RbacBinding", namespace: "payments", clusterName: "prod",
+          roleRefKind: "Role", roleRefName: "reader",
+          subjects: [{ kind: "ServiceAccount", namespace: "payments", name: "checkout" }],
+        },
+      }),
+      resource({
+        key: "k8s:role", service: "kubernetes", type: "kubernetes.rbacrole", name: "reader",
+        configuration: { kind: "RbacRole", clusterScoped: false, namespace: "payments", clusterName: "prod", rules: [{ verbs: ["get"], apiGroups: [""], resources: ["secrets"] }] },
+      }),
+      resource({
+        key: "aws:iam", service: "iam", type: "aws.iam.role", name: "checkout",
+        arn: "arn:aws:iam::111122223333:role/checkout",
+        configuration: { policyDocument: { Statement: [{ Effect: "Allow", Action: ["s3:PutObject"], Resource: ["*"] }] } },
+      }),
+    ],
+  });
+  const relationOf = (from: string, to: string) =>
+    projection.edges.find((edge) => edge.from === from && edge.to === to)?.relation;
+  assert.equal(relationOf("k8s:wl", "k8s:sa"), "uses_service_account");
+  assert.equal(relationOf("k8s:sa", "aws:iam"), "assumes_iam_role");
+  assert.equal(relationOf("k8s:rb", "k8s:role"), "binds_rbac_role");
+  assert.equal(relationOf("k8s:sa", "k8s:rb"), "subject_of_rbac_binding");
+  // The IAM role is reachable from the workload through the SA hop.
+  assert.equal(projection.nodes.find((node) => node.key === "aws:iam")?.kind, "iam_role");
+  assert.equal(projection.nodes.find((node) => node.key === "k8s:rb")?.kind, "rbac_binding");
+});

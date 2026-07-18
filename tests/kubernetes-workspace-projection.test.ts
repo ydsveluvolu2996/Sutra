@@ -51,6 +51,7 @@ const workspace: KubernetesStoredWorkspace = {
     namespace: "payments",
     name: "api",
     workloadKind: "Deployment",
+    serviceAccountName: "api-sa",
     hostNetwork: false,
     hostPid: false,
     hostIpc: false,
