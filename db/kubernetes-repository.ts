@@ -473,6 +473,48 @@ export class KubernetesRepository {
     return { latest: await load(runRows[0]), previous: await load(runRows[1]) };
   }
 
+  public async listWorkloadScans(
+    scope: KubernetesTenantScope,
+    clusterId: string,
+  ): Promise<{
+    readonly latest: { readonly collectedAt: string; readonly workloads: readonly KubernetesEvidenceSnapshot["resources"][number][] } | null;
+    readonly previous: { readonly collectedAt: string; readonly workloads: readonly KubernetesEvidenceSnapshot["resources"][number][] } | null;
+  }> {
+    assertScope(scope);
+    if (!validIdentifier(clusterId)) throw new KubernetesRepositoryError("INVALID_INPUT");
+    const cluster = (await this.listClusters(scope)).find((item) => item.id === clusterId);
+    if (cluster === undefined) throw new KubernetesRepositoryError("SCOPE_NOT_FOUND");
+    const db = await this.ready();
+    const runs = await db.prepare(
+      `SELECT id, collected_at
+         FROM kubernetes_scan_runs
+        WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND status = 'complete'
+        ORDER BY collected_at DESC
+        LIMIT 2`,
+    ).bind(scope.orgId, scope.customerId, clusterId).all<{ id: string; collected_at: number }>();
+    const runRows = runs.results ?? [];
+    const load = async (run: { id: string; collected_at: number } | undefined) => {
+      if (run === undefined) return null;
+      const collectedAt = new Date(Number(run.collected_at)).toISOString();
+      const rows = await db.prepare(
+        `SELECT evidence_json FROM kubernetes_scan_resources
+          WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND scan_run_id = ? AND kind = 'Workload'`,
+      ).bind(scope.orgId, scope.customerId, clusterId, run.id).all<{ evidence_json: string }>();
+      const workloads = (rows.results ?? []).map((row) => {
+        const parsed = JSON.parse(row.evidence_json) as unknown;
+        return normalizeKubernetesEvidence({
+          schema: "sutra.kubernetes-evidence.v1",
+          clusterId: cluster.clusterUid,
+          collectedAt,
+          observedKinds: [recordKind(parsed)],
+          resources: [parsed],
+        }).resources[0];
+      }).filter((resource): resource is KubernetesEvidenceSnapshot["resources"][number] => resource !== undefined && resource.kind === "Workload");
+      return { collectedAt, workloads };
+    };
+    return { latest: await load(runRows[0]), previous: await load(runRows[1]) };
+  }
+
   public async getLatestCompleteScan(
     scope: KubernetesTenantScope,
     clusterId: string,

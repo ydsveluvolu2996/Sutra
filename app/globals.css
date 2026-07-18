@@ -1651,3 +1651,13 @@ h3 { letter-spacing: -.02em; }
 .vuln-delta-fix { text-align: right; font-size: 11px; color: #3a4a53; }
 .vuln-delta-resolved { opacity: .82; }
 @media (max-width: 640px) { .vuln-delta-row { grid-template-columns: 70px 1fr; } .vuln-delta-fix { grid-column: 2; text-align: left; } }
+
+/* Drift detection */
+.drift-list { display: flex; flex-direction: column; gap: 6px; }
+.drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
+.drift-body { min-width: 0; }
+.drift-body small { display: block; color: #7c8991; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.drift-transition { display: flex; align-items: center; gap: 8px; }
+.drift-transition code { font-size: 10px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 6px; border-radius: 6px; background: #f2f5f6; }
+.drift-transition span { color: #7c8991; }
+@media (max-width: 680px) { .drift-row { grid-template-columns: 70px 1fr; } .drift-transition { grid-column: 2; } }

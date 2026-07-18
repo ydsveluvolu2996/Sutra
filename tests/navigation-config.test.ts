@@ -51,6 +51,7 @@ describe("grouped workspace navigation", () => {
         "Effective permissions",
         "Network",
         "Runtime",
+        "Drift",
         "Compliance",
         "Admission control",
         "Policies",
