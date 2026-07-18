@@ -42,6 +42,8 @@ const collectors: Readonly<Record<KubernetesEvidenceKind, readonly string[]>> = 
   Service: ["kubernetes.services"],
   Ingress: ["kubernetes.ingresses"],
   RbacRole: ["kubernetes.roles", "kubernetes.clusterroles"],
+  RbacBinding: ["kubernetes.rolebindings", "kubernetes.clusterrolebindings"],
+  ServiceAccount: ["kubernetes.serviceaccounts"],
   Namespace: ["kubernetes.namespaces"],
   NetworkPolicy: ["kubernetes.networkpolicies"],
 };

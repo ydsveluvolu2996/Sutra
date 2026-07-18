@@ -108,6 +108,7 @@ const collectors: readonly CollectorDefinition[] = [
   { key: "kubernetes.rolebindings", path: "/apis/rbac.authorization.k8s.io/v1/rolebindings", kind: "rolebinding", apiVersion: "rbac.authorization.k8s.io/v1", namespaced: true },
   { key: "kubernetes.clusterroles", path: "/apis/rbac.authorization.k8s.io/v1/clusterroles", kind: "clusterrole", apiVersion: "rbac.authorization.k8s.io/v1", namespaced: false },
   { key: "kubernetes.clusterrolebindings", path: "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", kind: "clusterrolebinding", apiVersion: "rbac.authorization.k8s.io/v1", namespaced: false },
+  { key: "kubernetes.serviceaccounts", path: "/api/v1/serviceaccounts", kind: "serviceaccount", apiVersion: "v1", namespaced: true },
   { key: "kubernetes.nodes", path: "/api/v1/nodes", kind: "node", apiVersion: "v1", namespaced: false },
 ] as const;
 
@@ -292,6 +293,15 @@ function labels(value: unknown): Readonly<Record<string, string>> {
   }));
 }
 
+// IRSA binds a Kubernetes ServiceAccount to an AWS IAM role via a single
+// well-known annotation. We project only that one value (never the annotation
+// map, tokens, or imagePullSecrets), so CIEM can resolve the K8s-to-AWS reach
+// without collecting any secret or credential material.
+function serviceAccountIamRoleArn(item: Record<string, unknown>): string | null {
+  const metadataAnnotations = optionalRecord(optionalRecord(item.metadata).annotations);
+  return safeString(metadataAnnotations["eks.amazonaws.com/role-arn"], 2048);
+}
+
 function configuration(kind: KubernetesResourceKind, item: Record<string, unknown>): Readonly<Record<string, SafeKubernetesValue>> {
   const spec = optionalRecord(item.spec);
   const status = optionalRecord(item.status);
@@ -401,6 +411,9 @@ function configuration(kind: KubernetesResourceKind, item: Record<string, unknow
         };
       }),
     };
+  }
+  if (kind === "serviceaccount") {
+    return { iamRoleArn: serviceAccountIamRoleArn(item) };
   }
   if (kind === "node") {
     const nodeInfo = optionalRecord(status.nodeInfo);

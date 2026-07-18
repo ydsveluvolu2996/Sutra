@@ -6,7 +6,9 @@ import type {
   KubernetesContainerEvidence,
   KubernetesEvidence,
   KubernetesEvidenceKind,
+  KubernetesRbacBindingEvidence,
   KubernetesRbacRoleEvidence,
+  KubernetesServiceAccountEvidence,
   KubernetesWorkloadEvidence,
 } from "../../../lib/kubernetes-posture.ts";
 import type { KubernetesResource, KubernetesSnapshot, SafeKubernetesValue } from "./types.ts";
@@ -99,6 +101,39 @@ function rbacRole(resource: KubernetesResource): KubernetesRbacRoleEvidence {
   };
 }
 
+function rbacBinding(resource: KubernetesResource): KubernetesRbacBindingEvidence {
+  const rawSubjects = Array.isArray(resource.configuration.subjects) ? resource.configuration.subjects : [];
+  const clusterScoped = resource.kind === "clusterrolebinding";
+  return {
+    kind: "RbacBinding",
+    namespace: clusterScoped ? null : resource.namespace,
+    name: resource.name,
+    clusterScoped,
+    roleRefKind: nullableString(resource.configuration.roleRefKind),
+    roleRefName: nullableString(resource.configuration.roleRefName),
+    subjects: rawSubjects.flatMap((raw) => {
+      const subject = objectValue(raw);
+      const name = nullableString(subject.name);
+      if (name === null) return [];
+      return [{
+        kind: nullableString(subject.kind) ?? "",
+        namespace: nullableString(subject.namespace),
+        name,
+      }];
+    }),
+  };
+}
+
+function serviceAccount(resource: KubernetesResource): KubernetesServiceAccountEvidence | null {
+  if (resource.namespace === null) return null;
+  return {
+    kind: "ServiceAccount",
+    namespace: resource.namespace,
+    name: resource.name,
+    iamRoleArn: nullableString(resource.configuration.iamRoleArn),
+  };
+}
+
 function postureResource(resource: KubernetesResource): KubernetesEvidence | null {
   if (
     resource.kind === "pod" || resource.kind === "deployment" ||
@@ -123,6 +158,8 @@ function postureResource(resource: KubernetesResource): KubernetesEvidence | nul
     };
   }
   if (resource.kind === "role" || resource.kind === "clusterrole") return rbacRole(resource);
+  if (resource.kind === "rolebinding" || resource.kind === "clusterrolebinding") return rbacBinding(resource);
+  if (resource.kind === "serviceaccount") return serviceAccount(resource);
   if (resource.kind === "namespace") {
     return {
       kind: "Namespace",
@@ -149,6 +186,8 @@ const evidenceCollectors: Readonly<Record<KubernetesEvidenceKind, readonly strin
   Service: ["kubernetes.services"],
   Ingress: ["kubernetes.ingresses"],
   RbacRole: ["kubernetes.roles", "kubernetes.clusterroles"],
+  RbacBinding: ["kubernetes.rolebindings", "kubernetes.clusterrolebindings"],
+  ServiceAccount: ["kubernetes.serviceaccounts"],
   Namespace: ["kubernetes.namespaces"],
   NetworkPolicy: ["kubernetes.networkpolicies"],
 };

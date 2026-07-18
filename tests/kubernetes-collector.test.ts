@@ -107,18 +107,48 @@ test("collects only normalized metadata and never returns credentials, annotatio
         }],
       };
     }
+    if (url.pathname === "/api/v1/serviceaccounts") {
+      return {
+        metadata: {},
+        items: [{
+          apiVersion: "v1",
+          kind: "ServiceAccount",
+          metadata: {
+            name: "checkout",
+            namespace: "production",
+            uid: "sa-uid",
+            annotations: {
+              "eks.amazonaws.com/role-arn": "arn:aws:iam::111122223333:role/irsa-checkout",
+              "private.example/token": "sa-annotation-secret",
+            },
+          },
+          secrets: [{ name: "checkout-token-abcde" }],
+          imagePullSecrets: [{ name: "regcred" }],
+        }],
+      };
+    }
     return { metadata: {}, items: [] };
   };
   const snapshot = await new ReadOnlyKubernetesCollector(connection(), transport).collect(
     new Date("2026-07-17T12:00:00.000Z"),
   );
   const serialized = JSON.stringify(snapshot);
-  assert.equal(snapshot.resources.length, 3);
+  assert.equal(snapshot.resources.length, 4);
   assert.equal(snapshot.coverage.every((entry) => entry.status === "succeeded"), true);
   assert.equal(requestedPaths.some((path) => /^\/api\/v1\/(?:namespaces\/[^/]+\/)?secrets(?:\/|$)/u.test(path)), false);
-  for (const forbidden of [TOKEN, "annotation-secret", "secret-payload", "pod-env-secret", "PASSWORD"]) {
+  // The single IRSA role ARN is projected (CIEM needs it); the SA's own token
+  // Secret refs, imagePullSecrets, and every other annotation are never retained.
+  for (const forbidden of [TOKEN, "annotation-secret", "secret-payload", "pod-env-secret", "PASSWORD", "sa-annotation-secret", "checkout-token-abcde", "regcred"]) {
     assert.equal(serialized.includes(forbidden), false);
   }
+  const serviceAccount = snapshot.resources.find((resource) => resource.kind === "serviceaccount");
+  assert.equal(serviceAccount?.configuration.iamRoleArn, "arn:aws:iam::111122223333:role/irsa-checkout");
+  const serviceAccountEvidence = toKubernetesEvidenceSnapshot(snapshot).resources
+    .find((resource) => resource.kind === "ServiceAccount");
+  assert.equal(
+    serviceAccountEvidence?.kind === "ServiceAccount" && serviceAccountEvidence.iamRoleArn,
+    "arn:aws:iam::111122223333:role/irsa-checkout",
+  );
   const deployment = snapshot.resources.find((resource) => resource.kind === "deployment");
   assert.equal(deployment?.configuration.desiredReplicas, 3);
   assert.equal(deployment?.configuration.hostPid, true);
@@ -157,7 +187,7 @@ test("default transport performs authenticated read-only loopback API requests",
     serverUrl: `http://127.0.0.1:${address.port}`,
   })).collect();
   assert.equal(snapshot.coverage.every((entry) => entry.status === "succeeded"), true);
-  assert.equal(requests.length, 23);
+  assert.equal(requests.length, 24);
   assert.equal(requests.every((request) => request.method === "GET" && request.url?.includes("limit=")), true);
   assert.equal(JSON.stringify(snapshot).includes(TOKEN), false);
 });

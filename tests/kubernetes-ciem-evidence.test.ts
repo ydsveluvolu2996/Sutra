@@ -49,6 +49,45 @@ test("derives roles, bindings, service accounts and IAM roles from CMDB resource
   assert.ok(app.flags.includes("aws-write"));
 });
 
+test("resolves the projected posture-evidence shape (RbacRole/RbacBinding/ServiceAccount) end to end", () => {
+  // This is exactly what projectStoredKubernetesWorkspace emits: configuration.kind
+  // is the evidence kind ("RbacRole"/"RbacBinding"/"ServiceAccount") with the
+  // evidence fields spread at the top level. Before the bridge learned these
+  // kinds, the entire K8s side of CIEM resolved to empty in production.
+  const inputs = deriveCiemInputs([
+    resource({
+      resourceKey: "k8s:role", name: "payments-reader", resourceType: "kubernetes.rbacrole",
+      configuration: { kind: "RbacRole", clusterScoped: false, namespace: "payments", rules: [{ verbs: ["get", "list"], apiGroups: [""], resources: ["secrets"] }] },
+    }),
+    resource({
+      resourceKey: "k8s:binding", name: "payments-reader-binding", resourceType: "kubernetes.rbacbinding",
+      configuration: {
+        kind: "RbacBinding", clusterScoped: false, namespace: "payments",
+        roleRefKind: "Role", roleRefName: "payments-reader",
+        subjects: [{ kind: "ServiceAccount", namespace: "payments", name: "checkout" }],
+      },
+    }),
+    resource({
+      resourceKey: "k8s:sa", name: "checkout", resourceType: "kubernetes.serviceaccount",
+      configuration: { kind: "ServiceAccount", namespace: "payments", iamRoleArn: "arn:aws:iam::111122223333:role/checkout" },
+    }),
+    resource({
+      resourceKey: "iam", service: "iam", resourceType: "iam.role", arn: "arn:aws:iam::111122223333:role/checkout", name: "checkout",
+      configuration: { policyDocument: { Statement: [{ Effect: "Allow", Action: ["s3:PutObject"], Resource: ["*"] }] } },
+    }),
+  ]);
+  assert.equal(inputs.roles[0]?.id, "role:payments/payments-reader");
+  assert.equal(inputs.bindings[0]?.roleId, "role:payments/payments-reader");
+  assert.equal(inputs.serviceAccounts[0]?.iamRoleArn, "arn:aws:iam::111122223333:role/checkout");
+
+  const report = buildKubernetesCiem(inputs);
+  const checkout = report.subjects.find((s) => s.subject.includes("/checkout"));
+  assert.ok(checkout !== undefined, "the projected ServiceAccount resolves to a CIEM subject");
+  assert.ok(checkout.flags.includes("secrets-access"));
+  assert.ok(checkout.flags.includes("aws-reachable"));
+  assert.ok(checkout.flags.includes("aws-write"));
+});
+
 test("clusterrolebinding resolves to the cluster role id", () => {
   const inputs = deriveCiemInputs([
     resource({ resourceKey: "cr", name: "admin", configuration: { kind: "ClusterRole", rules: [{ verbs: ["*"], apiGroups: ["*"], resources: ["*"] }] } }),

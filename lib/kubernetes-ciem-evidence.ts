@@ -107,14 +107,19 @@ export function deriveCiemInputs(resources: readonly ResourceLike[]): {
 
   for (const resource of resources) {
     const kind = kindOf(resource);
-    if (kind === "role" || kind === "clusterrole") {
+    // The stored posture projection emits "rbacrole"/"rbacbinding" (evidence
+    // kinds); raw CMDB resources use "role"/"clusterrole"/"rolebinding". Accept
+    // both, deriving cluster-scope from the clusterScoped flag when present.
+    const configClusterScoped = resource.configuration.clusterScoped === true;
+    if (kind === "role" || kind === "clusterrole" || kind === "rbacrole") {
+      const clusterScoped = kind === "clusterrole" || (kind === "rbacrole" && configClusterScoped);
       const namespace = namespaceOf(resource);
       const name = nameOf(resource);
       roles.push({
-        id: roleId(kind, namespace, name),
+        id: roleId(clusterScoped ? "clusterrole" : "role", namespace, name),
         name,
-        namespace: kind === "clusterrole" ? null : namespace,
-        clusterScoped: kind === "clusterrole",
+        namespace: clusterScoped ? null : namespace,
+        clusterScoped,
         rules: arr(resource.configuration.rules).flatMap((rawRule) => {
           const rule = obj(rawRule);
           return rule === null ? [] : [{
@@ -124,7 +129,7 @@ export function deriveCiemInputs(resources: readonly ResourceLike[]): {
           }];
         }),
       });
-    } else if (kind === "rolebinding" || kind === "clusterrolebinding") {
+    } else if (kind === "rolebinding" || kind === "clusterrolebinding" || kind === "rbacbinding") {
       const bindingNamespace = namespaceOf(resource);
       const refName = str(resource.configuration.roleRefName);
       const refKind = (str(resource.configuration.roleRefKind) ?? "").toLocaleLowerCase("en-US");

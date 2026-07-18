@@ -13,7 +13,7 @@ const ORG_B = "org_kubernetes_tenant_b";
 const CUSTOMER_A = "cust_kubernetes_tenant_a";
 const CUSTOMER_B = "cust_kubernetes_tenant_b";
 const clusterUid = "cluster-production-01";
-const allKinds = ["Workload", "Service", "Ingress", "RbacRole", "Namespace", "NetworkPolicy"];
+const allKinds = ["Workload", "Service", "Ingress", "RbacRole", "RbacBinding", "ServiceAccount", "Namespace", "NetworkPolicy"];
 
 function evidence(collectedAt, imageCharacter = "a") {
   return {
@@ -49,6 +49,15 @@ function evidence(collectedAt, imageCharacter = "a") {
       {
         kind: "RbacRole", namespace: "payments", name: "reader", clusterScoped: false,
         rules: [{ verbs: ["get"], apiGroups: [""], resources: ["pods"] }],
+      },
+      {
+        kind: "RbacBinding", namespace: "payments", name: "reader-binding", clusterScoped: false,
+        roleRefKind: "Role", roleRefName: "reader",
+        subjects: [{ kind: "ServiceAccount", namespace: "payments", name: "api" }],
+      },
+      {
+        kind: "ServiceAccount", namespace: "payments", name: "api",
+        iamRoleArn: "arn:aws:iam::111122223333:role/payments-api",
       },
       { kind: "NetworkPolicy", namespace: "payments", name: "default-deny", coversAllPods: true },
     ],
