@@ -1,5 +1,9 @@
 import { canonicalJson } from "../lib/canonical-json";
 import {
+  buildSbomComponentDiff,
+  type SbomComponentDiffReport,
+} from "../lib/kubernetes-sbom-diff";
+import {
   evaluateSbomLicensePolicy,
   normalizeObservedLicenses,
   normalizeSbomLicensePolicy,
@@ -499,6 +503,33 @@ export class KubernetesSbomRepository {
       evaluation: evaluateSbomLicensePolicy(policy.policy, components, limit),
       scanRunId: row.scan_run_id,
       collectedAt: new Date(row.collected_at).toISOString(),
+    };
+  }
+
+  /** SBOM component drift between the two most recent scans of a cluster. */
+  public async diffLatest(scope: KubernetesSbomScope): Promise<{
+    readonly diff: SbomComponentDiffReport;
+    readonly currentScanRunId: string | null;
+    readonly previousScanRunId: string | null;
+    readonly collectedAt: string | null;
+    readonly previousCollectedAt: string | null;
+  }> {
+    const [current, previous] = await this.rows(scope, 2);
+    const flatten = async (row: ScannerRow | undefined) =>
+      row === undefined ? null : (await parseRow(row)).flatMap((sbom) => sbom.components.map((component) => ({
+        name: component.name,
+        version: component.version,
+        packageUrl: component.packageUrl,
+        type: component.type,
+        licenses: component.licenses ?? [],
+      })));
+    const currentComponents = (await flatten(current)) ?? [];
+    return {
+      diff: buildSbomComponentDiff({ current: currentComponents, previous: await flatten(previous) }),
+      currentScanRunId: current?.scan_run_id ?? null,
+      previousScanRunId: previous?.scan_run_id ?? null,
+      collectedAt: current === undefined ? null : new Date(current.collected_at).toISOString(),
+      previousCollectedAt: previous === undefined ? null : new Date(previous.collected_at).toISOString(),
     };
   }
 }

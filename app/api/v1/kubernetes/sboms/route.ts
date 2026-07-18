@@ -95,6 +95,10 @@ export async function GET(request: Request): Promise<Response> {
       const policies = await repository.listPolicies(scope);
       return jsonResponse({ schemaVersion: "sutra.kubernetes-sbom-license-policies.v1", clusterId, policies });
     }
+    if (view === "diff") {
+      const result = await repository.diffLatest(scope);
+      return jsonResponse({ schemaVersion: "sutra.kubernetes-sbom-diff.v1", clusterId, ...result });
+    }
     if (view === "evaluation") {
       const policyId = identifier(url.searchParams.get("policyId"), POLICY_ID);
       const result = await repository.evaluateLatest(

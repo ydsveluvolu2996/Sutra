@@ -91,6 +91,32 @@ interface LicenseEvaluationBody {
   };
 }
 
+interface SbomDiffBody {
+  readonly schemaVersion: "sutra.kubernetes-sbom-diff.v1";
+  readonly currentScanRunId: string | null;
+  readonly previousScanRunId: string | null;
+  readonly collectedAt: string | null;
+  readonly previousCollectedAt: string | null;
+  readonly diff: {
+    readonly hasPrevious: boolean;
+    readonly summary: {
+      readonly added: number;
+      readonly removed: number;
+      readonly versionChanged: number;
+      readonly licenseChanged: number;
+      readonly unchanged: number;
+    };
+    readonly changes: readonly {
+      readonly kind: "added" | "removed" | "version-changed" | "license-changed";
+      readonly name: string;
+      readonly packageUrl: string | null;
+      readonly type: string | null;
+      readonly from: string;
+      readonly to: string;
+    }[];
+  };
+}
+
 function imageReference(evidence: KubernetesSupplyChainEvidence): string {
   return `${evidence.image.repository}@${evidence.image.digest}`;
 }
@@ -107,6 +133,7 @@ export function SupplyChainWorkspace() {
   const [componentSearch, setComponentSearch] = useState<ComponentSearchBody | null>(null);
   const [policies, setPolicies] = useState<LicensePolicyBody["policies"]>([]);
   const [licenseEvaluation, setLicenseEvaluation] = useState<LicenseEvaluationBody | null>(null);
+  const [sbomDiff, setSbomDiff] = useState<SbomDiffBody | null>(null);
   const [policyName, setPolicyName] = useState("Production workload license policy");
   const [deniedLicenses, setDeniedLicenses] = useState("GPL-3.0-only, AGPL-3.0-only");
   const [allowedLicenses, setAllowedLicenses] = useState("");
@@ -143,18 +170,21 @@ export function SupplyChainWorkspace() {
       ) throw new Error(body?.error?.message ?? "Supply-chain evidence could not be loaded");
       setPayload(body);
       const scope = `connectionId=${encodeURIComponent(connectionId)}&clusterId=${encodeURIComponent(activeCluster.id)}`;
-      const [historyResponse, policyResponse] = await Promise.all([
+      const [historyResponse, policyResponse, diffResponse] = await Promise.all([
         fetch(`/api/v1/kubernetes/sboms?${scope}&view=history&limit=20`, { cache: "no-store" }),
         fetch(`/api/v1/kubernetes/sboms?${scope}&view=policies`, { cache: "no-store" }),
+        fetch(`/api/v1/kubernetes/sboms?${scope}&view=diff`, { cache: "no-store" }),
       ]);
       const historyBody = await historyResponse.json().catch(() => null) as SbomHistoryBody | null;
       const policyBody = await policyResponse.json().catch(() => null) as LicensePolicyBody | null;
+      const diffBody = await diffResponse.json().catch(() => null) as SbomDiffBody | null;
       if (
         !historyResponse.ok || historyBody?.schemaVersion !== "sutra.kubernetes-sbom-history.v1" ||
         !policyResponse.ok || policyBody?.schemaVersion !== "sutra.kubernetes-sbom-license-policies.v1"
       ) throw new Error("SBOM history or license policy state could not be loaded");
       setHistory(historyBody.history);
       setPolicies(policyBody.policies);
+      setSbomDiff(diffResponse.ok && diffBody?.schemaVersion === "sutra.kubernetes-sbom-diff.v1" ? diffBody : null);
       setError(null);
     } catch (caught) {
       setPayload(null);
@@ -313,6 +343,22 @@ export function SupplyChainWorkspace() {
               <section><h3>Document evidence</h3><dl><div><dt>Format</dt><dd>{item.format ?? "Not reported"} {item.specVersion ?? ""}</dd></div><div><dt>Stored components</dt><dd>{item.componentCount}</dd></div><div><dt>Declared components</dt><dd>{item.declaredComponentCount ?? "Not reported"}</dd></div><div><dt>Scanner</dt><dd>{item.scannerName} {item.scannerVersion}</dd></div></dl></section>
             </div>
           </article>)}</div> : <div className="empty-state"><strong>No historical SBOM evidence</strong><span>Sutra reports only immutable scanner snapshots received in this tenant and cluster scope.</span></div>}
+        </section>
+        <section className="panel supply-chain-panel">
+          <div className="panel-heading"><div><p className="eyebrow">Component drift</p><h2>SBOM diff (latest two scans)</h2></div>{sbomDiff?.diff.hasPrevious ? <span className="status-pill">{sbomDiff.diff.changes.length} change{sbomDiff.diff.changes.length === 1 ? "" : "s"}</span> : null}</div>
+          {sbomDiff === null || !sbomDiff.diff.hasPrevious ? <div className="empty-state"><strong>No previous scan to compare</strong><span>SBOM diff needs at least two immutable scans in this cluster scope. Nothing is inferred from a single scan.</span></div> : <>
+            <div className="inventory-stats">
+              <article><small>Added</small><strong>{sbomDiff.diff.summary.added}</strong><span>new components</span></article>
+              <article><small>Removed</small><strong>{sbomDiff.diff.summary.removed}</strong><span>no longer present</span></article>
+              <article><small>Version changed</small><strong>{sbomDiff.diff.summary.versionChanged}</strong><span>{sbomDiff.diff.summary.licenseChanged} license changed</span></article>
+              <article><small>Unchanged</small><strong>{sbomDiff.diff.summary.unchanged}</strong><span>since {formatTimestamp(sbomDiff.previousCollectedAt ?? "")}</span></article>
+            </div>
+            {sbomDiff.diff.changes.length > 0 ? <div className="vuln-delta-list">{sbomDiff.diff.changes.slice(0, 100).map((change) => <article className="posture-priority-row" key={`${change.kind}:${change.name}:${change.packageUrl ?? ""}`}>
+              <span className={`settings-pill ${change.kind === "removed" ? "is-good" : change.kind === "added" ? "is-risk" : ""}`}>{change.kind}</span>
+              <div><strong>{change.name}</strong><small>{change.packageUrl ?? change.type ?? "component"}</small><small className="posture-priority-msg">{change.from} → {change.to}</small></div>
+            </article>)}</div> : <div className="empty-state"><strong>No component drift</strong><span>The component inventory is identical across the two most recent scans.</span></div>}
+            {sbomDiff.diff.changes.length > 100 ? <p className="panel-footnote">Showing the first 100 of {sbomDiff.diff.changes.length} changes.</p> : null}
+          </>}
         </section>
         <section className="panel supply-chain-panel">
           <div className="panel-heading"><div><p className="eyebrow">Bounded evidence search</p><h2>Components and licenses</h2></div>{componentSearch ? <span className="status-pill">{componentSearch.componentsInspected} inspected</span> : null}</div>
