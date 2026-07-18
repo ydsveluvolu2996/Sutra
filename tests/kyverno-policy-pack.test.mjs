@@ -60,6 +60,35 @@ test("audit pack covers every requested workload and supply-chain control", asyn
   assert.doesNotMatch(supplyChain, /operator: NotMatches/u);
 });
 
+test("opt-in enforce overlay flips the audit pack to blocking and is not in the default target", async () => {
+  const rootKustomization = await source("kustomization.yaml");
+  // The default target must never pull in the enforce overlay.
+  assert.doesNotMatch(rootKustomization, /enforce/u);
+
+  const overlay = await source("enforce/kustomization.yaml");
+  // Reuses the exact audit policies as bases (no duplicated policy bodies).
+  for (const name of included) assert.match(overlay, new RegExp(`\\.\\./${name}`, "u"));
+  // Flips all three fields to blocking, fail-closed, enforce-promoted.
+  assert.match(overlay, /path: \/spec\/validationFailureAction\n\s+value: Enforce/u);
+  assert.match(overlay, /path: \/spec\/failurePolicy\n\s+value: Fail/u);
+  assert.match(overlay, /promotion-state\n\s+value: enforce/u);
+  // One patch target per audit policy.
+  assert.equal([...overlay.matchAll(/name: sutra-[a-z-]+-audit/gu)].length, included.length);
+});
+
+test("microsegmentation generate policy creates a default-deny NetworkPolicy per namespace", async () => {
+  const policy = await source("enforce/generate-default-deny-networkpolicy.yaml");
+  assert.match(policy, /kind: ClusterPolicy/u);
+  assert.match(policy, /generate:/u);
+  assert.match(policy, /kind: NetworkPolicy/u);
+  assert.match(policy, /kinds: \[Namespace\]/u);
+  assert.match(policy, /podSelector: \{\}/u);
+  assert.match(policy, /policyTypes: \[Ingress, Egress\]/u);
+  // Still excludes the reviewed system namespaces, and is enforce-scoped only.
+  assert.match(policy, /namespaces: \[kube-system, kube-public, kube-node-lease, kyverno\]/u);
+  assert.match(policy, /sutra\.io\/promotion-state: enforce/u);
+});
+
 test("every default policy excludes the reviewed system namespaces", async () => {
   for (const name of included) {
     const policy = await source(name);

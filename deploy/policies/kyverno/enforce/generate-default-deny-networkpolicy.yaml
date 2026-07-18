@@ -1,0 +1,38 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-generate-default-deny
+  annotations:
+    policies.kyverno.io/title: Generate a default-deny NetworkPolicy per namespace
+    sutra.io/promotion-state: enforce
+    # Part of the opt-in enforce overlay. This rule actively CREATES objects
+    # (a NetworkPolicy) in every non-system namespace — a mutation — so it is
+    # deliberately kept out of the audit-first default kustomization and applied
+    # only after the reviewed Audit->Enforce promotion (see ../README.md).
+spec:
+  admission: true
+  background: true
+  rules:
+    - name: generate-default-deny
+      match:
+        any:
+          - resources:
+              kinds: [Namespace]
+      exclude:
+        any:
+          - resources:
+              # Never microsegment the reviewed system namespaces.
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      generate:
+        apiVersion: networking.k8s.io/v1
+        kind: NetworkPolicy
+        name: sutra-default-deny
+        namespace: "{{request.object.metadata.name}}"
+        synchronize: true
+        data:
+          metadata:
+            annotations:
+              sutra.io/managed-by: sutra-microsegmentation
+          spec:
+            podSelector: {}
+            policyTypes: [Ingress, Egress]
