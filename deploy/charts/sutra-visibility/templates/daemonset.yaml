@@ -1,4 +1,9 @@
-{{- if and .Values.agent.enabled (eq (.Values.agent.mode | default "deployment") "deployment") }}
+{{- if and .Values.agent.enabled (eq (.Values.agent.mode | default "deployment") "daemonset") }}
+{{- /* DaemonSet mode: one agent per node for per-node coverage. Shares the same
+       hardened container contract as the Deployment (deployment.yaml); the only
+       differences are per-node NODE_NAME identity and node-local emptyDir state
+       (the RWO PVC cannot be shared across nodes). Both templates are rendered
+       and asserted by tests/kubernetes-agent-helm-contract.test.mjs. */ -}}
 {{- $repository := required "agent.image.repository is required when agent.enabled=true" .Values.agent.image.repository }}
 {{- $digest := required "agent.image.digest is required when agent.enabled=true" .Values.agent.image.digest }}
 {{- $controlPlane := required "agent.controlPlane.url is required when agent.enabled=true" .Values.agent.controlPlane.url }}
@@ -16,7 +21,7 @@
 {{- $falcoGatewayHealthUrl := (.Values.agent.falcoGateway | default dict).healthUrl | default "" }}
 {{- if and $falcoGatewayHealthUrl (not (regexMatch "^https?://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9./_-]*)?$" $falcoGatewayHealthUrl)) }}{{ fail "agent.falcoGateway.healthUrl must be a bounded in-cluster http(s) URL" }}{{- end }}
 apiVersion: apps/v1
-kind: Deployment
+kind: DaemonSet
 metadata:
   name: sutra-visibility-agent
   namespace: {{ .Release.Namespace }}
@@ -24,9 +29,6 @@ metadata:
     app.kubernetes.io/name: sutra
     app.kubernetes.io/component: visibility-agent
 spec:
-  replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: sutra
@@ -76,6 +78,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             {{- if $hubbleExport.enabled }}
             - name: SUTRA_HUBBLE_EXPORT_FILE
               value: /var/run/sutra-hubble/events.log
@@ -123,8 +129,7 @@ spec:
               - key: {{ .Values.agent.enrollment.key | quote }}
                 path: bootstrap
         - name: state
-          persistentVolumeClaim:
-            claimName: {{ default "sutra-agent-state" .Values.agent.state.existingClaim | quote }}
+          emptyDir: {}
         {{- if $hubbleExport.enabled }}
         - name: hubble-export
           hostPath:
