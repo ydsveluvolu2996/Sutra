@@ -1763,6 +1763,17 @@ h3 { letter-spacing: -.02em; }
 .networkpolicy-yaml { margin: 10px 0 0; padding: 12px; border-radius: 8px; background: #0f1720; color: #d7e2ea; font-size: 11px; line-height: 1.5; overflow-x: auto; }
 .networkpolicy-yaml code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
 
+/* IaC misconfiguration scan */
+.iac-input-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 4px; }
+.iac-input-grid label { display: grid; gap: 5px; font-size: 11px; font-weight: 600; color: #55636b; }
+.iac-input-grid label small { font-weight: 500; color: #7c8991; }
+.iac-textarea { width: 100%; min-height: 200px; padding: 11px; border: 1px solid var(--line-dark, #cbd5da); border-radius: 8px; background: #0f1720; color: #d7e2ea; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; resize: vertical; }
+.iac-finding-row { display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 12px; align-items: start; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
+.iac-finding-row small { display: block; color: #7c8991; overflow-wrap: anywhere; }
+.iac-finding-row .iac-finding-message { color: #3a4a53; margin-top: 3px; }
+.iac-finding-row .iac-finding-fix { color: #55636b; margin-top: 2px; }
+@media (max-width: 720px) { .iac-input-grid { grid-template-columns: 1fr; } .iac-finding-row { grid-template-columns: 1fr; } }
+
 /* Drift detection */
 .drift-list { display: flex; flex-direction: column; gap: 6px; }
 .drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e0e6e9); border-radius: 10px; padding: 9px 12px; }
