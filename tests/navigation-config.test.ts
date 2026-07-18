@@ -29,7 +29,7 @@ describe("grouped workspace navigation", () => {
     ]);
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "security")?.items.map((item) => item.label),
-      ["Posture findings", "Vulnerability & exposure", "Security events", "Remediation cases"],
+      ["Posture findings", "Vulnerability & exposure", "IaC scan", "Security events", "Remediation cases"],
     );
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "kubernetes")?.items.map((item) => item.label),
