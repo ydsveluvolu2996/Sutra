@@ -1,0 +1,100 @@
+name: IaC misconfiguration gate
+
+# Reusable shift-left gate. A consumer pipeline calls it after generating a
+# Terraform plan JSON (`terraform show -json > tfplan.json`) and/or a Kubernetes
+# manifest JSON, and the job fails the build when findings at or above `fail-on`
+# are present — blocking the misconfiguration before it ships. It runs the same
+# pure, unit-tested engines as the in-app /iac-scan tool; no cluster or network.
+on:
+  workflow_call:
+    inputs:
+      terraform-plan:
+        description: "Path to a `terraform show -json` plan file (relative to the repo root)."
+        type: string
+        required: false
+        default: ""
+      manifests:
+        description: "Path to a Kubernetes manifest JSON file (object or array)."
+        type: string
+        required: false
+        default: ""
+      fail-on:
+        description: "Minimum severity that fails the build: critical | high | medium | low."
+        type: string
+        required: false
+        default: "high"
+  workflow_dispatch:
+    inputs:
+      terraform-plan:
+        description: "Path to a `terraform show -json` plan file."
+        type: string
+        required: false
+        default: ""
+      manifests:
+        description: "Path to a Kubernetes manifest JSON file."
+        type: string
+        required: false
+        default: ""
+      fail-on:
+        description: "Minimum severity that fails the build."
+        type: string
+        required: false
+        default: "high"
+
+permissions:
+  contents: read
+
+jobs:
+  iac-scan:
+    name: Scan IaC for misconfigurations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Produce SARIF (non-blocking, for the code-scanning tab)
+        # `|| true` so a gate breach here does not skip the upload; the blocking
+        # decision is made by the final gate step below.
+        run: |
+          pnpm iac:scan \
+            ${{ inputs.terraform-plan && format('--terraform {0}', inputs.terraform-plan) || '' }} \
+            ${{ inputs.manifests && format('--manifests {0}', inputs.manifests) || '' }} \
+            --fail-on "${{ inputs.fail-on }}" \
+            --format sarif --out iac-scan.sarif || true
+
+      - name: Upload SARIF to code scanning
+        # GitHub Advanced Security must be enabled for private repos before uploads run.
+        if: ${{ hashFiles('iac-scan.sarif') != '' && (github.repository_visibility == 'public' || vars.CODEQL_ENABLED == 'true') }}
+        uses: github/codeql-action/upload-sarif@ddf5ce7296213f5548c91e2dd19df2d77d2b2d66 # v3
+        with:
+          sarif_file: iac-scan.sarif
+          category: sutra-iac-scan
+
+      - name: Gate the build on severity threshold
+        run: |
+          pnpm iac:scan \
+            ${{ inputs.terraform-plan && format('--terraform {0}', inputs.terraform-plan) || '' }} \
+            ${{ inputs.manifests && format('--manifests {0}', inputs.manifests) || '' }} \
+            --fail-on "${{ inputs.fail-on }}"
