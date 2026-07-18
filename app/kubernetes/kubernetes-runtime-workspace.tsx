@@ -121,6 +121,15 @@ export function KubernetesRuntimeWorkspace({
         <span className={`severity-badge severity-${priorityTone(item.priority)}`}>{item.priority}</span>
         <div><strong>{item.title}</strong><small>{item.subject} · {formatTimestamp(item.occurredAt)}</small></div>
         <p>Evidence {item.evidenceSha256}</p>
+        {item.containment.actions.length > 0 ? <details className="runtime-containment">
+          <summary>Suggested containment ({item.containment.actions.length}) · requires approval</summary>
+          <p className="panel-footnote">{item.containment.disclaimer}</p>
+          {item.containment.actions.map((action) => <div className="runtime-containment-action" key={`${item.id}:${action.kind}`}>
+            <strong>{action.title}</strong>
+            <pre><code>{action.content}</code></pre>
+            <small>{action.note}</small>
+          </div>)}
+        </details> : null}
         {item.caseId === null
           ? <button className="button button-secondary button-small" disabled={caseBusy !== null} onClick={() => void createCase(item)} type="button">{caseBusy === item.id ? "Creating…" : "Create case"}</button>
           : <span className="status-pill status-positive">{item.caseNumber ?? "Case created"}</span>}
