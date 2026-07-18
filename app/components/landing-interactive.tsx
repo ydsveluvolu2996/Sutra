@@ -41,27 +41,33 @@ function PreviewGraph(): ReactNode {
     { id: "role", label: "IAM: PaymentsRole", x: 70, y: 72, kind: "id" },
     { id: "s3", label: "s3://billing", x: 92, y: 72, kind: "data" },
   ] as const;
-  const edges = [["net", "ing"], ["ing", "pod"], ["pod", "sa"], ["pod", "role"], ["role", "s3"]] as const;
+  const baseEdges = [["net", "ing"], ["ing", "pod"], ["pod", "sa"], ["pod", "role"], ["role", "s3"]] as const;
+  const hops = [
+    { from: "net", to: "ing", label: "Internet → Ingress", evidence: "12,405 inbound flows to :443 observed from the public internet (Hubble)." },
+    { from: "ing", to: "pod", label: "Ingress → api-gateway", evidence: "Ingress routes api.northstar.io → api-gateway:8080, admission-confirmed." },
+    { from: "pod", to: "role", label: "api-gateway → PaymentsRole", evidence: "Pod mounts the payments-sa token; the SA is IRSA-linked to PaymentsRole." },
+    { from: "role", to: "s3", label: "PaymentsRole → s3://billing", evidence: "Role policy allows s3:GetObject and s3:DeleteObject on billing/*." },
+  ] as const;
   const pos = (id: string) => nodes.find((n) => n.id === id)!;
+  const [sel, setSel] = useState<number | null>(null);
   return (
     <div className="pv pv-graph">
       <div className="pv-head"><span>Security graph</span><b className="pv-tag pv-tag-red">attack path · confirmed</b></div>
       <div className="pv-graph-canvas">
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="pv-graph-edges" aria-hidden="true">
-          {edges.map(([a, b]) => {
-            const pa = pos(a); const pb = pos(b);
-            return <line key={`${a}-${b}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} className="pv-edge" />;
-          })}
-          <line x1={pos("net").x} y1={pos("net").y} x2={pos("ing").x} y2={pos("ing").y} className="pv-edge pv-edge-hot" />
-          <line x1={pos("ing").x} y1={pos("ing").y} x2={pos("pod").x} y2={pos("pod").y} className="pv-edge pv-edge-hot" />
-          <line x1={pos("pod").x} y1={pos("pod").y} x2={pos("role").x} y2={pos("role").y} className="pv-edge pv-edge-hot" />
-          <line x1={pos("role").x} y1={pos("role").y} x2={pos("s3").x} y2={pos("s3").y} className="pv-edge pv-edge-hot" />
+          {baseEdges.map(([a, b]) => { const pa = pos(a); const pb = pos(b); return <line key={`${a}-${b}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} className="pv-edge" />; })}
+          {hops.map((h, i) => { const pa = pos(h.from); const pb = pos(h.to); return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y} className={`pv-edge pv-edge-hot${sel === i ? " is-sel" : ""}`} />; })}
         </svg>
         {nodes.map((n) => (
           <span key={n.id} className={`pv-node pv-node-${n.kind}`} style={{ left: `${n.x}%`, top: `${n.y}%` }}>{n.label}</span>
         ))}
+        {hops.map((h, i) => { const pa = pos(h.from); const pb = pos(h.to); return <button type="button" key={`e${i}`} className={`pv-evi${sel === i ? " is-sel" : ""}`} style={{ left: `${(pa.x + pb.x) / 2}%`, top: `${(pa.y + pb.y) / 2}%` }} onClick={() => setSel(sel === i ? null : i)} aria-label={`Evidence for ${h.label}`}>{i + 1}</button>; })}
       </div>
-      <div className="pv-foot"><b>Reachable:</b> Internet → api-gateway (CVE-2024-3094, running) → payments-sa → PaymentsRole → s3://billing</div>
+      {sel === null ? (
+        <div className="pv-foot"><b>Reachable:</b> Internet → api-gateway (CVE-2024-3094, running) → payments-sa → PaymentsRole → s3://billing <em>— click a numbered hop for its evidence.</em></div>
+      ) : (
+        <div className="pv-foot pv-foot-evi"><b>{hops[sel].label} —</b> {hops[sel].evidence} <button type="button" className="pv-evi-reset" onClick={() => setSel(null)}>full path</button></div>
+      )}
     </div>
   );
 }
@@ -383,6 +389,176 @@ export function TrustPanel(): ReactNode {
           <p><span>{tab === "reads" ? "✓" : "✗"}</span>{tab === "reads" ? "Metadata and configuration only — scoped per collector pack." : "Enforced by the permission pack — not policy, capability."}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ================================================================== *
+ * 4) Live hero dashboard — switch views, drill into an issue
+ * ================================================================== */
+
+const HERO_NAV = [
+  { id: "overview", label: "Overview", glyph: (<><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>) },
+  { id: "issues", label: "Issues", glyph: (<><path d="M12 3 22 20H2z" /><path d="M12 10v5M12 18h.01" /></>) },
+  { id: "customers", label: "Customers", glyph: (<><circle cx="9" cy="8" r="3.2" /><path d="M3.5 20a5.5 5.5 0 0 1 11 0" /><path d="M16 6.4a3.2 3.2 0 0 1 0 6.1M20.5 20a5.6 5.6 0 0 0-4.2-5.4" /></>) },
+] as const;
+
+type HeroView = "overview" | "issues" | "customers";
+
+function HeroOverview(): ReactNode {
+  return (
+    <>
+      <div className="product-topline"><div><small>MSP portfolio</small><strong>Good morning, Alex.</strong></div><span>All customers⌄</span></div>
+      <div className="product-metrics"><article><small>Portfolio posture</small><strong>82<em>/100</em></strong><i><b style={{ width: "82%" }} /></i></article><article><small>Managed assets</small><strong>2,427</strong><span>+96 this week</span></article><article><small>Open findings</small><strong>46</strong><span className="risk-text">3 critical</span></article></div>
+      <div className="product-middle">
+        <article className="mini-chart"><div><small>Risk trend</small><strong>45 fewer findings</strong></div><div className="mini-bars">{[88, 82, 76, 70, 64, 60, 53, 47, 40, 34, 29, 23].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></article>
+        <article className="mini-coverage"><small>Customer posture</small>{([["Northstar", 62], ["Bluepeak", 78], ["Harbor", 86], ["Evergreen", 91]] as const).map(([name, value]) => <div key={name}><span>{name}</span><i><b style={{ width: `${value}%` }} /></i><strong>{value}</strong></div>)}</article>
+      </div>
+      <div className="product-queue"><div><small>Priority issues</small><span>Customer</span><span>Severity</span></div>{([["Internet-reachable critical CVE", "Northstar", "Critical"], ["Privileged workload reachable", "Northstar", "High"], ["ServiceAccount can delete S3", "Bluepeak", "High"]] as const).map((row) => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><b className={`queue-${row[2].toLowerCase()}`}>{row[2]}</b></div>)}</div>
+    </>
+  );
+}
+
+const HERO_ISSUES = [
+  { t: "Internet-reachable critical CVE", c: "Northstar", s: "Critical", chain: "Internet → api-gateway (CVE-2024-3094) → payments-sa → s3://billing" },
+  { t: "Privileged workload reachable", c: "Northstar", s: "High", chain: "ingress → batch-runner (privileged: true, hostPID)" },
+  { t: "ServiceAccount can delete S3", c: "Bluepeak", s: "High", chain: "payments-sa → PaymentsRole → s3:DeleteObject on billing/*" },
+  { t: "Public RDS snapshot exposure", c: "Harbor", s: "Medium", chain: "rds:DescribeDBSnapshots → snapshot shared to all accounts" },
+] as const;
+
+function HeroIssues(): ReactNode {
+  const [sel, setSel] = useState(0);
+  return (
+    <>
+      <div className="product-topline"><div><small>Priority issues</small><strong>46 open · 3 critical</strong></div><span>Severity⌄</span></div>
+      <div className="hero-issues">
+        {HERO_ISSUES.map((r, i) => (
+          <button type="button" key={r.t} className={`hero-issue${sel === i ? " is-sel" : ""}`} onClick={() => setSel(i)} aria-pressed={sel === i}>
+            <b className={`queue-${r.s.toLowerCase()}`}>{r.s}</b>
+            <span className="hero-issue-t">{r.t}</span>
+            <span className="hero-issue-c">{r.c}</span>
+          </button>
+        ))}
+      </div>
+      <div className="hero-evidence"><small>Evidence · reachable path</small><p>{HERO_ISSUES[sel].chain}</p></div>
+    </>
+  );
+}
+
+function HeroCustomers(): ReactNode {
+  const rows = [["Northstar", 62, "At risk"], ["Bluepeak", 78, "Watch"], ["Harbor", 86, "Healthy"], ["Evergreen", 91, "Healthy"]] as const;
+  return (
+    <>
+      <div className="product-topline"><div><small>Customer posture</small><strong>4 managed customers</strong></div><span>This quarter⌄</span></div>
+      <div className="hero-custs">
+        {rows.map(([name, value, status]) => (
+          <div key={name} className="hero-cust">
+            <span className="hero-cust-n">{name}</span>
+            <i><b style={{ width: `${value}%` }} className={value < 70 ? "is-risk" : value < 85 ? "is-watch" : "is-ok"} /></i>
+            <b className={`msp-${status.replace(" ", "-").toLowerCase()}`}>{status}</b>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="hero-evidence"><small>Scope</small><p>Each customer user sees only their own workspace; the MSP sees the roll-up.</p></div>
+    </>
+  );
+}
+
+export function HeroDashboard(): ReactNode {
+  const [view, setView] = useState<HeroView>("overview");
+  return (
+    <div className="hero-product hero-live" aria-label="Sutra portfolio dashboard — interactive preview">
+      <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.sutra.cloud</span><b>LIVE DEMO</b></div>
+      <div className="product-window-body">
+        <aside className="product-rail">
+          <span className="product-logo">P</span>
+          {HERO_NAV.map((n) => (
+            <button type="button" key={n.id} className={`product-nav${view === n.id ? " active" : ""}`} onClick={() => setView(n.id as HeroView)} aria-pressed={view === n.id} aria-label={n.label}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{n.glyph}</svg>
+            </button>
+          ))}
+          <span className="product-user">AM</span>
+        </aside>
+        <div className="product-canvas">
+          {view === "overview" ? <HeroOverview /> : view === "issues" ? <HeroIssues /> : <HeroCustomers />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================== *
+ * 5) MSP showcase — real, switchable tab views
+ * ================================================================== */
+
+function MspPortfolio(): ReactNode {
+  return (
+    <div className="msp-view">
+      <aside><small>Portfolio posture</small><strong>82</strong><span>↑ 8 points this quarter</span><div className="msp-ring"><i /></div></aside>
+      <div className="msp-customer-list">{([["Northstar Retail", "At risk", 62], ["Bluepeak Health", "Watch", 78], ["Harbor Analytics", "Healthy", 86], ["Evergreen Finance", "Healthy", 91]] as const).map(([name, status, score]) => <article key={name}><span>{name.slice(0, 2).toUpperCase()}</span><div><strong>{name}</strong><small>Customer workspace · {score > 80 ? "fresh" : "review"}</small></div><b className={`msp-${status.replace(" ", "-").toLowerCase()}`}>{status}</b><em>{score}/100</em></article>)}</div>
+      <div className="msp-insight"><span>Today’s focus</span><strong>3 customer-impacting risks</strong><p>Prioritized using severity, exposure and asset context—never hidden behind an unexplained score.</p><Link href="/findings">Open analyst queue →</Link></div>
+    </div>
+  );
+}
+
+function MspCustomer(): ReactNode {
+  return (
+    <div className="msp-view">
+      <aside><small>Northstar Retail</small><strong>62</strong><span className="is-risk">At risk · review</span><div className="msp-ring"><i /></div></aside>
+      <div className="msp-customer-list msp-issue-list">{([["Critical", "Internet-reachable critical CVE", "api-gateway"], ["High", "Privileged workload reachable", "batch-runner"], ["High", "SA can delete production S3", "payments-sa"], ["Medium", "Drifted from admitted spec", "payments-api"]] as const).map(([sev, title, asset]) => <article key={title}><b className={`queue-${sev.toLowerCase()}`}>{sev}</b><div><strong>{title}</strong><small>{asset}</small></div></article>)}</div>
+      <div className="msp-insight"><span>Top fix</span><strong>Patch api-gateway</strong><p>Removes the internet-reachable critical CVE and breaks the path to s3://billing.</p><Link href="/dashboard">Open remediation →</Link></div>
+    </div>
+  );
+}
+
+function MspAnalyst(): ReactNode {
+  const rows = [
+    ["Critical", "Internet-reachable critical CVE", "Northstar", "Triage", "AM"],
+    ["High", "Privileged workload reachable", "Northstar", "In review", "RK"],
+    ["High", "ServiceAccount can delete S3", "Bluepeak", "Assigned", "JT"],
+    ["Medium", "Public RDS snapshot exposure", "Harbor", "Open", "—"],
+  ] as const;
+  return (
+    <div className="msp-panel msp-queue">
+      <div className="msp-queue-row msp-queue-head"><span>Severity</span><span>Issue</span><span>Customer</span><span>Status</span><span>Owner</span></div>
+      {rows.map(([sev, issue, cust, status, owner]) => (
+        <div key={issue} className="msp-queue-row"><b className={`queue-${sev.toLowerCase()}`}>{sev}</b><span className="msp-queue-issue">{issue}</span><span>{cust}</span><em className="msp-status">{status}</em><span className="msp-owner">{owner}</span></div>
+      ))}
+    </div>
+  );
+}
+
+function MspAudit(): ReactNode {
+  const log = [
+    ["09:58", "collector", "assumed customer role via STS (1h session)", "Northstar"],
+    ["09:59", "collector", "completed bounded discovery — 812 assets", "Northstar"],
+    ["10:02", "system", "promoted scan — 3 new issues, 1 resolved", "Northstar"],
+    ["10:04", "alex@msp", "confirmed runtime case: shell in container", "payments-api"],
+    ["10:05", "system", "delivered signed alert to Slack + PagerDuty", "Northstar"],
+  ] as const;
+  return (
+    <div className="msp-panel msp-audit">
+      {log.map(([time, actor, action, target]) => (
+        <div key={time + action} className="msp-audit-row"><code>{time}</code><span><b>{actor}</b> {action}</span><em>{target}</em></div>
+      ))}
+    </div>
+  );
+}
+
+const MSP_TABS = [["portfolio", "MSP portfolio"], ["customer", "Customer workspace"], ["analyst", "Analyst queue"], ["audit", "Audit view"]] as const;
+type MspTab = "portfolio" | "customer" | "analyst" | "audit";
+
+export function MspShowcase(): ReactNode {
+  const [tab, setTab] = useState<MspTab>("portfolio");
+  return (
+    <div className="msp-showcase">
+      <div className="msp-tabs" role="tablist" aria-label="MSP views">
+        {MSP_TABS.map(([id, label]) => (
+          <button type="button" key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id as MspTab)}>{label}</button>
+        ))}
+      </div>
+      {tab === "portfolio" ? <MspPortfolio /> : tab === "customer" ? <MspCustomer /> : tab === "analyst" ? <MspAnalyst /> : <MspAudit />}
     </div>
   );
 }

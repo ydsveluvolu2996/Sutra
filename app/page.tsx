@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CapabilityExplorer, CorrelationGraph, TrustPanel } from "./components/landing-interactive";
+import { CapabilityExplorer, CorrelationGraph, HeroDashboard, MspShowcase, TrustPanel } from "./components/landing-interactive";
 
 const platformLayers = [
   { number: "01", title: "Customer cloud", copy: "A customer-owned IAM role grants only the metadata APIs in the selected collector pack." },
@@ -36,21 +36,7 @@ export default function LandingPage() {
             <div className="hero-assurances"><span><b>✓</b> Read-only access</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
           </div>
 
-          <div className="hero-product" aria-label="Sutra multi-tenant cloud operations dashboard preview">
-            <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.sutra.cloud</span><b>DEMO</b></div>
-            <div className="product-window-body">
-              <aside className="product-rail"><span className="product-logo">P</span><i className="active" /><i /><i /><i /><i /><span className="product-user">AM</span></aside>
-              <div className="product-canvas">
-                <div className="product-topline"><div><small>MSP portfolio</small><strong>Good morning, Alex.</strong></div><span>All customers⌄</span></div>
-                <div className="product-metrics"><article><small>Portfolio posture</small><strong>82<em>/100</em></strong><i><b style={{ width: "82%" }} /></i></article><article><small>Managed assets</small><strong>2,427</strong><span>+96 this week</span></article><article><small>Open findings</small><strong>46</strong><span className="risk-text">3 critical</span></article></div>
-                <div className="product-middle">
-                  <article className="mini-chart"><div><small>Risk trend</small><strong>45 fewer findings</strong></div><div className="mini-bars">{[88,82,76,70,64,60,53,47,40,34,29,23].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></article>
-                  <article className="mini-coverage"><small>Customer posture</small>{[["Northstar",62],["Bluepeak",78],["Harbor",86],["Evergreen",91]].map(([name, value]) => <div key={name}><span>{name}</span><i><b style={{ width: `${value}%` }} /></i><strong>{value}</strong></div>)}</article>
-                </div>
-                <div className="product-queue"><div><small>Priority issues</small><span>Customer</span><span>Severity</span></div>{[["Internet-reachable critical CVE", "Northstar", "Critical"],["Privileged workload reachable", "Northstar", "High"],["ServiceAccount can delete S3", "Bluepeak", "High"]].map((row) => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><b className={`queue-${row[2].toLowerCase()}`}>{row[2]}</b></div>)}</div>
-              </div>
-            </div>
-          </div>
+          <HeroDashboard />
         </section>
 
         <section className="foundation-strip" aria-label="Coverage strip">
@@ -83,14 +69,7 @@ export default function LandingPage() {
 
         <section className="site-section msp-section" id="msp">
           <div className="section-intro centered" data-reveal><span className="section-kicker">Designed for managed services</span><h2>Operate the portfolio. Hand each customer the right view.</h2><p>MSP teams see cross-customer health and priorities; customer users see only explicitly granted workspaces, accounts, resources and findings.</p></div>
-          <div className="msp-showcase" data-reveal>
-            <div className="msp-tabs"><span className="active">MSP portfolio</span><span>Customer workspace</span><span>Analyst queue</span><span>Audit view</span></div>
-            <div className="msp-view">
-              <aside><small>Portfolio posture</small><strong>82</strong><span>↑ 8 points this quarter</span><div className="msp-ring"><i /></div></aside>
-              <div className="msp-customer-list">{[["Northstar Retail","At risk",62],["Bluepeak Health","Watch",78],["Harbor Analytics","Healthy",86],["Evergreen Finance","Healthy",91]].map(([name,status,score]) => <article key={name}><span>{String(name).slice(0,2).toUpperCase()}</span><div><strong>{name}</strong><small>Customer workspace · {Number(score) > 80 ? "fresh" : "review"}</small></div><b className={`msp-${String(status).replace(" ", "-").toLowerCase()}`}>{status}</b><em>{score}/100</em></article>)}</div>
-              <div className="msp-insight"><span>Today’s focus</span><strong>3 customer-impacting risks</strong><p>Prioritized using severity, exposure and asset context—never hidden behind an unexplained score.</p><Link href="/findings">Open analyst queue →</Link></div>
-            </div>
-          </div>
+          <div data-reveal><MspShowcase /></div>
         </section>
 
         <section className="site-section model-section">
