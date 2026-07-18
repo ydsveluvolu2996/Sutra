@@ -7,6 +7,7 @@ import { KEV_AS_OF, KEV_COUNT, isKnownExploited } from "../../../../../lib/kev-s
 import { mergeVulnerabilityFindings } from "../../../../../lib/vulnerability-finding";
 import { deriveVulnerabilityFindings, scanFindingKey } from "../../../../../lib/vulnerability-finding-evidence";
 import { buildVulnerabilityQueue, type VulnWaiver } from "../../../../../lib/vulnerability-management";
+import { buildPatchPlan } from "../../../../../lib/vulnerability-patch-plan";
 import { toEngineWaiver } from "../../../../../lib/vulnerability-waiver-mapping";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -89,8 +90,19 @@ export async function GET(request: Request): Promise<Response> {
       nowDays: Math.floor(now / MS_PER_DAY),
       waivers,
     });
+    // Patch-management view over the same enriched findings: what to upgrade
+    // (grouped per image+package into one from->to bump), prioritized like the queue.
+    const patchPlan = buildPatchPlan(findings, {
+      now: { nowMs: now },
+      waivers: waivers.map((waiver) => ({
+        cveId: waiver.scope.cveId ?? null,
+        resourceKey: waiver.scope.resourceKey ?? null,
+        packageName: waiver.scope.packageName ?? null,
+      })),
+    });
     return jsonResponse({
       queue,
+      patchPlan,
       scannedAt: scans.latest?.collectedAt ?? null,
       hasPrevious: scans.previous !== null,
       totalFindings: findings.length,
