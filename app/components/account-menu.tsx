@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { Capability } from "../../lib/auth-policy";
+import { GlyphIcon } from "./nav-icon";
 
 export function AccountMenu({
   displayName,
@@ -72,12 +73,12 @@ export function AccountMenu({
             </span>
           </div>
           <div className="account-menu-links">
-            <Link href="/settings" role="menuitem" onClick={() => setOpen(false)}>Settings</Link>
-            <Link href="/settings/notifications" role="menuitem" onClick={() => setOpen(false)}>Notification destinations</Link>
+            <Link href="/settings" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="gear" size={14} />Settings</Link>
+            <Link href="/settings/notifications" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="bell" size={14} />Notification destinations</Link>
             {capabilities.has("membership:manage")
-              ? <Link href="/access" role="menuitem" onClick={() => setOpen(false)}>Access &amp; invitations</Link>
+              ? <Link href="/access" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="key" size={14} />Access &amp; invitations</Link>
               : null}
-            <Link href="/controls#architecture" role="menuitem" onClick={() => setOpen(false)}>Architecture &amp; trust</Link>
+            <Link href="/controls#architecture" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="policy" size={14} />Architecture &amp; trust</Link>
           </div>
           <button
             type="button"
@@ -86,7 +87,7 @@ export function AccountMenu({
             disabled={signingOut}
             onClick={() => { setOpen(false); onSignOut(); }}
           >
-            {signingOut ? "Signing out…" : "Sign out"}
+            <GlyphIcon className="account-menu-glyph" name="logout" size={14} />{signingOut ? "Signing out…" : "Sign out"}
           </button>
         </div>
       ) : null}

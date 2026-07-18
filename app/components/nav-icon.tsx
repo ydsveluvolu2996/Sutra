@@ -10,7 +10,8 @@ type IconName =
   | "layers" | "supplyChain" | "globe" | "target" | "key" | "network"
   | "shieldCheck" | "policy" | "scan" | "alert" | "bug" | "siren"
   | "wrench" | "clipboardCheck" | "listChecks" | "fileText" | "dollar"
-  | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "diff" | "dot";
+  | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "diff" | "dot"
+  | "logout" | "chevron";
 
 const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.3" /><rect x="14" y="3" width="7" height="5" rx="1.3" /><rect x="14" y="12" width="7" height="9" rx="1.3" /><rect x="3" y="16" width="7" height="5" rx="1.3" /></>,
@@ -50,6 +51,8 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   diff: <><path d="M12 3v6M9 6h6" /><path d="M5 15h14" /><path d="M8 18h8" /><rect x="3" y="3" width="18" height="18" rx="3" opacity="0" /></>,
   gear: <><circle cx="12" cy="12" r="3.2" /><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9.3a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" /></>,
   dot: <circle cx="12" cy="12" r="3.2" />,
+  logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></>,
+  chevron: <path d="m6 9 6 6 6-6" />,
 };
 
 const KEY_ICON: Partial<Record<NavKey, IconName>> = {
@@ -165,13 +168,29 @@ export function navTone(navKey: NavKey): NavTone {
 }
 
 export function NavIcon({ navKey }: { readonly navKey: NavKey }) {
-  const name = KEY_ICON[navKey] ?? "dot";
+  return <GlyphIcon name={KEY_ICON[navKey] ?? "dot"} />;
+}
+
+/**
+ * Direct access to a named glyph for shell chrome that is not a nav
+ * destination (group chevrons, the sign-out control, secondary links) so the
+ * whole rail draws from one icon system instead of legacy text glyphs.
+ */
+export function GlyphIcon({
+  name,
+  size = 17,
+  className = "nav-glyph",
+}: {
+  readonly name: IconName;
+  readonly size?: number;
+  readonly className?: string;
+}) {
   return (
     <svg
-      className="nav-glyph"
+      className={className}
       viewBox="0 0 24 24"
-      width="17"
-      height="17"
+      width={size}
+      height={size}
       fill="none"
       stroke="currentColor"
       strokeWidth="1.75"
