@@ -24,10 +24,10 @@ test("server-renders the Sutra public product site", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Sutra<\/title>/i);
-  assert.match(html, /One source of truth for every customer cloud/i);
-  assert.match(html, /Read-only permissions/i);
-  assert.match(html, /Unified AWS inventory/i);
-  assert.match(html, /Trusted-role onboarding/i);
+  assert.match(html, /Every cloud and cluster risk/i);
+  assert.match(html, /Read-only access/i);
+  assert.match(html, /Evidence-backed security graph/i);
+  assert.match(html, /Runtime-informed issues/i);
   assert.match(html, /View demo workspace/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });

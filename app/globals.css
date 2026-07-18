@@ -1699,3 +1699,20 @@ h3 { letter-spacing: -.02em; }
 .issue-fix-artifact pre { margin: 0; overflow-x: auto; background: #10151a; color: #e7f1f2; border-radius: 8px; padding: 10px 12px; }
 .issue-fix-artifact code { font-size: 11px; line-height: 1.5; white-space: pre; }
 .issue-fix-artifact small { color: #7c8991; }
+
+/* Landing page premium refresh (aligned with the login) */
+.site-hero { background: radial-gradient(90% 70% at 88% -5%, #dff5f4 0%, transparent 55%), radial-gradient(70% 60% at -5% 108%, #ede4fb 0%, transparent 55%), linear-gradient(180deg, #f7fbfb 0%, #f2f7f8 100%); }
+.hero-kicker { border-color: #bfe3e2; background: rgba(255,255,255,.82); color: #0c5b5c; }
+.hero-kicker i { background: #04a6a8; box-shadow: 0 0 0 4px rgba(4,166,168,.12); }
+.hero-accent { background: linear-gradient(96deg, #04a6a8 0%, #2bb9c0 40%, #9a75dc 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.capability-card { position: relative; overflow: hidden; }
+.capability-card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cap-tone, #04a6a8); opacity: .0; transition: opacity .18s ease; }
+.capability-card:hover::before { opacity: 1; }
+.capability-card > div > span { background: color-mix(in srgb, var(--cap-tone, #04a6a8) 14%, #fff); color: var(--cap-tone, #0c5b5c); }
+.capability-blue { --cap-tone: #3f83f8; } .capability-red { --cap-tone: #e0435a; } .capability-violet { --cap-tone: #b45cd8; }
+.capability-green { --cap-tone: #29ac74; } .capability-orange { --cap-tone: #ef7834; } .capability-teal { --cap-tone: #04a6a8; }
+.module-state.state-live { background: #e7f6ef; color: #08724e; }
+.capability-card h3 { margin: 15px 0 8px; }
+.capability-card a { margin-top: auto; color: var(--cap-tone, #04a6a8); }
+@media (max-width: 900px) { .capability-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 620px) { .capability-grid { grid-template-columns: 1fr; } }

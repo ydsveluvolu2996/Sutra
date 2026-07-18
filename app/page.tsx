@@ -1,12 +1,14 @@
 import Link from "next/link";
 
 const capabilities = [
-  { code: "CMDB", title: "Unified AWS inventory", copy: "Normalize accounts, regions, networks, compute, storage, IAM and databases into a searchable customer-scoped asset graph.", state: "Foundation" },
-  { code: "CSPM", title: "Configuration posture", copy: "Evaluate transparent controls for public exposure, encryption, logging, IAM hygiene and native security-service coverage.", state: "Foundation" },
-  { code: "NET", title: "Security-group analysis", copy: "Find unrestricted administrative ports, default-group drift and risky ingress with the affected asset and network context.", state: "Foundation" },
-  { code: "IAM", title: "Trusted-role onboarding", copy: "Connect customer accounts with an exact workload principal, unique ExternalId and temporary read-only STS sessions.", state: "Foundation" },
-  { code: "NAT", title: "Native finding correlation", copy: "Correlate Security Hub, GuardDuty and Inspector findings when customers already enable those AWS services.", state: "Add-on" },
-  { code: "OPS", title: "Evidence and workflows", copy: "Turn findings into customer-ready queues, assignments, exceptions, audit events and exportable evidence.", state: "Roadmap" },
+  { code: "GRAPH", tone: "blue", title: "Evidence-backed security graph", copy: "Explore every cloud, Kubernetes, identity and network relationship on one canvas — and every edge is a cited observation, not a black-box guess.", state: "Live" },
+  { code: "ISSUES", tone: "red", title: "Runtime-informed issues", copy: "Not thousands of CVEs — the handful actually internet-reachable, running and exploitable, proven with observed network and runtime evidence.", state: "Live" },
+  { code: "CIEM", tone: "violet", title: "Effective permissions", copy: "Resolve a workload's effective RBAC and follow its IRSA role into AWS: can this pod read Secrets, or delete an S3 bucket?", state: "Live" },
+  { code: "TRENDS", tone: "green", title: "Posture trends & scorecard", copy: "A per-customer security score over time with regression detection and a resell-ready export — the report an MSP hands over.", state: "Live" },
+  { code: "DRIFT", tone: "orange", title: "Drift & new-CVE detection", copy: "Catch a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan.", state: "Live" },
+  { code: "FIX", tone: "teal", title: "Guided remediation", copy: "Generate the exact Kyverno policy or kubectl patch that fixes an issue — a reviewed suggestion, never an automatic change.", state: "Live" },
+  { code: "RUNTIME", tone: "red", title: "Runtime detection", copy: "Signed, replay-resistant Falco events with Kubernetes context, human-confirmed cases and durable notification delivery.", state: "Live" },
+  { code: "COMPLY", tone: "green", title: "Readiness mappings", copy: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", state: "Live" },
 ];
 
 const platformLayers = [
@@ -37,12 +39,12 @@ export default function LandingPage() {
       <header className="site-header">
         <Link className="site-brand" href="/" aria-label="Sutra home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud security, woven together</small></span>
         </Link>
         <nav className="site-nav" aria-label="Public navigation">
           <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#msp">For MSPs</a><a href="#trust">Security model</a><Link href="/controls">Control library</Link>
         </nav>
-        <div className="site-actions"><Link className="site-signin" href="/dashboard">Sign in</Link><Link className="button button-primary" href="/dashboard">View demo workspace</Link></div>
+        <div className="site-actions"><Link className="site-signin" href="/login">Sign in</Link><Link className="button button-primary" href="/dashboard">View demo workspace</Link></div>
         <details className="site-mobile-nav"><summary>Menu</summary><div><a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#msp">For MSPs</a><Link href="/dashboard">Demo workspace</Link></div></details>
       </header>
 
@@ -50,11 +52,11 @@ export default function LandingPage() {
         <section className="site-hero">
           <div className="hero-glow" aria-hidden="true" />
           <div className="hero-copy">
-            <span className="hero-kicker"><i /> AWS operations platform for MSPs</span>
-            <h1>One source of truth for every customer cloud.</h1>
-            <p>Sutra gives managed service providers a tenant-aware AWS CMDB, configuration posture, security-group analysis and evidence-backed recommendations—through customer-owned, read-only IAM roles.</p>
+            <span className="hero-kicker"><i /> EKS-first CNAPP for MSPs</span>
+            <h1>Every cloud and cluster risk — <span className="hero-accent">proven</span>, prioritized, one graph.</h1>
+            <p>Sutra shows managed service providers the handful of risks that are actually reachable and exploitable across AWS and Kubernetes — each one traced to cited evidence — then generates the fix. All through customer-owned, read-only access.</p>
             <div className="hero-actions"><Link className="button hero-primary" href="/dashboard">Explore the live demo</Link><Link className="button hero-secondary" href="/onboard">See account onboarding</Link></div>
-            <div className="hero-assurances"><span><b>✓</b> Read-only permissions</span><span><b>✓</b> No customer access keys</span><span><b>✓</b> ExternalId trust binding</span></div>
+            <div className="hero-assurances"><span><b>✓</b> Read-only access</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
           </div>
 
           <div className="hero-product" aria-label="Sutra multi-tenant cloud operations dashboard preview">
@@ -68,19 +70,19 @@ export default function LandingPage() {
                   <article className="mini-chart"><div><small>Risk trend</small><strong>45 fewer findings</strong></div><div className="mini-bars">{[88,82,76,70,64,60,53,47,40,34,29,23].map((height, index) => <i key={index} style={{ height: `${height}%` }} />)}</div></article>
                   <article className="mini-coverage"><small>Customer posture</small>{[["Northstar",62],["Bluepeak",78],["Harbor",86],["Evergreen",91]].map(([name, value]) => <div key={name}><span>{name}</span><i><b style={{ width: `${value}%` }} /></i><strong>{value}</strong></div>)}</article>
                 </div>
-                <div className="product-queue"><div><small>Priority queue</small><span>Customer</span><span>Severity</span></div>{[["Public admin ports", "Northstar", "Critical"],["Public RDS endpoint", "Northstar", "High"],["Trail coverage gap", "Bluepeak", "High"]].map((row) => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><b className={`queue-${row[2].toLowerCase()}`}>{row[2]}</b></div>)}</div>
+                <div className="product-queue"><div><small>Priority issues</small><span>Customer</span><span>Severity</span></div>{[["Internet-reachable critical CVE", "Northstar", "Critical"],["Privileged workload reachable", "Northstar", "High"],["ServiceAccount can delete S3", "Bluepeak", "High"]].map((row) => <div key={row[0]}><strong>{row[0]}</strong><span>{row[1]}</span><b className={`queue-${row[2].toLowerCase()}`}>{row[2]}</b></div>)}</div>
               </div>
             </div>
           </div>
         </section>
 
-        <section className="foundation-strip" aria-label="Foundation preview metrics">
-          <p><span>Sutra foundation preview</span> Built around AWS trust best practices and explicit product boundaries</p>
-          <div><span><strong>4</strong> customer workspaces</span><span><strong>6</strong> AWS accounts</span><span><strong>20</strong> demo assets</span><span><strong>12</strong> deterministic controls</span></div>
+        <section className="foundation-strip" aria-label="Coverage strip">
+          <p><span>Correlated across your estate</span> AWS + EKS · identity · network · runtime · supply chain — in one evidence graph</p>
+          <div><span><strong>Cloud</strong> CMDB &amp; CSPM</span><span><strong>Kubernetes</strong> KSPM &amp; runtime</span><span><strong>Identity</strong> CIEM &amp; RBAC</span><span><strong>Supply chain</strong> SBOM &amp; signing</span></div>
         </section>
 
         <section className="site-section platform-section" id="platform">
-          <div className="section-intro centered"><span className="section-kicker">The operating system for your AWS practice</span><h2>CMDB is the context layer for every cloud operation.</h2><p>Bring inventory, security posture, account coverage and customer workflows into one consistent data model. Start with visibility; add deeper operational modules without rebuilding the foundation.</p></div>
+          <div className="section-intro centered"><span className="section-kicker">Correlation is the product</span><h2>One graph connects the cloud, the cluster, and the identity.</h2><p>A privileged pod, reachable from the internet, running a critical CVE, with a ServiceAccount that can reach S3 — no single tool sees that whole chain. Sutra correlates it and cites every edge.</p></div>
           <div className="platform-orbit">
             <div className="orbit-node orbit-cmdb"><b>CMDB</b><span>Normalized asset graph</span></div>
             <div className="orbit-line orbit-line-1" /><div className="orbit-line orbit-line-2" /><div className="orbit-line orbit-line-3" /><div className="orbit-line orbit-line-4" />
@@ -90,9 +92,9 @@ export default function LandingPage() {
         </section>
 
         <section className="site-section capabilities-section" id="capabilities">
-          <div className="section-intro"><span className="section-kicker">Integrated capabilities</span><h2>Build a cloud management suite around one reliable inventory.</h2><p>Sutra’s first release focuses on the AWS visibility and posture workflows an MSP can deliver honestly today. Broader modules stay clearly labeled until their data and operating controls exist.</p></div>
+          <div className="section-intro"><span className="section-kicker">One correlated suite</span><h2>Every other tool floods you with CVEs. Sutra shows what&apos;s reachable.</h2><p>Cloud, Kubernetes, identity, network, runtime and supply-chain evidence in one graph — and only the risks proven to matter surface first. Every capability below is live in the product.</p></div>
           <div className="capability-grid">
-            {capabilities.map((item) => <article key={item.code}><div><span>{item.code}</span><b className={`module-state state-${item.state.toLowerCase().replace("-", "")}`}>{item.state}</b></div><h3>{item.title}</h3><p>{item.copy}</p><Link href={item.state === "Foundation" ? "/dashboard" : "/controls"}>Explore capability <span>→</span></Link></article>)}
+            {capabilities.map((item) => <article className={`capability-card capability-${item.tone}`} key={item.code}><div><span>{item.code}</span><b className="module-state state-live">{item.state}</b></div><h3>{item.title}</h3><p>{item.copy}</p><Link href="/dashboard">Explore capability <span>→</span></Link></article>)}
           </div>
         </section>
 
@@ -121,14 +123,14 @@ export default function LandingPage() {
         </section>
 
         <section className="claim-section">
-          <div><span className="section-kicker">A suite with honest boundaries</span><h2>Lower-cost posture insight without pretending deterministic rules are a threat engine.</h2></div>
-          <div className="claim-columns"><article><strong>Sutra provides</strong><ul><li>Multi-tenant AWS CMDB and relationships</li><li>Configuration and exposure assessments</li><li>IAM, logging and native-service coverage signals</li><li>Customer-ready evidence and recommendations</li></ul></article><article><strong>AWS-native services still provide</strong><ul><li>Inspector package, image and Lambda vulnerability scanning</li><li>GuardDuty behavior analytics and threat intelligence</li><li>Security Hub managed standards and finding ecosystem</li><li>Service-specific remediation and delegated administration</li></ul></article></div>
+          <div><span className="section-kicker">A suite with honest boundaries</span><h2>Superior correlation and evidence — not a black box that claims certainty it can&apos;t prove.</h2></div>
+          <div className="claim-columns"><article><strong>Sutra provides</strong><ul><li>Cloud + Kubernetes CMDB, KSPM and the evidence graph</li><li>Runtime-informed, reachability-confirmed issue prioritization</li><li>Kubernetes CIEM, drift, new-CVE detection and guided fixes</li><li>Per-customer posture trends and resell-ready reporting</li></ul></article><article><strong>Your scanners and cloud still provide</strong><ul><li>Trivy image, SBOM and configuration scanning in-cluster</li><li>Falco kernel-level runtime detection</li><li>GuardDuty, Security Hub and Inspector native findings</li><li>The vulnerability databases Sutra keeps you current against</li></ul></article></div>
         </section>
 
         <section className="final-cta"><div><span className="section-kicker light">Start with the working foundation</span><h2>See the MSP experience before connecting an account.</h2><p>Explore fictional demo data, inspect the control library, then review the customer-owned IAM role.</p></div><div><Link className="button final-primary" href="/dashboard">Open demo workspace</Link><Link className="button final-secondary" href="/onboard">Review onboarding</Link></div></section>
       </main>
 
-      <footer className="site-footer"><div><Link className="site-brand footer-brand" href="/"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span><strong>Sutra</strong><small>Cloud operations for MSPs</small></span></Link><p>A production-oriented AWS CMDB and configuration posture foundation.</p></div><div><strong>Platform</strong><Link href="/dashboard">Demo workspace</Link><Link href="/cmdb">CMDB</Link><Link href="/findings">Findings</Link><Link href="/controls">Controls</Link></div><div><strong>Trust</strong><Link href="/onboard">AWS onboarding</Link><Link href="/controls#architecture">Architecture</Link><a href="/sutra-customer-role-live-demo.yaml">CloudFormation</a></div><div><strong>Project</strong><span>Foundation preview</span><span>Fictional demo data</span><span>© 2026 Sutra</span></div></footer>
+      <footer className="site-footer"><div><Link className="site-brand footer-brand" href="/"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span><strong>Sutra</strong><small>Cloud security, woven together</small></span></Link><p>An EKS-first, evidence-backed CNAPP for MSPs — every finding traced to what was actually observed.</p></div><div><strong>Platform</strong><Link href="/dashboard">Demo workspace</Link><Link href="/cmdb">CMDB</Link><Link href="/findings">Findings</Link><Link href="/controls">Controls</Link></div><div><strong>Trust</strong><Link href="/onboard">AWS onboarding</Link><Link href="/controls#architecture">Architecture</Link><a href="/sutra-customer-role-live-demo.yaml">CloudFormation</a></div><div><strong>Project</strong><span>Foundation preview</span><span>Fictional demo data</span><span>© 2026 Sutra</span></div></footer>
     </div>
   );
 }
