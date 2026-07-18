@@ -65,6 +65,12 @@ trivy-operator:
 
 agent:
   enabled: false
+  # Deployment (default) runs one scheduled agent per cluster and keeps state on
+  # a ReadWriteOnce PVC. DaemonSet runs one agent per node for per-node coverage
+  # (Hubble flows, node-local evidence) and uses node-local emptyDir state — the
+  # shared RWO PVC cannot be mounted by many pods. The control plane already
+  # models N agents per cluster (fleet health rolls up worst-across-nodes).
+  mode: deployment
   image:
     repository: ""
     # Production installs pin an immutable sha256 image digest.

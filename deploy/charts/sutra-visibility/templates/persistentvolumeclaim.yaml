@@ -1,4 +1,4 @@
-{{- if and .Values.agent.enabled (not .Values.agent.state.existingClaim) }}
+{{- if and .Values.agent.enabled (eq (.Values.agent.mode | default "deployment") "deployment") (not .Values.agent.state.existingClaim) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

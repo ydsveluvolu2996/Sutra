@@ -100,3 +100,35 @@ test("helm renders the managed scanner by default and suppresses it when scanner
   const unmanaged = helmTemplate("--set", "scanner.managed=false");
   assert.doesNotMatch(unmanaged ?? "", /name: trivy-operator/u, "scanner must be fully suppressed when unmanaged");
 });
+
+const AGENT_SET = [
+  "--set", "agent.enabled=true",
+  "--set", "agent.image.repository=example/agent",
+  "--set", `agent.image.digest=sha256:${"a".repeat(64)}`,
+  "--set", "agent.controlPlane.url=https://cp.example.com",
+  "--set", "agent.cluster.id=c1",
+  "--set", "agent.cluster.name=prod",
+  "--set", "agent.enrollment.existingSecret=sutra-bootstrap",
+];
+
+test("agent renders as a single-replica Deployment with a ReadWriteOnce PVC by default", () => {
+  const rendered = helmTemplate(...AGENT_SET);
+  if (rendered === null) return; // helm unavailable — template-level assertions above still gate the wiring
+  assert.match(rendered, /kind: Deployment/u);
+  assert.match(rendered, /kind: PersistentVolumeClaim/u);
+  assert.match(rendered, /accessModes: \[ReadWriteOnce\]/u);
+  assert.doesNotMatch(rendered, /kind: DaemonSet/u);
+});
+
+test("agent.mode=daemonset renders a DaemonSet with node-local state, per-node identity, and no shared PVC", () => {
+  const rendered = helmTemplate(...AGENT_SET, "--set", "agent.mode=daemonset");
+  if (rendered === null) return;
+  assert.match(rendered, /kind: DaemonSet/u);
+  assert.doesNotMatch(rendered, /kind: PersistentVolumeClaim/u); // RWO PVC cannot be shared across nodes
+  assert.match(rendered, /fieldPath: spec\.nodeName/u); // per-node identity
+  assert.match(rendered, /emptyDir: \{\}/u); // node-local state
+  // Hardened container contract is preserved in daemonset mode.
+  assert.match(rendered, /runAsNonRoot: true/u);
+  assert.match(rendered, /readOnlyRootFilesystem: true/u);
+  assert.match(rendered, /drop:\s*\n?\s*- ALL|drop: \[ALL\]/u);
+});
