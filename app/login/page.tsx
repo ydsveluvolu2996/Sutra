@@ -18,6 +18,104 @@ interface LoginResult {
   readonly mfaEnrollmentRequired: boolean;
 }
 
+const SHOWCASE = [
+  {
+    tone: "graph",
+    title: "Security graph, backed by evidence",
+    copy: "Explore every cloud, Kubernetes, identity and network relationship on one canvas — and every edge is a cited observation, not a guess.",
+    glyph: (
+      <>
+        <circle cx="14" cy="34" r="6" /><circle cx="40" cy="18" r="6" /><circle cx="40" cy="50" r="6" /><circle cx="66" cy="34" r="6" />
+        <path d="M20 34 34 20M20 34 34 48M46 18 60 32M46 50 60 36" />
+      </>
+    ),
+  },
+  {
+    tone: "issues",
+    title: "The risks that actually matter",
+    copy: "Not thousands of CVEs — the handful that are internet-reachable, running, and exploitable, proven with observed network and runtime evidence.",
+    glyph: (
+      <>
+        <path d="M40 12 66 56H14z" /><path d="M40 30v14M40 50h.02" />
+      </>
+    ),
+  },
+  {
+    tone: "ciem",
+    title: "What every identity can reach",
+    copy: "Resolve a workload's effective permissions and follow its IRSA role into AWS — can this pod read Secrets, or delete a bucket?",
+    glyph: (
+      <>
+        <circle cx="26" cy="42" r="12" /><path d="m34 34 26-26" /><path d="m50 8 8 8M56 4 66 14" />
+      </>
+    ),
+  },
+  {
+    tone: "trends",
+    title: "A score you can resell",
+    copy: "Track each customer's security posture over time, catch regressions the moment they land, and export the report an MSP hands over.",
+    glyph: (
+      <>
+        <path d="M12 52 30 34l12 10L68 16" /><path d="M52 16h16v16" />
+      </>
+    ),
+  },
+  {
+    tone: "drift",
+    title: "Drift and new CVEs, the moment they appear",
+    copy: "See a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan — then generate the fix.",
+    glyph: (
+      <>
+        <path d="M40 12v20M30 22h20" /><path d="M18 42h44" /><path d="M26 52h28" />
+      </>
+    ),
+  },
+] as const;
+
+function LoginShowcase() {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => setIndex((current) => (current + 1) % SHOWCASE.length), 4600);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="login-showcase" aria-live="polite">
+      <div className="login-showcase-stage">
+        {SHOWCASE.map((feature, position) => (
+          <article
+            key={feature.tone}
+            className={`login-feature login-feature-${feature.tone}${position === index ? " is-active" : ""}`}
+            aria-hidden={position !== index}
+          >
+            <span className="login-feature-icon">
+              <svg viewBox="0 0 80 68" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {feature.glyph}
+              </svg>
+            </span>
+            <h2>{feature.title}</h2>
+            <p>{feature.copy}</p>
+          </article>
+        ))}
+      </div>
+      <div className="login-showcase-dots" role="tablist" aria-label="Sutra capabilities">
+        {SHOWCASE.map((feature, position) => (
+          <button
+            key={feature.tone}
+            type="button"
+            role="tab"
+            aria-selected={position === index}
+            aria-label={feature.title}
+            className={position === index ? "is-active" : undefined}
+            onClick={() => setIndex(position)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function redirectFor(session: PublicLocalSession, returnTo: string): void {
   if (!session.mfa.enrolled || !session.mfa.verified) {
     window.location.replace(`/mfa/setup?returnTo=${encodeURIComponent(returnTo)}`);
@@ -113,19 +211,19 @@ export default function LoginPage() {
   return (
     <main className="auth-page">
       <section className="auth-brand-panel">
+        <div className="auth-grid" aria-hidden="true" />
         <Link className="auth-brand" href="/" aria-label="Sutra home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud security, woven together</small></span>
         </Link>
         <div className="auth-brand-copy">
-          <span className="auth-eyebrow">Local private beta</span>
-          <h1>Your cloud estate, operated from one trustworthy workspace.</h1>
-          <p>Local identities, enforced MFA and scoped access protect every customer boundary before inventory or findings are exposed.</p>
+          <span className="auth-eyebrow">EKS-first CNAPP · private beta</span>
+          <LoginShowcase />
         </div>
         <ul className="auth-assurances" aria-label="Local security properties">
-          <li><span>01</span> Credentials stay on this machine</li>
-          <li><span>02</span> MFA is required before workspace access</li>
-          <li><span>03</span> Every server request is authorization checked</li>
+          <li><span>✓</span> Credentials never leave this machine</li>
+          <li><span>✓</span> MFA required before any workspace data</li>
+          <li><span>✓</span> Every finding traced to cited evidence</li>
         </ul>
       </section>
 
