@@ -10,6 +10,7 @@ import { useKubernetesEvidence } from "./use-kubernetes-evidence";
 import type { KubernetesStoredWorkspace } from "../../db/kubernetes-repository";
 import { KubernetesRuntimeWorkspace } from "./kubernetes-runtime-workspace";
 import { buildKubernetesComplianceReadinessReport } from "../../lib/kubernetes-compliance-readiness";
+import { KubernetesPosturePriorityPanel } from "./kubernetes-posture-priority-panel";
 
 function findReportedImages(value: JsonValue, key = "", depth = 0): string[] {
   if (depth > 6) return [];
@@ -116,6 +117,7 @@ function SectionContent({
     });
     return <>
       <div className="trust-strip" role="note"><span className="trust-icon">!</span><span><strong>Assessment, not certification.</strong> Results are point-in-time interpretations of normalized evidence and do not establish conformity, audit readiness, or absence of risk.</span></div>
+      <KubernetesPosturePriorityPanel results={workspace?.findings ?? []} clusterId={workspace?.cluster.id ?? ""} collectedAt={workspace?.scan?.collectedAt ?? null} />
       <section className="kubernetes-subsection">
         <h3>Framework readiness mappings</h3>
         <p className="page-subtitle">{readiness.disclaimer}{readiness.collectedAt ? ` Evidence collected ${formatTimestamp(readiness.collectedAt)}.` : " No promoted Kubernetes scan supplies control evidence yet."}</p>
