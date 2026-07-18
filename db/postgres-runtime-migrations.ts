@@ -15,6 +15,7 @@ import postgresRuntimeEventCasesSql from "../postgres/migrations/0013_runtime_ev
 import postgresKubernetesSbomLicensePolicySql from "../postgres/migrations/0014_kubernetes_sbom_license_policy.sql?raw";
 import postgresVulnerabilityFeedMirrorSql from "../postgres/migrations/0015_vulnerability_feed_mirror.sql?raw";
 import postgresVulnerabilityWaiversSql from "../postgres/migrations/0016_vulnerability_waivers.sql?raw";
+import postgresCloudVulnerabilityFindingsSql from "../postgres/migrations/0017_cloud_vulnerability_findings.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -34,6 +35,7 @@ const migrations = [
   { id: "0014_kubernetes_sbom_license_policy", source: postgresKubernetesSbomLicensePolicySql },
   { id: "0015_vulnerability_feed_mirror", source: postgresVulnerabilityFeedMirrorSql },
   { id: "0016_vulnerability_waivers", source: postgresVulnerabilityWaiversSql },
+  { id: "0017_cloud_vulnerability_findings", source: postgresCloudVulnerabilityFindingsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
