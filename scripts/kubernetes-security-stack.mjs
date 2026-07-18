@@ -142,6 +142,7 @@ async function validateLocalInputs(options) {
   if (options.modules.includes("kyverno")) await requireFile("deploy/policies/kyverno/kustomization.yaml");
   if (options.modules.includes("falco")) {
     await requireFile("deploy/kubernetes/security-stack/falco-signing-gateway.contract.yaml");
+    await requireFile("deploy/policies/falco/sutra-runtime-rules.yaml");
     const image = process.env.SUTRA_FALCO_GATEWAY_IMAGE?.trim() ?? "";
     if (options.command === "apply" && !/^[a-z0-9][a-z0-9./:_-]+@sha256:[a-f0-9]{64}$/u.test(image)) {
       fail("SUTRA_FALCO_GATEWAY_IMAGE must be an immutable image digest");
@@ -153,11 +154,14 @@ function plan(options) {
   const lines = [];
   for (const moduleName of options.modules) {
     const item = definitions[moduleName];
+    const managedRules = moduleName === "falco"
+      ? ["--set-file", `customRules.sutra-runtime-rules\\.yaml=${resolve(root, "deploy/policies/falco/sutra-runtime-rules.yaml")}`]
+      : [];
     lines.push(safeCommand("helm", helmArgs(
       options, "upgrade", "--install", item.release, item.chart,
       "--repo", item.repository, "--version", item.version,
       "--namespace", item.namespace, "--create-namespace",
-      "--values", resolve(root, item.values), "--atomic", "--wait", "--timeout", "10m",
+      "--values", resolve(root, item.values), ...managedRules, "--atomic", "--wait", "--timeout", "10m",
     )));
     if (moduleName === "kyverno") {
       lines.push(safeCommand("kubectl", kubectlArgs(
@@ -165,6 +169,7 @@ function plan(options) {
       )));
     }
     if (moduleName === "falco") {
+      lines.push("Sutra managed Falco rules pack layered via customRules (deploy/policies/falco/sutra-runtime-rules.yaml)");
       lines.push("kubectl apply -f <rendered Falco signing-gateway contract; immutable image and existing ConfigMap/Secret references only>");
     }
   }
@@ -222,11 +227,17 @@ async function labelNamespace(options, namespace, privileged = false) {
 async function applyModule(options, moduleName) {
   const item = definitions[moduleName];
   await labelNamespace(options, item.namespace, moduleName === "falco");
+  // Falco: layer Sutra's managed rules pack on top of the upstream defaults by
+  // injecting the authored file as a chart customRules entry (single source of
+  // truth in deploy/policies/falco; no duplicated YAML).
+  const managedRules = moduleName === "falco"
+    ? ["--set-file", `customRules.sutra-runtime-rules\\.yaml=${resolve(root, "deploy/policies/falco/sutra-runtime-rules.yaml")}`]
+    : [];
   await run("helm", helmArgs(
     options, "upgrade", "--install", item.release, item.chart,
     "--repo", item.repository, "--version", item.version,
     "--namespace", item.namespace, "--create-namespace",
-    "--values", resolve(root, item.values), "--atomic", "--wait", "--timeout", "10m",
+    "--values", resolve(root, item.values), ...managedRules, "--atomic", "--wait", "--timeout", "10m",
   ));
   if (moduleName === "kyverno") {
     await run("kubectl", kubectlArgs(

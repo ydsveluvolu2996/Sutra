@@ -1,0 +1,89 @@
+# Sutra managed Falco rules pack.
+#
+# A curated, opinionated runtime-threat ruleset layered on top of the upstream
+# Falco defaults. Every rule obeys two Sutra constraints so its signal survives
+# ingestion:
+#   1. `priority` is one of Falco's syslog levels that Sutra recognizes
+#      (EMERGENCY, ALERT, CRITICAL, ERROR, WARNING, NOTICE, INFORMATIONAL, DEBUG);
+#      priority drives Sutra's case severity (critical/high/medium/low).
+#   2. `output` references only fields Sutra's ingestion boundary retains
+#      (k8s.ns.name, k8s.pod.name, container.name, container.image.repository,
+#      proc.name, evt.type). Raw command lines, environment values and file
+#      contents are intentionally dropped at the boundary, so rules never rely on
+#      them to carry meaning — intent is encoded in the rule NAME (which flows
+#      through verbatim to the Sutra finding title).
+#
+# Deliver as a ConfigMap and reference via the falcosecurity chart `customRules`
+# (see README.md). These layer on top of the default ruleset; they do not
+# replace it.
+
+- rule: Sutra Reverse Shell In Container
+  desc: A shell was spawned inside a container with its stdio redirected to a socket, the classic reverse-shell pattern.
+  condition: >
+    spawned_process and container and shell_procs
+    and proc.tty = 0
+    and fd.type in (ipv4, ipv6)
+  output: "Reverse shell spawned in container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: CRITICAL
+  tags: [sutra, container, mitre_execution, T1059]
+
+- rule: Sutra Crypto Mining Network Activity
+  desc: A container connected outbound to a port commonly used by cryptocurrency mining pools.
+  condition: >
+    outbound and container
+    and fd.sport in (3333, 4444, 5555, 7777, 14444, 45560)
+  output: "Possible crypto-mining connection from container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name port=%fd.sport image=%container.image.repository)"
+  priority: CRITICAL
+  tags: [sutra, container, mitre_impact, T1496]
+
+- rule: Sutra Package Management Launched In Container
+  desc: A package manager (apt, yum, apk, pip, npm) ran inside a running container, a common post-exploitation tampering step.
+  condition: >
+    spawned_process and container
+    and proc.name in (apt, apt-get, yum, dnf, apk, pip, pip3, npm, gem)
+  output: "Package management executed in running container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: WARNING
+  tags: [sutra, container, mitre_persistence, T1072]
+
+- rule: Sutra Shell Spawned In Container
+  desc: An interactive shell was started inside a container that should run a single application process.
+  condition: >
+    spawned_process and container and shell_procs and proc.tty != 0
+  output: "Interactive shell spawned in container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: NOTICE
+  tags: [sutra, container, mitre_execution, T1059]
+
+- rule: Sutra Write Below System Binary Directory
+  desc: A process wrote to a system binary directory, indicating binary planting or tampering inside a container.
+  condition: >
+    open_write and container
+    and fd.directory in (/bin, /sbin, /usr/bin, /usr/sbin, /usr/local/bin, /usr/local/sbin)
+  output: "Write below a system binary directory (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name file=%fd.directory image=%container.image.repository)"
+  priority: ERROR
+  tags: [sutra, container, mitre_persistence, T1554]
+
+- rule: Sutra Sensitive File Read By Untrusted Process
+  desc: A process read a sensitive credential file (shadow, private keys) inside a container.
+  condition: >
+    open_read and container
+    and fd.name in (/etc/shadow, /etc/sudoers, /root/.ssh/id_rsa, /root/.aws/credentials)
+  output: "Sensitive credential file read in container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: ERROR
+  tags: [sutra, container, mitre_credential_access, T1552]
+
+- rule: Sutra Contact Kubernetes API Server From Container
+  desc: A container process connected to the Kubernetes API server, which is unexpected for most workloads and can indicate lateral movement.
+  condition: >
+    outbound and container
+    and fd.sip.name = "kubernetes.default.svc.cluster.local"
+  output: "Container contacted the Kubernetes API server (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: NOTICE
+  tags: [sutra, container, mitre_discovery, T1613]
+
+- rule: Sutra Privilege Escalation Via Setuid
+  desc: A process changed its user id to root via setuid inside a container.
+  condition: >
+    evt.type = setuid and evt.dir = > and container and evt.arg.uid = 0
+  output: "Setuid to root inside container (namespace=%k8s.ns.name pod=%k8s.pod.name container=%container.name process=%proc.name image=%container.image.repository)"
+  priority: ERROR
+  tags: [sutra, container, mitre_privilege_escalation, T1548]
