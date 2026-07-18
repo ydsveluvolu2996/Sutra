@@ -25,6 +25,7 @@ export type NavKey =
   | "kubernetes_issues"
   | "kubernetes_permissions"
   | "kubernetes_vulnerability_updates"
+  | "kubernetes_drift"
   | "kubernetes_inventory"
   | "kubernetes_security"
   | "kubernetes_attack_paths"
@@ -98,6 +99,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_permissions", label: "Effective permissions", href: "/kubernetes/permissions", icon: "EP", capabilities: readConnection },
       { key: "kubernetes_network", label: "Network", href: "/kubernetes/network", icon: "NW", capabilities: readConnection },
       { key: "kubernetes_runtime", label: "Runtime", href: "/kubernetes/runtime", icon: "RT", capabilities: readConnection },
+      { key: "kubernetes_drift", label: "Drift", href: "/kubernetes/drift", icon: "DR", capabilities: readConnection },
       { key: "kubernetes_compliance", label: "Compliance", href: "/kubernetes/compliance", icon: "CO", capabilities: readConnection },
       { key: "kubernetes_admission", label: "Admission control", href: "/kubernetes/admission", icon: "AD", capabilities: readConnection },
       { key: "kubernetes_policies", label: "Policies", href: "/kubernetes/policies", icon: "PO", capabilities: readConnection },

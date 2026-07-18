@@ -10,7 +10,7 @@ type IconName =
   | "layers" | "supplyChain" | "globe" | "target" | "key" | "network"
   | "shieldCheck" | "policy" | "scan" | "alert" | "bug" | "siren"
   | "wrench" | "clipboardCheck" | "listChecks" | "fileText" | "dollar"
-  | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "dot";
+  | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "diff" | "dot";
 
 const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.3" /><rect x="14" y="3" width="7" height="5" rx="1.3" /><rect x="14" y="12" width="7" height="9" rx="1.3" /><rect x="3" y="16" width="7" height="5" rx="1.3" /></>,
@@ -47,6 +47,7 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9Z" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></>,
   alertOctagon: <><path d="M7.9 2.6 2.6 7.9a2 2 0 0 0-.6 1.4v5.4a2 2 0 0 0 .6 1.4l5.3 5.3a2 2 0 0 0 1.4.6h5.4a2 2 0 0 0 1.4-.6l5.3-5.3a2 2 0 0 0 .6-1.4V9.3a2 2 0 0 0-.6-1.4L16.1 2.6a2 2 0 0 0-1.4-.6H9.3a2 2 0 0 0-1.4.6Z" /><path d="M12 8v4.5M12 16h.01" /></>,
   trendUp: <><path d="M3 17l6-6 4 4 8-8" /><path d="M15 7h6v6" /></>,
+  diff: <><path d="M12 3v6M9 6h6" /><path d="M5 15h14" /><path d="M8 18h8" /><rect x="3" y="3" width="18" height="18" rx="3" opacity="0" /></>,
   gear: <><circle cx="12" cy="12" r="3.2" /><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0-1.1-2.7H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9.3a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" /></>,
   dot: <circle cx="12" cy="12" r="3.2" />,
 };
@@ -75,6 +76,7 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   kubernetes_permissions: "key",
   kubernetes_network: "network",
   kubernetes_runtime: "activity",
+  kubernetes_drift: "diff",
   kubernetes_compliance: "shieldCheck",
   kubernetes_admission: "shieldCheck",
   kubernetes_policies: "policy",
@@ -127,6 +129,7 @@ const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
   kubernetes_permissions: "amber",
   kubernetes_network: "cyan",
   kubernetes_runtime: "red",
+  kubernetes_drift: "orange",
   kubernetes_compliance: "green",
   kubernetes_admission: "green",
   kubernetes_policies: "blue",
