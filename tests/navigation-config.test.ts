@@ -43,6 +43,7 @@ describe("grouped workspace navigation", () => {
         "Workloads",
         "Images & vulnerabilities",
         "Vulnerability updates",
+        "Vulnerability management",
         "Software supply chain",
         "Exposure",
         "Issues",
