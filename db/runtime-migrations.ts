@@ -22,6 +22,7 @@ import kubernetesSbomLicensePolicySchemaSql from "../drizzle/0020_kubernetes_sbo
 import vulnerabilityFeedMirrorSchemaSql from "../drizzle/0021_vulnerability_feed_mirror.sql?raw";
 import vulnerabilityWaiversSchemaSql from "../drizzle/0022_vulnerability_waivers.sql?raw";
 import cloudVulnerabilityFindingsSchemaSql from "../drizzle/0023_cloud_vulnerability_findings.sql?raw";
+import caseRoutingRulesSchemaSql from "../drizzle/0024_case_routing_rules.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -61,6 +62,7 @@ const migrations = [
   { id: "0021_vulnerability_feed_mirror", statements: statementsFrom(vulnerabilityFeedMirrorSchemaSql) },
   { id: "0022_vulnerability_waivers", statements: statementsFrom(vulnerabilityWaiversSchemaSql) },
   { id: "0023_cloud_vulnerability_findings", statements: statementsFrom(cloudVulnerabilityFindingsSchemaSql) },
+  { id: "0024_case_routing_rules", statements: statementsFrom(caseRoutingRulesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
