@@ -126,7 +126,13 @@ function SectionContent({
           <p className="page-subtitle">{entry.framework.claimBoundary}</p>
           <div className="kubernetes-policy-grid">{entry.controls.map((control) => <article key={`${entry.framework.key}:${control.controlId}`}>
             <span className={`severity-dot severity-${control.state === "FAIL" ? "high" : control.state === "PASS" ? "info" : "medium"}`} />
-            <div><strong>{control.title}</strong><small>{control.controlId} · {control.references.join(", ")}</small></div>
+            <div>
+              <strong>{control.title}</strong><small>{control.controlId} · {control.references.join(", ")}</small>
+              {control.state === "FAIL" ? <>
+                <small className="posture-priority-fix">Fix: {control.remediation}</small>
+                {control.failedSubjectEvidence.length > 0 ? <small className="posture-priority-msg">{control.failedSubjectEvidence[0]?.subject}{control.failedSubjectEvidence[0]?.evidence.length ? ` — ${control.failedSubjectEvidence[0]?.evidence.join("; ")}` : ""}</small> : null}
+              </> : null}
+            </div>
             <span className={`compliance-status compliance-status-${control.state === "FAIL" ? "fail" : control.state === "PASS" ? "pass" : control.state === "UNKNOWN" ? "unknown" : "not-applicable"}`}>{control.state === "NOT_COLLECTED" ? "NOT COLLECTED" : control.state}{control.state === "FAIL" ? ` · ${control.failCount}` : ""}</span>
           </article>)}</div>
         </article>)}

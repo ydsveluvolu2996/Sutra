@@ -1,7 +1,11 @@
 import { getConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
+import { listComplianceExceptions } from "../../../../../db/compliance-exception-repository";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { assessCompliance } from "../../../../../lib/compliance-engine";
+import { applyComplianceExceptions } from "../../../../../lib/compliance-exception-types";
+import { buildComplianceEvidencePack } from "../../../../../lib/compliance-evidence-pack";
+import { buildKubernetesComplianceReadinessReport } from "../../../../../lib/kubernetes-compliance-readiness";
 import {
   awsCollectedControlResults,
   kubernetesCollectedControlResults,
@@ -24,7 +28,7 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const FRAMEWORK_IDS = new Set<ComplianceFrameworkId>(
   COMPLIANCE_FRAMEWORKS.map((framework) => framework.id),
 );
-type ExportFormat = "view" | "json" | "csv";
+type ExportFormat = "view" | "json" | "csv" | "pack";
 
 function invalid(): never {
   throw Object.assign(new Error("The compliance framework request is invalid"), { code: "INVALID_INPUT" });
@@ -67,11 +71,11 @@ export async function GET(request: Request): Promise<Response> {
     const format = (url.searchParams.get("format") ?? "view") as ExportFormat;
     if (
       connectionId === null || !CONNECTION_ID.test(connectionId) ||
-      (format !== "view" && format !== "json" && format !== "csv") ||
+      (format !== "view" && format !== "json" && format !== "csv" && format !== "pack") ||
       (frameworkParam !== null && !FRAMEWORK_IDS.has(frameworkParam as ComplianceFrameworkId))
     ) invalid();
-    // A single framework is required for an export; the view returns all five.
-    if (format !== "view" && frameworkParam === null) invalid();
+    // The per-framework json/csv exports require a framework; view and pack do not.
+    if (format !== "view" && format !== "pack" && frameworkParam === null) invalid();
 
     const actor = await requirePilotActor(request, "workspace:read");
     const connection = await getConnectionForOrg(actor.orgId, connectionId);
@@ -81,6 +85,7 @@ export async function GET(request: Request): Promise<Response> {
       format === "view" ? "connection:read" : "export:read",
       connection.customerId,
     );
+    const isPack = format === "pack";
 
     // AWS baseline control results (raw assessment; exceptions are a separate
     // documented artifact and are intentionally NOT collapsed into readiness).
@@ -92,14 +97,21 @@ export async function GET(request: Request): Promise<Response> {
     const scope = { orgId: actor.orgId, customerId: connection.customerId };
     const repository = new KubernetesRepository();
     const clusters = await repository.listClusters(scope);
-    const k8sFindings = (
+    const workspaces = (
       await Promise.all(
         clusters
           .filter((cluster) => cluster.status === "active")
           .map((cluster) => repository.getLatestWorkspace(scope, cluster.id)),
       )
-    ).flatMap((workspace) => (workspace === null ? [] : workspace.findings));
+    ).filter((workspace): workspace is NonNullable<typeof workspace> => workspace !== null);
+    const k8sFindings = workspaces.flatMap((workspace) => workspace.findings);
     const k8sResults = kubernetesCollectedControlResults(k8sFindings);
+    // Latest K8s scan time/hash across clusters, for the evidence-pack provenance.
+    const k8sCollectedAt = workspaces
+      .map((workspace) => workspace.scan?.collectedAt ?? null)
+      .filter((value): value is string => value !== null)
+      .sort((left, right) => right.localeCompare(left, "en-US"))[0] ?? null;
+    const k8sScanSha256 = workspaces.find((workspace) => (workspace.scan?.collectedAt ?? null) === k8sCollectedAt)?.scan?.evidenceSha256 ?? null;
 
     const collected = [...awsResults, ...k8sResults];
     const readinessScope: ReadinessScope = {
@@ -107,6 +119,48 @@ export async function GET(request: Request): Promise<Response> {
       collectionId: assessment.provenance.snapshotId,
       collectedAt: assessment.provenance.snapshotCollectedAt,
     };
+
+    if (isPack) {
+      // Single auditor-grade artifact: AWS baseline (governed exceptions applied),
+      // Kubernetes readiness (with its cited evidence trail), and all five
+      // framework readinesses, under one hash and one attestation envelope.
+      const exceptionRecords = await listComplianceExceptions({
+        orgId: actor.orgId,
+        customerId: connection.customerId,
+        connectionId,
+      });
+      const awsWithExceptions = applyComplianceExceptions(assessment, exceptionRecords);
+      const kubernetes = buildKubernetesComplianceReadinessReport({
+        findings: k8sFindings,
+        collectedAt: k8sCollectedAt,
+      });
+      const frameworks: FrameworkReadiness[] = [...FRAMEWORK_IDS].map((id) =>
+        buildFrameworkReadiness(collected, id, readinessScope),
+      );
+      const pack = buildComplianceEvidencePack({
+        aws: awsWithExceptions,
+        kubernetes,
+        frameworks,
+        kubernetesScanSha256: k8sScanSha256,
+      });
+      const reportSha256 = await sha256Hex(canonicalJson(pack));
+      // The attestation (generation time + actor + connection) is intentionally
+      // OUTSIDE the hashed pack bytes so the pack itself stays deterministic.
+      const attestation = {
+        generatedAt: new Date().toISOString(),
+        connectionId,
+        actorId: actor.authenticated.subject.userId,
+      };
+      const account = assessment.provenance.awsAccountId ?? "unscoped";
+      return new Response(canonicalJson({ ...pack, reportSha256, attestation }), {
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "content-disposition": `attachment; filename="sutra-compliance-evidence-pack-${account}.json"`,
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+        },
+      });
+    }
 
     if (format === "view") {
       const frameworks: FrameworkReadiness[] = [...FRAMEWORK_IDS].map((id) =>
