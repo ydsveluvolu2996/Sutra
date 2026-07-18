@@ -12,7 +12,9 @@ import {
 import {
   DescribeNetworkInterfacesCommand,
   DescribeInstancesCommand,
+  DescribeInternetGatewaysCommand,
   DescribeRegionsCommand,
+  DescribeRouteTablesCommand,
   DescribeSecurityGroupsCommand,
   DescribeSubnetsCommand,
   DescribeVolumesCommand,
@@ -22,7 +24,11 @@ import {
   type DescribeNetworkInterfacesCommandOutput,
   type DescribeInstancesCommandInput,
   type DescribeInstancesCommandOutput,
+  type DescribeInternetGatewaysCommandInput,
+  type DescribeInternetGatewaysCommandOutput,
   type DescribeRegionsCommandOutput,
+  type DescribeRouteTablesCommandInput,
+  type DescribeRouteTablesCommandOutput,
   type DescribeSecurityGroupsCommandInput,
   type DescribeSecurityGroupsCommandOutput,
   type DescribeSubnetsCommandInput,
@@ -339,6 +345,14 @@ export interface Ec2InventoryClient {
     input: DescribeNetworkInterfacesCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeNetworkInterfacesCommandOutput>;
+  describeRouteTables(
+    input: DescribeRouteTablesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeRouteTablesCommandOutput>;
+  describeInternetGateways(
+    input: DescribeInternetGatewaysCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeInternetGatewaysCommandOutput>;
 }
 
 export interface Elbv2InventoryClient {
@@ -566,6 +580,10 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
         sendSdkCommand(client, new DescribeVolumesCommand(input), signal),
       describeNetworkInterfaces: (input, signal) =>
         sendSdkCommand(client, new DescribeNetworkInterfacesCommand(input), signal),
+      describeRouteTables: (input, signal) =>
+        sendSdkCommand(client, new DescribeRouteTablesCommand(input), signal),
+      describeInternetGateways: (input, signal) =>
+        sendSdkCommand(client, new DescribeInternetGatewaysCommand(input), signal),
     };
   }
 
@@ -728,6 +746,9 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeVolumes: (input) => this.run((signal) => client.describeVolumes(input, signal)),
       describeNetworkInterfaces: (input) =>
         this.run((signal) => client.describeNetworkInterfaces(input, signal)),
+      describeRouteTables: (input) => this.run((signal) => client.describeRouteTables(input, signal)),
+      describeInternetGateways: (input) =>
+        this.run((signal) => client.describeInternetGateways(input, signal)),
     };
   }
 
@@ -1055,6 +1076,12 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ),
         task("ec2.network-interfaces", "ec2", "network-interfaces", region, (state) =>
           collectNetworkInterfaces(context, region, ec2, observedAt, state),
+        ),
+        task("ec2.route-tables", "ec2", "route-tables", region, (state) =>
+          collectRouteTables(context, region, ec2, observedAt, state),
+        ),
+        task("ec2.internet-gateways", "ec2", "internet-gateways", region, (state) =>
+          collectInternetGateways(context, region, ec2, observedAt, state),
         ),
         task("elbv2.load-balancers", "elasticloadbalancing", "load-balancers", region, (state) =>
           collectLoadBalancers(context, region, elbv2, observedAt, state),
@@ -1403,6 +1430,99 @@ async function collectNetworkInterfaces(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeNetworkInterfaces exceeded pagination limit");
+}
+
+async function collectRouteTables(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeRouteTables(
+      token === undefined ? { MaxResults: 100 } : { MaxResults: 100, NextToken: token },
+    );
+    const resources = (output.RouteTables ?? []).flatMap((routeTable) => {
+      if (routeTable.RouteTableId === undefined) return [];
+      const associations = routeTable.Associations ?? [];
+      const routes = routeTable.Routes ?? [];
+      // "main" route table when any association is flagged main. A route to an
+      // internet gateway makes the associated subnets a public egress path — a
+      // fact aws-network-exposure consumes; we record it, never infer beyond it.
+      const routesToIgw = routes.some((route) => (route.GatewayId ?? "").startsWith("igw-"));
+      const routesToNat = routes.some((route) => route.NatGatewayId !== undefined);
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "ec2",
+        "aws.ec2.route-table",
+        routeTable.RouteTableId,
+        `arn:${context.partition}:ec2:${region}:${context.accountId}:route-table/${routeTable.RouteTableId}`,
+        "ec2:DescribeRouteTables",
+        compact({
+          vpcId: routeTable.VpcId,
+          main: associations.some((association) => association.Main === true),
+          routeCount: routes.length,
+          associationCount: associations.length,
+          associatedSubnetIds: strings(associations.map((association) => association.SubnetId)),
+          routesToInternetGateway: routesToIgw,
+          routesToNatGateway: routesToNat,
+          propagatingVgws: strings((routeTable.PropagatingVgws ?? []).map((vgw) => vgw.GatewayId)),
+        }),
+        routeTable.Tags,
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeRouteTables");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeRouteTables exceeded pagination limit");
+}
+
+async function collectInternetGateways(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeInternetGateways(
+      token === undefined ? { MaxResults: 100 } : { MaxResults: 100, NextToken: token },
+    );
+    const resources = (output.InternetGateways ?? []).flatMap((gateway) => {
+      if (gateway.InternetGatewayId === undefined) return [];
+      const attachments = gateway.Attachments ?? [];
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "ec2",
+        "aws.ec2.internet-gateway",
+        gateway.InternetGatewayId,
+        `arn:${context.partition}:ec2:${region}:${context.accountId}:internet-gateway/${gateway.InternetGatewayId}`,
+        "ec2:DescribeInternetGateways",
+        compact({
+          attachedVpcIds: strings(attachments.map((attachment) => attachment.VpcId)),
+          attachmentStates: strings(attachments.map((attachment) => attachment.State)),
+          attached: attachments.length > 0,
+        }),
+        gateway.Tags,
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeInternetGateways");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeInternetGateways exceeded pagination limit");
 }
 
 async function collectLoadBalancers(

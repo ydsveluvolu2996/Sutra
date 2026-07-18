@@ -263,6 +263,9 @@ class FakeClientFactory implements AwsInventoryClientFactory {
       describeVolumes: () => this.tracker.run(() => ({ $metadata: {}, Volumes: [] })),
       describeNetworkInterfaces: () =>
         this.tracker.run(() => ({ $metadata: {}, NetworkInterfaces: [] })),
+      describeRouteTables: () => this.tracker.run(() => ({ $metadata: {}, RouteTables: [] })),
+      describeInternetGateways: () =>
+        this.tracker.run(() => ({ $metadata: {}, InternetGateways: [] })),
     };
   }
 
@@ -572,6 +575,37 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
             }
           : { $metadata: {}, NetworkInterfaces: [] };
       },
+      describeRouteTables: async (input) => {
+        this.record("route-tables", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "route-tables-next",
+              RouteTables: [{
+                RouteTableId: "rtb-expanded",
+                VpcId: "vpc-east",
+                Associations: [{ Main: false, SubnetId: "subnet-east" }],
+                Routes: [
+                  { DestinationCidrBlock: "10.0.0.0/16", GatewayId: "local" },
+                  { DestinationCidrBlock: "0.0.0.0/0", GatewayId: "igw-east" },
+                ],
+              }],
+            }
+          : { $metadata: {}, RouteTables: [] };
+      },
+      describeInternetGateways: async (input) => {
+        this.record("internet-gateways", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "internet-gateways-next",
+              InternetGateways: [{
+                InternetGatewayId: "igw-east",
+                Attachments: [{ VpcId: "vpc-east", State: "attached" }],
+              }],
+            }
+          : { $metadata: {}, InternetGateways: [] };
+      },
     };
   }
 
@@ -756,6 +790,8 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
   const expandedTypes = [
     "aws.ec2.volume",
     "aws.ec2.network-interface",
+    "aws.ec2.route-table",
+    "aws.ec2.internet-gateway",
     "aws.elasticloadbalancingv2.load-balancer",
     "aws.kms.key",
     "aws.dynamodb.table",
@@ -769,9 +805,28 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
-  for (const key of ["volumes", "network-interfaces", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
+  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "load-balancers", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
+  // Route table exposing 0.0.0.0/0 -> igw is the fact aws-network-exposure needs:
+  // record the routed-to-IGW flag and associated subnets, never infer beyond it.
+  const routeTable = resources.find((resource) => resource.resourceType === "aws.ec2.route-table");
+  assert.deepEqual(routeTable?.configuration, {
+    vpcId: "vpc-east",
+    main: false,
+    routeCount: 2,
+    associationCount: 1,
+    associatedSubnetIds: ["subnet-east"],
+    routesToInternetGateway: true,
+    routesToNatGateway: false,
+    propagatingVgws: [],
+  });
+  const internetGateway = resources.find((resource) => resource.resourceType === "aws.ec2.internet-gateway");
+  assert.deepEqual(internetGateway?.configuration, {
+    attachedVpcIds: ["vpc-east"],
+    attachmentStates: ["attached"],
+    attached: true,
+  });
   const eks = resources.find((resource) => resource.resourceType === "aws.eks.cluster");
   assert.deepEqual(eks?.configuration, {
     state: "ACTIVE",
