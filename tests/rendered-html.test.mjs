@@ -33,7 +33,7 @@ test("server-renders the Sutra public product site", async () => {
 });
 
 test("server-renders an authentication gate without leaking protected route data", async () => {
-  const routes = ["/dashboard", "/customers", "/cmdb", "/cmdb/resource?key=demo", "/changes", "/findings", "/security-events", "/cases", "/compliance", "/costs", "/reports", "/controls", "/roadmap", "/onboard", "/kubernetes/fleet", "/kubernetes/attack-paths", "/kubernetes/issues", "/kubernetes/permissions", "/kubernetes/iam", "/kubernetes/trends", "/kubernetes/vulnerability-updates", "/kubernetes/vulnerability-management", "/kubernetes/drift", "/settings"];
+  const routes = ["/dashboard", "/customers", "/cmdb", "/cmdb/resource?key=demo", "/changes", "/findings", "/security-events", "/cases", "/compliance", "/compliance-frameworks", "/costs", "/reports", "/controls", "/roadmap", "/onboard", "/kubernetes/fleet", "/kubernetes/attack-paths", "/kubernetes/issues", "/kubernetes/permissions", "/kubernetes/iam", "/kubernetes/trends", "/kubernetes/vulnerability-updates", "/kubernetes/vulnerability-management", "/kubernetes/drift", "/settings"];
 
   for (const pathname of routes) {
     const response = await render(pathname);
