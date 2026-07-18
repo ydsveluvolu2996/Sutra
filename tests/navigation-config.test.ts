@@ -49,6 +49,7 @@ describe("grouped workspace navigation", () => {
         "Attack paths",
         "RBAC",
         "Effective permissions",
+        "AWS IAM CIEM",
         "Network",
         "Runtime",
         "Drift",
