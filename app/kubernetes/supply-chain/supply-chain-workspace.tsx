@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { KubernetesSupplyChainEvidence } from "../../../lib/kubernetes-supply-chain";
 import { formatTimestamp, usePilotState } from "../../components/use-pilot-state";
 import { useKubernetesEvidence } from "../use-kubernetes-evidence";
+import { SupplyChainTrustPanel } from "./supply-chain-trust-panel";
 
 interface SupplyChainBody {
   readonly schemaVersion: "sutra.kubernetes-supply-chain-workspace.v1";
@@ -281,6 +282,7 @@ export function SupplyChainWorkspace() {
           <article><small>Signature + provenance</small><strong>{evidence.length > 0 ? verified : "—"}</strong><span>Both verification states reported</span></article>
           <article><small>Active cluster</small><strong>{activeCluster?.name ?? "—"}</strong><span>{activeCluster ? activeCluster.distribution ?? "Kubernetes" : "Not registered"}</span></article>
         </section>
+        <SupplyChainTrustPanel evidence={evidence} />
         <section className="panel supply-chain-panel">
           <div className="panel-heading"><div><p className="eyebrow">Authenticated tenant scope</p><h2>Normalized image evidence</h2></div><div className="supply-chain-panel-actions">{activeClusters.length > 1 ? <label><span className="sr-only">Select Kubernetes cluster</span><select className="filter-control" value={activeCluster?.id ?? ""} onChange={(event) => setSelectedClusterId(event.target.value)}>{activeClusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}</select></label> : null}{payload?.configured ? <span className="status-pill status-positive">Connected</span> : <span className="status-pill">Not configured</span>}</div></div>
           {evidence.length > 0 ? <>
