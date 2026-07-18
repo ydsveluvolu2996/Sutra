@@ -1,3 +1,5 @@
+import { buildContainmentPlan, type ContainmentPlan } from "./kubernetes-containment.ts";
+
 export const FALCO_PRIORITIES = [
   "emergency",
   "alert",
@@ -56,6 +58,8 @@ export interface FalcoInvestigationTimelineItem {
   readonly priority: FalcoPriority;
   readonly subject: string;
   readonly evidenceSha256: string;
+  /** Severity-scaled containment plan for operator review; never auto-applied. */
+  readonly containment: ContainmentPlan;
 }
 
 /**
@@ -97,6 +101,7 @@ export function projectFalcoTimeline(
     priority: event.priority,
     subject: subject || event.nodeName || event.clusterId,
     evidenceSha256: event.evidenceSha256,
+    containment: buildContainmentPlan({ event }),
   };
 }
 
