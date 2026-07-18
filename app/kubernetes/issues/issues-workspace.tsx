@@ -9,6 +9,7 @@ import {
   type IssueSeverity,
 } from "../../../lib/kubernetes-issues";
 import { buildKubernetesAttackPaths } from "../../../lib/kubernetes-attack-paths";
+import { buildRemediationPlan } from "../../../lib/kubernetes-remediation";
 import type { NormalizedFalcoRuntimeEvent } from "../../../lib/falco-runtime-types";
 import type { NormalizedHubbleFlow } from "../../../lib/hubble-flow-evidence";
 import type { KubernetesSupplyChainEvidence } from "../../../lib/kubernetes-supply-chain";
@@ -46,6 +47,48 @@ function reachabilityPill(reachability: IssueReachability): string {
   if (reachability === "confirmed") return "compliance-status-fail";
   if (reachability === "theoretical") return "compliance-status-unknown";
   return "compliance-status-not-applicable";
+}
+
+function IssueRemediation({
+  ruleId,
+  workload,
+  factors,
+}: {
+  readonly ruleId: string;
+  readonly workload: string;
+  readonly factors: readonly { readonly kind: string; readonly detail: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState<number | null>(null);
+  const cveId = factors.map((factor) => /CVE-\d{4}-\d+/u.exec(factor.detail)?.[0]).find((value) => value !== undefined) ?? null;
+  const plan = useMemo(() => buildRemediationPlan({ ruleId, workload, cveId }), [ruleId, workload, cveId]);
+  if (plan.artifacts.length === 0) return null;
+
+  const copy = (content: string, index: number) => {
+    void navigator.clipboard?.writeText(content).then(() => {
+      setCopied(index);
+      window.setTimeout(() => setCopied((current) => (current === index ? null : current)), 1500);
+    });
+  };
+
+  return (
+    <details className="issue-fix" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>{open ? "Hide" : "Generate"} fix ({plan.artifacts.length} artifact{plan.artifacts.length === 1 ? "" : "s"})</summary>
+      <div className="issue-fix-body">
+        {plan.artifacts.map((artifact, index) => (
+          <article className="issue-fix-artifact" key={artifact.kind + String(index)}>
+            <div className="issue-fix-head">
+              <strong>{artifact.title}</strong>
+              <button type="button" className="button button-secondary" onClick={() => copy(artifact.content, index)}>{copied === index ? "Copied" : "Copy"}</button>
+            </div>
+            <pre><code>{artifact.content}</code></pre>
+            <small>{artifact.note}</small>
+          </article>
+        ))}
+        <p className="panel-footnote">{plan.disclaimer}</p>
+      </div>
+    </details>
+  );
 }
 
 export function IssuesWorkspace() {
@@ -246,6 +289,7 @@ export function IssuesWorkspace() {
                 {issue.factors.map((factor, factorIndex) => <li key={`${issue.id}:${factorIndex}`}><b>{factor.kind}</b> {factor.detail}</li>)}
               </ul>
               <p className="issue-reco"><strong>Recommendation:</strong> {issue.recommendation}</p>
+              <IssueRemediation ruleId={issue.ruleId} workload={issue.workload} factors={issue.factors} />
             </article>)}
           </div> : <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">OK</span><h2>No prioritized issues</h2><p>No toxic combination is present in the current authorized evidence. This does not prove absence of risk; it may reflect collector, runtime, or network-flow coverage.</p></section>}
         </section>
