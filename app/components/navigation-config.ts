@@ -24,6 +24,7 @@ export type NavKey =
   | "kubernetes_trends"
   | "kubernetes_issues"
   | "kubernetes_permissions"
+  | "kubernetes_iam"
   | "kubernetes_vulnerability_updates"
   | "kubernetes_drift"
   | "kubernetes_inventory"
@@ -97,6 +98,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "kubernetes_attack_paths", label: "Attack paths", href: "/kubernetes/attack-paths", icon: "AP", capabilities: readConnection },
       { key: "kubernetes_rbac", label: "RBAC", href: "/kubernetes/rbac", icon: "RB", capabilities: readConnection },
       { key: "kubernetes_permissions", label: "Effective permissions", href: "/kubernetes/permissions", icon: "EP", capabilities: readConnection },
+      { key: "kubernetes_iam", label: "AWS IAM CIEM", href: "/kubernetes/iam", icon: "IA", capabilities: readConnection },
       { key: "kubernetes_network", label: "Network", href: "/kubernetes/network", icon: "NW", capabilities: readConnection },
       { key: "kubernetes_runtime", label: "Runtime", href: "/kubernetes/runtime", icon: "RT", capabilities: readConnection },
       { key: "kubernetes_drift", label: "Drift", href: "/kubernetes/drift", icon: "DR", capabilities: readConnection },
