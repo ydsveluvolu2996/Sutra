@@ -5,6 +5,7 @@
 // the acting organization owns (the gating SELECT writes nothing otherwise),
 // and every read is org+customer scoped so tenants never see each other.
 import { validateCmdbQuery, type CmdbQuery, type CmdbQueryResource } from "../lib/cmdb-query.ts";
+import type { CapturedManagementEvent, SnapshotIdentity } from "../lib/cmdb-event-capture.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 
@@ -237,6 +238,76 @@ export class CmdbWorkspaceRepository {
         configuration,
       };
     });
+  }
+
+  /** Inputs for event-assisted change hints: head-snapshot age + identities and
+   * the mutating-event window after it. Bounded and tenant-scoped. */
+  public async changeHintInputs(
+    scope: CmdbWorkspaceScope,
+    connectionId: string,
+    limit = 2_000,
+  ): Promise<{
+    snapshotCollectedAtMs: number | null;
+    resources: readonly SnapshotIdentity[];
+    events: readonly CapturedManagementEvent[];
+  }> {
+    assertScope(scope, connectionId);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 5_000) invalid();
+    const db = await this.ready();
+    const head = await db.prepare(
+      `SELECT s.collected_at AS collected_at
+         FROM connection_heads h
+         JOIN cmdb_snapshots s ON s.id = h.snapshot_id
+        WHERE h.connection_id = ? AND s.org_id = ? AND s.customer_id = ?`,
+    ).bind(connectionId, scope.orgId, scope.customerId).first<{ collected_at: number }>();
+    if (head === null || head === undefined) {
+      return { snapshotCollectedAtMs: null, resources: [], events: [] };
+    }
+    const collectedAtMs = Number(head.collected_at);
+    const resourceRows = await db.prepare(
+      `SELECT r.resource_key, r.native_id, r.arn
+         FROM cmdb_resources r
+         JOIN connection_heads h ON h.snapshot_id = r.snapshot_id
+        WHERE h.connection_id = ? AND r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?`,
+    ).bind(connectionId, scope.orgId, scope.customerId, connectionId).all<{ resource_key: string; native_id: string; arn: string | null }>();
+    const eventRows = await db.prepare(
+      `SELECT event_name, event_source, event_time, read_only, error_code, resources_json
+         FROM security_events
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND event_time > ?
+        ORDER BY event_time DESC, id DESC LIMIT ?`,
+    ).bind(scope.orgId, scope.customerId, connectionId, collectedAtMs, limit).all<{
+      event_name: string; event_source: string; event_time: number; read_only: number | null; error_code: string | null; resources_json: string;
+    }>();
+    const events: CapturedManagementEvent[] = (eventRows.results ?? []).map((row) => {
+      let resources: { type: string | null; name: string | null }[] = [];
+      try {
+        const parsed: unknown = JSON.parse(row.resources_json);
+        if (Array.isArray(parsed)) {
+          resources = parsed.flatMap((entry) =>
+            typeof entry === "object" && entry !== null
+              ? [{
+                  type: typeof (entry as { type?: unknown }).type === "string" ? (entry as { type: string }).type : null,
+                  name: typeof (entry as { name?: unknown }).name === "string" ? (entry as { name: string }).name : null,
+                }]
+              : []);
+        }
+      } catch {
+        resources = [];
+      }
+      return {
+        eventName: row.event_name,
+        eventSource: row.event_source,
+        eventTimeMs: Number(row.event_time),
+        readOnly: row.read_only === null ? null : Number(row.read_only) === 1,
+        errorCode: row.error_code,
+        resources,
+      };
+    });
+    return {
+      snapshotCollectedAtMs: collectedAtMs,
+      resources: (resourceRows.results ?? []).map((row) => ({ resourceKey: row.resource_key, nativeId: row.native_id, arn: row.arn })),
+      events,
+    };
   }
 
   public async saveQuery(
