@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { formatTimestamp } from "../components/use-pilot-state";
 import { postAuth, useSession } from "../components/use-session";
+import { ApiTokensPanel } from "./api-tokens-panel";
 
 function roleLabel(role: string): string {
   return role.split("_").map((part) => `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`).join(" ");
@@ -90,6 +91,7 @@ export function SettingsBrowser() {
           </div>
         </section>
       </div>
+      <ApiTokensPanel />
     </>
   );
 }
