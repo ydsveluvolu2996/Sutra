@@ -10,6 +10,7 @@ import {
   type GetTrailStatusCommandOutput,
 } from "@aws-sdk/client-cloudtrail";
 import {
+  DescribeNetworkAclsCommand,
   DescribeNetworkInterfacesCommand,
   DescribeInstancesCommand,
   DescribeInternetGatewaysCommand,
@@ -20,6 +21,8 @@ import {
   DescribeVolumesCommand,
   DescribeVpcsCommand,
   EC2Client,
+  type DescribeNetworkAclsCommandInput,
+  type DescribeNetworkAclsCommandOutput,
   type DescribeNetworkInterfacesCommandInput,
   type DescribeNetworkInterfacesCommandOutput,
   type DescribeInstancesCommandInput,
@@ -356,6 +359,10 @@ export interface Ec2InventoryClient {
     input: DescribeInternetGatewaysCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeInternetGatewaysCommandOutput>;
+  describeNetworkAcls(
+    input: DescribeNetworkAclsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeNetworkAclsCommandOutput>;
 }
 
 export interface Elbv2InventoryClient {
@@ -591,6 +598,8 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
         sendSdkCommand(client, new DescribeRouteTablesCommand(input), signal),
       describeInternetGateways: (input, signal) =>
         sendSdkCommand(client, new DescribeInternetGatewaysCommand(input), signal),
+      describeNetworkAcls: (input, signal) =>
+        sendSdkCommand(client, new DescribeNetworkAclsCommand(input), signal),
     };
   }
 
@@ -758,6 +767,7 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeRouteTables: (input) => this.run((signal) => client.describeRouteTables(input, signal)),
       describeInternetGateways: (input) =>
         this.run((signal) => client.describeInternetGateways(input, signal)),
+      describeNetworkAcls: (input) => this.run((signal) => client.describeNetworkAcls(input, signal)),
     };
   }
 
@@ -1092,6 +1102,9 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ),
         task("ec2.internet-gateways", "ec2", "internet-gateways", region, (state) =>
           collectInternetGateways(context, region, ec2, observedAt, state),
+        ),
+        task("ec2.network-acls", "ec2", "network-acls", region, (state) =>
+          collectNetworkAcls(context, region, ec2, observedAt, state),
         ),
         task("elbv2.load-balancers", "elasticloadbalancing", "load-balancers", region, (state) =>
           collectLoadBalancers(context, region, elbv2, observedAt, state),
@@ -1540,6 +1553,60 @@ async function collectInternetGateways(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeInternetGateways exceeded pagination limit");
+}
+
+async function collectNetworkAcls(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeNetworkAcls(
+      token === undefined ? { MaxResults: 100 } : { MaxResults: 100, NextToken: token },
+    );
+    const resources = (output.NetworkAcls ?? []).flatMap((acl) => {
+      if (acl.NetworkAclId === undefined) return [];
+      const associations = acl.Associations ?? [];
+      const entries = acl.Entries ?? [];
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "ec2",
+        "aws.ec2.network-acl",
+        acl.NetworkAclId,
+        `arn:${context.partition}:ec2:${region}:${context.accountId}:network-acl/${acl.NetworkAclId}`,
+        "ec2:DescribeNetworkAcls",
+        compact({
+          vpcId: acl.VpcId,
+          isDefault: acl.IsDefault,
+          associatedSubnetIds: strings(associations.map((association) => association.SubnetId)),
+          // Ordered ACL entries (rule number, direction, protocol, allow/deny,
+          // CIDR, port range) — the exact evidence subnet-boundary port
+          // filtering needs. Protocol "-1" is all; "6"/"17" are TCP/UDP.
+          entries: entries.map((entry) => compact({
+            ruleNumber: entry.RuleNumber,
+            egress: entry.Egress,
+            protocol: entry.Protocol,
+            ruleAction: entry.RuleAction,
+            cidr: entry.CidrBlock ?? entry.Ipv6CidrBlock,
+            fromPort: entry.PortRange?.From,
+            toPort: entry.PortRange?.To,
+          })),
+        }),
+        acl.Tags,
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeNetworkAcls");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeNetworkAcls exceeded pagination limit");
 }
 
 async function collectLoadBalancers(

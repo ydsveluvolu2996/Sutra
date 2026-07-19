@@ -14,6 +14,7 @@ import type { JsonValue, PilotResource } from "./pilot-types.ts";
 import type {
   DnsRecordEvidence,
   LoadBalancerEvidence,
+  NetworkAclRule,
   NetworkExposureEvidence,
   NetworkResource,
   RouteEvidence,
@@ -117,8 +118,34 @@ export function buildNetworkExposureEvidence(
     if (bool(config.main) && vpcId !== undefined) mainRouteTableByVpc.set(vpcId, table.nativeId);
   }
 
+  // Network ACLs: ordered entries -> engine rules, and the subnet -> ACL map so
+  // subnet-boundary port filtering can be evaluated.
+  const networkAcls: Record<string, NetworkAclRule[]> = {};
+  const networkAclBySubnet = new Map<string, string>();
+  for (const acl of of("network-acl")) {
+    const config = acl.configuration;
+    networkAcls[acl.nativeId] = records(config.entries).flatMap((entry) => {
+      const ruleNumber = num(entry.ruleNumber);
+      const ruleAction = str(entry.ruleAction);
+      if (ruleNumber === undefined || (ruleAction !== "allow" && ruleAction !== "deny")) return [];
+      const cidr = str(entry.cidr);
+      const fromPort = num(entry.fromPort);
+      const toPort = num(entry.toPort);
+      return [{
+        ruleNumber,
+        egress: entry.egress === true,
+        protocol: str(entry.protocol) ?? "-1",
+        ruleAction,
+        ...(cidr === undefined ? {} : { cidr }),
+        ...(fromPort === undefined ? {} : { fromPort }),
+        ...(toPort === undefined ? {} : { toPort }),
+      }];
+    });
+    for (const subnetId of strArray(config.associatedSubnetIds)) networkAclBySubnet.set(subnetId, acl.nativeId);
+  }
+
   // A subnet's route table is its explicit association, else its VPC's main
-  // route table (AWS's own fallback). Network ACLs are not collected -> omitted.
+  // route table (AWS's own fallback); its NACL is the associated ACL if collected.
   const subnets: Record<string, SubnetEvidence> = {};
   for (const subnet of of("subnet")) {
     const config = subnet.configuration;
@@ -126,9 +153,11 @@ export function buildNetworkExposureEvidence(
     const routeTableId = routeTableBySubnet.get(subnet.nativeId)
       ?? (vpcId === undefined ? undefined : mainRouteTableByVpc.get(vpcId));
     if (routeTableId === undefined) continue; // no association evidence -> engine treats subnet as unknown
+    const networkAclId = networkAclBySubnet.get(subnet.nativeId);
     subnets[subnet.nativeId] = {
       routeTableId,
       mapPublicIpOnLaunch: bool(config.mapPublicIpOnLaunch),
+      ...(networkAclId === undefined ? {} : { networkAclId }),
     };
   }
 
@@ -169,6 +198,7 @@ export function buildNetworkExposureEvidence(
     routeTables,
     internetGateways,
     loadBalancers,
+    ...(Object.keys(networkAcls).length > 0 ? { networkAcls } : {}),
     ...(dnsRecords.length > 0 ? { dnsRecords } : {}),
     ...(options.tenant === undefined ? {} : { tenant: options.tenant }),
   };
