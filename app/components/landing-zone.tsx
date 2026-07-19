@@ -28,6 +28,31 @@ function pvRows(bar: string, rows: Row[]): string {
   );
 }
 
+/* Wiz-style inventory table: icon + name/sub + resource count per row */
+type InvRow = { ico: string; t: string; nm: string; sub: string; count: string };
+const STACK_ICO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="5" rx="1.4"/><rect x="3" y="12" width="18" height="5" rx="1.4"/><path d="M6.5 6.5h.01M6.5 14.5h.01"/></svg>';
+function pvInventory(bar: string, rows: InvRow[]): string {
+  return (
+    '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>' + bar + '</span></div><div class="lx-pv-body">' +
+    '<div class="lx-pv-hdr"><span>Resource</span><span>Collected</span></div>' +
+    rows
+      .map(
+        (r) =>
+          '<div class="lx-pv-row"><span class="k"><span class="lx-pv-ico" style="--tt:' + r.t + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">' + r.ico + '</svg></span><span class="nm"><b>' + r.nm + '</b><em>' + r.sub + '</em></span></span><span class="lx-pv-count">' + STACK_ICO + r.count + '</span></div>'
+      )
+      .join('') +
+    '</div></div>'
+  );
+}
+const PV_INVENTORY = pvInventory("cmdb · demo workspace", [
+  { ico: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/><rect x="9" y="9" width="6" height="6" rx="1"/>', t: "#f0842e", nm: "EC2 Instances", sub: "Virtual machines", count: "208" },
+  { ico: '<path d="M12 2 20.5 7v10L12 22 3.5 17V7z"/><circle cx="12" cy="12" r="3.4"/>', t: "#3b82f6", nm: "EKS Clusters", sub: "Container orchestrators", count: "4" },
+  { ico: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><circle cx="12" cy="10" r="2.4"/><path d="M12 12.4V15"/>', t: "#8b5cf6", nm: "IAM Roles", sub: "Identities & trust policies", count: "61" },
+  { ico: '<path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', t: "#34d399", nm: "S3 Buckets", sub: "Object storage", count: "37" },
+  { ico: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h.01M11 12h.01M15 12h.01"/>', t: "#22d3ee", nm: "Network Interfaces", sub: "ENIs · routes · NACLs", count: "143" },
+  { ico: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/>', t: "#fb7185", nm: "Load Balancers", sub: "ALB · listeners · targets", count: "9" },
+]);
+
 const GDEF =
   '<defs><linearGradient id="pvg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset=".5" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>';
 
@@ -52,7 +77,8 @@ const PV_FIX =
 
 type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string; g?: string };
 const CAPS: Cap[] = [
-  { code: "GRAPH", g: "See & prioritize", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — every edge a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], pv: PV_GRAPH },
+  { code: "COLLECT", g: "See & prioritize", label: "Agentless collection", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>', title: "Agentless collection, in minutes", blurb: "Twenty-two collectors per region connect via a customer-owned IAM role with temporary STS credentials — full asset coverage with no agents on your workloads and no access keys stored, ever.", points: ["22 collectors per region via STS", "No agents · no stored keys", "Normalized into one CMDB"], pv: PV_INVENTORY },
+  { code: "GRAPH", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — every edge a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], pv: PV_GRAPH },
   { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Not thousands of CVEs — the handful that are internet-reachable, running and exploitable, proven with observed evidence.", points: ["Toxic-combination detection", "Reachability from real network flows", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", [
     { dot: "#fb7185", k: "Internet-reachable workload", em: "running CVE-2024-3094", v: "Critical", tone: "red" },
     { dot: "#fbbf24", k: "Privileged pod reachable from ingress", em: "hostPID", v: "High", tone: "amber" },

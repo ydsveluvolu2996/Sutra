@@ -2824,3 +2824,13 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .lz .stmt, .lz .wblock, .lz .wseg { transition: none !important; opacity: 1 !important; transform: none !important; }
   .lz .twr .twr-caret, .lz .ribbon path { animation: none !important; }
 }
+
+/* --- lz: Wiz-style inventory preview (icons + counts) --- */
+.lz .lx-pv-hdr { display: flex; justify-content: space-between; padding: 10px 0 8px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); border-bottom: 1px solid var(--line); }
+.lz .lx-pv-ico { width: 30px; height: 30px; flex: none; border-radius: 8px; display: grid; place-items: center; border: 1px solid var(--line-2); background: rgba(10,16,32,.65); color: var(--tt, #93c5fd); }
+.lz .lx-pv-ico svg { width: 16px; height: 16px; }
+.lz .lx-pv-row .nm { display: grid; gap: 1px; min-width: 0; }
+.lz .lx-pv-row .nm b { color: #e6ecfb; font-weight: 600; font-size: 12.5px; }
+.lz .lx-pv-row .nm em { font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--body-2); }
+.lz .lx-pv-count { font-family: var(--mono); font-size: 12px; color: #dce6ff; display: inline-flex; align-items: center; gap: 7px; flex: none; }
+.lz .lx-pv-count svg { color: var(--faint); }
