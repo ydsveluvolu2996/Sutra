@@ -11,7 +11,7 @@ type IconName =
   | "shieldCheck" | "policy" | "scan" | "alert" | "bug" | "siren"
   | "wrench" | "clipboardCheck" | "listChecks" | "fileText" | "dollar"
   | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "diff" | "dot"
-  | "logout" | "chevron";
+  | "logout" | "chevron" | "search";
 
 const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.3" /><rect x="14" y="3" width="7" height="5" rx="1.3" /><rect x="14" y="12" width="7" height="9" rx="1.3" /><rect x="3" y="16" width="7" height="5" rx="1.3" /></>,
@@ -53,6 +53,7 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dot: <circle cx="12" cy="12" r="3.2" />,
   logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></>,
   chevron: <path d="m6 9 6 6 6-6" />,
+  search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
 };
 
 const KEY_ICON: Partial<Record<NavKey, IconName>> = {
