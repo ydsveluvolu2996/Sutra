@@ -21,6 +21,7 @@ import postgresLatencySamplesSql from "../postgres/migrations/0019_latency_sampl
 import postgresCmdbWorkspaceSql from "../postgres/migrations/0020_cmdb_workspace.sql?raw";
 import postgresComplianceWorkspaceSql from "../postgres/migrations/0021_compliance_workspace.sql?raw";
 import postgresFinopsWorkspaceSql from "../postgres/migrations/0022_finops_workspace.sql?raw";
+import postgresPublicApiSql from "../postgres/migrations/0023_public_api.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -46,6 +47,7 @@ const migrations = [
   { id: "0020_cmdb_workspace", source: postgresCmdbWorkspaceSql },
   { id: "0021_compliance_workspace", source: postgresComplianceWorkspaceSql },
   { id: "0022_finops_workspace", source: postgresFinopsWorkspaceSql },
+  { id: "0023_public_api", source: postgresPublicApiSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

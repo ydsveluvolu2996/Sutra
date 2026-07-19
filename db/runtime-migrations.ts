@@ -27,6 +27,7 @@ import latencySamplesSchemaSql from "../drizzle/0025_latency_samples.sql?raw";
 import cmdbWorkspaceSchemaSql from "../drizzle/0026_cmdb_workspace.sql?raw";
 import complianceWorkspaceSchemaSql from "../drizzle/0027_compliance_workspace.sql?raw";
 import finopsWorkspaceSchemaSql from "../drizzle/0028_finops_workspace.sql?raw";
+import publicApiSchemaSql from "../drizzle/0029_public_api.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -71,6 +72,7 @@ const migrations = [
   { id: "0026_cmdb_workspace", statements: statementsFrom(cmdbWorkspaceSchemaSql) },
   { id: "0027_compliance_workspace", statements: statementsFrom(complianceWorkspaceSchemaSql) },
   { id: "0028_finops_workspace", statements: statementsFrom(finopsWorkspaceSchemaSql) },
+  { id: "0029_public_api", statements: statementsFrom(publicApiSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
