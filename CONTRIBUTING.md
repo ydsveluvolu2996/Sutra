@@ -7,12 +7,12 @@ sandbox, and production behavior unmistakable.
 ## Set up the repository
 
 Use a current Node.js 22 LTS patch (`>=22.13.0` is the package engine floor) and
-pnpm 10. `pnpm-lock.yaml` is the canonical dependency lockfile even though a legacy
-`package-lock.json` is currently present.
+pnpm 11.13.1, as pinned by `packageManager` in `package.json`. `pnpm-lock.yaml` is
+the canonical dependency lockfile.
 
 ```bash
 corepack enable
-corepack prepare pnpm@10.13.1 --activate
+corepack prepare pnpm@11.13.1 --activate
 pnpm install --frozen-lockfile
 pnpm dev
 ```

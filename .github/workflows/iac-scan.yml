@@ -54,18 +54,18 @@ jobs:
       security-events: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
         with:
           persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
         with:
           version: 11.13.1
           run_install: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
         with:
           node-version: 22
           cache: pnpm
@@ -77,11 +77,56 @@ jobs:
       - name: Produce SARIF (non-blocking, for the code-scanning tab)
         # `|| true` so a gate breach here does not skip the upload; the blocking
         # decision is made by the final gate step below.
+        env:
+          INPUT_TERRAFORM_PLAN: ${{ inputs.terraform-plan }}
+          INPUT_MANIFESTS: ${{ inputs.manifests }}
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
         run: |
-          pnpm iac:scan \
-            ${{ inputs.terraform-plan && format('--terraform {0}', inputs.terraform-plan) || '' }} \
-            ${{ inputs.manifests && format('--manifests {0}', inputs.manifests) || '' }} \
-            --fail-on "${{ inputs.fail-on }}" \
+          set -euo pipefail
+
+          validate_input_file() {
+            local candidate="$1"
+            local label="$2"
+            local resolved
+
+            if [[ -z "$candidate" ]]; then
+              return
+            fi
+            if [[ "$candidate" == -* ]]; then
+              echo "$label must be a repository-relative file path, not an option." >&2
+              exit 2
+            fi
+            resolved="$(realpath -e -- "$candidate")" || {
+              echo "$label does not identify an existing file." >&2
+              exit 2
+            }
+            case "$resolved" in
+              "$GITHUB_WORKSPACE"/*) ;;
+              *)
+                echo "$label must resolve inside the checked-out repository." >&2
+                exit 2
+                ;;
+            esac
+          }
+
+          case "$INPUT_FAIL_ON" in
+            critical|high|medium|low) ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          validate_input_file "$INPUT_TERRAFORM_PLAN" "terraform-plan"
+          validate_input_file "$INPUT_MANIFESTS" "manifests"
+
+          arguments=()
+          if [[ -n "$INPUT_TERRAFORM_PLAN" ]]; then
+            arguments+=(--terraform "$INPUT_TERRAFORM_PLAN")
+          fi
+          if [[ -n "$INPUT_MANIFESTS" ]]; then
+            arguments+=(--manifests "$INPUT_MANIFESTS")
+          fi
+          pnpm iac:scan "${arguments[@]}" --fail-on "$INPUT_FAIL_ON" \
             --format sarif --out iac-scan.sarif || true
 
       - name: Upload SARIF to code scanning
@@ -93,8 +138,53 @@ jobs:
           category: sutra-iac-scan
 
       - name: Gate the build on severity threshold
+        env:
+          INPUT_TERRAFORM_PLAN: ${{ inputs.terraform-plan }}
+          INPUT_MANIFESTS: ${{ inputs.manifests }}
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
         run: |
-          pnpm iac:scan \
-            ${{ inputs.terraform-plan && format('--terraform {0}', inputs.terraform-plan) || '' }} \
-            ${{ inputs.manifests && format('--manifests {0}', inputs.manifests) || '' }} \
-            --fail-on "${{ inputs.fail-on }}"
+          set -euo pipefail
+
+          validate_input_file() {
+            local candidate="$1"
+            local label="$2"
+            local resolved
+
+            if [[ -z "$candidate" ]]; then
+              return
+            fi
+            if [[ "$candidate" == -* ]]; then
+              echo "$label must be a repository-relative file path, not an option." >&2
+              exit 2
+            fi
+            resolved="$(realpath -e -- "$candidate")" || {
+              echo "$label does not identify an existing file." >&2
+              exit 2
+            }
+            case "$resolved" in
+              "$GITHUB_WORKSPACE"/*) ;;
+              *)
+                echo "$label must resolve inside the checked-out repository." >&2
+                exit 2
+                ;;
+            esac
+          }
+
+          case "$INPUT_FAIL_ON" in
+            critical|high|medium|low) ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          validate_input_file "$INPUT_TERRAFORM_PLAN" "terraform-plan"
+          validate_input_file "$INPUT_MANIFESTS" "manifests"
+
+          arguments=()
+          if [[ -n "$INPUT_TERRAFORM_PLAN" ]]; then
+            arguments+=(--terraform "$INPUT_TERRAFORM_PLAN")
+          fi
+          if [[ -n "$INPUT_MANIFESTS" ]]; then
+            arguments+=(--manifests "$INPUT_MANIFESTS")
+          fi
+          pnpm iac:scan "${arguments[@]}" --fail-on "$INPUT_FAIL_ON"

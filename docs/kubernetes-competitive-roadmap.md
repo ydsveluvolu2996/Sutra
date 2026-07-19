@@ -5,7 +5,13 @@ Competitors referenced: Wiz, Orca, Prisma Cloud, Sysdig, Datadog (Trivy Operator
 
 ## Where we are
 
-**Phase 1/2 ENGINE layer is built and verified** — 13 pure, deterministic, evidence-honest engines with 239 passing tests (`pnpm test:phase2`), added to the `verify` chain. Every engine returns explicit `unknown`/`unresolved`/`not-evaluated` states instead of synthesizing, and carries a limitations/disclaimer field. Commits: `c864854` (Wave 1, 8 engines), `ee3ebbb` (Wave 2, 5 engines).
+**Phase 1/2 ENGINE layer is built and verified** — the expanded Phase 2 suite
+completed 479 tests successfully during the final P1–P7 verification
+(`pnpm test:phase2`) and is included in the `verify` chain. The original 13 pure,
+deterministic, evidence-honest engines return explicit
+`unknown`/`unresolved`/`not-evaluated` states instead of synthesizing, and carry a
+limitations/disclaimer field. Initial engine commits: `c864854` (Wave 1, 8 engines)
+and `ee3ebbb` (Wave 2, 5 engines).
 
 The P6 registry slice is also closed locally: Registry v2 catalog, tags and manifest
 digests are collected from a disposable live `registry:2` instance and evaluated for

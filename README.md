@@ -23,13 +23,17 @@ configuration checks, the private beta now accepts bounded real evidence from
 Trivy Operator, Falco, Kyverno and Cilium/Hubble through cluster-bound ingestion
 paths. Missing telemetry is always reported as not configured, partial or stale.
 
-The verified local demo now also includes tenant-scoped Cost Explorer evidence,
-finding-backed case management, approval-controlled compliance exceptions,
-bounded CloudTrail LookupEvents normalization/detections, and expanded metadata
-collectors for EBS, ENI, ALB/NLB, KMS, DynamoDB, and ECR. Lambda inventory remains
-off because `ListFunctions` can expose environment-variable values. These local
-capabilities do not clear the hosted production gates below and are not presented
-as a Cloudaware, GuardDuty, Inspector, Security Hub, or SIEM replacement.
+The verified local demo now also includes tenant-scoped Cost Explorer evidence;
+CUR 2.0 and FOCUS 1.0 ingestion, allocation, budgets and anomaly signals; a
+versioned, scoped public API v1; and signed bidirectional Jira/ServiceNow
+synchronization. CMDB query/annotation workflows, finding-backed case management,
+approval-controlled compliance exceptions, bounded CloudTrail LookupEvents
+normalization/detections, and expanded metadata collectors for EBS, ENI, ALB/NLB,
+KMS, DynamoDB, and ECR are also implemented. Lambda inventory remains off because
+`ListFunctions` can expose environment-variable values. These local capabilities
+do not clear the hosted production gates below and are not presented as a
+Cloudaware, GuardDuty, Inspector, Security Hub, SIEM, billing-reconciliation, or
+vendor-certified ITSM replacement.
 
 The hosted identity foundation now includes the real Cognito/OIDC PKCE callback
 boundary and an MFA-protected, single-use organization invitation lifecycle.
@@ -62,6 +66,9 @@ Included in the target slice:
 - Optional read-only import of findings from native AWS security services that the
   customer has already enabled. Sutra does not enable or configure those
   billable services.
+- Tenant-scoped public API access and Jira/ServiceNow case synchronization, after
+  hosted gateway, managed-secret, delivery-worker and vendor-sandbox gates are
+  cleared.
 
 Explicitly outside the first slice:
 
@@ -75,10 +82,12 @@ Explicitly outside the first slice:
   evidence sources, not GuardDuty parity.
 - Security Hub-equivalent standards coverage, delegated administration, ASFF
   federation, or cross-product normalization.
-- Billing, marketplace metering, SAML/SCIM, ITSM/PSA ticketing, data residency
-  selection, or customer-managed keys. Email, Slack and Teams notification
-  configuration/outbox support exists, but provider delivery requires hosted
-  managed-secret and workload-identity adapters.
+- Customer invoicing, marketplace metering, SAML/SCIM, PSA integrations, data
+  residency selection, or customer-managed keys. Local FinOps analytics and
+  Jira/ServiceNow synchronization are implemented, but they are not billing-grade
+  reconciliation or vendor-certified production integrations. Email, Slack and
+  Teams notification configuration/outbox support exists, but provider delivery
+  requires hosted managed-secret and workload-identity adapters.
 
 Future resource management must be a separate remediation plane with a different
 customer role, narrowly scoped per-action permissions, dry-run/diff, approval,
@@ -119,9 +128,10 @@ must never contain a durable vendor AWS access key.
 The diagram is the hosted target architecture. The repository implements its local
 equivalent: a tenant-scoped control-plane API, D1 snapshots, a signed replay-resistant
 loopback broker boundary, encrypted connection material, behavioral trust probes,
-and selected service-specific inventory adapters. It does not yet contain the hosted
-queue/workflow, managed secret service, R2 evidence path, deployed AWS worker fleet,
-or production multi-tenant identity and authorization plane.
+selected service-specific inventory adapters, and tenant-scoped durable job,
+retry/backoff, lease and DLQ primitives. It does not yet contain the deployed hosted
+queue/workflow workers, managed secret service, R2 evidence path, deployed AWS
+worker fleet, or production multi-tenant identity and authorization plane.
 
 ## Trust-role onboarding
 
@@ -228,7 +238,7 @@ screenshots, logs, issues, or pull requests.
 | `infrastructure/` | Customer read-only IAM role template for controlled sandbox use |
 | `services/aws-collector/` | Signed loopback broker, encrypted registry, fixture/live runners, STS trust validation, and AWS adapters |
 | `docs/` | Production architecture, AWS integration, threat model, quality gates, and acceptance criteria |
-| `tests/` | Deterministic control tests and rendered-HTML route smoke tests; not yet the required tenant-isolation suite |
+| `tests/` | Deterministic domain, API, repository, tenant-isolation, collector, Kubernetes and rendered-route tests; targeted negative isolation tests exist, but production isolation-under-load and independent assurance remain gates |
 | `public/` | Static assets and a downloadable copy of the customer-role template |
 | `worker/`, `build/` | Cloudflare/vinext worker and local hosting integration |
 
@@ -242,6 +252,9 @@ pnpm typecheck
 pnpm typecheck:collector
 pnpm lint
 pnpm test
+pnpm test:kubernetes
+pnpm test:enterprise-security
+pnpm test:phase2
 pnpm test:collector
 pnpm db:postgres:test
 pnpm build
@@ -273,10 +286,10 @@ of multi-tenant production readiness.
 
 See the detailed [Cloud operations parity roadmap](docs/cloudaware-parity-roadmap.md)
 for a delivered-versus-future capability matrix covering the current local pilot,
-hosted MSP tenancy and jobs, broader AWS CMDB/CSPM and native finding imports,
-remediation, compliance, FinOps, ITSM/SIEM integrations, and the Azure/GCP/Kubernetes
-research horizon. It is a sequencing document, not a Cloudaware parity claim or
-release-date commitment.
+the locally delivered CMDB, compliance, FinOps, public API and ITSM slices, their
+hosted production gates, broader AWS CSPM and native finding imports, remediation,
+SIEM/PSA integrations, and the Azure/GCP/Kubernetes research horizon. It is a
+sequencing document, not a Cloudaware parity claim or release-date commitment.
 
 1. **P0 security foundation:** production identity, memberships and customer grants,
    centralized authorization, tenant-safe repositories, audit/outbox primitives,
