@@ -20,6 +20,7 @@ import postgresCaseRoutingRulesSql from "../postgres/migrations/0018_case_routin
 import postgresLatencySamplesSql from "../postgres/migrations/0019_latency_samples.sql?raw";
 import postgresCmdbWorkspaceSql from "../postgres/migrations/0020_cmdb_workspace.sql?raw";
 import postgresComplianceWorkspaceSql from "../postgres/migrations/0021_compliance_workspace.sql?raw";
+import postgresFinopsWorkspaceSql from "../postgres/migrations/0022_finops_workspace.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -44,6 +45,7 @@ const migrations = [
   { id: "0019_latency_samples", source: postgresLatencySamplesSql },
   { id: "0020_cmdb_workspace", source: postgresCmdbWorkspaceSql },
   { id: "0021_compliance_workspace", source: postgresComplianceWorkspaceSql },
+  { id: "0022_finops_workspace", source: postgresFinopsWorkspaceSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
