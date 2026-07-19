@@ -35,6 +35,11 @@ test("builds deterministic email, Slack, and Teams payloads without provider sec
   assert.equal(first.email.subject, "[Sutra CRITICAL] Internet-exposed privileged workload");
   assert.equal(first.slack.blocks.length, 4);
   assert.equal(first.microsoftTeams.attachments[0].content.type, "AdaptiveCard");
+  assert.equal(first.genericWebhook.schema, "sutra.ticket.v1");
+  assert.equal(first.genericWebhook.source, "sutra");
+  assert.equal(first.genericWebhook.title, "Internet-exposed privileged workload");
+  assert.equal(first.genericWebhook.severity, "critical");
+  assert.equal(first.genericWebhook.eventId, event.eventId);
   assert.equal(first.payloadSha256, second.payloadSha256);
   assert.match(first.payloadSha256, /^[a-f0-9]{64}$/u);
   const serialized = JSON.stringify(first);

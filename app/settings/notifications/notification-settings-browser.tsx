@@ -69,7 +69,12 @@ export function NotificationSettingsBrowser() {
   useEffect(() => {
     if (existing === undefined) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- Channel selection resets this controlled configuration form.
-      setDisplayName(channel === "email" ? "Security email alerts" : channel === "slack" ? "Security Slack alerts" : "Security Teams alerts");
+      setDisplayName(
+        channel === "email" ? "Security email alerts"
+          : channel === "slack" ? "Security Slack alerts"
+          : channel === "microsoft_teams" ? "Security Teams alerts"
+          : "Security ticket webhook",
+      );
       setEnabled(true);
       setRecipients("");
       setFromAddress("");
@@ -157,7 +162,7 @@ export function NotificationSettingsBrowser() {
           <p className="eyebrow">Tenant notification routing</p>
           <h1>Notification destinations</h1>
           <p className="page-subtitle">
-            Configure customer-scoped email, Slack, and Microsoft Teams delivery without exposing provider secrets to the browser or database.
+            Configure customer-scoped email, Slack, Microsoft Teams, and generic ticketing-webhook delivery (Jira, ServiceNow, PagerDuty) without exposing provider secrets to the browser or database.
           </p>
         </div>
       </section>
@@ -220,6 +225,7 @@ export function NotificationSettingsBrowser() {
                 <option value="email">Amazon SES email</option>
                 <option value="slack">Slack Incoming Webhook</option>
                 <option value="microsoft_teams">Microsoft Teams Workflow</option>
+                <option value="generic_webhook">Generic ticketing webhook (Jira / ServiceNow / PagerDuty)</option>
               </select>
             </label>
             <label>
@@ -255,7 +261,12 @@ export function NotificationSettingsBrowser() {
                 onChange={(event) => setSecretReference(event.target.value)}
                 placeholder={`secret://notifications/<org>/<customer>/${channel}/primary`}
               />
-              <small>Enter an opaque secret reference only. Sutra rejects raw webhook URLs.</small>
+              <small>
+                Enter an opaque secret reference only. Sutra rejects raw webhook URLs.
+                {channel === "generic_webhook"
+                  ? " The worker POSTs a stable sutra.ticket.v1 JSON envelope to the webhook URL held in this managed secret."
+                  : ""}
+              </small>
             </label>
           )}
           <label>

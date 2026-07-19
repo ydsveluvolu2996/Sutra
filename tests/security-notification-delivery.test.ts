@@ -291,6 +291,96 @@ test("classifies throttles, provider failures, permanent failures, and timeouts"
   assert.equal(timeout.status, "retryable_failure");
 });
 
+test("delivers a generic ticketing webhook to any pinned public host and sends the ticket envelope", async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const built = await payloads();
+  const results = await deliverSecurityNotification({
+    deliveryId,
+    payloads: built,
+    destinations: { genericWebhookSecretReference: "secret://notifications/org_sutra/cust_customer/generic_webhook/jira" },
+    dependencies: {
+      // A generic webhook has no fixed provider host, so an arbitrary — but
+      // pinned and public — hostname must be accepted. Safety comes from the
+      // expectedHostname pin plus public-address enforcement, not an allowlist.
+      secrets: {
+        async resolveWebhook({ channel }) {
+          assert.equal(channel, "generic_webhook");
+          return {
+            webhookUrl: "https://sutra.example-ticketing.com/inbound/9f8e7d6c",
+            expectedHostname: "sutra.example-ticketing.com",
+            idempotencyHeader: "Idempotency-Key",
+          };
+        },
+      },
+      dns: { async resolve() { return ["8.8.8.8"]; } },
+      http: {
+        async post(input) {
+          calls.push({ ...input });
+          return successfulResponse(202);
+        },
+      },
+      ses: { async post() { return successfulResponse(200); } },
+    },
+  });
+  assert.deepEqual(results.map((result) => [result.channel, result.status]), [
+    ["generic_webhook", "delivered"],
+  ]);
+  const call = calls[0];
+  assert.equal(String(call?.url), "https://sutra.example-ticketing.com/inbound/9f8e7d6c");
+  assert.equal((call?.headers as Record<string, string>)["Idempotency-Key"], deliveryId);
+  const body = JSON.parse(new TextDecoder().decode(call?.body as Uint8Array));
+  assert.equal(body.schema, "sutra.ticket.v1");
+  assert.equal(body.source, "sutra");
+  assert.equal(body.severity, "critical");
+  assert.equal(body.title, "Runtime threat detected");
+  assert.equal(body.reportUrl, "https://app.sutracmdb.com/security/runtime/example");
+});
+
+test("still rejects a generic webhook whose resolved host does not match the pin or is not public", async () => {
+  const built = await payloads();
+  // Hostname does not match the recorded expectedHostname pin.
+  const mismatched = {
+    secrets: {
+      async resolveWebhook() {
+        return { webhookUrl: "https://attacker.example/inbound", expectedHostname: "tickets.example.com" };
+      },
+    },
+    dns: { async resolve() { return ["8.8.8.8"]; } },
+    http: { async post() { return successfulResponse(200); } },
+    ses: { async post() { return successfulResponse(200); } },
+  };
+  await assert.rejects(
+    deliverSecurityNotification({
+      deliveryId,
+      payloads: built,
+      destinations: { genericWebhookSecretReference: "secret://notifications/org_sutra/cust_customer/generic_webhook/jira" },
+      dependencies: mismatched,
+    }),
+    (error: unknown) => error instanceof SecurityNotificationDeliveryError && error.code === "UNSAFE_DESTINATION",
+  );
+
+  // Correct pin, but DNS resolves to a private/metadata address.
+  const privateAddress = {
+    secrets: {
+      async resolveWebhook() {
+        return { webhookUrl: "https://tickets.example.com/inbound", expectedHostname: "tickets.example.com" };
+      },
+    },
+    dns: { async resolve() { return ["169.254.169.254"]; } },
+    http: { async post() { return successfulResponse(200); } },
+    ses: { async post() { return successfulResponse(200); } },
+  };
+  await assert.rejects(
+    deliverSecurityNotification({
+      deliveryId,
+      payloads: built,
+      destinations: { genericWebhookSecretReference: "secret://notifications/org_sutra/cust_customer/generic_webhook/jira" },
+      dependencies: privateAddress,
+    }),
+    (error: unknown) => error instanceof SecurityNotificationDeliveryError && error.code === "UNSAFE_DESTINATION",
+  );
+});
+
 test("rejects oversized payloads before a transport call", async () => {
   const fixture = dependencies();
   const valid = await payloads();

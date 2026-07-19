@@ -20,6 +20,7 @@ import type {
   SecurityNotificationDeliveryDependencies,
   SecurityNotificationSecretResolver,
   SesV2WorkloadIamTransport,
+  WebhookNotificationChannel,
 } from "../../lib/security-notification-delivery.ts";
 
 const SECRET_REFERENCE = /^secret:\/\/notifications\/([A-Za-z0-9][A-Za-z0-9._/-]{1,160})$/u;
@@ -42,7 +43,7 @@ function invalid(): never {
 
 interface WebhookSecretDocument {
   readonly version: 1;
-  readonly channel: "slack" | "microsoft_teams";
+  readonly channel: WebhookNotificationChannel;
   readonly webhookUrl: string;
   readonly expectedHostname: string;
   readonly idempotencyHeader?: "Idempotency-Key";
@@ -137,7 +138,7 @@ export class AwsManagedSecretResolver implements SecurityNotificationSecretResol
 
   public async resolveWebhook(input: {
     readonly secretReference: string;
-    readonly channel: "slack" | "microsoft_teams";
+    readonly channel: WebhookNotificationChannel;
   }): Promise<ResolvedWebhookSecret | null> {
     const match = SECRET_REFERENCE.exec(input.secretReference);
     if (match === null || match[1] === undefined || match[1].includes("..")) invalid();

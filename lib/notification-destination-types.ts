@@ -8,7 +8,7 @@ export interface EmailNotificationDestinationConfig {
 }
 
 export interface WebhookNotificationDestinationConfig {
-  readonly channel: "slack" | "microsoft_teams";
+  readonly channel: "slack" | "microsoft_teams" | "generic_webhook";
   readonly secretReference: string;
 }
 

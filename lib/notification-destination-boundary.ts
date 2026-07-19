@@ -43,7 +43,9 @@ export function normalizeNotificationDestinationConfig(
     };
   }
   if (
-    (config.channel !== "slack" && config.channel !== "microsoft_teams") ||
+    (config.channel !== "slack" &&
+      config.channel !== "microsoft_teams" &&
+      config.channel !== "generic_webhook") ||
     !SECRET_REFERENCE.test(config.secretReference)
   ) invalid();
   return { channel: config.channel, secretReference: config.secretReference };

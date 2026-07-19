@@ -59,7 +59,9 @@ export async function processOneSecurityNotification(input: {
       }
     : configuration.channel === "slack"
       ? { slackSecretReference: configuration.secretReference }
-      : { microsoftTeamsSecretReference: configuration.secretReference };
+      : configuration.channel === "microsoft_teams"
+        ? { microsoftTeamsSecretReference: configuration.secretReference }
+        : { genericWebhookSecretReference: configuration.secretReference };
   const [result] = await deliverSecurityNotification({
     deliveryId: claimed.event.eventId,
     payloads: claimed.payloads,

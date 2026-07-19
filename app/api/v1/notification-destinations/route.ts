@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 
 const CUSTOMER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
 const DESTINATION_ID = /^ndest_[a-f0-9]{32}$/u;
-const CHANNELS = new Set(["email", "slack", "microsoft_teams"]);
+const CHANNELS = new Set(["email", "slack", "microsoft_teams", "generic_webhook"]);
 
 function invalid(message = "The notification destination request is invalid"): never {
   throw Object.assign(new Error(message), { code: "INVALID_INPUT", status: 400 });
@@ -59,7 +59,11 @@ function configuration(value: unknown): NotificationDestinationConfig {
       sesRegion: parsed.sesRegion,
     });
   }
-  if (config.channel === "slack" || config.channel === "microsoft_teams") {
+  if (
+    config.channel === "slack" ||
+    config.channel === "microsoft_teams" ||
+    config.channel === "generic_webhook"
+  ) {
     const parsed = exact(config, ["channel", "secretReference"]);
     if (typeof parsed.secretReference !== "string") invalid();
     return normalizeNotificationDestinationConfig({

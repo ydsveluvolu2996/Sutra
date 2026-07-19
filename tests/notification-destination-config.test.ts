@@ -66,6 +66,36 @@ test("allows opaque secret references and rejects raw provider URLs", () => {
   }
 });
 
+test("accepts a generic ticketing webhook as a secret-referenced, tenant-scoped channel", () => {
+  assert.deepEqual(normalizeNotificationDestinationConfig({
+    channel: "generic_webhook",
+    secretReference: "secret://notifications/org-a/customer-a/generic_webhook/jira",
+  }), {
+    channel: "generic_webhook",
+    secretReference: "secret://notifications/org-a/customer-a/generic_webhook/jira",
+  });
+  assert.doesNotThrow(() => assertNotificationSecretScope({
+    channel: "generic_webhook",
+    secretReference: "secret://notifications/org-a/customer-a/generic_webhook/jira",
+  }, "org-a", "customer-a"));
+  // A generic webhook is still a secret reference — a raw URL is rejected, and
+  // the secret must stay inside the tenant + channel scope.
+  assert.throws(
+    () => normalizeNotificationDestinationConfig({
+      channel: "generic_webhook",
+      secretReference: "https://sutra.example-ticketing.com/inbound/token",
+    }),
+    NotificationDestinationValidationError,
+  );
+  assert.throws(
+    () => assertNotificationSecretScope({
+      channel: "generic_webhook",
+      secretReference: "secret://notifications/org-a/customer-b/generic_webhook/jira",
+    }, "org-a", "customer-a"),
+    NotificationDestinationValidationError,
+  );
+});
+
 test("rejects unbounded recipients and invalid SES regions", () => {
   assert.throws(
     () => normalizeNotificationDestinationConfig({

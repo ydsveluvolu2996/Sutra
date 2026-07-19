@@ -47,6 +47,30 @@ test("maps an opaque reference to a bounded managed-secret prefix", async () => 
   );
 });
 
+test("resolves a generic ticketing webhook secret to an arbitrary pinned host", async () => {
+  const requested: string[] = [];
+  const reader: ManagedSecretReader = {
+    async getSecretString(secretId) {
+      requested.push(secretId);
+      return JSON.stringify({
+        version: 1,
+        channel: "generic_webhook",
+        webhookUrl: "https://sutra.example-ticketing.com/inbound/9f8e7d6c",
+        expectedHostname: "sutra.example-ticketing.com",
+        idempotencyHeader: "Idempotency-Key",
+      });
+    },
+  };
+  const resolver = new AwsManagedSecretResolver({ reader, secretPrefix: "sutra/notifications/" });
+  const resolved = await resolver.resolveWebhook({
+    secretReference: "secret://notifications/org-a/customer-a/generic_webhook/jira",
+    channel: "generic_webhook",
+  });
+  assert.equal(requested[0], "sutra/notifications/org-a/customer-a/generic_webhook/jira");
+  assert.equal(resolved?.expectedHostname, "sutra.example-ticketing.com");
+  assert.equal(resolved?.idempotencyHeader, "Idempotency-Key");
+});
+
 test("rejects malformed, cross-channel, and unexpected secret documents", async () => {
   for (const value of [
     "not-json",
