@@ -34,6 +34,17 @@ export interface CiemServiceAccount {
   readonly namespace: string | null;
   readonly name: string;
   readonly iamRoleArn: string | null;
+  // How the SA is linked to its AWS role: the IRSA OIDC annotation, an EKS Pod
+  // Identity association, or null when there is no link. Both cross-plane
+  // mechanisms resolve to the same reach; the source is recorded for the reviewer.
+  readonly iamRoleSource?: "irsa" | "pod-identity" | null;
+}
+
+// A workload's ServiceAccount usage — the evidence that a SA is actually
+// assumed by a running pod (vs bound but unused).
+export interface CiemWorkloadServiceAccount {
+  readonly namespace: string | null;
+  readonly serviceAccountName: string | null;
 }
 
 export interface CiemIamStatement {
@@ -50,10 +61,12 @@ export interface CiemIamRole {
 export type CiemFlag =
   | "cluster-admin" | "secrets-access" | "pod-exec" | "impersonate"
   | "escalate-or-bind" | "wildcard-verb" | "wildcard-resource"
-  | "aws-reachable" | "aws-write";
+  | "aws-reachable" | "aws-write"
+  | "unused-serviceaccount" | "default-serviceaccount-in-use";
 
 export interface CiemAwsReach {
   readonly roleArn: string;
+  readonly linkage: "irsa" | "pod-identity" | null;
   readonly allowedActions: readonly string[];
   readonly allowedResources: readonly string[];
   readonly hasWriteAccess: boolean;
@@ -66,6 +79,9 @@ export interface CiemSubjectEntitlement {
   readonly permissions: readonly { readonly verb: string; readonly apiGroup: string; readonly resource: string }[];
   readonly flags: readonly CiemFlag[];
   readonly awsReach: CiemAwsReach | null;
+  // Number of collected workloads that assume this ServiceAccount; null when no
+  // workload evidence was provided (usage is unknown, never assumed zero).
+  readonly usedByWorkloads: number | null;
   readonly riskScore: number;
 }
 
@@ -78,6 +94,8 @@ export interface CiemReport {
     readonly secretsReaders: number;
     readonly awsReachable: number;
     readonly awsWrite: number;
+    readonly unusedServiceAccounts: number;
+    readonly defaultInUse: number;
   };
   readonly disclaimer: string;
 }
@@ -97,13 +115,18 @@ const FLAG_WEIGHT: Readonly<Record<CiemFlag, number>> = {
   "wildcard-resource": 25,
   "aws-write": 45,
   "aws-reachable": 20,
+  "default-serviceaccount-in-use": 30,
+  "unused-serviceaccount": 15,
 };
 
 const CIEM_DISCLAIMER =
   "Effective permissions are the union of the rules of every role bound to the " +
   "subject in the collected evidence. Missing binding or IAM policy evidence is " +
-  "shown as unresolved, never assumed empty; AWS reach follows the IRSA role " +
-  "annotation and its collected policy statements only.";
+  "shown as unresolved, never assumed empty; AWS reach follows the IRSA " +
+  "annotation or an EKS Pod Identity association and the role's collected policy " +
+  "statements only. A ServiceAccount is flagged unused only when workload " +
+  "evidence is present and no workload assumes it — absent workload evidence " +
+  "leaves usage unknown, never assumed zero.";
 
 function subjectKey(subject: CiemSubjectRef): string {
   return `${subject.kind}:${subject.namespace ?? "-"}/${subject.name}`;
@@ -137,9 +160,10 @@ function awsReachOf(
   iamRoles: Map<string, CiemIamRole>,
 ): CiemAwsReach | null {
   if (serviceAccount?.iamRoleArn == null) return null;
+  const linkage = serviceAccount.iamRoleSource ?? null;
   const role = iamRoles.get(serviceAccount.iamRoleArn);
   if (role === undefined) {
-    return { roleArn: serviceAccount.iamRoleArn, allowedActions: [], allowedResources: [], hasWriteAccess: false };
+    return { roleArn: serviceAccount.iamRoleArn, linkage, allowedActions: [], allowedResources: [], hasWriteAccess: false };
   }
   const denied = new Set(
     role.statements.filter((s) => s.effect === "Deny").flatMap((s) => lower(s.actions)),
@@ -153,6 +177,7 @@ function awsReachOf(
   )].sort((left, right) => left.localeCompare(right, "en-US"));
   return {
     roleArn: serviceAccount.iamRoleArn,
+    linkage,
     allowedActions: actions,
     allowedResources: resources,
     hasWriteAccess: actions.some((action) => AWS_WRITE_PATTERN.test(action)),
@@ -186,12 +211,24 @@ export function buildKubernetesCiem(input: {
   readonly bindings: readonly CiemBinding[];
   readonly serviceAccounts: readonly CiemServiceAccount[];
   readonly iamRoles: readonly CiemIamRole[];
+  readonly workloadServiceAccounts?: readonly CiemWorkloadServiceAccount[];
 }): CiemReport {
   const rolesById = new Map(input.roles.map((role) => [role.id, role]));
   const iamRoles = new Map(input.iamRoles.map((role) => [role.arn, role]));
   const serviceAccounts = new Map(
     input.serviceAccounts.map((sa) => [`${sa.namespace ?? "-"}/${sa.name}`, sa]),
   );
+
+  // ServiceAccount usage by workloads. Only computed when workload evidence was
+  // provided — otherwise usage is unknown (null), never assumed zero. A missing
+  // serviceAccountName means the pod's default SA for its namespace.
+  const usageProvided = input.workloadServiceAccounts !== undefined;
+  const usageBySa = new Map<string, number>();
+  for (const workload of input.workloadServiceAccounts ?? []) {
+    const name = workload.serviceAccountName ?? "default";
+    const key = `${workload.namespace ?? "-"}/${name}`;
+    usageBySa.set(key, (usageBySa.get(key) ?? 0) + 1);
+  }
 
   const bySubject = new Map<string, { subject: CiemSubjectRef; roleIds: Set<string> }>();
   for (const binding of input.bindings) {
@@ -224,6 +261,18 @@ export function buildKubernetesCiem(input: {
       ? awsReachOf(serviceAccounts.get(`${subject.namespace ?? "-"}/${subject.name}`), iamRoles)
       : null;
     const flags = deriveFlags(rules, awsReach);
+
+    // Right-sizing / over-privilege signals, only where the subject is a
+    // ServiceAccount and workload-usage evidence exists.
+    const usedByWorkloads = usageProvided && subject.kind === "ServiceAccount"
+      ? usageBySa.get(`${subject.namespace ?? "-"}/${subject.name}`) ?? 0
+      : null;
+    if (usedByWorkloads === 0 && rules.length > 0) flags.push("unused-serviceaccount");
+    if (subject.kind === "ServiceAccount" && subject.name === "default" &&
+      usedByWorkloads !== null && usedByWorkloads > 0 && permissions.length > 0) {
+      flags.push("default-serviceaccount-in-use");
+    }
+
     const riskScore = flags.reduce((sum, flag) => sum + FLAG_WEIGHT[flag], 0);
 
     subjects.push({
@@ -233,6 +282,7 @@ export function buildKubernetesCiem(input: {
       permissions,
       flags: flags.sort((a, b) => FLAG_WEIGHT[b] - FLAG_WEIGHT[a] || a.localeCompare(b, "en-US")),
       awsReach,
+      usedByWorkloads,
       riskScore,
     });
   }
@@ -249,6 +299,8 @@ export function buildKubernetesCiem(input: {
       secretsReaders: subjects.filter((s) => s.flags.includes("secrets-access")).length,
       awsReachable: subjects.filter((s) => s.flags.includes("aws-reachable")).length,
       awsWrite: subjects.filter((s) => s.flags.includes("aws-write")).length,
+      unusedServiceAccounts: subjects.filter((s) => s.flags.includes("unused-serviceaccount")).length,
+      defaultInUse: subjects.filter((s) => s.flags.includes("default-serviceaccount-in-use")).length,
     },
     disclaimer: CIEM_DISCLAIMER,
   };

@@ -9,6 +9,7 @@ import type {
   CiemRole,
   CiemServiceAccount,
   CiemSubjectRef,
+  CiemWorkloadServiceAccount,
 } from "./kubernetes-ciem.ts";
 import type { JsonValue } from "./pilot-types.ts";
 
@@ -94,16 +95,27 @@ function isIamRole(resource: ResourceLike): boolean {
   return value.includes("iam") && value.includes("role");
 }
 
+function serviceAccountKey(namespace: string | null, name: string): string {
+  return `${namespace ?? "-"}/${name}`;
+}
+
 export function deriveCiemInputs(resources: readonly ResourceLike[]): {
   readonly roles: readonly CiemRole[];
   readonly bindings: readonly CiemBinding[];
   readonly serviceAccounts: readonly CiemServiceAccount[];
   readonly iamRoles: readonly CiemIamRole[];
+  readonly workloadServiceAccounts?: readonly CiemWorkloadServiceAccount[];
 } {
   const roles: CiemRole[] = [];
   const bindings: CiemBinding[] = [];
   const serviceAccounts: CiemServiceAccount[] = [];
   const iamRoles: CiemIamRole[] = [];
+  const workloadServiceAccounts: CiemWorkloadServiceAccount[] = [];
+  // EKS Pod Identity links a ServiceAccount to an IAM role through a separate
+  // association resource (not a SA annotation like IRSA); collect those and
+  // merge them into the service accounts after the pass.
+  const podIdentityByKey = new Map<string, string>();
+  let sawWorkloadEvidence = false;
 
   for (const resource of resources) {
     const kind = kindOf(resource);
@@ -151,11 +163,61 @@ export function deriveCiemInputs(resources: readonly ResourceLike[]): {
         });
       }
     } else if (kind === "serviceaccount") {
-      serviceAccounts.push({ namespace: namespaceOf(resource), name: nameOf(resource), iamRoleArn: annotationRoleArn(resource) });
+      const arn = annotationRoleArn(resource);
+      serviceAccounts.push({
+        namespace: namespaceOf(resource),
+        name: nameOf(resource),
+        iamRoleArn: arn,
+        iamRoleSource: arn === null ? null : "irsa",
+      });
+    } else if (kind.includes("podidentity")) {
+      // Association config: the SA name/namespace it grants, and the role ARN.
+      const config = resource.configuration;
+      const saName = str(config.serviceAccount) ?? str(config.serviceAccountName);
+      const namespace = str(config.namespace) ?? namespaceOf(resource);
+      const arn = str(config.roleArn) ?? str(config.iamRoleArn);
+      if (saName !== null && arn !== null) podIdentityByKey.set(serviceAccountKey(namespace, saName), arn);
+    } else if (kind === "workload") {
+      sawWorkloadEvidence = true;
+      workloadServiceAccounts.push({
+        namespace: namespaceOf(resource),
+        serviceAccountName: str(resource.configuration.serviceAccountName),
+      });
     } else if (isIamRole(resource)) {
       iamRoles.push({ arn: resource.arn ?? nameOf(resource), statements: iamStatements(resource) });
     }
   }
 
-  return { roles, bindings, serviceAccounts, iamRoles };
+  // Merge EKS Pod Identity associations: a SA with no IRSA annotation but a
+  // collected association gets its role via Pod Identity; an association whose
+  // ServiceAccount was not itself collected still yields a resolvable SA.
+  const mergedServiceAccounts: CiemServiceAccount[] = serviceAccounts.map((sa) => {
+    if (sa.iamRoleArn !== null) return sa;
+    const podIdentityArn = podIdentityByKey.get(serviceAccountKey(sa.namespace, sa.name));
+    return podIdentityArn === undefined
+      ? sa
+      : { ...sa, iamRoleArn: podIdentityArn, iamRoleSource: "pod-identity" };
+  });
+  const known = new Set(mergedServiceAccounts.map((sa) => serviceAccountKey(sa.namespace, sa.name)));
+  for (const [key, arn] of podIdentityByKey) {
+    if (known.has(key)) continue;
+    const slash = key.indexOf("/");
+    const namespace = key.slice(0, slash);
+    mergedServiceAccounts.push({
+      namespace: namespace === "-" ? null : namespace,
+      name: key.slice(slash + 1),
+      iamRoleArn: arn,
+      iamRoleSource: "pod-identity",
+    });
+  }
+
+  return {
+    roles,
+    bindings,
+    serviceAccounts: mergedServiceAccounts,
+    iamRoles,
+    // Only surface workload usage when workload evidence was actually collected;
+    // otherwise omit it so the engine keeps usage unknown (never assumed zero).
+    ...(sawWorkloadEvidence ? { workloadServiceAccounts } : {}),
+  };
 }

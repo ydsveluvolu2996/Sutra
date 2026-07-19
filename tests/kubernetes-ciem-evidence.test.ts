@@ -49,6 +49,30 @@ test("derives roles, bindings, service accounts and IAM roles from CMDB resource
   assert.ok(app.flags.includes("aws-write"));
 });
 
+test("resolves an EKS Pod Identity association and projects workload usage", () => {
+  const inputs = deriveCiemInputs([
+    resource({ resourceKey: "r1", configuration: { kind: "Role", namespace: "payments", rules: [{ verbs: ["get"], apiGroups: [""], resources: ["pods"] }] } }),
+    resource({ resourceKey: "rb1", configuration: { kind: "RoleBinding", namespace: "payments", roleRefKind: "Role", roleRefName: "r1", subjects: [{ kind: "ServiceAccount", namespace: "payments", name: "app" }] } }),
+    // ServiceAccount with NO IRSA annotation…
+    resource({ resourceKey: "sa1", name: "app", configuration: { kind: "ServiceAccount", namespace: "payments", metadata: { name: "app" } } }),
+    // …but an EKS Pod Identity association grants it a role.
+    resource({ resourceKey: "pi1", resourceType: "eks.podidentityassociation", configuration: { kind: "PodIdentityAssociation", namespace: "payments", serviceAccount: "app", roleArn: "arn:aws:iam::1:role/pods" } }),
+    resource({ resourceKey: "iam1", service: "iam", resourceType: "iam.role", arn: "arn:aws:iam::1:role/pods", name: "pods", configuration: { policyDocument: { Statement: [{ Effect: "Allow", Action: ["s3:GetObject"], Resource: ["*"] }] } } }),
+    // A workload assuming the app SA — usage evidence.
+    resource({ resourceKey: "wl1", configuration: { kind: "Workload", namespace: "payments", serviceAccountName: "app" } }),
+  ]);
+  const sa = inputs.serviceAccounts.find((entry) => entry.name === "app");
+  assert.equal(sa?.iamRoleArn, "arn:aws:iam::1:role/pods");
+  assert.equal(sa?.iamRoleSource, "pod-identity");
+  assert.equal(inputs.workloadServiceAccounts?.length, 1);
+
+  const report = buildKubernetesCiem(inputs);
+  const app = report.subjects.find((s) => s.subject.includes("/app"));
+  assert.equal(app?.awsReach?.linkage, "pod-identity");
+  assert.equal(app?.usedByWorkloads, 1);
+  assert.ok(!app?.flags.includes("unused-serviceaccount")); // it is used
+});
+
 test("resolves the projected posture-evidence shape (RbacRole/RbacBinding/ServiceAccount) end to end", () => {
   // This is exactly what projectStoredKubernetesWorkspace emits: configuration.kind
   // is the evidence kind ("RbacRole"/"RbacBinding"/"ServiceAccount") with the

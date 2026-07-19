@@ -33,6 +33,50 @@ test("effective permissions union the rules of every role bound to a subject", (
   assert.ok(app?.permissions.some((p) => p.verb === "create" && p.resource === "deployments"));
 });
 
+test("EKS Pod Identity linkage resolves AWS reach and records the source", () => {
+  const report = buildKubernetesCiem({
+    ...base,
+    roles: [role("reader", [{ verbs: ["get"], apiGroups: [""], resources: ["pods"] }])],
+    bindings: [saBinding("reader", "app")],
+    serviceAccounts: [{ namespace: "payments", name: "app", iamRoleArn: "arn:aws:iam::1:role/pods", iamRoleSource: "pod-identity" }],
+    iamRoles: [{ arn: "arn:aws:iam::1:role/pods", statements: [{ effect: "Allow", actions: ["s3:GetObject"], resources: ["*"] }] }],
+  });
+  const app = report.subjects[0];
+  assert.equal(app?.awsReach?.linkage, "pod-identity");
+  assert.deepEqual(app?.awsReach?.allowedActions, ["s3:GetObject"]);
+  assert.ok(app?.flags.includes("aws-reachable"));
+});
+
+test("workload usage flags a bound-but-unused ServiceAccount, only with workload evidence", () => {
+  const inputs = {
+    ...base,
+    roles: [role("admin", [{ verbs: ["*"], apiGroups: ["*"], resources: ["*"] }])],
+    bindings: [saBinding("admin", "ci-runner")],
+  };
+  // No workload evidence -> usage unknown, no unused flag.
+  const unknown = buildKubernetesCiem(inputs);
+  assert.equal(unknown.subjects[0]?.usedByWorkloads, null);
+  assert.ok(!unknown.subjects[0]?.flags.includes("unused-serviceaccount"));
+  // Workload evidence present, but no workload uses ci-runner -> unused.
+  const withUsage = buildKubernetesCiem({ ...inputs, workloadServiceAccounts: [{ namespace: "payments", serviceAccountName: "other" }] });
+  assert.equal(withUsage.subjects[0]?.usedByWorkloads, 0);
+  assert.ok(withUsage.subjects[0]?.flags.includes("unused-serviceaccount"));
+  assert.equal(withUsage.totals.unusedServiceAccounts, 1);
+});
+
+test("an in-use privileged default ServiceAccount is flagged", () => {
+  const report = buildKubernetesCiem({
+    ...base,
+    roles: [role("reader", [{ verbs: ["get"], apiGroups: [""], resources: ["secrets"] }])],
+    bindings: [saBinding("reader", "default")],
+    workloadServiceAccounts: [{ namespace: "payments", serviceAccountName: null }], // null -> the namespace default SA
+  });
+  const def = report.subjects[0];
+  assert.equal(def?.usedByWorkloads, 1);
+  assert.ok(def?.flags.includes("default-serviceaccount-in-use"));
+  assert.equal(report.totals.defaultInUse, 1);
+});
+
 test("subjectCan honors verb, resource, apiGroup and wildcards", () => {
   const rules = [
     { verbs: ["get"], apiGroups: [""], resources: ["secrets"] },
