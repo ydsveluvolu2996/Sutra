@@ -81,8 +81,16 @@ function AuthenticatedAppShell({
   const { state, health, loading } = usePilotState();
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [navQuery, setNavQuery] = useState("");
   const capabilitySet = new Set(session.capabilities);
-  const visibleNav = visibleNavigation(capabilitySet);
+  const allVisibleNav = visibleNavigation(capabilitySet);
+  // Live nav filter: keep only groups with items whose label matches the query.
+  const query = navQuery.trim().toLocaleLowerCase("en-US");
+  const visibleNav = query === ""
+    ? allVisibleNav
+    : allVisibleNav
+        .map((group) => ({ ...group, items: group.items.filter((item) => item.label.toLocaleLowerCase("en-US").includes(query)) }))
+        .filter((group) => group.items.length > 0);
   const connection = state?.connection ?? null;
   const openFindings = state?.findings.filter((finding) => finding.status === "open").length ?? 0;
   const snapshotOrigin = state?.activeSnapshot?.origin;
@@ -115,10 +123,24 @@ function AuthenticatedAppShell({
           <span><strong>Sutra</strong><small>Cloud operations, woven together.</small></span>
         </Link>
         <div className="workspace-label">{session.organization.name}</div>
+        <div className="nav-search">
+          <GlyphIcon className="nav-search-icon" name="search" size={13} />
+          <input
+            type="search"
+            value={navQuery}
+            onChange={(event) => setNavQuery(event.target.value)}
+            placeholder="Search navigation…"
+            aria-label="Search navigation"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {navQuery !== "" ? <button type="button" className="nav-search-clear" aria-label="Clear search" onClick={() => setNavQuery("")}>×</button> : null}
+        </div>
         <nav className="main-nav grouped-nav" aria-label="Primary navigation">
           {visibleNav.map((group) => (
-            <NavigationGroup active={active} group={group} key={group.key} openFindings={openFindings} />
+            <NavigationGroup active={active} group={group} forceOpen={query !== ""} key={group.key} openFindings={openFindings} />
           ))}
+          {visibleNav.length === 0 ? <p className="nav-empty">No navigation matches &ldquo;{navQuery}&rdquo;.</p> : null}
         </nav>
         <div className="sidebar-spacer" />
         <div className={`sidebar-note collector-${connectionTone(connection?.status)}`}>
@@ -186,14 +208,18 @@ function AuthenticatedAppShell({
 function NavigationGroup({
   active,
   group,
+  forceOpen = false,
   openFindings,
 }: {
   readonly active: NavKey;
   readonly group: NavGroup;
+  readonly forceOpen?: boolean;
   readonly openFindings: number;
 }) {
   const containsActive = groupContainsActiveItem(group, active);
   const [open, setOpen] = useState(containsActive || group.key === "overview");
+  // While a search filter is active, every matching group is expanded.
+  const isOpen = forceOpen || open;
 
   const renderItem = (item: NavGroup["items"][number]) => {
     const isActive = active === item.key;
@@ -222,7 +248,7 @@ function NavigationGroup({
     .filter((section) => section.items.length > 0);
 
   return (
-    <details className="nav-group" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details className="nav-group" open={isOpen} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>
         <span>{group.label}</span>
         {containsActive ? <i aria-hidden="true" /> : null}

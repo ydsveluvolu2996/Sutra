@@ -2272,3 +2272,37 @@ button.orbit-node { font: inherit; cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .hero-stars, .hero-chip, .hc-dot, .hero-copy h1, .hero-copy h1 .hero-accent { animation: none !important; }
 }
+
+/* ================================================================== *
+ * App shell v2 — nav search + Wiz-grade polish
+ * ================================================================== */
+.nav-search { position: relative; display: flex; align-items: center; margin: 0 4px 10px; }
+.nav-search .nav-search-icon { position: absolute; left: 11px; color: #6f7ea9; pointer-events: none; }
+.nav-search input { width: 100%; height: 34px; padding: 0 30px 0 32px; border: 1px solid rgba(130,155,235,.2); border-radius: 9px; background: rgba(130,155,235,.07); color: #eef2ff; font-size: 11.5px; font-weight: 500; transition: border-color .16s ease, background .16s ease, box-shadow .16s ease; }
+.nav-search input::placeholder { color: #6f7ea9; }
+.nav-search input:focus { outline: none; border-color: rgba(99,132,246,.6); background: rgba(99,132,246,.1); box-shadow: 0 0 0 3px rgba(59,130,246,.16); }
+.nav-search input::-webkit-search-cancel-button { display: none; }
+.nav-search-clear { position: absolute; right: 8px; width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%; background: rgba(130,155,235,.16); color: #c6d1ec; font-size: 13px; line-height: 1; cursor: pointer; transition: background .15s ease; }
+.nav-search-clear:hover { background: rgba(130,155,235,.3); color: #fff; }
+.nav-empty { padding: 12px 12px; color: #7e8bb0; font-size: 10.5px; }
+
+/* Softer, more Wiz-like active state: quiet tint + left accent bar (keeps the
+   glyph chip as the color anchor rather than a heavy full-gradient fill). */
+.grouped-nav a.active { position: relative; background: linear-gradient(90deg, rgba(99,132,246,.20), rgba(139,92,246,.12)); color: #f4f7ff; font-weight: 680; box-shadow: inset 0 0 0 1px rgba(130,160,255,.18); }
+.grouped-nav a.active::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 18px; border-radius: 0 3px 3px 0; background: linear-gradient(180deg, #5eeaff, #a78bff); }
+.grouped-nav a.active b { background: rgba(255,255,255,.14); color: #eaf0ff; }
+.grouped-nav a { transition: background .16s ease, color .16s ease, transform .14s ease; }
+.grouped-nav a:hover { transform: translateX(1px); }
+
+/* Content surface: subtle depth behind the light dashboard cards */
+.main-area { background: radial-gradient(120% 55% at 100% -4%, rgba(99,132,246,.05), transparent 60%), linear-gradient(180deg, #f7f9fe 0%, #eef2fb 100%); }
+
+/* Panels & tiles: crisper premium framing, cohesive with the marketing page */
+.metric-card, .panel { border-color: #e4e9f6; box-shadow: 0 1px 0 rgba(255,255,255,.9) inset, 0 14px 32px rgba(28,40,96,.06); }
+.panel h2 { letter-spacing: -.02em; }
+.inventory-stats article { transition: transform .18s ease, box-shadow .2s ease, border-color .18s ease; }
+.inventory-stats article:hover { transform: translateY(-2px); border-color: #cdd9f5; box-shadow: 0 16px 34px rgba(28,40,96,.1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .grouped-nav a:hover, .inventory-stats article:hover, .metric-card:hover { transform: none !important; }
+}
