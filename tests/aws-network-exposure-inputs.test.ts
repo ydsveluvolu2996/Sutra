@@ -148,6 +148,23 @@ test("a collected NACL that allows the open port keeps it internet-exposed", () 
   assert.deepEqual(report.resources[0]?.openPorts, [443]);
 });
 
+test("resolves load-balancer instance targets to their ENIs so LB reachability fires", () => {
+  const lbArn = "arn:aws:elasticloadbalancing:us-east-1:111122223333:loadbalancer/app/demo/1234";
+  const evidence = buildNetworkExposureEvidence([
+    // A private ENI (no public IP) behind an internet-facing ALB, attached to i-1.
+    resource("aws.ec2.network-interface", "eni-priv", { subnetId: "subnet-9", securityGroupIds: ["sg-9"], instanceId: "i-1" }),
+    resource("aws.ec2.security-group", "sg-9", { ingress: [{ protocol: "tcp", fromPort: 443, toPort: 443, ipv4Cidrs: ["0.0.0.0/0"], ipv6Cidrs: [], referencedSecurityGroupIds: [] }] }),
+    resource("aws.elasticloadbalancingv2.load-balancer", lbArn, { scheme: "internet-facing", dnsName: "demo.elb.amazonaws.com" }),
+    resource("aws.elasticloadbalancingv2.target-group", "arn:tg/demo", {
+      targetType: "instance", loadBalancerArns: [lbArn], targets: [{ id: "i-1", port: 443, state: "healthy" }],
+    }),
+  ]);
+  assert.deepEqual(evidence.loadBalancers[0]?.targets, ["eni-priv"]);
+  const report = buildNetworkExposure(evidence);
+  assert.equal(report.resources[0]?.exposure, "internet-exposed"); // via the internet-facing LB, no public IP needed
+  assert.ok(report.resources[0]?.path.some((hop) => hop.includes("internet-facing")));
+});
+
 test("also accepts bare (non-aws-prefixed) resource type names", () => {
   const evidence = buildNetworkExposureEvidence([
     resource("network-interface", "eni-9", { subnetId: "subnet-9", securityGroupIds: ["sg-9"] }),

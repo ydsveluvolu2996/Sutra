@@ -15,7 +15,7 @@ export const LIVE_AWS_RUN_RECLAIM_AFTER_MS = 360_000;
 /** The pilot boundary accepts at most 500 collector coverage rows. */
 export const LIVE_AWS_COVERAGE_ROW_LIMIT = 500;
 export const LIVE_AWS_GLOBAL_COLLECTOR_COUNT = 2;
-export const LIVE_AWS_REGIONAL_COLLECTOR_COUNT = 21;
+export const LIVE_AWS_REGIONAL_COLLECTOR_COUNT = 22;
 export const LIVE_AWS_MAX_REGIONS = Math.floor(
   (LIVE_AWS_COVERAGE_ROW_LIMIT - LIVE_AWS_GLOBAL_COLLECTOR_COUNT) /
     LIVE_AWS_REGIONAL_COLLECTOR_COUNT,

@@ -45,11 +45,17 @@ import {
 import {
   DescribeListenersCommand,
   DescribeLoadBalancersCommand,
+  DescribeTargetGroupsCommand,
+  DescribeTargetHealthCommand,
   ElasticLoadBalancingV2Client,
   type DescribeListenersCommandInput,
   type DescribeListenersCommandOutput,
   type DescribeLoadBalancersCommandInput,
   type DescribeLoadBalancersCommandOutput,
+  type DescribeTargetGroupsCommandInput,
+  type DescribeTargetGroupsCommandOutput,
+  type DescribeTargetHealthCommandInput,
+  type DescribeTargetHealthCommandOutput,
 } from "@aws-sdk/client-elastic-load-balancing-v2";
 import {
   DescribeKeyCommand,
@@ -374,6 +380,14 @@ export interface Elbv2InventoryClient {
     input: DescribeListenersCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeListenersCommandOutput>;
+  describeTargetGroups(
+    input: DescribeTargetGroupsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeTargetGroupsCommandOutput>;
+  describeTargetHealth(
+    input: DescribeTargetHealthCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeTargetHealthCommandOutput>;
 }
 
 export interface KmsInventoryClient {
@@ -610,6 +624,10 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
         sendSdkCommand(client, new DescribeLoadBalancersCommand(input), signal),
       describeListeners: (input, signal) =>
         sendSdkCommand(client, new DescribeListenersCommand(input), signal),
+      describeTargetGroups: (input, signal) =>
+        sendSdkCommand(client, new DescribeTargetGroupsCommand(input), signal),
+      describeTargetHealth: (input, signal) =>
+        sendSdkCommand(client, new DescribeTargetHealthCommand(input), signal),
     };
   }
 
@@ -777,6 +795,8 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeLoadBalancers: (input) =>
         this.run((signal) => client.describeLoadBalancers(input, signal)),
       describeListeners: (input) => this.run((signal) => client.describeListeners(input, signal)),
+      describeTargetGroups: (input) => this.run((signal) => client.describeTargetGroups(input, signal)),
+      describeTargetHealth: (input) => this.run((signal) => client.describeTargetHealth(input, signal)),
     };
   }
 
@@ -1108,6 +1128,9 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ),
         task("elbv2.load-balancers", "elasticloadbalancing", "load-balancers", region, (state) =>
           collectLoadBalancers(context, region, elbv2, observedAt, state),
+        ),
+        task("elbv2.target-groups", "elasticloadbalancing", "target-groups", region, (state) =>
+          collectTargetGroups(context, region, elbv2, observedAt, state),
         ),
         task("kms.keys", "kms", "keys", region, (state) =>
           collectKmsKeys(context, region, kms, observedAt, state),
@@ -1719,6 +1742,61 @@ async function collectListenersForLoadBalancer(
     if (marker === undefined) return;
   }
   throw new InventoryProtocolError("ELBv2 DescribeListeners exceeded pagination limit");
+}
+
+async function collectTargetGroups(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Elbv2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let marker: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeTargetGroups(
+      marker === undefined ? { PageSize: 400 } : { PageSize: 400, Marker: marker },
+    );
+    const resources: NormalizedAwsResource[] = [];
+    for (const group of output.TargetGroups ?? []) {
+      const arn = group.TargetGroupArn;
+      if (arn === undefined) continue;
+      // Registered targets are the load balancer's actual backends — the hop
+      // that makes a private instance internet-reachable via an internet-facing
+      // balancer. Health is recorded as a fact, never used to hide a target.
+      const health = await client.describeTargetHealth({ TargetGroupArn: arn });
+      const targets = (health.TargetHealthDescriptions ?? []).flatMap((description) =>
+        description.Target?.Id === undefined ? [] : [compact({
+          id: description.Target.Id,
+          port: description.Target.Port,
+          state: description.TargetHealth?.State,
+        })]);
+      resources.push(resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "elasticloadbalancing",
+        "aws.elasticloadbalancingv2.target-group",
+        arn,
+        arn,
+        "elasticloadbalancing:DescribeTargetGroups",
+        compact({
+          name: group.TargetGroupName,
+          targetType: group.TargetType,
+          protocol: group.Protocol,
+          port: group.Port,
+          vpcId: group.VpcId,
+          loadBalancerArns: strings(group.LoadBalancerArns ?? []),
+          targets,
+        }),
+      ));
+    }
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    marker = nextToken(output.NextMarker, seen, "ELBv2 DescribeTargetGroups");
+    if (marker === undefined) return;
+  }
+  throw new InventoryProtocolError("ELBv2 DescribeTargetGroups exceeded pagination limit");
 }
 
 async function collectKmsKeys(

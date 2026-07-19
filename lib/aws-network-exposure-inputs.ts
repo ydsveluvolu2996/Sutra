@@ -174,6 +174,42 @@ export function buildNetworkExposureEvidence(
     else existing.push(port);
   }
 
+  // Resolve each load balancer's registered targets to the network-interface
+  // refs the engine evaluates. An "instance" target's id is an EC2 instance id
+  // (matched to the ENIs attached to it); an "ip" target's id is a private IP
+  // (matched to the ENI carrying it). Targets we cannot resolve to a collected
+  // ENI simply do not fire reachability — never guessed.
+  const eniRefsByInstanceId = new Map<string, string[]>();
+  const eniRefByPrivateIp = new Map<string, string>();
+  for (const eni of of("network-interface")) {
+    const instanceId = str(eni.configuration.instanceId);
+    if (instanceId !== undefined) {
+      const existing = eniRefsByInstanceId.get(instanceId);
+      if (existing === undefined) eniRefsByInstanceId.set(instanceId, [eni.nativeId]);
+      else existing.push(eni.nativeId);
+    }
+    for (const ip of [str(eni.configuration.privateIpAddress), ...strArray(eni.configuration.privateIpAddresses)]) {
+      if (ip !== undefined) eniRefByPrivateIp.set(ip, eni.nativeId);
+    }
+  }
+  const targetRefsByLb = new Map<string, Set<string>>();
+  for (const group of of("target-group")) {
+    const config = group.configuration;
+    const targetType = str(config.targetType);
+    for (const lbArn of strArray(config.loadBalancerArns)) {
+      const set = targetRefsByLb.get(lbArn) ?? new Set<string>();
+      for (const target of records(config.targets)) {
+        const id = str(target.id);
+        if (id === undefined) continue;
+        const refs = targetType === "ip"
+          ? (eniRefByPrivateIp.has(id) ? [eniRefByPrivateIp.get(id) as string] : [])
+          : (eniRefsByInstanceId.get(id) ?? []);
+        for (const ref of refs) set.add(ref);
+      }
+      targetRefsByLb.set(lbArn, set);
+    }
+  }
+
   const loadBalancers: LoadBalancerEvidence[] = [];
   const dnsRecords: DnsRecordEvidence[] = [];
   for (const lb of of("load-balancer")) {
@@ -183,7 +219,7 @@ export function buildNetworkExposureEvidence(
       ref: lb.nativeId,
       scheme,
       listeners: (listenerPortsByLb.get(lb.nativeId) ?? []).map((port) => ({ port })),
-      targets: [], // target-group membership is not collected yet
+      targets: [...(targetRefsByLb.get(lb.nativeId) ?? [])].sort((a, b) => a.localeCompare(b, "en-US")),
     });
     const dnsName = str(config.dnsName);
     if (dnsName !== undefined) {
