@@ -2370,3 +2370,58 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .platform-orbit::before, .orbit-ring, .orbit-orbiter, .orbit-core-glow, .orbit-north, .orbit-east, .orbit-south, .orbit-west, .orbit-spark, .section-kicker, .why-card::before { animation: none !important; }
   .orbit-core-glow { opacity: .5; }
 }
+
+/* ================================================================== *
+ * Security graph explorer — Wiz-parity: findings, severity, search, table
+ * ================================================================== */
+.sg-toolbar-left { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sg-search { position: relative; display: flex; align-items: center; }
+.sg-search > svg { position: absolute; left: 10px; color: var(--ink-faint); pointer-events: none; }
+.sg-search input { width: 210px; height: 32px; padding: 0 26px 0 30px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-size: 12px; transition: border-color .15s ease, box-shadow .15s ease; }
+.sg-search input:focus { outline: none; border-color: #9fb8f6; box-shadow: 0 0 0 3px rgba(59,130,246,.14); }
+.sg-search input::-webkit-search-cancel-button { display: none; }
+.sg-search-clear { position: absolute; right: 7px; width: 17px; height: 17px; display: grid; place-items: center; border-radius: 50%; background: #eef1f9; color: #5b6a92; font-size: 13px; line-height: 1; }
+.sg-viewtoggle { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 9px; background: #f3f6fd; }
+.sg-viewtoggle button { padding: 5px 13px; border-radius: 6px; color: var(--ink-soft); font-size: 11.5px; font-weight: 650; transition: background .15s ease, color .15s ease, box-shadow .15s ease; }
+.sg-viewtoggle button.is-active { background: #fff; color: var(--ink); box-shadow: 0 2px 6px rgba(30,45,110,.1); }
+
+/* Severity halo + count badge on nodes */
+.sg-node-halo { fill: none; stroke-width: 2; opacity: .32; }
+.sg-node-badge circle { stroke: #fff; stroke-width: 1.6; }
+.sg-node-badge text { fill: #fff; font: 700 9px var(--font-geist-mono, monospace); }
+.sg-node.sg-dim .sg-node-halo { opacity: .1; }
+
+/* Findings block in the detail panel */
+.sg-detail-findings { display: grid; gap: 9px; margin: 4px 0 14px; }
+.sg-detail-findings-head { display: flex; align-items: center; justify-content: space-between; }
+.sg-detail-findings-head strong { font-size: 11px; letter-spacing: .02em; }
+.sg-detail-findings-head span { min-width: 20px; padding: 2px 7px; border-radius: 20px; background: rgba(224,67,90,.12); color: #c02d43; font-size: 10px; font-weight: 700; text-align: center; }
+.sg-finding { display: grid; gap: 5px; padding: 11px 12px; border: 1px solid var(--line); border-left: 3px solid #e0435a; border-radius: 10px; background: #fff; }
+.sg-finding-top { display: flex; align-items: center; gap: 8px; }
+.sg-finding-top code { color: var(--ink-soft); font-size: 10px; }
+.sg-finding strong { font-size: 12.5px; letter-spacing: -.01em; }
+.sg-finding p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
+.sg-finding-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 3px; }
+.sg-finding-actions .button { min-height: 28px; padding-inline: 12px; font-size: 10.5px; }
+.sg-finding-actions small { color: var(--ink-faint); font-size: 9.5px; }
+.sg-evidence-label { margin: 2px 0 8px; color: var(--ink-faint); font-size: 9px; font-weight: 750; letter-spacing: .12em; text-transform: uppercase; }
+
+/* Severity pills (shared by detail + table) */
+.sg-sev-pill { padding: 2px 8px; border-radius: 20px; font-size: 9px; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.sg-sev-critical { background: rgba(224,67,90,.14); color: #c02d43; }
+.sg-sev-high { background: rgba(224,149,42,.16); color: #b06d10; }
+.sg-sev-medium { background: rgba(234,179,8,.18); color: #9a7a06; }
+.sg-sev-low { background: rgba(63,131,248,.14); color: #2560c8; }
+
+/* Table view */
+.sg-table-wrap { max-height: 560px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; }
+.sg-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.sg-table thead th { position: sticky; top: 0; z-index: 1; padding: 11px 14px; text-align: left; background: #f6f8fe; color: #8b97ba; font-size: 9px; font-weight: 760; letter-spacing: .09em; text-transform: uppercase; border-bottom: 1px solid var(--line); }
+.sg-table tbody tr { border-top: 1px solid #eef1fa; cursor: pointer; transition: background .12s ease; }
+.sg-table tbody tr:first-child { border-top: 0; }
+.sg-table tbody tr:hover { background: #f6f9ff; }
+.sg-table tbody tr.is-selected { background: linear-gradient(90deg, rgba(59,130,246,.08), rgba(139,92,246,.05)); }
+.sg-table td { padding: 10px 14px; color: var(--ink); }
+.sg-td-entity { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.sg-td-entity i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.sg-td-none { color: var(--ink-faint); }
