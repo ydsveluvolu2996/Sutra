@@ -18,6 +18,7 @@ import postgresVulnerabilityWaiversSql from "../postgres/migrations/0016_vulnera
 import postgresCloudVulnerabilityFindingsSql from "../postgres/migrations/0017_cloud_vulnerability_findings.sql?raw";
 import postgresCaseRoutingRulesSql from "../postgres/migrations/0018_case_routing_rules.sql?raw";
 import postgresLatencySamplesSql from "../postgres/migrations/0019_latency_samples.sql?raw";
+import postgresCmdbWorkspaceSql from "../postgres/migrations/0020_cmdb_workspace.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -40,6 +41,7 @@ const migrations = [
   { id: "0017_cloud_vulnerability_findings", source: postgresCloudVulnerabilityFindingsSql },
   { id: "0018_case_routing_rules", source: postgresCaseRoutingRulesSql },
   { id: "0019_latency_samples", source: postgresLatencySamplesSql },
+  { id: "0020_cmdb_workspace", source: postgresCmdbWorkspaceSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
