@@ -276,6 +276,8 @@ class FakeClientFactory implements AwsInventoryClientFactory {
       describeLoadBalancers: () =>
         this.tracker.run(() => ({ $metadata: {}, LoadBalancers: [] })),
       describeListeners: () => this.tracker.run(() => ({ $metadata: {}, Listeners: [] })),
+      describeTargetGroups: () => this.tracker.run(() => ({ $metadata: {}, TargetGroups: [] })),
+      describeTargetHealth: () => this.tracker.run(() => ({ $metadata: {}, TargetHealthDescriptions: [] })),
     };
   }
 
@@ -669,6 +671,31 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
             }
           : { $metadata: {}, Listeners: [] };
       },
+      describeTargetGroups: async (input) => {
+        this.record("target-groups", input.Marker);
+        return input.Marker === undefined
+          ? {
+              $metadata: {},
+              NextMarker: "target-groups-next",
+              TargetGroups: [{
+                TargetGroupArn: `arn:aws:elasticloadbalancing:${region}:123456789012:targetgroup/demo/abcd`,
+                TargetGroupName: "demo",
+                TargetType: "instance",
+                Protocol: "HTTPS",
+                Port: 443,
+                VpcId: "vpc-east",
+                LoadBalancerArns: [`arn:aws:elasticloadbalancing:${region}:123456789012:loadbalancer/app/demo/1234`],
+              }],
+            }
+          : { $metadata: {}, TargetGroups: [] };
+      },
+      describeTargetHealth: async () => ({
+        $metadata: {},
+        TargetHealthDescriptions: [{
+          Target: { Id: "i-east-1", Port: 443 },
+          TargetHealth: { State: "healthy" },
+        }],
+      }),
     };
   }
 
@@ -834,6 +861,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     "aws.ec2.network-acl",
     "aws.elasticloadbalancingv2.load-balancer",
     "aws.elasticloadbalancingv2.listener",
+    "aws.elasticloadbalancingv2.target-group",
     "aws.kms.key",
     "aws.dynamodb.table",
     "aws.ecr.repository",
@@ -846,7 +874,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
-  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "network-acls", "load-balancers", "listeners", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
+  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "network-acls", "load-balancers", "listeners", "target-groups", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
   // Route table exposing 0.0.0.0/0 -> igw is the fact aws-network-exposure needs:
@@ -893,6 +921,17 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     certificateCount: 1,
     defaultActionTypes: ["forward"],
     alpnPolicy: [],
+  });
+  // Target group carries the LB's registered backends (the reachable hop).
+  const targetGroup = resources.find((resource) => resource.resourceType === "aws.elasticloadbalancingv2.target-group");
+  assert.deepEqual(targetGroup?.configuration, {
+    name: "demo",
+    targetType: "instance",
+    protocol: "HTTPS",
+    port: 443,
+    vpcId: "vpc-east",
+    loadBalancerArns: ["arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/demo/1234"],
+    targets: [{ id: "i-east-1", port: 443, state: "healthy" }],
   });
   const eks = resources.find((resource) => resource.resourceType === "aws.eks.cluster");
   assert.deepEqual(eks?.configuration, {
