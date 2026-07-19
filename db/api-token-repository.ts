@@ -62,6 +62,8 @@ export interface AuthenticatedToken {
   readonly orgId: string;
   readonly customerId: string;
   readonly scopes: readonly PublicApiScope[];
+  /** The user who minted the token — public-API writes attribute to them. */
+  readonly createdBy: string;
 }
 
 export type TokenVerification =
@@ -192,9 +194,9 @@ export class ApiTokenRepository {
     const db = await this.ready();
     const tokenSha256 = await sha256Hex(tokenValue);
     const row = await db.prepare(
-      `SELECT id, org_id, customer_id, scopes_json, expires_at, revoked_at FROM api_tokens WHERE token_sha256 = ?`,
+      `SELECT id, org_id, customer_id, scopes_json, expires_at, revoked_at, created_by FROM api_tokens WHERE token_sha256 = ?`,
     ).bind(tokenSha256).first<{
-      id: string; org_id: string; customer_id: string; scopes_json: string; expires_at: string | null; revoked_at: string | null;
+      id: string; org_id: string; customer_id: string; scopes_json: string; expires_at: string | null; revoked_at: string | null; created_by: string;
     }>();
     if (row === null || row === undefined) return { ok: false, reason: "unknown" };
     if (row.revoked_at !== null) return { ok: false, reason: "revoked" };
@@ -216,7 +218,7 @@ export class ApiTokenRepository {
       .bind(new Date(now).toISOString(), row.id).run();
     return {
       ok: true,
-      token: { id: row.id, orgId: row.org_id, customerId: row.customer_id, scopes: parseScopes(row.scopes_json) },
+      token: { id: row.id, orgId: row.org_id, customerId: row.customer_id, scopes: parseScopes(row.scopes_json), createdBy: row.created_by },
     };
   }
 

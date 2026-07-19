@@ -2885,3 +2885,7 @@ button.orbit-node { font: inherit; cursor: pointer; }
 
 /* Compliance workspace panels */
 .cmpw-controls { width: 100%; margin: 10px 0; border: 1px solid var(--line-dark); border-radius: 8px; background: #fff; color: var(--ink); font: 11px var(--font-geist-mono), monospace; padding: 9px 11px; resize: vertical; }
+
+/* API token panel */
+.apitok-scope { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
+.apitok-secret code { user-select: all; background: #f1f4fb; padding: 3px 7px; border-radius: 6px; }
