@@ -1,0 +1,27 @@
+name: Feature request
+description: Propose a bounded, evidence-backed product change.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Customer problem
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance evidence
+      description: Describe tests, tenant boundaries, permissions and rollback behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Safety boundary
+      options:
+        - label: I will not include secrets or real customer evidence.
+          required: true
+        - label: I have identified whether this affects local, sandbox, staging or production.
+          required: true

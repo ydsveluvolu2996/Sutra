@@ -1,0 +1,188 @@
+import type {
+  AttackGraphEdge,
+  AttackGraphNode,
+  KubernetesAttackPath,
+} from "./kubernetes-attack-paths.ts";
+
+const NODE_WIDTH = 176;
+const NODE_HEIGHT = 58;
+const COLUMN_GAP = 96;
+const ROW_GAP = 26;
+const PADDING = 24;
+const MAX_GRAPH_NODES = 400;
+
+export interface SecurityGraphNode {
+  readonly node: AttackGraphNode;
+  readonly x: number;
+  readonly y: number;
+  readonly layer: number;
+  readonly row: number;
+  readonly pathIds: readonly string[];
+}
+
+export interface SecurityGraphEdge {
+  readonly edge: AttackGraphEdge;
+  readonly fromX: number;
+  readonly fromY: number;
+  readonly toX: number;
+  readonly toY: number;
+  readonly pathIds: readonly string[];
+  // True when the target lands in the same or an earlier layer than the source
+  // (an evidence cycle). Such edges are drawn distinctly and are the only ones
+  // that may point leftward.
+  readonly isBackEdge: boolean;
+}
+
+export interface SecurityGraphLayout {
+  readonly nodes: readonly SecurityGraphNode[];
+  readonly edges: readonly SecurityGraphEdge[];
+  readonly width: number;
+  readonly height: number;
+  readonly nodeWidth: number;
+  readonly nodeHeight: number;
+  readonly truncatedNodeCount: number;
+}
+
+const KIND_ORDER: readonly string[] = [
+  "internet",
+  "load_balancer",
+  "security_group",
+  "kubernetes_exposure",
+  "container_image",
+  "kubernetes_workload",
+  "runtime_event",
+  "service_account",
+  "rbac_binding",
+  "rbac_role",
+  "iam_role",
+  "aws_resource",
+  "other",
+];
+
+function kindRank(kind: string): number {
+  const index = KIND_ORDER.indexOf(kind);
+  return index < 0 ? KIND_ORDER.length : index;
+}
+
+function edgeKey(edge: AttackGraphEdge): string {
+  return `${edge.from}\u0000${edge.to}\u0000${edge.relation}`;
+}
+
+/**
+ * Deterministic layered layout for the evidence graph. Layers follow the
+ * longest evidenced chain from root nodes, so every displayed edge points to
+ * a strictly later layer; cycles are broken after a bounded number of passes
+ * rather than looping. Output coordinates are stable for identical input.
+ */
+export function buildSecurityGraphLayout(input: {
+  readonly paths: readonly KubernetesAttackPath[];
+}): SecurityGraphLayout {
+  const nodesByKey = new Map<string, AttackGraphNode>();
+  const nodePathIds = new Map<string, string[]>();
+  const edgesByKey = new Map<string, AttackGraphEdge>();
+  const edgePathIds = new Map<string, string[]>();
+  const truncatedKeys = new Set<string>();
+
+  for (const path of input.paths) {
+    for (const node of path.nodes) {
+      if (!nodesByKey.has(node.key)) {
+        if (nodesByKey.size >= MAX_GRAPH_NODES) {
+          truncatedKeys.add(node.key);
+          continue;
+        }
+        nodesByKey.set(node.key, node);
+        nodePathIds.set(node.key, []);
+      }
+      const membership = nodePathIds.get(node.key);
+      if (membership !== undefined && !membership.includes(path.id)) membership.push(path.id);
+    }
+    for (const edge of path.edges) {
+      if (!nodesByKey.has(edge.from) || !nodesByKey.has(edge.to)) continue;
+      const key = edgeKey(edge);
+      if (!edgesByKey.has(key)) {
+        edgesByKey.set(key, edge);
+        edgePathIds.set(key, []);
+      }
+      const membership = edgePathIds.get(key);
+      if (membership !== undefined && !membership.includes(path.id)) membership.push(path.id);
+    }
+  }
+
+  const layers = new Map<string, number>();
+  for (const key of nodesByKey.keys()) layers.set(key, 0);
+  const edges = [...edgesByKey.values()];
+  // Longest-path layering with a bounded pass count breaks evidence cycles.
+  for (let pass = 0; pass < nodesByKey.size + 1; pass += 1) {
+    let changed = false;
+    for (const edge of edges) {
+      const from = layers.get(edge.from) ?? 0;
+      const to = layers.get(edge.to) ?? 0;
+      if (to <= from && from + 1 <= nodesByKey.size) {
+        layers.set(edge.to, from + 1);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+
+  const byLayer = new Map<number, AttackGraphNode[]>();
+  for (const node of nodesByKey.values()) {
+    const layer = layers.get(node.key) ?? 0;
+    const bucket = byLayer.get(layer);
+    if (bucket === undefined) byLayer.set(layer, [node]);
+    else bucket.push(node);
+  }
+
+  const positioned = new Map<string, SecurityGraphNode>();
+  let maxRows = 0;
+  const layerNumbers = [...byLayer.keys()].sort((left, right) => left - right);
+  for (const [column, layer] of layerNumbers.entries()) {
+    const bucket = (byLayer.get(layer) ?? []).sort((left, right) =>
+      kindRank(left.kind) - kindRank(right.kind) ||
+      left.label.localeCompare(right.label, "en-US") ||
+      left.key.localeCompare(right.key, "en-US"));
+    maxRows = Math.max(maxRows, bucket.length);
+    for (const [row, node] of bucket.entries()) {
+      positioned.set(node.key, {
+        node,
+        x: PADDING + column * (NODE_WIDTH + COLUMN_GAP),
+        y: PADDING + row * (NODE_HEIGHT + ROW_GAP),
+        layer,
+        row,
+        pathIds: nodePathIds.get(node.key) ?? [],
+      });
+    }
+  }
+
+  const layoutEdges: SecurityGraphEdge[] = [];
+  for (const edge of edges) {
+    const from = positioned.get(edge.from);
+    const to = positioned.get(edge.to);
+    if (from === undefined || to === undefined) continue;
+    const isBackEdge = to.layer <= from.layer;
+    // Back-edges (cycles) leave the source's left side and enter the target's
+    // right side, so the drawn arrow honestly points backward rather than
+    // faking a forward hop.
+    layoutEdges.push({
+      edge,
+      fromX: isBackEdge ? from.x : from.x + NODE_WIDTH,
+      fromY: from.y + NODE_HEIGHT / 2,
+      toX: isBackEdge ? to.x + NODE_WIDTH : to.x,
+      toY: to.y + NODE_HEIGHT / 2,
+      pathIds: edgePathIds.get(edgeKey(edge)) ?? [],
+      isBackEdge,
+    });
+  }
+
+  return {
+    nodes: [...positioned.values()],
+    edges: layoutEdges,
+    width: PADDING * 2 + Math.max(1, layerNumbers.length) * NODE_WIDTH +
+      Math.max(0, layerNumbers.length - 1) * COLUMN_GAP,
+    height: PADDING * 2 + Math.max(1, maxRows) * NODE_HEIGHT +
+      Math.max(0, maxRows - 1) * ROW_GAP,
+    truncatedNodeCount: truncatedKeys.size,
+    nodeWidth: NODE_WIDTH,
+    nodeHeight: NODE_HEIGHT,
+  };
+}

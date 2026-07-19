@@ -10,10 +10,16 @@ import type {
 } from "@aws-sdk/client-sts";
 
 import {
+  AWS_BROKER_CONNECTION_TIMEOUT_MS,
+  AWS_BROKER_REQUEST_TIMEOUT_MS,
   AwsRoleBroker,
+  IMPLEMENTED_READ_ACTIONS,
+  TRUST_ATTESTATION_ACTIONS,
   accountIdFromRoleArn,
   parseIamRoleArn,
+  readonlyMetadataSessionPolicy,
   sanitizeRoleSessionName,
+  workloadIdentityAwsClientConfig,
 } from "../src/role-broker.js";
 import {
   ConnectionIntegrityError,
@@ -23,11 +29,49 @@ import {
   type CallerIdentityClient,
   type ConnectionScope,
   type OnboardingTrustVerification,
+  type RoleContractClient,
   type ScopedConnectionRegistry,
   type StoredAwsConnection,
 } from "../src/types.js";
 
 const scope: ConnectionScope = { tenantId: "tenant-01", subjectId: "queue-worker" };
+const COLLECTOR_PRINCIPAL_ARN = "arn:aws:iam::999988887777:role/SutraLocalCollector";
+const EXPECTED_IMPLEMENTED_READ_ACTIONS = [
+  "sts:GetCallerIdentity",
+  "ec2:DescribeRegions",
+  "ec2:DescribeInstances",
+  "ec2:DescribeVpcs",
+  "ec2:DescribeSubnets",
+  "ec2:DescribeSecurityGroups",
+  "ec2:DescribeVolumes",
+  "ec2:DescribeNetworkInterfaces",
+  "elasticloadbalancing:DescribeLoadBalancers",
+  "kms:ListKeys",
+  "kms:ListAliases",
+  "kms:DescribeKey",
+  "dynamodb:ListTables",
+  "dynamodb:DescribeTable",
+  "ecr:DescribeRepositories",
+  "s3:ListAllMyBuckets",
+  "s3:GetBucketPublicAccessBlock",
+  "rds:DescribeDBInstances",
+  "iam:GetAccountSummary",
+  "iam:GetAccountPasswordPolicy",
+  "cloudtrail:DescribeTrails",
+  "cloudtrail:GetTrailStatus",
+  "cloudtrail:LookupEvents",
+  "guardduty:ListDetectors",
+  "guardduty:GetDetector",
+  "guardduty:ListFindings",
+  "guardduty:GetFindings",
+  "securityhub:DescribeHub",
+  "securityhub:GetFindings",
+  "inspector2:BatchGetAccountStatus",
+  "inspector2:ListFindings",
+  "ce:GetCostAndUsage",
+  "ce:GetCostForecast",
+] as const;
+const EXPECTED_TRUST_ACTIONS = ["iam:GetRole", "iam:ListRolePolicies", "iam:GetRolePolicy"] as const;
 
 function connection(
   overrides: Partial<StoredAwsConnection> = {},
@@ -36,9 +80,10 @@ function connection(
     tenantId: "tenant-01",
     connectionId: "conn-01",
     expectedAccountId: "123456789012",
-    roleArn: "arn:aws:iam::123456789012:role/mspcmdb/MSPCMDBReadRole",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status: "ACTIVE",
+    permissionPackVersion: "live-demo-2026-07.3",
     sessionNamePrefix: "mspcmdb-",
     ...overrides,
   };
@@ -96,6 +141,64 @@ class FakeCallerIdentityClient implements CallerIdentityClient {
     this.calls += 1;
     return this.responder();
   }
+}
+
+function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractClient {
+  return {
+    getRole: async () => ({
+      arn: stored.roleArn,
+      roleName: "SutraReadOnlyRole",
+      path: "/sutra/",
+      maxSessionDuration: 3_600,
+      assumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [{
+          Sid: "ExactCollectorWithConnectionExternalId",
+          Effect: "Allow",
+          Principal: { AWS: COLLECTOR_PRINCIPAL_ARN },
+          Action: "sts:AssumeRole",
+          Condition: {
+            StringEquals: { "sts:ExternalId": stored.externalId },
+            StringLike: { "sts:RoleSessionName": `${stored.sessionNamePrefix ?? "mspcmdb-"}*` },
+          },
+        }],
+      })),
+      tags: [
+        { key: "sutra:access-mode", value: "read-only" },
+        { key: "sutra:permission-pack", value: "live-demo-2026-07.3" },
+        { key: "sutra:managed-by", value: "cloudformation" },
+      ],
+    }),
+    listRolePolicies: async () => ({
+      policyNames: ["SutraImplementedMetadataCollectors"],
+      isTruncated: false,
+    }),
+    getRolePolicy: async () => ({
+      policyDocument: encodeURIComponent(JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Sid: "DenyUnimplementedActions",
+            Effect: "Deny",
+            NotAction: [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
+            Resource: "*",
+          },
+          {
+            Sid: "ImplementedMetadataApis",
+            Effect: "Allow",
+            Action: IMPLEMENTED_READ_ACTIONS,
+            Resource: "*",
+          },
+          {
+            Sid: "TrustContractAttestation",
+            Effect: "Allow",
+            Action: TRUST_ATTESTATION_ACTIONS,
+            Resource: stored.roleArn,
+          },
+        ],
+      })),
+    }),
+  };
 }
 
 function successfulAssumeRole(): AssumeRoleCommandOutput {
@@ -165,6 +268,81 @@ test("sanitizeRoleSessionName is deterministic, bounded, and collision resistant
   );
 });
 
+test("the compact STS session policy caps an overprivileged customer role to reviewed read families", () => {
+  const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
+  const serialized = readonlyMetadataSessionPolicy(roleArn);
+  const policy = JSON.parse(serialized) as {
+    Statement: Array<{
+      Effect: string;
+      Action?: string[];
+      NotAction?: string[];
+      Resource?: string;
+      NotResource?: string;
+    }>;
+  };
+  const allows = policy.Statement.filter((statement) => statement.Effect === "Allow");
+  const actions = allows.flatMap((statement) => statement.Action ?? []);
+
+  assert.ok(serialized.length <= 900);
+  assert.equal(policy.Statement.length, 2);
+  assert.equal(policy.Statement.some((statement) => "Sid" in statement), false);
+  assert.equal(policy.Statement.every((statement) => statement.Effect === "Allow"), true);
+  assert.equal(
+    actions.every((action) => /^[a-z0-9]+:(?:Get|List|Describe|Lookup|BatchGet)[A-Za-z*]+$/u.test(action)),
+    true,
+  );
+  assert.equal(
+    allows.find((statement) => statement.Resource === roleArn)?.Resource,
+    roleArn,
+  );
+});
+
+test("the compact session cap covers every exact permission-pack action", () => {
+  const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
+  const policy = JSON.parse(readonlyMetadataSessionPolicy(roleArn)) as {
+    Statement: Array<{ Effect: string; Action?: string[]; NotAction?: string[]; Resource?: string }>;
+  };
+  const metadata = policy.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === "*",
+  );
+  const trust = policy.Statement.find(
+    (statement) => statement.Effect === "Allow" && statement.Resource === roleArn,
+  );
+  const patterns = metadata?.Action ?? [];
+  for (const action of EXPECTED_IMPLEMENTED_READ_ACTIONS) {
+    assert.equal(
+      patterns.some((pattern) => pattern.endsWith("*")
+        ? action.startsWith(pattern.slice(0, -1))
+        : action === pattern),
+      true,
+      action,
+    );
+  }
+  assert.deepEqual(new Set(trust?.Action), new Set(EXPECTED_TRUST_ACTIONS));
+});
+
+test("workload STS and IAM clients use bounded standard-retry HTTP timeouts", () => {
+  assert.equal(AWS_BROKER_CONNECTION_TIMEOUT_MS, 5_000);
+  assert.equal(AWS_BROKER_REQUEST_TIMEOUT_MS, 10_000);
+  assert.deepEqual(workloadIdentityAwsClientConfig("us-east-1"), {
+    retryMode: "standard",
+    maxAttempts: 4,
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 10_000,
+    },
+    region: "us-east-1",
+  });
+  assert.deepEqual(workloadIdentityAwsClientConfig(undefined, 2), {
+    retryMode: "standard",
+    maxAttempts: 2,
+    requestHandler: {
+      connectionTimeout: 5_000,
+      requestTimeout: 10_000,
+    },
+  });
+});
+
 test("positive AssumeRole/GetCallerIdentity contract uses registry trust material", async () => {
   const stored = connection();
   const registry = new MemoryRegistry(stored);
@@ -176,13 +354,15 @@ test("positive AssumeRole/GetCallerIdentity contract uses registry trust materia
     return {
       $metadata: { httpStatusCode: 200 },
       Account: stored.expectedAccountId,
-      Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/MSPCMDBReadRole/${sessionName}`,
+      Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
       UserId: `AROATEST:${sessionName}`,
     };
   });
   const broker = new AwsRoleBroker({
     registry,
     assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored),
     callerIdentityClientFactory: (credentials) => {
       identityCredentialsAccessKey = credentials.accessKeyId;
       return identityClient;
@@ -200,10 +380,28 @@ test("positive AssumeRole/GetCallerIdentity contract uses registry trust materia
   assert.equal(assume.calls[0]?.RoleArn, stored.roleArn);
   assert.equal(assume.calls[0]?.ExternalId, stored.externalId);
   assert.equal(assume.calls[0]?.DurationSeconds, 900);
+  assert.equal(assume.calls[0]?.Policy, readonlyMetadataSessionPolicy(stored.roleArn));
   assert.equal(identityCredentialsAccessKey, "ASIAEXAMPLE");
   assert.equal(identityClient.calls, 1);
   assert.equal(session.accountId, stored.expectedAccountId);
   assert.equal(session.credentials.sessionToken, "session-token-not-for-logs");
+});
+
+test("an active legacy permission pack is denied before STS is called", async () => {
+  const stored = connection({ permissionPackVersion: "live-demo-2026-07.1" });
+  const assume = new FakeAssumeRoleClient(() => successfulAssumeRole());
+  const broker = new AwsRoleBroker({
+    registry: new MemoryRegistry(stored),
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored),
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => ({ $metadata: {} })),
+  });
+  await assert.rejects(
+    broker.assumeValidatedSession(scope, stored.connectionId, "legacy-pack-job"),
+    /not in a state/u,
+  );
+  assert.equal(assume.calls.length, 0);
 });
 
 test("onboarding requires positive validation plus missing and wrong ExternalId denials", async () => {
@@ -221,13 +419,15 @@ test("onboarding requires positive validation plus missing and wrong ExternalId 
     return {
       $metadata: {},
       Account: stored.expectedAccountId,
-      Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/MSPCMDBReadRole/${sessionName}`,
+      Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
       UserId: `AROATEST:${sessionName}`,
     };
   });
   const broker = new AwsRoleBroker({
     registry,
     assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored),
     callerIdentityClientFactory: () => identityClient,
     now: () => new Date("2026-07-15T00:00:00.000Z"),
   });
@@ -243,10 +443,41 @@ test("onboarding requires positive validation plus missing and wrong ExternalId 
   assert.equal(assume.calls[1]?.ExternalId, undefined);
   assert.ok(assume.calls[2]?.ExternalId);
   assert.notEqual(assume.calls[2]?.ExternalId, stored.externalId);
+  assert.equal(assume.calls[1]?.RoleSessionName, assume.calls[0]?.RoleSessionName);
+  assert.equal(assume.calls[2]?.RoleSessionName, assume.calls[0]?.RoleSessionName);
+  assert.ok(assume.calls.every((call) => call.Policy === assume.calls[0]?.Policy));
+  assert.equal(assume.calls[2]?.ExternalId?.length, stored.externalId.length);
+  assert.equal(
+    assume.calls[2]?.ExternalId?.slice(0, -1),
+    stored.externalId.slice(0, -1),
+  );
   assert.equal(verification.missingExternalIdDenied, true);
   assert.equal(verification.wrongExternalIdDenied, true);
   assert.equal(JSON.stringify(verification).includes(stored.externalId), false);
   assert.equal(JSON.stringify(verification).includes("session-token-not-for-logs"), false);
+});
+
+test("an active connection can explicitly revalidate the unchanged trust contract", async () => {
+  const stored = connection({ status: "ACTIVE" });
+  const registry = new MemoryRegistry(stored);
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) {
+      return successfulAssumeRole();
+    }
+    throw accessDenied();
+  });
+  const broker = brokerWithIdentity(registry, assume, stored);
+
+  const verification = await broker.verifyOnboardingTrust(
+    scope,
+    stored.connectionId,
+    "revalidate-job-01",
+  );
+
+  assert.equal(assume.calls.length, 3);
+  assert.equal(verification.accountId, stored.expectedAccountId);
+  assert.equal(verification.missingExternalIdDenied, true);
+  assert.equal(verification.wrongExternalIdDenied, true);
 });
 
 test("onboarding rejects a role that succeeds without ExternalId", async () => {
@@ -288,6 +519,85 @@ test("onboarding rejects a role that succeeds with a wrong ExternalId", async ()
   assert.equal(assume.calls.length, 3, "both negative probes must execute");
 });
 
+test("onboarding rejects prefix-wildcard ExternalId trust even when the session name is restricted", async () => {
+  const stored = connection({ status: "PENDING", externalId: "sutra_abcdefghijklmnopqrstuvwxyz123456" });
+  const registry = new MemoryRegistry(stored);
+  let acceptedSessionName: string | undefined;
+  const assume = new FakeAssumeRoleClient((input) => {
+    acceptedSessionName ??= input.RoleSessionName;
+    if (
+      input.RoleSessionName === acceptedSessionName &&
+      typeof input.ExternalId === "string" &&
+      input.ExternalId.startsWith("sutra_")
+    ) {
+      return successfulAssumeRole();
+    }
+    throw accessDenied();
+  });
+  const broker = brokerWithIdentity(registry, assume, stored);
+
+  await assert.rejects(
+    broker.verifyOnboardingTrust(scope, stored.connectionId, "onboard-job-prefix-wildcard"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "WRONG_EXTERNAL_ID",
+  );
+  assert.equal(assume.calls.length, 3);
+  assert.ok(assume.calls.every((call) => call.RoleSessionName === acceptedSessionName));
+});
+
+test("onboarding rejects a role whose fetched trust policy is not an exact StringEquals contract", async () => {
+  const stored = connection({ status: "PENDING", externalId: "sutra_abcdefghijklmnopqrstuvwxyz123456" });
+  const registry = new MemoryRegistry(stored);
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const base = expectedRoleContractClient(stored);
+  const broker = new AwsRoleBroker({
+    registry,
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls[0]?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    roleContractClientFactory: () => ({
+      ...base,
+      getRole: async (roleName) => ({
+        ...(await base.getRole(roleName)),
+        assumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [{
+            Sid: "ExactCollectorWithConnectionExternalId",
+            Effect: "Allow",
+            Principal: { AWS: COLLECTOR_PRINCIPAL_ARN },
+            Action: "sts:AssumeRole",
+            Condition: {
+              StringLike: {
+                "sts:ExternalId": "sutra_*",
+                "sts:RoleSessionName": "mspcmdb-*",
+              },
+            },
+          }],
+        })),
+      }),
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  await assert.rejects(
+    broker.verifyOnboardingTrust(scope, stored.connectionId, "onboard-job-attestation"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "ROLE_CONTRACT",
+  );
+});
+
 test("a transient negative-probe error is inconclusive, never treated as a safe denial", async () => {
   const stored = connection({ status: "PENDING" });
   const registry = new MemoryRegistry(stored);
@@ -315,6 +625,8 @@ function brokerWithIdentity(
   return new AwsRoleBroker({
     registry,
     assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored),
     callerIdentityClientFactory: () =>
       new FakeCallerIdentityClient(() => {
         const sessionName = assume.calls[0]?.RoleSessionName;
@@ -322,7 +634,7 @@ function brokerWithIdentity(
         return {
           $metadata: {},
           Account: stored.expectedAccountId,
-          Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/MSPCMDBReadRole/${sessionName}`,
+          Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
           UserId: `AROATEST:${sessionName}`,
         };
       }),

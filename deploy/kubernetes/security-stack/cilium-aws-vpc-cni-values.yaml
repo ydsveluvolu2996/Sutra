@@ -1,0 +1,29 @@
+cni:
+  chainingMode: aws-cni
+  exclusive: false
+  uninstall: false
+enableIPv4Masquerade: false
+endpointRoutes:
+  enabled: true
+kubeProxyReplacement: false
+routingMode: native
+operator:
+  replicas: 2
+hubble:
+  enabled: true
+  relay:
+    enabled: true
+  ui:
+    enabled: false
+  metrics:
+    enableOpenMetrics: true
+    enabled:
+      - dns
+      - drop
+      - flow
+      - httpV2
+      - icmp
+      - port-distribution
+      - tcp
+prometheus:
+  enabled: true

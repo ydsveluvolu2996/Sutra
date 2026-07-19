@@ -1,0 +1,22 @@
+.firstRun { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 22px; padding: 28px; }
+.firstRunIcon { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 17px; background: linear-gradient(145deg,#dbeafe,#a5f3fc); color: #164e63; font-weight: 900; }
+.firstRun h2 { margin: 4px 0 7px; }.firstRun p { color: var(--muted); }
+.kpis { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 13px; margin-bottom: 13px; }
+.kpis article { min-height: 118px; display: grid; align-content: center; gap: 6px; padding: 18px; }
+.kpis small { color: var(--muted); font-size: 10px; }.kpis strong { font-size: 24px; }.kpis span { color: var(--ink-faint); font-size: 9px; }
+.grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(320px,.65fr); gap: 13px; margin-bottom: 13px; }
+.detections { display: grid; gap: 0; margin: 0 -20px -19px; }
+.detections > article { display: grid; grid-template-columns: 70px minmax(0,1fr) auto; gap: 14px; align-items: start; padding: 16px 20px; border-top: 1px solid var(--line); }
+.detections h3 { margin: 0 0 5px; font-size: 12px; }.detections p { margin: 0 0 6px; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.detections small,.detections em { display: block; color: var(--ink-faint); font-size: 8px; font-style: normal; }.detections em { margin-top: 7px; color: #80633c; }
+.provenance { display: grid; margin: 0; }.provenance > div { display: grid; grid-template-columns: 95px minmax(0,1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); }
+.provenance dt { color: var(--ink-faint); font-size: 8px; text-transform: uppercase; }.provenance dd { margin: 0; overflow: hidden; text-overflow: ellipsis; font: 8px var(--font-geist-mono),monospace; white-space: nowrap; }
+.coverage { display: grid; gap: 7px; max-height: 230px; margin-top: 14px; overflow: auto; }.coverage div { display: grid; grid-template-columns: 12px 1fr auto; gap: 7px; align-items: center; padding: 8px; border-radius: 7px; background: #f7f9fa; }.coverage small { grid-column: 2; color: var(--muted); font-size: 7px; }.coverage b { grid-column: 3; grid-row: 1 / 3; color: var(--ink-faint); font-size: 7px; }
+.filters { display: grid; grid-template-columns: minmax(240px,1fr) 160px 180px auto; gap: 8px; margin-bottom: 14px; }
+.eventTable { overflow-x: auto; }.eventHeader,.eventRow summary { min-width: 900px; display: grid; grid-template-columns: 145px minmax(210px,1fr) minmax(190px,1fr) 100px 120px; gap: 12px; align-items: center; }
+.eventHeader { padding: 9px 12px; background: #f4f6f7; color: var(--ink-faint); font-size: 8px; font-weight: 750; text-transform: uppercase; }
+.eventRow { border-top: 1px solid var(--line); }.eventRow summary { min-height: 58px; padding: 9px 12px; cursor: pointer; list-style: none; font-size: 9px; }.eventRow summary::-webkit-details-marker { display: none; }.eventRow summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.eventRow summary strong,.eventRow summary small { display: block; overflow: hidden; text-overflow: ellipsis; }.eventRow summary small { margin-top: 3px; color: var(--ink-faint); font-size: 7px; }
+.eventRow > div { padding: 2px 12px 16px 169px; }.eventRow dl { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }.eventRow dl div { padding: 8px; border-radius: 7px; background: #f7f9fa; }.eventRow dt { color: var(--ink-faint); font-size: 7px; text-transform: uppercase; }.eventRow dd { margin: 3px 0 0; overflow-wrap: anywhere; font: 8px var(--font-geist-mono),monospace; }.eventRow p { color: var(--ink-faint); font-size: 8px; }
+.allowed { color: var(--green); }.denied { color: var(--red); }
+@media (max-width: 1100px) { .grid { grid-template-columns: 1fr; }.kpis { grid-template-columns: repeat(2,1fr); }.filters { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 720px) { .firstRun { grid-template-columns: 1fr; }.kpis { grid-template-columns: 1fr 1fr; }.detections > article { grid-template-columns: 65px minmax(0,1fr); }.detections button { grid-column: 2; justify-self: start; }.filters { grid-template-columns: 1fr; }.eventRow > div { padding-left: 12px; }.eventRow dl { grid-template-columns: 1fr; } }

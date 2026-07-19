@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Source workload role for a disposable Sutra live-AWS sandbox demo. An operator
+  reaches this role through short-lived federation; the role can assume only the
+  fixed customer read-only role path and name and cannot access AWS resources itself.
+
+Parameters:
+  OperatorRoleArn:
+    Type: String
+    Description: >-
+      Exact IAM role ARN used by the short-lived AWS SSO/profile session that may
+      assume this collector role. Account-root and wildcard principals are forbidden.
+    AllowedPattern: '^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
+    ConstraintDescription: Must be an exact IAM role ARN in this AWS partition.
+
+  CollectorRoleName:
+    Type: String
+    Default: SutraLocalCollectorRole
+    MinLength: 1
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9+=,.@_-]+$'
+
+  CustomerRoleName:
+    Type: String
+    Default: SutraReadOnlyRole
+    AllowedValues:
+      - SutraReadOnlyRole
+    Description: Fixed reviewed customer role name accepted by the Sutra broker.
+
+Resources:
+  CollectorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName:
+        Ref: CollectorRoleName
+      Path: /sutra/
+      Description: Short-lived source role used only by the local Sutra sandbox collector.
+      MaxSessionDuration: 3600
+      PermissionsBoundary:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/SutraCollectorBoundary
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: FederatedOperatorOnly
+            Effect: Allow
+            Principal:
+              AWS:
+                Ref: OperatorRoleArn
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AssumeFixedSutraCustomerRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AssumeCustomerMetadataRoleOnly
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/${CustomerRoleName}
+      Tags:
+        - Key: sutra:access-mode
+          Value: assume-role-only
+        - Key: sutra:environment
+          Value: disposable-sandbox
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+Outputs:
+  CollectorRoleArn:
+    Description: Set this exact value as SUTRA_COLLECTOR_PRINCIPAL_ARN.
+    Value:
+      Fn::GetAtt:
+        - CollectorRole
+        - Arn

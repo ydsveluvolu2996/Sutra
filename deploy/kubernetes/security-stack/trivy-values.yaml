@@ -1,0 +1,18 @@
+operator:
+  builtInTrivyServer: false
+  scanJobsConcurrentLimit: 1
+  vulnerabilityScannerEnabled: true
+  configAuditScannerEnabled: true
+  rbacAssessmentScannerEnabled: true
+  infraAssessmentScannerEnabled: true
+  sbomGenerationEnabled: true
+  clusterComplianceEnabled: true
+  accessGlobalSecretsAndServiceAccount: false
+  exposedSecretScannerEnabled: false
+  webhookBroadcastURL: ""
+  metricsFindingsEnabled: true
+trivy:
+  ignoreUnfixed: true
+  severity: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL
+serviceMonitor:
+  enabled: false

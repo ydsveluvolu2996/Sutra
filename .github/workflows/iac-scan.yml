@@ -1,0 +1,190 @@
+name: IaC misconfiguration gate
+
+# Reusable shift-left gate. A consumer pipeline calls it after generating a
+# Terraform plan JSON (`terraform show -json > tfplan.json`) and/or a Kubernetes
+# manifest JSON, and the job fails the build when findings at or above `fail-on`
+# are present — blocking the misconfiguration before it ships. It runs the same
+# pure, unit-tested engines as the in-app /iac-scan tool; no cluster or network.
+on:
+  workflow_call:
+    inputs:
+      terraform-plan:
+        description: "Path to a `terraform show -json` plan file (relative to the repo root)."
+        type: string
+        required: false
+        default: ""
+      manifests:
+        description: "Path to a Kubernetes manifest JSON file (object or array)."
+        type: string
+        required: false
+        default: ""
+      fail-on:
+        description: "Minimum severity that fails the build: critical | high | medium | low."
+        type: string
+        required: false
+        default: "high"
+  workflow_dispatch:
+    inputs:
+      terraform-plan:
+        description: "Path to a `terraform show -json` plan file."
+        type: string
+        required: false
+        default: ""
+      manifests:
+        description: "Path to a Kubernetes manifest JSON file."
+        type: string
+        required: false
+        default: ""
+      fail-on:
+        description: "Minimum severity that fails the build."
+        type: string
+        required: false
+        default: "high"
+
+permissions:
+  contents: read
+
+jobs:
+  iac-scan:
+    name: Scan IaC for misconfigurations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Produce SARIF (non-blocking, for the code-scanning tab)
+        # `|| true` so a gate breach here does not skip the upload; the blocking
+        # decision is made by the final gate step below.
+        env:
+          INPUT_TERRAFORM_PLAN: ${{ inputs.terraform-plan }}
+          INPUT_MANIFESTS: ${{ inputs.manifests }}
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
+        run: |
+          set -euo pipefail
+
+          validate_input_file() {
+            local candidate="$1"
+            local label="$2"
+            local resolved
+
+            if [[ -z "$candidate" ]]; then
+              return
+            fi
+            if [[ "$candidate" == -* ]]; then
+              echo "$label must be a repository-relative file path, not an option." >&2
+              exit 2
+            fi
+            resolved="$(realpath -e -- "$candidate")" || {
+              echo "$label does not identify an existing file." >&2
+              exit 2
+            }
+            case "$resolved" in
+              "$GITHUB_WORKSPACE"/*) ;;
+              *)
+                echo "$label must resolve inside the checked-out repository." >&2
+                exit 2
+                ;;
+            esac
+          }
+
+          case "$INPUT_FAIL_ON" in
+            critical|high|medium|low) ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          validate_input_file "$INPUT_TERRAFORM_PLAN" "terraform-plan"
+          validate_input_file "$INPUT_MANIFESTS" "manifests"
+
+          arguments=()
+          if [[ -n "$INPUT_TERRAFORM_PLAN" ]]; then
+            arguments+=(--terraform "$INPUT_TERRAFORM_PLAN")
+          fi
+          if [[ -n "$INPUT_MANIFESTS" ]]; then
+            arguments+=(--manifests "$INPUT_MANIFESTS")
+          fi
+          pnpm iac:scan "${arguments[@]}" --fail-on "$INPUT_FAIL_ON" \
+            --format sarif --out iac-scan.sarif || true
+
+      - name: Upload SARIF to code scanning
+        # GitHub Advanced Security must be enabled for private repos before uploads run.
+        if: ${{ hashFiles('iac-scan.sarif') != '' && (github.repository_visibility == 'public' || vars.CODEQL_ENABLED == 'true') }}
+        uses: github/codeql-action/upload-sarif@ddf5ce7296213f5548c91e2dd19df2d77d2b2d66 # v3
+        with:
+          sarif_file: iac-scan.sarif
+          category: sutra-iac-scan
+
+      - name: Gate the build on severity threshold
+        env:
+          INPUT_TERRAFORM_PLAN: ${{ inputs.terraform-plan }}
+          INPUT_MANIFESTS: ${{ inputs.manifests }}
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
+        run: |
+          set -euo pipefail
+
+          validate_input_file() {
+            local candidate="$1"
+            local label="$2"
+            local resolved
+
+            if [[ -z "$candidate" ]]; then
+              return
+            fi
+            if [[ "$candidate" == -* ]]; then
+              echo "$label must be a repository-relative file path, not an option." >&2
+              exit 2
+            fi
+            resolved="$(realpath -e -- "$candidate")" || {
+              echo "$label does not identify an existing file." >&2
+              exit 2
+            }
+            case "$resolved" in
+              "$GITHUB_WORKSPACE"/*) ;;
+              *)
+                echo "$label must resolve inside the checked-out repository." >&2
+                exit 2
+                ;;
+            esac
+          }
+
+          case "$INPUT_FAIL_ON" in
+            critical|high|medium|low) ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          validate_input_file "$INPUT_TERRAFORM_PLAN" "terraform-plan"
+          validate_input_file "$INPUT_MANIFESTS" "manifests"
+
+          arguments=()
+          if [[ -n "$INPUT_TERRAFORM_PLAN" ]]; then
+            arguments+=(--terraform "$INPUT_TERRAFORM_PLAN")
+          fi
+          if [[ -n "$INPUT_MANIFESTS" ]]; then
+            arguments+=(--manifests "$INPUT_MANIFESTS")
+          fi
+          pnpm iac:scan "${arguments[@]}" --fail-on "$INPUT_FAIL_ON"

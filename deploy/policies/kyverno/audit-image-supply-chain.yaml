@@ -1,0 +1,51 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-image-supply-chain-audit
+  annotations:
+    policies.kyverno.io/title: Sutra image supply-chain audit
+    policies.kyverno.io/category: Software Supply Chain
+    policies.kyverno.io/severity: high
+    sutra.io/promotion-state: audit
+    sutra.io/configuration-note: Replace the example registry expression before promotion.
+spec:
+  admission: true
+  background: true
+  emitWarning: true
+  failurePolicy: Ignore
+  validationFailureAction: Audit
+  rules:
+    - name: require-trusted-registry
+      match: &pods
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude: &systemNamespaces
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      validate:
+        message: Images must originate from a reviewed registry allowlist.
+        foreach:
+          - list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "*.dkr.ecr.*.amazonaws.com/*"
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "public.ecr.aws/*"
+                  - key: "{{ element.image }}"
+                    operator: NotEquals
+                    value: "ghcr.io/*"
+    - name: require-image-digest
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Images must be pinned to an immutable sha256 digest.
+        foreach:
+          - list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+            pattern:
+              image: "*@sha256:*"

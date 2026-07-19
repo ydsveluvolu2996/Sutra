@@ -1,0 +1,6 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - audit-workload-security.yaml
+  - audit-workload-reliability.yaml
+  - audit-image-supply-chain.yaml

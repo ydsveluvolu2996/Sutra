@@ -1,0 +1,73 @@
+// Sutra security gate — declarative Jenkins pipeline that runs on a Kubernetes
+// agent. It runs the same scanners as the GitHub Actions gate (repository
+// secret scan + IaC misconfiguration + Trivy image/dependency scan), aggregates
+// them with scripts/pipeline-scan.mjs, and publishes a JUnit report via
+// scripts/ci-gate.mjs so the build fails (and the report renders) when the gate
+// is breached. The gate's own exit code (2 = breached) fails the stage.
+//
+// Wiring: point a Jenkins Multibranch or Pipeline job at this file. The
+// `kubernetes` agent provisions an ephemeral pod (see jenkins-pod.yaml) with a
+// Node container and a Trivy container, so no tools are installed on the
+// controller. Set FAIL_ON to critical|high|medium|low.
+pipeline {
+  agent {
+    kubernetes {
+      yamlFile 'deploy/ci/jenkins-pod.yaml'
+      defaultContainer 'node'
+    }
+  }
+
+  parameters {
+    choice(name: 'FAIL_ON', choices: ['high', 'critical', 'medium', 'low'],
+           description: 'Minimum severity that breaches the gate.')
+    string(name: 'IMAGE', defaultValue: '',
+           description: 'Optional container image ref to scan (repo@sha256:...).')
+  }
+
+  options {
+    timeout(time: 20, unit: 'MINUTES')
+    disableConcurrentBuilds()
+  }
+
+  stages {
+    stage('Install') {
+      steps {
+        sh 'corepack enable && pnpm install --frozen-lockfile'
+      }
+    }
+
+    stage('Security gate') {
+      steps {
+        script {
+          // Assemble optional IaC/image inputs. Absent inputs are honestly
+          // reported as "skipped" by pipeline-scan.mjs, never as a pass.
+          def extra = ''
+          if (fileExists('infra/terraform-plan.json')) { extra += ' --terraform infra/terraform-plan.json' }
+          if (fileExists('deploy/kubernetes')) { extra += ' --manifests deploy/kubernetes' }
+          if (params.IMAGE?.trim()) { extra += " --image ${params.IMAGE.trim()}" }
+
+          // Run the aggregate gate; capture its stages as JSON regardless of
+          // outcome so the JUnit report is always published.
+          def gateStatus = sh(
+            returnStatus: true,
+            script: "node scripts/pipeline-scan.mjs --fail-on ${params.FAIL_ON} --json gate-stages.json${extra}"
+          )
+          // Render JUnit from the captured stages (does not re-run scanners).
+          sh "node scripts/ci-gate.mjs --stages gate-stages.json --fail-on ${params.FAIL_ON} --junit gate-report.xml || true"
+          if (gateStatus == 2) {
+            error("Sutra security gate breached at severity ${params.FAIL_ON}")
+          } else if (gateStatus != 0) {
+            error("Sutra security gate errored (exit ${gateStatus})")
+          }
+        }
+      }
+    }
+  }
+
+  post {
+    always {
+      junit testResults: 'gate-report.xml', allowEmptyResults: true
+      archiveArtifacts artifacts: 'gate-stages.json,gate-report.xml', allowEmptyArchive: true
+    }
+  }
+}

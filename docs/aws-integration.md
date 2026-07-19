@@ -41,7 +41,7 @@ The customer role trusts the **exact ARN** of the vendor collector workload role
 not the vendor account root. Its trust policy requires both:
 
 1. `sts:ExternalId` equal to a platform-generated value unique among MSP tenants.
-2. `sts:RoleSessionName` matching `mspcmdb-*` so customer CloudTrail records are
+2. `sts:RoleSessionName` matching `sutra-*` so customer CloudTrail records are
    easy to identify.
 
 AWS explicitly recommends an External ID for third parties that access multiple
@@ -66,8 +66,9 @@ from a canonical connection record:
 ```text
 RoleArn:        stored customer role ARN (never arbitrary request input)
 ExternalId:     stored tenant/account External ID
-RoleSessionName:mspcmdb-<scanJobUlid>       # <= 64 valid STS characters
+RoleSessionName:sutra-<scanJobUlid>         # <= 64 valid STS characters
 DurationSeconds: 900-3600                   # template maximum is 3600
+Policy:          fixed versioned metadata-read ceiling (never browser supplied)
 ```
 
 After the first successful call, immediately call `sts:GetCallerIdentity` with the
@@ -93,10 +94,20 @@ for example:
   "Effect": "Allow",
   "Action": "sts:AssumeRole",
   "Resource": [
-    "arn:aws:iam::*:role/mspcmdb/MSPCMDBReadRole"
+    "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
   ]
 }
 ```
+
+Apply the same target as a fixed, customer-managed permissions boundary on the
+collector workload role, with explicit denies for every action other than
+`sts:AssumeRole` and for `sts:AssumeRole` against any other resource. The matching
+allow then permits only `arn:aws:iam::*:role/sutra/SutraReadOnlyRole`. Create and
+control that boundary independently of the
+operator-mutable collector stack. The operator may attach the exact boundary ARN
+but must not create new versions, change the default version, or delete it. This
+keeps the effective collector permissions at the fixed customer-role target even
+if an alternate role policy is submitted through CloudFormation.
 
 Use separate vendor accounts and collector roles for `aws`, `aws-us-gov`, and
 `aws-cn`; AWS partitions do not share trust. If customers can choose a role name,
@@ -110,6 +121,12 @@ can attempt every customer role. Mitigations are a fixed role path/name, exact
 trusted vendor principal, tenant-unique External IDs, no interactive access to the
 broker, short sessions, egress controls, workload identity, CloudTrail alerting, and
 strong separation between public API and collector credentials.
+
+Every customer `AssumeRole` request also carries a fixed inline session policy. It
+explicitly denies actions outside the release's reviewed metadata/attestation API
+set and explicitly denies role-policy attestation reads outside the one registered
+customer role ARN, before adding the narrow allows. This makes the runtime ceiling
+auditable as an explicit deny contract instead of depending only on implicit deny.
 
 Do not expose assumed credentials or AWS console federation URLs to MSP/customer
 users. They access normalized CMDB data through SaaS RBAC. If customers need AWS
@@ -140,7 +157,7 @@ correct External ID.
 
 ### 3.2 Template decisions
 
-`customer-role-template.yaml` uses explicit versioned policies rather than attaching
+`infrastructure/customer-role-live-demo.yaml` uses explicit versioned policies rather than attaching
 AWS `ReadOnlyAccess`. It also avoids relying solely on the evolving AWS-managed
 `SecurityAudit` policy. The template intentionally excludes data-plane and write
 actions such as:
@@ -164,9 +181,11 @@ Modules are explicit:
 | Organizations discovery | off | Account metadata is sensitive and only works in management/delegated accounts |
 
 The role accepts an optional customer permissions boundary. It is tagged with a
-non-secret tenant ID and access mode. The External ID is `NoEcho`, but must still be
-treated as non-secret because principals able to inspect the role trust policy can
-see it.
+non-secret tenant ID and access mode. The External ID is a non-secret, unique
+high-entropy trust binding. The live quick-create template leaves the parameter
+visible because AWS CloudFormation quick-create links cannot prefill `NoEcho`
+parameters; the template never outputs it, and Sutra excludes it from logs and
+analytics.
 
 The sensitive-field decisions above follow the documented response shapes for
 [Lambda ListFunctions](https://docs.aws.amazon.com/lambda/latest/api/API_ListFunctions.html)
@@ -207,6 +226,12 @@ Official references:
 - [CloudFormation StackSets and Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/services-that-can-integrate-cloudformation.html)
 
 ### 3.4 Offboarding
+
+The local pilot implements only the Sutra-side portions of this sequence. Its
+offboard action removes local control-plane trust material and performs
+best-effort, retriable collector cleanup; it cannot delete a customer IAM role or
+edit its trust policy. The customer-owned CloudFormation stack or IAM trust must
+still be removed directly in AWS.
 
 1. Set connection state to `DISABLING`; stop enqueueing and revoke worker leases.
 2. Customer deletes the CloudFormation stack or removes the role trust.

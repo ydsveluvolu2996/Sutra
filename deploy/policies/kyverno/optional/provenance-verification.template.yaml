@@ -1,0 +1,42 @@
+# This fail-closed template is intentionally excluded from kustomization.yaml.
+# Configure issuer, subject, registry and attestation conditions, test in Audit,
+# and record a separate human approval before promotion to Enforce.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-verify-image-provenance
+  annotations:
+    sutra.io/template-state: requires-explicit-configuration
+spec:
+  admission: true
+  background: true
+  failurePolicy: Fail
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 15
+  rules:
+    - name: verify-slsa-provenance
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      verifyImages:
+        - imageReferences: ["SET_ME_REGISTRY/*"]
+          mutateDigest: false
+          required: true
+          verifyDigest: true
+          attestations:
+            - predicateType: https://slsa.dev/provenance/v1
+              attestors:
+                - entries:
+                    - keyless:
+                        issuer: SET_ME_OIDC_ISSUER
+                        subject: SET_ME_BUILDER_SUBJECT
+              conditions:
+                - all:
+                    - key: "{{ builder.id }}"
+                      operator: Equals
+                      value: SET_ME_BUILDER_ID

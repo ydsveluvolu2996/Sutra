@@ -1,0 +1,107 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-workload-security-audit
+  annotations:
+    policies.kyverno.io/title: Sutra workload security audit
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    sutra.io/promotion-state: audit
+spec:
+  admission: true
+  background: true
+  emitWarning: true
+  failurePolicy: Ignore
+  validationFailureAction: Audit
+  rules:
+    - name: disallow-privileged-containers
+      match: &pods
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude: &systemNamespaces
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      validate:
+        message: Privileged containers are not permitted.
+        foreach:
+          - list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+            pattern:
+              securityContext:
+                =(privileged): "false"
+    - name: disallow-privilege-escalation
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Every container must explicitly disable privilege escalation.
+        foreach:
+          - list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+            pattern:
+              securityContext:
+                allowPrivilegeEscalation: "false"
+    - name: disallow-host-namespaces
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Pods must not share host network, PID, or IPC namespaces.
+        pattern:
+          spec:
+            =(hostNetwork): "false"
+            =(hostPID): "false"
+            =(hostIPC): "false"
+    - name: disallow-host-path
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: hostPath volumes require an approved, expiring exception.
+        foreach:
+          - list: request.object.spec.volumes[?hostPath]
+            deny:
+              conditions:
+                all:
+                  - key: "{{ element.hostPath.path || '' }}"
+                    operator: NotEquals
+                    value: ""
+    - name: disallow-dangerous-capabilities
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Dangerous Linux capabilities are not permitted.
+        foreach:
+          - list: request.object.spec.[ephemeralContainers, initContainers, containers][]
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.capabilities.add[] || `[]` }}"
+                    operator: AnyIn
+                    value:
+                      - SYS_ADMIN
+                      - SYS_MODULE
+                      - SYS_PTRACE
+                      - NET_ADMIN
+                      - NET_RAW
+                      - DAC_OVERRIDE
+                      - DAC_READ_SEARCH
+                      - MKNOD
+                      - BPF
+                      - PERFMON
+    - name: require-non-root
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Pods must explicitly run as non-root.
+        pattern:
+          spec:
+            securityContext:
+              runAsNonRoot: "true"
+    - name: require-runtime-default-seccomp
+      match: *pods
+      exclude: *systemNamespaces
+      validate:
+        message: Pods must use RuntimeDefault or Localhost seccomp.
+        pattern:
+          spec:
+            securityContext:
+              seccompProfile:
+                type: RuntimeDefault | Localhost

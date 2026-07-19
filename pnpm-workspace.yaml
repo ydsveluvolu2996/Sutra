@@ -1,6 +1,9 @@
 packages:
   - "services/*"
 
+overrides:
+  postcss: 8.5.19
+
 allowBuilds:
   esbuild: true
   sharp: true
@@ -23,3 +26,14 @@ minimumReleaseAgeExclude:
   - '@aws-sdk/token-providers@3.1087.0'
   - '@aws-sdk/types@3.974.1'
   - '@aws-sdk/xml-builder@3.972.35'
+  - '@aws-sdk/checksums@3.1000.17'
+  - '@aws-sdk/client-cloudtrail@3.1087.0'
+  - '@aws-sdk/client-ec2@3.1087.0'
+  - '@aws-sdk/client-guardduty@3.1087.0'
+  - '@aws-sdk/client-iam@3.1087.0'
+  - '@aws-sdk/client-rds@3.1087.0'
+  - '@aws-sdk/client-s3@3.1087.0'
+  - '@aws-sdk/client-securityhub@3.1087.0'
+  - '@aws-sdk/middleware-sdk-ec2@3.972.46'
+  - '@aws-sdk/middleware-sdk-rds@3.972.46'
+  - '@aws-sdk/middleware-sdk-s3@3.972.63'

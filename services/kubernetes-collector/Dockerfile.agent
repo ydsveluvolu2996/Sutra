@@ -1,0 +1,15 @@
+ARG NODE_IMAGE
+FROM ${NODE_IMAGE}
+
+ENV NODE_ENV=production
+WORKDIR /opt/sutra
+
+COPY --chown=node:node scripts/kubernetes-agent.mjs ./scripts/kubernetes-agent.mjs
+COPY --chown=node:node services/kubernetes-collector/src ./services/kubernetes-collector/src
+COPY --chown=node:node lib/kubernetes-posture.ts ./lib/kubernetes-posture.ts
+
+RUN mkdir -p /var/lib/sutra-agent \
+    && chown node:node /var/lib/sutra-agent
+
+USER node
+ENTRYPOINT ["node", "--experimental-strip-types", "/opt/sutra/scripts/kubernetes-agent.mjs"]

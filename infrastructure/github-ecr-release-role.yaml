@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: OIDC-only GitHub release role and immutable ECR repositories for Sutra Kubernetes runtime images.
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    Description: Existing account-local token.actions.githubusercontent.com OIDC provider ARN.
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
+  GitHubRepository:
+    Type: String
+    Description: Exact owner/repository slug.
+    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  ReleaseEnvironment:
+    Type: String
+    Default: kubernetes-production-release
+    AllowedValues:
+      - kubernetes-production-release
+  AgentRepositoryName:
+    Type: String
+    Default: sutra/kubernetes-agent
+    AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
+  FalcoGatewayRepositoryName:
+    Type: String
+    Default: sutra/falco-signing-gateway
+    AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
+Rules:
+  DistinctRuntimeRepositories:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: AgentRepositoryName
+                - Ref: FalcoGatewayRepositoryName
+        AssertDescription: AgentRepositoryName and FalcoGatewayRepositoryName must be different.
+Resources:
+  AgentRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref AgentRepositoryName
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Remove only abandoned untagged layers after seven days; retain signed release evidence","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}}]}
+      Tags:
+        - Key: sutra:component
+          Value: kubernetes-agent
+        - Key: sutra:managed-by
+          Value: cloudformation
+  FalcoGatewayRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref FalcoGatewayRepositoryName
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Remove only abandoned untagged layers after seven days; retain signed release evidence","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":7},"action":{"type":"expire"}}]}
+      Tags:
+        - Key: sutra:component
+          Value: falco-signing-gateway
+        - Key: sutra:managed-by
+          Value: cloudformation
+  GitHubReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      Description: Short-lived GitHub OIDC role scoped to the protected Kubernetes release environment.
+      Tags:
+        - Key: sutra:component
+          Value: kubernetes-runtime-release
+        - Key: sutra:managed-by
+          Value: cloudformation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${ReleaseEnvironment}
+      Policies:
+        - PolicyName: PushOnlyToSutraRuntimeRepositories
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !GetAtt AgentRepository.Arn
+                  - !GetAtt FalcoGatewayRepository.Arn
+Outputs:
+  AgentEcrRepositoryName:
+    Description: Configure GitHub AGENT_ECR_REPOSITORY with this value.
+    Value: !Ref AgentRepository
+  AgentEcrRepositoryUri:
+    Description: Immutable agent repository URI without a tag or digest.
+    Value: !GetAtt AgentRepository.RepositoryUri
+  FalcoGatewayEcrRepositoryName:
+    Description: Configure GitHub FALCO_GATEWAY_ECR_REPOSITORY with this value.
+    Value: !Ref FalcoGatewayRepository
+  FalcoGatewayEcrRepositoryUri:
+    Description: Immutable Falco signing gateway repository URI without a tag or digest.
+    Value: !GetAtt FalcoGatewayRepository.RepositoryUri
+  GitHubReleaseRoleArn:
+    Value: !GetAtt GitHubReleaseRole.Arn

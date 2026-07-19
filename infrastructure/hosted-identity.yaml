@@ -1,0 +1,138 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Amazon Cognito hosted identity foundation for a Sutra staging or production
+  control plane. Users are administrator-created, TOTP MFA is mandatory, and the
+  application uses the OAuth authorization-code flow with PKCE.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues:
+      - staging
+      - production
+
+  DomainPrefix:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$'
+
+  CallbackUrl:
+    Type: String
+    MinLength: 12
+    MaxLength: 1024
+    AllowedPattern: '^https://[^?#[:space:]]+/api/auth/oidc/callback$'
+
+  LogoutUrl:
+    Type: String
+    MinLength: 9
+    MaxLength: 1024
+    AllowedPattern: '^https://[^?#[:space:]]+/$'
+
+Resources:
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName:
+        Fn::Sub: sutra-${EnvironmentName}
+      DeletionProtection: ACTIVE
+      MfaConfiguration: ON
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      UsernameConfiguration:
+        CaseSensitive: false
+      AutoVerifiedAttributes:
+        - email
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 2
+      UserAttributeUpdateSettings:
+        AttributesRequireVerificationBeforeUpdate:
+          - email
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      UserPoolTags:
+        sutra:component: identity
+        sutra:environment:
+          Ref: EnvironmentName
+        sutra:managed-by: cloudformation
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName:
+        Fn::Sub: sutra-${EnvironmentName}-web
+      UserPoolId:
+        Ref: UserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      EnableTokenRevocation: true
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - Ref: CallbackUrl
+      LogoutURLs:
+        - Ref: LogoutUrl
+      AccessTokenValidity: 15
+      IdTokenValidity: 15
+      RefreshTokenValidity: 1
+      TokenValidityUnits:
+        AccessToken: minutes
+        IdToken: minutes
+        RefreshToken: days
+      AuthSessionValidity: 3
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain:
+        Ref: DomainPrefix
+      UserPoolId:
+        Ref: UserPool
+
+Outputs:
+  UserPoolId:
+    Value:
+      Ref: UserPool
+  UserPoolClientId:
+    Value:
+      Ref: UserPoolClient
+  OidcIssuer:
+    Value:
+      Fn::Sub: https://cognito-idp.${AWS::Region}.${AWS::URLSuffix}/${UserPool}
+  AuthorizationEndpoint:
+    Value:
+      Fn::Sub: https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize
+  TokenEndpoint:
+    Value:
+      Fn::Sub: https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/oauth2/token
+  LogoutEndpoint:
+    Value:
+      Fn::Sub: https://${DomainPrefix}.auth.${AWS::Region}.amazoncognito.com/logout
