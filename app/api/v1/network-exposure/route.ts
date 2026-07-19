@@ -1,8 +1,9 @@
 import { getConnectionForOrg, getPilotStateForOrg } from "../../../../db/pilot-repository";
+import { LatencySampleRepository } from "../../../../db/latency-sample-repository";
 import { assertSessionCapability } from "../../../../lib/api-auth";
 import { buildNetworkExposure } from "../../../../lib/aws-network-exposure";
 import { buildNetworkExposureEvidence } from "../../../../lib/aws-network-exposure-inputs";
-import { buildReachabilityLatency, type LatencySample } from "../../../../lib/reachability-latency";
+import { buildReachabilityLatency } from "../../../../lib/reachability-latency";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -29,11 +30,13 @@ export async function GET(request: Request): Promise<Response> {
     const evidence = buildNetworkExposureEvidence(state.resources, { tenant: connection.customerId });
     const exposure = buildNetworkExposure(evidence);
 
-    // Latency samples come from a CloudWatch/APM collector that is not wired yet,
-    // so there are none: the overlay reports every endpoint as UNKNOWN rather than
-    // inventing timings. The shape is returned so the UI can render the honest
-    // "no samples collected" state and light up once the collector lands.
-    const latencySamples: readonly LatencySample[] = [];
+    // Endpoint latency samples ingested via POST /api/v1/latency-samples (from a
+    // CloudWatch exporter, APM agent, or synthetic monitor). Absent samples ->
+    // the overlay reports UNKNOWN rather than inventing timings.
+    const latencySamples = await new LatencySampleRepository().recentForConnection(
+      { orgId: actor.orgId, customerId: connection.customerId },
+      connectionId,
+    );
     const latency = buildReachabilityLatency(latencySamples);
 
     return jsonResponse({

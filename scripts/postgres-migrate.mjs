@@ -32,6 +32,7 @@ const migrationFiles = [
   "0016_vulnerability_waivers.sql",
   "0017_cloud_vulnerability_findings.sql",
   "0018_case_routing_rules.sql",
+  "0019_latency_samples.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
