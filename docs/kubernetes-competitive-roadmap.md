@@ -22,11 +22,16 @@ The remaining work to make these *shipping features* is INGEST (feed the engines
 | IaC misconfig scan | `iac-misconfiguration` + `iac-normalizer` | ✅ | ⬜ accept TF plan / manifests on upload | ⬜ |
 | Cloud detection (CDR) | `cloud-detection` | ✅ | ⬜ ingest CloudTrail/GuardDuty/K8s-audit | ⬜ |
 | Supply-chain verify + VEX | `supply-chain-verification` | ✅ | ◐ extends existing supply-chain ingest | ⬜ |
+| Registry inventory + tag/digest policy | `registry-inventory` | ✅ | ✅ live local `registry:2` validation | ⬜ |
 | Finding exceptions/suppression | `finding-exceptions` | ✅ | ◐ applies to existing findings | ⬜ repo + API |
 | Collection scheduling | `collection-schedule` | ✅ | n/a (pure) | ⬜ repo + API |
 | Case routing | `case-routing` | ✅ | n/a (pure) | ⬜ repo + API |
 
 Legend: ✅ done · ◐ can run over already-collected evidence · ⬜ not yet.
+
+Registry row 9 is closed only for catalog/tag/manifest inventory and deterministic
+latest/unpinned/stale policy. Image CVE scanning is not claimed by this validation and
+remains gated on a verified Trivy runtime.
 
 ## Remaining sequence
 
