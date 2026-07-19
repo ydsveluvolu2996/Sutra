@@ -41,6 +41,14 @@ interface ChangeEvent {
   readonly toSnapshotId?: string;
 }
 
+interface ChangeHints {
+  readonly hints: readonly { readonly resourceKey: string; readonly eventName: string; readonly eventSource: string; readonly eventTimeMs: number }[];
+  readonly possibleNew: readonly { readonly resourceName: string; readonly eventName: string }[];
+  readonly unmapped: readonly { readonly eventName: string; readonly count: number }[];
+  readonly unassessedCount: number;
+  readonly disclaimer: string;
+}
+
 interface Annotation {
   readonly resourceKey: string;
   readonly ownerTeam: string | null;
@@ -99,6 +107,7 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
   const [saveName, setSaveName] = useState("");
   const [changes, setChanges] = useState<ChangeEvent[] | null>(null);
   const [changesError, setChangesError] = useState<string | null>(null);
+  const [hints, setHints] = useState<ChangeHints | null>(null);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [annotationDraft, setAnnotationDraft] = useState({ resourceKey: "", ownerTeam: "", ownerEmail: "", fieldKey: "", fieldValue: "" });
   const [annotationError, setAnnotationError] = useState<string | null>(null);
@@ -137,6 +146,8 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
       try {
         const payload = await requestJson<{ changes: ChangeEvent[] }>(`/api/v1/changes?connectionId=${encodeURIComponent(connectionId)}&limit=100`);
         if (!cancelled) { setChanges(payload.changes); setChangesError(null); }
+        const hintPayload = await requestJson<{ status: string; hints: ChangeHints | null }>(`/api/v1/cmdb/change-hints?connectionId=${encodeURIComponent(connectionId)}`);
+        if (!cancelled) setHints(hintPayload.status === "ok" ? hintPayload.hints : null);
       } catch (caught) {
         if (!cancelled) { setChanges([]); setChangesError(caught instanceof Error ? caught.message : "Change history unavailable"); }
       }
@@ -303,6 +314,24 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
                 <td>{(change.changedPaths ?? []).slice(0, 6).join(", ") || "—"}</td>
               </tr>
             ))}</tbody></table>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Event-observed change hints">
+        <div className="panel-heading"><div><h2>Changed since the snapshot (event-observed)</h2><p>CloudTrail management events that likely modified resources after the published snapshot. Hints only — the CMDB projection changes exclusively through a complete collection.</p></div></div>
+        {hints === null ? <p className="panel-footnote">No event window available — hints appear once security events are collected after a published snapshot.</p> : (
+          <>
+            {hints.hints.length === 0 ? <p className="panel-footnote">No mutating events name a snapshot resource in the current window.</p> : (
+              <table><thead><tr><th>Resource</th><th>Event</th><th>Source</th><th>When</th></tr></thead>
+                <tbody>{hints.hints.slice(0, 50).map((hint, index) => (
+                  <tr key={`${hint.resourceKey}-${index}`}><td>{hint.resourceKey}</td><td>{hint.eventName}</td><td>{hint.eventSource}</td><td>{new Date(hint.eventTimeMs).toISOString()}</td></tr>
+                ))}</tbody></table>
+            )}
+            {hints.possibleNew.length > 0 ? <p className="panel-footnote">Possible new resources (not in the snapshot): {hints.possibleNew.slice(0, 8).map((entry) => `${entry.resourceName} (${entry.eventName})`).join(" · ")}</p> : null}
+            {hints.unmapped.length > 0 ? <p className="panel-footnote">Mutating events naming no resource: {hints.unmapped.slice(0, 6).map((entry) => `${entry.eventName} ×${entry.count}`).join(" · ")}</p> : null}
+            {hints.unassessedCount > 0 ? <p className="panel-footnote">{hints.unassessedCount} events had unknown mutability and were not assessed.</p> : null}
+            <p className="panel-footnote">{hints.disclaimer}</p>
+          </>
         )}
       </section>
 
