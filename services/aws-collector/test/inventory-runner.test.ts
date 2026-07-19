@@ -266,6 +266,7 @@ class FakeClientFactory implements AwsInventoryClientFactory {
       describeRouteTables: () => this.tracker.run(() => ({ $metadata: {}, RouteTables: [] })),
       describeInternetGateways: () =>
         this.tracker.run(() => ({ $metadata: {}, InternetGateways: [] })),
+      describeNetworkAcls: () => this.tracker.run(() => ({ $metadata: {}, NetworkAcls: [] })),
     };
   }
 
@@ -607,6 +608,25 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
             }
           : { $metadata: {}, InternetGateways: [] };
       },
+      describeNetworkAcls: async (input) => {
+        this.record("network-acls", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "network-acls-next",
+              NetworkAcls: [{
+                NetworkAclId: "acl-east",
+                VpcId: "vpc-east",
+                IsDefault: true,
+                Associations: [{ SubnetId: "subnet-east", NetworkAclAssociationId: "aclassoc-1" }],
+                Entries: [
+                  { RuleNumber: 100, Egress: false, Protocol: "-1", RuleAction: "allow", CidrBlock: "0.0.0.0/0" },
+                  { RuleNumber: 32767, Egress: false, Protocol: "-1", RuleAction: "deny", CidrBlock: "0.0.0.0/0" },
+                ],
+              }],
+            }
+          : { $metadata: {}, NetworkAcls: [] };
+      },
     };
   }
 
@@ -811,6 +831,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     "aws.ec2.network-interface",
     "aws.ec2.route-table",
     "aws.ec2.internet-gateway",
+    "aws.ec2.network-acl",
     "aws.elasticloadbalancingv2.load-balancer",
     "aws.elasticloadbalancingv2.listener",
     "aws.kms.key",
@@ -825,7 +846,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
-  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "load-balancers", "listeners", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
+  for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "network-acls", "load-balancers", "listeners", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
   // Route table exposing 0.0.0.0/0 -> igw is the fact aws-network-exposure needs:
@@ -850,6 +871,17 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     attachedVpcIds: ["vpc-east"],
     attachmentStates: ["attached"],
     attached: true,
+  });
+  // NACL entries (ordered rule/action/CIDR) are the subnet-boundary port-filter evidence.
+  const networkAcl = resources.find((resource) => resource.resourceType === "aws.ec2.network-acl");
+  assert.deepEqual(networkAcl?.configuration, {
+    vpcId: "vpc-east",
+    isDefault: true,
+    associatedSubnetIds: ["subnet-east"],
+    entries: [
+      { ruleNumber: 100, egress: false, protocol: "-1", ruleAction: "allow", cidr: "0.0.0.0/0" },
+      { ruleNumber: 32767, egress: false, protocol: "-1", ruleAction: "deny", cidr: "0.0.0.0/0" },
+    ],
   });
   // Listener records the served ingress port/protocol — the network-exposure fact.
   const listener = resources.find((resource) => resource.resourceType === "aws.elasticloadbalancingv2.listener");

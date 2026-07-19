@@ -112,6 +112,42 @@ test("a load balancer contributes its listeners and a public DNS entry point", (
   ]);
 });
 
+test("maps a collected NACL that denies the open port into a filtered result", () => {
+  const resources = [
+    ...publicScenario(),
+    resource("aws.ec2.network-acl", "acl-1", {
+      vpcId: "vpc-1",
+      isDefault: false,
+      associatedSubnetIds: ["subnet-1"],
+      entries: [
+        { ruleNumber: 100, egress: false, protocol: "tcp", ruleAction: "deny", cidr: "0.0.0.0/0", fromPort: 443, toPort: 443 },
+        { ruleNumber: 32767, egress: false, protocol: "-1", ruleAction: "deny", cidr: "0.0.0.0/0" },
+      ],
+    }),
+  ];
+  const evidence = buildNetworkExposureEvidence(resources);
+  assert.equal(evidence.subnets["subnet-1"]?.networkAclId, "acl-1");
+  assert.equal(evidence.networkAcls?.["acl-1"]?.length, 2);
+  const report = buildNetworkExposure(evidence);
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "not-exposed"); // 443 filtered at the subnet boundary
+  assert.deepEqual(r?.openPorts, []);
+  assert.deepEqual(r?.filteredPorts, [443]);
+});
+
+test("a collected NACL that allows the open port keeps it internet-exposed", () => {
+  const resources = [
+    ...publicScenario(),
+    resource("aws.ec2.network-acl", "acl-2", {
+      vpcId: "vpc-1", isDefault: true, associatedSubnetIds: ["subnet-1"],
+      entries: [{ ruleNumber: 100, egress: false, protocol: "-1", ruleAction: "allow", cidr: "0.0.0.0/0" }],
+    }),
+  ];
+  const report = buildNetworkExposure(buildNetworkExposureEvidence(resources));
+  assert.equal(report.resources[0]?.exposure, "internet-exposed");
+  assert.deepEqual(report.resources[0]?.openPorts, [443]);
+});
+
 test("also accepts bare (non-aws-prefixed) resource type names", () => {
   const evidence = buildNetworkExposureEvidence([
     resource("network-interface", "eni-9", { subnetId: "subnet-9", securityGroupIds: ["sg-9"] }),
