@@ -4,7 +4,7 @@ const EVENT_ID = /^notify_[a-f0-9]{48}$/u;
 const SCOPED_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/u;
 
-export type SecurityNotificationChannel = "email" | "slack" | "microsoft_teams";
+export type SecurityNotificationChannel = "email" | "slack" | "microsoft_teams" | "generic_webhook";
 export type SecurityNotificationSeverity = "critical" | "high" | "medium" | "low";
 
 export interface SecurityNotificationEvent {
@@ -39,6 +39,23 @@ export interface SecurityNotificationPayloads {
       readonly contentUrl: null;
       readonly content: Record<string, unknown>;
     }];
+  };
+  // Provider-neutral JSON envelope for a generic ticketing/CMDB webhook
+  // (Jira/ServiceNow/PagerDuty inbound automations, custom integrations).
+  // Stable, flat, and self-describing so a receiving system can map fields
+  // without Sutra-specific parsing.
+  readonly genericWebhook: {
+    readonly schema: "sutra.ticket.v1";
+    readonly source: "sutra";
+    readonly eventId: string;
+    readonly severity: SecurityNotificationSeverity;
+    readonly title: string;
+    readonly summary: string;
+    readonly clusterId: string;
+    readonly findingCount: number;
+    readonly occurredAt: string;
+    readonly evidenceSha256: string;
+    readonly reportUrl: string;
   };
   readonly payloadSha256: string;
 }
@@ -196,10 +213,24 @@ export async function buildSecurityNotificationPayloads(input: {
       },
     }],
   } as const;
+  const genericWebhook = {
+    schema: "sutra.ticket.v1" as const,
+    source: "sutra" as const,
+    eventId: event.eventId,
+    severity: event.severity,
+    title: event.title,
+    summary: event.summary,
+    clusterId: event.clusterId,
+    findingCount: event.findingCount,
+    occurredAt: event.occurredAt,
+    evidenceSha256: event.evidenceSha256,
+    reportUrl: event.reportUrl,
+  };
   const payloads = {
     email: { to, subject, text: textBody },
     slack,
     microsoftTeams,
+    genericWebhook,
   };
   return { ...payloads, payloadSha256: await sha256(canonicalJson(payloads)) };
 }

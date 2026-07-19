@@ -16,6 +16,7 @@ const MAXIMUM_RESPONSE_BYTES = 16_384;
 const MAXIMUM_SES_PAYLOAD_BYTES = 128 * 1024;
 const MAXIMUM_SLACK_PAYLOAD_BYTES = 48 * 1024;
 const MAXIMUM_TEAMS_PAYLOAD_BYTES = 64 * 1024;
+const MAXIMUM_GENERIC_PAYLOAD_BYTES = 32 * 1024;
 
 export type SecurityNotificationDeliveryStatus =
   | "delivered"
@@ -43,14 +44,16 @@ export interface ResolvedWebhookSecret {
   readonly webhookUrl: string;
   /** Exact hostname recorded when the managed secret was provisioned. */
   readonly expectedHostname: string;
-  /** Enable only when the receiving Teams workflow deduplicates this header. */
+  /** Enable only when the receiving workflow deduplicates this header. */
   readonly idempotencyHeader?: "Idempotency-Key";
 }
+
+export type WebhookNotificationChannel = "slack" | "microsoft_teams" | "generic_webhook";
 
 export interface SecurityNotificationSecretResolver {
   resolveWebhook(input: {
     readonly secretReference: string;
-    readonly channel: "slack" | "microsoft_teams";
+    readonly channel: WebhookNotificationChannel;
   }): Promise<ResolvedWebhookSecret | null>;
 }
 
@@ -114,6 +117,7 @@ export interface SecurityNotificationDestinations {
   };
   readonly slackSecretReference?: string;
   readonly microsoftTeamsSecretReference?: string;
+  readonly genericWebhookSecretReference?: string;
 }
 
 export class SecurityNotificationDeliveryError extends Error {
@@ -157,7 +161,7 @@ function providerHostname(channel: "slack" | "microsoft_teams", hostname: string
 }
 
 function webhookUrl(
-  channel: "slack" | "microsoft_teams",
+  channel: WebhookNotificationChannel,
   resolved: ResolvedWebhookSecret,
 ): URL {
   let url: URL;
@@ -166,6 +170,11 @@ function webhookUrl(
   } catch {
     return invalid("UNSAFE_DESTINATION");
   }
+  // A generic ticketing webhook has no fixed provider host, so it cannot be
+  // hostname-allowlisted like Slack/Teams. Safety instead rests on the exact
+  // expectedHostname pin recorded when the managed secret was provisioned, plus
+  // the public-address enforcement in validatedAddresses and the shared
+  // https/no-credentials/no-redirect/bounded-payload guarantees below.
   if (
     url.protocol !== "https:" ||
     url.username !== "" ||
@@ -174,7 +183,7 @@ function webhookUrl(
     (url.port !== "" && url.port !== "443") ||
     !validHostname(url.hostname) ||
     url.hostname !== resolved.expectedHostname ||
-    !providerHostname(channel, url.hostname) ||
+    (channel !== "generic_webhook" && !providerHostname(channel, url.hostname)) ||
     url.pathname.length < 2 ||
     url.pathname.length > 2_048 ||
     url.search.length > 4_096
@@ -304,7 +313,7 @@ async function validatedAddresses(
 }
 
 async function deliverWebhook(input: {
-  readonly channel: "slack" | "microsoft_teams";
+  readonly channel: WebhookNotificationChannel;
   readonly secretReference: string;
   readonly deliveryId: string;
   readonly payload: unknown;
@@ -339,7 +348,10 @@ async function deliverWebhook(input: {
     return transportFailure(input.channel, error);
   }
   const headers: Record<string, string> = { "content-type": "application/json; charset=utf-8" };
-  if (secret.idempotencyHeader === "Idempotency-Key" && input.channel === "microsoft_teams") {
+  if (
+    secret.idempotencyHeader === "Idempotency-Key" &&
+    (input.channel === "microsoft_teams" || input.channel === "generic_webhook")
+  ) {
     headers["Idempotency-Key"] = input.deliveryId;
   }
   const body = jsonBytes(input.payload, input.maximumPayloadBytes);
@@ -415,6 +427,7 @@ export async function deliverSecurityNotification(input: {
       email: input.payloads.email,
       slack: input.payloads.slack,
       microsoftTeams: input.payloads.microsoftTeams,
+      genericWebhook: input.payloads.genericWebhook,
     });
   } catch {
     return invalid("INVALID_CONFIGURATION");
@@ -451,6 +464,16 @@ export async function deliverSecurityNotification(input: {
       deliveryId: input.deliveryId,
       payload: input.payloads.microsoftTeams,
       maximumPayloadBytes: MAXIMUM_TEAMS_PAYLOAD_BYTES,
+      dependencies: input.dependencies,
+    }));
+  }
+  if (input.destinations.genericWebhookSecretReference !== undefined) {
+    deliveries.push(deliverWebhook({
+      channel: "generic_webhook",
+      secretReference: input.destinations.genericWebhookSecretReference,
+      deliveryId: input.deliveryId,
+      payload: input.payloads.genericWebhook,
+      maximumPayloadBytes: MAXIMUM_GENERIC_PAYLOAD_BYTES,
       dependencies: input.dependencies,
     }));
   }
