@@ -150,11 +150,9 @@ function AuthenticatedAppShell({
             <small>{loading ? "Checking workspace…" : connection ? `${connection.awsAccountId} · ${connection.status.replace("_", " ")}` : "No cloud account connected"}</small>
           </div>
         </div>
-        <div className="user-card">
-          <span className="user-avatar">{initials}</span>
-          <span><strong>{session.user.displayName}</strong><small>{roleLabel(session.membership.role)} · MFA verified</small></span>
-          <button aria-label="Sign out" disabled={signingOut} onClick={() => void signOut()} title="Sign out" type="button"><GlyphIcon className="user-signout-glyph" name="logout" size={14} /></button>
-        </div>
+        {/* Account identity + sign-out live in the top-right account menu; the
+            sidebar stays clean. The sign-out error still surfaces here if a
+            sign-out attempt from anywhere fails. */}
         {signOutError ? <p className="sidebar-error" role="alert">{signOutError}</p> : null}
       </aside>
       <main className="main-area">

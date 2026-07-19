@@ -254,9 +254,9 @@ export function AttackPathsWorkspace() {
         <section className="panel attack-path-workspace">
           <div className="panel-heading">
             <div><p className="eyebrow">Interactive evidence graph</p><h2>Security graph</h2></div>
-            <span className="result-count">Click an entity to inspect its cited edges; highlight a path below to trace it.</span>
+            <span className="result-count">Click an entity to inspect its findings and cited edges; search or switch to the table.</span>
           </div>
-          <SecurityGraph paths={paths} selectedPathId={selectedPathId} onSelectPath={setSelectedPathId} />
+          <SecurityGraph paths={paths} findings={kubernetes.projectionInput.findings} selectedPathId={selectedPathId} onSelectPath={setSelectedPathId} />
         </section>
         <section className="panel attack-path-workspace">
           <div className="panel-heading">

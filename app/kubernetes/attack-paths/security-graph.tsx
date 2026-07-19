@@ -3,11 +3,27 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { KubernetesAttackPath } from "../../../lib/kubernetes-attack-paths";
+import type { PilotFinding } from "../../../lib/pilot-types";
 import {
   buildSecurityGraphLayout,
   type SecurityGraphEdge,
 } from "../../../lib/kubernetes-security-graph";
 import { formatTimestamp } from "../../components/use-pilot-state";
+
+// Severity → colour and rank. A node that carries findings is badged and its
+// ring tinted by its worst finding, the way Wiz conveys risk on the node.
+const SEVERITY_COLOR: Readonly<Record<string, string>> = {
+  critical: "#e0435a", high: "#e0952a", medium: "#eab308", low: "#3f83f8",
+};
+const SEVERITY_RANK: Readonly<Record<string, number>> = { critical: 4, high: 3, medium: 2, low: 1 };
+
+function worstSeverity(findings: readonly PilotFinding[]): string | null {
+  let worst: string | null = null;
+  for (const finding of findings) {
+    if (worst === null || (SEVERITY_RANK[finding.severity] ?? 0) > (SEVERITY_RANK[worst] ?? 0)) worst = finding.severity;
+  }
+  return worst;
+}
 
 // Node colors and glyphs by evidence kind. White canvas + colored ring +
 // type icon, the readable Wiz-style treatment, over Sutra's cited edges.
@@ -60,10 +76,12 @@ function nodeLabel(label: string): string {
 
 export function SecurityGraph({
   paths,
+  findings = [],
   selectedPathId,
   onSelectPath,
 }: {
   readonly paths: readonly KubernetesAttackPath[];
+  readonly findings?: readonly PilotFinding[];
   readonly selectedPathId: string | null;
   readonly onSelectPath: (pathId: string | null) => void;
 }) {
@@ -71,6 +89,25 @@ export function SecurityGraph({
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [view, setView] = useState({ x: 24, y: 24, z: 1 });
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"graph" | "table">("graph");
+
+  // Active findings grouped by the resource they concern, so each graph node
+  // can surface the CVEs / posture findings on its own resource.
+  const findingsByResourceKey = useMemo(() => {
+    const map = new Map<string, PilotFinding[]>();
+    for (const finding of findings) {
+      if (finding.resourceKey === null || finding.status === "resolved" || finding.status === "suppressed") continue;
+      const list = map.get(finding.resourceKey);
+      if (list === undefined) map.set(finding.resourceKey, [finding]);
+      else list.push(finding);
+    }
+    return map;
+  }, [findings]);
+  const nodeFindings = useCallback(
+    (resourceKey: string | null): readonly PilotFinding[] => (resourceKey === null ? [] : findingsByResourceKey.get(resourceKey) ?? []),
+    [findingsByResourceKey],
+  );
   const containerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -120,7 +157,11 @@ export function SecurityGraph({
     return null;
   }, [hoverKey, model]);
 
-  const nodeActive = (key: string, pathIds: readonly string[]): boolean => {
+  const searchQuery = search.trim().toLocaleLowerCase("en-US");
+  const matchesSearch = (label: string, kind: string): boolean =>
+    searchQuery === "" || label.toLocaleLowerCase("en-US").includes(searchQuery) || kind.replaceAll("_", " ").includes(searchQuery);
+  const nodeActive = (key: string, label: string, kind: string, pathIds: readonly string[]): boolean => {
+    if (searchQuery !== "") return matchesSearch(label, kind);
     if (focusNodeKeys !== null) return focusNodeKeys.has(key);
     if (highlightPathIds !== null) return pathIds.some((id) => highlightPathIds.has(id));
     return true;
@@ -191,19 +232,59 @@ export function SecurityGraph({
   return (
     <div className="security-graph">
       <div className="security-graph-toolbar">
-        <span className="result-count">{layout.nodes.length} entities · {layout.edges.length} cited edges</span>
+        <div className="sg-toolbar-left">
+          <div className="sg-search">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+            <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search entities…" aria-label="Search graph entities" spellCheck={false} autoComplete="off" />
+            {search !== "" ? <button type="button" className="sg-search-clear" aria-label="Clear search" onClick={() => setSearch("")}>×</button> : null}
+          </div>
+          <span className="result-count">{layout.nodes.length} entities · {layout.edges.length} cited edges</span>
+        </div>
         <div className="security-graph-actions">
+          <div className="sg-viewtoggle" role="tablist" aria-label="Graph or table view">
+            <button type="button" role="tab" aria-selected={viewMode === "graph"} className={viewMode === "graph" ? "is-active" : ""} onClick={() => setViewMode("graph")}>Graph</button>
+            <button type="button" role="tab" aria-selected={viewMode === "table"} className={viewMode === "table" ? "is-active" : ""} onClick={() => setViewMode("table")}>Table</button>
+          </div>
           {selectedPathId !== null || selectedNodeKey !== null ? (
             <button type="button" className="button button-secondary" onClick={() => { onSelectPath(null); setSelectedNodeKey(null); }}>Clear</button>
           ) : null}
-          <button type="button" className="button button-secondary" aria-label="Zoom out" onClick={() => zoomBy(0.83)}>−</button>
-          <button type="button" className="button button-secondary" aria-label="Zoom in" onClick={() => zoomBy(1.2)}>+</button>
-          <button type="button" className="button button-secondary" onClick={resetView}>Reset</button>
+          {viewMode === "graph" ? (
+            <>
+              <button type="button" className="button button-secondary" aria-label="Zoom out" onClick={() => zoomBy(0.83)}>−</button>
+              <button type="button" className="button button-secondary" aria-label="Zoom in" onClick={() => zoomBy(1.2)}>+</button>
+              <button type="button" className="button button-secondary" onClick={resetView}>Reset</button>
+            </>
+          ) : null}
         </div>
       </div>
       {layout.truncatedNodeCount > 0 ? (
         <p className="panel-footnote">{layout.truncatedNodeCount} additional entities exceeded the graph display bound and are omitted from the drawing (never from the evidence).</p>
       ) : null}
+      {viewMode === "table" ? (
+        <div className="sg-table-wrap">
+          <table className="sg-table">
+            <thead><tr><th>Entity</th><th>Type</th><th>Findings</th><th>Paths</th><th>Connections</th></tr></thead>
+            <tbody>
+              {[...layout.nodes]
+                .filter((entry) => matchesSearch(entry.node.label, entry.node.kind))
+                .sort((a, b) => (SEVERITY_RANK[worstSeverity(nodeFindings(b.node.resourceKey)) ?? ""] ?? 0) - (SEVERITY_RANK[worstSeverity(nodeFindings(a.node.resourceKey)) ?? ""] ?? 0) || a.node.label.localeCompare(b.node.label, "en-US"))
+                .map((entry) => {
+                  const finds = nodeFindings(entry.node.resourceKey);
+                  const sev = worstSeverity(finds);
+                  return (
+                    <tr key={entry.node.key} className={selectedNodeKey === entry.node.key ? "is-selected" : ""} onClick={() => { onSelectPath(null); setSelectedNodeKey(entry.node.key); }}>
+                      <td><span className="sg-td-entity"><i style={{ background: (sev !== null ? SEVERITY_COLOR[sev] : KIND_COLOR[entry.node.kind]) ?? KIND_COLOR.other }} />{entry.node.label}</span></td>
+                      <td>{entry.node.kind.replaceAll("_", " ")}</td>
+                      <td>{finds.length > 0 ? <span className={`sg-sev-pill sg-sev-${sev}`}>{finds.length} · {sev}</span> : <span className="sg-td-none">—</span>}</td>
+                      <td>{entry.pathIds.length}</td>
+                      <td>{model.neighbors.get(entry.node.key)?.size ?? 0}</td>
+                    </tr>
+                  );
+                })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div
         className={`security-graph-canvas${dragging ? " is-dragging" : ""}`}
         ref={containerRef}
@@ -236,7 +317,10 @@ export function SecurityGraph({
               const center = model.centers.get(entry.node.key);
               if (center === undefined) return null;
               const color = KIND_COLOR[entry.node.kind] ?? KIND_COLOR.other;
-              const active = nodeActive(entry.node.key, entry.pathIds);
+              const nodeFinds = nodeFindings(entry.node.resourceKey);
+              const sev = worstSeverity(nodeFinds);
+              const ringColor = sev !== null ? SEVERITY_COLOR[sev] ?? color : color;
+              const active = nodeActive(entry.node.key, entry.node.label, entry.node.kind, entry.pathIds);
               const selected = selectedNodeKey === entry.node.key;
               return (
                 <g
@@ -261,12 +345,19 @@ export function SecurityGraph({
                     }
                   }}
                 >
-                  <circle className="sg-node-ring" r={NODE_RADIUS} style={{ stroke: color }} />
+                  <circle className="sg-node-ring" r={NODE_RADIUS} style={{ stroke: ringColor }} />
+                  {sev !== null ? <circle className="sg-node-halo" r={NODE_RADIUS + 3} style={{ stroke: ringColor }} /> : null}
                   <g className="sg-node-glyph" style={{ color }} transform="translate(-11 -11) scale(0.92)">
                     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
                       {KIND_GLYPH[entry.node.kind] ?? KIND_GLYPH.other}
                     </svg>
                   </g>
+                  {nodeFinds.length > 0 ? (
+                    <g className="sg-node-badge" transform={`translate(${NODE_RADIUS - 3} ${-NODE_RADIUS + 3})`}>
+                      <circle r="9" style={{ fill: ringColor }} />
+                      <text textAnchor="middle" dy="3.2">{nodeFinds.length > 9 ? "9+" : nodeFinds.length}</text>
+                    </g>
+                  ) : null}
                   <text className="sg-node-label" y={NODE_RADIUS + 14} textAnchor="middle">{nodeLabel(entry.node.label)}</text>
                   <text className="sg-node-kind" y={NODE_RADIUS + 26} textAnchor="middle">{entry.node.kind.replaceAll("_", " ")}</text>
                 </g>
@@ -286,6 +377,7 @@ export function SecurityGraph({
           </div>
         ) : null}
       </div>
+      )}
       {selectedNode !== null ? (
         <aside className="security-graph-detail">
           <header>
@@ -298,7 +390,32 @@ export function SecurityGraph({
               : <small>Evidence-derived boundary</small>}
           </header>
           <p className="panel-footnote">Appears in {selectedNode.pathIds.length} evidenced path{selectedNode.pathIds.length === 1 ? "" : "s"} · {model.neighbors.get(selectedNode.node.key)?.size ?? 0} direct connections.</p>
+          {(() => {
+            const finds = nodeFindings(selectedNode.node.resourceKey);
+            if (finds.length === 0) return null;
+            const sorted = [...finds].sort((a, b) => (SEVERITY_RANK[b.severity] ?? 0) - (SEVERITY_RANK[a.severity] ?? 0));
+            return (
+              <div className="sg-detail-findings">
+                <div className="sg-detail-findings-head"><strong>Findings on this entity</strong><span>{finds.length}</span></div>
+                {sorted.map((finding) => (
+                  <article key={finding.fingerprint} className="sg-finding">
+                    <div className="sg-finding-top">
+                      <span className={`sg-sev-pill sg-sev-${finding.severity}`}>{finding.severity}</span>
+                      <code>{finding.controlKey}</code>
+                    </div>
+                    <strong>{finding.title}</strong>
+                    <p>{finding.summary}</p>
+                    <div className="sg-finding-actions">
+                      <Link className="button button-secondary" href={`/findings?highlight=${encodeURIComponent(finding.fingerprint)}`}>View details →</Link>
+                      <small>Evaluated {formatTimestamp(finding.evaluatedAt)}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            );
+          })()}
           <div className="security-graph-evidence">
+            <p className="sg-evidence-label">Cited relationships</p>
             {layout.edges
               .filter((entry) => entry.edge.from === selectedNode.node.key || entry.edge.to === selectedNode.node.key)
               .map((entry, index) => (
