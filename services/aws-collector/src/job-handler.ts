@@ -83,8 +83,9 @@ export class AwsCollectorJobHandler {
       job.jobId,
     );
 
-    // A registry implementation should make this transition conditional on the
-    // connection still being pending/degraded to prevent stale verification races.
+    // A registry implementation should make this staged transition conditional
+    // on the connection still naming the verified candidate. Verification must
+    // not make the role runnable before the control plane commits it.
     await this.dependencies.registry.markOnboardingVerified(
       scope,
       job.connectionId,
@@ -100,6 +101,10 @@ export class AwsCollectorJobHandler {
       callerIdentityArn: verification.callerIdentityArn,
       missingExternalIdDenied: true,
       wrongExternalIdDenied: true,
+      trustPolicyAttested: true,
+      permissionPolicyAttested: true,
+      sessionPolicyApplied: true,
+      permissionPackVersion: verification.permissionPackVersion,
       verifiedAt: this.now().toISOString(),
     };
   }

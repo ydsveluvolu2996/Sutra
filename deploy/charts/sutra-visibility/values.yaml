@@ -1,0 +1,125 @@
+# Group configured on the customer's EKS access entry. The chart never creates
+# cloud IAM identities, credentials, tokens, workloads, webhooks or agents.
+kubernetesGroup: sutra:readers
+
+# Sutra-managed scanner. When true (the default) this chart installs and
+# configures Trivy Operator as a dependency, so vulnerability, config-audit,
+# RBAC-assessment, infra-assessment and SBOM scanning work out of the box.
+# Trivy performs the scanning; the Sutra agent only ingests the reports it
+# produces (Sutra ships no scanner engine of its own and never fabricates a
+# clean scan). Set to false to run your own Trivy Operator — the agent will
+# detect and ingest it instead.
+scanner:
+  managed: true
+
+# Let the Sutra agent import Trivy reports. On by default because the chart
+# now bundles a managed Trivy Operator (scanner.managed). If you disable the
+# managed scanner AND do not run your own Trivy, no vulnerability/SBOM/config
+# evidence is produced, and Sutra reports that honestly (absence of a scanner
+# is never presented as a clean result).
+trivyReports:
+  enabled: true
+
+# Configuration applied to the bundled Trivy Operator dependency (only when
+# scanner.managed is true). This is Sutra's recommended, data-minimizing
+# scanner profile: full vulnerability/config/RBAC/infra/SBOM/compliance
+# coverage, with exposed-secret scanning OFF by default and global
+# secret/ServiceAccount access always OFF, to honor Sutra's no-secrets boundary.
+#
+# Exposed-secret detection is a supported OPT-IN. Enable it with:
+#   --set trivy-operator.operator.exposedSecretScannerEnabled=true
+# When enabled, Trivy scans image filesystems for embedded credentials and Sutra
+# ingests only sanitized finding metadata (rule id, category, severity, title,
+# and file target). Sutra never collects or stores the matched secret VALUE:
+# the collector drops Trivy's `match` field at parse time, and the persistence
+# layer rejects any finding object that still carries it. This detection scans
+# image contents and does NOT require accessGlobalSecretsAndServiceAccount, which
+# stays false so Trivy is never granted read access to live cluster Secrets.
+trivy-operator:
+  operator:
+    scanJobsConcurrentLimit: 1
+    vulnerabilityScannerEnabled: true
+    configAuditScannerEnabled: true
+    rbacAssessmentScannerEnabled: true
+    infraAssessmentScannerEnabled: true
+    sbomGenerationEnabled: true
+    clusterComplianceEnabled: true
+    builtInTrivyServer: false
+    # Sutra never reads live cluster Secret objects. Keep this false.
+    accessGlobalSecretsAndServiceAccount: false
+    # Opt in with --set (see the note above). Metadata-only; value never stored.
+    exposedSecretScannerEnabled: false
+    metricsFindingsEnabled: true
+  trivy:
+    ignoreUnfixed: true
+    severity: "UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+  serviceMonitor:
+    enabled: false
+
+agent:
+  enabled: false
+  # Deployment (default) runs one scheduled agent per cluster and keeps state on
+  # a ReadWriteOnce PVC. DaemonSet runs one agent per node for per-node coverage
+  # (Hubble flows, node-local evidence) and uses node-local emptyDir state — the
+  # shared RWO PVC cannot be mounted by many pods. The control plane already
+  # models N agents per cluster (fleet health rolls up worst-across-nodes).
+  mode: deployment
+  image:
+    repository: ""
+    # Production installs pin an immutable sha256 image digest.
+    digest: ""
+    pullPolicy: IfNotPresent
+  controlPlane:
+    url: ""
+  cluster:
+    id: ""
+    name: ""
+  enrollment:
+    # Pre-create this Secret with only the short-lived bootstrap value. Helm
+    # never receives or renders the value.
+    existingSecret: ""
+    key: bootstrap
+  schedule:
+    intervalSeconds: 900
+  state:
+    existingClaim: ""
+    storageClassName: ""
+    size: 1Gi
+    keepOnUninstall: true
+  podAnnotations: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+  modules:
+    trivy: true
+    kyverno: true
+    falco: true
+    cilium: true
+  # Optional bounded Hubble flow-export collection. Mounts the customer's
+  # Cilium hubble export file read-only. Coverage is node-local for this
+  # single-replica agent and the flow evidence carries explicit sampling and
+  # coverage limitations; per-node coverage requires per-node enrollment.
+  hubble:
+    exportFile:
+      enabled: false
+      hostPath: /var/run/cilium/hubble/events.log
+      # Exact Hubble/Cilium version identifier, for example "1.19.5".
+      version: ""
+  # Optional in-cluster Falco signing-gateway readiness URL. When set, the
+  # agent probes /readyz without credentials and reports a falco-gateway
+  # module state in its heartbeat.
+  falcoGateway:
+    healthUrl: ""
+  networkPolicy:
+    enabled: true

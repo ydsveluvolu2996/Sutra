@@ -1,0 +1,74 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: sutra-visibility
+  labels:
+    app.kubernetes.io/name: sutra
+    app.kubernetes.io/component: visibility-access
+    app.kubernetes.io/managed-by: Helm
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - nodes
+      - pods
+      - services
+      - serviceaccounts
+      - resourcequotas
+      - limitranges
+      - persistentvolumes
+      - persistentvolumeclaims
+    verbs: [get, list]
+  - apiGroups: [apps]
+    resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+      - replicasets
+    verbs: [get, list]
+  - apiGroups: [batch]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: [get, list]
+  - apiGroups: [networking.k8s.io]
+    resources:
+      - ingresses
+      - ingressclasses
+      - networkpolicies
+    verbs: [get, list]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources:
+      - roles
+      - rolebindings
+      - clusterroles
+      - clusterrolebindings
+    verbs: [get, list]
+  - apiGroups: [policy]
+    resources:
+      - poddisruptionbudgets
+    verbs: [get, list]
+  - apiGroups: [autoscaling]
+    resources:
+      - horizontalpodautoscalers
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources:
+      - storageclasses
+      - csidrivers
+    verbs: [get, list]
+{{- if .Values.trivyReports.enabled }}
+  - apiGroups: [aquasecurity.github.io]
+    resources:
+      - vulnerabilityreports
+      - clustervulnerabilityreports
+      - configauditreports
+      - exposedsecretreports
+      - rbacassessmentreports
+      - clusterrbacassessmentreports
+      - clusterinfraassessmentreports
+      - infraassessmentreports
+      - clustercompliancereports
+      - sbomreports
+    verbs: [get, list]
+{{- end }}

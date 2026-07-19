@@ -1,0 +1,40 @@
+name: CodeQL analysis
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze JavaScript and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # GitHub Advanced Security must be enabled for private repositories before
+    # uploads can run. Keeping the job visible but skipped makes the requirement
+    # explicit without weakening the required CI gates on the current plan.
+    if: github.repository_visibility == 'public' || vars.CODEQL_ENABLED == 'true'
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@ddf5ce7296213f5548c91e2dd19df2d77d2b2d66 # v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@ddf5ce7296213f5548c91e2dd19df2d77d2b2d66 # v3
+        with:
+          category: "/language:javascript-typescript"

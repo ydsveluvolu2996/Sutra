@@ -1,0 +1,172 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadExactOperatorAndCollectorRoles",
+      "Effect": "Allow",
+      "Action": "iam:GetRole",
+      "Resource": [
+        "arn:aws:iam::738663485493:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SutraOperator_23be8f1356bf1aef",
+        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
+        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+      ]
+    },
+    {
+      "Sid": "ReadExactCollectorBoundary",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::738663485493:policy/SutraCollectorBoundary"
+    },
+    {
+      "Sid": "AttestExactCollectorRolePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies"
+      ],
+      "Resource": "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+    },
+    {
+      "Sid": "ValidateLocalCloudFormationTemplate",
+      "Effect": "Allow",
+      "Action": "cloudformation:GetTemplateSummary",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ReadExactCollectorStack",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:GetTemplate",
+        "cloudformation:ListStackResources"
+      ],
+      "Resource": "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*"
+    },
+    {
+      "Sid": "CreateReviewedCollectorChangeSet",
+      "Effect": "Allow",
+      "Action": "cloudformation:CreateChangeSet",
+      "Resource": "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestTag/sutra:stack-owner": "sutra-live-aws-preparation",
+          "aws:RequestTag/sutra:stack-purpose": "local-collector-source-role",
+          "aws:RequestTag/sutra:template-sha256": "c8bbaa5b20b33b576ad33c930a98ea51afdb67013bd263833b16c91bcfe4006d"
+        },
+        "ForAllValues:StringEquals": {
+          "aws:TagKeys": [
+            "sutra:stack-owner",
+            "sutra:stack-purpose",
+            "sutra:template-sha256"
+          ]
+        },
+        "StringLike": {
+          "cloudformation:ChangeSetName": "awscli-cloudformation-package-deploy-*"
+        },
+        "Null": {
+          "cloudformation:ImportResourceTypes": "true",
+          "cloudformation:RoleArn": "true",
+          "cloudformation:StackPolicyUrl": "true",
+          "cloudformation:TemplateUrl": "true"
+        }
+      }
+    },
+    {
+      "Sid": "ExecuteReviewedCollectorChangeSet",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ExecuteChangeSet"
+      ],
+      "Resource": [
+        "arn:aws:cloudformation:us-east-1:738663485493:changeSet/awscli-cloudformation-package-deploy-*/*",
+        "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*"
+      ]
+    },
+    {
+      "Sid": "CreateBoundaryCappedCollectorRoleViaCloudFormation",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:PutRolePermissionsBoundary"
+      ],
+      "Resource": [
+        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
+        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "iam:PermissionsBoundary": "arn:aws:iam::738663485493:policy/SutraCollectorBoundary"
+        },
+        "ForAnyValue:StringEquals": {
+          "aws:CalledVia": "cloudformation.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "MaintainExactCollectorRoleViaCloudFormation",
+      "Effect": "Allow",
+      "Action": [
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:TagRole",
+        "iam:UntagRole",
+        "iam:UpdateAssumeRolePolicy",
+        "iam:UpdateRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
+        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+      ],
+      "Condition": {
+        "ForAnyValue:StringEquals": {
+          "aws:CalledVia": "cloudformation.amazonaws.com"
+        }
+      }
+    },
+    {
+      "Sid": "AssumeExactCollectorRole",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:RoleSessionName": "sutra-local-demo"
+        }
+      }
+    },
+    {
+      "Sid": "CreateExactTemplateBucket",
+      "Effect": "Allow",
+      "Action": "s3:CreateBucket",
+      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1"
+    },
+    {
+      "Sid": "ConfigureAndRecoverExactTemplateBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketTagging",
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:PutBucketOwnershipControls",
+        "s3:PutBucketPolicy",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:PutBucketTagging",
+        "s3:PutBucketVersioning",
+        "s3:PutEncryptionConfiguration"
+      ],
+      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1"
+    },
+    {
+      "Sid": "PublishExactReviewedTemplateObject",
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/live-demo-2026-07.3/3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml"
+    }
+  ]
+}

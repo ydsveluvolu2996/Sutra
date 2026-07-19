@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Account-level GitHub Actions OIDC provider for short-lived AWS federation.
+Resources:
+  GitHubActionsOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      Tags:
+        - Key: sutra:component
+          Value: github-actions-oidc
+        - Key: sutra:managed-by
+          Value: cloudformation
+Outputs:
+  GitHubOidcProviderArn:
+    Description: Pass this ARN to the GitHub ECR release-role stack.
+    Value: !Ref GitHubActionsOidcProvider

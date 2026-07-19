@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
+import { register } from "node:module";
 import test from "node:test";
+
+register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
@@ -21,29 +24,37 @@ test("server-renders the Sutra public product site", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Sutra<\/title>/i);
-  assert.match(html, /One source of truth for every customer cloud/i);
-  assert.match(html, /Read-only permissions/i);
-  assert.match(html, /Unified AWS inventory/i);
-  assert.match(html, /Trusted-role onboarding/i);
-  assert.match(html, /View demo workspace/i);
+  assert.match(html, /Every cloud and cluster risk/i);
+  assert.match(html, /Read-only access/i);
+  assert.match(html, /Cloud security, woven together/i);
+  assert.match(html, /Runtime-informed issues/i);
+  assert.match(html, /Open live demo/i);
+  assert.match(html, /Prove every path/i);
+  assert.match(html, /Why teams choose Sutra/i);
+  assert.doesNotMatch(html, /private beta/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 
-test("renders the core product routes", async () => {
-  const routes = [
-    ["/dashboard", /MSP portfolio/i],
-    ["/customers", /Customer portfolio/i],
-    ["/cmdb", /AWS resource inventory/i],
-    ["/findings", /Security findings/i],
-    ["/controls", /Control library/i],
-    ["/onboard", /Onboard a customer account/i],
-  ];
+test("server-renders an authentication gate without leaking protected route data", async () => {
+  const routes = ["/dashboard", "/customers", "/cmdb", "/cmdb/resource?key=demo", "/changes", "/findings", "/network-exposure", "/iac-scan", "/security-events", "/cases", "/cases/routing", "/compliance", "/compliance-frameworks", "/costs", "/reports", "/controls", "/roadmap", "/onboard", "/kubernetes/fleet", "/kubernetes/attack-paths", "/kubernetes/issues", "/kubernetes/permissions", "/kubernetes/iam", "/kubernetes/trends", "/kubernetes/vulnerability-updates", "/kubernetes/vulnerability-management", "/kubernetes/drift", "/settings"];
 
-  for (const [pathname, expected] of routes) {
+  for (const pathname of routes) {
     const response = await render(pathname);
     assert.equal(response.status, 200, pathname);
-    assert.match(await response.text(), expected, pathname);
+    const html = await response.text();
+    assert.match(html, /Opening your protected workspace/i, pathname);
+    assert.doesNotMatch(html, /Your AWS pilot workspace|AWS resource inventory|Onboard one AWS account/i, pathname);
   }
+});
+
+test("server-renders the local login and MFA entry routes", async () => {
+  const login = await render("/login");
+  assert.equal(login.status, 200);
+  assert.match(await login.text(), /Checking your local workspace/i);
+
+  const mfa = await render("/mfa/setup");
+  assert.equal(mfa.status, 200);
+  assert.match(await mfa.text(), /Protecting your session/i);
 });
 
 test("removes starter-only preview infrastructure", async () => {

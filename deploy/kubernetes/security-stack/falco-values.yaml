@@ -1,0 +1,22 @@
+driver:
+  kind: modern_ebpf
+falco:
+  json_output: true
+falcosidekick:
+  enabled: true
+  webui:
+    enabled: false
+  config:
+    webhook:
+      address: http://sutra-falco-signing-gateway.sutra-falco.svc.cluster.local:8080/events
+    debug: false
+    customfields: "source:falco"
+collectors:
+  kubernetes:
+    enabled: false
+falcoctl:
+  artifact:
+    install:
+      enabled: true
+    follow:
+      enabled: false

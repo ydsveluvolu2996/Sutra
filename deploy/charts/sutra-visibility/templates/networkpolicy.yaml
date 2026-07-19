@@ -1,0 +1,25 @@
+{{- if and .Values.agent.enabled .Values.agent.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sutra-visibility-agent-outbound-only
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sutra
+      app.kubernetes.io/component: visibility-agent
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    # Kubernetes API and the Sutra HTTPS control channel. Narrow destination
+    # CIDRs through an organization-specific NetworkPolicy when available.
+    - ports:
+        - protocol: TCP
+          port: 443
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- end }}

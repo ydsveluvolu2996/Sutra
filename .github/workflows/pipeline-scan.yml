@@ -1,0 +1,80 @@
+name: Pipeline security gate
+
+# Combined CI/CD security gate: repository secret scan + dependency/filesystem
+# vulnerability scan (Trivy) + IaC misconfiguration gate, aggregated into one
+# pass/fail. Runs on every PR/push and is also reusable (workflow_call) so a
+# consumer pipeline can gate a build before promotion.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      fail-on:
+        description: "Minimum severity that fails the gate: critical | high | medium | low."
+        type: string
+        required: false
+        default: "high"
+  workflow_dispatch:
+    inputs:
+      fail-on:
+        description: "Minimum severity that fails the gate."
+        type: string
+        required: false
+        default: "high"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-scan-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Secret + dependency + IaC scan gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Trivy is placed on PATH so the pipeline gate's image/fs stage can run.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
+      - name: Trivy filesystem (dependency) scan
+        run: trivy fs --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+
+      - name: Combined pipeline security gate (secret + IaC)
+        env:
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
+        run: |
+          case "$INPUT_FAIL_ON" in
+            critical|high|medium|low) ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          node scripts/pipeline-scan.mjs --fail-on "$INPUT_FAIL_ON"

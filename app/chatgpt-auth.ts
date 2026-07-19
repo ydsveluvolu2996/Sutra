@@ -1,5 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getLocalSession } from "../db/auth-repository";
+import { sessionTokenFromRequest } from "../lib/api-auth";
 
 export type ChatGPTUser = {
   displayName: string;
@@ -7,31 +9,20 @@ export type ChatGPTUser = {
   fullName: string | null;
 };
 
-const USER_EMAIL_HEADER = "oai-authenticated-user-email";
-const USER_FULL_NAME_HEADER = "oai-authenticated-user-full-name";
-const USER_FULL_NAME_ENCODING_HEADER =
-  "oai-authenticated-user-full-name-encoding";
-const PERCENT_ENCODED_UTF8 = "percent-encoded-utf-8";
-const SIGN_IN_PATH = "/signin-with-chatgpt";
-const SIGN_OUT_PATH = "/signout-with-chatgpt";
-const CALLBACK_PATH = "/callback";
+const SIGN_IN_PATH = "/login";
+const SIGN_OUT_PATH = "/api/auth/logout";
 
 export async function getChatGPTUser(): Promise<ChatGPTUser | null> {
   const requestHeaders = await headers();
-  const email = requestHeaders.get(USER_EMAIL_HEADER);
-  if (!email) return null;
-
-  const encodedFullName = requestHeaders.get(USER_FULL_NAME_HEADER);
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get(USER_FULL_NAME_ENCODING_HEADER) === PERCENT_ENCODED_UTF8
-      ? safeDecodeURIComponent(encodedFullName)
-      : null;
+  const token = sessionTokenFromRequest(new Request("http://localhost", { headers: requestHeaders }));
+  const authenticated = token === null ? null : await getLocalSession(token);
+  if (authenticated === null) return null;
+  const { email, displayName } = authenticated.session.user;
 
   return {
-    displayName: fullName ?? email,
+    displayName,
     email,
-    fullName,
+    fullName: displayName,
   };
 }
 
@@ -70,17 +61,5 @@ function safeRelativeReturnPath(value: string): string {
 }
 
 function isReservedAuthPath(pathname: string): boolean {
-  return (
-    pathname === SIGN_IN_PATH ||
-    pathname === SIGN_OUT_PATH ||
-    pathname === CALLBACK_PATH
-  );
-}
-
-function safeDecodeURIComponent(value: string): string | null {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
+  return pathname === SIGN_IN_PATH || pathname === SIGN_OUT_PATH || pathname.startsWith("/api/auth/");
 }

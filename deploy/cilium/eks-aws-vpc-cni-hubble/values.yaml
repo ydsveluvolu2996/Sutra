@@ -1,0 +1,41 @@
+# Reviewed planning profile only. Do not apply without customer change approval.
+# Chart: oci://quay.io/cilium/charts/cilium
+# Version: 1.19.5
+cni:
+  chainingMode: aws-cni
+  exclusive: false
+enableIPv4Masquerade: false
+routingMode: native
+hubble:
+  enabled: true
+  tls:
+    enabled: true
+    auto:
+      enabled: true
+      method: helm
+  relay:
+    enabled: true
+    service:
+      type: ClusterIP
+  ui:
+    enabled: false
+  metrics:
+    enabled:
+      - drop
+      - tcp
+      - flow
+      - icmp
+  redact:
+    enabled: true
+    http:
+      urlQuery: true
+      userInfo: true
+      headers:
+        deny:
+          - Authorization
+          - Proxy-Authorization
+          - Cookie
+          - Set-Cookie
+operator:
+  replicas: 2
+rollOutCiliumPods: false

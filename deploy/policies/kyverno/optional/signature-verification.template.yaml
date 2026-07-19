@@ -1,0 +1,36 @@
+# This fail-closed template is intentionally excluded from kustomization.yaml.
+# Replace every SET_ME value, verify the key owner and image scope, then obtain
+# a recorded human approval before applying it to a customer cluster.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: sutra-verify-image-signatures
+  annotations:
+    sutra.io/template-state: requires-explicit-configuration
+spec:
+  admission: true
+  background: true
+  failurePolicy: Fail
+  validationFailureAction: Enforce
+  webhookTimeoutSeconds: 15
+  rules:
+    - name: verify-cosign-signature
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+      exclude:
+        any:
+          - resources:
+              namespaces: [kube-system, kube-public, kube-node-lease, kyverno]
+      verifyImages:
+        - imageReferences: ["SET_ME_REGISTRY/*"]
+          mutateDigest: false
+          required: true
+          verifyDigest: true
+          attestors:
+            - count: 1
+              entries:
+                - keys:
+                    publicKeys: |-
+                      SET_ME_COSIGN_PUBLIC_KEY

@@ -1,0 +1,58 @@
+# Kubernetes pod template for the Jenkins `kubernetes` agent used by
+# deploy/ci/Jenkinsfile. Each build runs in an ephemeral pod: a Node container
+# (pnpm + the gate scripts) and a Trivy container so the image/dependency stage
+# has its scanner without installing anything on the Jenkins controller.
+#
+# The pod runs as a non-root user, drops all Linux capabilities, and mounts no
+# service-account token — the gate only reads the checked-out workspace and does
+# not call the cluster API.
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app.kubernetes.io/name: sutra-ci-gate
+    app.kubernetes.io/component: jenkins-agent
+spec:
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: node
+      image: node:22-bookworm-slim
+      command: ["sleep"]
+      args: ["infinity"]
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: false
+        capabilities:
+          drop: ["ALL"]
+    - name: trivy
+      image: aquasec/trivy:0.60.0
+      command: ["sleep"]
+      args: ["infinity"]
+      env:
+        # Cache the vulnerability DB on the ephemeral workspace volume.
+        - name: TRIVY_CACHE_DIR
+          value: /home/jenkins/agent/.trivycache
+      resources:
+        requests:
+          cpu: "500m"
+          memory: 1Gi
+        limits:
+          cpu: "2"
+          memory: 2Gi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

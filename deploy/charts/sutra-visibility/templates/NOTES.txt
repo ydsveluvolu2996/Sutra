@@ -1,0 +1,46 @@
+Sutra visibility {{ .Chart.Version }} installed.
+
+{{- if .Values.scanner.managed }}
+
+Sutra-managed scanning is ON. Trivy Operator was installed and configured by this
+chart (vulnerability, config-audit, RBAC-assessment, infra-assessment and SBOM
+scanning; exposed-secret scanning is intentionally disabled). Trivy performs the
+scanning and the Sutra agent ingests its reports — no scanner install is required
+of you. First reports appear once Trivy finishes its initial scan jobs:
+  kubectl -n {{ .Release.Namespace }} get vulnerabilityreports,sbomreports -A
+To run your own Trivy instead, reinstall with --set scanner.managed=false.
+
+Exposed-secret detection is OFF by default. To opt in (Trivy scans image
+filesystems for embedded credentials; Sutra ingests only sanitized metadata and
+never stores the secret value), reinstall with:
+  --set trivy-operator.operator.exposedSecretScannerEnabled=true
+This scans image contents only; Sutra never reads live cluster Secret objects.
+{{- else }}
+
+Sutra-managed scanning is OFF (scanner.managed=false). Sutra will ingest reports
+from a Trivy Operator you run yourself; without one, no vulnerability/SBOM/config
+evidence is produced and Sutra reports that honestly (it never fabricates a clean
+scan). Set trivyReports.enabled=false as well if you run no scanner at all.
+{{- end }}
+
+{{- if .Values.agent.enabled }}
+The outbound-only agent is enabled for cluster {{ .Values.agent.cluster.id | quote }}.
+The bootstrap value is read from the existing Secret {{ .Values.agent.enrollment.existingSecret | quote }};
+Helm did not receive or render that value.
+
+Check rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deployment/sutra-visibility-agent
+  kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/component=visibility-agent
+
+Upgrade:
+  helm upgrade --install {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --reuse-values
+
+Uninstall:
+  helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if .Values.agent.state.keepOnUninstall }}
+The agent state PVC is retained by policy. Delete it separately only after the cluster is offboarded.
+{{- end }}
+{{- else }}
+The continuous agent is disabled. Only the least-privilege visibility role was installed.
+{{- end }}

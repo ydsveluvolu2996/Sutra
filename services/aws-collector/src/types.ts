@@ -6,9 +6,15 @@ import type {
 } from "@aws-sdk/client-sts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+export const CURRENT_PERMISSION_PACK_VERSION = "live-demo-2026-07.3" as const;
+export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
+export type PermissionPackVersion =
+  | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof LEGACY_PERMISSION_PACK_VERSION;
 
 export type AwsConnectionStatus =
   | "PENDING"
+  | "VERIFIED"
   | "ACTIVE"
   | "DEGRADED"
   | "DISABLED";
@@ -30,6 +36,7 @@ export interface StoredAwsConnection {
   readonly roleArn: string;
   readonly externalId: string;
   readonly status: AwsConnectionStatus;
+  readonly permissionPackVersion: PermissionPackVersion;
   readonly sessionNamePrefix?: string;
 }
 
@@ -69,6 +76,32 @@ export type CallerIdentityClientFactory = (
   credentials: AwsTemporaryCredentials,
 ) => CallerIdentityClient;
 
+export interface RoleContractClient {
+  getRole(roleName: string): Promise<{
+    readonly arn?: string;
+    readonly roleName?: string;
+    readonly path?: string;
+    readonly maxSessionDuration?: number;
+    readonly assumeRolePolicyDocument?: string;
+    readonly tags?: readonly { readonly key?: string; readonly value?: string }[];
+  }>;
+  listRolePolicies(
+    roleName: string,
+    marker?: string,
+  ): Promise<{
+    readonly policyNames: readonly string[];
+    readonly isTruncated: boolean;
+    readonly marker?: string;
+  }>;
+  getRolePolicy(roleName: string, policyName: string): Promise<{
+    readonly policyDocument?: string;
+  }>;
+}
+
+export type RoleContractClientFactory = (
+  credentials: AwsTemporaryCredentials,
+) => RoleContractClient;
+
 export interface ParsedIamRoleArn {
   readonly arn: string;
   readonly partition: AwsPartition;
@@ -99,6 +132,10 @@ export interface OnboardingTrustVerification {
   readonly roleSessionName: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
 }
 
 export interface InventoryJobRequest {
@@ -112,6 +149,91 @@ export interface OnboardingVerificationJobRequest {
 }
 
 export type InventoryCoverage = "COMPLETE" | "PARTIAL";
+
+export type InventoryCollectorCoverageStatus =
+  | "SUCCEEDED"
+  | "PARTIAL"
+  | "FAILED";
+
+/**
+ * Safe, adapter-scoped coverage. Counts describe normalized items that reached
+ * the sink and primary AWS list/describe pages that returned successfully.
+ * Raw AWS messages are deliberately excluded.
+ */
+export interface InventoryCollectorCoverage {
+  readonly collectorKey: string;
+  readonly region: string;
+  readonly status: InventoryCollectorCoverageStatus;
+  readonly itemsObserved: number;
+  readonly pagesObserved: number;
+  readonly errorCode?: string;
+  readonly message?: string;
+}
+
+export type SafeJsonPrimitive = string | number | boolean | null;
+export type SafeJsonValue =
+  | SafeJsonPrimitive
+  | readonly SafeJsonValue[]
+  | SafeJsonObject;
+
+export interface SafeJsonObject {
+  readonly [key: string]: SafeJsonValue;
+}
+
+/**
+ * Allowlisted CMDB record. Raw AWS SDK responses, unbounded/sensitive tags,
+ * environment variables, credentials, and arbitrary error messages are not
+ * valid persistence objects.
+ */
+export interface NormalizedAwsResource {
+  readonly schemaVersion: 1;
+  readonly provider: "aws";
+  readonly resourceKey: string;
+  readonly accountId: string;
+  readonly region: string;
+  readonly service: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly arn?: string;
+  /** Exact read-only AWS API provenance for this normalized record. */
+  readonly sourceApi?: string;
+  readonly observedAt: string;
+  readonly tags: Readonly<Record<string, string>>;
+  readonly configuration: SafeJsonObject;
+}
+
+export type InventoryEvidenceStatus =
+  | "ENABLED"
+  | "DISABLED"
+  | "CONFIGURED"
+  | "NOT_CONFIGURED"
+  | "OBSERVED"
+  | "ERROR";
+
+/** Security/configuration evidence with only explicitly normalized JSON data. */
+export interface NormalizedAwsEvidence {
+  readonly schemaVersion: 1;
+  readonly provider: "aws";
+  readonly evidenceKey: string;
+  readonly accountId: string;
+  readonly region: string;
+  readonly service: string;
+  readonly evidenceType: string;
+  readonly subjectId: string;
+  readonly status: InventoryEvidenceStatus;
+  readonly observedAt: string;
+  readonly data: SafeJsonObject;
+}
+
+export interface AwsInventoryBatch {
+  readonly resources: readonly NormalizedAwsResource[];
+  readonly evidence: readonly NormalizedAwsEvidence[];
+}
+
+/** Production implementations persist/upsert batches inside the tenant boundary. */
+export interface AwsInventorySink {
+  writeBatch(batch: AwsInventoryBatch): Promise<void>;
+}
 
 export interface InventoryCollectionContext {
   readonly tenantId: string;
@@ -127,6 +249,7 @@ export interface InventoryCollectionResult {
   readonly resourcesObserved: number;
   readonly findingsObserved: number;
   readonly coverage: InventoryCoverage;
+  readonly collectorCoverage: readonly InventoryCollectorCoverage[];
 }
 
 export interface InventoryRunner {
@@ -155,6 +278,10 @@ export interface OnboardingVerificationJobResult {
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
+  readonly trustPolicyAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly sessionPolicyApplied: true;
+  readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
   readonly verifiedAt: string;
 }
 
@@ -255,13 +382,16 @@ export class IdentityMismatchError extends CollectorError {
 
 export type NegativeExternalIdProbe =
   | "MISSING_EXTERNAL_ID"
-  | "WRONG_EXTERNAL_ID";
+  | "WRONG_EXTERNAL_ID"
+  | "ROLE_CONTRACT";
 
 export class UnsafeTrustPolicyError extends CollectorError {
   public constructor(public readonly probe: NegativeExternalIdProbe) {
     super(
       "TRUST_POLICY_UNSAFE",
-      "Customer role accepted an onboarding request that did not contain the registered External ID",
+      probe === "ROLE_CONTRACT"
+        ? "Customer role does not match the reviewed Sutra trust and permission contract"
+        : "Customer role accepted an onboarding request that did not contain the exact registered External ID",
     );
   }
 }
