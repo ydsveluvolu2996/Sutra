@@ -2882,3 +2882,6 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .cmdbq-changed { background: #fdf0d5; color: #b26a1c; }
 .cmdbq-removed { background: #fde3e6; color: #c62a41; }
 .cmdbq-annotation input { min-width: 110px; }
+
+/* Compliance workspace panels */
+.cmpw-controls { width: 100%; margin: 10px 0; border: 1px solid var(--line-dark); border-radius: 8px; background: #fff; color: var(--ink); font: 11px var(--font-geist-mono), monospace; padding: 9px 11px; resize: vertical; }

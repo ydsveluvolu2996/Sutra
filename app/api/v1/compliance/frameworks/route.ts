@@ -1,15 +1,11 @@
-import { getConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
-import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
+import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { listComplianceExceptions } from "../../../../../db/compliance-exception-repository";
+import { ComplianceWorkspaceRepository } from "../../../../../db/compliance-workspace-repository";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
-import { assessCompliance } from "../../../../../lib/compliance-engine";
 import { applyComplianceExceptions } from "../../../../../lib/compliance-exception-types";
 import { buildComplianceEvidencePack } from "../../../../../lib/compliance-evidence-pack";
 import { buildKubernetesComplianceReadinessReport } from "../../../../../lib/kubernetes-compliance-readiness";
-import {
-  awsCollectedControlResults,
-  kubernetesCollectedControlResults,
-} from "../../../../../lib/compliance-framework-inputs";
+import { collectComplianceInputs } from "../../../../../lib/compliance-collected";
 import {
   buildAuditExport,
   buildFrameworkReadiness,
@@ -17,7 +13,6 @@ import {
   type AuditExport,
   type ComplianceFrameworkId,
   type FrameworkReadiness,
-  type ReadinessScope,
 } from "../../../../../lib/compliance-frameworks";
 import { canonicalJson } from "../../../../../lib/canonical-json";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../../lib/pilot-server";
@@ -87,38 +82,12 @@ export async function GET(request: Request): Promise<Response> {
     );
     const isPack = format === "pack";
 
-    // AWS baseline control results (raw assessment; exceptions are a separate
-    // documented artifact and are intentionally NOT collapsed into readiness).
-    const state = await getPilotStateForOrg(actor.orgId, connectionId);
-    const assessment = assessCompliance(state);
-    const awsResults = awsCollectedControlResults(assessment);
-
-    // Kubernetes control results across every active cluster on this connection.
-    const scope = { orgId: actor.orgId, customerId: connection.customerId };
-    const repository = new KubernetesRepository();
-    const clusters = await repository.listClusters(scope);
-    const workspaces = (
-      await Promise.all(
-        clusters
-          .filter((cluster) => cluster.status === "active")
-          .map((cluster) => repository.getLatestWorkspace(scope, cluster.id)),
-      )
-    ).filter((workspace): workspace is NonNullable<typeof workspace> => workspace !== null);
-    const k8sFindings = workspaces.flatMap((workspace) => workspace.findings);
-    const k8sResults = kubernetesCollectedControlResults(k8sFindings);
-    // Latest K8s scan time/hash across clusters, for the evidence-pack provenance.
-    const k8sCollectedAt = workspaces
-      .map((workspace) => workspace.scan?.collectedAt ?? null)
-      .filter((value): value is string => value !== null)
-      .sort((left, right) => right.localeCompare(left, "en-US"))[0] ?? null;
-    const k8sScanSha256 = workspaces.find((workspace) => (workspace.scan?.collectedAt ?? null) === k8sCollectedAt)?.scan?.evidenceSha256 ?? null;
-
-    const collected = [...awsResults, ...k8sResults];
-    const readinessScope: ReadinessScope = {
-      tenantId: connection.customerId,
-      collectionId: assessment.provenance.snapshotId,
-      collectedAt: assessment.provenance.snapshotCollectedAt,
-    };
+    const inputs = await collectComplianceInputs({
+      orgId: actor.orgId,
+      customerId: connection.customerId,
+      connectionId,
+    });
+    const { collected, assessment, k8sFindings, k8sCollectedAt, k8sScanSha256, readinessScope } = inputs;
 
     if (isPack) {
       // Single auditor-grade artifact: AWS baseline (governed exceptions applied),
@@ -171,13 +140,33 @@ export async function GET(request: Request): Promise<Response> {
         frameworks,
         scope: readinessScope,
         evidence: {
-          awsControls: awsResults.length,
-          kubernetesControls: k8sResults.length,
-          clusters: clusters.filter((cluster) => cluster.status === "active").length,
+          awsControls: inputs.awsResultCount,
+          kubernetesControls: inputs.kubernetesResultCount,
+          clusters: inputs.activeClusterCount,
           snapshotCoverageState: assessment.provenance.snapshotCoverageState,
         },
       };
       const reportSha256 = await sha256Hex(canonicalJson(reportCore));
+      // Record one trend point per framework for this snapshot (idempotent);
+      // the trend series only ever reflects evaluations that actually ran.
+      const snapshotId = assessment.provenance.snapshotId;
+      const collectedAtMs = assessment.provenance.snapshotCollectedAt === null
+        ? Number.NaN
+        : Date.parse(assessment.provenance.snapshotCollectedAt);
+      if (snapshotId !== null && Number.isFinite(collectedAtMs)) {
+        const workspaceRepository = new ComplianceWorkspaceRepository();
+        const trendScope = { orgId: actor.orgId, customerId: connection.customerId };
+        for (const framework of frameworks) {
+          await workspaceRepository.recordTrendPoint(trendScope, connectionId, framework.framework.id, {
+            snapshotId,
+            collectedAtMs,
+            passCount: framework.summary.PASS,
+            failCount: framework.summary.FAIL,
+            unknownCount: framework.summary.UNKNOWN,
+            notCollectedCount: framework.summary.NOT_COLLECTED,
+          });
+        }
+      }
       return jsonResponse({ ...reportCore, reportSha256 });
     }
 

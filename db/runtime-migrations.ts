@@ -25,6 +25,7 @@ import cloudVulnerabilityFindingsSchemaSql from "../drizzle/0023_cloud_vulnerabi
 import caseRoutingRulesSchemaSql from "../drizzle/0024_case_routing_rules.sql?raw";
 import latencySamplesSchemaSql from "../drizzle/0025_latency_samples.sql?raw";
 import cmdbWorkspaceSchemaSql from "../drizzle/0026_cmdb_workspace.sql?raw";
+import complianceWorkspaceSchemaSql from "../drizzle/0027_compliance_workspace.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -67,6 +68,7 @@ const migrations = [
   { id: "0024_case_routing_rules", statements: statementsFrom(caseRoutingRulesSchemaSql) },
   { id: "0025_latency_samples", statements: statementsFrom(latencySamplesSchemaSql) },
   { id: "0026_cmdb_workspace", statements: statementsFrom(cmdbWorkspaceSchemaSql) },
+  { id: "0027_compliance_workspace", statements: statementsFrom(complianceWorkspaceSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
