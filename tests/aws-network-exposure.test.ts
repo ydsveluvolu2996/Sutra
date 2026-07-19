@@ -7,6 +7,14 @@ import {
   type SecurityGroupIngressRule,
 } from "../lib/aws-network-exposure.ts";
 
+// A public subnet whose subnet carries a Network ACL association, for the
+// NACL port-filtering cases below.
+const publicNetworkWithAcl = {
+  subnets: { "subnet-1": { routeTableId: "rtb-1", mapPublicIpOnLaunch: true, networkAclId: "acl-1" } },
+  routeTables: { "rtb-1": [{ destinationCidr: "0.0.0.0/0", gatewayId: "igw-1" }] },
+  internetGateways: ["igw-1"],
+};
+
 function evidence(over: Partial<NetworkExposureEvidence> = {}): NetworkExposureEvidence {
   return {
     resources: [],
@@ -251,6 +259,115 @@ test("summary counts and resource ordering are accurate across a mixed batch", (
 test("tenant scope is echoed from the evidence when present", () => {
   const report = buildNetworkExposure(evidence({ tenant: "acme", resources: [res("eni-1")], securityGroups: { "sg-open": [ingress(443)] }, ...publicNetwork }));
   assert.equal(report.tenant, "acme");
+});
+
+test("no collected NACL means default allow-all: SG-open ports stay open, none filtered", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-nacl-0")],
+    securityGroups: { "sg-open": [ingress(443)] },
+    ...publicNetwork,
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "internet-exposed");
+  assert.deepEqual(r?.openPorts, [443]);
+  assert.deepEqual(r?.filteredPorts, []);
+});
+
+test("a collected NACL that denies the only open port filters it -> 'not-exposed'", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-nacl-1")],
+    securityGroups: { "sg-open": [ingress(443)] },
+    ...publicNetworkWithAcl,
+    networkAcls: {
+      "acl-1": [{ ruleNumber: 100, egress: false, protocol: "tcp", ruleAction: "deny", cidr: "0.0.0.0/0", fromPort: 443, toPort: 443 }],
+    },
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "not-exposed");
+  assert.deepEqual(r?.openPorts, []);
+  assert.deepEqual(r?.filteredPorts, [443]);
+  assert.deepEqual(r?.path, []);
+  assert.ok(r?.evidenceRefs.includes("acl-1"));
+});
+
+test("a NACL allow rule keeps the port open and cites the NACL hop in the path", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-nacl-2")],
+    securityGroups: { "sg-open": [ingress(443)] },
+    ...publicNetworkWithAcl,
+    networkAcls: {
+      "acl-1": [{ ruleNumber: 100, egress: false, protocol: "tcp", ruleAction: "allow", cidr: "0.0.0.0/0", fromPort: 400, toPort: 500 }],
+    },
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "internet-exposed");
+  assert.deepEqual(r?.openPorts, [443]);
+  assert.deepEqual(r?.filteredPorts, []);
+  assert.ok(r?.path.includes("acl-1 allows 443"));
+});
+
+test("first-match-wins: an earlier allow beats a later deny for the same port", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-nacl-3", { securityGroupIds: ["sg-multi"] })],
+    securityGroups: { "sg-multi": [ingress(22), ingress(443)] },
+    ...publicNetworkWithAcl,
+    networkAcls: {
+      "acl-1": [
+        { ruleNumber: 100, egress: false, protocol: "tcp", ruleAction: "allow", cidr: "0.0.0.0/0", fromPort: 443, toPort: 443 },
+        { ruleNumber: 200, egress: false, protocol: "-1", ruleAction: "deny", cidr: "0.0.0.0/0" },
+      ],
+    },
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "internet-exposed");
+  assert.deepEqual(r?.openPorts, [443]); // 443 allowed by rule 100; 22 hits default deny via rule 200
+  assert.deepEqual(r?.filteredPorts, [22]);
+});
+
+test("a NACL deny scoped to a narrower CIDR does not filter the whole internet", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-nacl-4")],
+    securityGroups: { "sg-open": [ingress(443)] },
+    ...publicNetworkWithAcl,
+    networkAcls: {
+      "acl-1": [
+        { ruleNumber: 90, egress: false, protocol: "tcp", ruleAction: "deny", cidr: "1.2.3.0/24", fromPort: 443, toPort: 443 },
+        { ruleNumber: 100, egress: false, protocol: "-1", ruleAction: "allow", cidr: "0.0.0.0/0" },
+      ],
+    },
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "internet-exposed");
+  assert.deepEqual(r?.openPorts, [443]);
+});
+
+test("public DNS records fronting the resource are surfaced as entry points", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-dns-1")],
+    securityGroups: { "sg-open": [ingress(443)] },
+    ...publicNetwork,
+    dnsRecords: [
+      { name: "app.example.com", type: "A", public: true, targetIp: "203.0.113.10" },
+      { name: "ref.example.com", type: "ALIAS", public: true, targetRef: "eni-dns-1" },
+      { name: "internal.example.com", type: "A", public: false, targetIp: "203.0.113.10" },
+    ],
+  }));
+  const r = report.resources[0];
+  assert.deepEqual(r?.dnsNames, ["app.example.com", "ref.example.com"]);
+  assert.ok(r?.path.includes("dns:app.example.com"));
+  assert.ok(r?.path.includes("dns:ref.example.com"));
+});
+
+test("an internet-facing load balancer's DNS name fronts its target", () => {
+  const report = buildNetworkExposure(evidence({
+    resources: [res("eni-dns-2", { publicIp: undefined })],
+    securityGroups: { "sg-open": [ingress(443)] },
+    loadBalancers: [{ ref: "elb-pub", scheme: "internet-facing", listeners: [{ port: 443 }], targets: ["eni-dns-2"] }],
+    dnsRecords: [{ name: "lb.example.com", type: "ALIAS", public: true, targetRef: "elb-pub" }],
+  }));
+  const r = report.resources[0];
+  assert.equal(r?.exposure, "internet-exposed");
+  assert.deepEqual(r?.dnsNames, ["lb.example.com"]);
 });
 
 test("output is deterministic for identical input", () => {
