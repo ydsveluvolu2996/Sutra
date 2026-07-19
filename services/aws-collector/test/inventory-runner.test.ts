@@ -839,6 +839,10 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     associatedSubnetIds: ["subnet-east"],
     routesToInternetGateway: true,
     routesToNatGateway: false,
+    routes: [
+      { destination: "10.0.0.0/16", target: "local" },
+      { destination: "0.0.0.0/0", target: "igw-east" },
+    ],
     propagatingVgws: [],
   });
   const internetGateway = resources.find((resource) => resource.resourceType === "aws.ec2.internet-gateway");
