@@ -6,6 +6,7 @@ import type {
   ReadinessState,
 } from "../../lib/compliance-frameworks";
 import { formatTimestamp, usePilotState } from "../components/use-pilot-state";
+import { ComplianceWorkspacePanels } from "./workspace-panels";
 
 interface FrameworksResponse {
   readonly schemaVersion: "sutra.compliance-frameworks.v1";
@@ -141,6 +142,7 @@ export function ComplianceFrameworksBrowser() {
 
         <p className="panel-footnote">Report integrity SHA-256: <code>{data.reportSha256.slice(0, 16)}…</code>. Exports carry the full hash. Mapping is informative only and does not constitute a certification or audit opinion.</p>
       </> : null}
+      <ComplianceWorkspacePanels connectionId={connectionId} reportSha256={data?.reportSha256 ?? null} />
     </>
   );
 }

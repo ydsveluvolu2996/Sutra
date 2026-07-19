@@ -34,6 +34,7 @@ const migrationFiles = [
   "0018_case_routing_rules.sql",
   "0019_latency_samples.sql",
   "0020_cmdb_workspace.sql",
+  "0021_compliance_workspace.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
