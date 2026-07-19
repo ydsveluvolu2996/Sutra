@@ -13,15 +13,15 @@ import Link from "next/link";
 type Row = { dot?: string; k: string; em?: string; v: string; tone?: string };
 function pvRows(bar: string, rows: Row[]): string {
   return (
-    '<div class="pv"><div class="pv-bar"><i></i><i></i><i></i><span>' + bar + "</span></div><div class=\"pv-body\">" +
+    '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>' + bar + "</span></div><div class=\"lx-pv-body\">" +
     rows
       .map(
         (r) =>
-          '<div class="pv-row"><span class="k">' +
+          '<div class="lx-pv-row"><span class="k">' +
           (r.dot ? '<span class="dot" style="background:' + r.dot + '"></span>' : "") +
           r.k +
           (r.em ? " <em>" + r.em + "</em>" : "") +
-          '</span><span class="pv-badge ' + (r.tone || "") + '">' + r.v + "</span></div>"
+          '</span><span class="lx-pv-badge ' + (r.tone || "") + '">' + r.v + "</span></div>"
       )
       .join("") +
     "</div></div>"
@@ -32,23 +32,23 @@ const GDEF =
   '<defs><linearGradient id="pvg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset=".5" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>';
 
 const PV_GRAPH =
-  '<div class="pv"><div class="pv-bar"><i></i><i></i><i></i><span>security-graph · live</span></div><div class="pv-graph"><svg viewBox="0 0 460 190" preserveAspectRatio="xMidYMid meet">' +
+  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>security-graph · live</span></div><div class="lx-pv-graph"><svg viewBox="0 0 460 190" preserveAspectRatio="xMidYMid meet">' +
   GDEF +
-  '<path d="M44 132 C 110 132 118 96 168 92" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path d="M168 92 C 236 88 250 50 316 46" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path d="M168 92 C 240 96 300 118 416 120" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path d="M168 92 C 200 66 250 62 292 118" fill="none" stroke="#fb7185" stroke-width="1.4" opacity=".7"/>' +
-  '<g><circle cx="44" cy="132" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="44" y="156" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">internet</text></g>' +
-  '<g><circle cx="168" cy="92" r="13" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="168" y="118" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#f4f7ff">api-gateway</text></g>' +
-  '<g><circle cx="316" cy="46" r="11" fill="#0c1326" stroke="#22d3ee" stroke-width="1.6"/><text x="316" y="30" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">payments-sa</text></g>' +
-  '<g><circle cx="416" cy="120" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="416" y="144" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">s3://billing</text></g>' +
-  '<g><circle cx="292" cy="118" r="9" fill="#26121a" stroke="#fb7185" stroke-width="1.5"/><text x="292" y="140" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#fb7185">CVE</text></g>' +
+  '<path class="pvl" d="M44 132 C 110 132 118 96 168 92" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd2" d="M168 92 C 236 88 250 50 316 46" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd3" d="M168 92 C 240 96 300 118 416 120" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd4" d="M168 92 C 200 66 250 62 292 118" fill="none" stroke="#fb7185" stroke-width="1.4" opacity=".7"/>' +
+  '<g class="pvn nd1"><circle cx="44" cy="132" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="44" y="156" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">internet</text></g>' +
+  '<g class="pvn nd2"><circle cx="168" cy="92" r="13" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="168" y="118" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#f4f7ff">api-gateway</text></g>' +
+  '<g class="pvn nd3"><circle cx="316" cy="46" r="11" fill="#0c1326" stroke="#22d3ee" stroke-width="1.6"/><text x="316" y="30" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">payments-sa</text></g>' +
+  '<g class="pvn nd4"><circle cx="416" cy="120" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="416" y="144" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">s3://billing</text></g>' +
+  '<g class="pvn nd5"><circle cx="292" cy="118" r="9" fill="#26121a" stroke="#fb7185" stroke-width="1.5"/><text x="292" y="140" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#fb7185">CVE</text></g>' +
   "</svg></div></div>";
 
 const PV_TRENDS =
-  '<div class="pv"><div class="pv-bar"><i></i><i></i><i></i><span>posture · last 90 days</span></div><div class="pv-body pv-spark"><div class="cap-score"><b>82</b><span>▲ +6 this month</span></div><svg viewBox="0 0 300 64" preserveAspectRatio="none">' +
+  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>posture · last 90 days</span></div><div class="lx-pv-body lx-pv-spark"><div class="cap-score"><b>82</b><span>▲ +6 this month</span></div><svg viewBox="0 0 300 64" preserveAspectRatio="none">' +
   GDEF +
-  '<path d="M0 50 L30 46 L60 48 L90 40 L120 42 L150 34 L180 30 L210 32 L240 22 L270 20 L300 14 L300 64 L0 64 Z" fill="url(#pvg)" opacity=".18"/><polyline points="0,50 30,46 60,48 90,40 120,42 150,34 180,30 210,32 240,22 270,20 300,14" fill="none" stroke="url(#pvg)" stroke-width="2"/></svg></div></div>';
+  '<path class="pva" d="M0 50 L30 46 L60 48 L90 40 L120 42 L150 34 L180 30 L210 32 L240 22 L270 20 L300 14 L300 64 L0 64 Z" fill="url(#pvg)"/><polyline class="pvl" points="0,50 30,46 60,48 90,40 120,42 150,34 180,30 210,32 240,22 270,20 300,14" fill="none" stroke="url(#pvg)" stroke-width="2"/></svg></div></div>';
 
 const PV_FIX =
-  '<div class="pv"><div class="pv-bar"><i></i><i></i><i></i><span>kyverno-policy.yaml · generated</span></div><pre class="pv-code"><span class="c"># reviewed suggestion — scoped to the finding</span>\napiVersion: kyverno.io/v1\nkind: <span class="b">ClusterPolicy</span>\nmetadata:\n  name: disallow-privileged\nspec:\n  rules:\n    - name: privileged-containers\n      validate:\n        message: <span class="g">"privileged not allowed"</span>\n        pattern: { spec: { containers: [ { securityContext: { privileged: <span class="g">false</span> } } ] } }</pre></div>';
+  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>kyverno-policy.yaml · generated</span></div><pre class="lx-pv-code"><span class="c"># reviewed suggestion — scoped to the finding</span>\napiVersion: kyverno.io/v1\nkind: <span class="b">ClusterPolicy</span>\nmetadata:\n  name: disallow-privileged\nspec:\n  rules:\n    - name: privileged-containers\n      validate:\n        message: <span class="g">"privileged not allowed"</span>\n        pattern: { spec: { containers: [ { securityContext: { privileged: <span class="g">false</span> } } ] } }</pre></div>';
 
 type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string };
 const CAPS: Cap[] = [
@@ -56,7 +56,9 @@ const CAPS: Cap[] = [
   { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Not thousands of CVEs — the handful that are internet-reachable, running and exploitable, proven with observed evidence.", points: ["Toxic-combination detection", "Reachability from real network flows", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", [
     { dot: "#fb7185", k: "Internet-reachable workload", em: "running CVE-2024-3094", v: "Critical", tone: "red" },
     { dot: "#fbbf24", k: "Privileged pod reachable from ingress", em: "hostPID", v: "High", tone: "amber" },
-    { dot: "#fbbf24", k: "ServiceAccount can delete a prod S3 bucket", em: "no MFA", v: "High", tone: "amber" }]) },
+    { dot: "#fbbf24", k: "ServiceAccount can delete a prod S3 bucket", em: "no MFA", v: "High", tone: "amber" },
+    { dot: "#93c5fd", k: "Drifted workload gained a new CVE", em: "batch-runner · since last scan", v: "Medium", tone: "blue" },
+    { k: "12,988 CVEs suppressed", em: "not reachable · not running", v: "deprioritized", tone: "green" }]) },
   { code: "CIEM", label: "Effective permissions", t: "#8b5cf6", icon: '<circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/>', title: "Effective permissions", blurb: "Resolve a workload's effective RBAC and follow its IRSA or EKS Pod Identity link into AWS — can this pod delete an S3 bucket?", points: ["In-cluster RBAC solver", "IRSA + Pod Identity → AWS reach", "Flags: secrets, exec, unused SA"], pv: pvRows("effective-permissions", [
     { k: "api-gateway", em: "mounts payments-sa token", v: "IRSA", tone: "blue" },
     { k: "payments-sa → PaymentsRole", em: "assume-role", v: "aws-reach", tone: "violet" },
@@ -65,11 +67,15 @@ const CAPS: Cap[] = [
   { code: "EXPOSE", label: "Network exposure", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/>', title: "Network exposure & port filtering", blurb: "A proven internet path — gateway route, NACL port filter, load-balancer target, DNS entry point — with open vs filtered ports per interface.", points: ["Hop-by-hop reachability, each hop cited", "Open vs NACL-filtered ports", "Missing evidence → honest unknown"], pv: pvRows("network-exposure", [
     { dot: "#fb7185", k: "eni-api-gw", em: "443 open · 8080 filtered by acl-1", v: "Internet-exposed", tone: "red" },
     { dot: "#34d399", k: "eni-batch", em: "22 filtered by acl-2", v: "Not exposed", tone: "green" },
-    { dot: "#fbbf24", k: "eni-worker", em: "no route evidence", v: "Unknown", tone: "amber" }]) },
+    { dot: "#fbbf24", k: "eni-worker", em: "no route evidence", v: "Unknown", tone: "amber" },
+    { dot: "#8b5cf6", k: "api.northstar.io", em: "DNS entry point → eni-api-gw", v: "DNS", tone: "violet" },
+    { dot: "#93c5fd", k: "alb/public-web", em: "2 healthy targets · listener :443", v: "LB target", tone: "blue" }]) },
   { code: "PATCH", label: "Patch plans", t: "#f0842e", icon: '<rect x="4" y="4" width="7" height="7" rx="1.4"/><rect x="13" y="13" width="7" height="7" rx="1.4"/><path d="M11 7.5h5.5v5.5"/>', title: "Patch plans, not CVE lists", blurb: "Hundreds of CVEs collapse into the handful of version bumps that actually fix them — ranked by KEV, EPSS and reachability.", points: ["One upgrade per package + image", "KEV & EPSS-aware priority", "SLA due dates per severity"], pv: pvRows("patch-plan · ranked", [
     { k: "openssl 3.0.11 → 3.0.14", em: "fixes 4 CVEs", v: "KEV", tone: "red" },
     { k: "libxml2 2.9.1 → 2.12.0", em: "fixes 2 CVEs", v: "EPSS 0.62", tone: "amber" },
-    { k: "base image node:18 → node:20", em: "fixes 12 CVEs", v: "12 CVEs", tone: "blue" }]) },
+    { k: "base image node:18 → node:20", em: "fixes 12 CVEs", v: "12 CVEs", tone: "blue" },
+    { k: "golang.org/x/net v0.17 → v0.23", em: "fixes 3 CVEs", v: "EPSS 0.31", tone: "blue" },
+    { k: "SLA", em: "critical 7d · high 30d", v: "2 due this week", tone: "amber" }]) },
   { code: "GATE", label: "CI security gate", t: "#06b6c4", icon: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>', title: "CI security gate", blurb: "The same scanners gate every build — Jenkins, GitHub Actions or an in-cluster Job — with severity thresholds and a JUnit report the pipeline renders.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], pv: pvRows("ci-gate · fail-on high", [
     { k: "secret-scan", em: "no committed secrets", v: "pass", tone: "green" },
     { k: "iac-scan", em: "clean at fail-on high", v: "pass", tone: "green" },
@@ -79,13 +85,14 @@ const CAPS: Cap[] = [
   { code: "DRIFT", label: "Drift & new CVEs", t: "#f0842e", icon: '<path d="M8 3H4v4M4 3l6 6M16 21h4v-4M20 21l-6-6"/>', title: "Drift & new-CVE detection", blurb: "Catch a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan.", points: ["Live spec vs. admitted spec diff", "New-CVE delta between scans", "Severity-ranked, cited to the change"], pv: pvRows("drift · since last scan", [
     { dot: "#fbbf24", k: "replicas", em: "3 → 5", v: "drift", tone: "amber" },
     { dot: "#fbbf24", k: "image tag", em: ":1.4.2 → :latest", v: "drift", tone: "amber" },
-    { dot: "#fb7185", k: "batch-runner", em: "gained CVE-2024-3094", v: "new CVE", tone: "red" }]) },
+    { dot: "#fb7185", k: "batch-runner", em: "gained CVE-2024-3094", v: "new CVE", tone: "red" },
+    { dot: "#34d399", k: "api-gateway", em: "matches admitted spec · digest pinned", v: "in sync", tone: "green" }]) },
   { code: "FIX", label: "Guided remediation", t: "#06b6c4", icon: '<path d="M14.5 6.5a3.5 3.5 0 0 1-4.6 4.6L4 17l3 3 5.9-5.9a3.5 3.5 0 0 1 4.6-4.6l-2.2 2.2-2-2z"/>', title: "Guided remediation", blurb: "Generate the exact Kyverno policy or kubectl patch that fixes an issue — a reviewed suggestion, never an automatic change.", points: ["Kyverno policy or kubectl patch", "Scoped to the specific finding", "You review and apply — never auto"], pv: PV_FIX },
   { code: "RUNTIME", label: "Runtime detection", t: "#fb7185", icon: '<path d="M3 12h4l2 6 4-14 2 8h6"/>', title: "Runtime detection", blurb: "Signed, replay-resistant Falco events with Kubernetes context, human-confirmed cases and durable notification delivery.", points: ["Signed, replay-resistant events", "Full pod and workload context", "Human-confirmed cases + alerting"], pv: pvRows("runtime · falco events", [
     { dot: "#fb7185", k: "Shell spawned in container", em: "api-gateway · pod-7f9", v: "signed", tone: "red" },
     { dot: "#fbbf24", k: "Unexpected outbound connection", em: "batch-runner → 185.x", v: "case open", tone: "amber" },
     { dot: "#fb7185", k: "Sensitive file read", em: "/etc/shadow", v: "signed", tone: "red" }]) },
-  { code: "COMPLY", label: "Readiness mappings", t: "#34d399", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h6"/>', title: "Readiness mappings", blurb: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", points: ["CIS, NSA/CISA, SOC 2 mappings", "Every control cited to evidence", "Honest readiness, not a pass stamp"], pv: '<div class="pv"><div class="pv-bar"><i></i><i></i><i></i><span>readiness · cited to evidence</span></div><div class="pv-body"><div class="pv-bars"><div class="pv-barrow"><span>CIS Kubernetes</span><span class="pv-track"><span class="pv-fill" style="width:78%"></span></span><em>78%</em></div><div class="pv-barrow"><span>NSA / CISA</span><span class="pv-track"><span class="pv-fill" style="width:84%"></span></span><em>84%</em></div><div class="pv-barrow"><span>SOC 2 (CC)</span><span class="pv-track"><span class="pv-fill" style="width:71%"></span></span><em>71%</em></div></div></div></div>' },
+  { code: "COMPLY", label: "Readiness mappings", t: "#34d399", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h6"/>', title: "Readiness mappings", blurb: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", points: ["CIS, NSA/CISA, SOC 2 mappings", "Every control cited to evidence", "Honest readiness, not a pass stamp"], pv: '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>readiness · cited to evidence</span></div><div class="lx-pv-body"><div class="lx-pv-bars"><div class="lx-pv-barrow"><span>CIS Kubernetes</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:78%"></span></span><em>78%</em></div><div class="lx-pv-barrow"><span>NSA / CISA</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:84%"></span></span><em>84%</em></div><div class="lx-pv-barrow"><span>SOC 2 (CC)</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:71%"></span></span><em>71%</em></div></div></div></div>' },
 ];
 
 const MARQUEE = ["Amazon EKS", "AWS IAM & IRSA", "EKS Pod Identity", "Trivy Operator", "Falco runtime", "Kyverno admission", "Cilium · Hubble", "Amazon GuardDuty", "Security Hub", "Amazon Inspector", "SBOM & signing", "Kubernetes RBAC", "CIS Benchmarks", "KEV · EPSS", "Jenkins & GitOps gates", "Route tables & NACLs"];
@@ -142,20 +149,39 @@ function Plus() {
 }
 
 function PlatformTabs() {
-  const [tab, setTab] = useState("cloud");
-  const active = PLATFORM.find((p) => p.name === tab) ?? PLATFORM[0];
+  const [idx, setIdx] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [cycle, setCycle] = useState(0); // restarts the progress bar per slide
+  const active = PLATFORM[idx];
+
+  useEffect(() => {
+    if (paused) return;
+    const t = setInterval(() => {
+      setIdx((v) => (v + 1) % PLATFORM.length);
+      setCycle((c) => c + 1);
+    }, 5000);
+    return () => clearInterval(t);
+  }, [paused, cycle]);
+
   return (
-    <>
+    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       <div className="tabs" role="tablist">
-        {PLATFORM.map((p) => (
-          <button key={p.name} className="tab" role="tab" aria-selected={p.name === tab} onClick={() => setTab(p.name)}>
+        {PLATFORM.map((p, i) => (
+          <button
+            key={p.name}
+            className="tab"
+            role="tab"
+            aria-selected={i === idx}
+            onClick={() => { setIdx(i); setCycle((c) => c + 1); }}
+          >
             <span dangerouslySetInnerHTML={{ __html: p.icon }} />{" "}
             {p.name === "cloud" ? "Cloud" : p.name === "k8s" ? "Kubernetes" : "Identity"}
+            {i === idx && !paused ? <span className="tprog" key={cycle}><i /></span> : null}
           </button>
         ))}
       </div>
       <div className="prod">
-        <div className="panel" data-active="true" key={tab}>
+        <div className="lx-panel" data-active="true" key={`${idx}-${cycle}`}>
           <div>
             <h3>{active.h3}</h3>
             <p className="lead">{active.lead}</p>
@@ -170,7 +196,7 @@ function PlatformTabs() {
           <div className="mini" dangerouslySetInnerHTML={{ __html: active.mini }} />
         </div>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -257,10 +283,10 @@ export default function LandingZone() {
           return {
             x: Math.random() * W, y: Math.random() * H,
             size: (5 + Math.random() * 18) * DPR,
-            a: 0.16 + Math.random() * 0.5,
-            vx: (Math.random() - 0.5) * 0.08 * DPR, vy: (-0.04 - Math.random() * 0.14) * DPR,
-            tw: Math.random() * 6.28, tws: 0.008 + Math.random() * 0.02,
-            sway: (0.1 + Math.random() * 0.16) * DPR,
+            a: 0.2 + Math.random() * 0.55,
+            vx: (Math.random() - 0.5) * 0.14 * DPR, vy: (-0.08 - Math.random() * 0.26) * DPR,
+            tw: Math.random() * 6.28, tws: 0.012 + Math.random() * 0.024,
+            sway: (0.16 + Math.random() * 0.24) * DPR,
             sp: r < 0.16 ? spViolet : r < 0.42 ? spBlue : spCyan,
           };
         });
@@ -333,7 +359,7 @@ export default function LandingZone() {
       <canvas className="bg-canvas" id="lz-bg" aria-hidden="true" />
 
       <header className="head">
-        <Link className="brand" href="/" aria-label="Sutra home">
+        <Link className="lx-brand" href="/" aria-label="Sutra home">
           <span className="mark" aria-hidden="true"><i /><i /><i /></span>
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
@@ -348,7 +374,7 @@ export default function LandingZone() {
 
       <span id="top" />
       <section className="hero">
-        <div className="hero-copy">
+        <div className="lx-hero-copy">
           <span className="kicker"><i /> EKS-first CNAPP for managed service providers</span>
           <h1>See every risk.<br /><span className="accent">Prove every path.</span></h1>
           <p>Sutra correlates every cloud and cluster risk across AWS and Kubernetes into one evidence graph — exposure, workload, identity, blast radius — and surfaces the few that are provably reachable. Every finding cites the exact observation behind it.</p>
@@ -358,7 +384,7 @@ export default function LandingZone() {
           </div>
           <div className="assur"><span><b>✓</b> Read-only access, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
         </div>
-        <div className="hero-stage">
+        <div className="lx-hero-stage">
           <div className="card">
             <div className="card-bar"><i /><i /><i /><span>security-graph · live</span></div>
             <div
@@ -398,7 +424,7 @@ export default function LandingZone() {
       <div className="strip">
         <div className="wrap top">
           <p><span>Correlated across your estate.</span> AWS + EKS · identity · network · runtime · supply chain — in one evidence graph</p>
-          <div className="strip-cats"><span><strong>Cloud</strong> CMDB &amp; CSPM</span><span><strong>Kubernetes</strong> KSPM &amp; runtime</span><span><strong>Identity</strong> CIEM &amp; RBAC</span><span><strong>Supply chain</strong> SBOM &amp; signing</span></div>
+          <div className="lx-strip-cats"><span><strong>Cloud</strong> CMDB &amp; CSPM</span><span><strong>Kubernetes</strong> KSPM &amp; runtime</span><span><strong>Identity</strong> CIEM &amp; RBAC</span><span><strong>Supply chain</strong> SBOM &amp; signing</span></div>
         </div>
         <div className="marquee" aria-hidden="true">{[...MARQUEE, ...MARQUEE].map((t, i) => <span key={i}>{t}</span>)}</div>
       </div>
@@ -418,17 +444,17 @@ export default function LandingZone() {
           <div className="intro center rise"><span className="sec-kicker">Why teams choose Sutra</span><h2>Built on proof, where others ask for trust.</h2><p className="lead">Most platforms hand you a score. Sutra hands you the observation, the path, and the verdict — including the honest &ldquo;unknown&rdquo; when the evidence isn&apos;t there.</p></div>
           <div className="why rise">
             {DIFFERENTIATORS.map((d) => (
-              <article key={d.c} className="why-card"><span className="c">{d.c}</span><h3>{d.h}</h3><p>{d.p}</p><em>{d.proof}</em></article>
+              <article key={d.c} className="lx-why-card"><span className="c">{d.c}</span><h3>{d.h}</h3><p>{d.p}</p><em>{d.proof}</em></article>
             ))}
           </div>
           <div className="compare rise">
-            <div className="compare-head">The difference in practice</div>
+            <div className="lx-compare-head">The difference in practice</div>
             <div className="crow crow-head"><span>&nbsp;</span><span>Typical CNAPP</span><span className="sutra">Sutra</span></div>
             {COMPARISON.map((r) => (
               <div key={r.dim} className="crow"><span className="dim">{r.dim}</span><span className="them">{r.them}</span><span className="sutra"><b>✓</b>{r.sutra}</span></div>
             ))}
           </div>
-          <p className="compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the demo workspace.</p>
+          <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the demo workspace.</p>
         </section>
       </div>
 
@@ -441,7 +467,7 @@ export default function LandingZone() {
             <ul><li><span>01</span> Exact vendor workload-role principal</li><li><span>02</span> Unique, platform-generated ExternalId</li><li><span>03</span> Positive and negative trust validation</li><li><span>04</span> Metadata-only permission packs</li></ul>
             <Link className="btn btn-solid" href="/controls#architecture">Review the security architecture <Arrow /></Link>
           </div>
-          <div className="trust-panel rise">
+          <div className="lx-trust-panel rise">
             <div className="row"><b>role principal</b><span>arn:aws:iam::…:role/sutra-collector</span></div>
             <div className="row"><b>credential type</b><span className="ok">STS · temporary</span></div>
             <div className="row"><b>permission pack</b><span>read-only · metadata</span></div>
@@ -491,7 +517,7 @@ export default function LandingZone() {
 
       <footer className="foot">
         <div className="wrap foot-in">
-          <Link className="brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
+          <Link className="lx-brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
           <small className="c">© 2026 Sutra · EKS-first CNAPP for MSPs · demo workspace uses fictional data</small>
         </div>
       </footer>
