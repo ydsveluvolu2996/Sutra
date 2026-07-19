@@ -12,7 +12,7 @@
 //   node scripts/pipeline-scan.mjs [--terraform plan.json] [--manifests m.json]
 //     [--image repo@sha256:...] [--fail-on critical|high|medium|low]
 import { spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { realpathSync, writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -85,6 +85,11 @@ function main() {
   }
 
   const gate = combinePipelineGate(stages);
+  // Optional machine-readable handoff: write the stage results as JSON so a
+  // downstream tool (e.g. scripts/ci-gate.mjs for JUnit publishing in Jenkins)
+  // can consume them without re-running the scanners.
+  const jsonPath = arg("json");
+  if (jsonPath !== undefined) writeFileSync(jsonPath, `${JSON.stringify(gate.stages, null, 2)}\n`, "utf8");
   for (const stage of gate.stages) {
     process.stdout.write(`${stage.status.toUpperCase().padEnd(8)} ${stage.name}  ${stage.detail}\n`);
   }

@@ -1,0 +1,71 @@
+# In-cluster Sutra security gate as a Kubernetes Job. Use this for a GitOps /
+# Argo Workflows / Tekton path (or a manual `kubectl create -f`) where the gate
+# runs inside the cluster rather than on a Jenkins agent. The Job clones the
+# repo at $SUTRA_REF, runs the aggregate scanner gate, and exits non-zero when
+# the gate is breached — a failed Job is the signal a controller acts on.
+#
+# The pod is hardened: non-root, all capabilities dropped, read-only root
+# filesystem with explicit writable scratch, and no mounted service-account
+# token (the gate does not talk to the cluster API).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sutra-security-gate
+  labels:
+    app.kubernetes.io/name: sutra-ci-gate
+    app.kubernetes.io/component: in-cluster-job
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: sutra-ci-gate
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gate
+          image: node:22-bookworm-slim
+          workingDir: /workspace
+          env:
+            - name: SUTRA_REPO
+              value: "https://github.com/your-org/sutra.git"
+            - name: SUTRA_REF
+              value: "main"
+            - name: FAIL_ON
+              value: "high"
+          command: ["/bin/sh", "-euc"]
+          args:
+            - |
+              apt-get update >/dev/null && apt-get install -y --no-install-recommends git >/dev/null
+              git clone --depth 1 --branch "$SUTRA_REF" "$SUTRA_REPO" repo
+              cd repo
+              corepack enable
+              pnpm install --frozen-lockfile
+              node scripts/pipeline-scan.mjs --fail-on "$FAIL_ON" --json /workspace/gate-stages.json
+              node scripts/ci-gate.mjs --stages /workspace/gate-stages.json --fail-on "$FAIL_ON" --junit /workspace/gate-report.xml
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}
