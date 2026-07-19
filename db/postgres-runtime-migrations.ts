@@ -22,6 +22,7 @@ import postgresCmdbWorkspaceSql from "../postgres/migrations/0020_cmdb_workspace
 import postgresComplianceWorkspaceSql from "../postgres/migrations/0021_compliance_workspace.sql?raw";
 import postgresFinopsWorkspaceSql from "../postgres/migrations/0022_finops_workspace.sql?raw";
 import postgresPublicApiSql from "../postgres/migrations/0023_public_api.sql?raw";
+import postgresItsmConnectorsSql from "../postgres/migrations/0024_itsm_connectors.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -48,6 +49,7 @@ const migrations = [
   { id: "0021_compliance_workspace", source: postgresComplianceWorkspaceSql },
   { id: "0022_finops_workspace", source: postgresFinopsWorkspaceSql },
   { id: "0023_public_api", source: postgresPublicApiSql },
+  { id: "0024_itsm_connectors", source: postgresItsmConnectorsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
