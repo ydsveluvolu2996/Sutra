@@ -2861,3 +2861,24 @@ button.orbit-node { font: inherit; cursor: pointer; }
 /* --- lz: keep the explorer panel in view while browsing the tall 18-item list --- */
 .lz .ex-panel { position: sticky; top: 82px; align-self: start; }
 @media (max-width: 940px) { .lz .ex-panel { position: static; } }
+
+/* CMDB workspace panels (query builder, change history, annotations) */
+.cmdbq-rows { display: grid; gap: 9px; margin-bottom: 13px; }
+.cmdbq-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cmdbq-row select, .cmdbq-row input, .cmdbq-actions select, .cmdbq-actions input { border: 1px solid var(--line-dark); border-radius: 8px; background: #fff; color: var(--ink); font-size: 11px; padding: 7px 9px; min-width: 120px; }
+.cmdbq-row input { flex: 1 1 140px; }
+.cmdbq-novalue { color: var(--ink-faint); padding: 0 8px; }
+.cmdbq-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cmdbq-error { margin: 10px 0 0; color: #bc3d49; font-size: 11px; }
+.cmdbq-summary { margin: 12px 0 8px; color: var(--ink-soft); font-size: 11px; }
+.cmdbq-results table, .panel table { width: 100%; border-collapse: collapse; }
+.cmdbq-results th, .cmdbq-results td { text-align: left; padding: 7px 9px; border-top: 1px solid var(--line); font-size: 11.5px; }
+.cmdbq-saved { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.cmdbq-saved h3 { margin: 0 0 8px; font-size: 12px; }
+.cmdbq-saved-row { display: flex; gap: 8px; align-items: center; padding: 5px 0; font-size: 12px; }
+.cmdbq-saved-row span { flex: 1; }
+.cmdbq-chip { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 10px; font-weight: 700; }
+.cmdbq-added { background: #ddf4e6; color: #1f9d63; }
+.cmdbq-changed { background: #fdf0d5; color: #b26a1c; }
+.cmdbq-removed { background: #fde3e6; color: #c62a41; }
+.cmdbq-annotation input { min-width: 110px; }
