@@ -91,7 +91,7 @@ export default function MfaSetupPage() {
       <section className="auth-brand-panel mfa-brand-panel">
         <Link className="auth-brand" href="/" aria-label="Sutra home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud operations</small></span>
+          <span><strong>Sutra</strong><small>Cloud security</small></span>
         </Link>
         <div className="auth-brand-copy">
           <span className="auth-eyebrow">Required protection</span>

@@ -133,7 +133,34 @@ export default function Home() {
       {error || actionError ? <div className="page-alert page-alert-error" role="alert"><strong>Workspace needs attention</strong><span>{actionError ?? error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading the pilot workspace…</div> : null}
 
-      {!loading && !connection ? <section className="panel empty-workspace dashboard-empty"><span className="empty-workspace-icon">AWS</span><h2>Start with one customer account</h2><p>Sutra will validate a customer-owned IAM role, collect selected AWS metadata, build the asset graph, and evaluate deterministic posture checks.</p><a className="button button-primary" href="/onboard">Start secure onboarding</a></section> : null}
+      {!loading && !connection ? (
+        <section className="panel dbe" aria-label="Connect your first customer account">
+          <div className="dbe-copy">
+            <span className="dbe-kicker">Get started</span>
+            <h2>Connect your first customer account</h2>
+            <p>Sutra validates a customer-owned IAM role, collects selected AWS metadata with temporary STS credentials, builds the asset graph, and evaluates deterministic posture checks — read-only from the first minute.</p>
+            <ol className="dbe-steps">
+              <li><span>01</span><div><strong>Create the customer workspace</strong><em>Name the customer and choose a collector pack</em></div></li>
+              <li><span>02</span><div><strong>Deploy the CloudFormation role</strong><em>Customer-owned, read-only, unique ExternalId</em></div></li>
+              <li><span>03</span><div><strong>Run the first collection</strong><em>Assets, relationships and findings appear right here</em></div></li>
+            </ol>
+            <div className="dbe-actions">
+              <a className="button button-primary" href="/onboard">Start secure onboarding</a>
+              <a className="button button-secondary" href="/controls#architecture">Review the trust model</a>
+            </div>
+          </div>
+          <div className="dbe-preview" aria-hidden="true">
+            <div className="dbe-preview-bar"><i /><i /><i /><span>after your first collection</span></div>
+            <div className="dbe-tiles">
+              <div className="dbe-tile"><small>Open issues</small><b>3</b><em>1 critical · reachable</em></div>
+              <div className="dbe-tile"><small>Internet-exposed</small><b>1</b><em>of 208 resources</em></div>
+              <div className="dbe-tile"><small>Posture score</small><b>82</b><em>▲ +6 this month</em></div>
+              <div className="dbe-tile"><small>Coverage</small><b>22</b><em>collectors per region</em></div>
+            </div>
+            <div className="dbe-note">Preview — populated by your customer&apos;s real evidence</div>
+          </div>
+        </section>
+      ) : null}
 
       {connection ? (
         <>
