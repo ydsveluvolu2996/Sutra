@@ -5,7 +5,7 @@ ENV COREPACK_HOME=/opt/corepack \
     PATH=/opt/pnpm:$PATH
 
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
+RUN corepack enable && corepack prepare pnpm@11.13.1 --activate
 
 FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
