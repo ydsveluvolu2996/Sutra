@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 /* ================================================================== *
@@ -50,9 +50,9 @@ const PV_TRENDS =
 const PV_FIX =
   '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>kyverno-policy.yaml · generated</span></div><pre class="lx-pv-code"><span class="c"># reviewed suggestion — scoped to the finding</span>\napiVersion: kyverno.io/v1\nkind: <span class="b">ClusterPolicy</span>\nmetadata:\n  name: disallow-privileged\nspec:\n  rules:\n    - name: privileged-containers\n      validate:\n        message: <span class="g">"privileged not allowed"</span>\n        pattern: { spec: { containers: [ { securityContext: { privileged: <span class="g">false</span> } } ] } }</pre></div>';
 
-type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string };
+type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string; g?: string };
 const CAPS: Cap[] = [
-  { code: "GRAPH", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — every edge a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], pv: PV_GRAPH },
+  { code: "GRAPH", g: "See & prioritize", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — every edge a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], pv: PV_GRAPH },
   { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Not thousands of CVEs — the handful that are internet-reachable, running and exploitable, proven with observed evidence.", points: ["Toxic-combination detection", "Reachability from real network flows", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", [
     { dot: "#fb7185", k: "Internet-reachable workload", em: "running CVE-2024-3094", v: "Critical", tone: "red" },
     { dot: "#fbbf24", k: "Privileged pod reachable from ingress", em: "hostPID", v: "High", tone: "amber" },
@@ -76,7 +76,7 @@ const CAPS: Cap[] = [
     { k: "base image node:18 → node:20", em: "fixes 12 CVEs", v: "12 CVEs", tone: "blue" },
     { k: "golang.org/x/net v0.17 → v0.23", em: "fixes 3 CVEs", v: "EPSS 0.31", tone: "blue" },
     { k: "SLA", em: "critical 7d · high 30d", v: "2 due this week", tone: "amber" }]) },
-  { code: "GATE", label: "CI security gate", t: "#06b6c4", icon: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>', title: "CI security gate", blurb: "The same scanners gate every build — Jenkins, GitHub Actions or an in-cluster Job — with severity thresholds and a JUnit report the pipeline renders.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], pv: pvRows("ci-gate · fail-on high", [
+  { code: "GATE", g: "Ship & operate", label: "CI security gate", t: "#06b6c4", icon: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>', title: "CI security gate", blurb: "The same scanners gate every build — Jenkins, GitHub Actions or an in-cluster Job — with severity thresholds and a JUnit report the pipeline renders.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], pv: pvRows("ci-gate · fail-on high", [
     { k: "secret-scan", em: "no committed secrets", v: "pass", tone: "green" },
     { k: "iac-scan", em: "clean at fail-on high", v: "pass", tone: "green" },
     { k: "image-vulns", em: "1 critical · CVE-2024-3094", v: "fail", tone: "red" },
@@ -93,15 +93,43 @@ const CAPS: Cap[] = [
     { dot: "#fbbf24", k: "Unexpected outbound connection", em: "batch-runner → 185.x", v: "case open", tone: "amber" },
     { dot: "#fb7185", k: "Sensitive file read", em: "/etc/shadow", v: "signed", tone: "red" }]) },
   { code: "COMPLY", label: "Readiness mappings", t: "#34d399", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h6"/>', title: "Readiness mappings", blurb: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", points: ["CIS, NSA/CISA, SOC 2 mappings", "Every control cited to evidence", "Honest readiness, not a pass stamp"], pv: '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>readiness · cited to evidence</span></div><div class="lx-pv-body"><div class="lx-pv-bars"><div class="lx-pv-barrow"><span>CIS Kubernetes</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:78%"></span></span><em>78%</em></div><div class="lx-pv-barrow"><span>NSA / CISA</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:84%"></span></span><em>84%</em></div><div class="lx-pv-barrow"><span>SOC 2 (CC)</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:71%"></span></span><em>71%</em></div></div></div></div>' },
+  { code: "VULN", g: "Manage & prove", label: "Vulnerability management", t: "#fb7185", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5h.01"/><path d="M5.5 5.5 3 3M18.5 5.5 21 3M5.5 18.5 3 21M18.5 18.5 21 21"/>', title: "Vulnerability management, unified", blurb: "One queue for cluster and cloud CVEs — enriched from a local EPSS + KEV mirror (~349k CVEs), AWS Inspector findings in the same view, with SLA tracking and a waiver workflow.", points: ["EPSS + KEV mirror, refreshed locally", "AWS Inspector in the same queue", "Waivers with owner, reason & expiry"], pv: pvRows("vuln-queue · unified", [
+    { dot: "#fb7185", k: "CVE-2024-3094 · xz-utils", em: "KEV · reachable · running", v: "act now", tone: "red" },
+    { dot: "#fbbf24", k: "CVE-2023-44487 · http/2", em: "EPSS 0.71 · Inspector", v: "high", tone: "amber" },
+    { k: "CVE-2022-40897 · setuptools", em: "waived · expires 2026-09-01", v: "waived", tone: "blue" },
+    { k: "349,204 CVEs mirrored", em: "EPSS + KEV · nightly", v: "local DB", tone: "green" }]) },
+  { code: "SUPPLY", label: "Supply-chain trust", t: "#8b5cf6", icon: '<path d="M7 8a4 4 0 1 1 4 4H8a4 4 0 0 1-1-8z"/><path d="M17 16a4 4 0 1 1-4-4h3a4 4 0 0 1 1 8z"/>', title: "Supply-chain verification", blurb: "Cosign signatures, SLSA provenance and VEX statements verified per image — plus SBOM diffing between builds so a new dependency never slips in silently.", points: ["Cosign signature verification", "SLSA provenance & VEX statements", "SBOM diff between releases"], pv: pvRows("supply-chain · per image", [
+    { dot: "#34d399", k: "api-gateway:1.4.2", em: "cosign verified · SLSA L2", v: "trusted", tone: "green" },
+    { dot: "#fb7185", k: "batch-runner:latest", em: "unsigned image", v: "untrusted", tone: "red" },
+    { k: "SBOM diff 1.4.1 → 1.4.2", em: "+2 deps · 1 flagged", v: "review", tone: "amber" },
+    { k: "CVE-2024-3094", em: "VEX: not_affected (vendor)", v: "VEX", tone: "violet" }]) },
+  { code: "IAC", label: "IaC & admission", t: "#f0842e", icon: '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/><path d="m10 9-2 3 2 3M14 9l2 3-2 3"/>', title: "IaC & admission misconfiguration", blurb: "The same policy set scans Terraform and Kubernetes manifests in CI and enforces at admission with Kyverno — one source of truth from commit to cluster.", points: ["Terraform + manifest scanning", "Kyverno admission enforcement", "Same policies in CI and cluster"], pv: pvRows("iac-scan · fail-on high", [
+    { dot: "#fb7185", k: "aws_s3_bucket.exports", em: "public-read ACL", v: "fail", tone: "red" },
+    { dot: "#fbbf24", k: "Deployment/batch-runner", em: "privileged: true", v: "warn", tone: "amber" },
+    { dot: "#34d399", k: "admission · disallow-privileged", em: "blocked at deploy", v: "enforced", tone: "green" }]) },
+  { code: "NETPOL", label: "NetworkPolicy generator", t: "#22d3ee", icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/>', title: "Least-privilege NetworkPolicies", blurb: "Generate NetworkPolicies from observed Hubble flows — allow exactly what the workload actually talks to, deny the rest, and review before applying.", points: ["Built from observed flows", "Default-deny with explicit allows", "Reviewed before apply — never auto"], pv: pvRows("networkpolicy · generated", [
+    { dot: "#34d399", k: "allow api-gateway → payments :8443", em: "12,405 flows observed", v: "allow", tone: "green" },
+    { dot: "#34d399", k: "allow api-gateway → dns :53", em: "kube-dns", v: "allow", tone: "green" },
+    { dot: "#fb7185", k: "everything else", em: "default", v: "deny", tone: "red" },
+    { k: "policy.yaml", em: "ready for review", v: "generated", tone: "blue" }]) },
+  { code: "TENANCY", label: "MSP multi-tenancy", t: "#34d399", icon: '<circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.4a3.2 3.2 0 0 1 0 6.1M20.5 20a5.6 5.6 0 0 0-4.2-5.4"/>', title: "MSP multi-tenancy", blurb: "Portfolio roll-up for your team; every customer user sees only their explicitly granted workspaces, accounts, resources and findings — enforced at every layer.", points: ["Cross-customer portfolio view", "Per-customer scoped workspaces", "Isolation enforced at every query"], pv: pvRows("tenancy · scoped access", [
+    { dot: "#22d3ee", k: "MSP operator", em: "sees all customers", v: "portfolio", tone: "blue" },
+    { dot: "#8b5cf6", k: "northstar-admin", em: "Northstar workspace only", v: "scoped", tone: "violet" },
+    { dot: "#8b5cf6", k: "bluepeak-viewer", em: "read-only · Bluepeak", v: "scoped", tone: "violet" },
+    { k: "cross-tenant access attempts", em: "denied + audited", v: "0 allowed", tone: "green" }]) },
+  { code: "ALERTS", label: "Ticketing & alerting", t: "#06b6c4", icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', title: "Ticketing & alerting", blurb: "Findings route to the tools you already run — generic webhooks for Jira or ServiceNow, Slack notifications, with durable delivery and human-confirmed cases.", points: ["Generic webhook (Jira / ServiceNow)", "Durable, retried delivery", "Human-confirmed case workflow"], pv: pvRows("notifications · delivery", [
+    { dot: "#34d399", k: "Critical issue → Jira SEC-142", em: "webhook · 201 created", v: "delivered", tone: "green" },
+    { dot: "#34d399", k: "Runtime case → Slack #sec-ops", em: "signed event", v: "delivered", tone: "green" },
+    { dot: "#fbbf24", k: "ServiceNow INC0091", em: "retry 2/5 · backoff", v: "retrying", tone: "amber" }]) },
 ];
 
 const MARQUEE = ["Amazon EKS", "AWS IAM & IRSA", "EKS Pod Identity", "Trivy Operator", "Falco runtime", "Kyverno admission", "Cilium · Hubble", "Amazon GuardDuty", "Security Hub", "Amazon Inspector", "SBOM & signing", "Kubernetes RBAC", "CIS Benchmarks", "KEV · EPSS", "Jenkins & GitOps gates", "Route tables & NACLs"];
 
-type Panel = { name: string; icon: string; h3: string; lead: string; points: string[]; mini: string };
+type Panel = { name: string; icon: string; h3: string; lead: string; points: string[]; mini: string; chips: string[] };
 const PLATFORM: Panel[] = [
-  { name: "cloud", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>', h3: "Cloud CMDB & reachability", lead: "Twenty-two collectors per region build a normalized asset graph, then trace which resources are provably internet-reachable — gateway route, NACL port filter, load-balancer target, DNS entry point.", points: ["Open vs NACL-filtered ports, per resource", "Every hop cited; unknowns disclosed, never guessed"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M42 176 C 110 176 122 118 192 116 M192 116 C 262 114 282 64 352 62" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="42" cy="176" r="12"/><text x="42" y="200" text-anchor="middle">igw</text></g><g class="gn" style="opacity:1"><circle cx="192" cy="116" r="13"/><text x="192" y="140" text-anchor="middle" fill="#f4f7ff">subnet</text></g><g class="gn acc" style="opacity:1"><circle cx="352" cy="62" r="12"/><text x="352" y="86" text-anchor="middle">sg :443</text></g></svg>' },
-  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "KSPM over admitted specs, workload & image drift, SBOM findings and signed Falco runtime events — correlated onto the same workloads, not a separate console.", points: ["Live spec vs admitted-spec drift", "Runtime-informed prioritization (KEV · EPSS · reachable)"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">drift</text></g></svg>' },
-  { name: "id", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/></svg>', h3: "Cross-plane effective permissions", lead: "Kubernetes RBAC unioned with IRSA and EKS Pod Identity into one answer: what can this pod actually do — in the cluster and in the AWS account?", points: ["RBAC ∪ IRSA ∪ Pod Identity → AWS reach", "Unused & default-ServiceAccount flags"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M68 116 H 184 M216 116 H 332" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="55" cy="116" r="13"/><text x="55" y="140" text-anchor="middle">pod</text></g><g class="gn acc" style="opacity:1"><circle cx="200" cy="116" r="13"/><text x="200" y="140" text-anchor="middle">SA</text></g><g class="gn" style="opacity:1"><circle cx="345" cy="116" r="13"/><text x="345" y="140" text-anchor="middle">IAM</text></g></svg>' },
+  { name: "cloud", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>', h3: "Cloud CMDB & reachability", lead: "Twenty-two collectors per region build a normalized asset graph, then trace which resources are provably internet-reachable — gateway route, NACL port filter, load-balancer target, DNS entry point.", points: ["Open vs NACL-filtered ports, per resource", "Every hop cited; unknowns disclosed, never guessed"], chips: ["CSPM & CMDB", "Route tables · IGW · NACLs", "ELB target membership", "DNS entry points"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M42 176 C 110 176 122 118 192 116 M192 116 C 262 114 282 64 352 62" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="42" cy="176" r="12"/><text x="42" y="200" text-anchor="middle">igw</text></g><g class="gn" style="opacity:1"><circle cx="192" cy="116" r="13"/><text x="192" y="140" text-anchor="middle" fill="#f4f7ff">subnet</text></g><g class="gn acc" style="opacity:1"><circle cx="352" cy="62" r="12"/><text x="352" y="86" text-anchor="middle">sg :443</text></g></svg>' },
+  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "KSPM over admitted specs, workload & image drift, SBOM findings and signed Falco runtime events — correlated onto the same workloads, not a separate console.", points: ["Live spec vs admitted-spec drift", "Runtime-informed prioritization (KEV · EPSS · reachable)"], chips: ["KSPM over admitted specs", "Workload & image drift", "SBOM & new-CVE delta", "Signed Falco runtime"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">drift</text></g></svg>' },
+  { name: "id", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/></svg>', h3: "Cross-plane effective permissions", lead: "Kubernetes RBAC unioned with IRSA and EKS Pod Identity into one answer: what can this pod actually do — in the cluster and in the AWS account?", points: ["RBAC ∪ IRSA ∪ Pod Identity → AWS reach", "Unused & default-ServiceAccount flags"], chips: ["In-cluster RBAC solver", "IRSA & EKS Pod Identity", "AWS-reach verdicts", "Unused-SA flags"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M68 116 H 184 M216 116 H 332" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="55" cy="116" r="13"/><text x="55" y="140" text-anchor="middle">pod</text></g><g class="gn acc" style="opacity:1"><circle cx="200" cy="116" r="13"/><text x="200" y="140" text-anchor="middle">SA</text></g><g class="gn" style="opacity:1"><circle cx="345" cy="116" r="13"/><text x="345" y="140" text-anchor="middle">IAM</text></g></svg>' },
 ];
 
 const COMPARISON = [
@@ -148,56 +176,115 @@ function Plus() {
   );
 }
 
-function PlatformTabs() {
-  const [idx, setIdx] = useState(0);
-  const [paused, setPaused] = useState(false);
-  const [cycle, setCycle] = useState(0); // restarts the progress bar per slide
-  const active = PLATFORM[idx];
-
+/* Scroll-pinned suite wheel (Prisma-style): the donut stays fixed while the
+ * right column scrolls; each story block lights its segment. */
+function SuiteWheel() {
+  const [on, setOn] = useState(0);
+  const blocksRef = useRef<Array<HTMLDivElement | null>>([]);
   useEffect(() => {
-    if (paused) return;
-    const t = setInterval(() => {
-      setIdx((v) => (v + 1) % PLATFORM.length);
-      setCycle((c) => c + 1);
-    }, 5000);
-    return () => clearInterval(t);
-  }, [paused, cycle]);
-
+    const io = new IntersectionObserver(
+      (es) => es.forEach((e) => { if (e.isIntersecting) setOn(Number((e.target as HTMLElement).dataset.i)); }),
+      { rootMargin: "-40% 0px -40% 0px" }
+    );
+    blocksRef.current.forEach((b) => b && io.observe(b));
+    return () => io.disconnect();
+  }, []);
+  const segs = [
+    { d: "M220.5 60.4 A150 150 0 0 1 344.8 275.8", label: "CLOUD", lx: 370, ly: 118 },
+    { d: "M334.3 293.9 A150 150 0 0 1 85.7 293.9", label: "KUBERNETES", lx: 210, ly: 412 },
+    { d: "M75.2 275.8 A150 150 0 0 1 199.5 60.4", label: "IDENTITY", lx: 50, ly: 118 },
+  ];
+  const go = (i: number) => blocksRef.current[i]?.scrollIntoView({ behavior: "smooth", block: "center" });
   return (
-    <div onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
-      <div className="tabs" role="tablist">
-        {PLATFORM.map((p, i) => (
-          <button
-            key={p.name}
-            className="tab"
-            role="tab"
-            aria-selected={i === idx}
-            onClick={() => { setIdx(i); setCycle((c) => c + 1); }}
-          >
-            <span dangerouslySetInnerHTML={{ __html: p.icon }} />{" "}
-            {p.name === "cloud" ? "Cloud" : p.name === "k8s" ? "Kubernetes" : "Identity"}
-            {i === idx && !paused ? <span className="tprog" key={cycle}><i /></span> : null}
-          </button>
-        ))}
+    <div className="wheel-wrap">
+      <div className="wheel-pin">
+        <svg className="wheel" viewBox="0 0 420 440" aria-hidden="true">
+          <defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient></defs>
+          {segs.map((s, i) => <path key={s.label} className="wseg" d={s.d} data-on={i === on} onClick={() => go(i)} />)}
+          {segs.map((s, i) => <text key={s.label} className="wlab" x={s.lx} y={s.ly} textAnchor="middle" data-on={i === on}>{s.label}</text>)}
+          <circle className="wcore" cx={210} cy={210} r={86} />
+          <text className="wcore-t" x={210} y={205} textAnchor="middle">Sutra</text>
+          <text className="wcore-s" x={210} y={228} textAnchor="middle">ONE EVIDENCE GRAPH</text>
+        </svg>
       </div>
-      <div className="prod">
-        <div className="lx-panel" data-active="true" key={`${idx}-${cycle}`}>
-          <div>
-            <h3>{active.h3}</h3>
-            <p className="lead">{active.lead}</p>
-            <ul>
-              {active.points.map((pt) => (
-                <li key={pt}>
-                  <Check s={16} /> {pt}
-                </li>
-              ))}
-            </ul>
+      <div>
+        {PLATFORM.map((p, i) => (
+          <div key={p.name} className="wblock" data-on={i === on} data-i={i} ref={(el) => { blocksRef.current[i] = el; }}>
+            <span className="sec-kicker">{p.name === "cloud" ? "Cloud" : p.name === "k8s" ? "Kubernetes" : "Identity"}</span>
+            <h3>{p.h3}</h3>
+            <p className="lead">{p.lead}</p>
+            <div className="wchips">{p.chips.map((c) => <span key={c} className="wchip"><Check s={14} /> {c}</span>)}</div>
+            <div className="mini" style={{ maxWidth: 560 }} dangerouslySetInnerHTML={{ __html: p.mini }} />
           </div>
-          <div className="mini" dangerouslySetInnerHTML={{ __html: active.mini }} />
-        </div>
+        ))}
       </div>
     </div>
   );
+}
+
+/* Full-screen scroll-pinned statements (Prisma-style scrollytelling). */
+const STMTS: Array<{ pre: string; em: string; post?: string; sub: string }> = [
+  { pre: "Every tool floods you with ", em: "thousands of CVEs.", sub: "and calls it visibility" },
+  { pre: "Sutra shows the ", em: "few that are provably reachable.", sub: "exposure · running · identity · blast radius" },
+  { pre: "With ", em: "cited evidence", post: " behind every verdict.", sub: "tri-state verdicts · every edge cited" },
+];
+function Statements() {
+  const ref = useRef<HTMLElement | null>(null);
+  const [on, setOn] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onScroll = () => {
+      const r = el.getBoundingClientRect();
+      const total = Math.max(1, r.height - window.innerHeight);
+      const prog = Math.min(0.999, Math.max(0, -r.top / total));
+      setOn(Math.floor(prog * STMTS.length));
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  return (
+    <section className="stmts" ref={ref} aria-label="Why Sutra exists">
+      <div className="stmts-pin">
+        {STMTS.map((s, i) => (
+          <div key={s.em} className="stmt" data-on={i === on}>
+            <div>
+              <h2>{s.pre}<span className="em">{s.em}</span>{s.post ?? ""}</h2>
+              <small>{s.sub}</small>
+            </div>
+          </div>
+        ))}
+        <div className="stmt-dots" aria-hidden="true">{STMTS.map((s, i) => <i key={s.em} data-on={i === on} />)}</div>
+      </div>
+    </section>
+  );
+}
+
+/* Wiz-style typewriter: "Yes, Sutra works with <tool>|" */
+const TOOLS = ["Trivy Operator", "Falco", "Kyverno", "GuardDuty", "Security Hub", "Inspector", "Jenkins", "GitHub Actions", "Cilium · Hubble"];
+function TypeLine() {
+  const [txt, setTxt] = useState("");
+  useEffect(() => {
+    let w = 0, i = 0, del = false;
+    let t: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const word = TOOLS[w];
+      if (!del) {
+        i++;
+        setTxt(word.slice(0, i));
+        if (i === word.length) { del = true; t = setTimeout(tick, 1500); return; }
+      } else {
+        i--;
+        setTxt(word.slice(0, i));
+        if (i === 0) { del = false; w = (w + 1) % TOOLS.length; }
+      }
+      t = setTimeout(tick, del ? 32 : 72);
+    };
+    t = setTimeout(tick, 500);
+    return () => clearTimeout(t);
+  }, []);
+  return <p className="twr">Yes, Sutra works with <span className="twr-word">{txt}</span><span className="twr-caret" /></p>;
 }
 
 function FeatureExplorer() {
@@ -207,8 +294,9 @@ function FeatureExplorer() {
     <div className="explorer">
       <div className="ex-nav" role="tablist" aria-label="Capabilities">
         {CAPS.map((cap, i) => (
+          <Fragment key={cap.code}>
+          {cap.g ? <div className="exg">{cap.g}</div> : null}
           <button
-            key={cap.code}
             className="ex-item"
             role="tab"
             aria-selected={i === sel}
@@ -220,6 +308,7 @@ function FeatureExplorer() {
             </span>
             <b>{cap.label}</b>
           </button>
+          </Fragment>
         ))}
       </div>
       <div className="ex-panel" key={sel} style={{ "--t": c.t } as React.CSSProperties}>
@@ -345,7 +434,23 @@ export default function LandingZone() {
     );
     root.querySelectorAll(".stats .n").forEach((el) => cio.observe(el));
 
+    /* ---- header section spy (Prisma-style gradient underline) ---- */
+    const navLinks = Array.from(root.querySelectorAll<HTMLAnchorElement>(".head nav a[href^='#']"));
+    const spy = new IntersectionObserver(
+      (es) => es.forEach((e) => {
+        if (!e.isIntersecting) return;
+        const id = "#" + (e.target as HTMLElement).id;
+        navLinks.forEach((a) => a.setAttribute("data-active", String(a.getAttribute("href") === id)));
+      }),
+      { rootMargin: "-35% 0px -55% 0px" }
+    );
+    ["platform", "capabilities", "why", "trust", "architecture"].forEach((id) => {
+      const el = root.querySelector("#" + id);
+      if (el) spy.observe(el);
+    });
+
     return () => {
+      spy.disconnect();
       if (raf) cancelAnimationFrame(raf);
       if (onResize) window.removeEventListener("resize", onResize);
       io.disconnect();
@@ -363,8 +468,8 @@ export default function LandingZone() {
           <span className="mark" aria-hidden="true"><i /><i /><i /></span>
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
-        <nav>
-          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#trust">Security model</a>
+        <nav aria-label="Page sections">
+          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a>
         </nav>
         <div className="head-actions">
           <Link className="signin" href="/login">Sign in</Link>
@@ -412,6 +517,8 @@ export default function LandingZone() {
         </a>
       </section>
 
+      <Statements />
+
       <div className="stats">
         <div className="wrap stats-in">
           <div><div className="n" data-n="22">0<em>per region</em></div><div className="l">AWS evidence collectors</div></div>
@@ -423,7 +530,7 @@ export default function LandingZone() {
 
       <div className="strip">
         <div className="wrap top">
-          <p><span>Correlated across your estate.</span> AWS + EKS · identity · network · runtime · supply chain — in one evidence graph</p>
+          <TypeLine />
           <div className="lx-strip-cats"><span><strong>Cloud</strong> CMDB &amp; CSPM</span><span><strong>Kubernetes</strong> KSPM &amp; runtime</span><span><strong>Identity</strong> CIEM &amp; RBAC</span><span><strong>Supply chain</strong> SBOM &amp; signing</span></div>
         </div>
         <div className="marquee" aria-hidden="true">{[...MARQUEE, ...MARQUEE].map((t, i) => <span key={i}>{t}</span>)}</div>
@@ -432,7 +539,7 @@ export default function LandingZone() {
       <div className="wrap">
         <section className="block" id="platform">
           <div className="intro center rise"><span className="sec-kicker">Correlation is the product</span><h2>One graph connects the cloud, the cluster, and the identity.</h2><p className="lead">A privileged pod, reachable from the internet, running a critical CVE, with a ServiceAccount that can reach S3 — no single tool sees that whole chain. Sutra correlates it and cites every edge.</p></div>
-          <div className="rise"><PlatformTabs /></div>
+          <SuiteWheel />
         </section>
 
         <section className="block" style={{ paddingTop: 0 }} id="capabilities">
@@ -480,10 +587,13 @@ export default function LandingZone() {
       <div className="wrap">
         <section className="block" id="architecture">
           <div className="intro rise"><span className="sec-kicker">From account to action</span><h2>A production architecture, not a browser-side AWS script.</h2><p className="lead">Collection, normalization and user access live in deliberately separate trust zones.</p></div>
-          <div className="layers rise">
-            {LAYERS.map((l) => (
-              <div key={l.n} className="layer"><span>{l.n}</span><h4>{l.h}</h4><p>{l.p}</p></div>
-            ))}
+          <div className="layers-wrap">
+            <svg className="ribbon" viewBox="0 0 1200 300" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient></defs><path d="M0 200 C 140 120 260 110 400 165 S 640 250 800 180 S 1060 80 1200 140" /></svg>
+            <div className="layers rise">
+              {LAYERS.map((l) => (
+                <div key={l.n} className="layer"><span>{l.n}</span><h4>{l.h}</h4><p>{l.p}</p></div>
+              ))}
+            </div>
           </div>
         </section>
 
@@ -516,9 +626,41 @@ export default function LandingZone() {
       </section>
 
       <footer className="foot">
-        <div className="wrap foot-in">
-          <Link className="lx-brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
-          <small className="c">© 2026 Sutra · EKS-first CNAPP for MSPs · demo workspace uses fictional data</small>
+        <div className="wrap">
+          <div className="ftcols">
+            <div className="ftcol ftbrand">
+              <Link className="lx-brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
+              <p>The EKS-first, evidence-backed CNAPP for managed service providers — every finding traced to what was actually observed.</p>
+              <div className="soc">
+                <a href="#top" aria-label="X"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.7 3H21l-7.3 8.3L22.2 21h-6.8l-5.3-6.4L4 21H.8l7.8-8.9L.5 3h7l4.8 5.8L17.7 3Zm-1.2 16h1.9L6.6 4.9H4.6L16.5 19Z" /></svg></a>
+                <a href="#top" aria-label="LinkedIn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5ZM.24 8.25h4.52V23H.24V8.25ZM8.34 8.25h4.33v2h.06c.6-1.14 2.08-2.34 4.28-2.34 4.58 0 5.43 3.01 5.43 6.93V23h-4.52v-7.1c0-1.7-.03-3.88-2.37-3.88-2.37 0-2.73 1.85-2.73 3.76V23H8.34V8.25Z" /></svg></a>
+                <a href="#top" aria-label="RSS"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73H19.5C19.5 11.4 12.6 4.44 4 4.44Zm0 5.66v2.83a7.9 7.9 0 0 1 7.9 7.9h2.83c0-5.93-4.8-10.73-10.73-10.73ZM6.18 15.64a2.18 2.18 0 1 0 0 4.36 2.18 2.18 0 0 0 0-4.36Z" /></svg></a>
+              </div>
+            </div>
+            <div className="ftcol"><strong>Platform</strong>
+              <Link href="/dashboard">Live demo</Link>
+              <Link href="/cmdb">CMDB</Link>
+              <Link href="/findings">Findings</Link>
+              <Link href="/network-exposure">Network exposure</Link>
+              <Link href="/controls">Control library</Link>
+            </div>
+            <div className="ftcol"><strong>Trust</strong>
+              <Link href="/onboard">AWS onboarding</Link>
+              <Link href="/controls#architecture">Security architecture</Link>
+              <a href="/sutra-customer-role-live-demo.yaml">CloudFormation role</a>
+              <a href="#trust">Trust model</a>
+            </div>
+            <div className="ftcol"><strong>Company</strong>
+              <Link href="/login">Sign in</Link>
+              <Link href="/dashboard">Open live demo</Link>
+              <a href="#capabilities">Capabilities</a>
+              <a href="#why">Why Sutra</a>
+            </div>
+          </div>
+          <div className="ftbottom">
+            <small>© 2026 Sutra, Inc. All rights reserved.</small>
+            <nav aria-label="Legal"><a href="#top">Status</a><a href="#top">Privacy Policy</a><a href="#top">Terms of Use</a><a href="#top">Cookie Preferences</a></nav>
+          </div>
         </div>
       </footer>
     </div>
