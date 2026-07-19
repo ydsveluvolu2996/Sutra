@@ -38,6 +38,7 @@ const migrationFiles = [
   "0022_finops_workspace.sql",
   "0023_public_api.sql",
   "0024_itsm_connectors.sql",
+  "0025_background_jobs.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
