@@ -49,9 +49,13 @@ pnpm --dir services/aws-collector test
 pnpm lint
 ```
 
-Results: 1,238 tests discovered, 1,235 passed, 3 intentionally skipped, 0 failed;
-ESLint completed with zero errors. Test worker serialization changes only test
-execution and does not reduce application concurrency.
+The original P1–P7 gate discovered 1,238 tests: 1,235 passed, 3 were intentionally
+skipped and 0 failed. The subsequent GitHub release-hardening gate added immutable
+Action-pin, safe workflow-input and read-only CI-container regressions; the complete
+`pnpm verify` run then discovered 1,252 tests: 1,249 passed, 3 intentionally skipped
+and 0 failed. TypeScript, ESLint, PostgreSQL integration, the production build and
+rendered-route checks completed successfully. Test worker serialization changes only
+test execution and does not reduce application concurrency.
 
 ## Claims boundary
 
