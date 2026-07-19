@@ -80,10 +80,10 @@ export function parseCsv(text: string, maxRows = CUR_MAX_ROWS + 1): string[][] {
 export function toMicros(value: string): string | null {
   const match = /^(-?)(\d+)(?:\.(\d{1,12}))?$/u.exec(value.trim());
   if (match === null) return null;
-  const sign = match[1] === "-" ? -1n : 1n;
+  const sign = match[1] === "-" ? BigInt(-1) : BigInt(1);
   const whole = BigInt(match[2]);
   const fraction = (match[3] ?? "").padEnd(6, "0").slice(0, 6);
-  return (sign * (whole * 1_000_000n + BigInt(fraction || "0"))).toString();
+  return (sign * (whole * BigInt(1000000) + BigInt(fraction || "0"))).toString();
 }
 
 interface ColumnMap {
