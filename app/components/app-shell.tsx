@@ -113,7 +113,6 @@ function AuthenticatedAppShell({
         <Link className="brand" href="/dashboard" aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span><strong>Sutra</strong><small>Cloud operations, woven together.</small></span>
-          <em>Private beta</em>
         </Link>
         <div className="workspace-label">{session.organization.name}</div>
         <nav className="main-nav grouped-nav" aria-label="Primary navigation">
@@ -176,7 +175,7 @@ function AuthenticatedAppShell({
         </header>
         <div className="content-wrap">{children}</div>
         <footer className="app-footer">
-          <span>Sutra · local MSP private beta</span>
+          <span>Sutra · CNAPP for managed service providers</span>
           <span>Authenticated operators · tenant-scoped access · deterministic posture checks</span>
         </footer>
       </main>

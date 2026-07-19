@@ -16,6 +16,9 @@ function Glyph({ name }: { name: string }): ReactNode {
     FIX: (<><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8 7.2 20l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.2-.4-.4-2.2z" /></>),
     RUNTIME: (<><path d="M3 12h4l2 6 4-14 2 8h6" /></>),
     COMPLY: (<><path d="M12 3 5 6v5c0 4 3 7 7 10 4-3 7-6 7-10V6z" /><path d="m9 12 2 2 4-4" /></>),
+    EXPOSE: (<><circle cx="12" cy="12" r="9" /><path d="M3 12h18" /><path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z" /></>),
+    PATCH: (<><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /><path d="M11 7.5h5.5v5.5" /><path d="m14 10.5 2.5 2.5 2.5-2.5" /></>),
+    GATE: (<><path d="M5 3v18M19 3v18" /><path d="M5 8h14M5 16h14" /><path d="m10 12 1.8 1.8L15.5 10" /></>),
   };
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -233,6 +236,81 @@ function PreviewComply(): ReactNode {
   );
 }
 
+function PreviewExposure(): ReactNode {
+  const rows = [
+    { iface: "eni-api-gw", verdict: "Internet-exposed", tone: "red", open: "443", filtered: "8080 · by acl-1", dns: "api.northstar.io" },
+    { iface: "eni-batch", verdict: "Not exposed", tone: "ok", open: "—", filtered: "22 · by acl-2", dns: "—" },
+    { iface: "eni-worker", verdict: "Unknown", tone: "amber", open: "—", filtered: "—", dns: "—" },
+  ];
+  return (
+    <div className="pv pv-expose">
+      <div className="pv-head"><span>Network exposure</span><b className="pv-tag pv-tag-red">path-proven</b></div>
+      <div className="pv-expose-grid">
+        <div className="pv-expose-row pv-expose-head"><span>Interface</span><span>Verdict</span><span>Open</span><span>Filtered</span><span>DNS entry</span></div>
+        {rows.map((r) => (
+          <div key={r.iface} className="pv-expose-row">
+            <code>{r.iface}</code>
+            <b className={`pv-verdict pv-verdict-${r.tone}`}>{r.verdict}</b>
+            <span>{r.open}</span>
+            <span className="pv-filtered">{r.filtered}</span>
+            <em>{r.dns}</em>
+          </div>
+        ))}
+      </div>
+      <div className="pv-foot"><b>Hop-by-hop:</b> igw-0ba2 route → subnet acl-1 (443 allow, 8080 deny) → sg-api 0.0.0.0/0:443 — the unknown row is missing its route table, disclosed, never assumed safe.</div>
+    </div>
+  );
+}
+
+function PreviewPatch(): ReactNode {
+  const bumps = [
+    { pkg: "openssl", from: "3.0.1", to: "3.0.7", fixes: 12, kev: true, target: "img: api-gateway" },
+    { pkg: "libcurl", from: "7.81.0", to: "7.88.1", fixes: 5, kev: false, target: "img: payments" },
+    { pkg: "glibc", from: "2.31", to: null, fixes: 2, kev: false, target: "img: batch-runner" },
+  ];
+  return (
+    <div className="pv pv-patch">
+      <div className="pv-head"><span>Patch plan</span><b className="pv-tag pv-tag-orange">19 CVEs → 3 upgrades</b></div>
+      <ul className="pv-patch-list">
+        {bumps.map((b) => (
+          <li key={b.pkg}>
+            <div className="pv-patch-bump">
+              <strong>{b.pkg}</strong>
+              {b.to !== null ? (<span className="pv-bump"><code>{b.from}</code><i>→</i><code className="pv-bump-to">{b.to}</code></span>) : (<span className="pv-bump pv-bump-none"><code>{b.from}</code><i>→</i><em>no fix published yet</em></span>)}
+            </div>
+            <div className="pv-patch-meta">{b.kev ? <Chip tone="red">KEV · exploited</Chip> : null}<Chip>{`fixes ${b.fixes} CVEs`}</Chip><em>{b.target}</em></div>
+          </li>
+        ))}
+      </ul>
+      <div className="pv-foot"><b>Upgrades, not a CVE dump.</b> CVEs collapse into one version bump per package, ranked KEV → EPSS → reachability. A missing fix is reported as missing — never an invented version.</div>
+    </div>
+  );
+}
+
+function PreviewGate(): ReactNode {
+  const stages = [
+    { name: "secret-scan", status: "pass", detail: "no committed secrets" },
+    { name: "iac-scan", status: "pass", detail: "clean at fail-on high" },
+    { name: "image-vulns", status: "fail", detail: "1 critical · CVE-2024-3094" },
+    { name: "sbom-attest", status: "skip", detail: "no artifact provided" },
+  ];
+  return (
+    <div className="pv pv-gate">
+      <div className="pv-head"><span>CI security gate · Jenkins</span><b className="pv-tag pv-tag-red">BREACHED · exit 2</b></div>
+      <ul className="pv-gate-list">
+        {stages.map((s) => (
+          <li key={s.name} className={`pv-gate-${s.status}`}>
+            <i aria-hidden="true">{s.status === "pass" ? "✓" : s.status === "fail" ? "✕" : "–"}</i>
+            <code>{s.name}</code>
+            <span>{s.detail}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="pv-foot"><b>Severity-gated, honestly.</b> A failure below the fail-on threshold is reported, not hidden; a skipped stage is never counted as a pass. JUnit report published to the build.</div>
+    </div>
+  );
+}
+
 interface Capability {
   readonly code: string;
   readonly tone: string;
@@ -245,7 +323,10 @@ interface Capability {
 const CAPABILITIES: readonly Capability[] = [
   { code: "GRAPH", tone: "blue", title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — and every edge is a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], preview: <PreviewGraph /> },
   { code: "ISSUES", tone: "red", title: "Runtime-informed issues", blurb: "Not thousands of CVEs — the handful that are internet-reachable, running and exploitable, proven with observed network and runtime evidence.", points: ["Toxic-combination detection", "Reachability from real network flows", "Prioritized by exposure, not just CVSS"], preview: <PreviewIssues /> },
-  { code: "CIEM", tone: "violet", title: "Effective permissions", blurb: "Resolve a workload's effective RBAC and follow its IRSA role into AWS — can this pod read Secrets, or delete an S3 bucket?", points: ["In-cluster RBAC solver", "IRSA → IAM reach into AWS", "Flags: secrets, exec, escalate, aws-write"], preview: <PreviewCiem /> },
+  { code: "CIEM", tone: "violet", title: "Effective permissions", blurb: "Resolve a workload's effective RBAC and follow its IRSA or EKS Pod Identity link into AWS — can this pod read Secrets, or delete an S3 bucket?", points: ["In-cluster RBAC solver", "IRSA + Pod Identity → AWS reach", "Flags: secrets, exec, unused SA, aws-write"], preview: <PreviewCiem /> },
+  { code: "EXPOSE", tone: "blue", title: "Network exposure & port filtering", blurb: "A proven internet path — gateway route, NACL port filter, load-balancer target, DNS entry point — with open vs filtered ports per interface.", points: ["Hop-by-hop reachability, each hop cited", "Open vs NACL-filtered ports", "Missing evidence → honest unknown"], preview: <PreviewExposure /> },
+  { code: "PATCH", tone: "orange", title: "Patch plans, not CVE lists", blurb: "Hundreds of CVEs collapse into the handful of version bumps that actually fix them — ranked by KEV, EPSS and reachability.", points: ["One upgrade per package + image", "KEV & EPSS-aware priority", "SLA due dates per severity"], preview: <PreviewPatch /> },
+  { code: "GATE", tone: "teal", title: "CI security gate", blurb: "The same scanners gate every build — Jenkins, GitHub Actions or an in-cluster Job — with severity thresholds and a JUnit report the pipeline renders natively.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], preview: <PreviewGate /> },
   { code: "TRENDS", tone: "green", title: "Posture trends & scorecard", blurb: "A per-customer security score over time with regression detection and a resell-ready export — the report an MSP hands over.", points: ["Score per customer over time", "Automatic regression detection", "Exportable MSP scorecard"], preview: <PreviewTrends /> },
   { code: "DRIFT", tone: "orange", title: "Drift & new-CVE detection", blurb: "Catch a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan.", points: ["Live spec vs. admitted spec diff", "New-CVE delta between scans", "Severity-ranked, cited to the change"], preview: <PreviewDrift /> },
   { code: "FIX", tone: "teal", title: "Guided remediation", blurb: "Generate the exact Kyverno policy or kubectl patch that fixes an issue — a reviewed suggestion, never an automatic change.", points: ["Kyverno policy or kubectl patch", "Scoped to the specific finding", "You review and apply — never auto"], preview: <PreviewFix /> },

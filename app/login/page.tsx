@@ -217,7 +217,7 @@ export default function LoginPage() {
           <span><strong>Sutra</strong><small>Cloud security, woven together</small></span>
         </Link>
         <div className="auth-brand-copy">
-          <span className="auth-eyebrow">EKS-first CNAPP · private beta</span>
+          <span className="auth-eyebrow">EKS-first CNAPP for managed service providers</span>
           <LoginShowcase />
         </div>
         <ul className="auth-assurances" aria-label="Local security properties">
