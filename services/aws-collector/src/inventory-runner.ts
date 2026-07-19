@@ -1481,6 +1481,13 @@ async function collectRouteTables(
           associatedSubnetIds: strings(associations.map((association) => association.SubnetId)),
           routesToInternetGateway: routesToIgw,
           routesToNatGateway: routesToNat,
+          // Raw route entries (destination -> target) so downstream reachability
+          // analysis can confirm an exact internet-gateway hop, not just a flag.
+          routes: routes.map((route) => compact({
+            destination: route.DestinationCidrBlock ?? route.DestinationIpv6CidrBlock ?? route.DestinationPrefixListId,
+            target: route.GatewayId ?? route.NatGatewayId ?? route.TransitGatewayId ?? route.VpcPeeringConnectionId ?? route.NetworkInterfaceId,
+            state: route.State,
+          })),
           propagatingVgws: strings((routeTable.PropagatingVgws ?? []).map((vgw) => vgw.GatewayId)),
         }),
         routeTable.Tags,
