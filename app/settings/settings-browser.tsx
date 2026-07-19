@@ -70,7 +70,7 @@ export function SettingsBrowser() {
           <dl className="settings-list">
             <div><dt>Name</dt><dd>{session.organization.name}</dd></div>
             <div><dt>Identifier</dt><dd>{session.organization.slug}</dd></div>
-            <div><dt>Release</dt><dd><span className="settings-pill">Private beta</span></dd></div>
+            <div><dt>Release</dt><dd><span className="settings-pill">General availability</span></dd></div>
           </dl>
         </section>
 

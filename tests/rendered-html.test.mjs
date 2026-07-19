@@ -28,7 +28,10 @@ test("server-renders the Sutra public product site", async () => {
   assert.match(html, /Read-only access/i);
   assert.match(html, /Evidence-backed security graph/i);
   assert.match(html, /Runtime-informed issues/i);
-  assert.match(html, /View demo workspace/i);
+  assert.match(html, /Open live demo/i);
+  assert.match(html, /Prove every path/i);
+  assert.match(html, /Why teams choose Sutra/i);
+  assert.doesNotMatch(html, /private beta/i);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 
