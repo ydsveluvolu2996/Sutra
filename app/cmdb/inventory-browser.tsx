@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PilotResource } from "../../lib/pilot-types";
 import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
+import { CmdbWorkspacePanels } from "./workspace-panels";
 
 function isSecurityGroup(resource: PilotResource): boolean {
   const type = resource.resourceType.toLowerCase();
@@ -144,6 +145,7 @@ export function InventoryBrowser() {
           </section> : null}
         </>
       ) : null}
+      <CmdbWorkspacePanels connectionId={connection?.id ?? null} />
     </>
   );
 }
