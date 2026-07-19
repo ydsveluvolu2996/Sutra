@@ -120,7 +120,7 @@ function AuthenticatedAppShell({
       <aside className="sidebar">
         <Link className="brand" href="/dashboard" aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud operations, woven together.</small></span>
+          <span><strong>Sutra</strong><small>Cloud security, woven together.</small></span>
         </Link>
         <div className="workspace-label">{session.organization.name}</div>
         <div className="nav-search">
