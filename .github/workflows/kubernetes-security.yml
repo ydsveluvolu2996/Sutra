@@ -11,7 +11,7 @@ on:
       - "Dockerfile"
       - "pnpm-lock.yaml"
   push:
-    branches: [main, agent/sutra-local-aws-pilot]
+    branches: [main]
     paths:
       - ".github/workflows/kubernetes-security.yml"
       - ".github/workflows/kubernetes-agent-release.yml"
