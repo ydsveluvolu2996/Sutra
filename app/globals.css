@@ -2834,3 +2834,7 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-pv-row .nm em { font-style: normal; font-family: var(--mono); font-size: 10.5px; color: var(--body-2); }
 .lz .lx-pv-count { font-family: var(--mono); font-size: 12px; color: #dce6ff; display: inline-flex; align-items: center; gap: 7px; flex: none; }
 .lz .lx-pv-count svg { color: var(--faint); }
+
+/* --- lz: keep the explorer panel in view while browsing the tall 18-item list --- */
+.lz .ex-panel { position: sticky; top: 82px; align-self: start; }
+@media (max-width: 940px) { .lz .ex-panel { position: static; } }
