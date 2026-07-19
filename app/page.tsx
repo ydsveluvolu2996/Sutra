@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CapabilityExplorer, CorrelationGraph, HeroDashboard, MspShowcase, TrustPanel } from "./components/landing-interactive";
+import { CapabilityExplorer, CorrelationGraph, HeroDashboard, HeroStatBand, MspShowcase, TrustPanel } from "./components/landing-interactive";
 
 const platformLayers = [
   { number: "01", title: "Customer cloud", copy: "A customer-owned IAM role grants only the metadata APIs in the selected collector pack." },
@@ -87,14 +87,7 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <section className="hero-statband" aria-label="Platform facts">
-          {heroStats.map((stat) => (
-            <article key={stat.label} data-reveal>
-              <strong>{stat.value}<em>{stat.unit}</em></strong>
-              <span>{stat.label}</span>
-            </article>
-          ))}
-        </section>
+        <HeroStatBand stats={heroStats} />
 
         <section className="foundation-strip" aria-label="Coverage strip">
           <div className="strip-top">

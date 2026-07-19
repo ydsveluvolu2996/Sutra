@@ -1,7 +1,66 @@
 "use client";
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+
+/* ================================================================== *
+ * Animated stat band — each value counts up when scrolled into view
+ * ================================================================== */
+
+interface HeroStat { readonly value: string; readonly unit: string; readonly label: string }
+
+function CountUp({ target, suffix }: { readonly target: number; readonly suffix: string }): ReactNode {
+  const [display, setDisplay] = useState(0);
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (node === null) return;
+    let raf = 0;
+    const runCountUp = () => {
+      const start = performance.now();
+      const duration = 1100;
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        setDisplay(Math.round(eased * target));
+        if (t < 1) raf = requestAnimationFrame(tick);
+      };
+      raf = requestAnimationFrame(tick);
+    };
+    if (typeof IntersectionObserver === "undefined") {
+      raf = requestAnimationFrame(runCountUp); // no synchronous setState in the effect
+      return () => cancelAnimationFrame(raf);
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      runCountUp();
+    }, { threshold: 0.4 });
+    observer.observe(node);
+    return () => { observer.disconnect(); cancelAnimationFrame(raf); };
+  }, [target]);
+  return <em ref={ref}>{display}{suffix}</em>;
+}
+
+export function HeroStatBand({ stats }: { readonly stats: readonly HeroStat[] }): ReactNode {
+  return (
+    <section className="hero-statband" aria-label="Platform facts">
+      {stats.map((stat) => {
+        const numeric = Number.parseInt(stat.value, 10);
+        const suffix = stat.value.replace(/^-?\d+/u, "");
+        return (
+          <article key={stat.label} data-reveal>
+            <strong>
+              {Number.isNaN(numeric) ? <em>{stat.value}</em> : <CountUp target={numeric} suffix={suffix} />}
+              <em className="stat-unit">{stat.unit}</em>
+            </strong>
+            <span>{stat.label}</span>
+          </article>
+        );
+      })}
+    </section>
+  );
+}
 
 /* ------------------------------------------------------------------ *
  * Shared feature glyphs (stroke icons, one per capability code)
@@ -387,7 +446,16 @@ export function CorrelationGraph(): ReactNode {
   const current = ORBIT_NODES.find((n) => n.id === active);
   return (
     <div className="platform-orbit is-interactive" data-active={active}>
+      <span className="orbit-ring orbit-ring-a" aria-hidden="true" />
+      <span className="orbit-ring orbit-ring-b" aria-hidden="true" />
+      <span className="orbit-spark orbit-spark-1" aria-hidden="true" />
+      <span className="orbit-spark orbit-spark-2" aria-hidden="true" />
+      <span className="orbit-spark orbit-spark-3" aria-hidden="true" />
+      <span className="orbit-spark orbit-spark-4" aria-hidden="true" />
+      <span className="orbit-spark orbit-spark-5" aria-hidden="true" />
+      <span className="orbit-orbiter" aria-hidden="true"><i /></span>
       <button type="button" className={`orbit-node orbit-cmdb${active === "cmdb" ? " is-active" : ""}`} onMouseEnter={() => setActive("cmdb")} onFocus={() => setActive("cmdb")} onClick={() => setActive("cmdb")} aria-label="CMDB — normalized asset graph">
+        <span className="orbit-core-glow" aria-hidden="true" />
         <b>CMDB</b><span>Normalized asset graph</span>
       </button>
       {ORBIT_NODES.map((n) => (
