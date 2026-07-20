@@ -112,6 +112,32 @@ export class JobQueueRepository {
     return row === null ? null : parseRow(row);
   }
 
+  /**
+   * Lease the oldest ready job of a kind across ALL tenants — the entry point
+   * for the system worker, which is not scoped to one org. Also reclaims jobs
+   * whose lease has expired (a worker died mid-job) so work is never stranded.
+   * At-least-once: a reclaimed job's attempt counter advances like any lease.
+   */
+  public async leaseNext(kind: string, now = Date.now()): Promise<BackgroundJob | null> {
+    if (!JOB_KIND.test(kind) || !Number.isFinite(now)) invalid();
+    const db = await this.ready();
+    const row = await db.prepare(
+      `UPDATE background_jobs
+          SET status = 'leased', attempt = attempt + 1, lease_expires_at = ?, updated_at = ?
+        WHERE id = (
+          SELECT id FROM background_jobs
+           WHERE kind = ?
+             AND (
+               (status = 'queued' AND run_after <= ?)
+               OR (status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+             )
+           ORDER BY run_after ASC, created_at ASC, id ASC LIMIT 1
+        ) AND status IN ('queued', 'leased')
+       RETURNING *`,
+    ).bind(now + LEASE_MS, now, kind, now, now).first<JobRow>();
+    return row === null ? null : parseRow(row);
+  }
+
   public async complete(orgId: string, id: string, now = Date.now()): Promise<boolean> {
     if (!IDENTIFIER.test(orgId) || !JOB_ID.test(id)) invalid();
     const db = await this.ready();
