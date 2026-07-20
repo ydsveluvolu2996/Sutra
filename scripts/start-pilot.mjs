@@ -22,6 +22,7 @@ function parseVariables(text) {
 const variables = parseVariables(await readFile(variablesPath, "utf8"));
 const environment = { ...process.env, ...variables };
 const webHost = environment.SUTRA_WEB_HOST ?? "127.0.0.1";
+const webPort = "3000";
 
 const collector = spawn(process.execPath, [resolve(root, "services/aws-collector/dist/src/local-server.js")], {
   cwd: root,
@@ -33,7 +34,7 @@ const web = spawn(resolve(root, "node_modules/.bin/wrangler"), [
   "--config", resolve(root, "dist/server/wrangler.json"),
   "--env-file", variablesPath,
   "--ip", webHost,
-  "--port", "3000",
+  "--port", webPort,
   "--show-interactive-dev-session", "false",
 ], {
   cwd: root,
@@ -41,10 +42,41 @@ const web = spawn(resolve(root, "node_modules/.bin/wrangler"), [
   stdio: "inherit",
 });
 
+// Durable background-job ticker. When a runner token is configured, poll the
+// system-internal drain endpoint on an interval. Failures are logged and never
+// crash the pilot — the endpoint is idempotent and the next tick simply retries.
+const jobRunnerToken = process.env.SUTRA_JOB_RUNNER_TOKEN;
+let jobRunnerTimer;
+if (typeof jobRunnerToken === "string" && jobRunnerToken.length > 0) {
+  const requestedInterval = Number(process.env.SUTRA_JOB_RUNNER_INTERVAL_MS ?? "15000");
+  const intervalMs = Number.isFinite(requestedInterval)
+    ? Math.min(300_000, Math.max(5_000, requestedInterval))
+    : 15_000;
+  const runUrl = `http://127.0.0.1:${webPort}/api/internal/jobs/run`;
+  jobRunnerTimer = setInterval(() => {
+    fetch(runUrl, {
+      method: "POST",
+      headers: { "x-sutra-job-token": jobRunnerToken },
+      signal: AbortSignal.timeout(30_000),
+    })
+      .then((response) => {
+        if (!response.ok) {
+          process.stderr.write(`${JSON.stringify({ event: "sutra.job-runner.tick.failed", status: response.status })}\n`);
+        }
+      })
+      .catch((error) => {
+        const reason = error instanceof Error ? error.name : "unknown";
+        process.stderr.write(`${JSON.stringify({ event: "sutra.job-runner.tick.error", reason })}\n`);
+      });
+  }, intervalMs);
+  jobRunnerTimer.unref?.();
+}
+
 let closing = false;
 function stop(signal = "SIGTERM") {
   if (closing) return;
   closing = true;
+  if (jobRunnerTimer !== undefined) clearInterval(jobRunnerTimer);
   collector.kill(signal);
   web.kill(signal);
 }

@@ -1,8 +1,9 @@
 import { addCaseNote, listFindingCases } from "../../../../../db/case-repository";
 import { ItsmConnectorRepository } from "../../../../../db/itsm-connector-repository";
+import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
-import { buildOutboundTicket, signOutboundBody } from "../../../../../lib/itsm-sync";
+import { buildOutboundTicket, signOutboundBody, type ItsmCaseLike } from "../../../../../lib/itsm-sync";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -33,14 +34,15 @@ export async function POST(request: Request): Promise<Response> {
     const current = (await listFindingCases({ ...scope, connectionId: connection.id }))
       .find((candidate) => candidate.id === record.caseId);
     if (current === undefined) throw Object.assign(new Error("The case was not found"), { code: "NOT_FOUND" });
-    const ticket = buildOutboundTicket({
+    const itsmCase: ItsmCaseLike = {
       caseId: current.id,
       title: current.title,
       summary: `Finding ${current.findingFingerprint} from snapshot ${current.findingSnapshotId}.`,
       severity: current.findingSeverity,
       priority: current.priority,
       status: current.status === "closed" ? "accepted_risk" : current.status,
-    }, connector.connectorType, connector.projectKey);
+    };
+    const ticket = buildOutboundTicket(itsmCase, connector.connectorType, connector.projectKey);
     const outboundBody = JSON.stringify(ticket.payload);
     let delivered = false;
     let statusCode: number | undefined;
@@ -69,10 +71,35 @@ export async function POST(request: Request): Promise<Response> {
       actorUserId: authenticated.subject.userId,
       note: `ITSM dispatch to '${connector.name}' ${outcome}.`,
     });
+    // The immediate attempt above is unchanged and best-effort. If it did not
+    // deliver, hand the retry to the durable queue so backoff/dead-letter is
+    // owned by background_jobs. A queue failure must never break this response.
+    let durableRetryScheduled = false;
+    if (!delivered) {
+      try {
+        await new JobQueueRepository().enqueue({
+          orgId: scope.orgId,
+          customerId: connection.customerId,
+          kind: "itsm-dispatch",
+          payload: {
+            customerId: connection.customerId,
+            connectionId: connection.id,
+            connectorId: record.connectorId,
+            connectorName: connector.name,
+            actorUserId: authenticated.subject.userId,
+            itsmCase,
+          },
+        });
+        durableRetryScheduled = true;
+      } catch {
+        durableRetryScheduled = false;
+      }
+    }
     return jsonResponse({
       delivered,
       ...(statusCode === undefined ? { error: deliveryError ?? "dispatch-error" } : { statusCode }),
       payloadPreview: outboundBody.slice(0, 500),
+      durableRetryScheduled,
     });
   } catch (error) {
     return errorResponse(error);

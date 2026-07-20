@@ -47,9 +47,11 @@ export async function ensureDockerLocalEnvironment(root) {
     }
     const ownerPassword = randomBytes(32).toString("base64url");
     const appPassword = randomBytes(32).toString("base64url");
+    const jobRunnerToken = randomBytes(32).toString("hex");
     contents = [
       `SUTRA_POSTGRES_OWNER_PASSWORD=${ownerPassword}`,
       `SUTRA_POSTGRES_APP_PASSWORD=${appPassword}`,
+      `SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`,
       "",
     ].join("\n");
     await writeFile(environmentPath, contents, { encoding: "utf8", flag: "wx", mode: 0o600 });
@@ -75,5 +77,17 @@ export async function ensureDockerLocalEnvironment(root) {
   ) {
     throw new Error(".sutra/docker.env must contain distinct generated 256-bit owner and runtime passwords");
   }
-  return { environmentPath, ownerPassword, appPassword };
+  // Persist/reuse the background-job runner token. Older env files predate it, so
+  // generate and append one on demand; reuse a present, valid token unchanged.
+  let jobRunnerToken = values.get("SUTRA_JOB_RUNNER_TOKEN");
+  if (jobRunnerToken === undefined) {
+    jobRunnerToken = randomBytes(32).toString("hex");
+    const separator = contents.length === 0 || contents.endsWith("\n") ? "" : "\n";
+    await writeFile(environmentPath, `${separator}SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}\n`, { encoding: "utf8", flag: "a", mode: 0o600 });
+    await chmod(environmentPath, 0o600);
+    values.set("SUTRA_JOB_RUNNER_TOKEN", jobRunnerToken);
+  } else if (!/^[a-f0-9]{64}$/u.test(jobRunnerToken)) {
+    throw new Error(".sutra/docker.env must contain a generated 256-bit hex SUTRA_JOB_RUNNER_TOKEN");
+  }
+  return { environmentPath, ownerPassword, appPassword, jobRunnerToken };
 }
