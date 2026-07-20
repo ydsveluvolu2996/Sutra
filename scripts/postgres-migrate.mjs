@@ -44,6 +44,8 @@ const migrationFiles = [
   "0028_kubernetes_agent_nodes.sql",
   "0029_customer_scoped_invitations.sql",
   "0030_contact_submissions.sql",
+  "0031_finops_unit_counts.sql",
+  "0032_finops_scheduled_reports.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

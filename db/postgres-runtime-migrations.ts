@@ -29,6 +29,8 @@ import postgresRegistryVulnerabilitiesSql from "../postgres/migrations/0027_regi
 import postgresKubernetesAgentNodesSql from "../postgres/migrations/0028_kubernetes_agent_nodes.sql?raw";
 import postgresCustomerScopedInvitationsSql from "../postgres/migrations/0029_customer_scoped_invitations.sql?raw";
 import postgresContactSubmissionsSql from "../postgres/migrations/0030_contact_submissions.sql?raw";
+import postgresFinopsUnitCountsSql from "../postgres/migrations/0031_finops_unit_counts.sql?raw";
+import postgresFinopsScheduledReportsSql from "../postgres/migrations/0032_finops_scheduled_reports.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -62,6 +64,8 @@ const migrations = [
   { id: "0028_kubernetes_agent_nodes", source: postgresKubernetesAgentNodesSql },
   { id: "0029_customer_scoped_invitations", source: postgresCustomerScopedInvitationsSql },
   { id: "0030_contact_submissions", source: postgresContactSubmissionsSql },
+  { id: "0031_finops_unit_counts", source: postgresFinopsUnitCountsSql },
+  { id: "0032_finops_scheduled_reports", source: postgresFinopsScheduledReportsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

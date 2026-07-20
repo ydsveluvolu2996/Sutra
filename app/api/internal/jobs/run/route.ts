@@ -1,5 +1,10 @@
 import { env } from "cloudflare:workers";
-import { buildJobHandlers, ensureRetentionSweepsEnqueued } from "../../../../../db/background-job-handlers";
+import {
+  buildJobHandlers,
+  ensureDueScheduledReportsEnqueued,
+  ensureRetentionSweepsEnqueued,
+} from "../../../../../db/background-job-handlers";
+import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { listActiveOrgIds } from "../../../../../db/organization-directory";
 import { runDueBackgroundJobs } from "../../../../../lib/background-job-runner";
@@ -26,6 +31,8 @@ export async function POST(request: Request): Promise<Response> {
     if (verdict === "unauthorized") return jsonResponse({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
     const queue = new JobQueueRepository();
     await ensureRetentionSweepsEnqueued(queue, await listActiveOrgIds());
+    // The scheduled-report tick: enqueue any due FinOps cost reports (all tenants).
+    await ensureDueScheduledReportsEnqueued(queue, new FinopsScheduledReportRepository());
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 25 });
     return jsonResponse(result);
   } catch (error) {
