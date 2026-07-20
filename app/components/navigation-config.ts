@@ -14,6 +14,7 @@ export type NavKey =
   | "registry_inventory"
   | "iac_scan"
   | "security_events"
+  | "cloud_detections"
   | "cases_routing"
   | "cases"
   | "costs"
@@ -152,6 +153,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "registry_inventory", label: "Registry inventory", href: "/registry/inventory", icon: "RG", capabilities: readConnection },
       { key: "iac_scan", label: "IaC scan", href: "/iac-scan", icon: "IA", capabilities: readWorkspace },
       { key: "security_events", label: "Security events", href: "/security-events", icon: "SE", capabilities: readConnection },
+      { key: "cloud_detections", label: "Cloud detections", href: "/cloud-detections", icon: "CD", capabilities: readConnection },
       { key: "cases", label: "Remediation cases", href: "/cases", icon: "RC", capabilities: readConnection },
       { key: "cases_routing", label: "Case routing", href: "/cases/routing", icon: "CR", capabilities: readConnection },
     ],
