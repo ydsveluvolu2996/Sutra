@@ -28,6 +28,25 @@ const jobRunnerToken = process.env.SUTRA_JOB_RUNNER_TOKEN?.trim();
 if (jobRunnerToken !== undefined && /[\r\n]/u.test(jobRunnerToken)) {
   throw new Error("SUTRA_JOB_RUNNER_TOKEN must be a single line");
 }
+// The public contact form's delivery config must reach the Worker runtime (which
+// reads it from .dev.vars via `env`), not just the container process env —
+// otherwise a submission is persisted but never emailed. Each is optional and
+// only written when present in the container env.
+const CONTACT_VARS = [
+  "SUTRA_CONTACT_RECIPIENT",
+  "SUTRA_CONTACT_FROM",
+  "SUTRA_CONTACT_PROVIDER",
+  "SUTRA_CONTACT_WEBHOOK_URL",
+  "SUTRA_CONTACT_EMAIL_API_URL",
+  "SUTRA_CONTACT_EMAIL_API_KEY",
+];
+const contactVars = CONTACT_VARS.map((name) => {
+  const value = process.env[name]?.trim();
+  if (value !== undefined && /[\r\n]/u.test(value)) {
+    throw new Error(`${name} must be a single line`);
+  }
+  return { name, value };
+}).filter((entry) => entry.value);
 
 if (existingContents === null) {
   const values = [
@@ -48,6 +67,7 @@ if (existingContents === null) {
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",
     ...(databaseUrl ? [`DATABASE_URL=${databaseUrl}`] : []),
     ...(jobRunnerToken ? [`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`] : []),
+    ...contactVars.map(({ name, value }) => `${name}=${value}`),
     "",
   ];
   await writeFile(variablesPath, values.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
@@ -75,6 +95,14 @@ if (existingContents === null) {
       updatedContents = updatedContents.replace(/^SUTRA_JOB_RUNNER_TOKEN=.*$/mu, `SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`);
     } else {
       additions.push(`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`);
+    }
+  }
+  for (const { name, value } of contactVars) {
+    const linePattern = new RegExp(`^${name}=`, "mu");
+    if (linePattern.test(updatedContents)) {
+      updatedContents = updatedContents.replace(new RegExp(`^${name}=.*$`, "mu"), `${name}=${value}`);
+    } else {
+      additions.push(`${name}=${value}`);
     }
   }
   if (additions.length > 0 || updatedContents !== existingContents) {
