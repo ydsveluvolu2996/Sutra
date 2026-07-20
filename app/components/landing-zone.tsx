@@ -191,6 +191,92 @@ const LAYERS = [
   { n: "04", h: "MSP control plane", p: "Role-aware dashboards, findings, audit history and customer access operate without exposing AWS credentials." },
 ];
 
+/* ------------------------------------------------------------------ *
+ * Pricing — the dollar amounts below are DELIBERATE PLACEHOLDERS.
+ * Every tier renders "$—" with a "set your price" note; there are no
+ * real, final prices here. Replace `price`/`note` with your own
+ * commercial terms. Feature bullets are drawn only from capabilities
+ * that already ship on this page (see CAPS / PLATFORM above); any
+ * numeric limit is explicitly marked "example".
+ * ------------------------------------------------------------------ */
+type Tier = { name: string; tagline: string; note: string; cta: string; ctaHref: string; feat?: boolean; lead: string; points: string[]; eg: string };
+const TIERS: Tier[] = [
+  {
+    name: "Starter",
+    tagline: "Single-account posture, proven from day one",
+    note: "set your price",
+    cta: "Explore in the demo",
+    ctaHref: "/dashboard",
+    lead: "Agentless collection and the evidence graph for a small AWS + EKS footprint.",
+    points: [
+      "Agentless collection · customer-owned IAM role, STS only",
+      "Cloud + Kubernetes CMDB and security graph",
+      "Runtime-informed, reachability-confirmed issues",
+      "Readiness mappings — CIS, NSA/CISA, SOC 2 (CC)",
+      "Email & webhook alerting",
+    ],
+    eg: "Example scope: up to 3 connected AWS accounts",
+  },
+  {
+    name: "Growth",
+    tagline: "The full CNAPP + FinOps operations suite",
+    note: "set your price",
+    cta: "Explore in the demo",
+    ctaHref: "/dashboard",
+    feat: true,
+    lead: "Everything in Starter, plus unified vulnerability management and cost.",
+    points: [
+      "Everything in Starter",
+      "Vulnerability management — EPSS + KEV mirror, Trivy + AWS Inspector",
+      "Patch plans, drift and new-CVE detection",
+      "Cloud cost (FinOps) — CUR/FOCUS allocation & anomalies",
+      "Supply-chain trust, IaC scanning & CI security gate",
+      "Ticketing — Jira / ServiceNow webhooks & Slack",
+    ],
+    eg: "Example scope: up to 15 connected AWS accounts",
+  },
+  {
+    name: "Portfolio",
+    tagline: "Multi-tenant operations for the whole book",
+    note: "set your price",
+    cta: "Review onboarding",
+    ctaHref: "/onboard",
+    lead: "Everything in Growth, built for running many customers at once.",
+    points: [
+      "Everything in Growth",
+      "MSP multi-tenancy — portfolio roll-up + per-customer scoped workspaces",
+      "Public REST API & typed TypeScript / Python SDKs",
+      "Per-customer posture trends & resell-ready scorecards",
+      "Isolation enforced at every query, cross-tenant access audited",
+    ],
+    eg: "Example scope: unlimited customers, priced per workspace",
+  },
+];
+
+/* Proof / trust content. NO real or fabricated customers, quotes or logos —
+ * every testimonial and logo is an obvious editable placeholder. The badge
+ * row states only what is truthfully accurate about the product. */
+const TESTIMONIALS = [
+  { role: "MSP security lead", tag: "placeholder" },
+  { role: "Cloud practice owner", tag: "placeholder" },
+  { role: "Platform / SRE lead", tag: "placeholder" },
+];
+const TRUST_BADGES = [
+  "SOC 2 readiness mapping — not a certification",
+  "Read-only, customer-owned access",
+  "Every finding cited to collected evidence",
+  "No customer access keys stored",
+  "Data-minimizing by design",
+];
+const FAQ: Array<{ q: string; a: string }> = [
+  { q: "How does onboarding work?", a: "You deploy a customer-owned IAM role from the CloudFormation template we provide. A separate collector workload assumes that role with temporary STS credentials and performs read-only, metadata-only discovery — no agents on your workloads, no access keys stored. You can explore the full live demo workspace before connecting any account." },
+  { q: "Is the access really read-only?", a: "Yes. The role grants metadata-only permission packs, is owned by you, and is scoped with a unique platform-generated ExternalId. There are no write permissions and no customer access keys ever leave your account or enter the browser or web control plane." },
+  { q: "Which clouds and platforms are supported?", a: "AWS and Amazon EKS. Sutra is not multi-cloud — there is no Azure or GCP support. Within that scope it correlates cloud, Kubernetes, identity, network, runtime and supply-chain evidence into one graph." },
+  { q: "How is my data handled?", a: "Data-minimizing by design: only normalized, scoped metadata evidence is validated and promoted after a complete collection run. Customer credentials never reach the browser or the web control plane, and each customer sees only the workspaces explicitly granted to them." },
+  { q: "Is there an API?", a: "Yes — a versioned, tenant-scoped REST API at /api/public/v1 with scoped service-account tokens, cursor pagination and idempotent writes, plus typed TypeScript and Python SDKs generated from the OpenAPI spec. Automation reads resources, findings, cases, vulnerabilities and compliance exactly as the UI does." },
+  { q: "Are you SOC 2 or ISO certified?", a: "We do not claim certifications the product does not hold. Sutra maps collected evidence to CIS Kubernetes, NSA/CISA and SOC 2 (CC) controls as an honest readiness view — a readiness mapping, never a pass stamp or a certification badge." },
+];
+
 function Arrow() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4}>
@@ -481,7 +567,7 @@ export default function LandingZone() {
       }),
       { rootMargin: "-35% 0px -55% 0px" }
     );
-    ["platform", "capabilities", "why", "trust", "architecture"].forEach((id) => {
+    ["platform", "capabilities", "why", "pricing", "trust", "architecture", "proof"].forEach((id) => {
       const el = root.querySelector("#" + id);
       if (el) spy.observe(el);
     });
@@ -506,7 +592,7 @@ export default function LandingZone() {
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
         <nav aria-label="Page sections">
-          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a>
+          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#pricing">Pricing</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a><a href="#proof">Customers</a>
         </nav>
         <div className="head-actions">
           <Link className="signin" href="/login">Sign in</Link>
@@ -517,9 +603,9 @@ export default function LandingZone() {
       <span id="top" />
       <section className="hero">
         <div className="lx-hero-copy">
-          <span className="kicker"><i /> EKS-first CNAPP for managed service providers</span>
+          <span className="kicker"><i /> The cloud operations platform for AWS MSPs</span>
           <h1>See every risk.<br /><span className="accent">Prove every path.</span></h1>
-          <p>Sutra correlates every cloud and cluster risk across AWS and Kubernetes into one evidence graph — exposure, workload, identity, blast radius — and surfaces the few that are provably reachable. Every finding cites the exact observation behind it.</p>
+          <p>One platform for AWS and Amazon EKS operations — a live CMDB and asset inventory, reachability-proven security, cloud cost (FinOps), compliance readiness, and a tenant-scoped API — woven into a single evidence graph. Sutra surfaces the few risks that are provably reachable and cites the exact observation behind every finding.</p>
           <div className="hero-cta">
             <Link className="btn btn-solid" href="/dashboard">Open live demo <Arrow /></Link>
             <a className="btn" href="#trust">Review the trust model</a>
@@ -600,6 +686,30 @@ export default function LandingZone() {
           </div>
           <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the demo workspace.</p>
         </section>
+
+        <section className="block" style={{ paddingTop: 0 }} id="pricing">
+          <div className="intro center rise"><span className="sec-kicker">Plans</span><h2>Pricing that scales with your book of business.</h2><p className="lead">Three tiers built around what Sutra already does — collection, the evidence graph, vulnerability management, FinOps, compliance readiness, the API and MSP multi-tenancy.</p></div>
+          {/* Prices below are editable placeholders — no real, final numbers are shown. */}
+          <p className="lx-price-note">Placeholder pricing — every amount below is a <strong>&ldquo;set your price&rdquo;</strong> slot for you to replace with your own commercial terms. Feature scopes marked <em>example</em> are illustrative, not fixed limits.</p>
+          <div className="lx-tiers rise">
+            {TIERS.map((t) => (
+              <article key={t.name} className={"lx-tier" + (t.feat ? " feat" : "")}>
+                {t.feat ? <span className="lx-tier-badge">Most popular</span> : null}
+                <h3>{t.name}</h3>
+                <p className="tagline">{t.tagline}</p>
+                <div className="lx-price"><b>$—</b><small>{t.note}</small></div>
+                <p className="lx-tier-lead">{t.lead}</p>
+                <ul>
+                  {t.points.map((pt) => (
+                    <li key={pt}><Check s={14} /> {pt}</li>
+                  ))}
+                </ul>
+                <span className="lx-tier-eg">{t.eg}</span>
+                <Link className={"btn lx-tier-cta" + (t.feat ? " btn-solid" : "")} href={t.ctaHref}>{t.cta} <Arrow /></Link>
+              </article>
+            ))}
+          </div>
+        </section>
       </div>
 
       <section className="block trust" id="trust">
@@ -653,6 +763,47 @@ export default function LandingZone() {
         </section>
       </div>
 
+      <section className="block proof" id="proof">
+        <div className="wrap">
+          <div className="intro center rise"><span className="sec-kicker">Proof &amp; trust</span><h2>Proof is the pitch. So the proof lives here.</h2><p className="lead">The logos and quotes below are placeholders for you to fill in. The trust statements are not — they describe exactly how the product behaves today.</p></div>
+
+          {/* Logos: clearly-marked placeholder slots — no real or fabricated company logos. */}
+          <div className="lx-logos rise" aria-label="Customer logo placeholders">
+            {[0, 1, 2, 3, 4].map((i) => (
+              <span key={i} className="lx-logo-slot">Your logo here</span>
+            ))}
+          </div>
+
+          {/* Testimonials: obvious placeholder text — never a fabricated quote or person. */}
+          <div className="lx-quotes rise">
+            {TESTIMONIALS.map((t, i) => (
+              <figure key={i} className="lx-quote">
+                <span className="lx-ph-tag">{t.tag}</span>
+                <blockquote>&ldquo;Add a customer quote here — what changed once your team could prove every path and cite every finding.&rdquo;</blockquote>
+                <figcaption>&mdash; Name, {t.role}, Company</figcaption>
+              </figure>
+            ))}
+          </div>
+
+          {/* Honest trust posture — no certification the product does not hold. */}
+          <div className="lx-badges rise" aria-label="Trust posture">
+            {TRUST_BADGES.map((b) => (
+              <span key={b} className="lx-badge"><Check s={13} /> {b}</span>
+            ))}
+          </div>
+
+          <div className="lx-faq rise">
+            <h3 className="lx-faq-title">Frequently asked</h3>
+            {FAQ.map((f) => (
+              <details key={f.q} className="lx-faq-item">
+                <summary>{f.q}<span className="lx-faq-mark" aria-hidden="true"><Plus /></span></summary>
+                <p>{f.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
       <section className="final">
         <div className="wrap"><div className="inner rise">
           <span className="sec-kicker">Start in minutes</span>
@@ -667,7 +818,7 @@ export default function LandingZone() {
           <div className="ftcols">
             <div className="ftcol ftbrand">
               <Link className="lx-brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
-              <p>The EKS-first, evidence-backed CNAPP for managed service providers — every finding traced to what was actually observed.</p>
+              <p>The evidence-backed cloud operations platform for AWS MSPs — inventory, security, cost and compliance, every finding traced to what was actually observed.</p>
               <div className="soc">
                 <a href="#top" aria-label="X"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.7 3H21l-7.3 8.3L22.2 21h-6.8l-5.3-6.4L4 21H.8l7.8-8.9L.5 3h7l4.8 5.8L17.7 3Zm-1.2 16h1.9L6.6 4.9H4.6L16.5 19Z" /></svg></a>
                 <a href="#top" aria-label="LinkedIn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5ZM.24 8.25h4.52V23H.24V8.25ZM8.34 8.25h4.33v2h.06c.6-1.14 2.08-2.34 4.28-2.34 4.58 0 5.43 3.01 5.43 6.93V23h-4.52v-7.1c0-1.7-.03-3.88-2.37-3.88-2.37 0-2.73 1.85-2.73 3.76V23H8.34V8.25Z" /></svg></a>
