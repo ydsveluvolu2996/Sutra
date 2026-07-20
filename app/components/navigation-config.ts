@@ -7,6 +7,7 @@ export type NavKey =
   | "cmdb"
   | "changes"
   | "findings"
+  | "findings_exceptions"
   | "vulnerabilities"
   | "vulnerabilities_exploitability"
   | "network_exposure"
@@ -143,6 +144,7 @@ export const navGroups: readonly NavGroup[] = [
     label: "Security",
     items: [
       { key: "findings", label: "Posture findings", href: "/findings", icon: "PF", capabilities: readConnection },
+      { key: "findings_exceptions", label: "Finding exceptions", href: "/findings/exceptions", icon: "FE", capabilities: readConnection },
       { key: "vulnerabilities", label: "Vulnerability & exposure", href: "/vulnerabilities", icon: "VX", capabilities: readConnection },
       { key: "vulnerabilities_exploitability", label: "Exploitability ranking", href: "/vulnerabilities/exploitability", icon: "XP", capabilities: readConnection },
       { key: "network_exposure", label: "Network exposure", href: "/network-exposure", icon: "NX", capabilities: readConnection },

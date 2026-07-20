@@ -39,6 +39,7 @@ const migrationFiles = [
   "0023_public_api.sql",
   "0024_itsm_connectors.sql",
   "0025_background_jobs.sql",
+  "0026_finding_exceptions.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
