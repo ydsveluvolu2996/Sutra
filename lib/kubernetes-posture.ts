@@ -15,6 +15,28 @@ export interface KubernetesEvidenceSnapshot {
   readonly collectedAt: string;
   readonly observedKinds: readonly KubernetesEvidenceKind[];
   readonly resources: readonly KubernetesEvidence[];
+  /**
+   * Optional side array of Node capacity/pricing inputs for FinOps cost
+   * allocation. It is NOT an observedKind, is never scored by the posture
+   * engine, and is OMITTED entirely when no nodes were collected — so its
+   * absence leaves every existing evidence blob byte-identical.
+   */
+  readonly nodes?: readonly KubernetesNodeInfo[];
+}
+
+/**
+ * Credential-free Node fact used only for FinOps cost allocation: allocatable
+ * capacity (the schedulable pool) and the EC2/instance type. Never a posture
+ * subject.
+ */
+export interface KubernetesNodeInfo {
+  readonly name: string;
+  /** Allocatable CPU in millicores; null when not collected or unparseable. */
+  readonly allocatableCpuMillicores: number | null;
+  /** Allocatable memory in bytes; null when not collected or unparseable. */
+  readonly allocatableMemoryBytes: number | null;
+  /** EC2/instance type from the node label; null when unlabelled. */
+  readonly instanceType: string | null;
 }
 
 export type KubernetesEvidenceKind =
@@ -62,6 +84,14 @@ export interface KubernetesContainerEvidence {
   readonly hasMemoryLimit: TriState;
   readonly hasLivenessProbe: TriState;
   readonly hasReadinessProbe: TriState;
+  /**
+   * Numeric CPU request in millicores; OPTIONAL and OMITTED when the quantity
+   * was not collected/parseable (never null — absence keeps evidence SHAs
+   * byte-stable). Feeds FinOps cost allocation; ignored by posture controls.
+   */
+  readonly cpuRequestMillicores?: number;
+  /** Numeric memory request in bytes; OPTIONAL and OMITTED when absent. */
+  readonly memoryRequestBytes?: number;
 }
 
 export interface KubernetesServiceEvidence extends EvidenceBase {
@@ -213,8 +243,19 @@ function apiGroupList(value: unknown): readonly string[] | null {
   return [...new Set(normalized)].sort();
 }
 
+/** A non-negative safe integer, or null when the value is absent/invalid. */
+function optionalNonNegativeInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new KubernetesEvidenceError("INVALID_EVIDENCE");
+  }
+  return value;
+}
+
 function container(value: unknown): KubernetesContainerEvidence {
   const item = record(value);
+  const cpuRequestMillicores = optionalNonNegativeInteger(item.cpuRequestMillicores);
+  const memoryRequestBytes = optionalNonNegativeInteger(item.memoryRequestBytes);
   return {
     name: requiredIdentifier(item.name),
     image: nullableString(item.image, 2_048),
@@ -229,6 +270,21 @@ function container(value: unknown): KubernetesContainerEvidence {
     hasMemoryLimit: triState(item.hasMemoryLimit),
     hasLivenessProbe: triState(item.hasLivenessProbe),
     hasReadinessProbe: triState(item.hasReadinessProbe),
+    // OMIT when absent so canonicalJson never emits the key -> SHA stays stable.
+    ...(cpuRequestMillicores !== null ? { cpuRequestMillicores } : {}),
+    ...(memoryRequestBytes !== null ? { memoryRequestBytes } : {}),
+  };
+}
+
+const MAX_NODES = 5_000;
+
+function normalizeNode(value: unknown): KubernetesNodeInfo {
+  const item = record(value);
+  return {
+    name: requiredIdentifier(item.name),
+    allocatableCpuMillicores: optionalNonNegativeInteger(item.allocatableCpuMillicores),
+    allocatableMemoryBytes: optionalNonNegativeInteger(item.allocatableMemoryBytes),
+    instanceType: nullableString(item.instanceType ?? null, 128),
   };
 }
 
@@ -374,6 +430,22 @@ export function normalizeKubernetesEvidence(input: unknown): KubernetesEvidenceS
   if (resources.some((resource) => !observed.has(resource.kind))) {
     throw new KubernetesEvidenceError("INVALID_EVIDENCE");
   }
+  // Optional FinOps Node side array: validated, de-duplicated by name and
+  // sorted for determinism. OMITTED when absent or empty so node-less evidence
+  // serialises exactly as before and its SHA is unchanged.
+  let nodes: readonly KubernetesNodeInfo[] | undefined;
+  if (source.nodes !== undefined && source.nodes !== null) {
+    if (!Array.isArray(source.nodes) || source.nodes.length > MAX_NODES) {
+      throw new KubernetesEvidenceError("INVALID_EVIDENCE");
+    }
+    const seen = new Set<string>();
+    const normalized = source.nodes.map(normalizeNode).filter((node) => {
+      if (seen.has(node.name)) return false;
+      seen.add(node.name);
+      return true;
+    }).sort((left, right) => left.name.localeCompare(right.name));
+    if (normalized.length > 0) nodes = normalized;
+  }
   return {
     schema: "sutra.kubernetes-evidence.v1",
     clusterId,
@@ -382,6 +454,7 @@ export function normalizeKubernetesEvidence(input: unknown): KubernetesEvidenceS
     resources: resources.sort((left, right) =>
       `${left.kind}\0${left.namespace ?? ""}\0${left.name}`
         .localeCompare(`${right.kind}\0${right.namespace ?? ""}\0${right.name}`)),
+    ...(nodes !== undefined ? { nodes } : {}),
   };
 }
 

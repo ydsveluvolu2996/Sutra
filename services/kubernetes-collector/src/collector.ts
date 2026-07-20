@@ -20,6 +20,10 @@ import {
   trivyOperatorReports,
   TrivyOperatorEvidenceError,
 } from "./trivy-operator.ts";
+import {
+  parseCpuRequestMillicores,
+  parseMemoryRequestBytes,
+} from "./quantity.ts";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const COLLECTION_TIMEOUT_MS = 60_000;
@@ -240,6 +244,13 @@ function projectedContainers(podSpec: Record<string, unknown>): readonly SafeKub
     const resources = optionalRecord(rawContainer.resources);
     const requests = hasObject(resources.requests) ? resources.requests : null;
     const limits = hasObject(resources.limits) ? resources.limits : null;
+    // Numeric request quantities ride the canonical evidence blob as OPTIONAL
+    // fields: they are added only when the container declares a parseable
+    // request, and OMITTED (never null) otherwise so every existing fixture's
+    // evidence SHA stays byte-identical (canonicalJson rejects undefined and
+    // would serialise null, so absence must mean the key is not present at all).
+    const cpuRequestMillicores = requests === null ? null : parseCpuRequestMillicores(requests.cpu);
+    const memoryRequestBytes = requests === null ? null : parseMemoryRequestBytes(requests.memory);
     return [{
       name,
       image: safeString(rawContainer.image, 2_048),
@@ -254,6 +265,8 @@ function projectedContainers(podSpec: Record<string, unknown>): readonly SafeKub
       hasMemoryLimit: limits === null ? null : Object.hasOwn(limits, "memory"),
       hasLivenessProbe: Object.hasOwn(rawContainer, "livenessProbe"),
       hasReadinessProbe: Object.hasOwn(rawContainer, "readinessProbe"),
+      ...(cpuRequestMillicores !== null ? { cpuRequestMillicores } : {}),
+      ...(memoryRequestBytes !== null ? { memoryRequestBytes } : {}),
     }];
   });
 }
@@ -418,12 +431,23 @@ function configuration(kind: KubernetesResourceKind, item: Record<string, unknow
   }
   if (kind === "node") {
     const nodeInfo = optionalRecord(status.nodeInfo);
+    const allocatable = optionalRecord(status.allocatable);
+    const nodeLabels = labels(optionalRecord(item.metadata).labels);
     const conditions = Array.isArray(status.conditions) ? status.conditions.slice(0, 100) : [];
+    // FinOps allocation inputs: allocatable CPU/memory (parsed to millicores /
+    // bytes) and the EC2/instance type (from the standard node label, with the
+    // legacy beta fallback). These live only on the Node resource, which the
+    // posture adapter never turns into a posture subject, so they do not affect
+    // any posture control, coverage or existing evidence SHA.
     return {
       unschedulable: spec.unschedulable === true,
       kubeletVersion: safeString(nodeInfo.kubeletVersion, 128),
       operatingSystem: safeString(nodeInfo.operatingSystem, 64),
       architecture: safeString(nodeInfo.architecture, 64),
+      instanceType: nodeLabels["node.kubernetes.io/instance-type"]
+        ?? nodeLabels["beta.kubernetes.io/instance-type"] ?? null,
+      allocatableCpuMillicores: parseCpuRequestMillicores(allocatable.cpu),
+      allocatableMemoryBytes: parseMemoryRequestBytes(allocatable.memory),
       conditions: conditions.map((condition) => {
         const value = optionalRecord(condition);
         return { type: safeString(value.type, 128), status: safeString(value.status, 32) };

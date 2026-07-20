@@ -6,6 +6,7 @@ import type {
   KubernetesContainerEvidence,
   KubernetesEvidence,
   KubernetesEvidenceKind,
+  KubernetesNodeInfo,
   KubernetesRbacBindingEvidence,
   KubernetesRbacRoleEvidence,
   KubernetesServiceAccountEvidence,
@@ -48,6 +49,8 @@ function workload(resource: KubernetesResource): KubernetesWorkloadEvidence | nu
         const item = objectValue(raw);
         const name = nullableString(item.name);
         if (name === null) return [];
+        const cpuRequestMillicores = numberValue(item.cpuRequestMillicores);
+        const memoryRequestBytes = numberValue(item.memoryRequestBytes);
         return [{
           name,
           image: nullableString(item.image),
@@ -62,6 +65,9 @@ function workload(resource: KubernetesResource): KubernetesWorkloadEvidence | nu
           hasMemoryLimit: nullableBoolean(item.hasMemoryLimit),
           hasLivenessProbe: nullableBoolean(item.hasLivenessProbe),
           hasReadinessProbe: nullableBoolean(item.hasReadinessProbe),
+          // Carried through only when present so absence stays SHA-neutral.
+          ...(cpuRequestMillicores !== null ? { cpuRequestMillicores } : {}),
+          ...(memoryRequestBytes !== null ? { memoryRequestBytes } : {}),
         }];
       })
     : [];
@@ -193,17 +199,30 @@ const evidenceCollectors: Readonly<Record<KubernetesEvidenceKind, readonly strin
   NetworkPolicy: ["kubernetes.networkpolicies"],
 };
 
+function nodeInfo(resource: KubernetesResource): KubernetesNodeInfo {
+  return {
+    name: resource.name,
+    allocatableCpuMillicores: numberValue(resource.configuration.allocatableCpuMillicores),
+    allocatableMemoryBytes: numberValue(resource.configuration.allocatableMemoryBytes),
+    instanceType: nullableString(resource.configuration.instanceType),
+  };
+}
+
 /** Converts credential-free collector output into the posture engine contract. */
 export function toKubernetesEvidenceSnapshot(snapshot: KubernetesSnapshot): KubernetesEvidenceSnapshot {
   const successful = new Set(snapshot.coverage.filter((entry) => entry.status === "succeeded").map((entry) => entry.collectorKey));
   const observedKinds = (Object.keys(evidenceCollectors) as KubernetesEvidenceKind[]).filter((kind) =>
     evidenceCollectors[kind].some((collectorKey) => successful.has(collectorKey)),
   );
+  // Nodes are a FinOps-only side array, never an observedKind: they carry no
+  // posture subject and are omitted when the cluster reported no nodes.
+  const nodes = snapshot.resources.filter((resource) => resource.kind === "node").map(nodeInfo);
   return normalizeKubernetesEvidence({
     schema: "sutra.kubernetes-evidence.v1",
     clusterId: snapshot.clusterId,
     collectedAt: snapshot.collectedAt,
     observedKinds,
     resources: snapshot.resources.map(postureResource).filter((resource): resource is KubernetesEvidence => resource !== null),
+    ...(nodes.length > 0 ? { nodes } : {}),
   });
 }
