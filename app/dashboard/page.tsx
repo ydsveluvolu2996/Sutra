@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 import { AppShell } from "../components/app-shell";
 import { formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
@@ -49,6 +49,181 @@ function ScoreGauge({ value, caption }: { readonly value: number; readonly capti
   );
 }
 
+// --- Platform posture band -------------------------------------------------
+// Each KPI tile fetches ONE vertical's real summary independently (own
+// AbortController), so a slow or failing source never blanks its neighbours.
+// A parser returns `null` whenever the source is unconfigured or empty — the
+// tile then shows an explicit "no data" state and never a fabricated number.
+
+interface TileData {
+  readonly value: string;
+  readonly detail: string;
+  readonly alert?: boolean;
+}
+
+type SignalState = { readonly phase: "loading" } | { readonly phase: "empty" } | { readonly phase: "ready"; readonly data: TileData };
+
+function usePlatformSignal(url: string | null, parse: (body: unknown) => TileData | null): SignalState {
+  // The resolved state is tagged with the URL it belongs to; loading and the
+  // no-connection empty state are DERIVED during render, so the effect never
+  // calls setState synchronously (only inside the async fetch callbacks).
+  const [resolved, setResolved] = useState<{ readonly url: string; readonly state: SignalState } | null>(null);
+  useEffect(() => {
+    if (url === null) return;
+    const controller = new AbortController();
+    void fetch(url, { cache: "no-store", credentials: "same-origin", signal: controller.signal })
+      .then(async (response) => {
+        // 400/401/403/5xx all degrade honestly to "no data" rather than throwing.
+        if (!response.ok) return null;
+        const body = await response.json().catch(() => null) as unknown;
+        return body === null ? null : parse(body);
+      })
+      .then((parsed) => {
+        if (!controller.signal.aborted) setResolved({ url, state: parsed === null ? { phase: "empty" } : { phase: "ready", data: parsed } });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setResolved({ url, state: { phase: "empty" } });
+      });
+    return () => controller.abort();
+  }, [url, parse]);
+  if (url === null) return { phase: "empty" };
+  // Stale result from a previous connection → treat as still loading.
+  return resolved !== null && resolved.url === url ? resolved.state : { phase: "loading" };
+}
+
+// Integer micro-units → display string, matching the FinOps workspace exactly
+// (currencies are never summed together; each allocation carries its own).
+function moneyFromMicros(micros: string, currency: string): string {
+  const negative = micros.startsWith("-");
+  const padded = (negative ? micros.slice(1) : micros).padStart(7, "0");
+  const whole = padded.slice(0, -6).replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
+  return `${negative ? "-" : ""}${whole}.${padded.slice(-6, -4)} ${currency}`;
+}
+
+// Response shapes (partial — only the fields each tile reads).
+interface VulnBody { readonly queue?: { readonly summary?: { readonly open?: number; readonly bySeverity?: Readonly<Record<string, number>> }; readonly items?: readonly { readonly knownExploited?: boolean }[] } }
+interface ComplianceBody { readonly frameworks?: readonly { readonly summary?: Readonly<Record<string, number>> }[] }
+interface FleetBody { readonly totals?: { readonly clusters?: number; readonly online?: number; readonly degraded?: number; readonly offline?: number; readonly notEnrolled?: number } }
+interface FinopsBody { readonly period?: string | null; readonly allocation?: readonly { readonly currency: string; readonly totalMicros: string }[]; readonly commitment?: { readonly recommendations?: readonly unknown[] } | null }
+interface CasesBody { readonly cases?: readonly { readonly status?: string }[] }
+interface DetectionsBody { readonly report?: { readonly summary?: { readonly detections?: number; readonly bySeverity?: Readonly<Record<string, number>> } }; readonly coverage?: { readonly zeroCoverage?: boolean } }
+interface ExposureBody { readonly exposure?: { readonly summary?: { readonly resources?: number; readonly internetExposed?: number; readonly unknown?: number } } }
+
+function parseVulnerabilities(body: unknown): TileData | null {
+  const summary = (body as VulnBody).queue?.summary;
+  if (summary === undefined || typeof summary.open !== "number") return null;
+  const critical = summary.bySeverity?.critical ?? 0;
+  const high = summary.bySeverity?.high ?? 0;
+  const kev = ((body as VulnBody).queue?.items ?? []).filter((item) => item.knownExploited === true).length;
+  return {
+    value: summary.open.toLocaleString(),
+    detail: `${(critical + high).toLocaleString()} critical/high · ${kev} KEV/exploitable`,
+    alert: critical > 0 || kev > 0,
+  };
+}
+
+function complianceScore(counts: Readonly<Record<string, number>> | undefined): number | null {
+  if (counts === undefined) return null;
+  const scorable = (counts.PASS ?? 0) + (counts.FAIL ?? 0);
+  return scorable === 0 ? null : Math.round(((counts.PASS ?? 0) / scorable) * 1000) / 10;
+}
+
+function parseCompliance(body: unknown): TileData | null {
+  const frameworks = (body as ComplianceBody).frameworks;
+  if (!Array.isArray(frameworks)) return null;
+  const scores = frameworks.map((framework) => complianceScore(framework.summary)).filter((score): score is number => score !== null);
+  if (scores.length === 0) {
+    return { value: "—", detail: `${frameworks.length} mapped · not yet scorable` };
+  }
+  const worst = Math.min(...scores);
+  return { value: `${worst}%`, detail: `worst of ${frameworks.length} frameworks`, alert: worst < 55 };
+}
+
+function parseFleet(body: unknown): TileData | null {
+  const totals = (body as FleetBody).totals;
+  if (totals === undefined || typeof totals.clusters !== "number") return null;
+  const offline = totals.offline ?? 0;
+  const degraded = totals.degraded ?? 0;
+  const notEnrolled = totals.notEnrolled ?? 0;
+  const online = totals.online ?? 0;
+  const worst = totals.clusters === 0 ? "no clusters enrolled"
+    : offline > 0 ? "offline present"
+    : degraded > 0 ? "degraded present"
+    : notEnrolled > 0 ? "not-enrolled present"
+    : "all online";
+  return { value: totals.clusters.toLocaleString(), detail: `${online} online · ${worst}`, alert: offline > 0 || degraded > 0 };
+}
+
+function parseFinops(body: unknown): TileData | null {
+  const finops = body as FinopsBody;
+  if (typeof finops.period !== "string") return null;
+  const allocation = Array.isArray(finops.allocation) ? finops.allocation : [];
+  const opportunities = finops.commitment?.recommendations?.length ?? 0;
+  const oppText = `${opportunities} cost ${opportunities === 1 ? "opportunity" : "opportunities"}`;
+  if (allocation.length === 0) {
+    return { value: "—", detail: `${oppText} · ${finops.period}` };
+  }
+  const extra = allocation.length - 1;
+  const suffix = extra > 0 ? ` · +${extra} more currenc${extra === 1 ? "y" : "ies"}` : "";
+  return { value: moneyFromMicros(allocation[0].totalMicros, allocation[0].currency), detail: `${oppText} · ${finops.period}${suffix}` };
+}
+
+function parseCases(body: unknown): TileData | null {
+  const cases = (body as CasesBody).cases;
+  if (!Array.isArray(cases)) return null;
+  const open = cases.filter((item) => item.status === "open").length;
+  const investigating = cases.filter((item) => item.status === "investigating").length;
+  return { value: (open + investigating).toLocaleString(), detail: `${open} open · ${investigating} investigating`, alert: open > 0 };
+}
+
+function parseDetections(body: unknown): TileData | null {
+  const detections = body as DetectionsBody;
+  const summary = detections.report?.summary;
+  if (summary === undefined || typeof summary.detections !== "number") return null;
+  if (detections.coverage?.zeroCoverage === true) {
+    return { value: "—", detail: "Zero coverage · single-source (CloudTrail)" };
+  }
+  const critHigh = (summary.bySeverity?.critical ?? 0) + (summary.bySeverity?.high ?? 0);
+  return { value: summary.detections.toLocaleString(), detail: `${critHigh} critical/high · single-source (CloudTrail)`, alert: critHigh > 0 };
+}
+
+function parseExposure(body: unknown): TileData | null {
+  const summary = (body as ExposureBody).exposure?.summary;
+  if (summary === undefined || typeof summary.internetExposed !== "number") return null;
+  return {
+    value: summary.internetExposed.toLocaleString(),
+    detail: `${summary.unknown ?? 0} unknown · of ${(summary.resources ?? 0).toLocaleString()} interfaces`,
+    alert: summary.internetExposed > 0,
+  };
+}
+
+function PlatformTile({ label, glyph, href, state }: { readonly label: string; readonly glyph: string; readonly href: string; readonly state: SignalState }) {
+  return (
+    <a className="metric-card" href={href} aria-label={`${label} — open vertical`}>
+      <div className="metric-topline">
+        <span>{label}</span>
+        <span className={`metric-glyph${state.phase === "ready" && state.data.alert === true ? " metric-glyph-alert" : ""}`}>{glyph}</span>
+      </div>
+      {state.phase === "loading"
+        ? <><strong className="metric-value" aria-hidden="true">…</strong><p><span className="loading-spinner" style={{ width: 10, height: 10, marginRight: 6, verticalAlign: "middle" }} />Loading…</p></>
+        : state.phase === "empty"
+          ? <><strong className="metric-value">—</strong><p>Not configured or no data yet</p></>
+          : <><strong className="metric-value">{state.data.value}</strong><p>{state.data.detail}</p></>}
+    </a>
+  );
+}
+
+const EXPLORE_LINKS: readonly { readonly href: string; readonly glyph: string; readonly label: string; readonly blurb: string }[] = [
+  { href: "/registry/inventory", glyph: "RG", label: "Registry inventory", blurb: "Container image registries and their scanned contents" },
+  { href: "/iac-scan", glyph: "IAC", label: "IaC scan", blurb: "Terraform / CloudFormation misconfiguration scanning" },
+  { href: "/kubernetes/supply-chain", glyph: "SC", label: "Supply chain", blurb: "SBOM inventory and artifact provenance trust" },
+  { href: "/kubernetes/attack-paths", glyph: "AP", label: "Attack paths", blurb: "Reachable cross-plane attack chains" },
+  { href: "/kubernetes/permissions", glyph: "EP", label: "Effective permissions", blurb: "CIEM effective-access analysis" },
+  { href: "/cases/routing", glyph: "CR", label: "Case routing", blurb: "Automatic case assignment routing rules" },
+  { href: "/findings/exceptions", glyph: "FE", label: "Finding exceptions", blurb: "Governed, time-boxed risk acceptances" },
+  { href: "/vulnerabilities/exploitability", glyph: "XP", label: "Exploitability", blurb: "KEV-first, EPSS-ranked exploitability" },
+];
+
 export default function Home() {
   const { state, health, loading, refreshing, error, refresh } = usePilotState();
   const [syncing, setSyncing] = useState(false);
@@ -93,6 +268,31 @@ export default function Home() {
     Math.round(100 - Math.min(98, openBySeverity.critical * 14 + openBySeverity.high * 6 + openBySeverity.medium * 2 + openBySeverity.low * 0.5)),
   );
   const resolvedCount = findings.filter((finding) => finding.status === "resolved" || finding.status === "suppressed").length;
+
+  // Platform posture: one query per vertical, each carrying the active
+  // connection. Built once per connection so a re-render never re-fires fetches.
+  const connectionId = connection?.id ?? null;
+  const signalUrls = useMemo(() => {
+    if (connectionId === null) return null;
+    const query = `?connectionId=${encodeURIComponent(connectionId)}`;
+    return {
+      vulnerabilities: `/api/v1/cloud/vulnerabilities${query}`,
+      compliance: `/api/v1/compliance/frameworks${query}`,
+      fleet: `/api/v1/kubernetes/fleet${query}`,
+      finops: `/api/v1/finops/insights${query}`,
+      cases: `/api/v1/cases${query}`,
+      detections: `/api/v1/cloud-detections${query}`,
+      exposure: `/api/v1/network-exposure${query}`,
+    };
+  }, [connectionId]);
+  const vulnState = usePlatformSignal(signalUrls?.vulnerabilities ?? null, parseVulnerabilities);
+  const complianceState = usePlatformSignal(signalUrls?.compliance ?? null, parseCompliance);
+  const fleetState = usePlatformSignal(signalUrls?.fleet ?? null, parseFleet);
+  const finopsState = usePlatformSignal(signalUrls?.finops ?? null, parseFinops);
+  const casesState = usePlatformSignal(signalUrls?.cases ?? null, parseCases);
+  const detectionsState = usePlatformSignal(signalUrls?.detections ?? null, parseDetections);
+  const exposureState = usePlatformSignal(signalUrls?.exposure ?? null, parseExposure);
+  const withConn = (href: string): string => (connectionId === null ? href : `${href}?connectionId=${encodeURIComponent(connectionId)}`);
 
   async function runSync() {
     if (!connection) return;
@@ -164,6 +364,20 @@ export default function Home() {
 
       {connection ? (
         <>
+          <section className="panel" aria-label="Platform posture" style={{ marginBottom: 13 }}>
+            <div className="panel-heading"><div><p className="eyebrow">Cross-vertical overview</p><h2>Platform posture</h2></div><span className="result-count">Live signals · every source independent</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 13, marginTop: 4 }}>
+              <PlatformTile label="Vulnerabilities" glyph="VULN" href={withConn("/vulnerabilities")} state={vulnState} />
+              <PlatformTile label="Compliance" glyph="CMPL" href={withConn("/compliance-frameworks")} state={complianceState} />
+              <PlatformTile label="Kubernetes fleet" glyph="K8S" href={withConn("/kubernetes/fleet")} state={fleetState} />
+              <PlatformTile label="FinOps spend" glyph="COST" href={withConn("/costs")} state={finopsState} />
+              <PlatformTile label="Remediation cases" glyph="CASE" href={withConn("/cases")} state={casesState} />
+              <PlatformTile label="Cloud detections" glyph="CDR" href={withConn("/cloud-detections")} state={detectionsState} />
+              <PlatformTile label="Internet exposure" glyph="NET" href={withConn("/network-exposure")} state={exposureState} />
+            </div>
+            <p className="panel-footnote">Each tile queries its vertical directly for the active connection and degrades to &ldquo;no data&rdquo; on an empty or unavailable source — never a fabricated number. Cloud detections are single-source (collected CloudTrail management events only) and do not claim full-coverage CDR.</p>
+          </section>
+
           <section className="metrics-grid" aria-label="Pilot summary">
             <article className="metric-card metric-card-featured">
               <div className="metric-topline"><span>Trust health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
@@ -266,6 +480,18 @@ export default function Home() {
               <div className="panel-heading"><div><p className="eyebrow">Collection history</p><h2>Recent runs</h2></div></div>
               <div className="sync-run-list">{(state?.syncRuns ?? []).slice(0, 5).map((run) => <div key={run.id}><span className={`coverage-state coverage-${run.status === "succeeded" ? "succeeded" : run.status === "partial" ? "partial" : "failed"}`} /><p><strong>{run.status}</strong><small>{formatTimestamp(run.finishedAt ?? run.createdAt)}</small></p><b>{run.coverageState}</b></div>)}{(state?.syncRuns.length ?? 0) === 0 ? <div className="empty-state"><strong>No sync runs yet</strong><span>Run the first inventory collection from onboarding.</span></div> : null}</div>
             </article>
+          </section>
+
+          <section className="panel" aria-label="Explore the platform">
+            <div className="panel-heading"><div><p className="eyebrow">Launchpad</p><h2>Explore the platform</h2></div><span className="result-count">{EXPLORE_LINKS.length} more capabilities</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginTop: 4 }}>
+              {EXPLORE_LINKS.map((link) => (
+                <a className="metric-card" key={link.href} href={withConn(link.href)} style={{ minHeight: 0, padding: "13px 15px" }}>
+                  <div className="metric-topline"><span>{link.label}</span><span className="metric-glyph">{link.glyph}</span></div>
+                  <p style={{ marginTop: 8 }}>{link.blurb}</p>
+                </a>
+              ))}
+            </div>
           </section>
         </>
       ) : null}
