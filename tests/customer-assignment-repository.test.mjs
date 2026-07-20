@@ -71,7 +71,7 @@ async function withAssignmentDatabase(run) {
 }
 
 test("customer assignment API requires centralized membership capability, same-origin mutation, and recent MFA", () => {
-  assert.match(routeSource, /authorizePilotRequest\(request, "membership:manage"\)/u);
+  assert.match(routeSource, /authorizeMembershipManagementRequest\(request\)/u);
   assert.match(routeSource, /assertAuthMutation\(request\)/u);
   assert.match(routeSource, /requireRecentMfa\(actor\.authenticated\)/u);
   assert.match(routeSource, /readAuthJson\(request, 64 \* 1024\)/u);
@@ -88,7 +88,7 @@ test("repository scopes every assignment relation through organization keys and 
 
 test("owner can atomically replace explicit assignments and audit the resulting scope", async () => {
   await withAssignmentDatabase(async ({ database, actor, orgId }) => {
-    const initial = await assignments.listCustomerAssignments(actor);
+    const initial = await assignments.listCustomerAssignments(actor, { mode: "org" });
     assert.deepEqual(initial.customers.map((customer) => customer.id), [
       "cust_assignment_alpha",
       "cust_assignment_beta",
@@ -96,7 +96,7 @@ test("owner can atomically replace explicit assignments and audit the resulting 
     assert.equal(initial.members.find((member) => member.membershipId === "mem_assignment_target")?.editable, true);
     assert.equal(initial.members.some((member) => member.email === "target@sutra.invalid"), true);
 
-    const updated = await assignments.replaceCustomerAssignments(actor, {
+    const updated = await assignments.replaceCustomerAssignments(actor, { mode: "org" }, {
       membershipId: "mem_assignment_target",
       scopeMode: "assigned_customers",
       grants: [
@@ -136,7 +136,7 @@ test("owner can atomically replace explicit assignments and audit the resulting 
 test("foreign customers and protected owner membership fail closed without changing assignments", async () => {
   await withAssignmentDatabase(async ({ database, actor, orgId }) => {
     await assert.rejects(
-      assignments.replaceCustomerAssignments(actor, {
+      assignments.replaceCustomerAssignments(actor, { mode: "org" }, {
         membershipId: "mem_assignment_target",
         scopeMode: "assigned_customers",
         grants: [{ customerId: "cust_assignment_foreign", role: "viewer" }],
@@ -144,7 +144,7 @@ test("foreign customers and protected owner membership fail closed without chang
       (error) => error?.code === "INVALID_INPUT",
     );
     await assert.rejects(
-      assignments.replaceCustomerAssignments(actor, {
+      assignments.replaceCustomerAssignments(actor, { mode: "org" }, {
         membershipId: actor.subject.membershipId,
         scopeMode: "assigned_customers",
         grants: [],

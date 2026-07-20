@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { postAuth, readAuthResponse } from "../components/use-session";
+import { postAuth, readAuthResponse, useSession } from "../components/use-session";
 
 type CustomerRole = "customer_admin" | "analyst" | "viewer" | "customer_viewer";
 type ScopeMode = "all_customers" | "assigned_customers";
@@ -41,11 +41,21 @@ const roleOptions: readonly { readonly value: CustomerRole; readonly label: stri
   { value: "customer_viewer", label: "Customer viewer" },
 ];
 
+// A customer administrator may only ever grant customer-level roles.
+const customerScopedRoleOptions = roleOptions.filter(
+  (option) => option.value === "customer_admin" || option.value === "customer_viewer",
+);
+
 function roleLabel(role: string): string {
   return role.replaceAll("_", " ").replace(/\b\w/gu, (value) => value.toLocaleUpperCase("en-US"));
 }
 
 export function CustomerAssignments() {
+  const { session } = useSession();
+  const capabilities = new Set(session?.capabilities ?? []);
+  const customerScoped = capabilities.has("membership:manage:customer") && !capabilities.has("membership:manage");
+  const availableRoles = customerScoped ? customerScopedRoleOptions : roleOptions;
+  const defaultGrantRole: CustomerRole = customerScoped ? "customer_viewer" : "viewer";
   const [directory, setDirectory] = useState<AssignmentDirectory | null>(null);
   const [membershipId, setMembershipId] = useState("");
   const [scopeMode, setScopeMode] = useState<ScopeMode>("assigned_customers");
@@ -97,7 +107,7 @@ export function CustomerAssignments() {
   function toggleCustomer(customerId: string, enabled: boolean): void {
     setGrantRoles((current) => {
       const next = { ...current };
-      if (enabled) next[customerId] = next[customerId] ?? "viewer";
+      if (enabled) next[customerId] = next[customerId] ?? defaultGrantRole;
       else delete next[customerId];
       return next;
     });
@@ -145,9 +155,9 @@ export function CustomerAssignments() {
         <div>
           <p className="eyebrow">Tenant access administration</p>
           <h2 id="customer-assignment-title">Customer assignments</h2>
-          <p className="page-subtitle">Grant an active membership access to every customer or to an explicit, role-bound customer list.</p>
+          <p className="page-subtitle">{customerScoped ? "Grant your teammates access to the customers you administer, scoped to customer_admin or customer_viewer." : "Grant an active membership access to every customer or to an explicit, role-bound customer list."}</p>
         </div>
-        <span className="status-pill status-positive">Org scoped · audited</span>
+        <span className="status-pill status-positive">{customerScoped ? "Customer scoped · audited" : "Org scoped · audited"}</span>
       </div>
 
       {error ? <div className="page-alert page-alert-error" role="alert"><strong>Assignment action failed</strong><span>{error}</span></div> : null}
@@ -180,13 +190,15 @@ export function CustomerAssignments() {
                 </div>
                 <fieldset>
                   <legend>Customer visibility</legend>
-                  <label className="assignment-choice">
-                    <input checked={scopeMode === "all_customers"} name="scopeMode" onChange={() => setScopeMode("all_customers")} type="radio" />
-                    <span><strong>All customers</strong><small>Automatically includes current and newly onboarded customers.</small></span>
-                  </label>
+                  {customerScoped ? null : (
+                    <label className="assignment-choice">
+                      <input checked={scopeMode === "all_customers"} name="scopeMode" onChange={() => setScopeMode("all_customers")} type="radio" />
+                      <span><strong>All customers</strong><small>Automatically includes current and newly onboarded customers.</small></span>
+                    </label>
+                  )}
                   <label className="assignment-choice">
                     <input checked={scopeMode === "assigned_customers"} name="scopeMode" onChange={() => setScopeMode("assigned_customers")} type="radio" />
-                    <span><strong>Assigned customers only</strong><small>Every permitted customer is stored as an explicit tenant grant.</small></span>
+                    <span><strong>Assigned customers only</strong><small>{customerScoped ? "You may grant access only to the customers you administer." : "Every permitted customer is stored as an explicit tenant grant."}</small></span>
                   </label>
                 </fieldset>
 
@@ -205,10 +217,10 @@ export function CustomerAssignments() {
                             <select
                               aria-label={`${customer.name} customer role`}
                               disabled={!enabled}
-                              value={grantRoles[customer.id] ?? "viewer"}
+                              value={grantRoles[customer.id] ?? defaultGrantRole}
                               onChange={(event) => changeGrantRole(customer.id, event.target.value as CustomerRole)}
                             >
-                              {roleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                              {availableRoles.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </select>
                           </div>
                         );

@@ -4,7 +4,7 @@ import {
   type CustomerAssignmentGrant,
 } from "../../../../db/customer-assignment-repository";
 import { LocalAuthError, requireRecentMfa } from "../../../../db/auth-repository";
-import { authorizePilotRequest } from "../../../../lib/api-auth";
+import { authorizeMembershipManagementRequest } from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
   authErrorResponse,
@@ -38,8 +38,8 @@ function parseGrants(value: unknown): readonly CustomerAssignmentGrant[] {
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const actor = await authorizePilotRequest(request, "membership:manage");
-    return jsonResponse(await listCustomerAssignments(actor.authenticated));
+    const { actor, scope } = await authorizeMembershipManagementRequest(request);
+    return jsonResponse(await listCustomerAssignments(actor.authenticated, scope));
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -48,13 +48,13 @@ export async function GET(request: Request): Promise<Response> {
 export async function PUT(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
-    const actor = await authorizePilotRequest(request, "membership:manage");
+    const { actor, scope } = await authorizeMembershipManagementRequest(request);
     requireRecentMfa(actor.authenticated);
     const body = exactInputObject(
       await readAuthJson(request, 64 * 1024),
       ["membershipId", "scopeMode", "grants"],
     );
-    const member = await replaceCustomerAssignments(actor.authenticated, {
+    const member = await replaceCustomerAssignments(actor.authenticated, scope, {
       membershipId: boundedInputString(body.membershipId, {
         label: "membership identifier",
         maximum: 128,

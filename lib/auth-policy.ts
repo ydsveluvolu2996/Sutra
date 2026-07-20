@@ -22,6 +22,7 @@ export type CustomerRole = (typeof CUSTOMER_ROLES)[number];
 export const CAPABILITIES = [
   "workspace:read",
   "membership:manage",
+  "membership:manage:customer",
   "customer:create",
   "connection:read",
   "connection:manage",
@@ -31,6 +32,21 @@ export const CAPABILITIES = [
 ] as const;
 
 export type Capability = (typeof CAPABILITIES)[number];
+
+/**
+ * The customer-level roles a customer-scoped administrator may ever assign or
+ * invite. A customer_admin may never mint an organization role, so this list is
+ * the single source of truth used by both the invitation and the customer
+ * assignment repositories when the actor only holds `membership:manage:customer`.
+ */
+export const CUSTOMER_MANAGEABLE_ROLES = ["customer_admin", "customer_viewer"] as const;
+export type CustomerManageableRole = (typeof CUSTOMER_MANAGEABLE_ROLES)[number];
+
+const CUSTOMER_MANAGEABLE_ROLE_SET: ReadonlySet<string> = new Set(CUSTOMER_MANAGEABLE_ROLES);
+
+export function isCustomerManageableRole(role: string): role is CustomerManageableRole {
+  return CUSTOMER_MANAGEABLE_ROLE_SET.has(role);
+}
 
 export interface CustomerGrant {
   readonly customerId: string;
@@ -69,6 +85,7 @@ const ROLE_CAPABILITIES: Readonly<Record<OrgRole, ReadonlySet<Capability>>> = {
   viewer: new Set(["workspace:read", "connection:read", "export:read"]),
   customer_admin: new Set([
     "workspace:read",
+    "membership:manage:customer",
     "connection:read",
     "connection:manage",
     "sync:run",
@@ -129,4 +146,44 @@ export function authorize(subject: AuthorizationSubject, request: AuthorizationR
 
 export function effectiveCapabilities(subject: AuthorizationSubject): readonly Capability[] {
   return CAPABILITIES.filter((capability) => ROLE_CAPABILITIES[subject.role].has(capability));
+}
+
+/**
+ * The customers a subject is entitled to administer. This is *only* the set of
+ * customers where the subject explicitly holds the `customer_admin` role in
+ * `customer_access` — never inferred from an organization role or from a broad
+ * `all_customers` scope. An empty set means the subject can manage nobody, and
+ * every customer-scoped write must fail closed.
+ */
+export function administeredCustomerIds(subject: AuthorizationSubject): readonly string[] {
+  return subject.grants
+    .filter((grant) => grant.role === "customer_admin")
+    .map((grant) => grant.customerId);
+}
+
+/**
+ * Resolves how far a subject may manage organization membership.
+ *
+ * - `org` — the subject holds org-wide `membership:manage` (org_owner/org_admin)
+ *   and may manage every membership and customer exactly as before.
+ * - `customer` — the subject only holds `membership:manage:customer`
+ *   (customer_admin) and may act solely within its administered-customer set,
+ *   granting only customer-level roles.
+ * - `null` — the subject cannot manage membership at all.
+ *
+ * Org-wide capability always wins so operators never lose reach.
+ */
+export type MembershipManagementScope =
+  | { readonly mode: "org" }
+  | { readonly mode: "customer"; readonly customerIds: readonly string[] };
+
+export function resolveMembershipManagementScope(
+  subject: AuthorizationSubject,
+): MembershipManagementScope | null {
+  const capabilities = ROLE_CAPABILITIES[subject.role];
+  if (capabilities.has("membership:manage")) return { mode: "org" };
+  if (capabilities.has("membership:manage:customer")) {
+    return { mode: "customer", customerIds: administeredCustomerIds(subject) };
+  }
+  return null;
 }

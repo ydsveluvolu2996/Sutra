@@ -19,7 +19,7 @@ export function ClientOnboardingGuide() {
   const { session } = useSession();
   const capabilities = new Set(session?.capabilities ?? []);
   const canOnboard = capabilities.has("customer:create") && capabilities.has("connection:manage");
-  const canInvite = capabilities.has("membership:manage");
+  const canInvite = capabilities.has("membership:manage") || capabilities.has("membership:manage:customer");
 
   const customers = portfolio?.customers ?? [];
   const connectedCustomers = customers.filter((customer) => customer.connections.length > 0);

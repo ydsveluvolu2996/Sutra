@@ -6,7 +6,12 @@ import {
   type AuthenticatedLocalSession,
   type LocalAuthSecrets,
 } from "../db/auth-repository";
-import { authorize, type Capability } from "./auth-policy";
+import {
+  authorize,
+  resolveMembershipManagementScope,
+  type Capability,
+  type MembershipManagementScope,
+} from "./auth-policy";
 
 export const LOCAL_SESSION_COOKIE = "sutra_session";
 
@@ -143,13 +148,7 @@ export function assertSessionCapability(
   }
 }
 
-export async function authorizePilotRequest(
-  request: Request,
-  capability: Capability,
-  customerId?: string,
-): Promise<AuthorizedPilotActor> {
-  const authenticated = await requireApiSession(request);
-  assertSessionCapability(authenticated, capability, customerId);
+function pilotActorFromSession(authenticated: AuthenticatedLocalSession): AuthorizedPilotActor {
   return {
     id: authenticated.subject.userId,
     email: authenticated.session.user.email,
@@ -157,6 +156,38 @@ export async function authorizePilotRequest(
     orgId: authenticated.subject.orgId,
     authenticated,
   };
+}
+
+export async function authorizePilotRequest(
+  request: Request,
+  capability: Capability,
+  customerId?: string,
+): Promise<AuthorizedPilotActor> {
+  const authenticated = await requireApiSession(request);
+  assertSessionCapability(authenticated, capability, customerId);
+  return pilotActorFromSession(authenticated);
+}
+
+/**
+ * Authorizes a membership-management request under EITHER org-wide
+ * `membership:manage` (org operators) OR customer-scoped
+ * `membership:manage:customer` (customer_admin). The resolved
+ * {@link MembershipManagementScope} is handed to the repository so the actual
+ * per-customer scoping is enforced in SQL, not merely at the capability gate.
+ */
+export async function authorizeMembershipManagementRequest(
+  request: Request,
+): Promise<{ readonly actor: AuthorizedPilotActor; readonly scope: MembershipManagementScope }> {
+  const authenticated = await requireApiSession(request);
+  const scope = resolveMembershipManagementScope(authenticated.subject);
+  if (scope === null) {
+    throw new LocalAuthError(
+      403,
+      "AUTHORIZATION_DENIED",
+      "This account cannot manage organization membership",
+    );
+  }
+  return { actor: pilotActorFromSession(authenticated), scope };
 }
 
 async function sha256(value: string): Promise<Uint8Array> {

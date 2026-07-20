@@ -80,6 +80,7 @@ export const identityInvitations = sqliteTable("identity_invitations", {
   email: text("email").notNull(),
   role: text("role", { enum: ["org_admin", "analyst", "viewer", "customer_admin", "customer_viewer"] }).notNull(),
   scopeMode: text("scope_mode", { enum: ["all_customers", "assigned_customers"] }).notNull().default("assigned_customers"),
+  customerId: text("customer_id").references(() => customers.id),
   tokenDigest: text("token_digest").notNull(),
   invitedBy: text("invited_by").notNull().references(() => users.id),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),

@@ -1,8 +1,14 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { postAuth, readAuthResponse } from "../components/use-session";
+import { postAuth, readAuthResponse, useSession } from "../components/use-session";
 import { CustomerAssignments } from "./customer-assignments";
+
+interface AssignableCustomer {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+}
 
 interface Invitation {
   readonly id: string;
@@ -35,10 +41,19 @@ interface ManagedSession {
 }
 
 export function AccessBrowser() {
+  const { session } = useSession();
+  const capabilities = new Set(session?.capabilities ?? []);
+  // A customer administrator only holds the customer-scoped capability. Its view
+  // is restricted to inviting/assigning within the customers it administers, and
+  // it never sees the org-wide session administration surface.
+  const customerScoped = capabilities.has("membership:manage:customer") && !capabilities.has("membership:manage");
+
   const [invitations, setInvitations] = useState<readonly Invitation[]>([]);
   const [sessions, setSessions] = useState<readonly ManagedSession[]>([]);
+  const [customers, setCustomers] = useState<readonly AssignableCustomer[]>([]);
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("viewer");
+  const [customerId, setCustomerId] = useState("");
   const [scopeMode, setScopeMode] = useState("assigned_customers");
   const [lifetimeHours, setLifetimeHours] = useState("24");
   const [totpCode, setTotpCode] = useState("");
@@ -47,40 +62,50 @@ export function AccessBrowser() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // A customer administrator may only ever send a customer-level role; clamp the
+  // form value so the select can never carry an organization role for them.
+  const effectiveRole = customerScoped && role !== "customer_admin" && role !== "customer_viewer" ? "customer_viewer" : role;
+  const effectiveScopeMode = customerScoped ? "assigned_customers" : scopeMode;
+
   const load = useCallback(async () => {
-    const [invitationResponse, sessionResponse] = await Promise.all([
-      fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" }),
-      fetch("/api/v1/sessions", { cache: "no-store", credentials: "same-origin" }),
-    ]);
-    const [invitationBody, sessionBody] = await Promise.all([
-      readAuthResponse<{ invitations: readonly Invitation[] }>(invitationResponse),
-      readAuthResponse<{ sessions: readonly ManagedSession[] }>(sessionResponse),
-    ]);
-    setInvitations(invitationBody.invitations);
-    setSessions(sessionBody.sessions);
-  }, []);
+    const invitationResponse = await fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" });
+    setInvitations((await readAuthResponse<{ invitations: readonly Invitation[] }>(invitationResponse)).invitations);
+    if (customerScoped) {
+      setSessions([]);
+      return;
+    }
+    const sessionResponse = await fetch("/api/v1/sessions", { cache: "no-store", credentials: "same-origin" });
+    setSessions((await readAuthResponse<{ sessions: readonly ManagedSession[] }>(sessionResponse)).sessions);
+  }, [customerScoped]);
 
   useEffect(() => {
     let active = true;
-    void Promise.all([
-      fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" })
-        .then((response) => readAuthResponse<{ invitations: readonly Invitation[] }>(response)),
-      fetch("/api/v1/sessions", { cache: "no-store", credentials: "same-origin" })
-        .then((response) => readAuthResponse<{ sessions: readonly ManagedSession[] }>(response)),
-    ])
-      .then(([invitationBody, sessionBody]) => {
-        if (active) {
-          setInvitations(invitationBody.invitations);
-          setSessions(sessionBody.sessions);
-        }
+    const invitations = fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" })
+      .then((response) => readAuthResponse<{ invitations: readonly Invitation[] }>(response));
+    const sessions = customerScoped
+      ? Promise.resolve<{ sessions: readonly ManagedSession[] }>({ sessions: [] })
+      : fetch("/api/v1/sessions", { cache: "no-store", credentials: "same-origin" })
+        .then((response) => readAuthResponse<{ sessions: readonly ManagedSession[] }>(response));
+    const customers = customerScoped
+      ? fetch("/api/v1/customer-assignments", { cache: "no-store", credentials: "same-origin" })
+        .then((response) => readAuthResponse<{ customers: readonly AssignableCustomer[] }>(response))
+      : Promise.resolve<{ customers: readonly AssignableCustomer[] }>({ customers: [] });
+    void Promise.all([invitations, sessions, customers])
+      .then(([invitationBody, sessionBody, customerBody]) => {
+        if (!active) return;
+        setInvitations(invitationBody.invitations);
+        setSessions(sessionBody.sessions);
+        setCustomers(customerBody.customers);
+        setCustomerId((current) => current || customerBody.customers[0]?.id || "");
       })
       .catch((caught: unknown) => {
         if (active) setError(caught instanceof Error ? caught.message : "Sutra could not load invitations");
-      }).finally(() => {
+      })
+      .finally(() => {
         if (active) setLoading(false);
       });
     return () => { active = false; };
-  }, [load]);
+  }, [customerScoped]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -93,9 +118,10 @@ export function AccessBrowser() {
       }
       const created = await postAuth<CreateResult>("/api/v1/invitations", {
         email,
-        role,
-        scopeMode,
+        role: effectiveRole,
+        scopeMode: effectiveScopeMode,
         lifetimeHours: Number(lifetimeHours),
+        ...(customerScoped ? { customerId } : {}),
       });
       setActivationUrl(created.activationUrl);
       setEmail("");
@@ -183,7 +209,7 @@ export function AccessBrowser() {
         <div>
           <p className="eyebrow">Identity administration</p>
           <h1>Access & invitations</h1>
-          <p className="page-subtitle">Provision exact organization memberships without email-domain trust or self-service account creation.</p>
+          <p className="page-subtitle">{customerScoped ? "Invite teammates and assign their access, scoped to the customers you administer." : "Provision exact organization memberships without email-domain trust or self-service account creation."}</p>
         </div>
       </section>
 
@@ -197,14 +223,22 @@ export function AccessBrowser() {
       <CustomerAssignments />
 
       <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">New membership</p><h2>Invite an operator or customer user</h2></div><span className="status-pill status-positive">MFA protected</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">New membership</p><h2>{customerScoped ? "Invite a teammate to a customer you administer" : "Invite an operator or customer user"}</h2></div><span className="status-pill status-positive">MFA protected</span></div>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <div className="auth-field-pair">
             <label><span>Verified email</span><input type="email" maxLength={254} required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value)}><option value="org_admin">Organization admin</option><option value="analyst">Analyst</option><option value="viewer">Viewer</option><option value="customer_admin">Customer admin</option><option value="customer_viewer">Customer viewer</option></select></label>
+            <label><span>Role</span><select value={effectiveRole} onChange={(event) => setRole(event.target.value)}>
+              {customerScoped ? null : <option value="org_admin">Organization admin</option>}
+              {customerScoped ? null : <option value="analyst">Analyst</option>}
+              {customerScoped ? null : <option value="viewer">Viewer</option>}
+              <option value="customer_admin">Customer admin</option>
+              <option value="customer_viewer">Customer viewer</option>
+            </select></label>
           </div>
           <div className="auth-field-pair">
-            <label><span>Customer scope</span><select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}><option value="assigned_customers">Assigned customers only</option><option value="all_customers">All customers</option></select></label>
+            {customerScoped
+              ? <label><span>Customer</span><select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}>{customers.length === 0 ? <option value="">No administered customers</option> : customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+              : <label><span>Customer scope</span><select value={scopeMode} onChange={(event) => setScopeMode(event.target.value)}><option value="assigned_customers">Assigned customers only</option><option value="all_customers">All customers</option></select></label>}
             <label><span>Expires after</span><select value={lifetimeHours} onChange={(event) => setLifetimeHours(event.target.value)}><option value="1">1 hour</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168">7 days</option></select></label>
           </div>
           <label><span>Authenticator code for this privileged action</span><input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/gu, "").slice(0, 6))} /><small>Required when your last MFA verification is more than five minutes old.</small></label>
@@ -213,26 +247,28 @@ export function AccessBrowser() {
         {activationUrl ? <div className="page-alert"><strong>Copy this activation URL now</strong><span>The plaintext token will not be shown again.</span><input aria-label="One-time activation URL" readOnly value={activationUrl} onFocus={(event) => event.currentTarget.select()} /></div> : null}
       </section>
 
+      {customerScoped ? null : (
       <section className="panel">
         <div className="panel-heading">
           <div><p className="eyebrow">Session administration</p><h2>Signed-in browser sessions</h2></div>
-          <button className="button button-secondary button-small" disabled={busy || sessions.filter((session) => session.status === "active" && !session.current).length === 0} onClick={() => void revokeOtherSessions()} type="button">Revoke all other org sessions</button>
+          <button className="button button-secondary button-small" disabled={busy || sessions.filter((managed) => managed.status === "active" && !managed.current).length === 0} onClick={() => void revokeOtherSessions()} type="button">Revoke all other org sessions</button>
         </div>
         <p className="limitation-note">Each row is a server-side session, not a fingerprint of a physical device. Sutra does not retain raw IP addresses or browser fingerprints. Revocation is organization-scoped, MFA-protected, and committed with hash-chained audit evidence.</p>
         {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading active sessions…</div> : (
           <div className="data-table">
             <div className="data-row data-header"><span>User / session</span><span>Identity source</span><span>Status</span><span>Last verified activity</span><span>Action</span></div>
-            {sessions.map((session) => <div className="data-row" key={session.id}>
-              <span className="primary-cell"><strong>{session.user.displayName}{session.current ? " · This browser" : ""}</strong><small>{session.user.email} · {session.id}</small></span>
-              <span className="primary-cell"><strong>{session.identitySourceLabel}</strong><small>{session.deviceLabel} · MFA {session.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
-              <span><span className={`connection-status connection-${session.status === "active" ? "active" : "disabled"}`}>{session.status}</span></span>
-              <span className="primary-cell"><strong>{new Date(session.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(session.expiresAt).toLocaleString()}</small></span>
-              <span>{session.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(session)} type="button">{session.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
+            {sessions.map((managed) => <div className="data-row" key={managed.id}>
+              <span className="primary-cell"><strong>{managed.user.displayName}{managed.current ? " · This browser" : ""}</strong><small>{managed.user.email} · {managed.id}</small></span>
+              <span className="primary-cell"><strong>{managed.identitySourceLabel}</strong><small>{managed.deviceLabel} · MFA {managed.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
+              <span><span className={`connection-status connection-${managed.status === "active" ? "active" : "disabled"}`}>{managed.status}</span></span>
+              <span className="primary-cell"><strong>{new Date(managed.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(managed.expiresAt).toLocaleString()}</small></span>
+              <span>{managed.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(managed)} type="button">{managed.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
             </div>)}
             {sessions.length === 0 ? <div className="empty-row">No organization-scoped sessions were found.</div> : null}
           </div>
         )}
       </section>
+      )}
 
       <section className="panel">
         <div className="panel-heading"><div><p className="eyebrow">Membership activation queue</p><h2>Invitations</h2></div><span className="status-pill">{invitations.length} recorded</span></div>

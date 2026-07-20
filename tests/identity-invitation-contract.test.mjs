@@ -17,12 +17,12 @@ test("identity invitations persist only token digests and enforce one active ema
   assert.match(schema, /identity_invitations_active_email_uq/u);
   assert.doesNotMatch(schema, /token_plaintext|invitation_token\s/u);
   assert.match(repository, /digestSessionToken\(token\)/u);
-  assert.match(repository, /scope_mode, token_digest, invited_by/u);
-  assert.match(repository, /input\.scopeMode,\s+tokenDigest,/u);
+  assert.match(repository, /scope_mode, customer_id, token_digest, invited_by/u);
+  assert.match(repository, /input\.scopeMode,\s+customerId,\s+tokenDigest,/u);
 });
 
 test("invitation creation and revocation require centralized authorization and recent MFA", () => {
-  assert.match(route, /authorizePilotRequest\(request, "membership:manage"\)/u);
+  assert.match(route, /authorizeMembershipManagementRequest\(request\)/u);
   assert.match(route, /requireRecentMfa\(actor\.authenticated\)/u);
   assert.match(route, /assertAuthMutation\(request\)/u);
   assert.match(route, /activationUrlShownOnce: true/u);

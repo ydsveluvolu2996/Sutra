@@ -4,7 +4,7 @@ import {
   revokeIdentityInvitation,
 } from "../../../../db/identity-invitation-repository";
 import { requireRecentMfa } from "../../../../db/auth-repository";
-import { authorizePilotRequest } from "../../../../lib/api-auth";
+import { authorizeMembershipManagementRequest } from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
   authErrorResponse,
@@ -19,8 +19,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const actor = await authorizePilotRequest(request, "membership:manage");
-    return jsonResponse({ invitations: await listIdentityInvitations(actor.authenticated) });
+    const { actor, scope } = await authorizeMembershipManagementRequest(request);
+    return jsonResponse({ invitations: await listIdentityInvitations(actor.authenticated, scope) });
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -29,22 +29,28 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
-    const actor = await authorizePilotRequest(request, "membership:manage");
+    const { actor, scope } = await authorizeMembershipManagementRequest(request);
     requireRecentMfa(actor.authenticated);
     const body = exactInputObject(
       await readAuthJson(request, 4 * 1024),
       ["email", "role", "scopeMode", "lifetimeHours"],
+      ["customerId"],
     );
     const role = boundedInputString(body.role, { label: "membership role", maximum: 32 }) as OrgRole;
     const scopeMode = boundedInputString(body.scopeMode, { label: "customer scope", maximum: 32 }) as ScopeMode;
     if (typeof body.lifetimeHours !== "number" || !Number.isSafeInteger(body.lifetimeHours)) {
       throw { code: "INVALID_INPUT" };
     }
-    const created = await createIdentityInvitation(actor.authenticated, {
+    const customerId =
+      body.customerId === undefined || body.customerId === null
+        ? null
+        : boundedInputString(body.customerId, { label: "customer identifier", maximum: 128 });
+    const created = await createIdentityInvitation(actor.authenticated, scope, {
       email: boundedInputString(body.email, { label: "email address", maximum: 254 }),
       role,
       scopeMode,
       lifetimeMs: body.lifetimeHours * 60 * 60 * 1000,
+      customerId,
     });
     const invitationUrl = new URL("/api/auth/oidc/start", request.url);
     invitationUrl.searchParams.set("invitation", created.token);
@@ -65,11 +71,12 @@ export async function POST(request: Request): Promise<Response> {
 export async function DELETE(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
-    const actor = await authorizePilotRequest(request, "membership:manage");
+    const { actor, scope } = await authorizeMembershipManagementRequest(request);
     requireRecentMfa(actor.authenticated);
     const body = exactInputObject(await readAuthJson(request, 1024), ["invitationId"]);
     await revokeIdentityInvitation(
       actor.authenticated,
+      scope,
       boundedInputString(body.invitationId, { label: "invitation identifier", maximum: 64 }),
     );
     return jsonResponse({ revoked: true });

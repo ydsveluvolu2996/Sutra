@@ -1,0 +1,1 @@
+ALTER TABLE `identity_invitations` ADD `customer_id` text;

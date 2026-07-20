@@ -33,6 +33,7 @@ import backgroundJobsSchemaSql from "../drizzle/0031_background_jobs.sql?raw";
 import findingExceptionsSchemaSql from "../drizzle/0032_finding_exceptions.sql?raw";
 import registryVulnerabilitiesSchemaSql from "../drizzle/0033_registry_vulnerabilities.sql?raw";
 import kubernetesAgentNodesSchemaSql from "../drizzle/0034_kubernetes_agent_nodes.sql?raw";
+import customerScopedInvitationsSchemaSql from "../drizzle/0035_customer_scoped_invitations.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -83,6 +84,7 @@ const migrations = [
   { id: "0032_finding_exceptions", statements: statementsFrom(findingExceptionsSchemaSql) },
   { id: "0033_registry_vulnerabilities", statements: statementsFrom(registryVulnerabilitiesSchemaSql) },
   { id: "0034_kubernetes_agent_nodes", statements: statementsFrom(kubernetesAgentNodesSchemaSql) },
+  { id: "0035_customer_scoped_invitations", statements: statementsFrom(customerScopedInvitationsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

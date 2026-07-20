@@ -190,7 +190,7 @@ export const navGroups: readonly NavGroup[] = [
     label: "Administration",
     items: [
       { key: "settings", label: "Settings", href: "/settings", icon: "SG", capabilities: readWorkspace },
-      { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage"] },
+      { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage:customer"] },
       { key: "notification_settings", label: "Notification destinations", href: "/settings/notifications", icon: "NT", capabilities: readConnection },
     ],
   },

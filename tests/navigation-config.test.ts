@@ -6,6 +6,7 @@ import { groupContainsActiveItem, navGroups, visibleNavigation } from "../app/co
 const allCapabilities = new Set<Capability>([
   "workspace:read",
   "membership:manage",
+  "membership:manage:customer",
   "customer:create",
   "connection:read",
   "connection:manage",
