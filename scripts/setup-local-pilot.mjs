@@ -21,6 +21,13 @@ const databaseUrl = process.env.DATABASE_URL?.trim();
 if (databaseUrl !== undefined && /[\r\n]/u.test(databaseUrl)) {
   throw new Error("DATABASE_URL must be a single line");
 }
+// The background-job runner token must reach the Worker runtime (which reads it
+// from .dev.vars via `env`), not just the container process env — otherwise the
+// internal drain endpoint responds 503 NOT_CONFIGURED and jobs never run.
+const jobRunnerToken = process.env.SUTRA_JOB_RUNNER_TOKEN?.trim();
+if (jobRunnerToken !== undefined && /[\r\n]/u.test(jobRunnerToken)) {
+  throw new Error("SUTRA_JOB_RUNNER_TOKEN must be a single line");
+}
 
 if (existingContents === null) {
   const values = [
@@ -40,6 +47,7 @@ if (existingContents === null) {
     "SUTRA_FIXTURE_ACCOUNT_ID=123456789012",
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",
     ...(databaseUrl ? [`DATABASE_URL=${databaseUrl}`] : []),
+    ...(jobRunnerToken ? [`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`] : []),
     "",
   ];
   await writeFile(variablesPath, values.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
@@ -60,6 +68,13 @@ if (existingContents === null) {
       updatedContents = updatedContents.replace(/^DATABASE_URL=.*$/mu, `DATABASE_URL=${databaseUrl}`);
     } else {
       additions.push(`DATABASE_URL=${databaseUrl}`);
+    }
+  }
+  if (jobRunnerToken) {
+    if (/^SUTRA_JOB_RUNNER_TOKEN=/mu.test(updatedContents)) {
+      updatedContents = updatedContents.replace(/^SUTRA_JOB_RUNNER_TOKEN=.*$/mu, `SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`);
+    } else {
+      additions.push(`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`);
     }
   }
   if (additions.length > 0 || updatedContents !== existingContents) {
