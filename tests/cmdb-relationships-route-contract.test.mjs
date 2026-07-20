@@ -30,8 +30,11 @@ test("POST and DELETE enforce the CSRF origin boundary; POST reads a bounded bod
 });
 
 test("the graph is derived read-only and manual edges are validated against the live snapshot", () => {
-  // Derived edges come from the pure engine over collected resources — no writes.
-  assert.match(route, /deriveRelationships\(state\.resources\)/u);
+  // Derived edges come from the pure engine over collected resources plus
+  // imported custom/external assets (merged read-only) — no writes.
+  assert.match(route, /deriveRelationships\(resources\)/u);
+  assert.match(route, /\.\.\.state\.resources/u);
+  assert.match(route, /customAssetsAsResources/u);
   assert.match(route, /buildDependencyGraph\(/u);
   // A manual edge must reference two keys present in the current snapshot.
   assert.match(route, /keys\.has\(fromKey\) \|\| !keys\.has\(toKey\)/u);

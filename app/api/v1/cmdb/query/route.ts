@@ -1,5 +1,7 @@
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { CmdbWorkspaceRepository } from "../../../../../db/cmdb-workspace-repository";
+import { CmdbCustomAssetRepository } from "../../../../../db/cmdb-custom-asset-repository";
+import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { runCmdbQuery, validateCmdbQuery } from "../../../../../lib/cmdb-query";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
@@ -31,7 +33,11 @@ export async function POST(request: Request): Promise<Response> {
     const repository = new CmdbWorkspaceRepository();
     const scope = { orgId: authenticated.subject.orgId, customerId: connection.customerId };
     const resources = await repository.resourcesForQuery(scope, connectionId);
-    const result = runCmdbQuery(resources, validation.query);
+    // Imported custom/external assets (SaaS, network devices, on-prem) are
+    // first-class CMDB items — merge them so they are searchable alongside
+    // collected AWS resources. They are user-supplied and source-labeled.
+    const customAssets = (await new CmdbCustomAssetRepository().list(scope)).map((asset) => toCmdbResource(asset));
+    const result = runCmdbQuery([...resources, ...customAssets], validation.query);
     return jsonResponse({
       connectionId,
       result: {

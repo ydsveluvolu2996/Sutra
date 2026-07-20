@@ -8,7 +8,9 @@ import {
   deriveRelationships,
   type ManualRelationshipInput,
 } from "../../../../../lib/cmdb-relationships";
-import type { PilotConnection } from "../../../../../lib/pilot-types";
+import type { PilotConnection, PilotResource } from "../../../../../lib/pilot-types";
+import { CmdbCustomAssetRepository, type StoredCustomAsset } from "../../../../../db/cmdb-custom-asset-repository";
+import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
@@ -29,6 +31,29 @@ interface ResolvedScope {
   readonly authenticated: Awaited<ReturnType<typeof requireApiSession>>;
   readonly connection: PilotConnection;
   readonly scope: CmdbRelationshipScope;
+}
+
+// Imported custom/external assets become first-class graph NODES so they can be
+// linked (via manual edges) to collected AWS resources. They derive no edges of
+// their own (they carry no AWS config), and are honestly source-labeled.
+function customAssetsAsResources(assets: readonly StoredCustomAsset[]): PilotResource[] {
+  return assets.map((asset) => {
+    const resource = toCmdbResource(asset);
+    return {
+      resourceKey: resource.resourceKey,
+      service: resource.service,
+      resourceType: resource.resourceType,
+      nativeId: resource.nativeId,
+      arn: resource.arn,
+      name: resource.name,
+      region: resource.region,
+      state: resource.state,
+      tags: resource.tags,
+      configuration: resource.configuration,
+      source: { api: "custom-asset", accountId: "custom", collectedAt: asset.updatedAt },
+      contentSha256: "",
+    };
+  });
 }
 
 /**
@@ -82,13 +107,17 @@ export async function GET(request: Request): Promise<Response> {
     }
 
     const state = await getPilotStateForOrg(scope.orgId, connection.id);
-    const derived = deriveRelationships(state.resources);
+    const resources = [
+      ...state.resources,
+      ...customAssetsAsResources(await new CmdbCustomAssetRepository().list(scope)),
+    ];
+    const derived = deriveRelationships(resources);
     const repository = new CmdbRelationshipRepository();
     const manual = await repository.list(scope);
-    const graph = buildDependencyGraph(state.resources, derived, manualInputs(manual));
+    const graph = buildDependencyGraph(resources, derived, manualInputs(manual));
 
     const summary = {
-      resourceCount: state.resources.length,
+      resourceCount: resources.length,
       derivedEdgeCount: derived.length,
       manualEdgeCount: manual.length,
       externalNodeCount: graph.externalNodeKeys.length,
@@ -161,7 +190,8 @@ export async function POST(request: Request): Promise<Response> {
     // snapshot — an operator asserts intent over collected resources, never over
     // keys that do not exist.
     const state = await getPilotStateForOrg(scope.orgId, connection.id);
-    const keys = new Set(state.resources.map((resource) => resource.resourceKey));
+    const customAssets = customAssetsAsResources(await new CmdbCustomAssetRepository().list(scope));
+    const keys = new Set([...state.resources, ...customAssets].map((resource) => resource.resourceKey));
     if (!keys.has(fromKey) || !keys.has(toKey)) {
       throw Object.assign(
         new Error("A manual relationship must connect two resources in the current snapshot"),

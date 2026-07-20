@@ -1,5 +1,7 @@
 import { getLatestConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { CmdbWorkspaceRepository } from "../../../../../db/cmdb-workspace-repository";
+import { CmdbCustomAssetRepository } from "../../../../../db/cmdb-custom-asset-repository";
+import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { buildReport, toCsv, validateReportDefinition } from "../../../../../lib/report-builder";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
@@ -48,7 +50,10 @@ export async function POST(request: Request): Promise<Response> {
     let report;
     if (definition.dataset === "cmdb-resources") {
       const resources: readonly CmdbQueryResource[] = await new CmdbWorkspaceRepository().resourcesForQuery(scope, connection.id);
-      report = buildReport(definition, resources);
+      // Imported custom/external assets are first-class CMDB items — include them
+      // so reports over the CMDB dataset cover non-cloud assets too.
+      const customAssets = (await new CmdbCustomAssetRepository().list(scope)).map((asset) => toCmdbResource(asset));
+      report = buildReport(definition, [...resources, ...customAssets]);
     } else {
       const state = await getPilotStateForOrg(scope.orgId, connection.id);
       report = buildReport(definition, state.findings as readonly unknown[] as readonly Record<string, unknown>[]);
