@@ -59,6 +59,8 @@ describe("grouped workspace navigation", () => {
         "Policies",
         "Scan history",
         "Coverage",
+        "Inventory",
+        "Security findings",
       ],
     );
     assert.deepEqual(
