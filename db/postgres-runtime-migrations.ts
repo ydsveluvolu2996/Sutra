@@ -34,6 +34,8 @@ import postgresFinopsScheduledReportsSql from "../postgres/migrations/0032_finop
 import postgresKubernetesNodeSideArraySql from "../postgres/migrations/0033_kubernetes_node_side_array.sql?raw";
 import postgresSavedReportsSql from "../postgres/migrations/0034_saved_reports.sql?raw";
 import postgresAlertRulesSql from "../postgres/migrations/0035_alert_rules.sql?raw";
+import postgresCmdbRelationshipsSql from "../postgres/migrations/0036_cmdb_relationships.sql?raw";
+import postgresCmdbCustomAssetsSql from "../postgres/migrations/0037_cmdb_custom_assets.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -72,6 +74,8 @@ const migrations = [
   { id: "0033_kubernetes_node_side_array", source: postgresKubernetesNodeSideArraySql },
   { id: "0034_saved_reports", source: postgresSavedReportsSql },
   { id: "0035_alert_rules", source: postgresAlertRulesSql },
+  { id: "0036_cmdb_relationships", source: postgresCmdbRelationshipsSql },
+  { id: "0037_cmdb_custom_assets", source: postgresCmdbCustomAssetsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

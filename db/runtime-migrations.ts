@@ -40,6 +40,8 @@ import finopsScheduledReportsSchemaSql from "../drizzle/0038_finops_scheduled_re
 import kubernetesNodeSideArraySchemaSql from "../drizzle/0039_kubernetes_node_side_array.sql?raw";
 import savedReportsSchemaSql from "../drizzle/0040_saved_reports.sql?raw";
 import alertRulesSchemaSql from "../drizzle/0041_alert_rules.sql?raw";
+import cmdbRelationshipsSchemaSql from "../drizzle/0042_cmdb_relationships.sql?raw";
+import cmdbCustomAssetsSchemaSql from "../drizzle/0043_cmdb_custom_assets.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -97,6 +99,8 @@ const migrations = [
   { id: "0039_kubernetes_node_side_array", statements: statementsFrom(kubernetesNodeSideArraySchemaSql) },
   { id: "0040_saved_reports", statements: statementsFrom(savedReportsSchemaSql) },
   { id: "0041_alert_rules", statements: statementsFrom(alertRulesSchemaSql) },
+  { id: "0042_cmdb_relationships", statements: statementsFrom(cmdbRelationshipsSchemaSql) },
+  { id: "0043_cmdb_custom_assets", statements: statementsFrom(cmdbCustomAssetsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

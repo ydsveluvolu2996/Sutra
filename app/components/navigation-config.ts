@@ -25,6 +25,8 @@ export type NavKey =
   | "report_builder"
   | "alerts"
   | "patch"
+  | "cmdb_dependencies"
+  | "cmdb_assets"
   | "controls"
   | "roadmap"
   | "operations"
@@ -104,6 +106,8 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "cmdb", label: "Resource inventory", href: "/cmdb", icon: "RI", capabilities: readConnection },
       { key: "changes", label: "Change history", href: "/changes", icon: "CH", capabilities: readConnection },
+      { key: "cmdb_dependencies", label: "Dependencies", href: "/cmdb/dependencies", icon: "DP", capabilities: readConnection },
+      { key: "cmdb_assets", label: "Custom assets", href: "/cmdb/assets", icon: "CA", capabilities: readConnection },
     ],
   },
   {

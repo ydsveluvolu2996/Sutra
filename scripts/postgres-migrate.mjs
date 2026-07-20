@@ -49,6 +49,8 @@ const migrationFiles = [
   "0033_kubernetes_node_side_array.sql",
   "0034_saved_reports.sql",
   "0035_alert_rules.sql",
+  "0036_cmdb_relationships.sql",
+  "0037_cmdb_custom_assets.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
