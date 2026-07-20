@@ -20,6 +20,11 @@ export function resolve(specifier, context, nextResolve) {
     if (candidate.protocol === "file:" && existsSync(fileURLToPath(candidate))) {
       return { url: candidate.href, shortCircuit: true };
     }
+    // Directory (barrel) import: resolve `.../db` to `.../db/index.ts`.
+    const indexCandidate = new URL(`${specifier}/index.ts`, context.parentURL);
+    if (indexCandidate.protocol === "file:" && existsSync(fileURLToPath(indexCandidate))) {
+      return { url: indexCandidate.href, shortCircuit: true };
+    }
   }
   return nextResolve(specifier, context);
 }
