@@ -26,9 +26,12 @@ const MAX_BODY_BYTES = 8 * 1024;
 // global ceiling as a backstop against a distributed flood.
 const RATE_WINDOW_MS = 60_000;
 const MAX_PER_SOURCE_PER_WINDOW = 5;
-const MAX_GLOBAL_PER_WINDOW = 200;
+const MAX_GLOBAL_PER_WINDOW = 60;
 
 const SOURCE_IP = /^[A-Za-z0-9.:_-]{1,64}$/u;
+// Single shared bucket for requests without a trusted edge IP. Everything
+// unattributed shares one per-source budget so a spoofer cannot mint buckets.
+const UNATTRIBUTED_SOURCE = "unattributed";
 
 function tooManyRequests(): never {
   throw Object.assign(new Error("Too many contact submissions; please try again shortly"), {
@@ -37,13 +40,17 @@ function tooManyRequests(): never {
   });
 }
 
-/** Best-effort client IP from the edge headers; unmatched values collapse to "unknown". */
+/**
+ * Per-source rate limiting assumes a Cloudflare edge that sets `cf-connecting-ip`.
+ * Only that header is trusted as the bucket key — a client-supplied
+ * `x-forwarded-for` is NOT honored, because it is trivially spoofable and would
+ * let an attacker mint unlimited independent buckets. When the trusted header is
+ * absent every request collapses into one shared "unattributed" bucket.
+ */
 function sourceIp(request: Request): string {
   const direct = request.headers.get("cf-connecting-ip")?.trim();
   if (direct !== undefined && SOURCE_IP.test(direct)) return direct;
-  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  if (forwarded !== undefined && SOURCE_IP.test(forwarded)) return forwarded;
-  return "unknown";
+  return UNATTRIBUTED_SOURCE;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -73,20 +80,23 @@ export async function POST(request: Request): Promise<Response> {
     const deliveryEnv = env as unknown as ContactDeliveryEnv;
     const recipient = resolveContactRecipient(deliveryEnv);
     const submittedAt = new Date(now).toISOString();
+
+    // RECORD BEFORE DELIVER. Reserve the row first (delivered = 0) so the
+    // rate-limit counters above include in-flight submissions — this closes the
+    // check-before-write window that let a burst of concurrent requests all pass
+    // the count before any of them persisted. `ok: true` remains the honest
+    // guarantee that the lead is durably stored; `delivered` only reflects
+    // whether a configured transport accepted it.
+    const id = await repository.record(
+      { ...parsed.value, sourceIp: ip, recipient, delivered: false },
+      now,
+    );
     const delivery = await deliverContactSubmission(
       recipient,
       { ...parsed.value, sourceIp: ip, submittedAt },
       deliveryEnv,
     );
-
-    // Persist EVERY accepted submission so nothing is ever lost. `ok: true` is
-    // the honest guarantee: the lead is durably stored. `delivered` reflects
-    // only whether a configured transport accepted it — we never claim an email
-    // was sent when no transport is set.
-    await repository.record(
-      { ...parsed.value, sourceIp: ip, recipient, delivered: delivery.delivered },
-      now,
-    );
+    if (delivery.delivered) await repository.markDelivered(id);
 
     return jsonResponse({ ok: true });
   } catch (error) {

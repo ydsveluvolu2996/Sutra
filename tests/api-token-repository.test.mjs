@@ -11,8 +11,10 @@ const { ApiTokenRepository, ApiTokenRepositoryError, PUBLIC_API_RATE_LIMIT_PER_M
 const ORG_A = "org_tok_a";
 const ORG_B = "org_tok_b";
 const CUSTOMER_A = "cust_tok_a";
+const CUSTOMER_A2 = "cust_tok_a2";
 const CUSTOMER_B = "cust_tok_b";
 const SCOPE_A = { orgId: ORG_A, customerId: CUSTOMER_A };
+const SCOPE_A2 = { orgId: ORG_A, customerId: CUSTOMER_A2 };
 
 async function withDatabase(run) {
   const miniflare = new Miniflare({
@@ -30,6 +32,7 @@ async function withDatabase(run) {
       database.prepare("INSERT INTO organizations (id, slug, name, status) VALUES (?, 'tok-a', 'Tok A', 'active')").bind(ORG_A),
       database.prepare("INSERT INTO organizations (id, slug, name, status) VALUES (?, 'tok-b', 'Tok B', 'active')").bind(ORG_B),
       database.prepare("INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, 'tok-cust-a', 'Customer A', 'active')").bind(CUSTOMER_A, ORG_A),
+      database.prepare("INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, 'tok-cust-a2', 'Customer A2', 'active')").bind(CUSTOMER_A2, ORG_A),
       database.prepare("INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, 'tok-cust-b', 'Customer B', 'active')").bind(CUSTOMER_B, ORG_B),
     ]);
     await run(new ApiTokenRepository(database));
@@ -85,6 +88,30 @@ test("verify authenticates, enforces expiry/revocation, and rate-limits per minu
     const revoked = await repo.revoke(SCOPE_A, minted.id, now);
     assert.equal(revoked, true);
     assert.deepEqual((await repo.verify(minted.token, now)).ok, false);
+  });
+});
+
+test("list and revoke are scoped to the customer, not just the org (cross-customer containment)", async () => {
+  await withDatabase(async (repo) => {
+    // Two customers in the SAME org. A token minted for customer A must never
+    // be visible to — or revocable by — a caller scoped to customer A2.
+    const minted = await repo.mint(SCOPE_A, "cust-a-token", ["read:resources"], null, "user_a");
+
+    // Scope A2 (same org, different customer) sees nothing.
+    assert.deepEqual(await repo.list(SCOPE_A2), []);
+    // Scope A sees exactly its own token.
+    const listedA = await repo.list(SCOPE_A);
+    assert.equal(listedA.length, 1);
+    assert.equal(listedA[0].id, minted.id);
+
+    // Scope A2 cannot revoke customer A's token (no row matches its customer).
+    assert.equal(await repo.revoke(SCOPE_A2, minted.id), false);
+    // And the token is still active for its real owner.
+    assert.equal((await repo.verify(minted.token)).ok, true);
+
+    // Scope A (the true owner) can revoke it.
+    assert.equal(await repo.revoke(SCOPE_A, minted.id), true);
+    assert.equal((await repo.verify(minted.token)).ok, false);
   });
 });
 

@@ -3,8 +3,10 @@ import { ItsmConnectorRepository } from "../../../../../db/itsm-connector-reposi
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { buildOutboundTicket, signOutboundBody, type ItsmCaseLike } from "../../../../../lib/itsm-sync";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
+import { assertSafeOutboundUrl } from "../../../../../lib/ssrf-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,8 @@ const CASE_ID = /^case_[a-f0-9]{32}$/u;
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const body: unknown = await request.json().catch(() => null);
+    assertSameOrigin(request);
+    const body: unknown = await readBoundedJson(request);
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
       throw Object.assign(new Error("The ITSM dispatch request is invalid"), { code: "INVALID_INPUT" });
     }
@@ -48,13 +51,18 @@ export async function POST(request: Request): Promise<Response> {
     let statusCode: number | undefined;
     let deliveryError: string | undefined;
     try {
-      const response = await fetch(connector.baseUrl, {
+      // Re-check the stored base URL right before egress (defense in depth) and
+      // refuse to follow redirects so a 3xx to an internal target cannot bypass
+      // the SSRF guard after the first hop.
+      const target = assertSafeOutboundUrl(connector.baseUrl);
+      const response = await fetch(target, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           "x-sutra-signature": await signOutboundBody(connector.sharedSecret, outboundBody),
         },
         body: outboundBody,
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
       statusCode = response.status;

@@ -1,4 +1,5 @@
 import type { ItsmConnectorType } from "../lib/itsm-sync.ts";
+import { assertSafeOutboundUrl } from "../lib/ssrf-guard.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 
@@ -67,13 +68,16 @@ function assertScope(scope: ItsmConnectorScope): void {
 
 function normalizeBaseUrl(value: string): string {
   if (value.length > 2_048) invalid();
+  // Block SSRF targets (loopback/private/link-local/metadata + internal
+  // hostnames) at store time so a dangerous base URL can never be persisted.
+  let safe: URL;
   try {
-    const parsed = new URL(value);
-    if (parsed.protocol !== "https:" || parsed.username !== "" || parsed.password !== "" || parsed.hash !== "") invalid();
-    return parsed.toString();
+    safe = assertSafeOutboundUrl(value);
   } catch {
     invalid();
   }
+  if (safe.hash !== "") invalid();
+  return safe.toString();
 }
 
 function toSecret(row: ConnectorRow): ItsmConnectorSecret {

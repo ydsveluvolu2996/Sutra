@@ -161,8 +161,8 @@ export class ApiTokenRepository {
     const db = await this.ready();
     const rows = await db.prepare(
       `SELECT id, name, token_prefix, scopes_json, expires_at, created_by, created_at, last_used_at, revoked_at
-         FROM api_tokens WHERE org_id = ? ORDER BY created_at DESC`,
-    ).bind(scope.orgId).all<{
+         FROM api_tokens WHERE org_id = ? AND customer_id = ? ORDER BY created_at DESC`,
+    ).bind(scope.orgId, scope.customerId).all<{
       id: string; name: string; token_prefix: string; scopes_json: string; expires_at: string | null;
       created_by: string; created_at: string; last_used_at: string | null; revoked_at: string | null;
     }>();
@@ -180,11 +180,11 @@ export class ApiTokenRepository {
   }
 
   public async revoke(scope: ApiTokenScope, id: string, now = Date.now()): Promise<boolean> {
-    if (!IDENTIFIER.test(scope.orgId) || !TOKEN_ID.test(id)) invalid();
+    if (!IDENTIFIER.test(scope.orgId) || !IDENTIFIER.test(scope.customerId) || !TOKEN_ID.test(id)) invalid();
     const db = await this.ready();
     const result = await db.prepare(
-      `UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND org_id = ? AND revoked_at IS NULL`,
-    ).bind(new Date(now).toISOString(), id, scope.orgId).run();
+      `UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND org_id = ? AND customer_id = ? AND revoked_at IS NULL`,
+    ).bind(new Date(now).toISOString(), id, scope.orgId, scope.customerId).run();
     return Number(result.meta?.changes ?? 0) > 0;
   }
 

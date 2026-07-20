@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   evaluateDeploymentBoundary,
+  generateScriptNonce,
   hostedConfigurationIssues,
   responseSecurityHeaders,
 } from "../lib/deployment-security.ts";
@@ -77,4 +78,25 @@ test("security headers protect framing, MIME handling, capabilities, and HTTPS t
   assert.match(headers["Strict-Transport-Security"], /includeSubDomains/u);
   assert.equal(headers["X-Robots-Tag"], "noindex, nofollow");
   assert.equal(responseSecurityHeaders("http://127.0.0.1:3000/", "local")["Strict-Transport-Security"], undefined);
+});
+
+test("script-src drops 'unsafe-inline' and allowlists inline scripts via a per-request nonce", () => {
+  // A fresh nonce is high-entropy base64 and differs each call.
+  const nonce = generateScriptNonce();
+  assert.match(nonce, /^[A-Za-z0-9+/=]{16,}$/u);
+  assert.notEqual(generateScriptNonce(), generateScriptNonce());
+
+  const withNonce = responseSecurityHeaders("https://app.sutra.example/", "production", nonce)["Content-Security-Policy"];
+  assert.ok(withNonce.includes(`script-src 'self' 'nonce-${nonce}'`), withNonce);
+  // 'unsafe-inline' must be gone from script-src (style-src may still use it).
+  assert.doesNotMatch(withNonce, /script-src[^;]*'unsafe-inline'/u);
+
+  // Responses with no inline scripts (API/image/boundary) fall back to 'self'.
+  const noNonce = responseSecurityHeaders("https://app.sutra.example/api/v1/cases", "production")["Content-Security-Policy"];
+  assert.match(noNonce, /script-src 'self'; connect-src/u);
+  assert.doesNotMatch(noNonce, /script-src[^;]*'unsafe-inline'/u);
+
+  // A malformed nonce is ignored rather than injected into the header.
+  const bogus = responseSecurityHeaders("https://app.sutra.example/", "production", "short")["Content-Security-Policy"];
+  assert.match(bogus, /script-src 'self'; connect-src/u);
 });

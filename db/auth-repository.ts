@@ -327,14 +327,40 @@ export async function isLocalBootstrapRequired(): Promise<boolean> {
   return existing === null;
 }
 
-async function recordLoginFailure(db: D1Database, userId: string, failures: number, now: number): Promise<void> {
+/**
+ * Computes the next throttle state after a failed login. The counter is NEVER
+ * reset to 0 on lockout — resetting handed a locked-out attacker a fresh budget
+ * of {@link MAX_FAILED_ATTEMPTS} the moment the window expired. Instead it keeps
+ * climbing, and each failure at/beyond the threshold triggers an again-lockout
+ * whose duration grows progressively (bounded), so repeated 5-fail cycles cost
+ * more each time. A successful login is the only thing that clears the counter.
+ *
+ * NOTE: this is per-account only. A per-IP throttle (edge rate limit) is a
+ * larger, ops/edge-owned follow-up and is intentionally out of scope here.
+ */
+export function nextLoginFailureState(
+  failures: number,
+  now: number,
+  maxAttempts: number = MAX_FAILED_ATTEMPTS,
+  lockoutMs: number = LOCKOUT_MS,
+): { readonly failedAttempts: number; readonly lockedUntil: number | null } {
   const nextFailures = failures + 1;
-  const lockedUntil = nextFailures >= MAX_FAILED_ATTEMPTS ? now + LOCKOUT_MS : null;
+  if (nextFailures < maxAttempts) {
+    return { failedAttempts: nextFailures, lockedUntil: null };
+  }
+  // Progressive backoff: 1x at the threshold, +1x per extra failure, capped so
+  // the stored timestamp stays bounded.
+  const multiplier = Math.min(nextFailures - maxAttempts + 1, 12);
+  return { failedAttempts: nextFailures, lockedUntil: now + lockoutMs * multiplier };
+}
+
+async function recordLoginFailure(db: D1Database, userId: string, failures: number, now: number): Promise<void> {
+  const next = nextLoginFailureState(failures, now);
   await db.prepare(
     `UPDATE local_password_credentials
         SET failed_attempts = ?, locked_until = ?, updated_at = ?
       WHERE user_id = ?`,
-  ).bind(nextFailures >= MAX_FAILED_ATTEMPTS ? 0 : nextFailures, lockedUntil, now, userId).run();
+  ).bind(next.failedAttempts, next.lockedUntil, now, userId).run();
 }
 
 function invalidCredentials(): never {

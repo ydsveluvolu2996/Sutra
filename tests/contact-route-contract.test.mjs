@@ -33,15 +33,33 @@ test("contact route enforces a durable per-source + global rate window (429)", (
   assert.match(route, /MAX_PER_SOURCE_PER_WINDOW/u);
   assert.match(route, /MAX_GLOBAL_PER_WINDOW/u);
   assert.match(route, /status: 429/u);
-  // Source IP comes from the edge headers, never from the JSON body.
-  assert.match(route, /cf-connecting-ip/u);
-  assert.match(route, /x-forwarded-for/u);
+  // The global cap is tightened to a sane backstop (60/min).
+  assert.match(route, /MAX_GLOBAL_PER_WINDOW = 60/u);
 });
 
-test("contact route persists every accepted lead and routes to a resolved recipient", () => {
+test("contact route only trusts cf-connecting-ip and never the spoofable x-forwarded-for", () => {
+  // The rate-limit bucket key comes ONLY from the Cloudflare edge header.
+  assert.match(route, /cf-connecting-ip/u);
+  // A client-supplied x-forwarded-for must NOT be READ as a bucket key, or a
+  // spoofer could mint unlimited independent buckets. (An explanatory comment
+  // may still name the header; what matters is that it is never fetched.)
+  assert.doesNotMatch(route, /\.get\(\s*["']x-forwarded-for/u);
+  // Absent the trusted header, everything collapses to one shared bucket.
+  assert.match(route, /UNATTRIBUTED_SOURCE|"unattributed"/u);
+});
+
+test("contact route records BEFORE delivering, then flips the delivered flag", () => {
   assert.match(route, /resolveContactRecipient\(deliveryEnv\)/u);
   assert.match(route, /deliverContactSubmission\(/u);
   assert.match(route, /repository\.record\(/u);
+  assert.match(route, /markDelivered\(id\)/u);
+  // The row is reserved (delivered: false) before the outbound delivery, so the
+  // rate-limit counts include in-flight submissions (TOCTOU close).
+  assert.ok(
+    route.indexOf("repository.record(") < route.indexOf("deliverContactSubmission("),
+    "record() must be called before deliverContactSubmission()",
+  );
+  assert.match(route, /delivered: false/u);
   // No mailto/placeholder leakage in the endpoint.
   assert.doesNotMatch(route, /mailto:/u);
   assert.doesNotMatch(route, /hello@sutra/u);

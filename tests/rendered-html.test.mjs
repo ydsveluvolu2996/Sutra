@@ -24,11 +24,11 @@ test("server-renders the Sutra public product site", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Sutra<\/title>/i);
-  assert.match(html, /Every cloud and cluster risk/i);
+  assert.match(html, /See every risk/i);
   assert.match(html, /Read-only access/i);
   assert.match(html, /Cloud security, woven together/i);
   assert.match(html, /Runtime-informed issues/i);
-  assert.match(html, /Open live demo/i);
+  assert.match(html, /Book a walkthrough/i);
   assert.match(html, /Prove every path/i);
   assert.match(html, /Why teams choose Sutra/i);
   assert.doesNotMatch(html, /private beta/i);

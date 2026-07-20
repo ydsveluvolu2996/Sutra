@@ -19,6 +19,7 @@ export const CONTACT_MESSAGE_MAX = 2000;
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const SOURCE_IP = /^[A-Za-z0-9.:_-]{1,64}$/u;
+const SUBMISSION_ID = /^contact_[a-f0-9]{32}$/u;
 
 export interface ContactSubmissionValue {
   readonly name: string;
@@ -158,5 +159,18 @@ export class ContactSubmissionRepository {
       now,
     ).run();
     return id;
+  }
+
+  /**
+   * Flip the delivered flag on a previously reserved row. The route persists the
+   * lead first (delivered = 0) so the rate-limit counters include in-flight
+   * submissions, then calls this once the outbound transport confirms delivery.
+   */
+  public async markDelivered(id: string, delivered = true): Promise<void> {
+    if (!SUBMISSION_ID.test(id)) throw new ContactSubmissionRepositoryError();
+    const db = await this.ready();
+    await db.prepare(
+      `UPDATE contact_submissions SET delivered = ? WHERE id = ?`,
+    ).bind(delivered ? 1 : 0, id).run();
   }
 }

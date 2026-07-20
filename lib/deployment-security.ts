@@ -162,13 +162,37 @@ export function evaluateDeploymentBoundary(
   };
 }
 
+const SCRIPT_NONCE_PATTERN = /^[A-Za-z0-9+/=_-]{16,}$/u;
+
+/**
+ * Generates a per-response base64 nonce for the CSP `script-src` directive. The
+ * worker pins it on the request so the framework's inline hydration scripts and
+ * the inline theme bootstrap all carry it, which lets `'unsafe-inline'` be
+ * dropped from `script-src`. A static hash is not usable because the app streams
+ * dynamic inline RSC scripts whose contents vary per request.
+ */
+export function generateScriptNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 export function responseSecurityHeaders(
   requestUrl: string,
   environment: DeploymentEnvironment,
+  scriptNonce?: string,
 ): Readonly<Record<string, string>> {
   const url = new URL(requestUrl);
+  // 'unsafe-inline' is removed from script-src. A valid per-request nonce (for
+  // HTML responses) allowlists the inline hydration + theme scripts; responses
+  // without inline scripts (API/image/boundary) fall back to 'self' only.
+  const scriptSrc = scriptNonce !== undefined && SCRIPT_NONCE_PATTERN.test(scriptNonce)
+    ? `script-src 'self' 'nonce-${scriptNonce}'`
+    : "script-src 'self'";
   const headers: Record<string, string> = {
-    "Content-Security-Policy": "default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'",
+    "Content-Security-Policy": `default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; ${scriptSrc}; connect-src 'self'`,
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",

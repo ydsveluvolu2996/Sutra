@@ -18,6 +18,7 @@ import {
   type ItsmCaseLike,
   type ItsmConnectorType,
 } from "./itsm-sync.ts";
+import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const PAYLOAD_PREVIEW_LIMIT = 500;
@@ -49,13 +50,17 @@ export async function deliverItsmTicket(input: {
   const payloadPreview = outboundBody.slice(0, PAYLOAD_PREVIEW_LIMIT);
   const signature = await signOutboundBody(connector.sharedSecret, outboundBody);
   try {
-    const response = await fetchImpl(connector.baseUrl, {
+    // Block SSRF targets right before egress and refuse to follow redirects so
+    // a 3xx to an internal target cannot bypass the guard after the first hop.
+    const target = assertSafeOutboundUrl(connector.baseUrl);
+    const response = await fetchImpl(target, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-sutra-signature": signature,
       },
       body: outboundBody,
+      redirect: "error",
       signal: AbortSignal.timeout(input.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     return { delivered: response.ok, statusCode: response.status, payloadPreview };

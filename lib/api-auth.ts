@@ -111,7 +111,16 @@ export function sessionTokenFromRequest(request: Request): string | null {
 }
 
 export function sessionCookie(request: Request, token: string, maximumAgeSeconds: number): string {
-  const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
+  const url = new URL(request.url);
+  // Hosted mode is pinned to an HTTPS public origin, so the session cookie is
+  // ALWAYS marked Secure there (even if TLS is terminated at an edge and the
+  // internal request looks like http). The Secure flag is relaxed ONLY for
+  // local mode served over http on a loopback host, so local login still works.
+  const localHttp =
+    runtimeEnv().SUTRA_LOCAL_MODE === "true" &&
+    isLoopbackHostname(url.hostname) &&
+    url.protocol !== "https:";
+  const secure = localHttp ? "" : "; Secure";
   return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maximumAgeSeconds}${secure}`;
 }
 

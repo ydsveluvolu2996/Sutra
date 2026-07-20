@@ -76,3 +76,33 @@ test("connector writes reject invalid endpoints and cross-org customer theft", a
     );
   });
 });
+
+test("SSRF base URLs (metadata, loopback, private, internal) are rejected at store time", async () => {
+  await withDatabase(async (repository) => {
+    const blocked = [
+      "https://169.254.169.254/latest/meta-data/", // cloud metadata
+      "https://127.0.0.1/hook",                     // loopback
+      "https://10.1.2.3/hook",                      // private
+      "https://192.168.0.1/hook",                   // private
+      "https://[::1]/hook",                         // IPv6 loopback
+      "https://itsm.internal/hook",                 // internal hostname
+      "https://localhost/hook",                     // localhost
+    ];
+    for (const baseUrl of blocked) {
+      await assert.rejects(
+        repository.save(SCOPE_A, {
+          name: "ssrf-attempt", connectorType: "jira", baseUrl,
+          projectKey: null, sharedSecret: "sixteen-characters-minimum",
+        }, "user_a"),
+        (error) => error instanceof ItsmConnectorRepositoryError && error.code === "INVALID_INPUT",
+        `expected reject: ${baseUrl}`,
+      );
+    }
+    // A legitimate public HTTPS endpoint still stores.
+    const saved = await repository.save(SCOPE_A, {
+      name: "public-hook", connectorType: "jira", baseUrl: "https://hooks.example.com/itsm",
+      projectKey: null, sharedSecret: "sixteen-characters-minimum",
+    }, "user_a");
+    assert.match(saved.baseUrl, /^https:\/\/hooks\.example\.com\/itsm/u);
+  });
+});

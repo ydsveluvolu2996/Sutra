@@ -1,6 +1,7 @@
 import { ItsmConnectorRepository } from "../../../../../db/itsm-connector-repository";
 import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,8 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const body: unknown = await request.json().catch(() => null);
+    assertSameOrigin(request);
+    const body: unknown = await readBoundedJson(request);
     if (typeof body !== "object" || body === null || Array.isArray(body)) {
       throw Object.assign(new Error("The ITSM connector request is invalid"), { code: "INVALID_INPUT" });
     }
@@ -63,6 +65,7 @@ export async function POST(request: Request): Promise<Response> {
 
 export async function DELETE(request: Request): Promise<Response> {
   try {
+    assertSameOrigin(request);
     const id = new URL(request.url).searchParams.get("id") ?? "";
     if (!CONNECTOR_ID.test(id)) throw Object.assign(new Error("The connector identifier is invalid"), { code: "INVALID_INPUT" });
     const { scope } = await resolveScope(request, "connection:manage");

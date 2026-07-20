@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { headers } from "next/headers";
+import { THEME_BOOTSTRAP } from "../lib/theme-bootstrap";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -34,16 +35,22 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-/* Applied before first paint so the public marketing pages never flash the
- * wrong theme. Default is dark (the brand default); a stored choice wins.
- * The attribute is read by the `.lz` light-theme CSS overrides. */
-const THEME_BOOTSTRAP = `(function(){try{var t=localStorage.getItem("sutra.theme");document.documentElement.dataset.theme=(t==="light"||t==="dark")?t:"dark";}catch(e){document.documentElement.dataset.theme="dark";}})();`;
+/** Reads the per-request CSP nonce from the script-src directive the worker
+ * pins on the request headers, so the inline theme script carries it and can
+ * run under a policy with no 'unsafe-inline'. */
+function scriptNonce(csp: string | null): string | undefined {
+  if (csp === null) return undefined;
+  const match = /'nonce-([A-Za-z0-9+/=_-]+)'/u.exec(csp);
+  return match?.[1];
+}
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const requestHeaders = await headers();
+  const nonce = scriptNonce(requestHeaders.get("content-security-policy"));
   return (
     <html lang="en">
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>

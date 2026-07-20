@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import {
   evaluateDeploymentBoundary,
+  generateScriptNonce,
   responseSecurityHeaders,
   type DeploymentSecurityEnvironment,
 } from "../lib/deployment-security";
@@ -57,9 +58,17 @@ const worker = {
       return imageResponse;
     }
 
-    const applicationResponse = await handler.fetch(request, env, ctx);
+    // Per-request CSP nonce for inline scripts. Pinned on the request's
+    // `content-security-policy` header so the framework stamps its inline
+    // hydration scripts (and the layout reads it for the theme bootstrap), then
+    // set on the response — this is what lets 'unsafe-inline' stay out of
+    // script-src while the app still runs.
+    const scriptNonce = generateScriptNonce();
+    const renderRequest = new Request(request, { headers: new Headers(request.headers) });
+    renderRequest.headers.set("content-security-policy", `script-src 'self' 'nonce-${scriptNonce}'`);
+    const applicationResponse = await handler.fetch(renderRequest, env, ctx);
     const response = new Response(applicationResponse.body, applicationResponse);
-    for (const [name, value] of Object.entries(responseSecurityHeaders(request.url, boundary.environment))) response.headers.set(name, value);
+    for (const [name, value] of Object.entries(responseSecurityHeaders(request.url, boundary.environment, scriptNonce))) response.headers.set(name, value);
     response.headers.delete("X-Powered-By");
     if (url.pathname.startsWith("/api/") || boundary.environment !== "production") response.headers.set("Cache-Control", "no-store");
     return response;

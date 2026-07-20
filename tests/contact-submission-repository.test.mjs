@@ -85,6 +85,25 @@ test("0036 migration applies; an accepted submission persists and reads back", a
   });
 });
 
+test("markDelivered flips a reserved row's delivered flag (record-before-deliver)", async () => {
+  await withDatabase(async (repo, database) => {
+    const parsed = parseContactSubmission(VALID);
+    // Reserve the row first with delivered = 0, as the route now does.
+    const id = await repo.record({ ...parsed.value, sourceIp: "203.0.113.7", recipient: DEFAULT_CONTACT_RECIPIENT, delivered: false });
+    let row = await database.prepare("SELECT delivered FROM contact_submissions WHERE id = ?").bind(id).first();
+    assert.equal(row.delivered, 0);
+    // A confirmed delivery flips the flag on the already-persisted row.
+    await repo.markDelivered(id);
+    row = await database.prepare("SELECT delivered FROM contact_submissions WHERE id = ?").bind(id).first();
+    assert.equal(row.delivered, 1);
+    // A malformed id never touches storage.
+    await assert.rejects(
+      repo.markDelivered("not-a-contact-id"),
+      (error) => error instanceof ContactSubmissionRepositoryError,
+    );
+  });
+});
+
 test("record rejects a malformed submission before any write", async () => {
   await withDatabase(async (repo, database) => {
     await assert.rejects(
