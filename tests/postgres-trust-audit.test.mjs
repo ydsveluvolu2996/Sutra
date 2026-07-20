@@ -43,7 +43,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
            permission_pack_version, status, enabled_regions_json,
            last_validated_at, created_at, updated_at)
          VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, ?, 'test-key-v1',
-                 'live-demo-2026-07.3', 'active', '["us-east-1"]', ?, ?, ?)`,
+                 'standard-2026-07', 'active', '["us-east-1"]', ?, ?, ?)`,
       ).bind(
         connectionId,
         pilotRepository.LOCAL_ORG_ID,
@@ -71,7 +71,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "live-demo-2026-07.3",
+        permissionPackVersion: "standard-2026-07",
       },
     });
     assert.equal(registered.roleArn, replacementRoleArn);

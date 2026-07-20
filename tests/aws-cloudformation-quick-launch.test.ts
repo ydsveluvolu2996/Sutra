@@ -20,7 +20,7 @@ const TEMPLATE_URL =
   `https://sutra-demo-artifacts.s3.us-east-1.amazonaws.com/templates/${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}/${AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}.yaml?versionId=reviewed-1`;
 const EXTERNAL_ID = "sutra_0123456789abcdefghij";
 const REVIEWED_TEMPLATE = new Uint8Array(await readFile(
-  new URL("../public/sutra-customer-role-live-demo.yaml", import.meta.url),
+  new URL("../public/sutra-customer-onboarding-role.yaml", import.meta.url),
 ));
 const CONNECTION_ROUTE_SOURCE = await readFile(
   new URL("../app/api/pilot/connections/route.ts", import.meta.url),

@@ -31,7 +31,7 @@ import { LIVE_AWS_RUN_RECLAIM_AFTER_MS } from "../services/aws-collector/src/liv
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "live-demo-2026-07.3";
+const PILOT_PERMISSION_PACK = "standard-2026-07";
 export const CURRENT_PILOT_PERMISSION_PACK = PILOT_PERMISSION_PACK;
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
@@ -92,7 +92,7 @@ export interface VerifiedRoleEvidence {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "live-demo-2026-07.3";
+  readonly permissionPackVersion: "standard-2026-07";
 }
 
 export interface CommitVerifiedConnectionRoleInput {

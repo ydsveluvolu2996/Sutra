@@ -924,7 +924,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "live-demo-2026-07.3",
+        permissionPackVersion: "standard-2026-07",
       };
       await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
       return verificationResponse(verification);

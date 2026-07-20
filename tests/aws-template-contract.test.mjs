@@ -20,13 +20,13 @@ function statementActions(source, sid) {
     .map((match) => match[1]);
 }
 
-test("live demo customer role is the reviewed public artifact", async () => {
+test("standard customer onboarding role is the reviewed public artifact", async () => {
   const infrastructure = await readFile(
-    resolve(root, "infrastructure/customer-role-live-demo.yaml"),
+    resolve(root, "infrastructure/customer-onboarding-role.yaml"),
     "utf8",
   );
   const publicArtifact = await readFile(
-    resolve(root, "public/sutra-customer-role-live-demo.yaml"),
+    resolve(root, "public/sutra-customer-onboarding-role.yaml"),
     "utf8",
   );
 
@@ -35,7 +35,7 @@ test("live demo customer role is the reviewed public artifact", async () => {
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "live-demo-2026-07.3");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -44,7 +44,13 @@ test("live demo customer role is the reviewed public artifact", async () => {
     "ec2:DescribeSecurityGroups",
     "ec2:DescribeVolumes",
     "ec2:DescribeNetworkInterfaces",
+    "ec2:DescribeNetworkAcls",
+    "ec2:DescribeRouteTables",
+    "ec2:DescribeInternetGateways",
     "elasticloadbalancing:DescribeLoadBalancers",
+    "elasticloadbalancing:DescribeListeners",
+    "elasticloadbalancing:DescribeTargetGroups",
+    "elasticloadbalancing:DescribeTargetHealth",
     "kms:ListKeys",
     "kms:ListAliases",
     "kms:DescribeKey",
@@ -94,8 +100,8 @@ test("live demo customer role is the reviewed public artifact", async () => {
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+live-demo-2026-07\.3/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+live-demo-2026-07\.3/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07/u);
 
   const implemented = statementActions(infrastructure, "ImplementedMetadataApis");
   const trust = statementActions(infrastructure, "TrustContractAttestation");
@@ -159,7 +165,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "03221976c695b895adef5cee06c7d69464b7c8844b872ac5ac601f4d0639886d",
+    "f103889e75ef62dfaf8ca813aef629ddb0f31ee83d962a1bf9d75465a9c09889",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -188,8 +194,8 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   );
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
-    "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/live-demo-2026-07.3/" +
-      "3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml",
+    "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/" +
+      "3cb35686b47b8a6d5e37e95d4a9540c0715eed89cb583c0f2e459d684c216ca2.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[

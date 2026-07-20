@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Least-privilege customer role for the current Sutra one-account live sandbox
-  collector. It permits only the metadata and existing AWS-native finding APIs
-  implemented by this release and never grants data-plane reads, mutations, or
-  security-service enablement.
+  Least-privilege, read-only customer role for the Sutra collector. It grants
+  exactly the metadata, network-exposure, IAM posture, and AWS-native finding
+  APIs the collector invokes, and never grants data-plane payload reads,
+  mutations, or security-service enablement.
 
 Parameters:
   VendorCollectorRoleArn:
@@ -63,7 +63,7 @@ Resources:
       RoleName:
         Ref: RoleName
       Path: /sutra/
-      Description: Metadata-only role for the current Sutra live sandbox collector.
+      Description: Read-only metadata and posture role for the Sutra collector.
       MaxSessionDuration: 3600
       PermissionsBoundary:
         Fn::If:
@@ -102,7 +102,13 @@ Resources:
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeVolumes
                   - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeNetworkAcls
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeInternetGateways
                   - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
                   - kms:ListKeys
                   - kms:ListAliases
                   - kms:DescribeKey
@@ -144,7 +150,13 @@ Resources:
                   - ec2:DescribeSecurityGroups
                   - ec2:DescribeVolumes
                   - ec2:DescribeNetworkInterfaces
+                  - ec2:DescribeNetworkAcls
+                  - ec2:DescribeRouteTables
+                  - ec2:DescribeInternetGateways
                   - elasticloadbalancing:DescribeLoadBalancers
+                  - elasticloadbalancing:DescribeListeners
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
                   - kms:ListKeys
                   - kms:ListAliases
                   - kms:DescribeKey
@@ -187,7 +199,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: live-demo-2026-07.3
+          Value: standard-2026-07
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -201,4 +213,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: live-demo-2026-07.3
+    Value: standard-2026-07

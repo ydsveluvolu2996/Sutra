@@ -86,7 +86,7 @@ test("publisher distinguishes exact AWS absence evidence and exact empty buckets
 test("publisher creates a private-list/public-object versioned bucket and verifies exact bytes", async () => {
   const calls = [];
   let headCalls = 0;
-  const template = await readFile(resolve(root, "public/sutra-customer-role-live-demo.yaml"));
+  const template = await readFile(resolve(root, "public/sutra-customer-onboarding-role.yaml"));
   const runCommand = async (command, args, options) => {
     calls.push({
       kind: "run",
@@ -212,7 +212,7 @@ test("publisher refuses an unmarked pre-existing bucket before any bucket mutati
 
 test("publisher reuses only an owner-bound bucket with the exact Sutra purpose marker", async () => {
   const calls = [];
-  const template = await readFile(resolve(root, "public/sutra-customer-role-live-demo.yaml"));
+  const template = await readFile(resolve(root, "public/sutra-customer-onboarding-role.yaml"));
   const captureCommand = async (command, args) => {
     calls.push({ kind: "capture", command, args });
     if (args[0] === "sts") {
@@ -260,7 +260,7 @@ test("publisher reuses only an owner-bound bucket with the exact Sutra purpose m
 
 test("publisher recovers its deterministic same-account bucket only when untagged and empty", async () => {
   const calls = [];
-  const template = await readFile(resolve(root, "public/sutra-customer-role-live-demo.yaml"));
+  const template = await readFile(resolve(root, "public/sutra-customer-onboarding-role.yaml"));
   const captureCommand = async (command, args) => {
     calls.push({ kind: "capture", command, args });
     if (args[0] === "sts") {

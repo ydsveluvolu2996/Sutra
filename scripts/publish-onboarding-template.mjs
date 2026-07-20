@@ -259,7 +259,7 @@ export async function publishOnboardingTemplate({
   const bucket = input.configuredBucket ?? deterministicBucket;
   if (!BUCKET.test(bucket)) throw new Error("The derived S3 template bucket name is invalid");
 
-  const templatePath = resolve(root, "public/sutra-customer-role-live-demo.yaml");
+  const templatePath = resolve(root, "public/sutra-customer-onboarding-role.yaml");
   const contents = await readFile(templatePath);
   const digest = createHash("sha256").update(contents).digest("hex");
   if (digest !== AWS_CUSTOMER_ROLE_TEMPLATE_SHA256) {
