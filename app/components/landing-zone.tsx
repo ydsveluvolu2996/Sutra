@@ -44,7 +44,7 @@ function pvInventory(bar: string, rows: InvRow[]): string {
     '</div></div>'
   );
 }
-const PV_INVENTORY = pvInventory("cmdb · demo workspace", [
+const PV_INVENTORY = pvInventory("cmdb · product workspace", [
   { ico: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/><rect x="9" y="9" width="6" height="6" rx="1"/>', t: "#f0842e", nm: "EC2 Instances", sub: "Virtual machines", count: "208" },
   { ico: '<path d="M12 2 20.5 7v10L12 22 3.5 17V7z"/><circle cx="12" cy="12" r="3.4"/>', t: "#3b82f6", nm: "EKS Clusters", sub: "Container orchestrators", count: "4" },
   { ico: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><circle cx="12" cy="10" r="2.4"/><path d="M12 12.4V15"/>', t: "#8b5cf6", nm: "IAM Roles", sub: "Identities & trust policies", count: "61" },
@@ -205,8 +205,8 @@ const TIERS: Tier[] = [
     name: "Starter",
     tagline: "Single-account posture, proven from day one",
     note: "set your price",
-    cta: "Explore in the demo",
-    ctaHref: "/dashboard",
+    cta: "Book a walkthrough",
+    ctaHref: "/contact",
     lead: "Agentless collection and the evidence graph for a small AWS + EKS footprint.",
     points: [
       "Agentless collection · customer-owned IAM role, STS only",
@@ -221,8 +221,8 @@ const TIERS: Tier[] = [
     name: "Growth",
     tagline: "The full CNAPP + FinOps operations suite",
     note: "set your price",
-    cta: "Explore in the demo",
-    ctaHref: "/dashboard",
+    cta: "Book a walkthrough",
+    ctaHref: "/contact",
     feat: true,
     lead: "Everything in Starter, plus unified vulnerability management and cost.",
     points: [
@@ -239,8 +239,8 @@ const TIERS: Tier[] = [
     name: "Portfolio",
     tagline: "Multi-tenant operations for the whole book",
     note: "set your price",
-    cta: "Review onboarding",
-    ctaHref: "/onboard",
+    cta: "Talk to us",
+    ctaHref: "/contact",
     lead: "Everything in Growth, built for running many customers at once.",
     points: [
       "Everything in Growth",
@@ -269,7 +269,7 @@ const TRUST_BADGES = [
   "Data-minimizing by design",
 ];
 const FAQ: Array<{ q: string; a: string }> = [
-  { q: "How does onboarding work?", a: "You deploy a customer-owned IAM role from the CloudFormation template we provide. A separate collector workload assumes that role with temporary STS credentials and performs read-only, metadata-only discovery — no agents on your workloads, no access keys stored. You can explore the full live demo workspace before connecting any account." },
+  { q: "How does onboarding work?", a: "You deploy a customer-owned IAM role from the CloudFormation template we provide. A separate collector workload assumes that role with temporary STS credentials and performs read-only, metadata-only discovery — no agents on your workloads, no access keys stored. Book a walkthrough to see the full product before connecting any account." },
   { q: "Is the access really read-only?", a: "Yes. The role grants metadata-only permission packs, is owned by you, and is scoped with a unique platform-generated ExternalId. There are no write permissions and no customer access keys ever leave your account or enter the browser or web control plane." },
   { q: "Which clouds and platforms are supported?", a: "AWS and Amazon EKS. Sutra is not multi-cloud — there is no Azure or GCP support. Within that scope it correlates cloud, Kubernetes, identity, network, runtime and supply-chain evidence into one graph." },
   { q: "How is my data handled?", a: "Data-minimizing by design: only normalized, scoped metadata evidence is validated and promoted after a complete collection run. Customer credentials never reach the browser or the web control plane, and each customer sees only the workspaces explicitly granted to them." },
@@ -596,7 +596,7 @@ export default function LandingZone() {
         </nav>
         <div className="head-actions">
           <Link className="signin" href="/login">Sign in</Link>
-          <Link className="btn btn-solid" href="/dashboard">Open live demo <Arrow /></Link>
+          <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
         </div>
       </header>
 
@@ -607,7 +607,7 @@ export default function LandingZone() {
           <h1>See every risk.<br /><span className="accent">Prove every path.</span></h1>
           <p>One platform for AWS and Amazon EKS operations — a live CMDB and asset inventory, reachability-proven security, cloud cost (FinOps), compliance readiness, and a tenant-scoped API — woven into a single evidence graph. Sutra surfaces the few risks that are provably reachable and cites the exact observation behind every finding.</p>
           <div className="hero-cta">
-            <Link className="btn btn-solid" href="/dashboard">Open live demo <Arrow /></Link>
+            <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
             <a className="btn" href="#trust">Review the trust model</a>
           </div>
           <div className="assur"><span><b>✓</b> Read-only access, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
@@ -684,7 +684,7 @@ export default function LandingZone() {
               <div key={r.dim} className="crow"><span className="dim">{r.dim}</span><span className="them">{r.them}</span><span className="sutra"><b>✓</b>{r.sutra}</span></div>
             ))}
           </div>
-          <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the demo workspace.</p>
+          <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the product.</p>
         </section>
 
         <section className="block" style={{ paddingTop: 0 }} id="pricing">
@@ -719,7 +719,7 @@ export default function LandingZone() {
             <h2>Customer credentials never enter the browser or web control plane.</h2>
             <p className="lead">A separate collector workload assumes the customer role with temporary STS credentials. The application receives normalized, scoped evidence — not access keys.</p>
             <ul><li><span>01</span> Exact vendor workload-role principal</li><li><span>02</span> Unique, platform-generated ExternalId</li><li><span>03</span> Positive and negative trust validation</li><li><span>04</span> Metadata-only permission packs</li></ul>
-            <Link className="btn btn-solid" href="/controls#architecture">Review the security architecture <Arrow /></Link>
+            <a className="btn btn-solid" href="#architecture">Review the security architecture <Arrow /></a>
           </div>
           <div className="lx-trust-panel rise">
             <div className="row"><b>role principal</b><span>arn:aws:iam::…:role/sutra-collector</span></div>
@@ -808,8 +808,8 @@ export default function LandingZone() {
         <div className="wrap"><div className="inner rise">
           <span className="sec-kicker">Start in minutes</span>
           <h2>See the MSP experience before connecting an account.</h2>
-          <p className="lead">Explore the live demo workspace, inspect the control library, then review the customer-owned IAM role — read-only from the first minute.</p>
-          <div className="hero-cta"><Link className="btn btn-solid" href="/dashboard">Open live demo</Link><Link className="btn" href="/onboard">Review onboarding</Link></div>
+          <p className="lead">Book a walkthrough of the product, see the control library and the evidence graph, then review the customer-owned IAM role — read-only from the first minute.</p>
+          <div className="hero-cta"><Link className="btn btn-solid" href="/contact">Book a walkthrough</Link><a className="btn" href="#platform">Explore the platform</a></div>
         </div></div>
       </section>
 
@@ -826,21 +826,21 @@ export default function LandingZone() {
               </div>
             </div>
             <div className="ftcol"><strong>Platform</strong>
-              <Link href="/dashboard">Live demo</Link>
-              <Link href="/cmdb">CMDB</Link>
-              <Link href="/findings">Findings</Link>
-              <Link href="/network-exposure">Network exposure</Link>
-              <Link href="/controls">Control library</Link>
+              <a href="#platform">Platform overview</a>
+              <a href="#capabilities">CMDB &amp; findings</a>
+              <a href="#capabilities">Network exposure</a>
+              <a href="#capabilities">Capabilities</a>
+              <a href="#architecture">Control library</a>
             </div>
             <div className="ftcol"><strong>Trust</strong>
-              <Link href="/onboard">AWS onboarding</Link>
-              <Link href="/controls#architecture">Security architecture</Link>
-              <a href="/sutra-customer-role-live-demo.yaml">CloudFormation role</a>
+              <Link href="/contact">AWS onboarding</Link>
+              <a href="#architecture">Security architecture</a>
+              <Link href="/contact">CloudFormation role</Link>
               <a href="#trust">Trust model</a>
             </div>
             <div className="ftcol"><strong>Company</strong>
               <Link href="/login">Sign in</Link>
-              <Link href="/dashboard">Open live demo</Link>
+              <Link href="/contact">Book a walkthrough</Link>
               <a href="#capabilities">Capabilities</a>
               <a href="#why">Why Sutra</a>
             </div>
