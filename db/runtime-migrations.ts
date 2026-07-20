@@ -31,6 +31,7 @@ import publicApiSchemaSql from "../drizzle/0029_public_api.sql?raw";
 import itsmConnectorsSchemaSql from "../drizzle/0030_itsm_connectors.sql?raw";
 import backgroundJobsSchemaSql from "../drizzle/0031_background_jobs.sql?raw";
 import findingExceptionsSchemaSql from "../drizzle/0032_finding_exceptions.sql?raw";
+import registryVulnerabilitiesSchemaSql from "../drizzle/0033_registry_vulnerabilities.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -79,6 +80,7 @@ const migrations = [
   { id: "0030_itsm_connectors", statements: statementsFrom(itsmConnectorsSchemaSql) },
   { id: "0031_background_jobs", statements: statementsFrom(backgroundJobsSchemaSql) },
   { id: "0032_finding_exceptions", statements: statementsFrom(findingExceptionsSchemaSql) },
+  { id: "0033_registry_vulnerabilities", statements: statementsFrom(registryVulnerabilitiesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

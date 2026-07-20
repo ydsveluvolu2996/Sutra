@@ -1,5 +1,6 @@
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { CloudVulnerabilityRepository } from "../../../../../db/cloud-vulnerability-repository";
+import { RegistryVulnerabilityRepository } from "../../../../../db/registry-vulnerability-repository";
 import { VulnerabilityMirrorRepository } from "../../../../../db/vulnerability-mirror-repository";
 import { VulnerabilityWaiverRepository } from "../../../../../db/vulnerability-waiver-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
@@ -30,8 +31,17 @@ export async function GET(request: Request): Promise<Response> {
     const scope = { orgId: authenticated.subject.orgId, customerId: connection.customerId };
     const tenant = { orgId: scope.orgId, customerId: connection.customerId };
 
+    // The unified queue for a connection composes every already-normalized,
+    // connection-scoped source: AWS Inspector (cloud hosts/images/Lambda) plus
+    // registry container-image CVEs scanned by `trivy image`. Both are stored and
+    // read under the same tenant scope; their resourceKeys never collide (cloud
+    // ARNs vs registry image digests), so they rank together without merging.
     const rows = await new CloudVulnerabilityRepository().listForConnection(scope, connectionId);
-    const findingsBase = deriveCloudVulnerabilityFindings(rows, tenant);
+    const registryRows = await new RegistryVulnerabilityRepository().listForConnection(scope, connectionId);
+    const findingsBase = [
+      ...deriveCloudVulnerabilityFindings(rows, tenant),
+      ...deriveCloudVulnerabilityFindings(registryRows, tenant),
+    ];
 
     // Same enrichment as the Kubernetes queue: bundled CISA KEV snapshot + the
     // Postgres EPSS/CVSS mirror. Absence from a feed is a fact, never assumed safe.
@@ -57,12 +67,16 @@ export async function GET(request: Request): Promise<Response> {
       nowDays: Math.floor(now / MS_PER_DAY),
       waivers,
     });
+    const allRows = [...rows, ...registryRows];
     return jsonResponse({
       queue,
       source: "aws-inspector",
+      sources: registryRows.length > 0 ? ["aws-inspector", "trivy-image"] : ["aws-inspector"],
       accountId: connection.awsAccountId,
       totalFindings: findings.length,
-      lastSeenAt: rows.length > 0 ? new Date(Math.max(...rows.map((row) => row.lastSeenMs))).toISOString() : null,
+      cloudFindings: rows.length,
+      registryFindings: registryRows.length,
+      lastSeenAt: allRows.length > 0 ? new Date(Math.max(...allRows.map((row) => row.lastSeenMs))).toISOString() : null,
       kev: { asOf: KEV_AS_OF, count: KEV_COUNT },
       epss: { covered: epssCovered },
       waivers: { active: storedWaivers.length },
