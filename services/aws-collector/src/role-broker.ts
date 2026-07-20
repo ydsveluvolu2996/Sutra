@@ -67,6 +67,8 @@ export const IMPLEMENTED_READ_ACTIONS = [
   "ec2:DescribeNetworkAcls",
   "ec2:DescribeRouteTables",
   "ec2:DescribeInternetGateways",
+  "ec2:DescribeAddresses",
+  "ec2:DescribeSnapshots",
   "elasticloadbalancing:DescribeLoadBalancers",
   "elasticloadbalancing:DescribeListeners",
   "elasticloadbalancing:DescribeTargetGroups",

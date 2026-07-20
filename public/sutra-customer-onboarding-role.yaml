@@ -105,6 +105,8 @@ Resources:
                   - ec2:DescribeNetworkAcls
                   - ec2:DescribeRouteTables
                   - ec2:DescribeInternetGateways
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeSnapshots
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:DescribeTargetGroups
@@ -155,6 +157,8 @@ Resources:
                   - ec2:DescribeNetworkAcls
                   - ec2:DescribeRouteTables
                   - ec2:DescribeInternetGateways
+                  - ec2:DescribeAddresses
+                  - ec2:DescribeSnapshots
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:DescribeTargetGroups

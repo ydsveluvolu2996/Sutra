@@ -10,6 +10,7 @@ import {
   type GetTrailStatusCommandOutput,
 } from "@aws-sdk/client-cloudtrail";
 import {
+  DescribeAddressesCommand,
   DescribeNetworkAclsCommand,
   DescribeNetworkInterfacesCommand,
   DescribeInstancesCommand,
@@ -17,10 +18,13 @@ import {
   DescribeRegionsCommand,
   DescribeRouteTablesCommand,
   DescribeSecurityGroupsCommand,
+  DescribeSnapshotsCommand,
   DescribeSubnetsCommand,
   DescribeVolumesCommand,
   DescribeVpcsCommand,
   EC2Client,
+  type DescribeAddressesCommandInput,
+  type DescribeAddressesCommandOutput,
   type DescribeNetworkAclsCommandInput,
   type DescribeNetworkAclsCommandOutput,
   type DescribeNetworkInterfacesCommandInput,
@@ -34,6 +38,8 @@ import {
   type DescribeRouteTablesCommandOutput,
   type DescribeSecurityGroupsCommandInput,
   type DescribeSecurityGroupsCommandOutput,
+  type DescribeSnapshotsCommandInput,
+  type DescribeSnapshotsCommandOutput,
   type DescribeSubnetsCommandInput,
   type DescribeSubnetsCommandOutput,
   type DescribeVolumesCommandInput,
@@ -369,6 +375,16 @@ export interface Ec2InventoryClient {
     input: DescribeNetworkAclsCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeNetworkAclsCommandOutput>;
+  // Optional so pre-existing test factories that predate these read-only cost
+  // collectors remain source-compatible (mirrors the optional `eks` factory).
+  describeAddresses?(
+    input: DescribeAddressesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeAddressesCommandOutput>;
+  describeSnapshots?(
+    input: DescribeSnapshotsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeSnapshotsCommandOutput>;
 }
 
 export interface Elbv2InventoryClient {
@@ -614,6 +630,10 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
         sendSdkCommand(client, new DescribeInternetGatewaysCommand(input), signal),
       describeNetworkAcls: (input, signal) =>
         sendSdkCommand(client, new DescribeNetworkAclsCommand(input), signal),
+      describeAddresses: (input, signal) =>
+        sendSdkCommand(client, new DescribeAddressesCommand(input), signal),
+      describeSnapshots: (input, signal) =>
+        sendSdkCommand(client, new DescribeSnapshotsCommand(input), signal),
     };
   }
 
@@ -773,6 +793,8 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
 
   public ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient {
     const client = this.delegate.ec2(region, credentials);
+    const describeAddresses = client.describeAddresses;
+    const describeSnapshots = client.describeSnapshots;
     return {
       describeInstances: (input) => this.run((signal) => client.describeInstances(input, signal)),
       describeVpcs: (input) => this.run((signal) => client.describeVpcs(input, signal)),
@@ -786,6 +808,14 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeInternetGateways: (input) =>
         this.run((signal) => client.describeInternetGateways(input, signal)),
       describeNetworkAcls: (input) => this.run((signal) => client.describeNetworkAcls(input, signal)),
+      // Forwarded only when the delegate provides them, so pre-existing test
+      // factories that omit these optional read-only cost collectors stay intact.
+      ...(describeAddresses === undefined
+        ? {}
+        : { describeAddresses: (input) => this.run((signal) => describeAddresses(input, signal)) }),
+      ...(describeSnapshots === undefined
+        ? {}
+        : { describeSnapshots: (input) => this.run((signal) => describeSnapshots(input, signal)) }),
     };
   }
 
@@ -1126,6 +1156,19 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         task("ec2.network-acls", "ec2", "network-acls", region, (state) =>
           collectNetworkAcls(context, region, ec2, observedAt, state),
         ),
+        // Read-only cost-waste evidence. Registered only when the ec2 client
+        // exposes the (optional) call, mirroring the optional `eks` collector so
+        // pre-existing test factories are unaffected.
+        ...(ec2.describeAddresses === undefined ? [] : [
+          task("ec2.elastic-ips", "ec2", "elastic-ips", region, (state) =>
+            collectElasticIps(context, region, ec2, observedAt, state),
+          ),
+        ]),
+        ...(ec2.describeSnapshots === undefined ? [] : [
+          task("ec2.snapshots", "ec2", "snapshots", region, (state) =>
+            collectSnapshots(context, region, ec2, observedAt, state),
+          ),
+        ]),
         task("elbv2.load-balancers", "elasticloadbalancing", "load-balancers", region, (state) =>
           collectLoadBalancers(context, region, elbv2, observedAt, state),
         ),
@@ -1630,6 +1673,110 @@ async function collectNetworkAcls(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeNetworkAcls exceeded pagination limit");
+}
+
+async function collectElasticIps(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const describe = client.describeAddresses;
+  if (describe === undefined) return; // task is only registered when present
+  // DescribeAddresses returns the full set in one response (no pagination).
+  const output = await describe({});
+  const resources = (output.Addresses ?? []).flatMap((address) => {
+    const nativeIdValue = address.AllocationId ?? address.PublicIp;
+    if (nativeIdValue === undefined) return [];
+    // Associated when the address is bound to an association, instance, or ENI.
+    // The `associated` flag is the exact fact the idle/waste engine consumes to
+    // flag an unused (billing) Elastic IP — recorded, never inferred beyond it.
+    const associated =
+      address.AssociationId !== undefined ||
+      address.InstanceId !== undefined ||
+      address.NetworkInterfaceId !== undefined;
+    return [resourceFromApi(
+      context,
+      observedAt,
+      region,
+      "ec2",
+      "aws.ec2.elastic-ip",
+      nativeIdValue,
+      address.AllocationId === undefined
+        ? undefined
+        : `arn:${context.partition}:ec2:${region}:${context.accountId}:elastic-ip/${address.AllocationId}`,
+      "ec2:DescribeAddresses",
+      compact({
+        allocationId: address.AllocationId,
+        publicIp: address.PublicIp,
+        domain: address.Domain,
+        associated,
+        associationId: address.AssociationId,
+        instanceId: address.InstanceId,
+        networkInterfaceId: address.NetworkInterfaceId,
+        privateIpAddress: address.PrivateIpAddress,
+        publicIpv4Pool: address.PublicIpv4Pool,
+        networkBorderGroup: address.NetworkBorderGroup,
+      }),
+      address.Tags,
+    )];
+  });
+  await state.emit({ resources, evidence: [] });
+  state.observePage(resources.length);
+}
+
+async function collectSnapshots(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const describe = client.describeSnapshots;
+  if (describe === undefined) return; // task is only registered when present
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    // OwnerIds: ["self"] keeps this to the account's own snapshots — never the
+    // enormous set of public/shared snapshots.
+    const output = await describe(
+      token === undefined
+        ? { OwnerIds: ["self"], MaxResults: 500 }
+        : { OwnerIds: ["self"], MaxResults: 500, NextToken: token },
+    );
+    const resources = (output.Snapshots ?? []).flatMap((snapshot) =>
+      snapshot.SnapshotId === undefined
+        ? []
+        : [resourceFromApi(
+            context,
+            observedAt,
+            region,
+            "ec2",
+            "aws.ec2.snapshot",
+            snapshot.SnapshotId,
+            `arn:${context.partition}:ec2:${region}:${context.accountId}:snapshot/${snapshot.SnapshotId}`,
+            "ec2:DescribeSnapshots",
+            compact({
+              state: snapshot.State,
+              // Source volume id — the idle/waste engine joins it against the
+              // collected volume inventory to flag a snapshot whose source is gone.
+              volumeId: snapshot.VolumeId,
+              volumeSizeGiB: snapshot.VolumeSize,
+              encrypted: snapshot.Encrypted,
+              storageTier: snapshot.StorageTier,
+              startTime: iso(snapshot.StartTime),
+              ownerId: snapshot.OwnerId,
+            }),
+            snapshot.Tags,
+          )],
+    );
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeSnapshots");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeSnapshots exceeded pagination limit");
 }
 
 async function collectLoadBalancers(

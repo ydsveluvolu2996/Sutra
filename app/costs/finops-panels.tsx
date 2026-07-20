@@ -69,6 +69,122 @@ interface Rightsizing {
   readonly limitations: readonly string[];
   readonly disclaimer: string;
 }
+interface IdleWasteFinding {
+  readonly id: string;
+  readonly category: string;
+  readonly severity: "low" | "medium" | "high";
+  readonly resourceKey: string;
+  readonly region: string | null;
+  readonly title: string;
+  readonly currency: string | null;
+  readonly estimatedMonthlyWasteMicros: string | null;
+  readonly costBasis: "cur-line-items" | "bundled-list-price" | "none";
+  readonly basisReason: string;
+}
+interface IdleWaste {
+  readonly findings: readonly IdleWasteFinding[];
+  readonly summary: {
+    readonly count: number;
+    readonly wasteByCurrencyMicros: Readonly<Record<string, string>>;
+    readonly findingsWithoutEstimate: number;
+  };
+  readonly disclaimer: string;
+}
+interface RequiredTagCoverage {
+  readonly tag: string;
+  readonly resourcesTotal: number;
+  readonly resourcesWithTag: number;
+  readonly coveragePercent: number | null;
+  readonly missingResourceKeys: readonly string[];
+}
+interface CurrencyUntaggedSpend {
+  readonly currency: string;
+  readonly totalMicros: string;
+  readonly untaggedMicros: string;
+  readonly untaggedPercent: number | null;
+  readonly unattributableMicros: string;
+}
+interface MissingTagResource {
+  readonly resourceKey: string;
+  readonly service: string | null;
+  readonly region: string | null;
+  readonly missingTags: readonly string[];
+}
+interface TagGovernance {
+  readonly requiredTags: readonly string[];
+  readonly resourceCoverage: readonly RequiredTagCoverage[];
+  readonly spendByCurrency: readonly CurrencyUntaggedSpend[];
+  readonly missingByResource: readonly MissingTagResource[];
+  readonly summary: {
+    readonly resourcesEvaluated: number;
+    readonly resourcesMissingAnyTag: number;
+    readonly fullyTaggedPercent: number | null;
+  };
+  readonly disclaimer: string;
+}
+interface CostTrendPeriod {
+  readonly period: string;
+  readonly totalMicros: string;
+  readonly lineCount: number;
+  readonly momDeltaMicros: string | null;
+  readonly momDeltaPercent: number | null;
+  readonly momBasis: string;
+  readonly movingAverageMicros: string | null;
+  readonly isCurrentPartialPeriod: boolean;
+}
+interface ForecastPoint {
+  readonly period: string;
+  readonly amountMicros: string;
+  readonly bandLowMicros: string | null;
+  readonly bandHighMicros: string | null;
+}
+type ForecastResult =
+  | { readonly available: false; readonly reason: string; readonly historicalPointsUsed: number; readonly minRequired: number }
+  | {
+      readonly available: true;
+      readonly method: string;
+      readonly historicalPointsUsed: number;
+      readonly points: readonly ForecastPoint[];
+      readonly residualBand: { readonly method: string; readonly sigmaMicros: string } | null;
+      readonly disclaimer: string;
+    };
+interface CostTrendSeries {
+  readonly currency: string;
+  readonly movingAverageWindow: number;
+  readonly periods: readonly CostTrendPeriod[];
+  readonly forecast: ForecastResult;
+}
+interface CostTrends {
+  readonly series: readonly CostTrendSeries[];
+  readonly currentPeriod: string | null;
+  readonly disclaimer: string;
+}
+interface SavingsPeriod {
+  readonly period: string;
+  readonly realizedSavingsMicros: string | null;
+  readonly realizedSavingsBasis: string;
+  readonly coveredAmortizedMicros: string;
+  readonly coveredOnDemandEquivalentMicros: string | null;
+  readonly onDemandUsageMicros: string;
+  readonly commitmentFeeMicros: string;
+  readonly coveragePercent: number | null;
+  readonly coverageBasis: string;
+  readonly periodOverPeriodDeltaMicros: string | null;
+  readonly cumulativeRealizedSavingsMicros: string;
+  readonly isCurrentPartialPeriod: boolean;
+}
+interface SavingsTrackingSeries {
+  readonly currency: string;
+  readonly periods: readonly SavingsPeriod[];
+  readonly totalRealizedSavingsMicros: string;
+  readonly derivablePeriodCount: number;
+  readonly notDerivablePeriodCount: number;
+}
+interface SavingsTracking {
+  readonly series: readonly SavingsTrackingSeries[];
+  readonly currentPeriod: string | null;
+  readonly disclaimer: string;
+}
 interface Insights {
   readonly periods: readonly { period: string; lineCount: number }[];
   readonly period: string | null;
@@ -78,6 +194,10 @@ interface Insights {
   readonly anomalies: { readonly anomalies: readonly Anomaly[]; readonly disclaimer: string } | null;
   readonly commitment?: Commitment | null;
   readonly rightsizing?: Rightsizing | null;
+  readonly idleWaste?: IdleWaste | null;
+  readonly tagGovernance?: TagGovernance | null;
+  readonly trends?: CostTrends | null;
+  readonly savings?: SavingsTracking | null;
 }
 
 function money(micros: string, currency: string): string {
@@ -301,6 +421,139 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
             <p className="panel-footnote">{insights.rightsizing.disclaimer}</p>
           </>
         )}
+      </section>
+
+      <section className="panel" aria-label="Idle and waste">
+        <div className="panel-heading"><div><h2>Idle &amp; waste</h2><p>Unattached volumes, empty load balancers, unused Elastic IPs, stopped-but-billing instances, and orphaned snapshots. A monthly cost appears only when derivable — from per-resource CUR lines or a bundled conservative USD list price — otherwise the reason is shown, never a fabricated figure.</p></div></div>
+        {insights?.idleWaste == null || insights.idleWaste.findings.length === 0 ? (
+          <p className="panel-footnote">No idle or wasted resources detected{insights?.idleWaste ? "" : " (no data)"}.</p>
+        ) : (
+          <>
+            {Object.keys(insights.idleWaste.summary.wasteByCurrencyMicros).length > 0 ? (
+              <p className="cmdbq-summary">Estimated monthly waste: {Object.entries(insights.idleWaste.summary.wasteByCurrencyMicros).map(([currency, micros]) => money(micros, currency)).join(" · ")}{insights.idleWaste.summary.findingsWithoutEstimate > 0 ? ` · ${insights.idleWaste.summary.findingsWithoutEstimate} finding(s) with no derivable estimate` : ""}</p>
+            ) : null}
+            <table><thead><tr><th>Category</th><th>Resource</th><th>Est. monthly waste</th><th>Severity</th></tr></thead>
+              <tbody>{insights.idleWaste.findings.map((finding) => (
+                <tr key={finding.id}>
+                  <td><span className="cmdbq-chip">{finding.category}</span></td>
+                  <td>{finding.title}{finding.region ? ` (${finding.region})` : ""}</td>
+                  <td>{finding.estimatedMonthlyWasteMicros != null && finding.currency
+                    ? `${money(finding.estimatedMonthlyWasteMicros, finding.currency)} (${finding.costBasis})`
+                    : `No estimate — ${finding.basisReason}`}</td>
+                  <td><span className={`cmdbq-chip ${finding.severity === "high" ? "cmdbq-removed" : finding.severity === "medium" ? "cmdbq-changed" : "cmdbq-added"}`}>{finding.severity}</span></td>
+                </tr>
+              ))}</tbody></table>
+            <p className="panel-footnote">{insights.idleWaste.disclaimer}</p>
+          </>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Tag governance">
+        <div className="panel-heading"><div><h2>Tag governance</h2><p>Cost-allocation tag coverage over billable resources and untagged-spend share from CUR lines, per currency. &quot;Untagged&quot; means a required tag is missing in collected metadata — a coverage statement, not proof of untracked cost.</p></div></div>
+        {insights?.tagGovernance == null ? (
+          <p className="panel-footnote">No tag governance data (no data).</p>
+        ) : (
+          <>
+            <p className="cmdbq-summary">Required tags: {insights.tagGovernance.requiredTags.join(", ")} · {insights.tagGovernance.summary.resourcesMissingAnyTag} of {insights.tagGovernance.summary.resourcesEvaluated} resources missing a required tag{insights.tagGovernance.summary.fullyTaggedPercent === null ? "" : ` · ${insights.tagGovernance.summary.fullyTaggedPercent.toFixed(1)}% fully tagged`}</p>
+            {insights.tagGovernance.spendByCurrency.length > 0 ? (
+              <table><thead><tr><th>Currency</th><th>Total spend</th><th>Untagged spend</th><th>Untagged %</th></tr></thead>
+                <tbody>{insights.tagGovernance.spendByCurrency.map((row) => (
+                  <tr key={row.currency}>
+                    <td>{row.currency}</td>
+                    <td>{money(row.totalMicros, row.currency)}</td>
+                    <td>{money(row.untaggedMicros, row.currency)}</td>
+                    <td>{row.untaggedPercent === null ? "—" : `${row.untaggedPercent.toFixed(1)}%`}</td>
+                  </tr>
+                ))}</tbody></table>
+            ) : <p className="panel-footnote">No CUR spend ingested for the selected period — coverage is shown from CMDB metadata only.</p>}
+            <table><thead><tr><th>Required tag</th><th>Coverage</th><th>Resources with tag</th></tr></thead>
+              <tbody>{insights.tagGovernance.resourceCoverage.map((coverage) => (
+                <tr key={coverage.tag}>
+                  <td>{coverage.tag}</td>
+                  <td>
+                    <span aria-hidden="true" style={{ display: "inline-block", width: "80px", height: "7px", borderRadius: "20px", background: "var(--surface-soft)", verticalAlign: "middle", overflow: "hidden" }}>
+                      <span style={{ display: "block", height: "100%", width: `${coverage.coveragePercent ?? 0}%`, background: "var(--forest, #2fae74)" }} />
+                    </span>
+                    {coverage.coveragePercent === null ? " —" : ` ${coverage.coveragePercent.toFixed(1)}%`}
+                  </td>
+                  <td>{coverage.resourcesWithTag} / {coverage.resourcesTotal}</td>
+                </tr>
+              ))}</tbody></table>
+            {insights.tagGovernance.missingByResource.length > 0 ? (
+              <table><thead><tr><th>Resource</th><th>Service</th><th>Missing tags</th></tr></thead>
+                <tbody>{insights.tagGovernance.missingByResource.slice(0, 20).map((resource) => (
+                  <tr key={resource.resourceKey}>
+                    <td>{resource.resourceKey}{resource.region ? ` (${resource.region})` : ""}</td>
+                    <td>{resource.service ?? "—"}</td>
+                    <td>{resource.missingTags.join(", ")}</td>
+                  </tr>
+                ))}</tbody></table>
+            ) : <p className="panel-footnote">Every evaluated resource carries all required tags.</p>}
+            <p className="panel-footnote">{insights.tagGovernance.disclaimer}</p>
+          </>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Cost trends and forecast">
+        <div className="panel-heading"><div><h2>Cost trends &amp; forecast</h2><p>Month-over-month spend per currency across every ingested period, with a trailing moving average and a linear-regression forecast. Currencies are never summed. The forecast is an estimate over historical totals — shown only with at least three months of history, never fabricated.</p></div></div>
+        {insights?.trends == null || insights.trends.series.length === 0 ? (
+          <p className="panel-footnote">No trend data yet — ingest at least one billing period{insights?.trends ? "" : " (no data)"}.</p>
+        ) : insights.trends.series.map((series) => {
+          const forecast = series.forecast;
+          return (
+            <div key={series.currency} className="cmdbq-results">
+              <p className="cmdbq-summary">{series.currency} · {series.periods.length} period(s) · {series.movingAverageWindow}-month moving average</p>
+              <table><thead><tr><th>Period</th><th>Spend</th><th>MoM</th><th>Moving avg</th></tr></thead>
+                <tbody>{series.periods.map((point) => (
+                  <tr key={point.period}>
+                    <td>{point.period}{point.isCurrentPartialPeriod ? " (partial)" : ""}</td>
+                    <td>{money(point.totalMicros, series.currency)}</td>
+                    <td>{point.momDeltaPercent === null ? (point.momBasis === "prior-period-zero" ? "n/a (prior 0)" : "—") : `${point.momDeltaPercent > 0 ? "+" : ""}${point.momDeltaPercent.toFixed(1)}%`}</td>
+                    <td>{point.movingAverageMicros === null ? "—" : money(point.movingAverageMicros, series.currency)}</td>
+                  </tr>
+                ))}</tbody></table>
+              {forecast.available ? (
+                <>
+                  <p className="cmdbq-summary">Forecast ({forecast.method}, estimate over {forecast.historicalPointsUsed} months):</p>
+                  <table><thead><tr><th>Period</th><th>Projected spend</th>{forecast.residualBand ? <th>±1σ band</th> : null}</tr></thead>
+                    <tbody>{forecast.points.map((pt) => (
+                      <tr key={pt.period}>
+                        <td>{pt.period}</td>
+                        <td>{money(pt.amountMicros, series.currency)}</td>
+                        {forecast.residualBand ? <td>{pt.bandLowMicros && pt.bandHighMicros ? `${money(pt.bandLowMicros, series.currency)} – ${money(pt.bandHighMicros, series.currency)}` : "—"}</td> : null}
+                      </tr>
+                    ))}</tbody></table>
+                </>
+              ) : (
+                <p className="panel-footnote">Forecast not shown — {forecast.reason} ({forecast.historicalPointsUsed}/{forecast.minRequired} months of history).</p>
+              )}
+            </div>
+          );
+        })}
+        {insights?.trends ? <p className="panel-footnote">{insights.trends.disclaimer}</p> : null}
+      </section>
+
+      <section className="panel" aria-label="Realized savings">
+        <div className="panel-heading"><div><h2>Realized savings (look-back)</h2><p>What Reserved-Instance / Savings-Plan commitments actually saved per period — the public on-demand-equivalent of covered usage minus the amortized cost billed. Per currency, never summed. Periods where the on-demand-equivalent is absent are shown as not-derivable, never estimated.</p></div></div>
+        {insights?.savings == null || insights.savings.series.length === 0 ? (
+          <p className="panel-footnote">No realized-savings data yet — this needs billing lines carrying commitment coverage{insights?.savings ? "" : " (no data)"}.</p>
+        ) : insights.savings.series.map((series) => (
+          <div key={series.currency} className="cmdbq-results">
+            <p className="cmdbq-summary">{series.currency} · total realized {money(series.totalRealizedSavingsMicros, series.currency)} · {series.derivablePeriodCount} derivable / {series.notDerivablePeriodCount} not-derivable period(s)</p>
+            <table><thead><tr><th>Period</th><th>Realized saving</th><th>Coverage</th><th>Cumulative</th></tr></thead>
+              <tbody>{series.periods.map((point) => (
+                <tr key={point.period}>
+                  <td>{point.period}{point.isCurrentPartialPeriod ? " (partial)" : ""}</td>
+                  <td>{point.realizedSavingsMicros === null
+                    ? `not derivable — ${point.realizedSavingsBasis}`
+                    : `${money(point.realizedSavingsMicros, series.currency)}${point.realizedSavingsBasis === "no-commitment-usage" ? " (no commitment usage)" : ""}`}</td>
+                  <td>{point.coveragePercent === null ? "—" : `${point.coveragePercent.toFixed(1)}%`}</td>
+                  <td>{money(point.cumulativeRealizedSavingsMicros, series.currency)}</td>
+                </tr>
+              ))}</tbody></table>
+          </div>
+        ))}
+        {insights?.savings ? <p className="panel-footnote">{insights.savings.disclaimer}</p> : null}
       </section>
     </>
   );

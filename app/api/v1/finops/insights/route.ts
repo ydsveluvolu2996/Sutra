@@ -1,9 +1,19 @@
-import { getConnectionForOrg } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { buildAllocation, detectAnomalies, evaluateBudgets } from "../../../../../lib/finops-insights";
 import { buildCostOptimizations } from "../../../../../lib/aws-cost-optimization";
 import { buildRightsizingRecommendations } from "../../../../../lib/finops-rightsizing";
 import { buildRightsizingInput, type CollectedUtilizationSample } from "../../../../../lib/finops-rightsizing-inputs";
+import { buildIdleWaste } from "../../../../../lib/finops-idle-waste";
+import { buildIdleWasteInputs } from "../../../../../lib/finops-idle-waste-inputs";
+import { buildTagGovernance } from "../../../../../lib/finops-tag-governance";
+import { buildTagGovernanceInputs } from "../../../../../lib/finops-tag-governance-inputs";
+import { buildCostTrends } from "../../../../../lib/finops-trends";
+import { buildCostTrendsInput } from "../../../../../lib/finops-trends-inputs";
+import { buildSavingsTracking } from "../../../../../lib/finops-savings-tracking";
+import { buildSavingsTrackingInput } from "../../../../../lib/finops-savings-tracking-inputs";
+import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
+import type { PilotResource } from "../../../../../lib/pilot-types";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -35,9 +45,38 @@ export async function GET(request: Request): Promise<Response> {
     const repository = new FinopsWorkspaceRepository();
     const scope = { orgId: authenticated.subject.orgId, customerId: connection.customerId };
     const periods = await repository.listPeriods(scope, connectionId);
+    // CMDB resources for this connection (tenant-scoped through the resolved
+    // connection). Idle/waste and tag governance are derived from these plus the
+    // selected period's CUR lines; both are honest with no CUR present.
+    const resources: readonly PilotResource[] =
+      (await getPilotStateForOrg(authenticated.subject.orgId, connectionId)).resources;
+    const governanceBlocks = (lines: readonly NormalizedCurLine[]) => ({
+      idleWaste: buildIdleWaste(buildIdleWasteInputs({ resources, curLines: lines })),
+      tagGovernance: buildTagGovernance(buildTagGovernanceInputs({ resources, curLines: lines })),
+    });
+    // Trends, forecasting and realized-savings are inherently multi-period, so
+    // they read EVERY persisted period's CUR lines — not just the selected one.
+    // With no periods the line set is empty and both engines report an honest
+    // empty result. A real clock lets them flag the current in-progress month.
+    const allPeriodLines: readonly NormalizedCurLine[] = (
+      await Promise.all(periods.map((entry) => repository.linesForPeriod(scope, connectionId, entry.period)))
+    ).flat();
+    const trendBlocks = {
+      trends: buildCostTrends(buildCostTrendsInput({ curLines: allPeriodLines }), { now: () => new Date() }),
+      savings: buildSavingsTracking(buildSavingsTrackingInput({ curLines: allPeriodLines }), { now: () => new Date() }),
+    };
     const selected = period ?? periods[0]?.period ?? null;
     if (selected === null) {
-      return jsonResponse({ connectionId, periods, period: null, allocation: [], budgets: [], anomalies: null });
+      return jsonResponse({
+        connectionId,
+        periods,
+        period: null,
+        allocation: [],
+        budgets: [],
+        anomalies: null,
+        ...governanceBlocks([]),
+        ...trendBlocks,
+      });
     }
     const lines = await repository.linesForPeriod(scope, connectionId, selected);
     const budgets = await repository.listBudgets(scope);
@@ -73,6 +112,8 @@ export async function GET(request: Request): Promise<Response> {
         limitations: rightsizingReport.limitations,
         disclaimer: rightsizingReport.disclaimer,
       },
+      ...governanceBlocks(lines),
+      ...trendBlocks,
     });
   } catch (error) {
     return errorResponse(error);

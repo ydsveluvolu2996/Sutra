@@ -41,6 +41,8 @@ const COLLECTOR_COMMANDS = {
   DescribeNetworkAclsCommand: { action: "ec2:DescribeNetworkAcls", scope: "customer" },
   DescribeRouteTablesCommand: { action: "ec2:DescribeRouteTables", scope: "customer" },
   DescribeInternetGatewaysCommand: { action: "ec2:DescribeInternetGateways", scope: "customer" },
+  DescribeAddressesCommand: { action: "ec2:DescribeAddresses", scope: "customer" },
+  DescribeSnapshotsCommand: { action: "ec2:DescribeSnapshots", scope: "customer" },
   DescribeLoadBalancersCommand: { action: "elasticloadbalancing:DescribeLoadBalancers", scope: "customer" },
   DescribeListenersCommand: { action: "elasticloadbalancing:DescribeListeners", scope: "customer" },
   DescribeTargetGroupsCommand: { action: "elasticloadbalancing:DescribeTargetGroups", scope: "customer" },

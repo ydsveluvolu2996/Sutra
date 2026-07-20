@@ -629,6 +629,39 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
             }
           : { $metadata: {}, NetworkAcls: [] };
       },
+      describeAddresses: async () => ({
+        $metadata: {},
+        Addresses: [
+          // Unassociated (idle) Elastic IP.
+          { AllocationId: "eipalloc-idle", PublicIp: "203.0.113.10", Domain: "vpc" },
+          // Associated Elastic IP (bound to an ENI).
+          {
+            AllocationId: "eipalloc-live",
+            PublicIp: "203.0.113.11",
+            Domain: "vpc",
+            AssociationId: "eipassoc-1",
+            NetworkInterfaceId: "eni-expanded",
+          },
+        ],
+      }),
+      describeSnapshots: async (input) => {
+        this.record("snapshots", input.NextToken);
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "snapshots-next",
+              Snapshots: [{
+                SnapshotId: "snap-orphaned",
+                VolumeId: "vol-gone",
+                VolumeSize: 40,
+                State: "completed",
+                Encrypted: false,
+                StartTime: new Date("2026-06-01T00:00:00Z"),
+                OwnerId: "123456789012",
+              }],
+            }
+          : { $metadata: {}, Snapshots: [] };
+      },
     };
   }
 
@@ -951,6 +984,26 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     encryptionProviderKeyArn: "arn:aws:kms:us-east-1:123456789012:key/key-expanded",
     authenticationMode: "API",
     bootstrapClusterCreatorAdminPermissions: false,
+  });
+
+  // Read-only cost-waste evidence: unassociated Elastic IP + orphaned snapshot.
+  const elasticIps = resources.filter((resource) => resource.resourceType === "aws.ec2.elastic-ip");
+  assert.equal(elasticIps.length, 2);
+  const idleEip = elasticIps.find((resource) => resource.resourceId === "eipalloc-idle");
+  assert.equal(idleEip?.sourceApi, "ec2:DescribeAddresses");
+  assert.equal(idleEip?.configuration.associated, false);
+  const liveEip = elasticIps.find((resource) => resource.resourceId === "eipalloc-live");
+  assert.equal(liveEip?.configuration.associated, true);
+  assert.equal(liveEip?.configuration.networkInterfaceId, "eni-expanded");
+  const snapshotResource = resources.find((resource) => resource.resourceType === "aws.ec2.snapshot");
+  assert.equal(snapshotResource?.sourceApi, "ec2:DescribeSnapshots");
+  assert.deepEqual(snapshotResource?.configuration, {
+    state: "completed",
+    volumeId: "vol-gone",
+    volumeSizeGiB: 40,
+    encrypted: false,
+    startTime: "2026-06-01T00:00:00.000Z",
+    ownerId: "123456789012",
   });
 
   const connection = {

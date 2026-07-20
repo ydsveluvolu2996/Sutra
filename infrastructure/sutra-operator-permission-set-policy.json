@@ -166,7 +166,7 @@
       "Sid": "PublishExactReviewedTemplateObject",
       "Effect": "Allow",
       "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/75d402e3b11c114b6a37aee73b15259e1c78fff5e91621c87da8c500b1fa4346.yaml"
+      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/64c3a71c3b5184cc8032837937d66db2c7d316fe2eaae3a1df49a46ef29f5616.yaml"
     }
   ]
 }

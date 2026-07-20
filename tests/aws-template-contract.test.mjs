@@ -47,6 +47,8 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     "ec2:DescribeNetworkAcls",
     "ec2:DescribeRouteTables",
     "ec2:DescribeInternetGateways",
+    "ec2:DescribeAddresses",
+    "ec2:DescribeSnapshots",
     "elasticloadbalancing:DescribeLoadBalancers",
     "elasticloadbalancing:DescribeListeners",
     "elasticloadbalancing:DescribeTargetGroups",
@@ -165,7 +167,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "8aaf7c8e840a96759b6661d95047ffc0f49a6439a5c7c2d6043fd3d653019cca",
+    "21daea14f7e6a25a671c150af32da2b59ef881e133f6c8075cbe614825ee9237",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -195,7 +197,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
     "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/" +
-      "75d402e3b11c114b6a37aee73b15259e1c78fff5e91621c87da8c500b1fa4346.yaml",
+      "64c3a71c3b5184cc8032837937d66db2c7d316fe2eaae3a1df49a46ef29f5616.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[
