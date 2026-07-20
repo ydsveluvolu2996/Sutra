@@ -276,15 +276,16 @@ export class KubernetesRepository {
         `INSERT INTO kubernetes_scan_runs
           (id, org_id, customer_id, cluster_id, status, collected_at,
            idempotency_key, evidence_sha256, posture_sha256,
-           resource_count, finding_count, coverage_count)
-         SELECT ?, c.org_id, c.customer_id, c.id, ?, ?, ?, ?, ?, ?, ?, ?
+           resource_count, finding_count, coverage_count, nodes_json)
+         SELECT ?, c.org_id, c.customer_id, c.id, ?, ?, ?, ?, ?, ?, ?, ?, ?
            FROM kubernetes_clusters c
           WHERE c.id = ? AND c.org_id = ? AND c.customer_id = ?
             AND c.cluster_uid = ? AND c.status = 'active'`,
       ).bind(
         scanId, input.status, collectedAt, input.idempotencyKey,
         evidenceSha256, postureSha256, evidence.resources.length,
-        posture.results.length, coverage.length, input.clusterId,
+        posture.results.length, coverage.length,
+        canonicalJson(evidence.nodes ?? []), input.clusterId,
         input.scope.orgId, input.scope.customerId, evidence.clusterId,
       ),
     ];
@@ -660,17 +661,9 @@ export class KubernetesRepository {
         sbom_count: number;
       }>(),
     ]);
-    const resources = (resourceRows.results ?? []).map((row) => {
-      const parsed = JSON.parse(row.evidence_json) as unknown;
-      const normalized = normalizeKubernetesEvidence({
-        schema: "sutra.kubernetes-evidence.v1",
-        clusterId: cluster.clusterUid,
-        collectedAt: scan.collectedAt,
-        observedKinds: [recordKind(parsed)],
-        resources: [parsed],
-      });
-      return normalized.resources[0];
-    });
+    const resources = this.reconstructResources(
+      cluster.clusterUid, scan.collectedAt, resourceRows.results ?? [],
+    );
     const findings = (findingRows.results ?? []).map((row) => ({
       controlId: row.control_id,
       subject: row.subject,
@@ -700,6 +693,75 @@ export class KubernetesRepository {
       )
     ) throw new KubernetesRepositoryError("INVALID_INPUT");
     return { cluster, scan, resources, findings, coverage, scannerEvidence };
+  }
+
+  /**
+   * Reconstruct the evidence snapshot the FinOps cost-allocation projection needs
+   * (`projectKubernetesAllocationInput`) for the latest COMPLETE scan — resources
+   * exactly as `getLatestWorkspace` rebuilds them plus the persisted Node side
+   * array. Returns null when the cluster is out of scope or has no complete scan.
+   * The reconstructed snapshot is run back through `normalizeKubernetesEvidence`
+   * so the nodes are validated, de-duplicated, sorted and OMITTED-when-empty just
+   * like the collector path — a node-less scan yields `nodes` absent, never a
+   * fabricated entry.
+   */
+  public async getLatestAllocationEvidence(
+    scope: KubernetesTenantScope,
+    clusterId: string,
+  ): Promise<KubernetesEvidenceSnapshot | null> {
+    assertScope(scope);
+    if (!validIdentifier(clusterId)) throw new KubernetesRepositoryError("INVALID_INPUT");
+    const cluster = (await this.listClusters(scope)).find((item) => item.id === clusterId);
+    if (cluster === undefined) return null;
+    const scan = cluster.latestCompleteScan;
+    if (scan === null) return null;
+    const db = await this.ready();
+    const [resourceRows, runRow] = await Promise.all([
+      db.prepare(
+        `SELECT evidence_json FROM kubernetes_scan_resources
+          WHERE org_id = ? AND customer_id = ? AND cluster_id = ? AND scan_run_id = ?
+          ORDER BY kind, namespace, name, id`,
+      ).bind(scope.orgId, scope.customerId, clusterId, scan.id).all<{ evidence_json: string }>(),
+      db.prepare(
+        `SELECT nodes_json FROM kubernetes_scan_runs
+          WHERE id = ? AND org_id = ? AND customer_id = ? AND cluster_id = ?
+          LIMIT 1`,
+      ).bind(scan.id, scope.orgId, scope.customerId, clusterId).first<{ nodes_json: string | null }>(),
+    ]);
+    const resources = this.reconstructResources(
+      cluster.clusterUid, scan.collectedAt, resourceRows.results ?? [],
+    );
+    return normalizeKubernetesEvidence({
+      schema: "sutra.kubernetes-evidence.v1",
+      clusterId: cluster.clusterUid,
+      collectedAt: scan.collectedAt,
+      observedKinds: [...new Set(resources.map((resource) => resource.kind))],
+      resources,
+      nodes: parseNodesJson(runRow?.nodes_json ?? null),
+    });
+  }
+
+  /**
+   * Rebuild each stored per-resource evidence row into a validated resource, one
+   * single-resource snapshot at a time (shared by `getLatestWorkspace` and
+   * `getLatestAllocationEvidence`).
+   */
+  private reconstructResources(
+    clusterUid: string,
+    collectedAt: string,
+    rows: readonly { readonly evidence_json: string }[],
+  ): readonly KubernetesEvidenceSnapshot["resources"][number][] {
+    return rows.map((row) => {
+      const parsed = JSON.parse(row.evidence_json) as unknown;
+      const normalized = normalizeKubernetesEvidence({
+        schema: "sutra.kubernetes-evidence.v1",
+        clusterId: clusterUid,
+        collectedAt,
+        observedKinds: [recordKind(parsed)],
+        resources: [parsed],
+      });
+      return normalized.resources[0];
+    });
   }
 
   private async getScanById(
@@ -754,6 +816,23 @@ function parseJsonArray(value: string): readonly unknown[] {
     return parsed;
   } catch {
     throw new KubernetesRepositoryError("INVALID_INPUT");
+  }
+}
+
+/**
+ * Defensively parse the stored `nodes_json` blob for the FinOps Node side array.
+ * A null column (rows written before the side array existed), non-array payload,
+ * or unparseable JSON all collapse to an empty list so the reconstructed snapshot
+ * stays honest — element-level validation and sorting are left to
+ * `normalizeKubernetesEvidence`.
+ */
+function parseNodesJson(value: string | null): readonly unknown[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }
 

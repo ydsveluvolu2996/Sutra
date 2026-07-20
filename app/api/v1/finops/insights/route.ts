@@ -15,6 +15,10 @@ import { buildSavingsTrackingInput } from "../../../../../lib/finops-savings-tra
 import { buildUnitEconomics } from "../../../../../lib/finops-unit-economics";
 import { buildUnitEconomicsInput } from "../../../../../lib/finops-unit-economics-inputs";
 import { FinopsUnitCountRepository } from "../../../../../db/finops-unit-count-repository";
+import { buildKubernetesAllocation, K8S_ALLOCATION_DISCLAIMER } from "../../../../../lib/finops-k8s-allocation";
+import { buildKubernetesAllocationInput } from "../../../../../lib/finops-k8s-allocation-inputs";
+import { projectKubernetesAllocationInput } from "../../../../../lib/finops-k8s-allocation-projection";
+import { KubernetesRepository } from "../../../../../db/kubernetes-repository";
 import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
 import type { PilotResource } from "../../../../../lib/pilot-types";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
@@ -68,6 +72,25 @@ export async function GET(request: Request): Promise<Response> {
       trends: buildCostTrends(buildCostTrendsInput({ curLines: allPeriodLines }), { now: () => new Date() }),
       savings: buildSavingsTracking(buildSavingsTrackingInput({ curLines: allPeriodLines }), { now: () => new Date() }),
     };
+    // #3 Kubernetes cost allocation: split each of this customer's cluster node
+    // costs across namespaces by collected pod requests. Node cost comes from a
+    // disclosed bundled instance-type price catalog; a cluster with no priced
+    // nodes is honestly reported as node-cost-not-derivable. Independent of the
+    // billing period (uses node list-price, not CUR).
+    const k8sRepo = new KubernetesRepository();
+    const k8sClusters = await k8sRepo.listClusters(scope);
+    const k8sAllocationClusters = (
+      await Promise.all(k8sClusters.map(async (cluster) => {
+        const evidence = await k8sRepo.getLatestAllocationEvidence(scope, cluster.id);
+        if (evidence === null) return null;
+        const projection = projectKubernetesAllocationInput(evidence);
+        const report = buildKubernetesAllocation(buildKubernetesAllocationInput(projection));
+        const allocation = report.clusters[0];
+        if (allocation === undefined) return null;
+        return { clusterName: cluster.name, costCatalogCoverage: projection.costCatalogCoverage, allocation };
+      }))
+    ).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    const kubernetesAllocation = { clusters: k8sAllocationClusters, disclaimer: K8S_ALLOCATION_DISCLAIMER };
     const selected = period ?? periods[0]?.period ?? null;
     if (selected === null) {
       return jsonResponse({
@@ -79,6 +102,7 @@ export async function GET(request: Request): Promise<Response> {
         anomalies: null,
         ...governanceBlocks([]),
         ...trendBlocks,
+        kubernetesAllocation,
         unitCountsPeriod: null,
         unitEconomics: [],
       });
@@ -136,6 +160,7 @@ export async function GET(request: Request): Promise<Response> {
       },
       ...governanceBlocks(lines),
       ...trendBlocks,
+      kubernetesAllocation,
       unitCountsPeriod: selected,
       unitEconomics,
     });

@@ -185,6 +185,38 @@ interface SavingsTracking {
   readonly currentPeriod: string | null;
   readonly disclaimer: string;
 }
+interface K8sNamespaceAllocation {
+  readonly namespace: string;
+  readonly allocatedMicros: string;
+  readonly sharePermille: number;
+  readonly zeroRequests: boolean;
+}
+interface K8sCurrencyAllocation {
+  readonly currency: string;
+  readonly clusterCostMicros: string;
+  readonly allocatedMicros: string;
+  readonly unallocatedMicros: string;
+  readonly unallocatedBasis: string;
+  readonly namespaces: readonly K8sNamespaceAllocation[];
+}
+interface K8sClusterAllocation {
+  readonly clusterId: string;
+  readonly costAvailable: boolean;
+  readonly unavailableReason: string | null;
+  readonly basis: string | null;
+  readonly basisReason: string;
+  readonly namespacesEvaluated: number;
+  readonly currencies: readonly K8sCurrencyAllocation[];
+}
+interface K8sAllocationCluster {
+  readonly clusterName: string;
+  readonly costCatalogCoverage: { readonly nodesTotal: number; readonly nodesPriced: number; readonly nodesWithUnknownType: number; readonly disclosure: string };
+  readonly allocation: K8sClusterAllocation;
+}
+interface KubernetesAllocation {
+  readonly clusters: readonly K8sAllocationCluster[];
+  readonly disclaimer: string;
+}
 interface UnitCostPerUnit {
   readonly amountMicros: string;
   readonly count: number | null;
@@ -232,6 +264,7 @@ interface Insights {
   readonly savings?: SavingsTracking | null;
   readonly unitEconomics?: readonly UnitEconomicsEntry[];
   readonly unitCountsPeriod?: string | null;
+  readonly kubernetesAllocation?: KubernetesAllocation | null;
 }
 
 function money(micros: string, currency: string): string {
@@ -678,6 +711,33 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
           </div>
         ))}
         {insights?.savings ? <p className="panel-footnote">{insights.savings.disclaimer}</p> : null}
+      </section>
+
+      <section className="panel" aria-label="Kubernetes cost allocation">
+        <div className="panel-heading"><div><h2>Kubernetes cost allocation</h2><p>Splits each cluster&apos;s node cost across namespaces by collected pod CPU/memory requests (reserved capacity, not live usage). Node cost is a disclosed bundled instance-type list-price estimate; idle/unallocated capacity is shown explicitly. Currencies are never summed.</p></div></div>
+        {(insights?.kubernetesAllocation?.clusters ?? []).length === 0 ? (
+          <p className="panel-footnote">No Kubernetes scans for this customer yet{insights?.kubernetesAllocation ? " — deploy the Sutra agent to a cluster to populate this" : " (no data)"}.</p>
+        ) : (insights?.kubernetesAllocation?.clusters ?? []).map((entry) => (
+          <div key={entry.clusterName} className="cmdbq-results">
+            <p className="cmdbq-summary">{entry.clusterName} · {entry.allocation.namespacesEvaluated} namespace(s) · nodes priced {entry.costCatalogCoverage.nodesPriced}/{entry.costCatalogCoverage.nodesTotal}{entry.allocation.basis ? ` · basis: ${entry.allocation.basis}` : ""}</p>
+            {!entry.allocation.costAvailable ? (
+              <p className="panel-footnote">Node cost not derivable — {entry.allocation.unavailableReason ?? "no priced nodes"}. Namespace request shares are still collected.</p>
+            ) : entry.allocation.currencies.map((cur) => (
+              <div key={cur.currency}>
+                <p className="cmdbq-summary">{cur.currency}: cluster cost {money(cur.clusterCostMicros, cur.currency)} · allocated {money(cur.allocatedMicros, cur.currency)} · idle {money(cur.unallocatedMicros, cur.currency)} ({cur.unallocatedBasis})</p>
+                <table><thead><tr><th>Namespace</th><th>Allocated</th><th>Share</th></tr></thead>
+                  <tbody>{cur.namespaces.map((ns) => (
+                    <tr key={ns.namespace}>
+                      <td>{ns.namespace}{ns.zeroRequests ? " (no requests)" : ""}</td>
+                      <td>{money(ns.allocatedMicros, cur.currency)}</td>
+                      <td>{(ns.sharePermille / 10).toFixed(1)}%</td>
+                    </tr>
+                  ))}</tbody></table>
+              </div>
+            ))}
+          </div>
+        ))}
+        {insights?.kubernetesAllocation ? <p className="panel-footnote">{insights.kubernetesAllocation.disclaimer}</p> : null}
       </section>
 
       <section className="panel" aria-label="Unit economics">
