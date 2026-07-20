@@ -185,6 +185,38 @@ interface SavingsTracking {
   readonly currentPeriod: string | null;
   readonly disclaimer: string;
 }
+interface UnitCostPerUnit {
+  readonly amountMicros: string;
+  readonly count: number | null;
+  readonly microsPerUnit: number | null;
+  readonly ratioBasis: string;
+}
+interface UnitEconomicsCurrencyResult {
+  readonly currency: string;
+  readonly customers: readonly { readonly customerId: string; readonly costPerUnit: UnitCostPerUnit }[];
+  readonly global: UnitCostPerUnit;
+  readonly totalMicros: string;
+}
+interface UnitEconomicsEntry {
+  readonly unitLabel: string;
+  readonly count: number;
+  readonly report: {
+    readonly unitLabel: string | null;
+    readonly results: readonly UnitEconomicsCurrencyResult[];
+    readonly disclaimer: string;
+  };
+}
+interface ScheduledReport {
+  readonly id: string;
+  readonly name: string;
+  readonly connectionId: string;
+  readonly cadence: string;
+  readonly deliveryKind: string;
+  readonly deliveryTarget: string;
+  readonly enabled: boolean;
+  readonly lastRunAt: string | null;
+  readonly nextRunAt: string;
+}
 interface Insights {
   readonly periods: readonly { period: string; lineCount: number }[];
   readonly period: string | null;
@@ -198,6 +230,8 @@ interface Insights {
   readonly tagGovernance?: TagGovernance | null;
   readonly trends?: CostTrends | null;
   readonly savings?: SavingsTracking | null;
+  readonly unitEconomics?: readonly UnitEconomicsEntry[];
+  readonly unitCountsPeriod?: string | null;
 }
 
 function money(micros: string, currency: string): string {
@@ -233,6 +267,11 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ name: "", currency: "USD", limit: "" });
   const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [unitDraft, setUnitDraft] = useState({ unitLabel: "transactions", count: "" });
+  const [unitError, setUnitError] = useState<string | null>(null);
+  const [reports, setReports] = useState<readonly ScheduledReport[]>([]);
+  const [reportDraft, setReportDraft] = useState({ name: "", cadence: "monthly", deliveryKind: "email", deliveryTarget: "" });
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!connectionId) return;
@@ -291,6 +330,91 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       await load();
     } catch (caught) {
       setBudgetError(caught instanceof Error ? caught.message : "Budget rejected");
+    }
+  }
+
+  async function saveUnitCount() {
+    setUnitError(null);
+    try {
+      const effectivePeriod = period ?? insights?.period ?? null;
+      if (effectivePeriod === null) throw new Error("Select or upload a billing period first.");
+      const count = Number(unitDraft.count.trim());
+      if (!Number.isInteger(count) || count < 0) throw new Error("Count must be a whole number (0 or more).");
+      await requestJson("/api/v1/finops/unit-counts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ period: effectivePeriod, unitLabel: unitDraft.unitLabel.trim(), count }),
+      });
+      setUnitDraft((draft) => ({ ...draft, count: "" }));
+      await load();
+    } catch (caught) {
+      setUnitError(caught instanceof Error ? caught.message : "Unit count rejected");
+    }
+  }
+
+  const loadReports = useCallback(async () => {
+    if (!connectionId) return;
+    try {
+      const payload = await requestJson<{ reports: readonly ScheduledReport[] }>("/api/v1/finops/reports");
+      setReports(payload.reports);
+    } catch {
+      setReports([]);
+    }
+  }, [connectionId]);
+
+  useEffect(() => {
+    void (async () => {
+      await loadReports();
+    })();
+  }, [loadReports]);
+
+  async function saveReport() {
+    setReportError(null);
+    try {
+      if (!connectionId) throw new Error("No connection selected.");
+      if (reportDraft.name.trim().length === 0) throw new Error("Give the report a name.");
+      if (reportDraft.deliveryTarget.trim().length === 0) {
+        throw new Error(reportDraft.deliveryKind === "email" ? "Enter a recipient email." : "Enter an HTTPS webhook URL.");
+      }
+      await requestJson("/api/v1/finops/reports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: reportDraft.name.trim(),
+          connectionId,
+          cadence: reportDraft.cadence,
+          deliveryKind: reportDraft.deliveryKind,
+          deliveryTarget: reportDraft.deliveryTarget.trim(),
+        }),
+      });
+      setReportDraft({ name: "", cadence: "monthly", deliveryKind: "email", deliveryTarget: "" });
+      await loadReports();
+    } catch (caught) {
+      setReportError(caught instanceof Error ? caught.message : "Schedule rejected");
+    }
+  }
+
+  async function toggleReport(id: string, enabled: boolean) {
+    setReportError(null);
+    try {
+      await requestJson("/api/v1/finops/reports", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "setEnabled", id, enabled }),
+      });
+      await loadReports();
+    } catch (caught) {
+      setReportError(caught instanceof Error ? caught.message : "Update rejected");
+    }
+  }
+
+  async function deleteReport(id: string) {
+    setReportError(null);
+    try {
+      await requestJson(`/api/v1/finops/reports?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadReports();
+    } catch (caught) {
+      setReportError(caught instanceof Error ? caught.message : "Delete rejected");
     }
   }
 
@@ -554,6 +678,71 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
           </div>
         ))}
         {insights?.savings ? <p className="panel-footnote">{insights.savings.disclaimer}</p> : null}
+      </section>
+
+      <section className="panel" aria-label="Unit economics">
+        <div className="panel-heading"><div><h2>Unit economics</h2><p>Cost per business unit for {insights?.unitCountsPeriod ?? "the selected period"} — spend divided by a unit count you provide (transactions, seats, and so on). Counts are business metrics not present in billing data and are never assumed: with no count the ratio is shown as not-derivable, never a divide-by-zero.</p></div></div>
+        <div className="cmdbq-row">
+          <input aria-label="Unit label" placeholder="unit label (e.g. transactions)" value={unitDraft.unitLabel} onChange={(event) => setUnitDraft((draft) => ({ ...draft, unitLabel: event.target.value }))} />
+          <input aria-label="Unit count" placeholder="count for this period" value={unitDraft.count} onChange={(event) => setUnitDraft((draft) => ({ ...draft, count: event.target.value }))} />
+          <button type="button" className="button button-primary" disabled={!period && !insights?.period} onClick={() => void saveUnitCount()}>Save count</button>
+        </div>
+        {unitError ? <p className="cmdbq-error" role="alert">{unitError}</p> : null}
+        {(insights?.unitEconomics ?? []).length === 0 ? (
+          <p className="panel-footnote">No unit counts recorded for this period yet — add one above to see cost per unit.</p>
+        ) : (insights?.unitEconomics ?? []).map((entry) => (
+          <div key={entry.unitLabel} className="cmdbq-results">
+            <p className="cmdbq-summary">{entry.unitLabel}: {entry.count.toLocaleString()} units</p>
+            <table><thead><tr><th>Currency</th><th>Spend</th><th>Cost per {entry.unitLabel}</th></tr></thead>
+              <tbody>{entry.report.results.map((res) => {
+                const cpu = res.customers[0]?.costPerUnit ?? res.global;
+                return (
+                  <tr key={res.currency}>
+                    <td>{res.currency}</td>
+                    <td>{money(res.totalMicros, res.currency)}</td>
+                    <td>{cpu.microsPerUnit === null
+                      ? `not derivable (${cpu.ratioBasis})`
+                      : `${money(String(Math.round(cpu.microsPerUnit)), res.currency)} / ${entry.unitLabel}`}</td>
+                  </tr>
+                );
+              })}</tbody></table>
+          </div>
+        ))}
+        {(insights?.unitEconomics ?? []).length > 0 ? <p className="panel-footnote">{insights!.unitEconomics![0].report.disclaimer}</p> : null}
+      </section>
+
+      <section className="panel" aria-label="Scheduled cost reports">
+        <div className="panel-heading"><div><h2>Scheduled cost reports</h2><p>Email or webhook a cost summary for this connection on a weekly or monthly cadence. Delivery uses your configured transport; a report is marked delivered only on a 2xx response — never faked.</p></div></div>
+        <div className="cmdbq-row">
+          <input aria-label="Report name" placeholder="report name" value={reportDraft.name} onChange={(event) => setReportDraft((draft) => ({ ...draft, name: event.target.value }))} />
+          <select aria-label="Cadence" value={reportDraft.cadence} onChange={(event) => setReportDraft((draft) => ({ ...draft, cadence: event.target.value }))}>
+            <option value="monthly">Monthly</option><option value="weekly">Weekly</option>
+          </select>
+          <select aria-label="Delivery kind" value={reportDraft.deliveryKind} onChange={(event) => setReportDraft((draft) => ({ ...draft, deliveryKind: event.target.value }))}>
+            <option value="email">Email</option><option value="webhook">Webhook</option>
+          </select>
+          <input aria-label="Delivery target" placeholder={reportDraft.deliveryKind === "email" ? "recipient email" : "https://webhook-url"} value={reportDraft.deliveryTarget} onChange={(event) => setReportDraft((draft) => ({ ...draft, deliveryTarget: event.target.value }))} />
+          <button type="button" className="button button-primary" onClick={() => void saveReport()}>Add schedule</button>
+        </div>
+        {reportError ? <p className="cmdbq-error" role="alert">{reportError}</p> : null}
+        {reports.length === 0 ? (
+          <p className="panel-footnote">No scheduled reports yet.</p>
+        ) : (
+          <table><thead><tr><th>Name</th><th>Cadence</th><th>Delivery</th><th>Next run</th><th>State</th><th>Actions</th></tr></thead>
+            <tbody>{reports.map((report) => (
+              <tr key={report.id}>
+                <td>{report.name}</td>
+                <td>{report.cadence}</td>
+                <td>{report.deliveryKind}: {report.deliveryTarget}</td>
+                <td>{report.nextRunAt ? report.nextRunAt.slice(0, 10) : "—"}</td>
+                <td><span className={`cmdbq-chip ${report.enabled ? "cmdbq-added" : "cmdbq-removed"}`}>{report.enabled ? "enabled" : "disabled"}</span></td>
+                <td>
+                  <button type="button" className="button" onClick={() => void toggleReport(report.id, !report.enabled)}>{report.enabled ? "Disable" : "Enable"}</button>{" "}
+                  <button type="button" className="button" onClick={() => void deleteReport(report.id)}>Delete</button>
+                </td>
+              </tr>
+            ))}</tbody></table>
+        )}
       </section>
     </>
   );

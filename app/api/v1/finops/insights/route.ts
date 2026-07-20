@@ -12,6 +12,9 @@ import { buildCostTrends } from "../../../../../lib/finops-trends";
 import { buildCostTrendsInput } from "../../../../../lib/finops-trends-inputs";
 import { buildSavingsTracking } from "../../../../../lib/finops-savings-tracking";
 import { buildSavingsTrackingInput } from "../../../../../lib/finops-savings-tracking-inputs";
+import { buildUnitEconomics } from "../../../../../lib/finops-unit-economics";
+import { buildUnitEconomicsInput } from "../../../../../lib/finops-unit-economics-inputs";
+import { FinopsUnitCountRepository } from "../../../../../db/finops-unit-count-repository";
 import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
 import type { PilotResource } from "../../../../../lib/pilot-types";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
@@ -76,6 +79,8 @@ export async function GET(request: Request): Promise<Response> {
         anomalies: null,
         ...governanceBlocks([]),
         ...trendBlocks,
+        unitCountsPeriod: null,
+        unitEconomics: [],
       });
     }
     const lines = await repository.linesForPeriod(scope, connectionId, selected);
@@ -92,6 +97,23 @@ export async function GET(request: Request): Promise<Response> {
     const rightsizingReport = buildRightsizingRecommendations(
       buildRightsizingInput({ utilization: utilizationSamples, curLines: lines }),
     );
+    // #10 unit economics: operator-provided per-customer unit counts (transactions,
+    // seats, ...) for this period turned into a cost-per-unit. Counts are never
+    // assumed — an absent or zero count yields a disclosed null ratio, never a
+    // divide-by-zero. One report per stored unit label.
+    const unitCounts = await new FinopsUnitCountRepository().list(scope, { period: selected });
+    const periodCurrencies = [...new Set(lines.map((line) => line.currency))].filter((code) => /^[A-Z]{3}$/u.test(code));
+    const accountToCustomer = { [connection.awsAccountId]: connection.customerId };
+    const unitEconomics = unitCounts.map((entry) => ({
+      unitLabel: entry.unitLabel,
+      count: entry.count,
+      report: buildUnitEconomics(buildUnitEconomicsInput({
+        curLines: lines,
+        accountToCustomer,
+        customerUnits: periodCurrencies.map((currency) => ({ customerId: connection.customerId, currency, count: entry.count })),
+        unitLabel: entry.unitLabel,
+      })),
+    }));
     return jsonResponse({
       connectionId,
       periods,
@@ -114,6 +136,8 @@ export async function GET(request: Request): Promise<Response> {
       },
       ...governanceBlocks(lines),
       ...trendBlocks,
+      unitCountsPeriod: selected,
+      unitEconomics,
     });
   } catch (error) {
     return errorResponse(error);
