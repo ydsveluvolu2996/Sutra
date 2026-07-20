@@ -80,6 +80,9 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     "inspector2:ListFindings",
     "ce:GetCostAndUsage",
     "ce:GetCostForecast",
+    "ssm:DescribeInstanceInformation",
+    "ssm:DescribeInstancePatchStates",
+    "ssm:DescribeInstancePatches",
   ]) {
     assert.match(infrastructure, new RegExp(`- ${action.replaceAll("*", "\\*")}`));
   }
@@ -167,7 +170,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "21daea14f7e6a25a671c150af32da2b59ef881e133f6c8075cbe614825ee9237",
+    "efd6a6d35c390c89447d248d24296a94d31f141f729f3da22c5b60cfdcb2b964",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -197,7 +200,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
     "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/" +
-      "64c3a71c3b5184cc8032837937d66db2c7d316fe2eaae3a1df49a46ef29f5616.yaml",
+      "17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[

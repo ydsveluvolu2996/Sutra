@@ -156,6 +156,19 @@ import {
   type GetFindingsCommandInput as GetSecurityHubFindingsCommandInput,
   type GetFindingsCommandOutput as GetSecurityHubFindingsCommandOutput,
 } from "@aws-sdk/client-securityhub";
+import {
+  DescribeInstanceInformationCommand,
+  DescribeInstancePatchStatesCommand,
+  DescribeInstancePatchesCommand,
+  SSMClient,
+  type DescribeInstanceInformationCommandInput,
+  type DescribeInstanceInformationCommandOutput,
+  type DescribeInstancePatchStatesCommandInput,
+  type DescribeInstancePatchStatesCommandOutput,
+  type DescribeInstancePatchesCommandInput,
+  type DescribeInstancePatchesCommandOutput,
+  type InstancePatchState,
+} from "@aws-sdk/client-ssm";
 
 import type {
   AwsInventoryBatch,
@@ -187,6 +200,12 @@ const MAX_PAGES = 10_000;
 const MAX_NATIVE_FINDING_PAGES = 50;
 const MAX_NATIVE_FINDINGS_PER_SERVICE_REGION = 1_000;
 const MAX_NATIVE_FINDING_RESOURCES = 20;
+// DescribeInstancePatchStates accepts at most 50 instance ids per call; the
+// missing-patch detail fan-out and per-instance patch list are bounded so a
+// large fleet cannot turn a single read-only patch-posture scan unbounded.
+const MAX_SSM_PATCH_STATE_BATCH = 50;
+const MAX_SSM_MISSING_PATCH_INSTANCES = 50;
+const MAX_SSM_MISSING_PATCHES_PER_INSTANCE = 60;
 const SAFE_TAG_KEYS = new Set([
   "name",
   "environment",
@@ -524,6 +543,26 @@ export interface InspectorInventoryClient {
   ): Promise<ListInspectorFindingsCommandOutput>;
 }
 
+/**
+ * Read-only SSM patch-compliance client. Only the three Describe APIs the
+ * onboarding role grants are exposed; there is deliberately no SendCommand or
+ * any write, so the collector can observe patch state but never patch a host.
+ */
+export interface SsmInventoryClient {
+  describeInstanceInformation(
+    input: DescribeInstanceInformationCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeInstanceInformationCommandOutput>;
+  describeInstancePatchStates(
+    input: DescribeInstancePatchStatesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeInstancePatchStatesCommandOutput>;
+  describeInstancePatches(
+    input: DescribeInstancePatchesCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<DescribeInstancePatchesCommandOutput>;
+}
+
 export interface AwsInventoryClientFactory {
   ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient;
   elbv2(region: string, credentials: AwsTemporaryCredentials): Elbv2InventoryClient;
@@ -551,6 +590,8 @@ export interface AwsInventoryClientFactory {
     region: string,
     credentials: AwsTemporaryCredentials,
   ): InspectorInventoryClient;
+  /** Optional only so existing isolated test factories remain source-compatible. */
+  ssm?(region: string, credentials: AwsTemporaryCredentials): SsmInventoryClient;
 }
 
 export interface AwsSdkInventoryClientFactoryOptions {
@@ -761,6 +802,18 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
     };
   }
 
+  public ssm(region: string, credentials: AwsTemporaryCredentials): SsmInventoryClient {
+    const client = new SSMClient(this.clientConfig(region, credentials));
+    return {
+      describeInstanceInformation: (input, signal) =>
+        sendSdkCommand(client, new DescribeInstanceInformationCommand(input), signal),
+      describeInstancePatchStates: (input, signal) =>
+        sendSdkCommand(client, new DescribeInstancePatchStatesCommand(input), signal),
+      describeInstancePatches: (input, signal) =>
+        sendSdkCommand(client, new DescribeInstancePatchesCommand(input), signal),
+    };
+  }
+
   private clientConfig(region: string, credentials: AwsTemporaryCredentials) {
     return awsInventorySdkClientConfig(region, credentials, this.maxAttempts);
   }
@@ -771,6 +824,11 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
     region: string,
     credentials: AwsTemporaryCredentials,
   ) => EksInventoryClient;
+
+  public readonly ssm?: (
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ) => SsmInventoryClient;
 
   public constructor(
     private readonly delegate: AwsInventoryClientFactory,
@@ -786,6 +844,22 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
         return {
           listClusters: (input) => this.run((signal) => client.listClusters(input, signal)),
           describeCluster: (input) => this.run((signal) => client.describeCluster(input, signal)),
+        };
+      };
+    }
+    if (delegate.ssm !== undefined) {
+      this.ssm = (region, credentials) => {
+        const client = delegate.ssm?.(region, credentials);
+        if (client === undefined) {
+          throw new InventoryConfigurationError("The SSM inventory client is unavailable");
+        }
+        return {
+          describeInstanceInformation: (input) =>
+            this.run((signal) => client.describeInstanceInformation(input, signal)),
+          describeInstancePatchStates: (input) =>
+            this.run((signal) => client.describeInstancePatchStates(input, signal)),
+          describeInstancePatches: (input) =>
+            this.run((signal) => client.describeInstancePatches(input, signal)),
         };
       };
     }
@@ -1124,6 +1198,7 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
       const dynamodb = clients.dynamodb(region, credentials);
       const ecr = clients.ecr(region, credentials);
       const eks = clients.eks?.(region, credentials);
+      const ssm = clients.ssm?.(region, credentials);
 
       tasks.push(
         task("s3.buckets", "s3", "buckets", region, (state) =>
@@ -1187,6 +1262,16 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ...(eks === undefined ? [] : [
           task("eks.clusters", "eks", "clusters", region, (state) =>
             collectEksClusters(context, region, eks, observedAt, state),
+          ),
+        ]),
+        // Read-only patch-compliance posture. Registered only when the ssm client
+        // is available (mirrors the optional eks collector), so pre-existing test
+        // factories are unaffected. Its own coverage row means an SSM denial or
+        // outage is disclosed as an unassessed collector, never silently folded
+        // into EC2 inventory.
+        ...(ssm === undefined ? [] : [
+          task("ssm.patch-states", "ssm", "patch-states", region, (state) =>
+            collectSsmPatchStates(context, region, ssm, observedAt, state),
           ),
         ]),
         task("rds.db-instances", "rds", "db-instances", region, (state) =>
@@ -1777,6 +1862,172 @@ async function collectSnapshots(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeSnapshots exceeded pagination limit");
+}
+
+interface SsmManagedInstance {
+  readonly pingStatus?: string;
+  readonly platformType?: string;
+  readonly platformName?: string;
+  readonly platformVersion?: string;
+  readonly agentVersion?: string;
+}
+
+/**
+ * Read-only patch-compliance posture for SSM-managed EC2 instances. This
+ * collects state ONLY — DescribeInstanceInformation to learn which EC2
+ * instances are SSM-managed, DescribeInstancePatchStates for the installed /
+ * missing / failed counts and the critical/security non-compliant totals, and
+ * DescribeInstancePatches (State=Missing) for the missing-patch detail on
+ * non-compliant hosts. It never sends a command or applies a patch. Instances
+ * not returned by DescribeInstanceInformation get no patch-state resource at
+ * all, so the posture engine reports them as unmanaged / not-assessed rather
+ * than implying they are compliant.
+ */
+async function collectSsmPatchStates(
+  context: InventoryCollectionContext,
+  region: string,
+  client: SsmInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  // 1. Enumerate SSM-managed EC2 instances (agent reporting in). On-prem managed
+  //    nodes (mi-*) are skipped — this posture is EC2-instance scoped.
+  const managed = new Map<string, SsmManagedInstance>();
+  {
+    let token: string | undefined;
+    const seen = new Set<string>();
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const output = await client.describeInstanceInformation(
+        token === undefined ? { MaxResults: 50 } : { MaxResults: 50, NextToken: token },
+      );
+      for (const info of output.InstanceInformationList ?? []) {
+        const id = info.InstanceId;
+        if (id === undefined || !id.startsWith("i-")) continue;
+        managed.set(id, {
+          ...(info.PingStatus === undefined ? {} : { pingStatus: info.PingStatus }),
+          ...(info.PlatformType === undefined ? {} : { platformType: info.PlatformType }),
+          ...(info.PlatformName === undefined ? {} : { platformName: info.PlatformName }),
+          ...(info.PlatformVersion === undefined ? {} : { platformVersion: info.PlatformVersion }),
+          ...(info.AgentVersion === undefined ? {} : { agentVersion: info.AgentVersion }),
+        });
+      }
+      token = nextToken(output.NextToken, seen, "SSM DescribeInstanceInformation");
+      if (token === undefined) break;
+    }
+  }
+
+  // 2. Patch state for the managed instances, batched at the API's 50-id limit.
+  const patchStates = new Map<string, InstancePatchState>();
+  const managedIds = [...managed.keys()];
+  for (let offset = 0; offset < managedIds.length; offset += MAX_SSM_PATCH_STATE_BATCH) {
+    const batch = managedIds.slice(offset, offset + MAX_SSM_PATCH_STATE_BATCH);
+    let token: string | undefined;
+    const seen = new Set<string>();
+    for (let page = 0; page < MAX_PAGES; page += 1) {
+      const output = await client.describeInstancePatchStates(
+        token === undefined
+          ? { InstanceIds: batch }
+          : { InstanceIds: batch, NextToken: token },
+      );
+      for (const patchState of output.InstancePatchStates ?? []) {
+        if (patchState.InstanceId !== undefined) {
+          patchStates.set(patchState.InstanceId, patchState);
+        }
+      }
+      token = nextToken(output.NextToken, seen, "SSM DescribeInstancePatchStates");
+      if (token === undefined) break;
+    }
+  }
+
+  // 3. One patch-state resource per managed instance. Non-compliant hosts get a
+  //    bounded missing-patch detail list for the generated remediation runbook.
+  let missingDetailBudget = MAX_SSM_MISSING_PATCH_INSTANCES;
+  const resources: NormalizedAwsResource[] = [];
+  for (const id of managedIds) {
+    const info = managed.get(id) ?? {};
+    const patchState = patchStates.get(id);
+    const nonCompliant =
+      patchState !== undefined &&
+      ((patchState.MissingCount ?? 0) > 0 ||
+        (patchState.FailedCount ?? 0) > 0 ||
+        (patchState.CriticalNonCompliantCount ?? 0) > 0 ||
+        (patchState.SecurityNonCompliantCount ?? 0) > 0);
+    let missingPatches: SafeJsonObject[] = [];
+    if (nonCompliant && missingDetailBudget > 0) {
+      missingDetailBudget -= 1;
+      missingPatches = await collectMissingPatchDetail(client, id);
+    }
+    resources.push(
+      resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "ssm",
+        "aws.ssm.patch-state",
+        id,
+        undefined,
+        "ssm:DescribeInstancePatchStates",
+        compact({
+          instanceId: id,
+          managed: true,
+          patchStateAvailable: patchState !== undefined,
+          pingStatus: info.pingStatus,
+          platformType: info.platformType,
+          platformName: info.platformName,
+          platformVersion: info.platformVersion,
+          agentVersion: info.agentVersion,
+          patchGroup: patchState?.PatchGroup,
+          baselineId: patchState?.BaselineId,
+          operation: patchState?.Operation,
+          operationStartTime: iso(patchState?.OperationStartTime),
+          lastScanAt: iso(patchState?.OperationEndTime),
+          installedCount: patchState?.InstalledCount,
+          installedOtherCount: patchState?.InstalledOtherCount,
+          installedPendingRebootCount: patchState?.InstalledPendingRebootCount,
+          installedRejectedCount: patchState?.InstalledRejectedCount,
+          missingCount: patchState?.MissingCount,
+          failedCount: patchState?.FailedCount,
+          notApplicableCount: patchState?.NotApplicableCount,
+          criticalMissingCount: patchState?.CriticalNonCompliantCount,
+          securityMissingCount: patchState?.SecurityNonCompliantCount,
+          otherNonCompliantCount: patchState?.OtherNonCompliantCount,
+          ...(missingPatches.length > 0 ? { missingPatches } : {}),
+        }),
+      ),
+    );
+  }
+  await state.emit({ resources, evidence: [] });
+  state.observePage(resources.length);
+}
+
+async function collectMissingPatchDetail(
+  client: SsmInventoryClient,
+  instanceId: string,
+): Promise<SafeJsonObject[]> {
+  const patches: SafeJsonObject[] = [];
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.describeInstancePatches(
+      token === undefined
+        ? { InstanceId: instanceId, Filters: [{ Key: "State", Values: ["Missing"] }], MaxResults: 100 }
+        : { InstanceId: instanceId, Filters: [{ Key: "State", Values: ["Missing"] }], MaxResults: 100, NextToken: token },
+    );
+    for (const patch of output.Patches ?? []) {
+      if (patches.length >= MAX_SSM_MISSING_PATCHES_PER_INSTANCE) return patches;
+      patches.push(
+        compact({
+          title: patch.Title,
+          kbId: patch.KBId,
+          classification: patch.Classification,
+          severity: patch.Severity,
+        }),
+      );
+    }
+    token = nextToken(output.NextToken, seen, "SSM DescribeInstancePatches");
+    if (token === undefined) break;
+  }
+  return patches;
 }
 
 async function collectLoadBalancers(

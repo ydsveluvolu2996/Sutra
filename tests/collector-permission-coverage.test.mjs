@@ -73,6 +73,9 @@ const COLLECTOR_COMMANDS = {
   GetCostForecastCommand: { action: "ce:GetCostForecast", scope: "customer" },
   GetMetricDataCommand: { action: "cloudwatch:GetMetricData", scope: "customer" },
   ListMetricsCommand: { action: "cloudwatch:ListMetrics", scope: "customer" },
+  DescribeInstanceInformationCommand: { action: "ssm:DescribeInstanceInformation", scope: "customer" },
+  DescribeInstancePatchStatesCommand: { action: "ssm:DescribeInstancePatchStates", scope: "customer" },
+  DescribeInstancePatchesCommand: { action: "ssm:DescribeInstancePatches", scope: "customer" },
 };
 
 const READ_ONLY_VERBS =

@@ -622,7 +622,7 @@ test("signed loopback fixture API completes register, trust verification, and sy
     const snapshot = sync.value as Record<string, unknown>;
     assert.equal(snapshot.schemaVersion, "sutra.inventory.v1");
     assert.equal(snapshot.coverageState, "complete");
-    assert.equal((snapshot.resources as unknown[]).length, 13);
+    assert.equal((snapshot.resources as unknown[]).length, 16);
     assert.equal((snapshot.findings as unknown[]).length, 11);
     assert.match(snapshot.snapshotSha256 as string, /^[a-f0-9]{64}$/u);
 
@@ -958,7 +958,7 @@ test("signed local fixture jobs are strict, idempotent, durable, and return veri
     assert.equal(completedValue.job.attempts, 1);
     assert.equal(completedValue.result.fixtureId, "northstar-retail");
     assert.equal(completedValue.result.snapshot.schemaVersion, "sutra.inventory.v1");
-    assert.equal(completedValue.result.snapshot.resources.length, 13);
+    assert.equal(completedValue.result.snapshot.resources.length, 16);
     assert.match(completedValue.result.snapshot.snapshotSha256, /^[a-f0-9]{64}$/u);
 
     const wrongResultScope = await signedRequest(

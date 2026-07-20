@@ -32,7 +32,7 @@ test("fixture produces a complete, relationship-safe one-account snapshot", () =
   assert.equal(snapshot.schemaVersion, "sutra.inventory.v1");
   assert.equal(snapshot.accountId, "123456789012");
   assert.equal(snapshot.coverageState, "complete");
-  assert.equal(snapshot.resources.length, 13);
+  assert.equal(snapshot.resources.length, 16);
   assert.equal(snapshot.relationships.length, 9);
   assert.equal(snapshot.findings.length, 11);
   assert.ok(snapshot.coverage.every((item) => item.status === "succeeded"));

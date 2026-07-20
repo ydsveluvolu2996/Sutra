@@ -139,6 +139,9 @@ Resources:
                   - ce:GetCostForecast
                   - cloudwatch:GetMetricData
                   - cloudwatch:ListMetrics
+                  - ssm:DescribeInstanceInformation
+                  - ssm:DescribeInstancePatchStates
+                  - ssm:DescribeInstancePatches
                   - iam:GetRole
                   - iam:ListRolePolicies
                   - iam:GetRolePolicy
@@ -191,6 +194,9 @@ Resources:
                   - ce:GetCostForecast
                   - cloudwatch:GetMetricData
                   - cloudwatch:ListMetrics
+                  - ssm:DescribeInstanceInformation
+                  - ssm:DescribeInstancePatchStates
+                  - ssm:DescribeInstancePatches
                 Resource: '*'
               - Sid: TrustContractAttestation
                 Effect: Allow

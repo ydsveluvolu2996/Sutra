@@ -101,6 +101,9 @@ export const IMPLEMENTED_READ_ACTIONS = [
   "ce:GetCostForecast",
   "cloudwatch:GetMetricData",
   "cloudwatch:ListMetrics",
+  "ssm:DescribeInstanceInformation",
+  "ssm:DescribeInstancePatchStates",
+  "ssm:DescribeInstancePatches",
 ] as const;
 export const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
@@ -143,6 +146,11 @@ const SESSION_READ_ACTIONS = [
   "ce:Get*",
   "cloudwatch:GetMetricData",
   "cloudwatch:ListMetrics",
+  // Single read-family wildcard for the three SSM patch-compliance describes
+  // (DescribeInstanceInformation / DescribeInstancePatchStates /
+  // DescribeInstancePatches). One entry keeps the packed STS policy well under
+  // its safe limit; the attested customer role supplies the exact-action ceiling.
+  "ssm:Describe*",
 ] as const;
 const EXPECTED_ACCESS_DENIALS = new Set([
   "AccessDenied",

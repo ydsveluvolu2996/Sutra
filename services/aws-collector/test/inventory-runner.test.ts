@@ -23,6 +23,7 @@ import {
   type RdsInventoryClient,
   type S3InventoryClient,
   type SecurityHubInventoryClient,
+  type SsmInventoryClient,
 } from "../src/inventory-runner.js";
 import { normalizeLiveSnapshot } from "../src/local-server.js";
 import type {
@@ -2438,4 +2439,152 @@ test("Region capacity cannot exceed the 500-row signed coverage boundary", async
     runner.collect(context()),
     /Selected AWS Regions are invalid/u,
   );
+});
+
+class PatchPostureClientFactory extends FakeClientFactory {
+  public readonly instanceInformationTokens: (string | undefined)[] = [];
+  public readonly patchStateBatches: (string[] | undefined)[] = [];
+  public readonly missingPatchInstanceIds: string[] = [];
+
+  public ssm(region: string): SsmInventoryClient {
+    return {
+      describeInstanceInformation: async (input) => {
+        this.instanceInformationTokens.push(input.NextToken);
+        if (region !== "us-east-1") return { $metadata: {}, InstanceInformationList: [] };
+        // Page 1 includes an on-prem managed node (mi-*) that MUST be filtered
+        // out — patch posture is EC2-instance scoped.
+        return input.NextToken === undefined
+          ? {
+              $metadata: {},
+              NextToken: "ssm-info-next",
+              InstanceInformationList: [
+                { InstanceId: "i-patch-compliant", PingStatus: "Online", PlatformType: "Linux", PlatformName: "Amazon Linux", PlatformVersion: "2023", AgentVersion: "3.3.1345.0", ResourceType: "EC2Instance" },
+                { InstanceId: "mi-onprem-node-1", PingStatus: "Online", PlatformType: "Linux", ResourceType: "ManagedInstance" },
+              ],
+            }
+          : {
+              $metadata: {},
+              InstanceInformationList: [
+                { InstanceId: "i-patch-noncompliant", PingStatus: "Online", PlatformType: "Linux", PlatformName: "Ubuntu", PlatformVersion: "22.04", AgentVersion: "3.3.1345.0", ResourceType: "EC2Instance" },
+                { InstanceId: "i-patch-unscanned", PingStatus: "ConnectionLost", PlatformType: "Linux", ResourceType: "EC2Instance" },
+              ],
+            };
+      },
+      describeInstancePatchStates: async (input) => {
+        this.patchStateBatches.push(input.InstanceIds);
+        // i-patch-unscanned is SSM-managed but has never reported a patch state.
+        return {
+          $metadata: {},
+          InstancePatchStates: [
+            {
+              InstanceId: "i-patch-compliant",
+              PatchGroup: "linux",
+              BaselineId: "pb-compliant",
+              Operation: "Scan",
+              OperationStartTime: new Date("2026-07-15T04:00:00Z"),
+              OperationEndTime: new Date("2026-07-15T04:03:00Z"),
+              InstalledCount: 120,
+              InstalledOtherCount: 4,
+              MissingCount: 0,
+              FailedCount: 0,
+              NotApplicableCount: 12,
+              CriticalNonCompliantCount: 0,
+              SecurityNonCompliantCount: 0,
+              OtherNonCompliantCount: 0,
+            },
+            {
+              InstanceId: "i-patch-noncompliant",
+              PatchGroup: "linux",
+              BaselineId: "pb-noncompliant",
+              Operation: "Scan",
+              OperationStartTime: new Date("2026-07-15T04:00:00Z"),
+              OperationEndTime: new Date("2026-07-15T04:05:00Z"),
+              InstalledCount: 88,
+              MissingCount: 7,
+              FailedCount: 1,
+              NotApplicableCount: 9,
+              CriticalNonCompliantCount: 2,
+              SecurityNonCompliantCount: 4,
+              OtherNonCompliantCount: 1,
+            },
+          ],
+        };
+      },
+      describeInstancePatches: async (input) => {
+        this.missingPatchInstanceIds.push(input.InstanceId ?? "");
+        if (input.InstanceId !== "i-patch-noncompliant") {
+          throw new Error("DescribeInstancePatches must only run for non-compliant hosts");
+        }
+        return {
+          $metadata: {},
+          Patches: [
+            { Title: "kernel security update", KBId: "USN-6013-1", Classification: "Security", Severity: "Critical", State: "MISSING", InstalledTime: undefined },
+            { Title: "openssl security update", KBId: "USN-6039-1", Classification: "Security", Severity: "Critical", State: "MISSING", InstalledTime: undefined },
+          ],
+        };
+      },
+    };
+  }
+}
+
+test("read-only SSM patch-state collection is honest about managed, non-compliant, and unassessed hosts", async () => {
+  const sink = new CapturingSink();
+  const clients = new PatchPostureClientFactory();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients,
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 4,
+    now: () => new Date("2026-07-16T12:00:00Z"),
+  });
+
+  const collection = await runner.collect(context());
+  const patchStates = sink.batches
+    .flatMap((batch) => batch.resources)
+    .filter((resource) => resource.resourceType === "aws.ssm.patch-state");
+
+  // Only the two EC2 instances plus the unscanned EC2 host; the mi-* on-prem
+  // node is excluded.
+  assert.deepEqual(
+    patchStates.map((resource) => resource.resourceId).sort(),
+    ["i-patch-compliant", "i-patch-noncompliant", "i-patch-unscanned"],
+  );
+  assert.equal(
+    patchStates.some((resource) => resource.resourceId.startsWith("mi-")),
+    false,
+  );
+
+  const compliant = patchStates.find((resource) => resource.resourceId === "i-patch-compliant");
+  assert.equal(compliant?.sourceApi, "ssm:DescribeInstancePatchStates");
+  assert.equal(compliant?.configuration.managed, true);
+  assert.equal(compliant?.configuration.patchStateAvailable, true);
+  assert.equal(compliant?.configuration.missingCount, 0);
+  assert.equal(compliant?.configuration.criticalMissingCount, 0);
+  assert.equal(compliant?.configuration.baselineId, "pb-compliant");
+  assert.equal(compliant?.configuration.lastScanAt, "2026-07-15T04:03:00.000Z");
+  assert.equal(compliant?.configuration.missingPatches, undefined);
+
+  const nonCompliant = patchStates.find((resource) => resource.resourceId === "i-patch-noncompliant");
+  assert.equal(nonCompliant?.configuration.missingCount, 7);
+  assert.equal(nonCompliant?.configuration.failedCount, 1);
+  assert.equal(nonCompliant?.configuration.criticalMissingCount, 2);
+  assert.equal(nonCompliant?.configuration.securityMissingCount, 4);
+  assert.ok(Array.isArray(nonCompliant?.configuration.missingPatches));
+  assert.equal((nonCompliant?.configuration.missingPatches as unknown[]).length, 2);
+
+  // SSM-managed but never patch-scanned: recorded as managed with no patch state,
+  // so the posture engine reports it not-assessed (never compliant).
+  const unscanned = patchStates.find((resource) => resource.resourceId === "i-patch-unscanned");
+  assert.equal(unscanned?.configuration.managed, true);
+  assert.equal(unscanned?.configuration.patchStateAvailable, false);
+  assert.equal(unscanned?.configuration.missingCount, undefined);
+
+  // Missing-patch detail is fetched ONLY for the non-compliant host.
+  assert.deepEqual(clients.missingPatchInstanceIds, ["i-patch-noncompliant"]);
+  assert.equal(clients.instanceInformationTokens.length, 2);
+
+  const coverage = collection.collectorCoverage.find((entry) => entry.collectorKey === "ssm.patch-states");
+  assert.equal(coverage?.status, "SUCCEEDED");
+  assert.equal(coverage?.region, "us-east-1");
 });

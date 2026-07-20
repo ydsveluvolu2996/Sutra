@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import {
   buildJobHandlers,
+  ensureDueAlertEvaluationsEnqueued,
   ensureDueScheduledReportsEnqueued,
   ensureRetentionSweepsEnqueued,
 } from "../../../../../db/background-job-handlers";
+import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { listActiveOrgIds } from "../../../../../db/organization-directory";
@@ -33,6 +35,8 @@ export async function POST(request: Request): Promise<Response> {
     await ensureRetentionSweepsEnqueued(queue, await listActiveOrgIds());
     // The scheduled-report tick: enqueue any due FinOps cost reports (all tenants).
     await ensureDueScheduledReportsEnqueued(queue, new FinopsScheduledReportRepository());
+    // The alert-evaluation tick: enqueue one evaluation per tenant with enabled rules.
+    await ensureDueAlertEvaluationsEnqueued(queue, new AlertRuleRepository());
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 25 });
     return jsonResponse(result);
   } catch (error) {

@@ -23,6 +23,8 @@ export type NavKey =
   | "compliance_frameworks"
   | "reports"
   | "report_builder"
+  | "alerts"
+  | "patch"
   | "controls"
   | "roadmap"
   | "operations"
@@ -186,6 +188,8 @@ export const navGroups: readonly NavGroup[] = [
     label: "Operations",
     items: [
       { key: "operations", label: "Collection runs", href: "/operations", icon: "CR", capabilities: ["sync:run"] },
+      { key: "alerts", label: "Alerts", href: "/alerts", icon: "AL", capabilities: readConnection },
+      { key: "patch", label: "Patch management", href: "/patch", icon: "PM", capabilities: readConnection },
       { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "PR", capabilities: readWorkspace },
     ],
   },
