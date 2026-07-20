@@ -8,6 +8,7 @@ export type NavKey =
   | "changes"
   | "findings"
   | "vulnerabilities"
+  | "vulnerabilities_exploitability"
   | "network_exposure"
   | "iac_scan"
   | "security_events"
@@ -143,6 +144,7 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "findings", label: "Posture findings", href: "/findings", icon: "PF", capabilities: readConnection },
       { key: "vulnerabilities", label: "Vulnerability & exposure", href: "/vulnerabilities", icon: "VX", capabilities: readConnection },
+      { key: "vulnerabilities_exploitability", label: "Exploitability ranking", href: "/vulnerabilities/exploitability", icon: "XP", capabilities: readConnection },
       { key: "network_exposure", label: "Network exposure", href: "/network-exposure", icon: "NX", capabilities: readConnection },
       { key: "iac_scan", label: "IaC scan", href: "/iac-scan", icon: "IA", capabilities: readWorkspace },
       { key: "security_events", label: "Security events", href: "/security-events", icon: "SE", capabilities: readConnection },
