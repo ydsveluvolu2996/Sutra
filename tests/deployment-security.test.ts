@@ -37,6 +37,13 @@ test("preview mode exposes only public marketing assets", () => {
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/contact", runtime).allowed, true);
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/api/contact", runtime).allowed, true);
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/assets/app.js", runtime).allowed, true);
+  for (const legalPath of ["/privacy", "/terms", "/security", "/status"]) {
+    assert.equal(
+      evaluateDeploymentBoundary(`https://preview.sutra.example${legalPath}`, runtime).allowed,
+      true,
+      `${legalPath} should be a public marketing path`,
+    );
+  }
   const protectedRequest = evaluateDeploymentBoundary("https://preview.sutra.example/dashboard", runtime);
   assert.equal(protectedRequest.allowed, false);
   assert.equal(protectedRequest.code, "PREVIEW_MARKETING_ONLY");

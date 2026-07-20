@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import CookieConsent from "../components/cookie-consent";
 import ContactForm from "./contact-form";
 
 /* ================================================================== *
@@ -70,10 +71,14 @@ export default function ContactPage() {
           </Link>
           <nav aria-label="Contact page">
             <Link href="/">Back to home</Link>
+            <Link href="/privacy">Privacy Policy</Link>
+            <Link href="/terms">Terms of Use</Link>
             <Link href="/login">Sign in</Link>
           </nav>
         </div>
       </footer>
+
+      <CookieConsent />
     </div>
   );
 }

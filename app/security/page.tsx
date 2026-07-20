@@ -1,0 +1,100 @@
+import type { Metadata } from "next";
+
+import LegalShell from "../components/legal-shell";
+
+export const metadata: Metadata = {
+  title: "Security",
+  description: "How Sutra secures your data — read-only, customer-owned IAM access with a unique ExternalId, no stored access keys, tenant isolation and evidence-cited findings.",
+};
+
+export default function SecurityPage() {
+  return (
+    <LegalShell
+      kicker="Security"
+      title={<>Security is a <span className="accent">product feature.</span></>}
+      lead="Sutra is built so that the platform can be useful without ever holding privileged access to your cloud. Access is read-only and customer-owned, credentials stay in your account, and every finding is traced back to what was actually observed."
+    >
+      <section className="lx-legal-section">
+        <h2>Read-only, customer-owned access</h2>
+        <p>
+          Sutra connects to your environment through an IAM role that you create and own from a CloudFormation
+          template we provide. The role grants only read, metadata-scoped permission packs — there are no write
+          permissions. You can inspect exactly what it allows before you deploy it, and revoke it at any time.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>No customer access keys stored</h2>
+        <p>
+          A separate collector workload assumes your role using temporary AWS STS credentials and performs
+          bounded, regional discovery. <b>We never store customer access keys</b>, and long-lived credentials
+          never enter the browser or the web control plane. The application receives normalized, scoped evidence
+          — not keys.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>Least privilege and scoped trust</h2>
+        <ul>
+          <li>Metadata-only permission packs, matched to the collectors you enable.</li>
+          <li>A unique, platform-generated ExternalId scopes the trust relationship to your workspace.</li>
+          <li>Positive and negative trust validation confirms the role can be assumed only as intended.</li>
+          <li>An exact vendor workload-role principal — not a wildcard — is authorized to assume the role.</li>
+        </ul>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>Evidence-cited findings</h2>
+        <p>
+          Every verdict is tri-state — pass, fail or unknown — and cited to the specific observation behind it.
+          When the evidence needed to decide is missing, Sutra says so on the finding rather than reporting a
+          false &ldquo;safe.&rdquo; This keeps security decisions grounded in what was actually collected.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>Tenant isolation</h2>
+        <p>
+          Sutra is multi-tenant by design. Isolation is enforced at every query: each customer user sees only
+          the workspaces, accounts, resources and findings explicitly granted to them, and cross-tenant access
+          attempts are denied and audited.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>Data minimization</h2>
+        <p>
+          We collect the least data required to operate the service. Collection is metadata-only, and evidence
+          is normalized, scoped and promoted only after a complete run. See our{" "}
+          <a href="/privacy">Privacy Policy</a> for how data is used and retained.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>SOC 2 readiness mapping</h2>
+        <p className="lx-legal-note">
+          <em>
+            Sutra maps its collected evidence to SOC 2 Common Criteria as a readiness view. This is a readiness
+            mapping to support your own assessments — it is <b>not a certification</b>, and we do not claim SOC 2,
+            ISO 27001 or any other certification that the product does not hold.
+          </em>
+        </p>
+        <p>
+          Within the product, the same evidence-cited approach maps to CIS Kubernetes and NSA/CISA guidance as an
+          honest readiness view, never a pass stamp.
+        </p>
+      </section>
+
+      <section className="lx-legal-section">
+        <h2>Responsible disclosure</h2>
+        <p>
+          If you believe you have found a security vulnerability in Sutra, we want to hear from you. Please
+          report it through our <a href="/contact">contact page</a> with enough detail to reproduce the issue,
+          and give us a reasonable opportunity to investigate and remediate before any public disclosure. We
+          will not pursue action against good-faith research that respects user privacy and avoids service
+          disruption or data destruction.
+        </p>
+      </section>
+    </LegalShell>
+  );
+}

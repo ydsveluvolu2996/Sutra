@@ -3,6 +3,8 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
+import CookieConsent, { openCookieSettings } from "./cookie-consent";
+
 /* ================================================================== *
  * Sutra landing zone — cinematic dark page with a flowing bokeh
  * background, a scroll cue, and a Wiz-style feature explorer.
@@ -810,9 +812,9 @@ export default function LandingZone() {
               <a href="#architecture">Control library</a>
             </div>
             <div className="ftcol"><strong>Trust</strong>
+              <Link href="/security">Security</Link>
               <Link href="/contact">AWS onboarding</Link>
               <a href="#architecture">Security architecture</a>
-              <Link href="/contact">CloudFormation role</Link>
               <a href="#trust">Trust model</a>
             </div>
             <div className="ftcol"><strong>Company</strong>
@@ -824,10 +826,17 @@ export default function LandingZone() {
           </div>
           <div className="ftbottom">
             <small>© 2026 Sutra, Inc. All rights reserved.</small>
-            <nav aria-label="Legal"><a href="#top">Status</a><a href="#top">Privacy Policy</a><a href="#top">Terms of Use</a><a href="#top">Cookie Preferences</a></nav>
+            <nav aria-label="Legal">
+              <Link href="/status">Status</Link>
+              <Link href="/privacy">Privacy Policy</Link>
+              <Link href="/terms">Terms of Use</Link>
+              <button type="button" className="lx-cookie-link" onClick={openCookieSettings}>Cookie Preferences</button>
+            </nav>
           </div>
         </div>
       </footer>
+
+      <CookieConsent />
     </div>
   );
 }
