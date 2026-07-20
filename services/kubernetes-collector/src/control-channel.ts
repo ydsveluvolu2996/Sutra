@@ -13,9 +13,13 @@ export interface KubernetesAgentIdentity {
   readonly clusterName: string;
   readonly agentVersion: string;
   readonly capabilities: readonly string[];
+  // Set only for node-scoped (DaemonSet) enrollment, sourced from the downward
+  // API (spec.nodeName). It travels on the enroll request but never on the
+  // heartbeat, whose per-node isolation comes from the node's distinct agentId.
+  readonly nodeName?: string;
 }
 
-export interface KubernetesAgentHeartbeat extends KubernetesAgentIdentity {
+export interface KubernetesAgentHeartbeat extends Omit<KubernetesAgentIdentity, "nodeName"> {
   readonly agentId: string;
   readonly deployment: {
     readonly namespace: string;

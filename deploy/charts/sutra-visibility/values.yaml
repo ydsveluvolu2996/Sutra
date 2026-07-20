@@ -83,7 +83,11 @@ agent:
     name: ""
   enrollment:
     # Pre-create this Secret with only the short-lived bootstrap value. Helm
-    # never receives or renders the value.
+    # never receives or renders the value. For mode=daemonset, issue a
+    # node-scoped bootstrap (POST /v1/kubernetes/agents/bootstrap with
+    # nodeScoped=true): every per-node pod redeems the one shared secret and
+    # registers its own node-scoped credential from spec.nodeName. For
+    # mode=deployment the bootstrap stays single-use.
     existingSecret: ""
     key: bootstrap
   schedule:

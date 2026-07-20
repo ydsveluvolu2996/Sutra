@@ -41,6 +41,14 @@ const hubbleFlowSource = hubbleExportFile === ""
 
 const falcoGatewayHealthUrl = process.env.SUTRA_FALCO_GATEWAY_HEALTH_URL?.trim() ?? "";
 
+// Set only in DaemonSet mode from the downward API (spec.nodeName). Its presence
+// switches the agent to node-scoped enrollment so every pod authenticates under
+// the shared enrollment secret and heartbeats as its own node instance.
+const nodeName = process.env.SUTRA_KUBERNETES_NODE_NAME?.trim() ?? "";
+if (nodeName !== "" && !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(nodeName)) {
+  throw new Error("SUTRA_KUBERNETES_NODE_NAME is invalid");
+}
+
 const agent = new ContinuousKubernetesAgent({
   clusterId: safeIdentity("SUTRA_KUBERNETES_CLUSTER_ID", required("SUTRA_KUBERNETES_CLUSTER_ID")),
   clusterName: required("SUTRA_KUBERNETES_CLUSTER_NAME"),
@@ -67,6 +75,7 @@ const agent = new ContinuousKubernetesAgent({
   },
   ...(hubbleFlowSource === undefined ? {} : { hubbleFlowSource }),
   ...(falcoGatewayHealthUrl === "" ? {} : { falcoGateway: { healthUrl: falcoGatewayHealthUrl } }),
+  ...(nodeName === "" ? {} : { nodeName }),
 });
 
 const controller = new AbortController();

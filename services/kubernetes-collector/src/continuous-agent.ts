@@ -32,6 +32,7 @@ const ROTATE_BEFORE_MS = 15 * 60_000;
 const MAX_BOOTSTRAP_BYTES = 4 * 1024;
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,253}$/u;
 const CAPABILITY = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+const NODE_NAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u;
 
 export interface KubernetesAgentConfiguration extends KubernetesAgentIdentity {
   readonly clusterServerUrl: string;
@@ -128,7 +129,8 @@ export class ContinuousKubernetesAgent {
       !AGENT_ID.test(configuration.agentVersion) ||
       configuration.capabilities.length < 1 ||
       configuration.capabilities.length > 64 ||
-      configuration.capabilities.some((capability) => !CAPABILITY.test(capability))
+      configuration.capabilities.some((capability) => !CAPABILITY.test(capability)) ||
+      (configuration.nodeName !== undefined && !NODE_NAME.test(configuration.nodeName))
     ) {
       throw new Error("Kubernetes agent identity is invalid");
     }
@@ -198,7 +200,7 @@ export class ContinuousKubernetesAgent {
     if (credential === null) {
       credential = await this.configuration.controlChannel.enroll(
         await this.configuration.bootstrapToken(),
-        this.identity(),
+        this.enrollIdentity(),
       );
       state = { ...state, credential };
       await this.configuration.stateStore.save(state);
@@ -342,6 +344,16 @@ export class ContinuousKubernetesAgent {
       agentVersion: this.configuration.agentVersion,
       capabilities: [...this.configuration.capabilities].sort(),
     };
+  }
+
+  // Enrollment identity carries the node name (DaemonSet mode) so the control
+  // plane issues this pod a node-scoped credential; the heartbeat identity never
+  // does, keeping per-node isolation tied to the distinct agentId instead.
+  private enrollIdentity(): KubernetesAgentIdentity {
+    const base = this.identity();
+    return this.configuration.nodeName === undefined
+      ? base
+      : { ...base, nodeName: this.configuration.nodeName };
   }
 
   private heartbeat(

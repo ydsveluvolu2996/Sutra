@@ -126,6 +126,8 @@ test("agent.mode=daemonset renders a DaemonSet with node-local state, per-node i
   assert.match(rendered, /kind: DaemonSet/u);
   assert.doesNotMatch(rendered, /kind: PersistentVolumeClaim/u); // RWO PVC cannot be shared across nodes
   assert.match(rendered, /fieldPath: spec\.nodeName/u); // per-node identity
+  // The node name is wired to the env the agent reads for node-scoped enrollment.
+  assert.match(rendered, /- name: SUTRA_KUBERNETES_NODE_NAME\s*\n\s+valueFrom:\s*\n\s+fieldRef:\s*\n\s+fieldPath: spec\.nodeName/u);
   assert.match(rendered, /emptyDir: \{\}/u); // node-local state
   // Hardened container contract is preserved in daemonset mode.
   assert.match(rendered, /runAsNonRoot: true/u);

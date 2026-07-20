@@ -41,6 +41,7 @@ const migrationFiles = [
   "0025_background_jobs.sql",
   "0026_finding_exceptions.sql",
   "0027_registry_vulnerabilities.sql",
+  "0028_kubernetes_agent_nodes.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

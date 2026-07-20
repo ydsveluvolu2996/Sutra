@@ -2,12 +2,19 @@ import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,253}$/u;
+// Kubernetes node names are RFC-1123 DNS subdomains: lowercase alphanumerics,
+// '-' and '.' with alphanumeric first/last characters, up to 253 characters.
+const NODE_NAME = /^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u;
 const CAPABILITY = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{7,127}$/u;
 const TOKEN = /^[A-Za-z0-9_-]{43,512}$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
 const MIN_BOOTSTRAP_TTL_MS = 5 * 60_000;
 const MAX_BOOTSTRAP_TTL_MS = 30 * 60_000;
+// A node-scoped enrollment secret is shared by every DaemonSet pod and must
+// outlive a rollout so late-joining nodes (autoscaling) can still enroll, so it
+// is allowed a longer ceiling than a single-use Deployment bootstrap.
+const MAX_NODE_BOOTSTRAP_TTL_MS = 24 * 60 * 60_000;
 const DEFAULT_BOOTSTRAP_TTL_MS = 10 * 60_000;
 const CREDENTIAL_TTL_MS = 60 * 60_000;
 const PREVIOUS_CREDENTIAL_OVERLAP_MS = 5 * 60_000;
@@ -25,12 +32,18 @@ export interface KubernetesAgentIdentity {
   readonly clusterName: string;
   readonly agentVersion: string;
   readonly capabilities: readonly string[];
+  // Present only for node-scoped (DaemonSet) enrollment: the RFC-1123 node name
+  // this pod runs on, taken from the downward API (spec.nodeName). It is trusted
+  // because the enrollment is gated by possession of a node-scoped bootstrap
+  // secret; it is never accepted against a single-use Deployment bootstrap.
+  readonly nodeName?: string;
 }
 
 export interface AuthenticatedKubernetesAgent extends KubernetesAgentScope {
   readonly agentId: string;
   readonly clusterUid: string;
   readonly clusterName: string;
+  readonly nodeName: string | null;
 }
 
 export interface KubernetesAgentCredential {
@@ -42,6 +55,7 @@ export interface KubernetesAgentCredential {
 export interface KubernetesAgentDeploymentHealth {
   readonly agentId: string;
   readonly clusterId: string;
+  readonly nodeName: string | null;
   readonly state: "online" | "offline" | "revoked";
   readonly agentVersion: string;
   readonly capabilities: readonly string[];
@@ -59,6 +73,7 @@ export interface KubernetesAgentDeploymentHealth {
 interface DeploymentHealthRow {
   id: string;
   cluster_id: string;
+  node_name: string | null;
   status: string;
   agent_version: string;
   capabilities_json: string;
@@ -102,6 +117,7 @@ interface AgentRow {
   cluster_id: string;
   cluster_uid: string;
   cluster_name: string;
+  node_name: string | null;
   status: string;
   current_token_digest: string;
   previous_token_digest: string | null;
@@ -134,7 +150,8 @@ function assertIdentity(identity: KubernetesAgentIdentity): void {
     identity.capabilities.length < 1 ||
     identity.capabilities.length > 64 ||
     identity.capabilities.some((item) => !CAPABILITY.test(item)) ||
-    new Set(identity.capabilities).size !== identity.capabilities.length
+    new Set(identity.capabilities).size !== identity.capabilities.length ||
+    (identity.nodeName !== undefined && !NODE_NAME.test(identity.nodeName))
   ) invalid();
 }
 
@@ -167,6 +184,7 @@ function agentFromRow(row: AgentRow): AuthenticatedKubernetesAgent {
     clusterId: row.cluster_id,
     clusterUid: row.cluster_uid,
     clusterName: row.cluster_name,
+    nodeName: row.node_name,
   };
 }
 
@@ -188,11 +206,22 @@ export class KubernetesAgentRepository {
     readonly scope: KubernetesAgentScope;
     readonly createdBy: string;
     readonly ttlMs?: number;
-  }): Promise<{ readonly bootstrapId: string; readonly token: string; readonly expiresAt: string }> {
+    // A node-scoped bootstrap is a reusable enrollment secret for a DaemonSet:
+    // every pod redeems it once to obtain its own node-scoped credential. A
+    // single-use Deployment bootstrap (the default) is consumed on first enroll.
+    readonly nodeScoped?: boolean;
+  }): Promise<{
+    readonly bootstrapId: string;
+    readonly token: string;
+    readonly expiresAt: string;
+    readonly nodeScoped: boolean;
+  }> {
     assertScope(input.scope);
     assertIdentifier(input.createdBy);
+    const nodeScoped = input.nodeScoped === true;
+    const maxTtlMs = nodeScoped ? MAX_NODE_BOOTSTRAP_TTL_MS : MAX_BOOTSTRAP_TTL_MS;
     const ttlMs = input.ttlMs ?? DEFAULT_BOOTSTRAP_TTL_MS;
-    if (!Number.isSafeInteger(ttlMs) || ttlMs < MIN_BOOTSTRAP_TTL_MS || ttlMs > MAX_BOOTSTRAP_TTL_MS) {
+    if (!Number.isSafeInteger(ttlMs) || ttlMs < MIN_BOOTSTRAP_TTL_MS || ttlMs > maxTtlMs) {
       invalid();
     }
     const token = opaqueToken();
@@ -203,8 +232,8 @@ export class KubernetesAgentRepository {
     const db = await this.ready();
     const result = await db.prepare(
       `INSERT INTO kubernetes_agent_bootstraps
-        (id, org_id, customer_id, connection_id, cluster_id, token_digest, expires_at, created_by, created_at)
-       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+        (id, org_id, customer_id, connection_id, cluster_id, token_digest, expires_at, node_scoped, created_by, created_at)
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         WHERE EXISTS (
           SELECT 1 FROM aws_connections
            WHERE id = ? AND org_id = ? AND customer_id = ? AND status = 'active'
@@ -218,7 +247,7 @@ export class KubernetesAgentRepository {
         )`,
     ).bind(
       bootstrapId, input.scope.orgId, input.scope.customerId, input.scope.connectionId,
-      input.scope.clusterId, tokenDigest, expiresAt, input.createdBy, now,
+      input.scope.clusterId, tokenDigest, expiresAt, nodeScoped ? 1 : 0, input.createdBy, now,
       input.scope.connectionId, input.scope.orgId, input.scope.customerId,
       input.scope.clusterId, input.scope.orgId, input.scope.customerId,
       input.createdBy,
@@ -226,7 +255,7 @@ export class KubernetesAgentRepository {
     if (Number(result.meta?.changes ?? 0) !== 1) {
       throw new KubernetesAgentRepositoryError("NOT_FOUND", 404);
     }
-    return { bootstrapId, token, expiresAt: new Date(expiresAt).toISOString() };
+    return { bootstrapId, token, expiresAt: new Date(expiresAt).toISOString(), nodeScoped };
   }
 
   public async enroll(
@@ -241,7 +270,7 @@ export class KubernetesAgentRepository {
     const db = await this.ready();
     const bootstrap = await db.prepare(
       `SELECT b.id, b.org_id, b.customer_id, b.connection_id, b.cluster_id, b.token_digest,
-              b.expires_at, b.consumed_at, c.cluster_uid, c.name AS cluster_name
+              b.expires_at, b.consumed_at, b.node_scoped, c.cluster_uid, c.name AS cluster_name
          FROM kubernetes_agent_bootstraps b
          JOIN kubernetes_clusters c
            ON c.id = b.cluster_id AND c.org_id = b.org_id AND c.customer_id = b.customer_id
@@ -249,15 +278,18 @@ export class KubernetesAgentRepository {
         LIMIT 1`,
     ).bind(digest).first<{
       id: string; org_id: string; customer_id: string; connection_id: string; cluster_id: string;
-      token_digest: string; expires_at: number; consumed_at: number | null;
+      token_digest: string; expires_at: number; consumed_at: number | null; node_scoped: number;
       cluster_uid: string; cluster_name: string;
     }>();
     const now = this.now();
+    const nodeScoped = bootstrap !== null && Number(bootstrap.node_scoped) === 1;
     if (
       bootstrap === null ||
       !DIGEST.test(bootstrap.token_digest) ||
       !constantTimeEqual(digest, bootstrap.token_digest) ||
-      bootstrap.consumed_at !== null ||
+      // A node-scoped bootstrap is reusable by every pod until it expires; a
+      // single-use bootstrap is rejected once consumed.
+      (!nodeScoped && bootstrap.consumed_at !== null) ||
       Number(bootstrap.expires_at) <= now
     ) {
       throw new KubernetesAgentRepositoryError("AUTHENTICATION_REQUIRED", 401);
@@ -265,6 +297,25 @@ export class KubernetesAgentRepository {
     if (identity.clusterId !== bootstrap.cluster_uid || identity.clusterName !== bootstrap.cluster_name) {
       throw new KubernetesAgentRepositoryError("AUTHENTICATION_REQUIRED", 401);
     }
+    // The bootstrap's declared mode is authoritative: a node name is required
+    // for (and only for) a node-scoped enrollment. A pod cannot assert a node
+    // identity against a single-use Deployment bootstrap, and a node-scoped
+    // DaemonSet pod cannot enroll without presenting its node name.
+    if ((identity.nodeName !== undefined) !== nodeScoped) {
+      throw new KubernetesAgentRepositoryError("AUTHENTICATION_REQUIRED", 401);
+    }
+    return nodeScoped
+      ? this.enrollNodeScoped(db, bootstrap, identity, identity.nodeName as string, now)
+      : this.enrollSingleUse(db, bootstrap, identity, digest, now);
+  }
+
+  private async enrollSingleUse(
+    db: D1Database,
+    bootstrap: { readonly id: string },
+    identity: KubernetesAgentIdentity,
+    digest: string,
+    now: number,
+  ): Promise<KubernetesAgentCredential> {
     const agentId = `kagent_${crypto.randomUUID().replaceAll("-", "")}`;
     const token = opaqueToken();
     const credentialDigest = await sha256(token);
@@ -300,6 +351,95 @@ export class KubernetesAgentRepository {
     return { agentId, token, expiresAt: new Date(expiresAt).toISOString() };
   }
 
+  private async enrollNodeScoped(
+    db: D1Database,
+    bootstrap: {
+      readonly id: string; readonly org_id: string; readonly customer_id: string;
+      readonly connection_id: string; readonly cluster_id: string;
+    },
+    identity: KubernetesAgentIdentity,
+    nodeName: string,
+    now: number,
+  ): Promise<KubernetesAgentCredential> {
+    const token = opaqueToken();
+    const credentialDigest = await sha256(token);
+    const expiresAt = now + CREDENTIAL_TTL_MS;
+    const capabilities = JSON.stringify(identity.capabilities);
+    const scope = {
+      orgId: bootstrap.org_id,
+      customerId: bootstrap.customer_id,
+      connectionId: bootstrap.connection_id,
+      clusterId: bootstrap.cluster_id,
+    };
+    // A pod restart on an already-enrolled node re-presents the shared secret
+    // and must re-attach to that node's existing identity (idempotent, never a
+    // duplicate). A brand-new node inserts its own row; the partial unique index
+    // on (org, customer, cluster, node_name) WHERE active makes distinct nodes
+    // independent and collapses a concurrent same-node race to one winner.
+    const reattached = await this.reissueNodeCredential(
+      db, scope, nodeName, credentialDigest, expiresAt, identity, now,
+    );
+    if (reattached !== null) return { agentId: reattached, token, expiresAt: new Date(expiresAt).toISOString() };
+    const agentId = `kagent_${crypto.randomUUID().replaceAll("-", "")}`;
+    try {
+      const inserted = await db.prepare(
+        `INSERT INTO kubernetes_agents
+          (id, org_id, customer_id, connection_id, cluster_id, node_name, status,
+           current_token_digest, credential_expires_at, agent_version,
+           capabilities_json, enrolled_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+      ).bind(
+        agentId, scope.orgId, scope.customerId, scope.connectionId, scope.clusterId, nodeName,
+        credentialDigest, expiresAt, identity.agentVersion, capabilities, now,
+      ).run();
+      if (Number(inserted.meta?.changes ?? 0) !== 1) {
+        throw new KubernetesAgentRepositoryError("CONFLICT", 409);
+      }
+    } catch (error) {
+      if (error instanceof KubernetesAgentRepositoryError) throw error;
+      // Another pod on the same node won the insert race: re-attach to its row.
+      const raced = await this.reissueNodeCredential(
+        db, scope, nodeName, credentialDigest, expiresAt, identity, now,
+      );
+      if (raced === null) throw new KubernetesAgentRepositoryError("CONFLICT", 409);
+      return { agentId: raced, token, expiresAt: new Date(expiresAt).toISOString() };
+    }
+    return { agentId, token, expiresAt: new Date(expiresAt).toISOString() };
+  }
+
+  private async reissueNodeCredential(
+    db: D1Database,
+    scope: KubernetesAgentScope,
+    nodeName: string,
+    credentialDigest: string,
+    expiresAt: number,
+    identity: KubernetesAgentIdentity,
+    now: number,
+  ): Promise<string | null> {
+    const existing = await db.prepare(
+      `SELECT id FROM kubernetes_agents
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND cluster_id = ?
+          AND node_name = ? AND status = 'active' LIMIT 1`,
+    ).bind(scope.orgId, scope.customerId, scope.connectionId, scope.clusterId, nodeName)
+      .first<{ id: string }>();
+    if (existing === null) return null;
+    const updated = await db.prepare(
+      `UPDATE kubernetes_agents
+          SET current_token_digest = ?, credential_expires_at = ?,
+              previous_token_digest = NULL, previous_token_expires_at = NULL,
+              agent_version = ?, capabilities_json = ?, rotated_at = ?
+        WHERE id = ? AND org_id = ? AND customer_id = ? AND connection_id = ?
+          AND cluster_id = ? AND node_name = ? AND status = 'active'`,
+    ).bind(
+      credentialDigest, expiresAt, identity.agentVersion, JSON.stringify(identity.capabilities),
+      now, existing.id, scope.orgId, scope.customerId, scope.connectionId, scope.clusterId, nodeName,
+    ).run();
+    if (Number(updated.meta?.changes ?? 0) !== 1) {
+      throw new KubernetesAgentRepositoryError("CONFLICT", 409);
+    }
+    return existing.id;
+  }
+
   public async authenticate(
     agentId: string,
     token: string,
@@ -310,7 +450,7 @@ export class KubernetesAgentRepository {
     const candidate = await sha256(token);
     const db = await this.ready();
     const row = await db.prepare(
-      `SELECT a.id, a.org_id, a.customer_id, a.connection_id, a.cluster_id, a.status,
+      `SELECT a.id, a.org_id, a.customer_id, a.connection_id, a.cluster_id, a.node_name, a.status,
               a.current_token_digest, a.previous_token_digest, a.previous_token_expires_at,
               a.credential_expires_at, c.cluster_uid, c.name AS cluster_name
          FROM kubernetes_agents a
@@ -446,6 +586,7 @@ export class KubernetesAgentRepository {
     return {
       agentId: row.id,
       clusterId: row.cluster_id,
+      nodeName: row.node_name,
       state: row.status === "revoked"
         ? "revoked"
         : lastHeartbeat === null || this.now() - lastHeartbeat > OFFLINE_AFTER_MS
@@ -476,13 +617,13 @@ export class KubernetesAgentRepository {
     assertScope(scope);
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT id, cluster_id, status, agent_version, capabilities_json, deployment_namespace,
+      `SELECT id, cluster_id, node_name, status, agent_version, capabilities_json, deployment_namespace,
               deployment_pod_name, deployment_started_at, module_health_json,
               last_heartbeat_at, last_scan_at, enrolled_at
          FROM kubernetes_agents
         WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND cluster_id = ?
         ORDER BY enrolled_at DESC
-        LIMIT 16`,
+        LIMIT 256`,
     ).bind(scope.orgId, scope.customerId, scope.connectionId, scope.clusterId)
       .all<DeploymentHealthRow>();
     return (rows.results ?? []).map((row) => this.mapDeploymentHealthRow(row));
@@ -498,7 +639,7 @@ export class KubernetesAgentRepository {
     ) invalid();
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT id, cluster_id, status, agent_version, capabilities_json, deployment_namespace,
+      `SELECT id, cluster_id, node_name, status, agent_version, capabilities_json, deployment_namespace,
               deployment_pod_name, deployment_started_at, module_health_json,
               last_heartbeat_at, last_scan_at, enrolled_at
          FROM kubernetes_agents

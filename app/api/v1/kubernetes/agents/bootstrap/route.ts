@@ -18,10 +18,12 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("Invalid bootstrap request"), { code: "INVALID_INPUT" });
     }
     const input = body as Record<string, unknown>;
+    const allowed = new Set(["connectionId", "clusterId", "nodeScoped"]);
     if (
-      Object.keys(input).length !== 2 ||
+      Object.keys(input).some((key) => !allowed.has(key)) ||
       typeof input.connectionId !== "string" || !CONNECTION_ID.test(input.connectionId) ||
-      typeof input.clusterId !== "string" || !CLUSTER_ID.test(input.clusterId)
+      typeof input.clusterId !== "string" || !CLUSTER_ID.test(input.clusterId) ||
+      (input.nodeScoped !== undefined && typeof input.nodeScoped !== "boolean")
     ) throw Object.assign(new Error("Invalid bootstrap request"), { code: "INVALID_INPUT" });
     const connection = await getConnectionForOrg(authenticated.subject.orgId, input.connectionId);
     if (connection === null) throw Object.assign(new Error("Connection not found"), { code: "NOT_FOUND" });
@@ -34,6 +36,9 @@ export async function POST(request: Request): Promise<Response> {
         clusterId: input.clusterId,
       },
       createdBy: authenticated.subject.userId,
+      // A node-scoped bootstrap is the reusable enrollment secret a DaemonSet
+      // shares across its per-node pods; the default stays single-use.
+      nodeScoped: input.nodeScoped === true,
     });
     return jsonResponse({
       schema: "sutra.kubernetes-agent-bootstrap.v1",

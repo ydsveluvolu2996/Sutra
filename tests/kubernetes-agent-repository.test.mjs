@@ -151,6 +151,124 @@ test("enrollment is one-time, cluster-bound, rotates with overlap, and revocatio
   });
 });
 
+test("a node-scoped bootstrap enrolls many nodes concurrently, isolates them, and is idempotent per node", async () => {
+  await withRepository(async ({ database, repository, cluster }) => {
+    const scope = {
+      orgId: ORG_A,
+      customerId: CUSTOMER_A,
+      connectionId: CONNECTION_A,
+      clusterId: cluster.id,
+    };
+    const bootstrap = await repository.issueBootstrap({ scope, createdBy: USER_A, nodeScoped: true });
+    assert.equal(bootstrap.nodeScoped, true);
+    const identity = (nodeName) => ({
+      clusterId: cluster.clusterUid,
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+      nodeName,
+    });
+    // The shared enrollment secret is redeemed once per node — a node-scoped
+    // bootstrap MUST NOT be consumed after the first pod, unlike a single-use one.
+    const nodes = ["node-a1", "node-b2", "node-c3", "node-d4"];
+    const credentials = await Promise.all(nodes.map((node) => repository.enroll(bootstrap.token, identity(node))));
+    const agentIds = new Set(credentials.map((credential) => credential.agentId));
+    assert.equal(agentIds.size, nodes.length, "every distinct node gets its own agent identity");
+
+    const listed = await repository.listDeploymentHealth(scope);
+    assert.equal(listed.length, nodes.length);
+    assert.deepEqual([...listed.map((row) => row.nodeName)].sort(), [...nodes].sort());
+
+    // Each node heartbeats independently against its own credential/agentId.
+    for (const credential of credentials) {
+      const agent = await repository.authenticate(credential.agentId, credential.token);
+      assert.equal(agent.nodeName !== null, true);
+      await repository.recordHeartbeat({
+        agent,
+        agentVersion: "1.0.1",
+        capabilities: ["inventory"],
+        deployment: {
+          namespace: "sutra-system",
+          podName: `sutra-agent-${agent.nodeName}`,
+          startedAt: "2026-07-17T09:00:00.000Z",
+        },
+        modules: { trivy: "AVAILABLE" },
+      });
+    }
+    assert.equal((await repository.listDeploymentHealth(scope)).every((row) => row.state === "online"), true);
+
+    // A pod restart on an already-enrolled node re-presents the secret and must
+    // re-attach to the SAME identity (idempotent, not a duplicate) with a fresh
+    // credential that invalidates the previous one.
+    const first = credentials[0];
+    const reenrolled = await repository.enroll(bootstrap.token, identity("node-a1"));
+    assert.equal(reenrolled.agentId, first.agentId, "re-enroll re-attaches to the node's row");
+    assert.equal((await repository.listDeploymentHealth(scope)).length, nodes.length, "no duplicate node rows");
+    await assert.rejects(
+      repository.authenticate(first.agentId, first.token, { allowPrevious: true }),
+      (error) => error.code === "AUTHENTICATION_REQUIRED",
+      "the superseded credential no longer authenticates",
+    );
+    const reattached = await repository.authenticate(reenrolled.agentId, reenrolled.token);
+    assert.equal(reattached.nodeName, "node-a1");
+
+    // Cross-connection (tenant/cluster) isolation: another scope never sees these.
+    assert.deepEqual(
+      await repository.listDeploymentHealth({ ...scope, connectionId: "conn_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }),
+      [],
+    );
+    const stored = await database.prepare(
+      "SELECT COUNT(*) AS total FROM kubernetes_agents WHERE org_id = ? AND status = 'active'",
+    ).bind(ORG_B).first();
+    assert.equal(Number(stored.total), 0, "no node agent leaks into another org");
+  });
+});
+
+test("node identity must match the bootstrap mode and stays cluster-bound and authenticated", async () => {
+  await withRepository(async ({ repository, cluster }) => {
+    const scope = {
+      orgId: ORG_A,
+      customerId: CUSTOMER_A,
+      connectionId: CONNECTION_A,
+      clusterId: cluster.id,
+    };
+    // A single-use bootstrap rejects a client-asserted node name.
+    const singleUse = await repository.issueBootstrap({ scope, createdBy: USER_A });
+    await assert.rejects(repository.enroll(singleUse.token, {
+      clusterId: cluster.clusterUid,
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+      nodeName: "node-a1",
+    }), (error) => error.code === "AUTHENTICATION_REQUIRED");
+
+    // A node-scoped bootstrap requires a node name and stays cluster-bound.
+    const nodeScoped = await repository.issueBootstrap({ scope, createdBy: USER_A, nodeScoped: true });
+    await assert.rejects(repository.enroll(nodeScoped.token, {
+      clusterId: cluster.clusterUid,
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+    }), (error) => error.code === "AUTHENTICATION_REQUIRED");
+    await assert.rejects(repository.enroll(nodeScoped.token, {
+      clusterId: "different-cluster-uid",
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+      nodeName: "node-a1",
+    }), (error) => error.code === "AUTHENTICATION_REQUIRED");
+    // A valid node-scoped enrollment still succeeds afterward.
+    const credential = await repository.enroll(nodeScoped.token, {
+      clusterId: cluster.clusterUid,
+      clusterName: cluster.name,
+      agentVersion: "1.0.0",
+      capabilities: ["inventory"],
+      nodeName: "node-a1",
+    });
+    assert.equal((await repository.authenticate(credential.agentId, credential.token)).nodeName, "node-a1");
+  });
+});
+
 test("deployment health listing reports heartbeat modules, online state, and exact tenant scope", async () => {
   await withRepository(async ({ repository, cluster, advance }) => {
     const scope = {

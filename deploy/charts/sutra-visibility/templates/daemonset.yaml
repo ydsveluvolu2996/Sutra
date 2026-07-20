@@ -78,7 +78,9 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: NODE_NAME
+            # Per-node identity for node-scoped enrollment: each pod enrolls under
+            # the shared bootstrap once and registers/heartbeats as its own node.
+            - name: SUTRA_KUBERNETES_NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName

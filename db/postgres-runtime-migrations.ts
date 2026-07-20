@@ -26,6 +26,7 @@ import postgresItsmConnectorsSql from "../postgres/migrations/0024_itsm_connecto
 import postgresBackgroundJobsSql from "../postgres/migrations/0025_background_jobs.sql?raw";
 import postgresFindingExceptionsSql from "../postgres/migrations/0026_finding_exceptions.sql?raw";
 import postgresRegistryVulnerabilitiesSql from "../postgres/migrations/0027_registry_vulnerabilities.sql?raw";
+import postgresKubernetesAgentNodesSql from "../postgres/migrations/0028_kubernetes_agent_nodes.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -56,6 +57,7 @@ const migrations = [
   { id: "0025_background_jobs", source: postgresBackgroundJobsSql },
   { id: "0026_finding_exceptions", source: postgresFindingExceptionsSql },
   { id: "0027_registry_vulnerabilities", source: postgresRegistryVulnerabilitiesSql },
+  { id: "0028_kubernetes_agent_nodes", source: postgresKubernetesAgentNodesSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

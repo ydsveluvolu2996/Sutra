@@ -16,6 +16,7 @@ import {
   resolveKubernetesControlPlaneUrl,
   retryDelayMs,
   type KubernetesAgentHeartbeat,
+  type KubernetesAgentIdentity,
   type KubernetesAgentState,
   type KubernetesAgentStateStore,
   type KubernetesControlChannel,
@@ -50,9 +51,11 @@ class MemoryChannel implements KubernetesControlChannel {
   public enrollments = 0;
   public rotations = 0;
   public failNextUpload = false;
+  public lastEnrollIdentity: KubernetesAgentIdentity | null = null;
 
-  public async enroll(value: string) {
+  public async enroll(value: string, identity: KubernetesAgentIdentity) {
     assert.equal(value, bootstrap);
+    this.lastEnrollIdentity = identity;
     this.enrollments += 1;
     return credential();
   }
@@ -423,6 +426,50 @@ test("falco gateway probe maps readiness statuses without sending credentials", 
   assert.equal(await probeWith(404).inspect({ url, signal }), "DEGRADED");
   assert.equal(await probeWith(new Error("unreachable")).inspect({ url, signal }), "UNKNOWN");
   assert.ok(seen.every((entry) => entry.url.endsWith("/readyz")));
+});
+
+test("node-scoped agent presents its node name on enrollment but never on the heartbeat", async () => {
+  await withKubernetesApi(async (url) => {
+    const state = new MemoryState();
+    const channel = new MemoryChannel();
+    const instance = new ContinuousKubernetesAgent({
+      clusterId: "cluster_demo",
+      clusterName: "Demo",
+      clusterServerUrl: url,
+      agentVersion: "0.2.0-test",
+      capabilities: ["inventory.v1"],
+      scanIntervalMs: 5 * 60_000,
+      stateStore: state,
+      controlChannel: channel,
+      bootstrapToken: async () => bootstrap,
+      serviceAccountToken: async () => kubeToken,
+      deployment: { namespace: "sutra-system", podName: "sutra-agent-node-a1", startedAt: "2026-07-17T11:00:00.000Z" },
+      moduleHealthProbe: { async inspect() { return healthyModules; } },
+      nodeName: "node-a1",
+      now: () => Date.parse("2026-07-17T12:00:00.000Z"),
+    });
+    await instance.runCycle();
+    assert.equal(channel.enrollments, 1);
+    assert.equal(channel.lastEnrollIdentity?.nodeName, "node-a1");
+    for (const heartbeat of channel.heartbeats) {
+      assert.equal("nodeName" in heartbeat, false, "the node name never travels on the heartbeat body");
+    }
+    // An invalid node name is rejected before any control-channel traffic.
+    assert.throws(() => new ContinuousKubernetesAgent({
+      clusterId: "cluster_demo",
+      clusterName: "Demo",
+      clusterServerUrl: url,
+      agentVersion: "0.2.0-test",
+      capabilities: ["inventory.v1"],
+      scanIntervalMs: 5 * 60_000,
+      stateStore: state,
+      controlChannel: channel,
+      bootstrapToken: async () => bootstrap,
+      serviceAccountToken: async () => kubeToken,
+      deployment: { namespace: "sutra-system", podName: "sutra-agent-test", startedAt: "2026-07-17T11:00:00.000Z" },
+      nodeName: "Node_With_Invalid_CHARS",
+    }), /Kubernetes agent identity is invalid/u);
+  });
 });
 
 test("retry backoff is bounded and jittered", () => {

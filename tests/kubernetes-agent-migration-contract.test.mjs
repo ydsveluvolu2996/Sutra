@@ -26,6 +26,37 @@ test("Kubernetes agent control migrations are additive after Falco and store cre
   assert.ok(pgRunner.indexOf("0008_falco_runtime_events.sql") < pgRunner.indexOf("0009_kubernetes_agent_control.sql"));
 });
 
+test("per-node agent migration is additive, registered in all three places, and models a node dimension", async () => {
+  const [d1, postgres, d1Runtime, pgRuntime, pgRunner] = await Promise.all([
+    readFile(new URL("drizzle/0034_kubernetes_agent_nodes.sql", root), "utf8"),
+    readFile(new URL("postgres/migrations/0028_kubernetes_agent_nodes.sql", root), "utf8"),
+    readFile(new URL("db/runtime-migrations.ts", root), "utf8"),
+    readFile(new URL("db/postgres-runtime-migrations.ts", root), "utf8"),
+    readFile(new URL("scripts/postgres-migrate.mjs", root), "utf8"),
+  ]);
+  for (const source of [d1, postgres]) {
+    // Adds the node dimension and per-node uniqueness; never a plaintext token.
+    assert.match(source, /node_scoped/u);
+    assert.match(source, /node_name/u);
+    assert.match(source, /kubernetes_agents_active_cluster_node_uq/u);
+    assert.match(source, /COALESCE\(`?node_name/u);
+    assert.doesNotMatch(source, /(?:bootstrap|credential)_token(?!_digest)/u);
+    // The prior per-cluster singleton index is retired so distinct nodes coexist.
+    assert.match(source, /DROP INDEX IF EXISTS[\s`]*kubernetes_agents_active_cluster_uq/u);
+  }
+  // Registered — and additive after the registry-vulnerabilities migration — in
+  // every one of the three migration registries.
+  assert.ok(
+    d1Runtime.indexOf("0033_registry_vulnerabilities") < d1Runtime.indexOf("0034_kubernetes_agent_nodes"),
+  );
+  assert.ok(
+    pgRuntime.indexOf("0027_registry_vulnerabilities") < pgRuntime.indexOf("0028_kubernetes_agent_nodes"),
+  );
+  assert.ok(
+    pgRunner.indexOf("0027_registry_vulnerabilities.sql") < pgRunner.indexOf("0028_kubernetes_agent_nodes.sql"),
+  );
+});
+
 test("agent endpoints never accept Kubernetes tokens, Secrets, ConfigMaps, or webhook URLs", async () => {
   const files = [
     "app/api/v1/kubernetes/agents/enroll/route.ts",

@@ -76,6 +76,23 @@ export function exactAgentRecord(value: unknown, keys: readonly string[]): Recor
   return record;
 }
 
+export function optionalAgentRecord(
+  value: unknown,
+  requiredKeys: readonly string[],
+  optionalKeys: readonly string[],
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new KubernetesAgentRequestError("INVALID_INPUT", 400);
+  }
+  const record = value as Record<string, unknown>;
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  if (
+    Object.keys(record).some((key) => !allowed.has(key)) ||
+    requiredKeys.some((key) => !(key in record))
+  ) throw new KubernetesAgentRequestError("INVALID_INPUT", 400);
+  return record;
+}
+
 export function agentErrorResponse(error: unknown): Response {
   const candidate = error as { code?: unknown; status?: unknown } | null;
   const code = typeof candidate?.code === "string" ? candidate.code : "REQUEST_FAILED";
