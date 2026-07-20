@@ -1,6 +1,6 @@
-# Sutra live AWS demo-day runbook
+# Sutra live AWS launch runbook
 
-This runbook is for the local, one-account enterprise-pilot demonstration. It is
+This runbook is for the local, one-account enterprise-pilot walkthrough. It is
 designed to preserve the last verified CMDB snapshot and to fail closed when a
 required dependency is unavailable. It does not claim high availability or a
 hosted production SLA.
@@ -33,7 +33,7 @@ hosted production SLA.
 6. Open `http://127.0.0.1:3000/login`, sign in, complete MFA, and keep one tab on
    the dashboard. Do not display the bootstrap token or local runtime files.
 7. Verify that the selected customer, AWS account, last successful collection,
-   and evidence timestamps match the intended demonstration.
+   and evidence timestamps match the intended walkthrough.
 
 ## Customer story
 
@@ -92,7 +92,7 @@ docker compose \
 
 Then restart the guarded launcher. Never run `docker compose down --volumes`,
 `docker volume rm`, a database reset, or a destructive restore immediately before
-the demo.
+the walkthrough.
 
 ## Coordinated backup
 
@@ -113,7 +113,7 @@ mutate either side.
 4. Restart the guarded launcher and rerun `pnpm live:aws:status`.
 
 The backup includes a PostgreSQL custom dump, the matching encrypted host state,
-and a checksum manifest. A restore is intentionally not a demo-day operation:
+and a checksum manifest. A restore is intentionally not a launch-day operation:
 restore it only into a controlled copy after validating every manifest checksum,
 the original `.sutra/docker.env`, and the original encryption-key fingerprints.
 Until that isolated restore rehearsal is completed, describe this as a verified
@@ -130,5 +130,5 @@ Proceed only when:
 - no page displays fabricated, placeholder or unexplained partial data;
 - no terminal, browser tab or recording exposes a secret or one-time External ID.
 
-If any gate fails, demonstrate the last verified persisted snapshot and explain the
+If any gate fails, show the last verified persisted snapshot and explain the
 live dependency honestly instead of changing permissions during the meeting.

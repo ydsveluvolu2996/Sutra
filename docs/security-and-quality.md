@@ -310,7 +310,7 @@ No release proceeds with a known cross-tenant leak, bypassable ExternalId, store
 
 ## 11. Acceptance-test matrix for the first runnable slice
 
-`P0` blocks any production-like deployment. `P1` blocks a public beta but may be deferred for a clearly labeled local demo.
+`P0` blocks any production-like deployment. `P1` blocks a public beta but may be deferred for a clearly labeled local walkthrough.
 
 | ID | Area and test | Level | Expected result | Priority |
 |---|---|---|---|---|
@@ -352,7 +352,7 @@ No release proceeds with a known cross-tenant leak, bypassable ExternalId, store
 
 ### Slice exit criteria
 
-The slice is production-shaped only when all P0 tests pass in CI/staging, no critical/high unresolved security defect lacks an approved expiry, real AWS broker tests pass in an isolated sandbox, an operator can diagnose a failed run without viewing credentials/raw sensitive values, and a restore exercise has succeeded. Until then the UI must label AWS results as simulated/demo data and must not accept a customer production role.
+The slice is production-shaped only when all P0 tests pass in CI/staging, no critical/high unresolved security defect lacks an approved expiry, real AWS broker tests pass in an isolated sandbox, an operator can diagnose a failed run without viewing credentials/raw sensitive values, and a restore exercise has succeeded. Until then the UI must label AWS results as simulated/sample data and must not accept a customer production role.
 
 ## 12. Security review cadence and ownership
 

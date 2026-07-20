@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Source workload role for a disposable Sutra live-AWS sandbox demo. An operator
+  Source workload role for a disposable Sutra live-AWS sandbox walkthrough. An operator
   reaches this role through short-lived federation; the role can assume only the
   fixed customer read-only role path and name and cannot access AWS resources itself.
 

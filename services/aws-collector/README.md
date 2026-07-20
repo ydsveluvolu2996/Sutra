@@ -56,7 +56,7 @@ an HTTP/queue boundary.
 `markOnboardingVerified` must use a conditional database update so stale workers
 cannot activate a connection that changed after verification.
 
-The loopback server's connection-operation lock is intentionally a one-host demo
+The loopback server's connection-operation lock is intentionally a one-host
 boundary. A hosted, horizontally scaled or multi-process deployment still requires
 a durable queue, database-backed leases/fencing tokens, a staging snapshot store,
 and atomic promotion of a complete manifest. Do not treat the in-memory lock or the

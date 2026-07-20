@@ -157,7 +157,7 @@ correct External ID.
 
 ### 3.2 Template decisions
 
-`infrastructure/customer-role-live-demo.yaml` uses explicit versioned policies rather than attaching
+`infrastructure/customer-onboarding-role.yaml` uses explicit versioned policies rather than attaching
 AWS `ReadOnlyAccess`. It also avoids relying solely on the evolving AWS-managed
 `SecurityAudit` policy. The template intentionally excludes data-plane and write
 actions such as:

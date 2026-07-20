@@ -1,6 +1,6 @@
 # Sutra operations-wave live activation record
 
-Permission pack `live-demo-2026-07.3` was activated and attested on
+Permission pack `standard-2026-07` was activated and attested on
 2026-07-17. The existing customer role was updated in place, its External ID
 trust boundary was re-proven with positive and negative probes, and a complete
 AWS CMDB snapshot containing the temporary EKS cluster was promoted.
@@ -28,8 +28,8 @@ The customer role carries an explicit Deny with the exact implemented-action exc
 
 ## Reviewed artifacts
 
-- Permission pack: `live-demo-2026-07.3`
-- Template: `public/sutra-customer-role-live-demo.yaml`
+- Permission pack: `standard-2026-07`
+- Template: `public/sutra-customer-onboarding-role.yaml`
 - Template SHA-256: `3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f`
 - Operator policy source: `infrastructure/sutra-operator-permission-set-policy.json`
 

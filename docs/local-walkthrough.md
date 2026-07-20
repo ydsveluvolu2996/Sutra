@@ -1,6 +1,6 @@
-# Sutra local functional demo
+# Sutra local functional walkthrough
 
-This repository ships a demo-ready local slice and a separately gated path for
+This repository ships a ready-to-run local slice and a separately gated path for
 a real AWS sandbox account. The local slice is deliberately limited to one MSP
 organization, but it includes multiple deterministic simulated customer accounts
 and tenant/customer/connection-scoped contracts. It is not hosted production
@@ -8,7 +8,7 @@ multitenancy.
 
 ## One-command morning start
 
-After opening Docker Desktop, start the preserved local demo without rebuilding
+After opening Docker Desktop, start the preserved local walkthrough without rebuilding
 the application image:
 
 ```bash
@@ -38,7 +38,7 @@ collection still requires the guarded `pnpm live:aws:host` launch documented in
 acknowledged operation because it incurs hourly charges and requires a fresh
 expiry timestamp and validator `/32`.
 
-## Reliable sales demo (no AWS account required)
+## Reliable sales walkthrough (no AWS account required)
 
 ```bash
 pnpm install
@@ -62,7 +62,7 @@ After MFA verification, open `http://localhost:3000/operations`:
 3. When the job succeeds, select **Publish to CMDB**. Publication revalidates the
    complete tenant/customer/connection/job lineage and atomically promotes the
    immutable snapshot.
-4. To demonstrate unattended collection, configure a fixture under **Scheduled
+4. To exercise unattended collection, configure a fixture under **Scheduled
    fixture collections**. Choose its evidence version and cadence, then select
    **Enable & run now**. The durable collector creates the first signed job
    immediately and future occurrences at the saved interval. Pausing suppresses
@@ -83,14 +83,14 @@ After MFA verification, open `http://localhost:3000/operations`:
    never bypasses the explicit RBAC and provenance checks at the publication gate.
 6. Open the snapshot to inspect resources, relationships, coverage, security groups,
    findings, and exports.
-7. For a change demo, publish Northstar Retail `2026.07.0`, then `2026.07.1`, and
+7. For a change walkthrough, publish Northstar Retail `2026.07.0`, then `2026.07.1`, and
    open **Change history**. The evolved version deterministically records one added,
    one changed, and one removed resource.
 
 No simulated run registers a trust role or calls AWS. The UI and persisted snapshot
 both identify the source as `SIMULATED FIXTURE`. Signed broker responses, snapshot
 hashes, durable job state, D1 publication, CMDB queries, finding workflows, and
-exports are real local application paths rather than static demo cards.
+exports are real local application paths rather than static sample cards.
 
 Schedule mutations are also real cross-process operations. Sutra writes the exact
 scoped command to a D1 outbox before contacting the collector, sends a deterministic
@@ -132,7 +132,7 @@ the previous files if replacement fails. Backup directories are permission-
 restricted under ignored `.sutra/backups/`; never attach them to issues, chats, or
 source control.
 
-## Real AWS sandbox demo
+## Real AWS sandbox walkthrough
 
 Use only the guarded host launcher and the complete runbook in
 `docs/local-live-aws.md`. It isolates live PostgreSQL data and encryption keys from
@@ -163,7 +163,7 @@ Temporary STS credentials exist only inside the collector process. Browser and
 control-plane responses contain normalized metadata and safe status codes, never
 credentials, ExternalIds after creation, or raw AWS errors.
 
-## What the pilot demonstrates
+## What the pilot shows
 
 - server-generated, encrypted, connection-bound ExternalIds;
 - exact role/account/partition binding and behavioral trust validation;

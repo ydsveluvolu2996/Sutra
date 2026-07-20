@@ -43,7 +43,7 @@ in the README have been satisfied. They have not.
 
 ### Phase 0 — Working local AWS pilot (delivered locally)
 
-The current repository demonstrates the complete local path: create a scoped
+The current repository exercises the complete local path: create a scoped
 connection, hand off a one-time ExternalId, register a customer role, validate the
 trust behavior, collect a selected inventory, publish an immutable complete snapshot,
 browse the CMDB and graph edges, review findings, update finding workflow state, and
@@ -129,5 +129,5 @@ not mean shallow tag-only discovery.
    without measurable acceptance evidence.
 
 See [architecture.md](architecture.md), [aws-integration.md](aws-integration.md),
-[security-and-quality.md](security-and-quality.md), and [local-demo.md](local-demo.md)
+[security-and-quality.md](security-and-quality.md), and [local-walkthrough.md](local-walkthrough.md)
 for the detailed boundaries and validation procedures behind this roadmap.

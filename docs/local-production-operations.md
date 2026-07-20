@@ -74,7 +74,7 @@ evidence and incident timeline.
 
 ## Release and incident evidence
 
-For every customer demonstration or private-beta release, retain:
+For every customer walkthrough or private-beta release, retain:
 
 - application commit and migration identifiers;
 - passing test and build output;

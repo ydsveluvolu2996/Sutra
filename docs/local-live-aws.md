@@ -1,7 +1,7 @@
-# One-account live AWS demo on a laptop
+# One-account live AWS walkthrough on a laptop
 
 This runbook starts PostgreSQL in Docker while the prebuilt Sutra web process and
-AWS collector run directly on the Mac. A production-grade local demonstration uses
+AWS collector run directly on the Mac. A production-grade local walkthrough uses
 two accounts: a Sutra/MSP source account and a separate disposable customer account.
 The collector uses an existing short-lived AWS SSO/profile session from the host.
 Sutra never mounts `~/.aws` into Docker, copies the SSO cache, writes AWS access
@@ -24,7 +24,7 @@ Inspector, or any other billable AWS service.
 - Temporary administrator or equivalent IAM/CloudFormation permission in that
   source account, and customer-controlled permission to deploy the reviewed
   read-only role in a separate disposable client account.
-- A publicly readable, reviewed copy of `public/sutra-customer-role-live-demo.yaml`
+- A publicly readable, reviewed copy of `public/sutra-customer-onboarding-role.yaml`
   in a commercial-AWS regional S3 HTTPS URL if you want the one-click customer
   quick-create flow. The URL must pin an immutable non-null `versionId`; never use
   a presigned or versionless URL.
@@ -219,7 +219,7 @@ in the generated runtime file:
 ```bash
 AWS_PROFILE=sutra-demo-collector \
 SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::111122223333:role/sutra/SutraLocalCollectorRole' \
-SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/live-demo-2026-07.3/3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml?versionId=publisher-output' \
+SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/standard-2026-07/3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml?versionId=publisher-output' \
 SUTRA_LIVE_AWS_ACK='I_ACKNOWLEDGE_THIS_WILL_CONTACT_AWS' \
 pnpm live:aws:host
 ```
@@ -289,7 +289,7 @@ the quick-create URL into chat, tickets, recordings, or logs.
 
 A same-account rehearsal is possible, but it does not prove real MSP-to-customer
 cross-account onboarding. Use separate accounts before presenting the result as a
-client-ready live demonstration. Do not broaden either role to make onboarding
+client-ready live walkthrough. Do not broaden either role to make onboarding
 easier.
 
 ## Stop and rollback
@@ -297,7 +297,7 @@ easier.
 Press `Ctrl-C` in the launcher Terminal. It terminates both host processes. If the
 launcher started PostgreSQL, it also stops that container; if PostgreSQL was already
 running, it leaves it running. The named database volume and ignored live runtime
-files remain for the next demo.
+files remain for the next walkthrough.
 
 After an interrupted Terminal session, this command safely stops the dedicated
 live Compose project without deleting its named database volume:
@@ -320,19 +320,19 @@ docker compose \
 
 To revoke AWS access, first disable/offboard the connection in Sutra, then delete
 the customer role stack with the customer-account operator profile. Finally delete
-the source role stack with the MSP operator profile if no other disposable demo
+the source role stack with the MSP operator profile if no other disposable sandbox
 connection uses it:
 
 ```bash
 aws cloudformation delete-stack \
   --profile sutra-client-operator \
   --region us-east-1 \
-  --stack-name sutra-demo-customer-role
+  --stack-name sutra-sandbox-customer-role
 
 aws cloudformation wait stack-delete-complete \
   --profile sutra-client-operator \
   --region us-east-1 \
-  --stack-name sutra-demo-customer-role
+  --stack-name sutra-sandbox-customer-role
 
 aws cloudformation delete-stack \
   --profile sutra-msp-operator \
@@ -355,12 +355,12 @@ policy mutation or deletion permission for cleanup.
 The `pnpm docker:*` and `pnpm db:postgres:*` maintenance commands target the
 separate fixture project. The coordinated Docker fixture backup does not include
 the live Compose database or host-only live collector registry. Do not claim a host
-live-demo backup until a separate encrypted, tested backup procedure for the live
+live-walkthrough backup until a separate encrypted, tested backup procedure for the live
 database and host files has been completed.
 
 If `.sutra/live-aws.env` is lost while the live volume remains, restore the exact
 original permission-restricted file before starting. Do not manufacture replacement
-keys. If the demo data is intentionally disposable and no recovery is required,
+keys. If the sandbox data is intentionally disposable and no recovery is required,
 stop the live project and remove all mutually dependent live state before a fresh
 launch:
 

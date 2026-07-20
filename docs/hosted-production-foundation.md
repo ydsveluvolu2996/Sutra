@@ -84,7 +84,7 @@ The application-side Cognito boundary now implements:
   job binding, bounded bodies, timestamp checks and an atomic replay-store
   contract;
 - hosted session lookup through the existing centralized authorization policy,
-  plus local-auth compatibility for the laptop demo.
+  plus local-auth compatibility for the laptop walkthrough.
 
 The hosted release hold remains in place. Recovery administration, membership
 switching, hosted step-up authentication, distributed rate limiting, a shared

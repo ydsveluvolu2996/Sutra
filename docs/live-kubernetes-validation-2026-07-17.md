@@ -12,7 +12,7 @@ a hosted, independently penetration-tested or SLA-backed production SaaS.
 
 ## Trust and permissions
 
-- Customer-role permission pack: `live-demo-2026-07.3`
+- Customer-role permission pack: `standard-2026-07`
 - Added EKS permissions: `eks:ListClusters` and `eks:DescribeCluster`
 - The existing customer role was updated in place.
 - The positive AssumeRole check passed.
@@ -39,7 +39,7 @@ evidence. Sutra's complete scan observed:
 - 385 Trivy findings in the full scanner evidence
 - 6 CycloneDX SBOM reports in the full scanner evidence
 
-For the customer demonstration, a bounded artifact focused on the deliberately
+For the customer walkthrough, a bounded artifact focused on the deliberately
 insecure test namespace was published:
 
 - 235 resources

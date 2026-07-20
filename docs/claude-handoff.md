@@ -20,11 +20,11 @@ This document is the current source of truth for continuing Sutra work in anothe
 
 ## Product scope
 
-Sutra is an EKS-first AWS CMDB and cloud-security posture platform for MSP demonstrations. The intended customer flow is:
+Sutra is an EKS-first AWS CMDB and cloud-security posture platform for MSP walkthroughs. The intended customer flow is:
 
 `onboard AWS account → verify trust/external ID → install Kubernetes modules → collect inventory/evidence → prioritize findings and attack paths → show runtime/admission/supply-chain evidence → notify → executive report → teardown`
 
-This is a private-beta/demo baseline, not yet a hosted, penetration-tested, SLA-backed production SaaS.
+This is a private-beta baseline, not yet a hosted, penetration-tested, SLA-backed production SaaS.
 
 ## Implemented capabilities
 
@@ -41,7 +41,7 @@ This is a private-beta/demo baseline, not yet a hosted, penetration-tested, SLA-
 11. Email, Slack, and Teams notification configuration with durable outbox/retry/dead-letter behavior.
 12. CIS Kubernetes, NSA/CISA, and SOC 2 readiness mappings. These are readiness mappings, not certifications.
 13. PostgreSQL migrations, bounded APIs, audit trails, and immutable evidence records.
-14. Local Docker/PostgreSQL demo stack and Kubernetes workspaces.
+14. Local Docker/PostgreSQL walkthrough stack and Kubernetes workspaces.
 
 ## GitHub hardening already added
 
@@ -68,7 +68,7 @@ CodeQL is configured but currently skipped because the private repository does n
 
 ## Known limitations / remaining work
 
-### Highest priority before a customer demo
+### Highest priority before a customer walkthrough
 
 - Run one complete live EKS sequence in the approved AWS account `738663485493`, region `ap-south-1`.
 - Validate customer onboarding with an isolated role and external ID.
@@ -123,8 +123,8 @@ gh pr view 1 --repo ydsveluvolu2996/Sutra
 gh run list --repo ydsveluvolu2996/Sutra --branch agent/sutra-local-aws-pilot
 ```
 
-Before editing, inspect `docs/enterprise-kubernetes-private-beta.md`, `docs/eks-disposable-validation-runbook.md`, `docs/demo-day-runbook.md`, and `docs/repository-release-readiness.md`.
+Before editing, inspect `docs/enterprise-kubernetes-private-beta.md`, `docs/eks-disposable-validation-runbook.md`, `docs/launch-runbook.md`, and `docs/repository-release-readiness.md`.
 
 ## Handoff objective
 
-Continue by completing and verifying the live EKS private-beta demo path, recording evidence and teardown results. Make small, reviewable commits, push them to the existing branch, and update the draft PR. Report any permission, billing, security, or missing-credential blocker instead of simulating success.
+Continue by completing and verifying the live EKS private-beta walkthrough path, recording evidence and teardown results. Make small, reviewable commits, push them to the existing branch, and update the draft PR. Report any permission, billing, security, or missing-credential blocker instead of simulating success.

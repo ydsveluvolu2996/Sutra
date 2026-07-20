@@ -59,7 +59,7 @@ test execution and does not reduce application concurrency.
 
 ## Claims boundary
 
-Sutra can be demonstrated as a real local private-beta capability suite. Before
+Sutra can be shown as a real local private-beta capability suite. Before
 accepting a customer's production account, the hosted identity, managed-secret,
 worker, restore, monitoring, isolation-under-load, incident response, HA/DR,
 penetration-testing and support/SLA gates must be independently exercised and

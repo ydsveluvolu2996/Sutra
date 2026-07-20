@@ -2,7 +2,7 @@
 
 **Document purpose:** single source of truth for the remaining work required to
 take Sutra from the current local/private-beta build to an enterprise-grade,
-customer-demonstrable platform.
+customer-ready platform.
 
 **Current repository:** `agent/sutra-local-aws-pilot` in the Sutra GitHub
 repository. The EKS validation cluster has been intentionally deleted to stop
@@ -14,7 +14,7 @@ preserved in GitHub. Compliance language in this document and in the product is
 
 | Area | Current state | Honest interpretation |
 |---|---|---|
-| Local application | Working through `pnpm morning:start`; PostgreSQL, migrations and health checks pass | Demo-ready local runtime |
+| Local application | Working through `pnpm morning:start`; PostgreSQL, migrations and health checks pass | Walkthrough-ready local runtime |
 | AWS CMDB collector | Implemented with cross-account trust validation and bounded evidence collection | Requires a valid short-lived AWS profile for live use |
 | Kubernetes inventory/KSPM | Implemented and previously live-tested on EKS | Requires a fresh disposable EKS cluster for another live run |
 | Trivy/SBOM | Implemented; previous live run imported findings and CycloneDX evidence | Private-ECR and multi-namespace acceptance remains |
@@ -44,13 +44,13 @@ preserved in GitHub. Compliance language in this document and in the product is
 | K8S-P0-10 | Supply chain | Trivy, Syft, Cosign, immutable ECR and GitHub OIDC workflow implemented | Execute workflow against ECR and validate admission decisions | Immutable digest, scan, SBOM, signature and provenance are all linked | Protected GitHub reviewer; ECR |
 | K8S-P0-11 | Notifications | Durable outbox, retries, leasing and DLQ implemented | Configure SES/email, Slack and Teams through managed secrets and deliver tests | Success, retry, lease expiry and DLQ evidence is visible | Sender identity and endpoints |
 | K8S-P0-12 | Compliance reporting | CIS, NSA/CISA and SOC 2 readiness mappings implemented | Review evidence gaps and executive report wording with a sample customer | Report identifies readiness, evidence, exceptions and unknowns without certification language | Completed evidence from P0 |
-| K8S-P0-13 | End-to-end demo | Local UI and Kubernetes workspaces exist | Run fresh sequence from onboarding to teardown | Onboard → install → collect → prioritize → runtime → admission → notify → report → teardown | All preceding P0 gates |
+| K8S-P0-13 | End-to-end walkthrough | Local UI and Kubernetes workspaces exist | Run fresh sequence from onboarding to teardown | Onboard → install → collect → prioritize → runtime → admission → notify → report → teardown | All preceding P0 gates |
 
 ### 2.2 Kubernetes P1 enterprise-hardening tasks
 
 | ID | Task | Why a customer expects it | Definition of done |
 |---|---|---|---|
-| K8S-P1-01 | Persistent cluster-agent soak test | Demonstrates reliability beyond a one-time scan | 24–72 hour heartbeat/upload/rotation run with restart and offline recovery |
+| K8S-P1-01 | Persistent cluster-agent soak test | Shows reliability beyond a one-time scan | 24–72 hour heartbeat/upload/rotation run with restart and offline recovery |
 | K8S-P1-02 | Version and distribution matrix | Customers run more than one EKS version | Tested EKS versions and documented unsupported Kubernetes versions |
 | K8S-P1-03 | Helm/operator/DaemonSet installation choices | Matches Wiz/Orca/Prisma/Sysdig/Datadog expectations | Guided wizard presents selectable modules and health per installation method |
 | K8S-P1-04 | Private registry support | Production images are commonly private | ECR and one private-registry path tested without storing registry credentials |
@@ -85,7 +85,7 @@ node scripts/kubernetes-security-stack.mjs plan
 ```
 
 Apply modules only after reviewing the rendered plan. Cilium requires the
-additional `--allow-cni-change` acknowledgement. After the demo, use the
+additional `--allow-cni-change` acknowledgement. After the walkthrough, use the
 guarded teardown and verify that EKS, EC2, EBS, ENIs, VPC, log and budget
 resources are gone. Expiry tags do not delete resources automatically.
 
@@ -106,9 +106,9 @@ resources are gone. Expiry tags do not delete resources automatically.
 | P1 | Domain/hosting | Domain registered; DNS intentionally not pointed to laptop | Hosted deployment, TLS, WAF, `SUTRA_PUBLIC_ORIGIN`, monitoring and release promotion | `https://app.sutracmdb.com` login works with secure cookies and strict origin checks |
 | P1 | Assurance and selling | Private-beta documentation exists | Threat model, penetration test, privacy/DPA, support/SLA and customer security pack | Sales claims match evidence; no unsupported certification/parity claims |
 
-## 4. Demo definition of done
+## 4. Walkthrough definition of done
 
-The enterprise-feature Kubernetes demo is ready when all of the following are
+The enterprise-feature Kubernetes walkthrough is ready when all of the following are
 true:
 
 | Gate | Required proof |
@@ -123,7 +123,7 @@ true:
 | Notifications | Email plus configured Slack/Teams delivery receipts are recorded |
 | Compliance | CIS/NSA-CISA/SOC 2 readiness report includes evidence gaps and exceptions |
 | Teardown | Temporary AWS resources are deleted and orphan-resource audit is empty |
-| Claims | Demo labels private-beta limitations and does not claim certification or GA SaaS |
+| Claims | Walkthrough labels private-beta limitations and does not claim certification or GA SaaS |
 
 ## 5. Handoff for another Claude/Codex session
 
@@ -136,7 +136,7 @@ before broader platform work. Use real functionality and evidence only. Do not
 create AWS resources without an explicit current approval. The prior disposable
 EKS cluster was deleted; recreate only through scripts/eks-disposable-guard.mjs
 after reviewing the plan. Never commit secrets, MFA material, AWS profiles,
-database files or customer evidence. Keep the demo local unless hosted
+database files or customer evidence. Keep the walkthrough local unless hosted
 deployment is explicitly approved.
 ```
 
@@ -169,7 +169,7 @@ Relevant code and runbooks:
 2. Do not store AWS access keys, SSO caches, MFA secrets, webhook URLs or
    database files in GitHub or chat.
 3. Do not enable admission blocking on a customer production cluster during the
-   demo milestone.
+   walkthrough milestone.
 4. Treat Cilium changes as high-risk and prove rollback.
 5. Treat missing evidence as UNKNOWN or NOT CONFIGURED, never PASS.
 6. Keep the disposable AWS budget as an alert, not a hard spending cap.

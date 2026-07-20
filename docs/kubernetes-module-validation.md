@@ -9,7 +9,7 @@ orchestration. It is not customer or live-cluster evidence.
 
 ```sh
 node scripts/kubernetes-enterprise-demo.mjs validate
-node scripts/kubernetes-enterprise-demo.mjs generate > /tmp/sutra-kubernetes-demo.json
+node scripts/kubernetes-enterprise-demo.mjs generate > /tmp/sutra-kubernetes-validation.json
 ```
 
 The generated scenario correlates one workload across:

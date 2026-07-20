@@ -3,7 +3,7 @@
 ## Objective
 
 Within one week, deliver and verify an EKS-first enterprise-feature private
-beta. The target is a real, customer-demonstrable product with bounded
+beta. The target is a real, customer-ready product with bounded
 cross-account access, Kubernetes evidence, runtime and admission signals,
 notifications, reports, operational safeguards and repeatable teardown.
 
@@ -30,7 +30,7 @@ unrestricted enterprise sale.
 | Notifications | Real SES email plus configured Slack and Teams paths with durable retries and dead-letter behavior |
 | Fleet foundation | Multiple cluster data model, customer/cluster filtering and installation/health states |
 | Reliability | Restart, retry, idempotency, timeout, upgrade/rollback, backup/restore and bounded-load evidence |
-| Demonstration | Onboard → collect → prioritize → runtime/admission/network evidence → notify → report → teardown |
+| Walkthrough | Onboard → collect → prioritize → runtime/admission/network evidence → notify → report → teardown |
 
 ## Parallel execution plan
 
@@ -42,7 +42,7 @@ unrestricted enterprise sale.
 | Day 4 | Revalidate Cilium/Hubble install and rollback | Flow ingestion, Workload 360 and attack paths | Service map and evidence timestamps | Multi-signal evidence path |
 | Day 5 | Protected GitHub release environment | Build, scan, SBOM, sign and attest images | Release manifest and admission decision | Immutable reviewed release |
 | Day 6 | Second account/cluster onboarding if available | CIS/NSA-CISA/SOC 2 report review | Backup/restore, restart and bounded-load tests | Private-beta acceptance report |
-| Day 7 | Full fresh onboarding rehearsal | Runtime, admission and network demonstrations | Notifications, executive report and teardown | Recorded end-to-end demo |
+| Day 7 | Full fresh onboarding rehearsal | Runtime, admission and network walkthroughs | Notifications, executive report and teardown | Recorded end-to-end walkthrough |
 
 ## Required user dependencies
 
@@ -90,7 +90,7 @@ control, GitHub issues or chat. Use the approved local or managed-secret path.
 
 ## Definition of done
 
-The one-week milestone is complete only when the full demonstration succeeds
+The one-week milestone is complete only when the full walkthrough succeeds
 from a fresh onboarding path, the evidence and notification receipts are
 stored, automated verification is green, the acceptance report records all
 limitations, the code is pushed through the reviewed GitHub workflow and the

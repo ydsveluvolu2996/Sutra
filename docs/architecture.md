@@ -118,7 +118,7 @@ UI hiding is not authorization. Background tasks and exports repeat the authoriz
 ### 3.4 Authentication/session requirements
 
 - Use a production OIDC/OAuth provider with MFA policy, short-lived sessions, rotating secure/HttpOnly/SameSite cookies, CSRF defenses on cookie-authenticated mutations, logout/revocation, and session/device audit.
-- The current Sites identity headers may bootstrap a demo identity but do not establish organization membership or production-grade customer authorization on their own.
+- The current Sites identity headers may bootstrap a sample identity but do not establish organization membership or production-grade customer authorization on their own.
 - Invitations are single-use, expire, bind to normalized email plus organization/customer/role, and store only a token hash.
 - Service-to-service calls never reuse browser auth. Use separate audiences, short TTLs, key rotation, request-body signatures, timestamps, nonces, and replay rejection.
 
@@ -305,7 +305,7 @@ The v1 AST supports typed comparisons, existence, set membership, CIDR containme
 
 Evaluation is deterministic over `(control_version, parameters, inventory_watermark, resource_fingerprint, relevant_relationship_fingerprints)`. Results are:
 
-- `PASS`: complete required evidence demonstrates compliance;
+- `PASS`: complete required evidence shows compliance;
 - `FAIL`: complete evidence matches a risky condition;
 - `UNKNOWN`: evidence is absent/stale/inaccessible or collection coverage is incomplete;
 - `NOT_APPLICABLE`: the control does not apply to the asset/context;
@@ -396,20 +396,20 @@ Write the hot audit event transactionally with the mutation. Chain event hashes 
 
 ## 11. From prototype to production first slice
 
-A visual prototype may demonstrate workflows with seeded data, but it is not production-complete until all P0 gates below are implemented and independently tested.
+A visual prototype may show workflows with seeded data, but it is not production-complete until all P0 gates below are implemented and independently tested.
 
-| Capability | Prototype can demonstrate | Required before production customer data |
+| Capability | Prototype can show | Required before production customer data |
 |---|---|---|
 | Identity | mock/header identity | production OIDC, session lifecycle, MFA policy, CSRF, invitations |
 | Tenant/RBAC | UI roles and filters | centralized server authorization, composite tenant predicates, two-tenant negative test suite |
 | AWS onboarding | wizard and template preview | vendor AWS collector workload identity, real least-privilege CloudFormation template, ExternalId encryption/rotation, exact-account validation |
-| Inventory | seeded/demo assets | real paginated collectors, schema validation, checkpoints, quotas, partial coverage, tombstone safety |
-| Async jobs | in-process/demo state | durable queue/workflow, leases, retries/backoff, DLQ/replay, idempotency, cancellation semantics |
+| Inventory | seeded/sample assets | real paginated collectors, schema validation, checkpoints, quotas, partial coverage, tombstone safety |
+| Async jobs | in-process/sample state | durable queue/workflow, leases, retries/backoff, DLQ/replay, idempotency, cancellation semantics |
 | CMDB | current resource cards | normalized resources/relations/tags, provenance, change model, retention, tested indexes and scale envelope |
 | Rules/findings | sample checks | immutable versioned AST, fixtures, unknown/error semantics, stable fingerprints, suppression expiry, reconciliation |
 | Inspector-like claims | configuration suggestions | must remain explicitly CSPM-only unless real package/SBOM/CVE evidence pipeline is added |
 | GuardDuty-like claims | sample alerts | not supported without the required telemetry, detection engineering, threat intel, and operations |
-| Secrets | local/demo values | managed KMS/envelope encryption, rotation, environment separation, redaction tests |
+| Secrets | local/sample values | managed KMS/envelope encryption, rotation, environment separation, redaction tests |
 | Audit | activity feed | transactional append, denied actions, hash/export integrity, restricted access, retention |
 | Storage | local D1 | backups/restore drill, migration rehearsal, R2 lifecycle/deletion, cell capacity limits |
 | Operations | happy-path status | metrics/traces/alerts, on-call and incident runbooks, SLOs, security review, dependency/image scanning |

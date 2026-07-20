@@ -4,7 +4,7 @@
 
 ## Release boundary
 
-- [ ] Local demo only
+- [ ] Local walkthrough only
 - [ ] Disposable AWS sandbox
 - [ ] Staging
 - [ ] Production candidate

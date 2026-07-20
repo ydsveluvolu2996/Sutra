@@ -1,4 +1,4 @@
-# Local Docker and PostgreSQL demo stack
+# Local Docker and PostgreSQL walkthrough stack
 
 Sutra can run as a self-contained local stack with PostgreSQL 18, the web control
 plane, and the signed fixture/live collector. Cloudflare D1 remains the hosted
@@ -36,7 +36,7 @@ pnpm docker:up
 
 `docker:down` removes containers and the private network but preserves the
 PostgreSQL, application-state, and runtime-secret volumes. A later `docker:up`
-uses the same data. Do not add `--volumes` unless the local demo data and secrets
+uses the same data. Do not add `--volumes` unless the local sample data and secrets
 are intentionally being destroyed.
 
 The application connects as `sutra_app`, which cannot create schemas or roles.
@@ -77,7 +77,7 @@ after health checks pass. Backups are permission-restricted under ignored
 `.sutra/postgres-backups`. They
 can contain customer inventory, users, audit evidence, and encrypted connection
 configuration; they must not be committed, attached to issues, or copied into a
-demo recording.
+walkthrough recording.
 
 Restore verifies both file checksums and current encryption/database-key
 fingerprints, stops the application, creates pre-restore database and state
@@ -100,7 +100,7 @@ pnpm db:postgres:reset -- --confirm-reset
 
 For development outside the application container, start only PostgreSQL,
 provide its URL to the existing ignored `.dev.vars`, then use the normal pilot
-process. Prefer the full `docker:up` path for demos because it generates and
+process. Prefer the full `docker:up` path for walkthroughs because it generates and
 wires the password automatically.
 
 The local PostgreSQL baseline is in

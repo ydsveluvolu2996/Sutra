@@ -23,7 +23,7 @@ configuration checks, the private beta now accepts bounded real evidence from
 Trivy Operator, Falco, Kyverno and Cilium/Hubble through cluster-bound ingestion
 paths. Missing telemetry is always reported as not configured, partial or stale.
 
-The verified local demo now also includes tenant-scoped Cost Explorer evidence;
+The verified local walkthrough now also includes tenant-scoped Cost Explorer evidence;
 CUR 2.0 and FOCUS 1.0 ingestion, allocation, budgets and anomaly signals; a
 versioned, scoped public API v1; and signed bidirectional Jira/ServiceNow
 synchronization. CMDB query/annotation workflows, finding-backed case management,
@@ -160,7 +160,7 @@ isolation, validation probes, or operational controls exist.
 
 **Do not deploy the customer-role template into a production AWS account, register a
 live production role ARN, or onboard production customer data until every P0 gate is
-implemented, independently tested, and approved.** Use synthetic/demo data or a
+implemented, independently tested, and approved.** Use synthetic/sample data or a
 disposable sandbox while this hold is in place.
 
 The minimum P0 exit gates are:
@@ -204,11 +204,11 @@ token from `pnpm local:bootstrap-token`, and enroll MFA. Then open
 snapshot. Setup creates permission-restricted secrets in ignored `.dev.vars` and
 durable local state under ignored `.sutra/`. Fixture mode is the default and requires
 no AWS account. See
-[`docs/local-demo.md`](docs/local-demo.md) for the reliable sales-demo flow and the
+[`docs/local-walkthrough.md`](docs/local-walkthrough.md) for the reliable sales walkthrough flow and the
 separate live AWS sandbox procedure. The `DB` D1 binding is declared in
 `.openai/hosting.json` and simulated locally by the development stack.
 
-For a laptop demo backed by a real persistent PostgreSQL database, Docker Desktop
+For a laptop walkthrough backed by a real persistent PostgreSQL database, Docker Desktop
 can run the web application, collector, and PostgreSQL together:
 
 ```bash

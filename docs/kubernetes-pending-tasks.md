@@ -1,4 +1,4 @@
-# Sutra Kubernetes Enterprise Demo — Pending Tasks
+# Sutra Kubernetes Enterprise Walkthrough — Pending Tasks
 
 This is the execution backlog for the next coding agent. Complete tasks in priority order, keep evidence of every result, and do not claim live validation until it has actually run.
 
@@ -16,7 +16,7 @@ The EKS cluster is disposable and must not be left running. AWS account: `738663
 | P0 | Validate customer onboarding | Correct external ID succeeds; missing/wrong external ID fails; tenant/account identity is persisted | Read-only customer role only; no long-lived keys |
 | P0 | Install continuous Sutra agent | Enrollment, rotating credential, heartbeat, evidence upload, revocation, and offline state are observed | Use generated short-lived enrollment token; revoke after test |
 | P0 | Install Trivy Operator | RESOLVED — the `sutra-visibility` chart now bundles and manages Trivy Operator by default (`scanner.managed=true`), so vulnerability, config, RBAC, infra, compliance, and SBOM reports reach Sutra with no separate install. `scanner.managed=false` for bring-your-own. | Never ingest Secret or ConfigMap contents. Global-secret access stays OFF always; exposed-secret detection is OFF by default and available as an opt-in (`--set trivy-operator.operator.exposedSecretScannerEnabled=true`) that ingests sanitized finding metadata only — the matched secret value is dropped at collection and rejected at persistence |
-| P0 | Test private ECR scanning | Push a non-sensitive test image, scan it, display CVEs, and remove image/repository after validation | Tag all resources `sutra-demo=true`; delete after test |
+| P0 | Test private ECR scanning | Push a non-sensitive test image, scan it, display CVEs, and remove image/repository after validation | Tag all resources `sutra-sample=true`; delete after test |
 | P0 | Install Kyverno audit mode | Policies and PolicyReports appear in Sutra with namespace/workload context | Audit only on customer-like cluster |
 | P0 | Test disposable blocking policy | A deliberately invalid test deployment is denied; valid deployment succeeds; policy is reverted | Blocking is allowed only in disposable namespace/cluster |
 | P0 | Install Falco/Falcosidekick | A deliberate test event is detected, signed/validated, stored in timeline, and routed to notification queue | Generate harmless test event; no destructive commands |
@@ -28,7 +28,7 @@ The EKS cluster is disposable and must not be left running. AWS account: `738663
 | P1 | Compliance report validation | CIS Kubernetes, NSA/CISA, and SOC 2 readiness report renders with evidence and timestamps | Label as readiness mapping, not certification. Code complete 2026-07-17: framework readiness renders in the compliance workspace and executive report; validation against live evidence remains |
 | P1 | Upgrade and multi-namespace test | Repeat collectors and integrations across multiple namespaces and a version upgrade | Capture before/after inventory and failures |
 | P2 | Agent soak test | Agent remains healthy through restarts, temporary network loss, credential rotation, and replayed evidence | Run bounded duration; monitor local resources. Complete 2026-07-17: `pnpm kubernetes:agent:soak` runs the deterministic fault-injection harness with seven asserted invariants |
-| P2 | Demo teardown automation | One command deletes EKS, node group, ECR test assets, IAM role/policies, and temporary notifications | Teardown must print remaining tagged resources. Code complete 2026-07-17: guarded teardown deletes tag-verified role stacks, disposable notification secrets, and the control-plane log group, then fails until the sutra:disposable tag query is empty; final live run remains |
+| P2 | Walkthrough teardown automation | One command deletes EKS, node group, ECR test assets, IAM role/policies, and temporary notifications | Teardown must print remaining tagged resources. Code complete 2026-07-17: guarded teardown deletes tag-verified role stacks, disposable notification secrets, and the control-plane log group, then fails until the sutra:disposable tag query is empty; final live run remains |
 | P2 | Customer-facing runbook | Screenshots, prerequisites, least-privilege policy, onboarding steps, evidence interpretation, and teardown are documented | Remove account-specific secrets and identifiers. Drafted 2026-07-18 as `docs/customer-onboarding-runbook.md` (prerequisites, least-privilege AWS/RBAC, onboarding, module install, evidence interpretation, teardown); screenshots pending a live UI capture |
 | P2 | Reliability validation | Backup/restore, load, chaos, monitoring, and recovery objectives are tested | Required before claiming production SaaS |
 
@@ -49,7 +49,7 @@ AWS validation.
    (`pnpm kubernetes:agent:soak`).
 4. Real Hubble flow collection: the agent reads a bounded tail of the Cilium
    hubble-export file and uploads aggregated flow metadata through the
-   authenticated agent route; the demo simulation is no longer the only flow
+   authenticated agent route; the simulated flow is no longer the only flow
    producer (`services/kubernetes-collector/src/hubble-flow-source.ts`).
 5. Falco signing-gateway liveness reported as a `falco-gateway` module state in
    agent heartbeats (`SUTRA_FALCO_GATEWAY_HEALTH_URL`).
@@ -64,7 +64,7 @@ AWS validation.
 Known deferred item: per-node DaemonSet agent coverage requires per-node
 enrollment; the one-time bootstrap design cannot authenticate multiple pods.
 
-## Required evidence for the demo
+## Required evidence for the walkthrough
 
 Capture these artifacts without secrets:
 
@@ -89,6 +89,6 @@ Capture these artifacts without secrets:
 - Stop and request approval for any permission expansion, paid AWS service, public exposure, destructive operation, or budget risk.
 - Always tear down temporary AWS resources after validation and record the result.
 
-## Definition of demo-ready
+## Definition of walkthrough-ready
 
-Sutra is demo-ready when the complete sequence runs against one disposable EKS customer-like account, all ten evidence artifacts above are visible in the UI/report, notifications work, no secrets are exposed, and teardown confirms no temporary paid resources remain.
+Sutra is walkthrough-ready when the complete sequence runs against one disposable EKS customer-like account, all ten evidence artifacts above are visible in the UI/report, notifications work, no secrets are exposed, and teardown confirms no temporary paid resources remain.
