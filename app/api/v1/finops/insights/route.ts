@@ -1,6 +1,7 @@
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { buildAllocation, detectAnomalies, evaluateBudgets } from "../../../../../lib/finops-insights";
+import { buildCostOptimizations } from "../../../../../lib/aws-cost-optimization";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -38,6 +39,10 @@ export async function GET(request: Request): Promise<Response> {
     }
     const lines = await repository.linesForPeriod(scope, connectionId, selected);
     const budgets = await repository.listBudgets(scope);
+    // Commitment + rightsizing candidates are derived from the ingested CUR
+    // lines only (no snapshot/CMDB here); the engine returns only those two
+    // categories when given curLines with no snapshot or resources.
+    const optimizations = buildCostOptimizations({ snapshot: null, resources: [], curLines: lines });
     return jsonResponse({
       connectionId,
       periods,
@@ -46,6 +51,12 @@ export async function GET(request: Request): Promise<Response> {
       allocation: buildAllocation(lines, dimension, dimension === "tag" ? tagKey : null),
       budgets: evaluateBudgets(lines, budgets),
       anomalies: detectAnomalies(lines),
+      commitment: {
+        recommendations: optimizations.recommendations,
+        savingsByCurrencyMicros: optimizations.summary.commitmentSavingsByCurrencyMicros,
+        limitations: optimizations.limitations,
+        disclaimer: optimizations.disclaimer,
+      },
     });
   } catch (error) {
     return errorResponse(error);

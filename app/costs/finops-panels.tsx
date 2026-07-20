@@ -24,6 +24,22 @@ interface BudgetEvaluation {
   readonly state: string;
 }
 interface Anomaly { readonly dateIso: string; readonly service: string; readonly currency: string; readonly amountMicros: string; readonly baselineMicros: string; readonly ratio: number }
+interface Optimization {
+  readonly id: string;
+  readonly category: "commitment" | "rightsizing" | string;
+  readonly severity: "low" | "medium" | "high";
+  readonly title: string;
+  readonly summary: string;
+  readonly currency?: string;
+  readonly estimatedMonthlySavingsMicros?: string | null;
+  readonly evidence: Readonly<Record<string, string | number>>;
+}
+interface Commitment {
+  readonly recommendations: readonly Optimization[];
+  readonly savingsByCurrencyMicros: Readonly<Record<string, string>>;
+  readonly limitations: readonly string[];
+  readonly disclaimer: string;
+}
 interface Insights {
   readonly periods: readonly { period: string; lineCount: number }[];
   readonly period: string | null;
@@ -31,6 +47,7 @@ interface Insights {
   readonly allocation: readonly Allocation[];
   readonly budgets: readonly BudgetEvaluation[];
   readonly anomalies: { readonly anomalies: readonly Anomaly[]; readonly disclaimer: string } | null;
+  readonly commitment?: Commitment | null;
 }
 
 function money(micros: string, currency: string): string {
@@ -203,6 +220,28 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
                 </tr>
               ))}</tbody></table>
             <p className="panel-footnote">{insights.anomalies.disclaimer}</p>
+          </>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Commitment and rightsizing">
+        <div className="panel-heading"><div><h2>Commitment &amp; rightsizing</h2><p>Derived from ingested billing lines, per currency. Commitment savings apply a disclosed assumed discount to observed sustained on-demand spend — a planning input, not a quote. Rightsizing carries no savings figure: per-resource utilization is not collected.</p></div></div>
+        {insights?.commitment == null || insights.commitment.recommendations.length === 0 ? (
+          <p className="panel-footnote">No commitment or rightsizing candidates in the selected period{insights?.commitment ? "" : " (no data)"}.</p>
+        ) : (
+          <>
+            <table><thead><tr><th>Category</th><th>Candidate</th><th>Est. monthly savings</th><th>Severity</th></tr></thead>
+              <tbody>{insights.commitment.recommendations.map((rec) => (
+                <tr key={rec.id}>
+                  <td><span className="cmdbq-chip">{rec.category}</span></td>
+                  <td>{rec.title}</td>
+                  <td>{rec.estimatedMonthlySavingsMicros != null && rec.currency
+                    ? `${money(rec.estimatedMonthlySavingsMicros, rec.currency)} (assumes ${rec.evidence.assumedDiscountPercent ?? ""}% discount)`
+                    : `No savings estimated — ${String(rec.evidence.noSavingsReason ?? "not derivable")}`}</td>
+                  <td><span className={`cmdbq-chip ${rec.severity === "high" ? "cmdbq-removed" : rec.severity === "medium" ? "cmdbq-changed" : "cmdbq-added"}`}>{rec.severity}</span></td>
+                </tr>
+              ))}</tbody></table>
+            <p className="panel-footnote">{insights.commitment.disclaimer}</p>
           </>
         )}
       </section>

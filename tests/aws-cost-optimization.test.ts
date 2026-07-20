@@ -1,8 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildCostOptimizations } from "../lib/aws-cost-optimization.ts";
+import { buildCostOptimizations, COMMITMENT_DISCOUNT_DISCLOSURE } from "../lib/aws-cost-optimization.ts";
 import type { AwsCostSnapshot } from "../lib/cost-types.ts";
+import type { NormalizedCurLine } from "../lib/finops-cur.ts";
 import type { PilotResource } from "../lib/pilot-types.ts";
+
+const units = (whole: number): string => String(whole * 1_000_000);
+
+function curLine(over: Partial<NormalizedCurLine> & { service: string; day: string; amountUnits: number }): NormalizedCurLine {
+  return {
+    lineItemId: `${over.service}-${over.day}`,
+    usageAccountId: "111122223333",
+    service: over.service,
+    chargeCategory: over.chargeCategory ?? "Usage",
+    usageStartIso: `${over.day}T00:00:00.000Z`,
+    amountMicros: units(over.amountUnits),
+    currency: over.currency ?? "USD",
+    tags: over.tags ?? {},
+  };
+}
 
 function resource(over: Partial<PilotResource> & { resourceKey: string }): PilotResource {
   return {
@@ -68,4 +84,77 @@ test("is deterministic and severity-ordered", () => {
   assert.equal(JSON.stringify(build()), JSON.stringify(build()));
   const severities = build().recommendations.map((r) => r.severity);
   assert.deepEqual([...severities].sort((a, b) => ({ high: 0, medium: 1, low: 2 })[a] - ({ high: 0, medium: 1, low: 2 })[b]), severities);
+});
+
+test("commitment: derives a Savings-Plan candidate with a discount-assumption-labeled saving", () => {
+  // EC2 on-demand, sustained across the window, varying daily so it is not also
+  // a flat rightsizing candidate. Total 600 units → 20% assumed discount = 120.
+  const curLines = [
+    curLine({ service: "AmazonEC2", day: "2026-07-01", amountUnits: 100 }),
+    curLine({ service: "AmazonEC2", day: "2026-07-02", amountUnits: 200 }),
+    curLine({ service: "AmazonEC2", day: "2026-07-03", amountUnits: 300 }),
+  ];
+  const report = buildCostOptimizations({ snapshot: null, resources: [], curLines });
+  const commitment = report.recommendations.find((r) => r.category === "commitment");
+  assert.ok(commitment);
+  assert.equal(commitment.currency, "USD");
+  assert.equal(commitment.estimatedMonthlySavingsMicros, units(120)); // 20% of 600
+  assert.equal(commitment.evidence.commitmentVehicle, "compute-savings-plan");
+  assert.equal(commitment.evidence.assumedDiscountPercent, 20);
+  assert.equal(commitment.evidence.disclosure, COMMITMENT_DISCOUNT_DISCLOSURE); // exact wording surfaced
+  assert.equal(commitment.estimatedMonthlySavings, null); // legacy whole-unit scalar unused for CUR
+  assert.equal(report.summary.commitmentSavingsByCurrencyMicros.USD, units(120));
+  assert.equal(report.summary.estimatedMonthlySavings, null); // CUR savings never fold into the scalar
+});
+
+test("commitment: emits candidate WITHOUT savings when CUR lacks family/usage-type granularity", () => {
+  const curLines = [
+    curLine({ service: "AmazonRDS", day: "2026-07-01", amountUnits: 50 }),
+    curLine({ service: "AmazonRDS", day: "2026-07-02", amountUnits: 100 }),
+    curLine({ service: "AmazonRDS", day: "2026-07-03", amountUnits: 150 }),
+  ];
+  const report = buildCostOptimizations({ snapshot: null, resources: [], curLines });
+  const commitment = report.recommendations.find((r) => r.category === "commitment");
+  assert.ok(commitment);
+  assert.equal(commitment.estimatedMonthlySavingsMicros, null); // not derivable → never invented
+  assert.equal(commitment.evidence.commitmentVehicle, "reserved-instance");
+  assert.equal(commitment.evidence.noSavingsReason, "COMMITMENT_DISCOUNT_REQUIRES_USAGE_TYPE_AND_INSTANCE_FAMILY_NOT_COLLECTED");
+  assert.deepEqual(report.summary.commitmentSavingsByCurrencyMicros, {}); // nothing summable
+});
+
+test("rightsizing: flat sustained non-committable spend is a candidate with null savings + reason", () => {
+  const curLines = [
+    curLine({ service: "AmazonS3", day: "2026-07-01", amountUnits: 5 }),
+    curLine({ service: "AmazonS3", day: "2026-07-02", amountUnits: 5 }),
+    curLine({ service: "AmazonS3", day: "2026-07-03", amountUnits: 5 }),
+  ];
+  const report = buildCostOptimizations({ snapshot: null, resources: [], curLines });
+  const rightsizing = report.recommendations.find((r) => r.category === "rightsizing");
+  assert.ok(rightsizing);
+  assert.equal(rightsizing.estimatedMonthlySavingsMicros, null); // utilization not collected
+  assert.equal(rightsizing.estimatedMonthlySavings, null);
+  assert.equal(rightsizing.evidence.noSavingsReason, "RIGHTSIZING_REQUIRES_UTILIZATION_NOT_COLLECTED");
+  assert.equal(rightsizing.evidence.pattern, "flat");
+  // S3 is not commitment-eligible → no commitment rec is produced for it.
+  assert.equal(report.recommendations.find((r) => r.category === "commitment"), undefined);
+  assert.ok(report.limitations.includes("RIGHTSIZING_SAVINGS_ALWAYS_NULL_UTILIZATION_NOT_COLLECTED"));
+  assert.ok(report.limitations.includes("COMMITMENT_SAVINGS_USE_ASSUMED_DISCOUNT_RATE_NOT_A_QUOTE"));
+});
+
+test("mixed currencies are kept per-currency and never summed", () => {
+  const curLines = [
+    curLine({ service: "AmazonEC2", day: "2026-07-01", amountUnits: 100, currency: "USD" }),
+    curLine({ service: "AmazonEC2", day: "2026-07-02", amountUnits: 200, currency: "USD" }),
+    curLine({ service: "AmazonEC2", day: "2026-07-03", amountUnits: 300, currency: "USD" }),
+    curLine({ service: "AmazonEC2", day: "2026-07-01", amountUnits: 40, currency: "EUR" }),
+    curLine({ service: "AmazonEC2", day: "2026-07-02", amountUnits: 80, currency: "EUR" }),
+    curLine({ service: "AmazonEC2", day: "2026-07-03", amountUnits: 120, currency: "EUR" }),
+  ];
+  const report = buildCostOptimizations({ snapshot: null, resources: [], curLines });
+  const byCurrency = report.summary.commitmentSavingsByCurrencyMicros;
+  assert.equal(byCurrency.USD, units(120)); // 20% of 600
+  assert.equal(byCurrency.EUR, units(48)); // 20% of 240 — a separate bucket
+  assert.equal(Object.keys(byCurrency).length, 2); // two buckets, never one merged total
+  const currencies = report.recommendations.filter((r) => r.category === "commitment").map((r) => r.currency);
+  assert.deepEqual([...currencies].sort(), ["EUR", "USD"]);
 });
