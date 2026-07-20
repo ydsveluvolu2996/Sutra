@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sutra-public-api-client"
+version = "1.0.0"
+description = "Hand-written, standard-library-only Python client for the Sutra Public API v1."
+requires-python = ">=3.8"
+dependencies = []
+license = { text = "UNLICENSED" }
+
+[tool.setuptools]
+packages = ["sutra"]
