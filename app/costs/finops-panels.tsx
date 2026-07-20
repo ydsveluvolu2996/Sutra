@@ -40,6 +40,35 @@ interface Commitment {
   readonly limitations: readonly string[];
   readonly disclaimer: string;
 }
+interface RightsizingObservation {
+  readonly cpuP95Percent: number | null;
+  readonly memoryP95Percent: number | null;
+  readonly networkP95BytesPerMinute: number | null;
+  readonly sampleWindowDays: number | null;
+}
+interface RightsizingRec {
+  readonly resourceKey: string;
+  readonly region: string | null;
+  readonly currentInstanceType: string | null;
+  readonly state: "downsize-recommended" | "insufficient-data" | "already-optimal";
+  readonly targetInstanceType: string | null;
+  readonly currency: string | null;
+  readonly estimatedMonthlySavingsMicros: string | null;
+  readonly observed: RightsizingObservation;
+  readonly memoryKnown: boolean;
+  readonly reasons: readonly string[];
+}
+interface Rightsizing {
+  readonly recommendations: readonly RightsizingRec[];
+  readonly summary: {
+    readonly evaluated: number;
+    readonly downsizeRecommended: number;
+    readonly insufficientData: number;
+    readonly savingsByCurrencyMicros: Readonly<Record<string, string>>;
+  };
+  readonly limitations: readonly string[];
+  readonly disclaimer: string;
+}
 interface Insights {
   readonly periods: readonly { period: string; lineCount: number }[];
   readonly period: string | null;
@@ -48,6 +77,7 @@ interface Insights {
   readonly budgets: readonly BudgetEvaluation[];
   readonly anomalies: { readonly anomalies: readonly Anomaly[]; readonly disclaimer: string } | null;
   readonly commitment?: Commitment | null;
+  readonly rightsizing?: Rightsizing | null;
 }
 
 function money(micros: string, currency: string): string {
@@ -242,6 +272,33 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
                 </tr>
               ))}</tbody></table>
             <p className="panel-footnote">{insights.commitment.disclaimer}</p>
+          </>
+        )}
+      </section>
+
+      <section className="panel" aria-label="Rightsizing (utilization-based)">
+        <div className="panel-heading"><div><h2>Rightsizing (utilization-based)</h2><p>Derived from collected CloudWatch utilization over the observed window. A smaller same-family instance is suggested only when utilization is confidently low; the saving is an estimate, not a quote. Where memory was not collected the recommendation is CPU/network-based — verify the workload is not memory-bound. Resources without enough data are shown as insufficient-data, never as a fabricated saving.</p></div></div>
+        {insights?.rightsizing == null || insights.rightsizing.recommendations.length === 0 ? (
+          <p className="panel-footnote">No utilization-based rightsizing recommendations for the selected period{insights?.rightsizing ? " (run a utilization collection to populate this)" : " (no data)"}.</p>
+        ) : (
+          <>
+            <table><thead><tr><th>Resource</th><th>Current → target</th><th>Observed p95 (CPU / mem)</th><th>Est. monthly saving</th><th>State</th></tr></thead>
+              <tbody>{insights.rightsizing.recommendations.map((rec) => (
+                <tr key={rec.resourceKey}>
+                  <td>{rec.resourceKey}{rec.region ? ` (${rec.region})` : ""}</td>
+                  <td>{rec.currentInstanceType ?? "—"}{rec.targetInstanceType ? ` → ${rec.targetInstanceType}` : ""}</td>
+                  <td>
+                    {rec.observed.cpuP95Percent === null ? "CPU —" : `CPU ${rec.observed.cpuP95Percent.toFixed(0)}%`}
+                    {" / "}
+                    {rec.memoryKnown && rec.observed.memoryP95Percent !== null ? `mem ${rec.observed.memoryP95Percent.toFixed(0)}%` : "mem not collected"}
+                  </td>
+                  <td>{rec.estimatedMonthlySavingsMicros != null && rec.currency
+                    ? money(rec.estimatedMonthlySavingsMicros, rec.currency)
+                    : `No saving — ${String(rec.reasons[0] ?? "not derivable")}`}</td>
+                  <td><span className={`cmdbq-chip ${rec.state === "downsize-recommended" ? "cmdbq-added" : rec.state === "insufficient-data" ? "cmdbq-changed" : ""}`}>{rec.state}</span></td>
+                </tr>
+              ))}</tbody></table>
+            <p className="panel-footnote">{insights.rightsizing.disclaimer}</p>
           </>
         )}
       </section>

@@ -97,6 +97,8 @@ export const IMPLEMENTED_READ_ACTIONS = [
   "inspector2:ListFindings",
   "ce:GetCostAndUsage",
   "ce:GetCostForecast",
+  "cloudwatch:GetMetricData",
+  "cloudwatch:ListMetrics",
 ] as const;
 export const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
@@ -137,6 +139,8 @@ const SESSION_READ_ACTIONS = [
   "inspector2:BatchGet*",
   "inspector2:List*",
   "ce:Get*",
+  "cloudwatch:GetMetricData",
+  "cloudwatch:ListMetrics",
 ] as const;
 const EXPECTED_ACCESS_DENIALS = new Set([
   "AccessDenied",

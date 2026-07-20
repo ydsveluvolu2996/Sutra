@@ -69,6 +69,8 @@ const COLLECTOR_COMMANDS = {
   LookupEventsCommand: { action: "cloudtrail:LookupEvents", scope: "customer" },
   GetCostAndUsageCommand: { action: "ce:GetCostAndUsage", scope: "customer" },
   GetCostForecastCommand: { action: "ce:GetCostForecast", scope: "customer" },
+  GetMetricDataCommand: { action: "cloudwatch:GetMetricData", scope: "customer" },
+  ListMetricsCommand: { action: "cloudwatch:ListMetrics", scope: "customer" },
 };
 
 const READ_ONLY_VERBS =

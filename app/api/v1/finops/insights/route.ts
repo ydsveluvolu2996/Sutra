@@ -2,6 +2,8 @@ import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { buildAllocation, detectAnomalies, evaluateBudgets } from "../../../../../lib/finops-insights";
 import { buildCostOptimizations } from "../../../../../lib/aws-cost-optimization";
+import { buildRightsizingRecommendations } from "../../../../../lib/finops-rightsizing";
+import { buildRightsizingInput, type CollectedUtilizationSample } from "../../../../../lib/finops-rightsizing-inputs";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -43,6 +45,14 @@ export async function GET(request: Request): Promise<Response> {
     // lines only (no snapshot/CMDB here); the engine returns only those two
     // categories when given curLines with no snapshot or resources.
     const optimizations = buildCostOptimizations({ snapshot: null, resources: [], curLines: lines });
+    // Utilization-based rightsizing over collected CloudWatch samples. Samples are
+    // supplied by the collector's CloudWatch runner; until a utilization
+    // collection is persisted for this connection the sample set is empty and the
+    // engine honestly reports no recommendations (never a fabricated saving).
+    const utilizationSamples: readonly CollectedUtilizationSample[] = [];
+    const rightsizingReport = buildRightsizingRecommendations(
+      buildRightsizingInput({ utilization: utilizationSamples, curLines: lines }),
+    );
     return jsonResponse({
       connectionId,
       periods,
@@ -56,6 +66,12 @@ export async function GET(request: Request): Promise<Response> {
         savingsByCurrencyMicros: optimizations.summary.commitmentSavingsByCurrencyMicros,
         limitations: optimizations.limitations,
         disclaimer: optimizations.disclaimer,
+      },
+      rightsizing: {
+        recommendations: rightsizingReport.recommendations,
+        summary: rightsizingReport.summary,
+        limitations: rightsizingReport.limitations,
+        disclaimer: rightsizingReport.disclaimer,
       },
     });
   } catch (error) {

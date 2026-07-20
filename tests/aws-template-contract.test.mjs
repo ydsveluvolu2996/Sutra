@@ -165,7 +165,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "f103889e75ef62dfaf8ca813aef629ddb0f31ee83d962a1bf9d75465a9c09889",
+    "8aaf7c8e840a96759b6661d95047ffc0f49a6439a5c7c2d6043fd3d653019cca",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -195,7 +195,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
     "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/" +
-      "3cb35686b47b8a6d5e37e95d4a9540c0715eed89cb583c0f2e459d684c216ca2.yaml",
+      "75d402e3b11c114b6a37aee73b15259e1c78fff5e91621c87da8c500b1fa4346.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[

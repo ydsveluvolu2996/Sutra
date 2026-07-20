@@ -76,7 +76,7 @@ test("stays quiet and honest when there is no cost snapshot and nothing actionab
   const report = buildCostOptimizations({ snapshot: null, resources: [resource({ resourceKey: "i-ok" })] });
   assert.deepEqual(report.recommendations, []);
   assert.equal(report.summary.estimatedMonthlySavings, null);
-  assert.ok(report.limitations.includes("NO_PER_RESOURCE_UTILIZATION_METRICS_COLLECTED"));
+  assert.ok(report.limitations.includes("PER_RESOURCE_UTILIZATION_COLLECTED_VIA_CLOUDWATCH_SEE_UTILIZATION_BASED_RIGHTSIZING"));
 });
 
 test("is deterministic and severity-ordered", () => {
@@ -133,11 +133,11 @@ test("rightsizing: flat sustained non-committable spend is a candidate with null
   assert.ok(rightsizing);
   assert.equal(rightsizing.estimatedMonthlySavingsMicros, null); // utilization not collected
   assert.equal(rightsizing.estimatedMonthlySavings, null);
-  assert.equal(rightsizing.evidence.noSavingsReason, "RIGHTSIZING_REQUIRES_UTILIZATION_NOT_COLLECTED");
+  assert.equal(rightsizing.evidence.noSavingsReason, "CUR_SPEND_PATTERN_CANDIDATE_SEE_UTILIZATION_BASED_RIGHTSIZING_FOR_ESTIMATED_SAVINGS");
   assert.equal(rightsizing.evidence.pattern, "flat");
   // S3 is not commitment-eligible → no commitment rec is produced for it.
   assert.equal(report.recommendations.find((r) => r.category === "commitment"), undefined);
-  assert.ok(report.limitations.includes("RIGHTSIZING_SAVINGS_ALWAYS_NULL_UTILIZATION_NOT_COLLECTED"));
+  assert.ok(report.limitations.includes("CUR_PATTERN_RIGHTSIZING_CANDIDATES_CARRY_NO_SAVING_USE_UTILIZATION_BASED_RIGHTSIZING_FOR_ESTIMATES"));
   assert.ok(report.limitations.includes("COMMITMENT_SAVINGS_USE_ASSUMED_DISCOUNT_RATE_NOT_A_QUOTE"));
 });
 

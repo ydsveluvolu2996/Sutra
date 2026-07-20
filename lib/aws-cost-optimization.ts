@@ -68,8 +68,9 @@ export interface CostOptimizationReport {
 const DISCLAIMER =
   "Cost optimizations are derived from the collected Cost Explorer snapshot, " +
   "CMDB inventory, and ingested CUR/FOCUS billing lines only. Savings are shown " +
-  "only when derivable; right-sizing that needs per-resource utilization " +
-  "(CloudWatch) is surfaced as a candidate without an invented dollar figure. " +
+  "only when derivable. Right-sizing here is a CUR spend-pattern candidate " +
+  "without a dollar figure; utilization-based right-sizing (CloudWatch) provides " +
+  "an estimated saving separately. " +
   "Commitment savings apply a disclosed assumed discount rate to observed " +
   "sustained on-demand spend and are a planning input, not a quote. Review each " +
   "item against the workload before acting.";
@@ -89,10 +90,11 @@ export const COMMITMENT_DISCOUNT_DISCLOSURE =
   "purchasing any commitment.";
 
 const LIMITATIONS: readonly string[] = [
-  "NO_PER_RESOURCE_UTILIZATION_METRICS_COLLECTED",
+  "PER_RESOURCE_UTILIZATION_COLLECTED_VIA_CLOUDWATCH_SEE_UTILIZATION_BASED_RIGHTSIZING",
   "SAVINGS_ESTIMATED_ONLY_WHEN_DERIVABLE_FROM_COLLECTED_DATA",
   "COMMITMENT_SAVINGS_USE_ASSUMED_DISCOUNT_RATE_NOT_A_QUOTE",
-  "RIGHTSIZING_SAVINGS_ALWAYS_NULL_UTILIZATION_NOT_COLLECTED",
+  "CUR_PATTERN_RIGHTSIZING_CANDIDATES_CARRY_NO_SAVING_USE_UTILIZATION_BASED_RIGHTSIZING_FOR_ESTIMATES",
+  "MEMORY_UTILIZATION_MAY_BE_UNKNOWN_AND_IS_DISCLOSED_BY_UTILIZATION_BASED_RIGHTSIZING",
 ];
 
 // Steady-state / commitment tuning. All thresholds are documented and applied
@@ -106,7 +108,8 @@ const RIGHTSIZE_FLAT_RATIO_BP = 15_000; // maxDaily <= 1.5x minDaily counts as "
 
 const REASON_COMMITMENT_GRANULARITY =
   "COMMITMENT_DISCOUNT_REQUIRES_USAGE_TYPE_AND_INSTANCE_FAMILY_NOT_COLLECTED";
-const REASON_RIGHTSIZE_UTILIZATION = "RIGHTSIZING_REQUIRES_UTILIZATION_NOT_COLLECTED";
+const REASON_RIGHTSIZE_UTILIZATION =
+  "CUR_SPEND_PATTERN_CANDIDATE_SEE_UTILIZATION_BASED_RIGHTSIZING_FOR_ESTIMATED_SAVINGS";
 
 // Cost-allocation tags an org typically needs for chargeback/showback.
 const ALLOCATION_TAGS = ["Environment", "environment", "Owner", "owner", "CostCenter", "cost-center", "Team", "team"];
@@ -284,7 +287,7 @@ function buildCommitmentAndRightsizing(curLines: readonly NormalizedCurLine[]): 
             estimatedMonthlySavings: null,
             estimatedMonthlySavingsMicros: null, // utilization not collected → never a dollar figure
             title: `${usage.service}: ${flat ? "flat" : "low-proportion"} sustained cost is a rightsizing candidate (${currency})`,
-            summary: "A flat, always-on or low-proportion spend pattern can indicate over-provisioning. Per-resource utilization (CloudWatch) is not collected, so this is an investigation prompt — no savings is claimed.",
+            summary: "A flat, always-on or low-proportion spend pattern can indicate over-provisioning. This is a CUR spend-pattern candidate — no savings is claimed here; see utilization-based rightsizing (CloudWatch) for an estimated dollar saving.",
             evidence: {
               service: usage.service,
               currency,

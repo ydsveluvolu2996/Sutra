@@ -135,6 +135,8 @@ Resources:
                   - inspector2:ListFindings
                   - ce:GetCostAndUsage
                   - ce:GetCostForecast
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
                   - iam:GetRole
                   - iam:ListRolePolicies
                   - iam:GetRolePolicy
@@ -183,6 +185,8 @@ Resources:
                   - inspector2:ListFindings
                   - ce:GetCostAndUsage
                   - ce:GetCostForecast
+                  - cloudwatch:GetMetricData
+                  - cloudwatch:ListMetrics
                 Resource: '*'
               - Sid: TrustContractAttestation
                 Effect: Allow

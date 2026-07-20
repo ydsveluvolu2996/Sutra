@@ -28,6 +28,7 @@ minimumReleaseAgeExclude:
   - '@aws-sdk/xml-builder@3.972.35'
   - '@aws-sdk/checksums@3.1000.17'
   - '@aws-sdk/client-cloudtrail@3.1087.0'
+  - '@aws-sdk/client-cloudwatch@3.1087.0'
   - '@aws-sdk/client-ec2@3.1087.0'
   - '@aws-sdk/client-guardduty@3.1087.0'
   - '@aws-sdk/client-iam@3.1087.0'

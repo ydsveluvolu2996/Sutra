@@ -77,7 +77,7 @@ const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|security-events|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -712,6 +712,9 @@ async function route(
     if (action === "costs") {
       return { status: 200, body: await collectConnectionCosts(context, job) };
     }
+    if (action === "utilization") {
+      return { status: 200, body: await collectConnectionUtilization(context, job) };
+    }
     return { status: 200, body: await syncConnection(context, job) };
   }
 
@@ -763,6 +766,110 @@ async function collectConnectionCosts(context: ServerContext, job: ScopedJob): P
     return collectAwsCosts({
       accountId: session.accountId,
       partition: session.partition,
+      credentials: session.credentials,
+      now: context.now,
+    });
+  } finally {
+    context.activeConnectionOperations.delete(operationKey);
+  }
+}
+
+const UTILIZATION_INSTANCE_LIMIT = 500;
+const UTILIZATION_EC2_PAGES = 20;
+
+function ec2InstancesFromResources(
+  resources: readonly NormalizedAwsResource[] | readonly PilotResource[],
+): { instanceId: string; region: string; instanceType: string | null; resourceKey: string }[] {
+  const instances: { instanceId: string; region: string; instanceType: string | null; resourceKey: string }[] = [];
+  for (const resource of resources as readonly PilotResource[]) {
+    if (!/ec2.*instance/iu.test(resource.resourceType)) continue;
+    const instanceType = resource.configuration?.instanceType;
+    instances.push({
+      instanceId: resource.nativeId,
+      region: resource.region,
+      instanceType: typeof instanceType === "string" && instanceType.length > 0 ? instanceType : null,
+      resourceKey: resource.resourceKey,
+    });
+  }
+  return instances;
+}
+
+/**
+ * Utilization collection mirrors the cost runner: fixture mode returns
+ * representative CloudWatch samples (no AWS calls); live mode assumes the
+ * validated session and issues bounded read-only cloudwatch:GetMetricData /
+ * cloudwatch:ListMetrics reads for the account's EC2 instances.
+ */
+async function collectConnectionUtilization(context: ServerContext, job: ScopedJob): Promise<unknown> {
+  const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
+  if (
+    context.activeConnectionOperations.has(operationKey) ||
+    context.lifecycleMutations.has(operationKey)
+  ) {
+    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
+  }
+  context.activeConnectionOperations.add(operationKey);
+  try {
+    const connection = await requireCurrentActiveConnection(context.registry, job);
+    const { fixtureEc2Utilization, collectEc2Utilization } = await import("./cloudwatch-runner.js");
+    if (context.mode !== "live") {
+      const snapshot = buildFixtureSnapshot({ jobId: job.jobId, connection, now: context.now() });
+      return fixtureEc2Utilization({
+        accountId: connection.expectedAccountId,
+        instances: ec2InstancesFromResources(snapshot.resources).slice(0, UTILIZATION_INSTANCE_LIMIT),
+        now: context.now,
+      });
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    const session = await broker.assumeValidatedSession(
+      { tenantId: job.tenantId },
+      job.connectionId,
+      job.jobId,
+    );
+    const { AwsEnabledRegionSelector, AwsSdkInventoryClientFactory } = await import("./inventory-runner.js");
+    const regionSelector = new AwsEnabledRegionSelector({
+      controlRegion: partitionControlRegion(connection.partition),
+      requestedRegions: connection.enabledRegions,
+    });
+    const regions = await regionSelector.selectRegions({
+      tenantId: job.tenantId,
+      connectionId: job.connectionId,
+      accountId: session.accountId,
+      partition: session.partition,
+      credentials: session.credentials,
+    });
+    const clients = new AwsSdkInventoryClientFactory();
+    const instances: { instanceId: string; region: string; instanceType: string | null; resourceKey: string }[] = [];
+    for (const region of regions) {
+      const ec2 = clients.ec2(region, session.credentials);
+      let token: string | undefined;
+      for (let page = 0; page < UTILIZATION_EC2_PAGES; page += 1) {
+        const output = await ec2.describeInstances(
+          token === undefined ? { MaxResults: 1000 } : { MaxResults: 1000, NextToken: token },
+        );
+        for (const reservation of output.Reservations ?? []) {
+          for (const instance of reservation.Instances ?? []) {
+            if (instance.InstanceId === undefined) continue;
+            instances.push({
+              instanceId: instance.InstanceId,
+              region,
+              instanceType: instance.InstanceType ?? null,
+              resourceKey: instance.InstanceId,
+            });
+          }
+        }
+        token = output.NextToken;
+        if (token === undefined || token.length === 0 || instances.length >= UTILIZATION_INSTANCE_LIMIT) break;
+      }
+      if (instances.length >= UTILIZATION_INSTANCE_LIMIT) break;
+    }
+    return collectEc2Utilization({
+      accountId: session.accountId,
+      instances: instances.slice(0, UTILIZATION_INSTANCE_LIMIT),
       credentials: session.credentials,
       now: context.now,
     });
