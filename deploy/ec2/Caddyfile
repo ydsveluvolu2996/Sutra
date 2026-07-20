@@ -1,0 +1,72 @@
+# Sutra edge reverse proxy.
+#
+# Environment (injected by the caddy service in compose.prod.yaml):
+#   {$SUTRA_DOMAIN}      apex domain, e.g. sutracmdb.com  (default below)
+#   {$SUTRA_ACME_EMAIL}  Let's Encrypt registration/expiry contact
+#
+# Behaviour:
+#   * Auto-HTTPS via Let's Encrypt (HTTP-01 + TLS-ALPN). The ACME challenge on
+#     :80 is handled by Caddy internally before any site route runs.
+#   * reverse_proxy -> app:3000. The upstream Host header is rewritten to
+#     127.0.0.1 on purpose: the Sutra app runs in its single-tenant "local"
+#     deployment mode, whose boundary (lib/deployment-security.ts) serves the
+#     full product only for a loopback Host. Preserving the loopback identity to
+#     the app is what lets a public domain be served WITHOUT weakening any auth
+#     or security header (all app-owned CSP/headers are still emitted). See
+#     README.md -> "Deployment boundary".
+#   * When app:3000 is stopped / down / unhealthy, handle_errors serves the
+#     static maintenance page with HTTP 503 instead of a raw 502/504.
+{
+	email {$SUTRA_ACME_EMAIL}
+	# Redirect any bare error to our own handler; keep the admin API local only.
+	admin off
+}
+
+{$SUTRA_DOMAIN:sutracmdb.com}, www.{$SUTRA_DOMAIN:sutracmdb.com} {
+	encode zstd gzip
+
+	# Edge HSTS. App-owned security headers (CSP, X-Frame-Options, etc.) still
+	# flow through untouched from the origin; this only adds transport pinning.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		-Server
+	}
+
+	# Automatic maintenance page. Triggered by handle_errors whenever the
+	# reverse_proxy below cannot get a usable response from the app (connection
+	# refused when stopped, or a health-gated failure). Served as 503 so crawlers
+	# and monitors treat it as a temporary outage, not a hard error.
+	handle_errors {
+		root * /srv/maintenance
+		rewrite * /maintenance.html
+		file_server {
+			status 503
+		}
+		header {
+			Content-Type "text/html; charset=utf-8"
+			Cache-Control "no-store"
+			Retry-After "120"
+		}
+	}
+
+	reverse_proxy app:3000 {
+		# Serve the app under its loopback deployment identity (see note above).
+		# Caddy still forwards the real public host as X-Forwarded-Host by default.
+		header_up Host 127.0.0.1
+
+		# Active health gating: if the app reports unhealthy, mark the upstream
+		# down so requests fall through to handle_errors (the maintenance page).
+		# The probe carries a loopback Host so the app's deployment boundary
+		# allows /api/healthz just like the container healthcheck does.
+		health_uri /api/healthz
+		health_interval 10s
+		health_timeout 5s
+		health_status 2xx
+		health_headers {
+			Host 127.0.0.1
+		}
+
+		# Fail fast to the maintenance page rather than hanging on a dead upstream.
+		lb_try_duration 3s
+	}
+}

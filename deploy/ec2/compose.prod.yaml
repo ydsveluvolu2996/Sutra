@@ -1,0 +1,169 @@
+# Sutra single-box production-ish stack for a fresh Ubuntu EC2 instance.
+#
+# Derived from the repository root `compose.yaml` (the local pilot). Differences:
+#   * `app` is NOT published to the host; it is reachable only on the internal
+#     compose network. A `caddy` reverse proxy terminates TLS and publishes 80/443.
+#   * `postgres` is not published to the host either (internal network only).
+#   * A `caddy` service serves auto-HTTPS and an automatic maintenance page (503)
+#     whenever `app` is stopped/down/unhealthy.
+#   * `notification-worker` is profile-gated ("notifications"); enable it only when
+#     AWS Secrets Manager + SES are configured, otherwise it flaps to unready.
+#
+# Relative paths resolve from this file's directory (deploy/ec2/) because that is
+# the default compose project directory when invoked as
+#   docker compose -f deploy/ec2/compose.prod.yaml ...
+# Hence the `../../` prefixes that point back at the repository root.
+#
+# Secrets (SUTRA_POSTGRES_*/SUTRA_JOB_RUNNER_TOKEN) come from ../../.sutra/docker.env,
+# operator settings (SUTRA_DOMAIN/SUTRA_ACME_EMAIL/SUTRA_CONTACT_*) come from
+# ./.env.ec2. See bootstrap.sh / README.md for the exact --env-file ordering.
+
+name: sutra-prod
+
+services:
+  postgres:
+    image: postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15
+    environment:
+      POSTGRES_DB: sutra
+      POSTGRES_USER: sutra_owner
+      POSTGRES_PASSWORD: ${SUTRA_POSTGRES_OWNER_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored owner secret in .sutra/docker.env}
+      SUTRA_POSTGRES_APP_PASSWORD: ${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}
+    # No host port: the database is reachable only on the internal compose network.
+    volumes:
+      - sutra_postgres_data:/var/lib/postgresql
+      - ../../docker/postgres-init.sh:/docker-entrypoint-initdb.d/010-sutra-runtime-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username sutra_owner --dbname sutra"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  migrate:
+    image: sutra-local-app
+    entrypoint: ["node", "scripts/postgres-migrate.mjs"]
+    environment:
+      SUTRA_MIGRATOR_DATABASE_URL: postgresql://sutra_owner:${SUTRA_POSTGRES_OWNER_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored owner secret in .sutra/docker.env}@postgres:5432/sutra
+      SUTRA_POSTGRES_RUNTIME_ROLE: sutra_app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+
+  app:
+    image: sutra-local-app
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}@postgres:5432/sutra
+      SUTRA_WEB_HOST: 0.0.0.0
+      SUTRA_NOTIFICATION_WORKER_CONFIGURED: ${SUTRA_NOTIFICATION_WORKER_CONFIGURED:-false}
+      SUTRA_JOB_RUNNER_TOKEN: ${SUTRA_JOB_RUNNER_TOKEN}
+      SUTRA_JOB_RUNNER_INTERVAL_MS: ${SUTRA_JOB_RUNNER_INTERVAL_MS:-15000}
+      SUTRA_CONTACT_RECIPIENT: ${SUTRA_CONTACT_RECIPIENT:-}
+      SUTRA_CONTACT_FROM: ${SUTRA_CONTACT_FROM:-}
+      SUTRA_CONTACT_PROVIDER: ${SUTRA_CONTACT_PROVIDER:-}
+      SUTRA_CONTACT_WEBHOOK_URL: ${SUTRA_CONTACT_WEBHOOK_URL:-}
+      SUTRA_CONTACT_EMAIL_API_URL: ${SUTRA_CONTACT_EMAIL_API_URL:-}
+      SUTRA_CONTACT_EMAIL_API_KEY: ${SUTRA_CONTACT_EMAIL_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # No host port: only Caddy (on the internal network) may reach the app.
+    expose:
+      - "3000"
+    volumes:
+      - sutra_runtime_config:/app/runtime
+      - sutra_application_data:/app/.sutra
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:3000/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on:
+      - app
+    environment:
+      SUTRA_DOMAIN: ${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2 (e.g. sutracmdb.com)}
+      SUTRA_ACME_EMAIL: ${SUTRA_ACME_EMAIL:?Set SUTRA_ACME_EMAIL in deploy/ec2/.env.ec2 for Let's Encrypt}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./maintenance:/srv/maintenance:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  notification-worker:
+    profiles: ["notifications"]
+    image: sutra-notification-worker
+    build:
+      context: ../..
+      dockerfile: services/notification-worker/Dockerfile
+    environment:
+      DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}@postgres:5432/sutra
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      SUTRA_NOTIFICATION_HEALTH_PORT: "8081"
+      SUTRA_NOTIFICATION_POLL_INTERVAL_MS: ${SUTRA_NOTIFICATION_POLL_INTERVAL_MS:-1000}
+      SUTRA_NOTIFICATION_SECRET_PREFIX: ${SUTRA_NOTIFICATION_SECRET_PREFIX:-sutra/notifications/}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:8081/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: "1.0"
+    restart: unless-stopped
+
+volumes:
+  sutra_postgres_data:
+  sutra_runtime_config:
+  sutra_application_data:
+  caddy_data:
+  caddy_config:

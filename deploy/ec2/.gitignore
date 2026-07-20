@@ -1,0 +1,6 @@
+# Operator secrets for this box — never commit.
+.env.ec2
+
+# ...but the template MUST be tracked. The repo-root .gitignore ignores `.env*`
+# and only negates exactly `.env.example`, so re-include our template here.
+!.env.ec2.example
