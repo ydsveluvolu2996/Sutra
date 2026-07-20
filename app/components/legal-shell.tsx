@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 
 import CookieConsent, { openCookieSettings } from "./cookie-consent";
+import ThemeToggle from "./theme-toggle";
 
 /* ================================================================== *
  * Shared standalone shell for the public legal / trust pages
@@ -47,6 +48,8 @@ export default function LegalShell({
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
         <div className="head-actions">
+          <ThemeToggle />
+          <Link className="signin" href="/about">About</Link>
           <Link className="signin" href="/login">Sign in</Link>
           <Link className="btn" href="/">Back to home <Arrow /></Link>
         </div>
@@ -70,6 +73,7 @@ export default function LegalShell({
           </Link>
           <nav aria-label="Legal">
             <Link href="/">Back to home</Link>
+            <Link href="/about">About</Link>
             <Link href="/status">Status</Link>
             <Link href="/privacy">Privacy Policy</Link>
             <Link href="/terms">Terms of Use</Link>

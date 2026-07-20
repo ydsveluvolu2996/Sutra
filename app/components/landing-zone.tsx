@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import CookieConsent, { openCookieSettings } from "./cookie-consent";
+import ThemeToggle, { THEME_CHANGED_EVENT } from "./theme-toggle";
 
 /* ================================================================== *
  * Sutra landing zone — cinematic dark page with a flowing bokeh
@@ -460,17 +461,19 @@ export default function LandingZone() {
     const cv = root.querySelector<HTMLCanvasElement>("#lz-bg");
     let raf = 0;
     let onResize: (() => void) | null = null;
+    let onThemeChange: (() => void) | null = null;
     if (cv) {
       const ctx = cv.getContext("2d")!;
       let W = 0, H = 0, DPR = 1;
+      let alphaMul = 1;
       let dots: Array<{ x: number; y: number; size: number; a: number; vx: number; vy: number; tw: number; tws: number; sway: number; sp: HTMLCanvasElement }> = [];
-      const sprite = (rgb: string) => {
+      const sprite = (rgb: string, peak: number) => {
         const s = document.createElement("canvas");
         s.width = s.height = 64;
         const c2 = s.getContext("2d")!;
         const g = c2.createRadialGradient(32, 32, 0, 32, 32, 32);
-        g.addColorStop(0, "rgba(" + rgb + ",.95)");
-        g.addColorStop(0.35, "rgba(" + rgb + ",.4)");
+        g.addColorStop(0, "rgba(" + rgb + "," + peak + ")");
+        g.addColorStop(0.35, "rgba(" + rgb + "," + peak * 0.42 + ")");
         g.addColorStop(1, "rgba(" + rgb + ",0)");
         c2.fillStyle = g;
         c2.fillRect(0, 0, 64, 64);
@@ -483,9 +486,19 @@ export default function LandingZone() {
         H = cv.height = window.innerHeight * DPR;
         cv.style.width = window.innerWidth + "px";
         cv.style.height = window.innerHeight + "px";
-        spCyan = sprite("56,224,236");
-        spViolet = sprite("150,140,246");
-        spBlue = sprite("90,150,250");
+        // Read the active theme so the field reads right on both grounds:
+        // bright dots on the dark brand default, muted cool dots on light.
+        const light = document.documentElement.dataset.theme === "light";
+        alphaMul = light ? 0.5 : 1;
+        if (light) {
+          spCyan = sprite("36,150,178", 0.85);
+          spViolet = sprite("120,96,214", 0.85);
+          spBlue = sprite("64,110,214", 0.85);
+        } else {
+          spCyan = sprite("56,224,236", 0.95);
+          spViolet = sprite("150,140,246", 0.95);
+          spBlue = sprite("90,150,250", 0.95);
+        }
         const n = Math.min(150, Math.round((window.innerWidth * window.innerHeight) / 12500));
         dots = Array.from({ length: n }, () => {
           const r = Math.random();
@@ -509,7 +522,7 @@ export default function LandingZone() {
           d.tw += d.tws;
           if (d.y < -d.size) { d.y = H + d.size; d.x = Math.random() * W; }
           if (d.x < -d.size) d.x = W + d.size; else if (d.x > W + d.size) d.x = -d.size;
-          ctx.globalAlpha = d.a * (0.6 + 0.4 * Math.sin(d.tw));
+          ctx.globalAlpha = d.a * (0.6 + 0.4 * Math.sin(d.tw)) * alphaMul;
           ctx.drawImage(d.sp, d.x - d.size / 2, d.y - d.size / 2, d.size, d.size);
         }
         ctx.globalAlpha = 1;
@@ -518,6 +531,12 @@ export default function LandingZone() {
       resize();
       onResize = resize;
       window.addEventListener("resize", resize);
+      // Recolor the dot field the instant the theme flips.
+      onThemeChange = () => {
+        resize();
+        if (reduce) { draw(); cancelAnimationFrame(raf); }
+      };
+      window.addEventListener(THEME_CHANGED_EVENT, onThemeChange);
       if (reduce) { draw(); cancelAnimationFrame(raf); } else { draw(); }
     }
 
@@ -573,6 +592,7 @@ export default function LandingZone() {
       spy.disconnect();
       if (raf) cancelAnimationFrame(raf);
       if (onResize) window.removeEventListener("resize", onResize);
+      if (onThemeChange) window.removeEventListener(THEME_CHANGED_EVENT, onThemeChange);
       io.disconnect();
       cio.disconnect();
     };
@@ -592,6 +612,8 @@ export default function LandingZone() {
           <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#pricing">Pricing</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a><a href="#proof">Trust</a>
         </nav>
         <div className="head-actions">
+          <ThemeToggle />
+          <Link className="signin" href="/about">About</Link>
           <Link className="signin" href="/login">Sign in</Link>
           <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
         </div>
@@ -818,9 +840,9 @@ export default function LandingZone() {
               <a href="#trust">Trust model</a>
             </div>
             <div className="ftcol"><strong>Company</strong>
+              <Link href="/about">About</Link>
               <Link href="/login">Sign in</Link>
               <Link href="/contact">Book a walkthrough</Link>
-              <a href="#capabilities">Capabilities</a>
               <a href="#why">Why Sutra</a>
             </div>
           </div>

@@ -129,23 +129,46 @@ export default function CookieConsent() {
   return (
     <>
       {showBanner ? (
-        <div className="lx-cookie" role="region" aria-label="Cookie consent">
-          <div className="lx-cookie-msg">
-            <strong>We use cookies to enhance your experience.</strong>
+        <div className="lx-cookie lx-cookie-playful" role="region" aria-label="Cookie consent">
+          <span className="lx-cookie-art" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none">
+              <defs>
+                <linearGradient id="lx-ck-grad" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0" stopColor="#22d3ee" />
+                  <stop offset=".5" stopColor="#3b82f6" />
+                  <stop offset="1" stopColor="#8b5cf6" />
+                </linearGradient>
+              </defs>
+              {/* back cookie */}
+              <circle cx="23" cy="39" r="16" fill="rgba(59,130,246,.16)" stroke="url(#lx-ck-grad)" strokeWidth="2" />
+              <circle cx="18" cy="35" r="2" fill="#8b5cf6" />
+              <circle cx="27" cy="43" r="2.2" fill="#22d3ee" />
+              <circle cx="24" cy="31" r="1.6" fill="#3b82f6" />
+              <circle cx="16" cy="44" r="1.5" fill="#22d3ee" />
+              {/* front cookie with a small smiley */}
+              <circle cx="43" cy="25" r="14" fill="rgba(139,92,246,.20)" stroke="url(#lx-ck-grad)" strokeWidth="2" />
+              <circle cx="38" cy="21" r="1.7" fill="#22d3ee" />
+              <circle cx="48" cy="21" r="1.7" fill="#22d3ee" />
+              <path d="M38 28c2.4 2.6 7.6 2.6 10 0" stroke="#3b82f6" strokeWidth="2" strokeLinecap="round" />
+              <circle cx="46" cy="32" r="1.6" fill="#8b5cf6" />
+            </svg>
+          </span>
+          <div className="lx-cookie-copy">
+            <strong>We use cookies</strong>
             <span>
-              Essential cookies keep Sutra secure and working. Optional analytics stay off until you turn
-              them on. See our <a href="/privacy">Privacy Policy</a>.
+              to give you a better experience. By using our website you agree to{" "}
+              <a href="/privacy">our policies</a>.
             </span>
+            <button type="button" className="lx-cookie-manage" onClick={() => openCookieSettings()}>
+              Manage preferences
+            </button>
           </div>
           <div className="lx-cookie-actions">
-            <button type="button" className="lx-cookie-btn ghost" onClick={() => setShowModal(true)}>
-              Cookie settings
+            <button type="button" className="lx-cookie-btn gold" onClick={() => decide(true)}>
+              Sweet!
             </button>
             <button type="button" className="lx-cookie-btn ghost" onClick={() => decide(false)}>
-              Reject all
-            </button>
-            <button type="button" className="lx-cookie-btn solid" onClick={() => decide(true)}>
-              Accept all
+              Sorry, I&apos;m on a diet
             </button>
           </div>
         </div>

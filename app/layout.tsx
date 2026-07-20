@@ -34,9 +34,17 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
+/* Applied before first paint so the public marketing pages never flash the
+ * wrong theme. Default is dark (the brand default); a stored choice wins.
+ * The attribute is read by the `.lz` light-theme CSS overrides. */
+const THEME_BOOTSTRAP = `(function(){try{var t=localStorage.getItem("sutra.theme");document.documentElement.dataset.theme=(t==="light"||t==="dark")?t:"dark";}catch(e){document.documentElement.dataset.theme="dark";}})();`;
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>
   );
