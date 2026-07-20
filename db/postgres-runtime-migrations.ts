@@ -32,6 +32,7 @@ import postgresContactSubmissionsSql from "../postgres/migrations/0030_contact_s
 import postgresFinopsUnitCountsSql from "../postgres/migrations/0031_finops_unit_counts.sql?raw";
 import postgresFinopsScheduledReportsSql from "../postgres/migrations/0032_finops_scheduled_reports.sql?raw";
 import postgresKubernetesNodeSideArraySql from "../postgres/migrations/0033_kubernetes_node_side_array.sql?raw";
+import postgresSavedReportsSql from "../postgres/migrations/0034_saved_reports.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -68,6 +69,7 @@ const migrations = [
   { id: "0031_finops_unit_counts", source: postgresFinopsUnitCountsSql },
   { id: "0032_finops_scheduled_reports", source: postgresFinopsScheduledReportsSql },
   { id: "0033_kubernetes_node_side_array", source: postgresKubernetesNodeSideArraySql },
+  { id: "0034_saved_reports", source: postgresSavedReportsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

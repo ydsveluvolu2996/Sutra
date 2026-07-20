@@ -22,6 +22,7 @@ export type NavKey =
   | "compliance"
   | "compliance_frameworks"
   | "reports"
+  | "report_builder"
   | "controls"
   | "roadmap"
   | "operations"
@@ -169,6 +170,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "compliance_frameworks", label: "Compliance frameworks", href: "/compliance-frameworks", icon: "CF", capabilities: readConnection },
       { key: "controls", label: "Control library", href: "/controls", icon: "CL", capabilities: readWorkspace },
       { key: "reports", label: "Executive reports", href: "/reports", icon: "ER", capabilities: readConnection },
+      { key: "report_builder", label: "Report builder", href: "/reports/builder", icon: "RB", capabilities: readConnection },
     ],
   },
   {
