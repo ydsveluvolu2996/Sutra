@@ -18,6 +18,7 @@ export type NavKey =
   | "cases_routing"
   | "cases"
   | "costs"
+  | "showback"
   | "compliance"
   | "compliance_frameworks"
   | "reports"
@@ -175,6 +176,7 @@ export const navGroups: readonly NavGroup[] = [
     label: "FinOps",
     items: [
       { key: "costs", label: "AWS costs", href: "/costs", icon: "$", capabilities: readConnection },
+      { key: "showback", label: "Customer showback", href: "/costs/showback", icon: "$", capabilities: readConnection },
     ],
   },
   {

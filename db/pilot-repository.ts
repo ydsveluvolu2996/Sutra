@@ -517,6 +517,33 @@ export function getLatestConnection(): Promise<PilotConnection | null> {
   return getLatestConnectionForOrg(LOCAL_ORG_ID);
 }
 
+/**
+ * Read-only, org-scoped listing of every AWS connection in an organization,
+ * across all of its customers. This is the org/MSP-level counterpart to
+ * {@link getConnectionForOrg} (single connection) and is used by the
+ * cross-customer showback view, which aggregates already-persisted billing
+ * lines grouped by customer. Every lifecycle status is returned: billing lines
+ * survive a connection being disabled or offboarded, so a showback over
+ * historical spend must still see those connections. Tenant-scoped by org_id;
+ * rows are mapped through the same {@link toPilotConnection} mapper the
+ * single-connection getters use.
+ */
+export async function listConnectionsForOrg(orgId: string): Promise<readonly PilotConnection[]> {
+  const db = await readyDatabase();
+  const rows = await db.prepare(
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
+            c.fixture_id, c.fixture_version, c.partition,
+            c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
+            c.permission_pack_version, c.last_validated_at,
+            c.last_successful_sync_at, c.created_at, c.updated_at
+       FROM aws_connections c
+       JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
+      WHERE c.org_id = ?
+      ORDER BY c.created_at DESC, c.id ASC`,
+  ).bind(orgId).all<ConnectionRow>();
+  return (rows.results ?? []).map(toPilotConnection);
+}
+
 export function commitVerifiedConnectionRole(
   input: CommitVerifiedConnectionRoleInput,
 ): Promise<PilotConnection> {
