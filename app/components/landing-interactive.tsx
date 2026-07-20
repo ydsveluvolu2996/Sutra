@@ -409,7 +409,7 @@ export function CapabilityExplorer(): ReactNode {
               <div className="cap-ex-body">
                 <p>{c.blurb}</p>
                 <ul>{c.points.map((p) => <li key={p}>{p}</li>)}</ul>
-                <Link href="/dashboard">Explore in the live demo →</Link>
+                <Link href="/contact">Book a walkthrough →</Link>
               </div>
             ) : null}
           </div>
@@ -618,7 +618,7 @@ export function HeroDashboard(): ReactNode {
   const [view, setView] = useState<HeroView>("overview");
   return (
     <div className="hero-product hero-live" aria-label="Sutra portfolio dashboard — interactive preview">
-      <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.sutra.cloud</span><b>LIVE DEMO</b></div>
+      <div className="product-window-bar"><div><i /><i /><i /></div><span>portfolio.sutra.cloud</span><b>LIVE</b></div>
       <div className="product-window-body">
         <aside className="product-rail">
           <span className="product-logo">P</span>

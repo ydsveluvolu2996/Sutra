@@ -117,7 +117,7 @@ export function ComplianceExceptions({
         <span className="status-pill status-medium">MFA reviewed</span>
       </div>
       <p className={styles.intro}>An exception affects a result only after approval, only for its exact finding fingerprint, and only until its expiry. It never becomes a pass.</p>
-      {payload?.permissions.localSingleAdminReview ? <div className={styles.notice}><strong>Local demo governance:</strong> this workspace has one active administrator, so self-review is recorded explicitly in the audit trail. Add a second administrator before production use.</div> : null}
+      {payload?.permissions.localSingleAdminReview ? <div className={styles.notice}><strong>Local sample governance:</strong> this workspace has one active administrator, so self-review is recorded explicitly in the audit trail. Add a second administrator before production use.</div> : null}
       {error ? <div className="page-alert page-alert-error" role="alert"><strong>Exception workflow needs attention</strong><span>{error}</span></div> : null}
       {payload?.permissions.canRequest && candidates.length > 0 ? (
         <div className={styles.requestGrid}>
