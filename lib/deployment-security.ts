@@ -25,7 +25,7 @@ export interface DeploymentBoundaryDecision {
   readonly issues: readonly string[];
 }
 
-const publicPreviewPaths = new Set(["/", "/contact", "/favicon.svg", "/og.png", "/robots.txt"]);
+const publicPreviewPaths = new Set(["/", "/contact", "/api/contact", "/favicon.svg", "/og.png", "/robots.txt"]);
 const protectedPrefixes = [
   "/api/",
   "/dashboard",

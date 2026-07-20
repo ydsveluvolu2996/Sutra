@@ -2929,6 +2929,23 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-contact-details b { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--body-2); }
 .lz .lx-contact-details span { font-size: 13.5px; color: #cdd6ee; }
 .lz .lx-contact-details em { font-style: normal; font-size: 11px; color: var(--faint); }
+.lz .lx-form { gap: 14px; }
+.lz .lx-form:hover { transform: none; border-color: var(--line-2); box-shadow: none; }
+.lz .lx-field { display: flex; flex-direction: column; gap: 7px; }
+.lz .lx-field label { font-family: var(--mono); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--body-2); }
+.lz .lx-field label em { font-style: normal; color: var(--faint); text-transform: none; letter-spacing: 0; }
+.lz .lx-field label span { color: var(--cyan); }
+.lz .lx-field input, .lz .lx-field textarea { width: 100%; font: inherit; font-size: 14px; color: #eef3ff; background: var(--glass-2); border: 1px solid var(--line-2); border-radius: 11px; padding: 11px 13px; transition: border-color .16s, box-shadow .16s; }
+.lz .lx-field textarea { resize: vertical; min-height: 118px; line-height: 1.55; }
+.lz .lx-field input::placeholder, .lz .lx-field textarea::placeholder { color: var(--faint); }
+.lz .lx-field input:focus, .lz .lx-field textarea:focus { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(34,211,238,.15); }
+.lz .lx-honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.lz .lx-form-submit { align-self: flex-start; margin-top: 4px; border: 0; cursor: pointer; }
+.lz .lx-form-submit:disabled { opacity: .55; cursor: not-allowed; }
+.lz .lx-form-status { font-size: 13px; line-height: 1.55; padding: 11px 13px; border-radius: 11px; }
+.lz .lx-form-status.error { color: #ffd7dd; border: 1px solid rgba(251,113,133,.4); background: rgba(251,113,133,.1); }
+.lz .lx-form-fine { font-size: 11.5px; line-height: 1.6; color: var(--faint); }
+.lz .lx-form-done h2 { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lz.lx-contact .foot .ftbottom { margin-top: 0; padding-top: 0; border-top: 0; }
 .lz.lx-contact .foot nav { display: flex; gap: 22px; flex-wrap: wrap; }
 .lz.lx-contact .foot nav a { font-size: 13px; color: var(--body-2); transition: color .16s; }

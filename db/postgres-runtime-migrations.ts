@@ -28,6 +28,7 @@ import postgresFindingExceptionsSql from "../postgres/migrations/0026_finding_ex
 import postgresRegistryVulnerabilitiesSql from "../postgres/migrations/0027_registry_vulnerabilities.sql?raw";
 import postgresKubernetesAgentNodesSql from "../postgres/migrations/0028_kubernetes_agent_nodes.sql?raw";
 import postgresCustomerScopedInvitationsSql from "../postgres/migrations/0029_customer_scoped_invitations.sql?raw";
+import postgresContactSubmissionsSql from "../postgres/migrations/0030_contact_submissions.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -60,6 +61,7 @@ const migrations = [
   { id: "0027_registry_vulnerabilities", source: postgresRegistryVulnerabilitiesSql },
   { id: "0028_kubernetes_agent_nodes", source: postgresKubernetesAgentNodesSql },
   { id: "0029_customer_scoped_invitations", source: postgresCustomerScopedInvitationsSql },
+  { id: "0030_contact_submissions", source: postgresContactSubmissionsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

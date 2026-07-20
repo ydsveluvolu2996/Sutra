@@ -253,14 +253,9 @@ const TIERS: Tier[] = [
   },
 ];
 
-/* Proof / trust content. NO real or fabricated customers, quotes or logos —
- * every testimonial and logo is an obvious editable placeholder. The badge
- * row states only what is truthfully accurate about the product. */
-const TESTIMONIALS = [
-  { role: "MSP security lead", tag: "placeholder" },
-  { role: "Cloud practice owner", tag: "placeholder" },
-  { role: "Platform / SRE lead", tag: "placeholder" },
-];
+/* Trust content. NO customer claims — no logos, quotes or testimonials, because
+ * Sutra has no customers to cite yet and will not invent social proof. The badge
+ * row and FAQ state only what is truthfully accurate about the product today. */
 const TRUST_BADGES = [
   "SOC 2 readiness mapping — not a certification",
   "Read-only, customer-owned access",
@@ -592,7 +587,7 @@ export default function LandingZone() {
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
         <nav aria-label="Page sections">
-          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#pricing">Pricing</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a><a href="#proof">Customers</a>
+          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#pricing">Pricing</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a><a href="#proof">Trust</a>
         </nav>
         <div className="head-actions">
           <Link className="signin" href="/login">Sign in</Link>
@@ -765,25 +760,7 @@ export default function LandingZone() {
 
       <section className="block proof" id="proof">
         <div className="wrap">
-          <div className="intro center rise"><span className="sec-kicker">Proof &amp; trust</span><h2>Proof is the pitch. So the proof lives here.</h2><p className="lead">The logos and quotes below are placeholders for you to fill in. The trust statements are not — they describe exactly how the product behaves today.</p></div>
-
-          {/* Logos: clearly-marked placeholder slots — no real or fabricated company logos. */}
-          <div className="lx-logos rise" aria-label="Customer logo placeholders">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <span key={i} className="lx-logo-slot">Your logo here</span>
-            ))}
-          </div>
-
-          {/* Testimonials: obvious placeholder text — never a fabricated quote or person. */}
-          <div className="lx-quotes rise">
-            {TESTIMONIALS.map((t, i) => (
-              <figure key={i} className="lx-quote">
-                <span className="lx-ph-tag">{t.tag}</span>
-                <blockquote>&ldquo;Add a customer quote here — what changed once your team could prove every path and cite every finding.&rdquo;</blockquote>
-                <figcaption>&mdash; Name, {t.role}, Company</figcaption>
-              </figure>
-            ))}
-          </div>
+          <div className="intro center rise"><span className="sec-kicker">Security &amp; trust</span><h2>How Sutra works — and what it will never claim.</h2><p className="lead">No customer logos and no quotes: Sutra is early and we will not invent social proof. What we can state plainly is how the product behaves today, and answer the questions teams actually ask.</p></div>
 
           {/* Honest trust posture — no certification the product does not hold. */}
           <div className="lx-badges rise" aria-label="Trust posture">
