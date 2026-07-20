@@ -7,6 +7,7 @@ import type {
   LocalFixtureSchedule,
   LocalFixtureVersion,
 } from "../../lib/local-ops-types";
+import type { ScheduleEvaluation, ScheduleInvalidReason } from "../../lib/collection-schedule";
 import { formatTimestamp } from "../components/use-pilot-state";
 
 interface VisibleLocalFixtureDescriptor extends LocalFixtureDescriptor {
@@ -106,6 +107,21 @@ function newestFirst(left: PublishedJob, right: PublishedJob): number {
   return Date.parse(right.createdAt) - Date.parse(left.createdAt);
 }
 
+function durationLabel(minutes: number): string {
+  if (!Number.isFinite(minutes)) return "—";
+  const rounded = Math.max(0, Math.round(minutes));
+  if (rounded < 60) return `${rounded} min`;
+  if (rounded < 1_440) return `${Math.round(rounded / 60)} h`;
+  return `${Math.round(rounded / 1_440)} d`;
+}
+
+const SCHEDULE_INVALID_LABELS: Readonly<Record<ScheduleInvalidReason, string>> = {
+  "invalid-now": "Clock unavailable",
+  "non-positive-interval": "Non-positive interval",
+  "invalid-interval": "Unparseable interval",
+  "invalid-last-run": "Unparseable last run",
+};
+
 export function OperationsBrowser() {
   const [fixtures, setFixtures] = useState<readonly VisibleLocalFixtureDescriptor[]>([]);
   const [jobs, setJobs] = useState<readonly PublishedJob[]>([]);
@@ -122,6 +138,8 @@ export function OperationsBrowser() {
   const [error, setError] = useState<string | null>(null);
   const [jobsError, setJobsError] = useState<string | null>(null);
   const [schedulesError, setSchedulesError] = useState<string | null>(null);
+  const [scheduleStatus, setScheduleStatus] = useState<ScheduleEvaluation | null>(null);
+  const [scheduleStatusError, setScheduleStatusError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const scheduleMutationKeys = useRef(new Map<string, {
     readonly fingerprint: string;
@@ -199,6 +217,22 @@ export function OperationsBrowser() {
     }
   }, []);
 
+  const loadScheduleStatus = useCallback(async (): Promise<void> => {
+    try {
+      const body = await readJson<ScheduleEvaluation>(await fetch("/api/v1/collection-schedule/status", {
+        cache: "no-store",
+        credentials: "same-origin",
+      }));
+      if (body.schema !== "sutra.collection-schedule.v1" || typeof body.summary?.total !== "number") {
+        throw new Error("Sutra received an invalid schedule status evaluation");
+      }
+      setScheduleStatus(body);
+      setScheduleStatusError(null);
+    } catch (caught) {
+      setScheduleStatusError(caught instanceof Error ? caught.message : "Sutra could not evaluate schedule status");
+    }
+  }, []);
+
   const loadWorkspace = useCallback(async (): Promise<void> => {
     try {
       const [fixtureBody, jobBody, scheduleBody] = await Promise.all([
@@ -257,9 +291,9 @@ export function OperationsBrowser() {
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => void loadWorkspace(), 0);
+    const timer = setTimeout(() => void Promise.all([loadWorkspace(), loadScheduleStatus()]), 0);
     return () => clearTimeout(timer);
-  }, [loadWorkspace]);
+  }, [loadWorkspace, loadScheduleStatus]);
 
   const hasActiveJobs = jobs.some((job) => job.status === "pending" || job.status === "leased");
 
@@ -291,11 +325,11 @@ export function OperationsBrowser() {
     if (!hasEnabledSchedules) return;
     const timer = setInterval(() => {
       if (document.visibilityState === "visible") {
-        void Promise.all([loadJobs(), loadSchedules()]);
+        void Promise.all([loadJobs(), loadSchedules(), loadScheduleStatus()]);
       }
     }, 15_000);
     return () => clearInterval(timer);
-  }, [hasEnabledSchedules, loadJobs, loadSchedules]);
+  }, [hasEnabledSchedules, loadJobs, loadSchedules, loadScheduleStatus]);
 
   const fixtureById = useMemo(() => new Map(fixtures.map((fixture) => [fixture.fixtureId, fixture])), [fixtures]);
   const scheduleByFixtureId = useMemo(
@@ -315,7 +349,7 @@ export function OperationsBrowser() {
 
   async function refreshOperations(): Promise<void> {
     setRefreshing(true);
-    await Promise.all([loadJobs(), loadSchedules()]);
+    await Promise.all([loadJobs(), loadSchedules(), loadScheduleStatus()]);
     setRefreshing(false);
   }
 
@@ -529,6 +563,32 @@ export function OperationsBrowser() {
                 </article>;
               })}
             </div>
+          </section>
+
+          <section className="panel operations-schedule-status-panel" aria-label="Collection schedule status">
+            <div className="panel-heading"><div><p className="eyebrow">Read-only evaluation</p><h2>Schedule status</h2></div>{scheduleStatus ? <span className="result-count">{scheduleStatus.summary.evaluated} of {scheduleStatus.summary.total} evaluated</span> : null}</div>
+            <div className="simulation-trust-strip schedule-review-note" role="note">
+              <span className="simulation-badge compact">DERIVED</span>
+              <span>Dueness is computed from each schedule&rsquo;s stored interval and next run only. A never-run or unparseable schedule is surfaced, never assumed due; disabled schedules are listed, never dropped.</span>
+            </div>
+            {scheduleStatusError ? <div className="page-alert page-alert-error" role="alert"><strong>Schedule status unavailable</strong><span>{scheduleStatusError}</span><button type="button" onClick={() => void loadScheduleStatus()}>Retry</button></div> : null}
+            {scheduleStatus && !scheduleStatusError ? (() => {
+              const overdueCount = scheduleStatus.due.filter((entry) => entry.overdueByMinutes > 0).length;
+              return <>
+                <section className="summary-band operations-summary" aria-label="Schedule status summary">
+                  <div><small>Due now</small><strong>{scheduleStatus.summary.due}</strong><span>{overdueCount} past their interval</span></div>
+                  <div><small>Upcoming</small><strong>{scheduleStatus.summary.upcoming}</strong><span>Enabled, not yet due</span></div>
+                  <div><small>Disabled</small><strong>{scheduleStatus.summary.disabled}</strong><span>Listed, not evaluated</span></div>
+                  <div><small>Invalid</small><strong>{scheduleStatus.summary.invalid}</strong><span>Unusable cadence surfaced</span></div>
+                </section>
+                {scheduleStatus.summary.total === 0 ? <div className="empty-state"><strong>No schedules configured</strong><span>No automated fixture collections exist in this workspace, so nothing is due, upcoming, or overdue.</span></div> : null}
+                {scheduleStatus.due.length > 0 ? <div className="operations-schedule-status-group"><h3>Due now</h3><ul className="operations-schedule-status-list">{scheduleStatus.due.map((entry) => <li key={entry.scheduleId}><span className="status-pill status-high">due</span><code>{entry.target}</code><small>{entry.overdueByMinutes > 0 ? `overdue by ${durationLabel(entry.overdueByMinutes)}` : "due now"}</small></li>)}</ul></div> : null}
+                {scheduleStatus.upcoming.length > 0 ? <div className="operations-schedule-status-group"><h3>Upcoming</h3><ul className="operations-schedule-status-list">{scheduleStatus.upcoming.map((entry) => <li key={entry.scheduleId}><span className="status-pill status-positive">upcoming</span><code>{entry.scheduleId.slice(0, 15)}…</code><small>next in {durationLabel(entry.nextDueInMinutes)}</small></li>)}</ul></div> : null}
+                {scheduleStatus.invalid.length > 0 ? <div className="operations-schedule-status-group"><h3>Invalid</h3><ul className="operations-schedule-status-list">{scheduleStatus.invalid.map((entry) => <li key={`${entry.id}:${entry.reason}`}><span className="status-pill status-high">invalid</span><code>{entry.id.slice(0, 15)}…</code><small>{SCHEDULE_INVALID_LABELS[entry.reason]}</small></li>)}</ul></div> : null}
+                {scheduleStatus.disabled.length > 0 ? <div className="operations-schedule-status-group"><h3>Disabled</h3><ul className="operations-schedule-status-list">{scheduleStatus.disabled.map((scheduleId) => <li key={scheduleId}><span className="status-pill status-medium">disabled</span><code>{scheduleId.slice(0, 15)}…</code></li>)}</ul></div> : null}
+              </>;
+            })() : null}
+            {!scheduleStatus && !scheduleStatusError ? <div className="loading-state" role="status"><span className="loading-spinner" />Evaluating configured schedules…</div> : null}
           </section>
 
           <section className="panel table-panel operations-job-panel">
