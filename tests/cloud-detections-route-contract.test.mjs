@@ -30,8 +30,24 @@ test("cloud-detections route feeds already-collected CloudTrail events through t
   // Real ingest: tenant-scoped collected security events, mapped by the adapter,
   // evaluated by the committed engine — no fixture or fabricated stream.
   assert.match(route, /getSecurityEventsWorkspace\(/u);
-  assert.match(route, /buildCloudDetectionInputs\(workspace\.events, \{ tenant: connection\.customerId \}\)/u);
+  assert.match(route, /buildCloudDetectionInputs\(workspace\.events, \{/u);
+  assert.match(route, /tenant: connection\.customerId/u);
   assert.match(route, /buildCloudDetections\(inputs\.events\)/u);
-  // Single-source coverage is returned to the client, never hidden.
+  // Coverage (present vs absent sources) is returned to the client, never hidden.
   assert.match(route, /coverage: inputs\.coverage/u);
+});
+
+test("cloud-detections route feeds read-only GuardDuty findings as a second source", () => {
+  // GuardDuty findings are read from the connection's already-collected
+  // inventory snapshot (read-only guardduty:ListDetectors/ListFindings/
+  // GetFindings), reshaped, and merged into the engine's event stream.
+  assert.match(route, /getPilotStateForOrg\(authenticated\.subject\.orgId, connectionId\)/u);
+  assert.match(route, /AWS\.NATIVE\.GUARDDUTY\.FINDING/u);
+  assert.match(route, /guardDutyFindings/u);
+  // A source with no collection pipeline is declared absent, not faked empty:
+  // GuardDuty is fed only when an inventory snapshot exists for the connection.
+  assert.match(route, /pilot\.activeSnapshot !== null/u);
+  // The route reshapes findings read-only; it must not construct any AWS SDK
+  // command or mutate the account.
+  assert.doesNotMatch(route, /new\s+[A-Za-z]+Command\(/u);
 });

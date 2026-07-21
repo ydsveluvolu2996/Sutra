@@ -9,10 +9,22 @@ interface SourceState {
   readonly collected: boolean;
   readonly status: string;
   readonly eventsAnalyzed: number;
+  readonly eventsBySource?: Readonly<Record<string, number>>;
   readonly totalEventsStored: number;
   readonly lastCollectedAt: string | null;
   readonly windowStart: string | null;
   readonly windowEnd: string | null;
+  readonly guardDuty?: { readonly collected: boolean; readonly findingsAnalyzed: number };
+}
+
+const SOURCE_LABELS: Readonly<Record<string, string>> = {
+  cloudtrail: "AWS CloudTrail",
+  guardduty: "AWS GuardDuty",
+  "k8s-audit": "Kubernetes audit",
+};
+
+function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
 }
 
 interface CloudDetectionsResponse {
@@ -65,7 +77,7 @@ export function CloudDetectionsBrowser() {
         <div>
           <p className="eyebrow">Cloud detection &amp; response</p>
           <h1>Cloud detections</h1>
-          <p className="page-subtitle">Rule-based, point-in-time detections evaluated over the AWS CloudTrail management events this workspace already collects. A detection is emitted only when the collected event&rsquo;s own fields prove it — never a fabricated log stream, never a claim of full-coverage CDR.</p>
+          <p className="page-subtitle">Rule-based, point-in-time detections evaluated over multiple already-collected sources — AWS CloudTrail management events and read-only AWS GuardDuty findings — each detection labeled with the source that proved it and a confidence. A detection is emitted only when the collected evidence proves it; sources that are not collected are disclosed as absent, never a fabricated log stream or a claim of full-coverage CDR.</p>
         </div>
         <div className="heading-actions">
           <a className="button button-secondary" href="/security-events">Security events</a>
@@ -110,35 +122,38 @@ export function CloudDetectionsBrowser() {
             </section>
 
             <section className="panel">
-              <h2>Coverage</h2>
+              <h2>Source coverage</h2>
+              <p className="page-subtitle">Each detection carries the source that proved it. A source with no collection pipeline is disclosed as not collected — an empty result for it is never presented as &ldquo;clean&rdquo;.</p>
               <div className="table-scroll">
                 <table className="data-table">
-                  <thead><tr><th>Source</th><th>Status</th></tr></thead>
+                  <thead><tr><th>Source</th><th>Status</th><th>Events analyzed</th></tr></thead>
                   <tbody>
                     {coverage.sourcesPresent.map((item) => (
-                      <tr key={item}><td><code>{item}</code></td><td><span className="compliance-status compliance-status-pass">Collected</span></td></tr>
+                      <tr key={item}><td><strong>{sourceLabel(item)}</strong><small>{item}</small></td><td><span className="compliance-status compliance-status-pass">Collected</span></td><td>{source.eventsBySource?.[item] ?? 0}</td></tr>
                     ))}
                     {coverage.sourcesAbsent.map((item) => (
-                      <tr key={item}><td><code>{item}</code></td><td><span className="compliance-status compliance-status-unknown">Not collected</span></td></tr>
+                      <tr key={item}><td><strong>{sourceLabel(item)}</strong><small>{item}</small></td><td><span className="compliance-status compliance-status-unknown">Not collected</span></td><td>—</td></tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <p className="page-footnote">Analyzed {source.eventsAnalyzed} of {source.totalEventsStored} stored events · source {source.status}{source.lastCollectedAt !== null ? ` · last collected ${formatTimestamp(source.lastCollectedAt)}` : ""}{source.windowStart !== null ? ` · window ${formatTimestamp(source.windowStart)} → ${formatTimestamp(source.windowEnd)}` : ""}</p>
+              <p className="page-footnote">Analyzed {source.eventsAnalyzed} event{source.eventsAnalyzed === 1 ? "" : "s"} across all collected sources · CloudTrail {source.eventsBySource?.cloudtrail ?? 0} of {source.totalEventsStored} stored · GuardDuty {source.guardDuty?.collected ? `${source.guardDuty.findingsAnalyzed} finding${source.guardDuty.findingsAnalyzed === 1 ? "" : "s"}` : "not collected"} · CloudTrail source {source.status}{source.lastCollectedAt !== null ? ` · last collected ${formatTimestamp(source.lastCollectedAt)}` : ""}{source.windowStart !== null ? ` · window ${formatTimestamp(source.windowStart)} → ${formatTimestamp(source.windowEnd)}` : ""}</p>
             </section>
 
             <section className="panel">
               <h2>Detections</h2>
               {report.detections.length === 0 ? (
-                <div className="empty-state"><strong>No rule matched the collected evidence</strong><span>{report.summary.evaluated} event{report.summary.evaluated === 1 ? "" : "s"} were evaluated and {report.summary.unclassified} had no applicable rule. This does not prove the account is free of threats; only collected CloudTrail management events were evaluated.</span></div>
+                <div className="empty-state"><strong>No rule matched the collected evidence</strong><span>{report.summary.evaluated} event{report.summary.evaluated === 1 ? "" : "s"} were evaluated across the collected sources and {report.summary.unclassified} had no applicable rule. This does not prove the account is free of threats; only the collected sources ({coverage.sourcesPresent.map(sourceLabel).join(", ")}) were evaluated.</span></div>
               ) : (
                 <div className="table-scroll">
                   <table className="data-table">
-                    <thead><tr><th>Severity</th><th>Detection</th><th>Actor</th><th>Resource</th><th>Evidence</th></tr></thead>
+                    <thead><tr><th>Severity</th><th>Source</th><th>Confidence</th><th>Detection</th><th>Actor</th><th>Resource</th><th>Evidence</th></tr></thead>
                     <tbody>
                       {report.detections.map((detection) => (
                         <tr key={detection.id}>
                           <td><span className={severityTone(detection.severity)}>{detection.severity}</span></td>
+                          <td><code>{sourceLabel(detection.source)}</code></td>
+                          <td>{detection.confidence}</td>
                           <td><strong>{detection.title}</strong><small>{detection.ruleId}</small></td>
                           <td title={detection.actor}><code>{compactIdentifier(detection.actor, 24)}</code></td>
                           <td>{detection.resourceRef ?? "—"}</td>

@@ -304,6 +304,68 @@ test("summary invariant: events always equals evaluated plus unclassified", () =
   assert.equal(report.summary.detections, report.detections.length);
 });
 
+test("every detection is labeled with the source that proved it and a confidence", () => {
+  const report = buildCloudDetections([
+    ct({ eventName: "StopLogging" }),
+    gd({ findingType: "Backdoor:EC2/C&CActivity.B", severity: 8.5 }),
+    gd({ findingType: "Discovery:S3/TorIPCaller", severity: 2.0 }),
+    k8s({ verb: "create", resource: "pods/exec", user: "dev@corp" }),
+    k8s({ verb: "create", resource: "clusterrolebindings" }),
+  ]);
+  const byRule = new Map(report.detections.map((detection) => [detection.ruleId, detection]));
+  // CloudTrail + Kubernetes rules fire only on proven evidence -> high confidence.
+  assert.equal(byRule.get("cloudtrail-logging-disabled")?.source, "cloudtrail");
+  assert.equal(byRule.get("cloudtrail-logging-disabled")?.confidence, "high");
+  assert.equal(byRule.get("k8s-exec-into-pod")?.source, "k8s-audit");
+  assert.equal(byRule.get("k8s-exec-into-pod")?.confidence, "high");
+  // A ClusterRoleBinding whose bound role is not in the evidence is medium.
+  assert.equal(byRule.get("k8s-clusterrolebinding-created")?.confidence, "medium");
+  // GuardDuty findings inherit the confidence band of the provider's severity.
+  const guardDuty = report.detections.filter((detection) => detection.source === "guardduty");
+  const high = guardDuty.find((detection) => detection.evidence.name === "Backdoor:EC2/C&CActivity.B");
+  const low = guardDuty.find((detection) => detection.evidence.name === "Discovery:S3/TorIPCaller");
+  assert.equal(high?.confidence, "high");
+  assert.equal(low?.confidence, "low");
+});
+
+test("a mid-band GuardDuty finding is medium confidence", () => {
+  const report = buildCloudDetections([gd({ findingType: "UnauthorizedAccess:EC2/SSHBruteForce", severity: 5.0 })]);
+  assert.equal(report.detections[0]?.source, "guardduty");
+  assert.equal(report.detections[0]?.severity, "medium");
+  assert.equal(report.detections[0]?.confidence, "medium");
+});
+
+test("multi-source merge: three sources are counted, labeled, and correlated honestly in one report", () => {
+  const events: CloudDetectionEvent[] = [
+    // CloudTrail + Kubernetes for the SAME tenant-scoped actor -> correlated.
+    ct({ eventName: "StopLogging", principal: "alice", tenant: "acme" }),
+    k8s({ verb: "get", resource: "secrets", user: "alice", tenant: "acme" }),
+    // A GuardDuty finding for the same tenant -> its own detection, but excluded
+    // from correlation because a finding carries no actor identity.
+    gd({ findingType: "Backdoor:EC2/C&CActivity.B", severity: 8.0, tenant: "acme" }),
+  ];
+  const report = buildCloudDetections(events);
+  // Per-source provenance counts are exact.
+  assert.deepEqual(report.summary.bySource, { cloudtrail: 1, guardduty: 1, "k8s-audit": 1 });
+  assert.equal(report.summary.events, 3);
+  assert.equal(report.summary.detections, 3);
+  // Every detection is labeled by its real source; none is blurred.
+  assert.deepEqual(
+    new Set(report.detections.map((detection) => detection.source)),
+    new Set(["cloudtrail", "guardduty", "k8s-audit"]),
+  );
+  // Correlation groups only the two same-actor detections; the GuardDuty
+  // finding (actor "unknown") is never fabricated into the group.
+  assert.equal(report.correlated.length, 1);
+  assert.equal(report.correlated[0]?.actor, "alice");
+  assert.equal(report.correlated[0]?.detectionIds.length, 2);
+  const guardDuty = report.detections.find((detection) => detection.source === "guardduty");
+  assert.equal(guardDuty?.actor, "unknown");
+  for (const id of report.correlated[0]?.detectionIds ?? []) {
+    assert.notEqual(id, guardDuty?.id);
+  }
+});
+
 test("output is deterministic and independent of input ordering", () => {
   const events: CloudDetectionEvent[] = [
     ct({ eventName: "StopLogging", principal: "u2" }),

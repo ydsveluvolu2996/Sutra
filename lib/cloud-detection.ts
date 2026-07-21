@@ -19,6 +19,12 @@
 
 export type DetectionSeverity = "critical" | "high" | "medium" | "low";
 export type DetectionSource = "cloudtrail" | "guardduty" | "k8s-audit";
+// How strongly the supplied evidence proves the detection, independent of how
+// bad it would be if true (severity). "high" means the emitting event's own
+// fields prove the finding; "medium" means the signal is real but a material
+// fact is unresolved in the evidence (an unresolved bound role) or the source
+// is a provider score in its mid band; "low" is a low-confidence provider score.
+export type DetectionConfidence = "high" | "medium" | "low";
 
 export interface CloudTrailEvent {
   readonly source: "cloudtrail";
@@ -63,7 +69,12 @@ export interface CloudDetection {
   readonly ruleId: string;
   readonly title: string;
   readonly severity: DetectionSeverity;
+  // Which collected source proved this detection. Every detection is labeled so
+  // a multi-source report never blurs a CloudTrail change, a GuardDuty finding,
+  // and an in-cluster Kubernetes audit signal into one undifferentiated stream.
   readonly source: DetectionSource;
+  // How strongly the supplied evidence proves this specific detection.
+  readonly confidence: DetectionConfidence;
   // The principal (CloudTrail) or user (Kubernetes) that performed the action;
   // 'unknown' when the evidence carries no actor identity (GuardDuty findings).
   readonly actor: string;
@@ -127,7 +138,14 @@ const CLOUD_DETECTION_DISCLAIMER =
   "'unknown' actor and are excluded from correlation. Correlation groups " +
   "detections only by an identical, tenant-scoped actor identity and performs no " +
   "time-windowing (the clock is unavailable); temporal correlation is the " +
-  "caller's responsibility. Detections are triage signals, not proof of " +
+  "caller's responsibility. Every detection is labeled with the source that " +
+  "proved it (cloudtrail, guardduty, or k8s-audit) and a confidence: CloudTrail " +
+  "and Kubernetes rules are high confidence because the collected event's own " +
+  "fields prove them, a ClusterRoleBinding whose bound role is absent from the " +
+  "evidence is medium, and a GuardDuty finding inherits the confidence band of " +
+  "the provider's own numeric severity score. Which sources were actually " +
+  "collected — and which are absent — is disclosed by the coverage report, not " +
+  "inferred from an empty result. Detections are triage signals, not proof of " +
   "compromise.";
 
 interface RawDetection {
@@ -187,6 +205,26 @@ function guardDutyBand(severity: number): DetectionSeverity {
   if (severity >= 7) return "high";
   if (severity >= 4) return "medium";
   return "low";
+}
+
+// Confidence is deterministic from (source, ruleId, severity) and is never a
+// guess: CloudTrail and Kubernetes rules fire only when the collected event's
+// own fields prove them, so they are high confidence; a ClusterRoleBinding
+// whose bound role is not in the evidence is medium (the grant is real but its
+// blast radius is unresolved); a GuardDuty finding inherits the confidence band
+// of the provider's own numeric severity score rather than asserting certainty.
+function detectionConfidence(
+  source: DetectionSource,
+  ruleId: string,
+  severity: DetectionSeverity,
+): DetectionConfidence {
+  if (source === "guardduty") {
+    if (severity === "critical" || severity === "high") return "high";
+    if (severity === "medium") return "medium";
+    return "low";
+  }
+  if (ruleId === "k8s-clusterrolebinding-created") return "medium";
+  return "high";
 }
 
 function cloudTrailEvidence(event: CloudTrailEvent): DetectionEvidence {
@@ -467,6 +505,7 @@ function finalize(raw: RawDetection, index: number): CloudDetection {
     title: raw.title,
     severity: raw.severity,
     source: raw.source,
+    confidence: detectionConfidence(raw.source, raw.ruleId, raw.severity),
     actor: raw.actor,
   };
   const withResource = raw.resourceRef !== undefined ? { ...head, resourceRef: raw.resourceRef } : head;
