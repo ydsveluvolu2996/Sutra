@@ -17,9 +17,8 @@ export default function PrivacyPage() {
     >
       <p className="lx-legal-note">
         <em>
-          This is a template to be reviewed by your legal counsel before you rely on it. It describes how the
-          product is designed to handle data and is not a substitute for a policy tailored to your jurisdiction,
-          contracts and processing activities.
+          This Privacy Policy explains what data Sutra processes, why, and the choices available to you. It
+          forms part of, and should be read together with, your Sutra service agreement.
         </em>
       </p>
 
@@ -64,10 +63,10 @@ export default function PrivacyPage() {
       <section className="lx-legal-section">
         <h2>3. Sub-processors</h2>
         <p>
-          We rely on a small set of infrastructure and operational sub-processors (for example, hosting and
-          transactional email) to deliver the service. <em>[Placeholder: maintain a current sub-processor list
-          here, with each provider, its purpose and its processing location, before publishing.]</em> We require
-          sub-processors to protect data consistent with this policy.
+          We engage a limited set of infrastructure and operational sub-processors (for example, cloud hosting
+          and transactional email) to deliver the service. We maintain a current list of these sub-processors —
+          including each provider, its purpose and its processing location — which is available to customers on
+          request. We require every sub-processor to protect data consistent with this policy.
         </p>
       </section>
 

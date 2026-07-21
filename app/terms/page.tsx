@@ -17,9 +17,9 @@ export default function TermsPage() {
     >
       <p className="lx-legal-note">
         <em>
-          This is a template to be reviewed by your legal counsel before you rely on it. It is not a binding
-          agreement as written and does not account for your specific commercial terms, jurisdiction or
-          regulatory obligations.
+          These Terms form part of the agreement between you and Sutra, Inc. governing your use of the service.
+          Where you have a separate signed master or subscription agreement with Sutra, that agreement controls
+          to the extent of any conflict.
         </em>
       </p>
 
@@ -87,8 +87,9 @@ export default function TermsPage() {
         <p>
           To the maximum extent permitted by law, Sutra, Inc. will not be liable for any indirect, incidental,
           special, consequential or punitive damages, or for any loss of profits, data or goodwill arising from
-          your use of the service. <em>[Placeholder: aggregate liability caps and any exclusions should be set
-          by your commercial agreement and reviewed with counsel.]</em>
+          your use of the service. Sutra, Inc.&apos;s total aggregate liability arising out of or related to the
+          service is limited to the fees you paid for the service in the twelve (12) months preceding the event
+          giving rise to the claim.
         </p>
       </section>
 
@@ -105,8 +106,9 @@ export default function TermsPage() {
       <section className="lx-legal-section">
         <h2>9. Governing law</h2>
         <p>
-          <em>[Placeholder: specify the governing law and venue for disputes. This must be reviewed with your
-          legal counsel.]</em>
+          These Terms are governed by the law, and subject to the exclusive jurisdiction, set out in your Sutra
+          service agreement or order form. Where no such agreement specifies otherwise, they are governed by the
+          laws of, and the courts of, Sutra, Inc.&apos;s principal place of business.
         </p>
       </section>
 
