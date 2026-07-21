@@ -27,6 +27,7 @@ export type NavKey =
   | "patch"
   | "cmdb_dependencies"
   | "cmdb_assets"
+  | "docs"
   | "controls"
   | "roadmap"
   | "operations"
@@ -203,6 +204,7 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "settings", label: "Settings", href: "/settings", icon: "SG", capabilities: readWorkspace },
       { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage:customer"] },
+      { key: "docs", label: "Documentation", href: "/docs", icon: "DO", capabilities: readWorkspace },
       { key: "notification_settings", label: "Notification destinations", href: "/settings/notifications", icon: "NT", capabilities: readConnection },
     ],
   },
