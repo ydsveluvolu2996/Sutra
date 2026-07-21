@@ -32,7 +32,7 @@ test("plan supports module selection without tools, cluster access, or secret ou
   const { stdout } = await execute(process.execPath, [
     "scripts/kubernetes-security-stack.mjs",
     "plan",
-    "--context", "arn:aws:eks:ap-south-1:738663485493:cluster/demo",
+    "--context", "arn:aws:eks:ap-south-1:505060607080:cluster/demo",
     "--modules", "trivy,kyverno",
   ], {
     cwd: new URL("..", import.meta.url),

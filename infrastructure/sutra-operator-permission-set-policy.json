@@ -6,9 +6,9 @@
       "Effect": "Allow",
       "Action": "iam:GetRole",
       "Resource": [
-        "arn:aws:iam::738663485493:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SutraOperator_23be8f1356bf1aef",
-        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
-        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+        "arn:aws:iam::505060607080:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_SutraOperator_EXAMPLE",
+        "arn:aws:iam::505060607080:role/SutraLocalCollectorRole",
+        "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole"
       ]
     },
     {
@@ -18,7 +18,7 @@
         "iam:GetPolicy",
         "iam:GetPolicyVersion"
       ],
-      "Resource": "arn:aws:iam::738663485493:policy/SutraCollectorBoundary"
+      "Resource": "arn:aws:iam::505060607080:policy/SutraCollectorBoundary"
     },
     {
       "Sid": "AttestExactCollectorRolePolicies",
@@ -28,7 +28,7 @@
         "iam:ListAttachedRolePolicies",
         "iam:ListRolePolicies"
       ],
-      "Resource": "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+      "Resource": "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole"
     },
     {
       "Sid": "ValidateLocalCloudFormationTemplate",
@@ -44,13 +44,13 @@
         "cloudformation:GetTemplate",
         "cloudformation:ListStackResources"
       ],
-      "Resource": "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*"
+      "Resource": "arn:aws:cloudformation:us-east-1:505060607080:stack/sutra-local-collector/*"
     },
     {
       "Sid": "CreateReviewedCollectorChangeSet",
       "Effect": "Allow",
       "Action": "cloudformation:CreateChangeSet",
-      "Resource": "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*",
+      "Resource": "arn:aws:cloudformation:us-east-1:505060607080:stack/sutra-local-collector/*",
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/sutra:stack-owner": "sutra-live-aws-preparation",
@@ -83,8 +83,8 @@
         "cloudformation:ExecuteChangeSet"
       ],
       "Resource": [
-        "arn:aws:cloudformation:us-east-1:738663485493:changeSet/awscli-cloudformation-package-deploy-*/*",
-        "arn:aws:cloudformation:us-east-1:738663485493:stack/sutra-local-collector/*"
+        "arn:aws:cloudformation:us-east-1:505060607080:changeSet/awscli-cloudformation-package-deploy-*/*",
+        "arn:aws:cloudformation:us-east-1:505060607080:stack/sutra-local-collector/*"
       ]
     },
     {
@@ -95,12 +95,12 @@
         "iam:PutRolePermissionsBoundary"
       ],
       "Resource": [
-        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
-        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+        "arn:aws:iam::505060607080:role/SutraLocalCollectorRole",
+        "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole"
       ],
       "Condition": {
         "StringEquals": {
-          "iam:PermissionsBoundary": "arn:aws:iam::738663485493:policy/SutraCollectorBoundary"
+          "iam:PermissionsBoundary": "arn:aws:iam::505060607080:policy/SutraCollectorBoundary"
         },
         "ForAnyValue:StringEquals": {
           "aws:CalledVia": "cloudformation.amazonaws.com"
@@ -120,8 +120,8 @@
         "iam:UpdateRole"
       ],
       "Resource": [
-        "arn:aws:iam::738663485493:role/SutraLocalCollectorRole",
-        "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole"
+        "arn:aws:iam::505060607080:role/SutraLocalCollectorRole",
+        "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole"
       ],
       "Condition": {
         "ForAnyValue:StringEquals": {
@@ -133,7 +133,7 @@
       "Sid": "AssumeExactCollectorRole",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",
-      "Resource": "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole",
+      "Resource": "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole",
       "Condition": {
         "StringEquals": {
           "sts:RoleSessionName": "sutra-local-demo"
@@ -144,7 +144,7 @@
       "Sid": "CreateExactTemplateBucket",
       "Effect": "Allow",
       "Action": "s3:CreateBucket",
-      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1"
+      "Resource": "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1"
     },
     {
       "Sid": "ConfigureAndRecoverExactTemplateBucket",
@@ -160,13 +160,13 @@
         "s3:PutBucketVersioning",
         "s3:PutEncryptionConfiguration"
       ],
-      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1"
+      "Resource": "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1"
     },
     {
       "Sid": "PublishExactReviewedTemplateObject",
       "Effect": "Allow",
       "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml"
+      "Resource": "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07/17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml"
     }
   ]
 }

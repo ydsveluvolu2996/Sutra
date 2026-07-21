@@ -216,7 +216,7 @@ async function seedBaseline(db) {
 async function seedKubernetes(db) {
   const DB = db;
   const scope = { orgId: ORG_ID, customerId: CUSTOMER_ID };
-  const clusterUid = "738663485493:ap-south-1:sutra-e2e-prod";
+  const clusterUid = "505060607080:ap-south-1:sutra-e2e-prod";
 
   const enc = new TextEncoder();
   const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -379,7 +379,7 @@ async function seedKubernetes(db) {
 
   // Supply-chain evidence (registry/inventory + supply-chain routes). Canonical
   // JSON is round-trip validated by the read path, so it must be byte-exact.
-  const scImageRepo = "738663485493.dkr.ecr.ap-south-1.amazonaws.com/payments";
+  const scImageRepo = "505060607080.dkr.ecr.ap-south-1.amazonaws.com/payments";
   const scImageDigest = `sha256:${digest64}`;
   const scCore = {
     schemaVersion: "sutra.kubernetes-supply-chain.v1", clusterId, collectedAt: pastIso,

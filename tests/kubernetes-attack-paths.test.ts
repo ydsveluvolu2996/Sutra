@@ -36,7 +36,7 @@ function resource(input: {
     state: "active",
     tags: {},
     configuration: input.configuration ?? {},
-    source: { api: "fixture", accountId: "738663485493", collectedAt },
+    source: { api: "fixture", accountId: "505060607080", collectedAt },
     contentSha256: `sha-${input.key}`,
   };
 }
@@ -71,7 +71,7 @@ function completeFixture(): {
   relationships: PilotRelationship[];
   findings: PilotFinding[];
 } {
-  const roleArn = "arn:aws:iam::738663485493:role/payments-api";
+  const roleArn = "arn:aws:iam::505060607080:role/payments-api";
   return {
     resources: [
       resource({

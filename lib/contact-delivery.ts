@@ -17,7 +17,7 @@
 //
 // ── Environment ─────────────────────────────────────────────────────────────
 //   SUTRA_CONTACT_RECIPIENT   Destination the lead is routed to.
-//                             Defaults to yds.veluvolu@gmail.com.
+//                             Defaults to a placeholder; configure this in prod.
 //   SUTRA_CONTACT_FROM        Sender identity. Accepts "Name <email>" or a bare
 //                             address. Defaults to "Sutra <onboarding@resend.dev>".
 //   SUTRA_CONTACT_PROVIDER    Optional explicit transport: "resend" | "sendgrid"
@@ -65,7 +65,11 @@
 //
 // delivered = 1 is recorded only when the transport returns a 2xx response.
 
-export const DEFAULT_CONTACT_RECIPIENT = "yds.veluvolu@gmail.com";
+// Placeholder default only. Set SUTRA_CONTACT_RECIPIENT to your own destination
+// in production; leads are still persisted even when no email transport is
+// configured (see the contact route), so this address is never silently used
+// unless an operator has also wired up a delivery provider.
+export const DEFAULT_CONTACT_RECIPIENT = "contact@example.com";
 export const DEFAULT_CONTACT_FROM = "Sutra <onboarding@resend.dev>";
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;

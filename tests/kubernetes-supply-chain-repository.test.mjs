@@ -29,7 +29,7 @@ async function normalized(clusterId, character = "a", extra = {}) {
     collectedAt: "2026-07-17T09:00:00.000Z",
     evidence: {
       image: {
-        repository: "738663485493.dkr.ecr.ap-south-1.amazonaws.com/payments",
+        repository: "505060607080.dkr.ecr.ap-south-1.amazonaws.com/payments",
         digest: `sha256:${character.repeat(64)}`,
         tag: "release-17",
       },
@@ -86,12 +86,12 @@ async function withDatabase(run) {
     const clusters = new KubernetesRepository(database);
     const clusterA = await clusters.registerCluster({
       scope: { orgId: ORG_A, customerId: CUSTOMER_A },
-      clusterUid: "738663485493:ap-south-1:prod-a",
+      clusterUid: "505060607080:ap-south-1:prod-a",
       name: "Production A",
     });
     const clusterB = await clusters.registerCluster({
       scope: { orgId: ORG_B, customerId: CUSTOMER_B },
-      clusterUid: "738663485493:ap-south-1:prod-b",
+      clusterUid: "505060607080:ap-south-1:prod-b",
       name: "Production B",
     });
     await run(database, new KubernetesSupplyChainRepository(database), clusterA.id, clusterB.id);

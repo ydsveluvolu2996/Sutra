@@ -35,7 +35,7 @@ const report = {
 
 test("normalizes bounded Kyverno policy evidence without retaining raw content", async () => {
   const normalized = await normalizeKyvernoPolicyReport({
-    clusterId: "738663485493:ap-south-1:customer-cluster",
+    clusterId: "505060607080:ap-south-1:customer-cluster",
     collectedAt: "2026-07-17T14:30:00.000Z",
     mode: "audit",
     report,
@@ -53,13 +53,13 @@ test("normalizes bounded Kyverno policy evidence without retaining raw content",
 
 test("produces deterministic evidence independent of unretained report fields", async () => {
   const first = await normalizeKyvernoPolicyReport({
-    clusterId: "738663485493:ap-south-1:customer-cluster",
+    clusterId: "505060607080:ap-south-1:customer-cluster",
     collectedAt: "2026-07-17T14:30:00.000Z",
     mode: "audit",
     report,
   });
   const second = await normalizeKyvernoPolicyReport({
-    clusterId: "738663485493:ap-south-1:customer-cluster",
+    clusterId: "505060607080:ap-south-1:customer-cluster",
     collectedAt: "2026-07-17T14:30:00.000Z",
     mode: "audit",
     report: {

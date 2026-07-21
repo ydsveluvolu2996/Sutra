@@ -11,7 +11,7 @@ const eventInput = {
   eventId: `notify_${"a".repeat(48)}`,
   orgId: "org_sutra",
   customerId: "cust_customer",
-  clusterId: "738663485493:ap-south-1:customer-cluster",
+  clusterId: "505060607080:ap-south-1:customer-cluster",
   severity: "critical",
   title: "Internet-exposed privileged workload",
   summary: "A privileged workload is reachable through a public service and uses an over-privileged identity.",
@@ -25,11 +25,11 @@ test("builds deterministic email, Slack, and Teams payloads without provider sec
   const event = normalizeSecurityNotificationEvent(eventInput, "https://app.sutracmdb.com");
   const first = await buildSecurityNotificationPayloads({
     event,
-    emailRecipients: ["yds.veluvolu@gmail.com"],
+    emailRecipients: ["alerts@example.com"],
   });
   const second = await buildSecurityNotificationPayloads({
     event,
-    emailRecipients: ["yds.veluvolu@gmail.com"],
+    emailRecipients: ["alerts@example.com"],
   });
 
   assert.equal(first.email.subject, "[Sutra CRITICAL] Internet-exposed privileged workload");
@@ -52,9 +52,9 @@ test("normalizes and de-duplicates email recipients", async () => {
   const event = normalizeSecurityNotificationEvent(eventInput, "https://app.sutracmdb.com");
   const payload = await buildSecurityNotificationPayloads({
     event,
-    emailRecipients: ["YDS.VELUVOLU@GMAIL.COM", "yds.veluvolu@gmail.com"],
+    emailRecipients: ["ALERTS@EXAMPLE.COM", "alerts@example.com"],
   });
-  assert.deepEqual(payload.email.to, ["yds.veluvolu@gmail.com"]);
+  assert.deepEqual(payload.email.to, ["alerts@example.com"]);
 });
 
 test("rejects cross-origin links, fragments, malformed evidence, and invalid recipients", async () => {

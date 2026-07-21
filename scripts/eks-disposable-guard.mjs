@@ -23,7 +23,7 @@ function required(name, pattern, planDefault = "") {
 }
 
 const region = required("AWS_REGION", /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u, "ap-south-1");
-const accountId = required("SUTRA_AWS_ACCOUNT_ID", /^\d{12}$/u, "738663485493");
+const accountId = required("SUTRA_AWS_ACCOUNT_ID", /^\d{12}$/u, "505060607080");
 const cluster = required(
   "SUTRA_EKS_CLUSTER_NAME",
   /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/u,
@@ -37,7 +37,7 @@ const kubernetesContext = required(
 const notificationEmail = required(
   "SUTRA_BUDGET_NOTIFICATION_EMAIL",
   /^[^@\s]{1,64}@[^@\s]{1,190}$/u,
-  "yds.veluvolu@gmail.com",
+  "alerts@example.com",
 );
 const expiration = required(
   "SUTRA_DISPOSABLE_EXPIRES_AT",

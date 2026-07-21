@@ -12,8 +12,8 @@ const connection = {
   fixtureId: null,
   fixtureVersion: null,
   partition: "aws",
-  awsAccountId: "738663485493",
-  roleArn: "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole",
+  awsAccountId: "505060607080",
+  roleArn: "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole",
   status: "active",
   enabledRegions: ["ap-south-1"],
   permissionPackVersion: "2",
@@ -26,7 +26,7 @@ const connection = {
 const workspace: KubernetesStoredWorkspace = {
   cluster: {
     id: `kcluster_${"b".repeat(48)}`,
-    clusterUid: "738663485493:ap-south-1:demo",
+    clusterUid: "505060607080:ap-south-1:demo",
     name: "demo",
     distribution: "Amazon EKS",
     version: "1.33",

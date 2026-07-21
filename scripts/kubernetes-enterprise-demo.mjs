@@ -39,7 +39,7 @@ const falcoRaw = {
     "k8s.pod.uid": "0df489b8-86b0-4ab2-8f38-852292e18f89",
     "container.id": "c".repeat(64),
     "container.name": workload,
-    "container.image.repository": "738663485493.dkr.ecr.ap-south-1.amazonaws.com/checkout-api",
+    "container.image.repository": "505060607080.dkr.ecr.ap-south-1.amazonaws.com/checkout-api",
     "container.image.tag": "demo",
     "proc.name": "sh",
     "proc.exepath": "/bin/sh",
@@ -116,7 +116,7 @@ const networkRaw = {
 
 const supplyChainRaw = {
   image: {
-    repository: "738663485493.dkr.ecr.ap-south-1.amazonaws.com/checkout-api",
+    repository: "505060607080.dkr.ecr.ap-south-1.amazonaws.com/checkout-api",
     digest: `sha256:${"a".repeat(64)}`,
     tag: "demo",
   },

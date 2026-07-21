@@ -170,7 +170,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "efd6a6d35c390c89447d248d24296a94d31f141f729f3da22c5b60cfdcb2b964",
+    "308f89a15bf382fec54537df18556fe9d5531dd2b9f57a8479f79d42d0a066fa",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -181,7 +181,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   );
   assert.equal(
     statements.get("AttestExactCollectorRolePolicies")?.Resource,
-    "arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole",
+    "arn:aws:iam::505060607080:role/sutra/SutraLocalCollectorRole",
   );
   assert.deepEqual(
     new Set(statements.get("ConfigureAndRecoverExactTemplateBucket")?.Action),
@@ -199,7 +199,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   );
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
-    "arn:aws:s3:::sutra-onboarding-738663485493-us-east-1/templates/standard-2026-07/" +
+    "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07/" +
       "17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml",
   );
   assert.equal(

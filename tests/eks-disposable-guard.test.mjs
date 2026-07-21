@@ -14,9 +14,9 @@ function environment() {
     ...process.env,
     AWS_PROFILE: "sutra-administrator",
     AWS_REGION: "ap-south-1",
-    SUTRA_AWS_ACCOUNT_ID: "738663485493",
+    SUTRA_AWS_ACCOUNT_ID: "505060607080",
     SUTRA_EKS_CLUSTER_NAME: "sutra-disposable-test",
-    SUTRA_KUBERNETES_CONTEXT: "arn:aws:eks:ap-south-1:738663485493:cluster/sutra-disposable-test",
+    SUTRA_KUBERNETES_CONTEXT: "arn:aws:eks:ap-south-1:505060607080:cluster/sutra-disposable-test",
     SUTRA_DISPOSABLE_EXPIRES_AT: new Date(Date.now() + 60 * 60_000).toISOString(),
     SUTRA_DISPOSABLE_BUDGET_USD: "40",
     SUTRA_BUDGET_NOTIFICATION_EMAIL: "budget@example.com",
@@ -86,7 +86,7 @@ function fakeAwsScript(logPath, remainingResourcesJson) {
     "#!/bin/sh",
     `printf '%s\\n' "$*" >> '${logPath}'`,
     'case "$1 $2" in',
-    '"sts get-caller-identity") echo \'{"Account":"738663485493"}\' ;;',
+    '"sts get-caller-identity") echo \'{"Account":"505060607080"}\' ;;',
     '"eks describe-cluster") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
     '"logs delete-log-group") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
     '"ecr describe-repositories") echo "An error occurred (RepositoryNotFoundException)" 1>&2; exit 254 ;;',
@@ -153,10 +153,10 @@ function fakeAwsWithEcr(ecrTagsJson) {
   return [
     "#!/bin/sh",
     'case "$1 $2" in',
-    '"sts get-caller-identity") echo \'{"Account":"738663485493"}\' ;;',
+    '"sts get-caller-identity") echo \'{"Account":"505060607080"}\' ;;',
     '"eks describe-cluster") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
     '"logs delete-log-group") echo "An error occurred (ResourceNotFoundException)" 1>&2; exit 254 ;;',
-    '"ecr describe-repositories") echo \'{"repositories":[{"repositoryArn":"arn:aws:ecr:ap-south-1:738663485493:repository/sutra/kubernetes-agent"}]}\' ;;',
+    '"ecr describe-repositories") echo \'{"repositories":[{"repositoryArn":"arn:aws:ecr:ap-south-1:505060607080:repository/sutra/kubernetes-agent"}]}\' ;;',
     `"ecr list-tags-for-resource") echo '${ecrTagsJson}' ;;`,
     '"ecr delete-repository") echo \'{}\' ;;',
     '"budgets delete-budget") echo "An error occurred (NotFoundException)" 1>&2; exit 254 ;;',
@@ -213,7 +213,7 @@ test("teardown deletes an ECR repository only after confirming the disposable ta
 });
 
 test("teardown fails and prints each remaining tagged resource when cleanup is incomplete", async () => {
-  const remaining = '{"ResourceTagMappingList":[{"ResourceARN":"arn:aws:ec2:ap-south-1:738663485493:volume/vol-0abc"}]}';
+  const remaining = '{"ResourceTagMappingList":[{"ResourceARN":"arn:aws:ec2:ap-south-1:505060607080:volume/vol-0abc"}]}';
   await withFakeAws(remaining, async ({ path }) => {
     try {
       await execute(process.execPath, [
@@ -227,7 +227,7 @@ test("teardown fails and prints each remaining tagged resource when cleanup is i
     } catch (error) {
       assert.match(String(error.stderr), /Teardown incomplete: tagged disposable resources remain/u);
       assert.match(String(error.stdout), /Remaining sutra:disposable resources \(1\):/u);
-      assert.match(String(error.stdout), /arn:aws:ec2:ap-south-1:738663485493:volume\/vol-0abc/u);
+      assert.match(String(error.stdout), /arn:aws:ec2:ap-south-1:505060607080:volume\/vol-0abc/u);
     }
   });
 });

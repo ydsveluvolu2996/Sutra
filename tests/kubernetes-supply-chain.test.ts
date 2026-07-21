@@ -8,7 +8,7 @@ import {
 
 const evidence = {
   image: {
-    repository: "738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra-demo",
+    repository: "505060607080.dkr.ecr.ap-south-1.amazonaws.com/sutra-demo",
     digest: `sha256:${"a".repeat(64)}`,
     tag: "verified-demo",
   },
@@ -32,14 +32,14 @@ const evidence = {
   signature: {
     state: "verified",
     issuer: "https://token.actions.githubusercontent.com",
-    subject: "https://github.com/ydsveluvolu2996/Sutra/.github/workflows/security.yml@refs/heads/main",
+    subject: "https://github.com/example-org/sutra/.github/workflows/security.yml@refs/heads/main",
     transparencyLogVerified: true,
     certificate: "must-not-survive",
   },
   provenance: {
     state: "verified",
     builderId: "https://github.com/actions/runner",
-    sourceRepository: "https://github.com/ydsveluvolu2996/Sutra",
+    sourceRepository: "https://github.com/example-org/sutra",
     commitSha: "c".repeat(40),
     statement: "must-not-survive",
   },
@@ -47,7 +47,7 @@ const evidence = {
 
 test("normalizes digest-bound scanner, SBOM, signature and provenance evidence", async () => {
   const normalized = await normalizeKubernetesSupplyChainEvidence({
-    clusterId: "738663485493:ap-south-1:sutra-validation",
+    clusterId: "505060607080:ap-south-1:sutra-validation",
     collectedAt: "2026-07-17T08:45:00.000Z",
     evidence,
   });
