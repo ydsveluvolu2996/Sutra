@@ -1119,21 +1119,42 @@ export async function markConnectionNeedsAttention(
   });
 }
 
-export async function createSyncRun(connectionId: string): Promise<string> {
+/**
+ * Options for scoping a sync run beyond the local pilot organization.
+ *
+ * `orgId` defaults to {@link LOCAL_ORG_ID}, so every local caller that passes no
+ * options gets byte-identical behaviour. Hosted callers (the broker-ingest job
+ * handler) pass the org resolved STRICTLY from the durable job's server-derived
+ * scope, plus the `idempotencyKey` = the broker's signed collector job id so the
+ * created run's idempotency key matches the snapshot payload's `jobId` that
+ * {@link persistSnapshot} re-checks.
+ */
+export interface CreateSyncRunOptions {
+  readonly orgId?: string;
+  readonly idempotencyKey?: string;
+  readonly triggerKind?: "manual" | "scheduled" | "onboarding";
+}
+
+export async function createSyncRun(
+  connectionId: string,
+  options: CreateSyncRunOptions = {},
+): Promise<string> {
+  const orgId = options.orgId ?? LOCAL_ORG_ID;
+  const triggerKind = options.triggerKind ?? "manual";
   const db = await readyDatabase();
   const abandonedBefore = Date.now() - LIVE_AWS_RUN_RECLAIM_AFTER_MS;
   await db.batch([
     db.prepare(
       `UPDATE cmdb_snapshots SET status = 'failed', completed_at = ?
         WHERE org_id = ? AND connection_id = ? AND status = 'staging' AND collected_at < ?`,
-    ).bind(Date.now(), LOCAL_ORG_ID, connectionId, abandonedBefore),
+    ).bind(Date.now(), orgId, connectionId, abandonedBefore),
     db.prepare(
       `UPDATE sync_runs SET status = 'failed', coverage_state = 'unknown',
           totals_json = '{"error":"COLLECTION_FAILED"}', finished_at = ?
         WHERE org_id = ? AND connection_id = ? AND status = 'running' AND created_at < ?`,
-    ).bind(Date.now(), LOCAL_ORG_ID, connectionId, abandonedBefore),
+    ).bind(Date.now(), orgId, connectionId, abandonedBefore),
   ]);
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(orgId, connectionId);
   if (connection === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -1150,6 +1171,7 @@ export async function createSyncRun(connectionId: string): Promise<string> {
     throw new PilotRepositoryError("INVALID_STATE", "Run simulated inventory through the durable local jobs workflow");
   }
   const runId = id("sync");
+  const idempotencyKey = options.idempotencyKey ?? runId;
   const now = Date.now();
   let result: D1Result<unknown>;
   try {
@@ -1158,7 +1180,7 @@ export async function createSyncRun(connectionId: string): Promise<string> {
       (id, org_id, customer_id, connection_id, trigger_kind, status,
        coverage_state, collector_pack_version, totals_json, idempotency_key,
        started_at, created_at)
-     SELECT ?, c.org_id, c.customer_id, c.id, 'manual', 'running', 'unknown',
+     SELECT ?, c.org_id, c.customer_id, c.id, ?, 'running', 'unknown',
             'aws-pilot-v1', '{}', ?, ?, ?
        FROM aws_connections c
       WHERE c.org_id = ? AND c.customer_id = ? AND c.id = ?
@@ -1171,10 +1193,11 @@ export async function createSyncRun(connectionId: string): Promise<string> {
         )`,
     ).bind(
       runId,
-      runId,
+      triggerKind,
+      idempotencyKey,
       now,
       now,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       connectionId,
       PILOT_PERMISSION_PACK,
@@ -1191,7 +1214,7 @@ export async function createSyncRun(connectionId: string): Promise<string> {
       `SELECT id FROM sync_runs
         WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
         LIMIT 1`,
-    ).bind(LOCAL_ORG_ID, connectionId).first<{ id: string }>();
+    ).bind(orgId, connectionId).first<{ id: string }>();
     if (running !== null) {
       throw new PilotRepositoryError("CONFLICT", "A sync is already running for this AWS connection");
     }
@@ -1244,9 +1267,14 @@ export async function persistSnapshot(
   origin: SnapshotOrigin = { kind: "unknown", fixtureId: null, fixtureVersion: null },
   localFixtureJobId: string | null = null,
   localFixtureScheduleId: string | null = null,
+  // `orgId` defaults to the local pilot organization so every existing local
+  // caller is byte-identical. Hosted callers pass the org resolved STRICTLY from
+  // the durable job's server-derived scope; the whole persist is then scoped to
+  // that tenant and never to anything read from the payload.
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<string> {
   const db = await readyDatabase();
-  const connection = await getConnection(payload.connectionId);
+  const connection = await getConnectionForOrg(orgId, payload.connectionId);
   if (connection === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -1263,7 +1291,7 @@ export async function persistSnapshot(
     `SELECT id, idempotency_key, trigger_kind, schedule_id FROM sync_runs
       WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND id = ? AND status = 'running'
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, runId).first<{
+  ).bind(orgId, connection.customerId, payload.connectionId, runId).first<{
     id: string;
     idempotency_key: string;
     trigger_kind: "manual" | "scheduled" | "onboarding";
@@ -1284,7 +1312,7 @@ export async function persistSnapshot(
           AND s.connection_id = h.connection_id AND s.status = 'complete'
         WHERE h.org_id = ? AND h.customer_id = ? AND h.connection_id = ?
         LIMIT 1`,
-    ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId).first<{ id: string }>();
+    ).bind(orgId, connection.customerId, payload.connectionId).first<{ id: string }>();
     if (previousHead !== null) {
       previousSnapshotId = previousHead.id;
       const previousResult = await db.prepare(
@@ -1294,7 +1322,7 @@ export async function persistSnapshot(
            FROM cmdb_resources
           WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND snapshot_id = ?
           ORDER BY resource_key`,
-      ).bind(LOCAL_ORG_ID, connection.customerId, payload.connectionId, previousHead.id).all<ResourceRow>();
+      ).bind(orgId, connection.customerId, payload.connectionId, previousHead.id).all<ResourceRow>();
       previousResources = (previousResult.results ?? []).map(resourceRowToComparable);
     }
   }
@@ -1341,7 +1369,7 @@ export async function persistSnapshot(
      VALUES (?, ?, ?, ?, ?, 'staging', ?, ?, ?, ?, ?, ?)`,
   ).bind(
     snapshotId,
-    LOCAL_ORG_ID,
+    orgId,
     connection.customerId,
     payload.connectionId,
     runId,
@@ -1368,7 +1396,7 @@ export async function persistSnapshot(
     ).bind(
       `${snapshotId}:${resource.resourceKey}`,
       snapshotId,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       resource.resourceKey,
@@ -1396,7 +1424,7 @@ export async function persistSnapshot(
     ).bind(
       `${snapshotId}:rel:${relationship.fromResourceKey}:${relationship.toResourceKey}:${relationship.relationType}:${index}`,
       snapshotId,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       relationship.fromResourceKey,
@@ -1416,7 +1444,7 @@ export async function persistSnapshot(
     ).bind(
       `${snapshotId}:finding:${finding.fingerprint}`,
       snapshotId,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       finding.resourceKey,
@@ -1442,7 +1470,7 @@ export async function persistSnapshot(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       `${runId}:${coverage.collectorKey}:${coverage.region}`,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       runId,
@@ -1470,7 +1498,7 @@ export async function persistSnapshot(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind(
       `${snapshotId}:change:${change.changeType}:${index}:${change.resourceKey}`,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       previousSnapshotId,
@@ -1495,7 +1523,7 @@ export async function persistSnapshot(
         WHERE id = ? AND org_id = ? AND status = 'staging'
           AND EXISTS (SELECT 1 FROM sync_runs r WHERE r.id = ? AND r.org_id = ?
             AND r.connection_id = ? AND r.status = 'running')`,
-    ).bind(snapshotStatus, now, payload.snapshotSha256, snapshotId, LOCAL_ORG_ID, runId, LOCAL_ORG_ID, payload.connectionId),
+    ).bind(snapshotStatus, now, payload.snapshotSha256, snapshotId, orgId, runId, orgId, payload.connectionId),
   ];
   if (shouldPublishHead) {
     publicationStatements.push(db.prepare(
@@ -1506,7 +1534,7 @@ export async function persistSnapshot(
        ON CONFLICT(connection_id) DO UPDATE SET snapshot_id = excluded.snapshot_id,
          customer_id = excluded.customer_id, updated_at = excluded.updated_at
        WHERE connection_heads.org_id = excluded.org_id`,
-    ).bind(payload.connectionId, LOCAL_ORG_ID, connection.customerId, snapshotId, now, runId, LOCAL_ORG_ID, payload.connectionId));
+    ).bind(payload.connectionId, orgId, connection.customerId, snapshotId, now, runId, orgId, payload.connectionId));
   }
   if (localFixtureJobId !== null && origin.kind === "simulated_fixture") {
     publicationStatements.push(db.prepare(
@@ -1535,7 +1563,7 @@ export async function persistSnapshot(
         WHERE NOT EXISTS (SELECT 1 FROM scoped)`,
     ).bind(
       runId,
-      LOCAL_ORG_ID,
+      orgId,
       connection.customerId,
       payload.connectionId,
       payload.jobId,
@@ -1565,7 +1593,7 @@ export async function persistSnapshot(
       collectors: payload.coverage.length,
     }),
     now,
-    LOCAL_ORG_ID,
+    orgId,
     runId,
     payload.connectionId,
   ));
@@ -1575,16 +1603,17 @@ export async function persistSnapshot(
           SET status = 'active', last_successful_sync_at = ?, updated_at = ?,
               fixture_version = CASE WHEN source_kind = 'simulated_fixture' THEN ? ELSE fixture_version END
         WHERE org_id = ? AND id = ? AND status = 'active'`,
-    ).bind(now, now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId)
+    ).bind(now, now, origin.fixtureVersion, orgId, payload.connectionId)
     : db.prepare(
       `UPDATE aws_connections
           SET updated_at = ?,
               fixture_version = CASE WHEN source_kind = 'simulated_fixture' THEN ? ELSE fixture_version END
         WHERE org_id = ? AND id = ? AND status = 'active'`,
-    ).bind(now, origin.fixtureVersion, LOCAL_ORG_ID, payload.connectionId));
+    ).bind(now, origin.fixtureVersion, orgId, payload.connectionId));
 
   const publicationAudit: AuditInput = origin.kind === "simulated_fixture" && localFixtureJobId !== null
     ? {
+      orgId,
       actorId,
       action: "fixture.job.published",
       targetType: "local_fixture_job",
@@ -1606,6 +1635,7 @@ export async function persistSnapshot(
       },
     }
     : {
+      orgId,
       actorId,
       action: "aws.sync.published",
       targetType: "cmdb_snapshot",

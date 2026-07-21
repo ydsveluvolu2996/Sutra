@@ -41,7 +41,15 @@ import { FinopsWorkspaceRepository } from "./finops-workspace-repository";
 import { ItsmConnectorRepository } from "./itsm-connector-repository";
 import { JobQueueRepository } from "./job-queue-repository";
 import { KubernetesRepository } from "./kubernetes-repository";
-import { getLatestConnectionForOrg, listConnectionsForOrg } from "./pilot-repository";
+import {
+  createSyncRun,
+  getConnectionForOrg,
+  getLatestConnectionForOrg,
+  listConnectionsForOrg,
+  persistSnapshot,
+} from "./pilot-repository";
+import { HOSTED_BROKER_INGEST_JOB_KIND } from "../lib/hosted-broker-ingest";
+import { runHostedBrokerIngestJob } from "../lib/hosted-broker-ingest-job";
 import { RetentionSweepRepository } from "./retention-sweep-repository";
 import { SecurityNotificationRepository } from "./security-notification-repository";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
@@ -509,6 +517,16 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       });
     },
     "uptime-probe": (job) => runUptimeProbeJob(job, buildUptimeProbeDeps()),
+    // The hosted broker ingestion job: persist a signed, server-scoped broker
+    // collection into its tenant via the SAME path the local collector uses.
+    // Enqueued by the ingest route (not a periodic tick); tenant identity comes
+    // strictly from the job's scope, never from the payload.
+    [HOSTED_BROKER_INGEST_JOB_KIND]: (job) => runHostedBrokerIngestJob(job, {
+      getConnection: (orgId, connectionId) => getConnectionForOrg(orgId, connectionId),
+      createSyncRun: (connectionId, options) => createSyncRun(connectionId, options),
+      persistSnapshot: ({ runId, payload, actorId, origin, orgId }) =>
+        persistSnapshot(runId, payload, actorId, origin, null, null, orgId),
+    }),
   };
 }
 
