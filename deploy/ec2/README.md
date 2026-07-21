@@ -287,3 +287,91 @@ $CE exec -T app node -e "fetch('http://127.0.0.1:3000/',{headers:{host:'sutracmd
 **Bottom line:** yes, this deploy serves `sutracmdb.com` end-to-end today, via the
 supported local single-tenant mode with edge TLS and loopback-preserving proxy —
 without weakening any security control.
+
+---
+
+## 11. Account lifecycle — owner bootstrap, client invitations, unlock
+
+Once the stack is up and DNS resolves, the platform has **no accounts yet**. This
+section takes you from an empty deployment to your operator account plus your
+clients, each isolated to their own workspace. It uses email + password + TOTP
+(no external identity provider). All sign-in guardrails are automatic: mandatory
+MFA on every data route, per-account lockout, a per-IP login rate limit, and a
+session cookie that is always `Secure` behind the Caddy TLS edge.
+
+`CE` below is the compose invocation:
+
+```bash
+CE="docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env"
+```
+
+### 11.1 Bootstrap the operator (master admin) — once
+
+1. Read the one-time bootstrap token generated into the runtime volume:
+
+   ```bash
+   $CE exec app node scripts/show-local-bootstrap-token.mjs
+   ```
+
+2. Open `https://<your-domain>/login`. The first-time setup screen appears
+   (bootstrap is required because no accounts exist yet). Paste the token, then
+   set your operator **email, password, and organization name**. This creates the
+   sole `org_owner` — your master admin, with control over every client.
+3. You are prompted to **enroll MFA** immediately. Do this now, over your trusted
+   connection, before the account is used anywhere else — scan the QR into an
+   authenticator app and confirm a code. MFA is mandatory: no workspace data is
+   reachable until it is enrolled and verified.
+
+### 11.2 Create a client workspace (customer) — per client
+
+As the owner, go to **Onboarding → Onboard a client** (`/onboard/client`) — or
+**Customers** (`/customers`) — and create one *customer* per client org. Each
+customer is an isolated tenant; a client's users only ever see their own
+customer's data.
+
+### 11.3 Invite the client's admin — per client
+
+1. Go to **Administration → Access & invitations** (`/access`).
+2. Create an invitation: the client admin's **email**, role **`customer_admin`**,
+   scope **assigned to that client's customer**.
+3. Sutra shows a one-time **activation URL** (`https://<your-domain>/accept-invite?token=…`).
+   Copy it now — the token is shown only once — and send it to the client over a
+   trusted channel.
+4. The client opens the link, chooses their own password, and enrolls MFA. They
+   are provisioned into **only** their customer, as `customer_admin`.
+
+Repeat 11.2–11.3 for each of your clients.
+
+### 11.4 Client self-service
+
+A `customer_admin` can sign in and, from the same **Access & invitations** page,
+invite additional users **into their own customer only** — as `customer_admin` or
+`customer_viewer`. They can never mint an organization role or reach another
+client's data; the invitation and assignment paths enforce this in SQL.
+
+### 11.5 Unlock a locked-out account
+
+Repeated bad passwords lock an account. As an org operator (with a fresh MFA
+step-up), clear the lockout by its user id:
+
+```bash
+curl -sS -X POST https://<your-domain>/api/v1/accounts/unlock \
+  -H 'content-type: application/json' \
+  -b sutra_session=<your-operator-session-cookie> \
+  --data '{"userId":"user_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
+```
+
+(The user id is visible in the members list. The call requires `org_owner` /
+`org_admin` and a recent MFA verification.)
+
+### 11.6 Optional: strict managed-password mode
+
+The steps above use the supported single-tenant local mode behind the loopback
+proxy, which is the turnkey default. A stricter, non-loopback identity mode
+(always-`Secure` by construction, origin-pinned, network-native) also exists,
+gated OFF behind `SUTRA_PASSWORD_IDENTITY_ENABLED`. It requires additional
+configuration (a canonical HTTPS `SUTRA_PUBLIC_ORIGIN`, a managed
+`SUTRA_AUTH_ENCRYPTION_KEY`, mandatory-MFA flag, managed secret store, isolated
+key scope) and a Caddyfile that forwards the real `Host`. Adopt it only if your
+compliance posture requires it; the default local mode already serves all clients
+securely over TLS.

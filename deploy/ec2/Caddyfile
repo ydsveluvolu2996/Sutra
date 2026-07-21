@@ -54,6 +54,12 @@
 		# Caddy still forwards the real public host as X-Forwarded-Host by default.
 		header_up Host 127.0.0.1
 
+		# Pin X-Forwarded-For to the real client IP that Caddy observed, discarding
+		# any client-supplied value. The app's per-IP login/accept rate limiter
+		# reads the right-most X-Forwarded-For hop, so this guarantees it throttles
+		# on the true origin and a spoofed header cannot mint fresh buckets.
+		header_up X-Forwarded-For {remote_host}
+
 		# Active health gating: if the app reports unhealthy, mark the upstream
 		# down so requests fall through to handle_errors (the maintenance page).
 		# The probe carries a loopback Host so the app's deployment boundary

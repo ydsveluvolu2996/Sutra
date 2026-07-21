@@ -19,17 +19,22 @@ const PUBLIC_AUTH_CODES = new Set([
 ]);
 
 /**
- * Resolves the caller's client IP for per-source rate limiting, taken from the
- * left-most entry of `X-Forwarded-For` (the original client as recorded by the
- * trusted edge proxy). Returns null when no forwarded chain is present (e.g. a
+ * Resolves the caller's client IP for per-source rate limiting. Uses the
+ * RIGHT-MOST entry of `X-Forwarded-For` — the hop appended by the trusted edge
+ * proxy (the EC2 Caddy front door), which also pins `X-Forwarded-For` to its own
+ * observed peer. A client-supplied left-most value is therefore NOT honored: it
+ * cannot be used to mint unlimited independent throttle buckets. This mirrors
+ * the rest of the auth code, which never trusts a client-supplied
+ * `x-forwarded-for`. Returns null when no forwarded chain is present (e.g. a
  * direct loopback dev request), in which case the limiter buckets it as
- * unattributed. This is used ONLY for throttling, never for authorization.
+ * unattributed. Used ONLY for throttling, never for authorization.
  */
 export function clientSourceKey(request: Request): string | null {
   const forwarded = request.headers.get("x-forwarded-for");
   if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first && first.length <= 64) return first;
+    const hops = forwarded.split(",");
+    const trusted = hops[hops.length - 1]?.trim();
+    if (trusted && trusted.length <= 64) return trusted;
   }
   return null;
 }

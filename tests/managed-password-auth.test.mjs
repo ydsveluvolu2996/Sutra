@@ -6,6 +6,7 @@ register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const cloudflare = await import("cloudflare:workers");
 const { assertLocalAuthRequest, isManagedPasswordRuntime, sessionCookie } = await import("../lib/api-auth.ts");
+const { clientSourceKey } = await import("../lib/auth-http.ts");
 
 // Managed-password identity is the network-reachable form of the local
 // email+password+TOTP stack. `assertLocalAuthRequest` is the single request gate
@@ -61,6 +62,23 @@ test("managed-password runtime pins the origin: a mismatched host is rejected", 
   assert.throws(() => assertLocalAuthRequest(req("https://evil.example/api/auth/login")));
   // A loopback host is NOT a shortcut around the public-origin pin in this mode.
   assert.throws(() => assertLocalAuthRequest(req("http://127.0.0.1:3000/api/auth/login")));
+});
+
+test("rate-limit source key trusts the right-most X-Forwarded-For hop, not a spoofed left value", () => {
+  // The trusted edge appends (or pins) the real client to the right; a client
+  // that prepends a bogus left value must NOT change the resolved source.
+  const spoofed = clientSourceKey(new Request("https://app.sutra.example/x", {
+    headers: { "x-forwarded-for": "9.9.9.9, 203.0.113.7" },
+  }));
+  assert.equal(spoofed, "203.0.113.7", "must use the right-most (edge-appended) hop");
+
+  const single = clientSourceKey(new Request("https://app.sutra.example/x", {
+    headers: { "x-forwarded-for": "203.0.113.7" },
+  }));
+  assert.equal(single, "203.0.113.7");
+
+  // No forwarded chain (direct loopback dev) -> unattributed (null).
+  assert.equal(clientSourceKey(new Request("http://127.0.0.1:3000/x")), null);
 });
 
 test("session cookie is Secure behind a TLS edge; relaxed only on genuine loopback http", () => {

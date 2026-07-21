@@ -4,7 +4,7 @@ import {
   revokeIdentityInvitation,
 } from "../../../../db/identity-invitation-repository";
 import { requireRecentMfa } from "../../../../db/auth-repository";
-import { authorizeMembershipManagementRequest } from "../../../../lib/api-auth";
+import { authorizeMembershipManagementRequest, isHostedOidcRuntime } from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
   authErrorResponse,
@@ -59,9 +59,18 @@ export async function POST(request: Request): Promise<Response> {
       customerId,
       allowedIssuer,
     });
-    const invitationUrl = new URL("/api/auth/oidc/start", request.url);
-    invitationUrl.searchParams.set("invitation", created.token);
-    invitationUrl.searchParams.set("returnTo", "/dashboard");
+    // The activation URL depends on how members authenticate. OIDC deployments
+    // hand the token to the federated sign-in start endpoint; local and
+    // managed-password deployments send the invitee to the set-password page.
+    let invitationUrl: URL;
+    if (isHostedOidcRuntime()) {
+      invitationUrl = new URL("/api/auth/oidc/start", request.url);
+      invitationUrl.searchParams.set("invitation", created.token);
+      invitationUrl.searchParams.set("returnTo", "/dashboard");
+    } else {
+      invitationUrl = new URL("/accept-invite", request.url);
+      invitationUrl.searchParams.set("token", created.token);
+    }
     return jsonResponse(
       {
         invitation: created.invitation,

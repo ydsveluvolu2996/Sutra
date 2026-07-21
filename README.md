@@ -6,6 +6,11 @@ configuration management database (CMDB) and cloud security posture management
 read-only inventory, resource relationships, evidence-backed configuration checks,
 and scoped access to findings.
 
+> **Deploying?** See [`DEPLOY.md`](DEPLOY.md) for a one-command single-box EC2
+> deployment (Docker Compose + Caddy TLS + automatic maintenance page), and
+> [`deploy/ec2/README.md`](deploy/ec2/README.md) for the full runbook including the
+> operator/client account lifecycle.
+
 > **Local pilot boundary:** the application supports one persistent local MSP
 > workspace, local identities with enforced MFA/RBAC, and multiple deterministic
 > simulated customer accounts. Simulation runs use a signed collector-owned fixture
