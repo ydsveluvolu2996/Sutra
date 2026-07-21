@@ -24,6 +24,8 @@ const [
   deploymentSecurity,
   jobRunnerRoute,
   brokerVerifier,
+  ingestRoute,
+  ingestLib,
 ] = await Promise.all([
   readFile(resolve(root, "app/api/auth/oidc/start/route.ts"), "utf8"),
   readFile(resolve(root, "app/api/auth/oidc/callback/route.ts"), "utf8"),
@@ -34,6 +36,8 @@ const [
   readFile(resolve(root, "lib/deployment-security.ts"), "utf8"),
   readFile(resolve(root, "app/api/internal/jobs/run/route.ts"), "utf8"),
   readFile(resolve(root, "lib/hosted-broker-request-security.ts"), "utf8"),
+  readFile(resolve(root, "app/api/hosted/broker/ingest/route.ts"), "utf8"),
+  readFile(resolve(root, "lib/hosted-broker-ingest.ts"), "utf8"),
 ]);
 
 test("login start builds the authorize redirect and seals state/nonce/PKCE into an HttpOnly cookie", () => {
@@ -54,11 +58,12 @@ test("login start builds the authorize redirect and seals state/nonce/PKCE into 
 test("callback validates state, code, id-token, and provisioning BEFORE issuing a session", () => {
   // Enforce the exact ordering of validation gates in the callback.
   const gates = [
-    "openOidcTransaction(sealed, runtime.transactionKey)", // decrypt+validate sealed transaction (state/nonce/verifier)
+    "openOidcTransaction(sealed, transactionKey)", // decrypt+validate sealed transaction (state/nonce/verifier/provider)
+    "resolveHostedOidcProvider(request, transaction.provider)", // bind the rest of the flow to the SEALED provider only
     "validateOidcCallback(request.url, transaction)", // constant-time state match, code shape, reject error param
-    "exchangeOidcAuthorizationCode(", // PKCE code exchange at the token endpoint
-    "fetchOidcJwks(runtime.client)", // issuer-pinned JWKS
-    "verifyOidcIdToken(idToken", // iss/aud/exp/nonce/signature
+    "exchangeOidcAuthorizationCode(", // PKCE code exchange at the provider's token endpoint
+    "fetchOidcJwks(provider.client)", // provider-pinned JWKS
+    "verifyOidcIdToken(idToken", // iss/aud/exp/nonce/signature pinned to the sealed provider
   ];
   let cursor = 0;
   for (const gate of gates) {
@@ -86,10 +91,17 @@ test("callback fails closed and clears the transaction cookie on any error", () 
 });
 
 test("first-login provisioning is deny-by-default: an uninvited identity cannot join a tenant", () => {
-  // Path A (no invitation): loginHostedUser only issues a session for an
-  // identity ALREADY provisioned into exactly one active org membership. An
+  // Path A (no invitation): the uninvited branch goes through resolveHostedSession,
+  // which calls loginHostedUser FIRST — and loginHostedUser only issues a session
+  // for an identity ALREADY provisioned into exactly one active org membership. An
   // uninvited subject matches zero memberships and is refused.
-  assert.match(callbackRoute, /transaction\.invitationToken === null\s*\?\s*await loginHostedUser\(identity\)/u);
+  assert.match(callbackRoute, /transaction\.invitationToken === null\s*\?\s*await resolveHostedSession\(identity\)/u);
+  assert.match(callbackRoute, /async function resolveHostedSession[\s\S]*return await loginHostedUser\(identity\)/u);
+  // Self-serve org creation is attempted ONLY behind the separate signup switch
+  // AND only when loginHostedUser reported no membership; otherwise the original
+  // error is rethrown unchanged (deny-by-default preserved).
+  assert.match(callbackRoute, /error\.code === "IDENTITY_NOT_PROVISIONED"\s*&&\s*isHostedSelfServeSignupEnabled\(\)/u);
+  assert.match(callbackRoute, /return await provisionSelfServeHostedOrg\(identity\)/u);
   assert.match(authRepo, /memberships\.length !== 1[\s\S]*IDENTITY_NOT_PROVISIONED/u);
   // The membership is looked up strictly by the VERIFIED issuer+subject+email,
   // all bound to active user/org/membership rows — never widened by email alone.
@@ -170,4 +182,45 @@ test("hosted broker ingestion authenticates with asymmetric signatures and serve
   assert.match(brokerVerifier, /throw new HostedBrokerRequestSecurityError\("SCOPE_MISMATCH"\)/u);
   // Replay protection is mandatory via an atomic consume.
   assert.match(brokerVerifier, /REQUEST_REPLAYED/u);
+});
+
+test("login start selects and seals exactly ONE configured provider", () => {
+  // The caller chooses the provider by a bounded slug; the resolved provider id
+  // is threaded into createOidcAuthorization so it is recorded in the sealed
+  // transaction (and never inferred later).
+  assert.match(startRoute, /resolveHostedOidcProvider\(request, providerParam\)/u);
+  assert.match(startRoute, /createOidcAuthorization\(\s*runtime\.client,\s*runtime\.providerId,/u);
+  // The provider list is validated from a single config value; the runtime never
+  // trusts a single ambient issuer.
+  assert.match(runtime, /parseHostedOidcProviders/u);
+  assert.doesNotMatch(runtime, /SUTRA_OIDC_ISSUER|SUTRA_OIDC_CLIENT_ID/u);
+});
+
+test("callback binds token validation to the SEALED provider (no cross-provider substitution)", () => {
+  // The provider config comes from the sealed provider id, and issuer + audience
+  // fed to id-token verification are that provider's — so a token from a
+  // different federated IdP cannot satisfy a transaction started for another.
+  assert.match(callbackRoute, /resolveHostedOidcProvider\(request, transaction\.provider\)/u);
+  assert.match(callbackRoute, /issuer: provider\.client\.issuer/u);
+  assert.match(callbackRoute, /clientId: provider\.client\.clientId/u);
+});
+
+test("self-serve provisioning mints only a NEW org and never joins an existing one", () => {
+  // Existing identities are matched by the FULL (issuer, subject) pair, never by
+  // email, and a known pair is refused rather than given a second org.
+  assert.match(authRepo, /SELECT id FROM users WHERE issuer = \? AND subject = \?/u);
+  assert.match(authRepo, /provisionSelfServeHostedOrg[\s\S]*existing !== null[\s\S]*IDENTITY_NOT_PROVISIONED/u);
+  // A brand-new identity gets a fresh org + a single owner membership.
+  assert.match(authRepo, /INSERT INTO organizations \(id, slug, name, status, created_at\)/u);
+  assert.match(authRepo, /'org_owner', 'all_customers', 'active'/u);
+  // The separate signup switch is off unless the exact string "true".
+  assert.match(runtime, /SUTRA_HOSTED_SELF_SERVE_SIGNUP === "true"/u);
+});
+
+test("hosted broker ingestion route is inert unless hosted mode + the master switch are on", () => {
+  assert.match(ingestRoute, /if \(!isHostedBrokerIngestEnabled\(\)\) return notFound\(\)/u);
+  // The enqueue uses the SERVER-DERIVED org scope, never a request-declared one.
+  assert.match(ingestLib, /orgId: scope\.tenantId/u);
+  assert.match(ingestLib, /tenantId: scope\.tenantId/u);
+  assert.match(ingestLib, /const scope = await deps\.resolveScope\(connectionId\)/u);
 });

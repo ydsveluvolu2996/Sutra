@@ -1,3 +1,5 @@
+import { hostedOidcProviderIssues } from "./hosted-oidc-providers.ts";
+
 export type DeploymentEnvironment = "local" | "preview" | "staging" | "production";
 
 export interface DeploymentSecurityEnvironment {
@@ -5,10 +7,7 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_PUBLIC_ORIGIN?: string;
   readonly SUTRA_LOCAL_MODE?: string;
   readonly SUTRA_IDENTITY_MODE?: string;
-  readonly SUTRA_OIDC_ISSUER?: string;
-  readonly SUTRA_OIDC_CLIENT_ID?: string;
-  readonly SUTRA_OIDC_AUTHORIZATION_ENDPOINT?: string;
-  readonly SUTRA_OIDC_TOKEN_ENDPOINT?: string;
+  readonly SUTRA_OIDC_PROVIDERS?: string;
   readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
   readonly SUTRA_BROKER_URL?: string;
   readonly SUTRA_BROKER_AUTH_MODE?: string;
@@ -93,10 +92,11 @@ export function hostedConfigurationIssues(environment: DeploymentSecurityEnviron
   if (environment.SUTRA_LOCAL_MODE === "true") issues.push("local authentication must be disabled");
   if (exactHttpsOrigin(environment.SUTRA_PUBLIC_ORIGIN) === null) issues.push("a canonical non-loopback HTTPS public origin is required");
   if (environment.SUTRA_IDENTITY_MODE !== "oidc") issues.push("the hosted OIDC identity adapter is required");
-  if (!isExactHttpsUrl(environment.SUTRA_OIDC_ISSUER)) issues.push("a non-loopback HTTPS OIDC issuer is required");
-  if (!/^[A-Za-z0-9._:-]{3,256}$/u.test(environment.SUTRA_OIDC_CLIENT_ID ?? "")) issues.push("a bounded OIDC client identifier is required");
-  if (!isExactHttpsUrl(environment.SUTRA_OIDC_AUTHORIZATION_ENDPOINT)) issues.push("a non-loopback HTTPS OIDC authorization endpoint is required");
-  if (!isExactHttpsUrl(environment.SUTRA_OIDC_TOKEN_ENDPOINT)) issues.push("a non-loopback HTTPS OIDC token endpoint is required");
+  // Federated login is MULTI-PROVIDER (Google, Microsoft Entra, ...). At least
+  // one fully-configured provider is required and every configured provider must
+  // pass its own HTTPS issuer/endpoint validation, so a single malformed entry
+  // still fails closed.
+  issues.push(...hostedOidcProviderIssues(environment.SUTRA_OIDC_PROVIDERS));
   if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) issues.push("a managed 256-bit OIDC transaction key is required");
   if (!isExactHttpsUrl(environment.SUTRA_BROKER_URL)) issues.push("a non-loopback HTTPS broker URL is required");
   if (environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") issues.push("asymmetric broker authentication is required");

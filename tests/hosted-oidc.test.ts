@@ -16,16 +16,28 @@ const configuration = {
   jwksUrl: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
 } as const;
 
-test("hosted OIDC accepts only the issuer's exact JWKS endpoint", () => {
+test("hosted OIDC accepts an operator-configured HTTPS JWKS endpoint on any host", () => {
   assert.doesNotThrow(() => validateHostedOidcConfiguration(configuration));
-  assert.throws(() => validateHostedOidcConfiguration({
+  // A federated provider may publish its signing keys on a different host than
+  // its issuer (Google's keys live on www.googleapis.com, not accounts.google.com).
+  // The JWKS URI is an operator-trusted configuration value, so a differently
+  // hosted HTTPS endpoint is accepted; the identity binding is enforced at token
+  // verification (issuer + audience + signature), not by the key transport host.
+  assert.doesNotThrow(() => validateHostedOidcConfiguration({
     ...configuration,
-    jwksUrl: "https://attacker.example/.well-known/jwks.json",
+    issuer: "https://accounts.google.com",
+    jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
   }));
-  assert.throws(() => validateHostedOidcConfiguration({
-    ...configuration,
-    jwksUrl: `${configuration.jwksUrl}?redirect=https://attacker.example`,
-  }));
+  // Credentials, a query string, a fragment, or non-HTTPS are still rejected so a
+  // JWKS URI can never smuggle an open-redirect or embedded credential.
+  for (const jwksUrl of [
+    `${configuration.jwksUrl}?redirect=https://attacker.example`,
+    "http://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
+    "https://user:pass@cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json",
+    "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json#fragment",
+  ]) {
+    assert.throws(() => validateHostedOidcConfiguration({ ...configuration, jwksUrl }));
+  }
 });
 
 test("code exchange uses PKCE form data and returns only the bounded ID token", async () => {

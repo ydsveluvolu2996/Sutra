@@ -13,6 +13,13 @@ export interface OidcClientConfiguration {
 
 export interface OidcAuthorizationTransaction {
   readonly version: typeof TRANSACTION_VERSION;
+  /**
+   * The configured OIDC provider id this transaction was opened for. The
+   * callback validates the returned token STRICTLY against this provider only,
+   * so a token minted by a different federated provider can never satisfy a
+   * transaction that was started for another one.
+   */
+  readonly provider: string;
   readonly state: string;
   readonly nonce: string;
   readonly codeVerifier: string;
@@ -21,6 +28,8 @@ export interface OidcAuthorizationTransaction {
   readonly createdAt: number;
   readonly expiresAt: number;
 }
+
+const PROVIDER_ID = /^[a-z][a-z0-9_-]{1,31}$/u;
 
 function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
@@ -80,13 +89,16 @@ async function codeChallenge(verifier: string): Promise<string> {
 
 export async function createOidcAuthorization(
   configuration: OidcClientConfiguration,
+  provider: string,
   returnTo: string | null | undefined,
   now = Date.now(),
   invitationToken?: string | null,
 ): Promise<{ readonly url: string; readonly transaction: OidcAuthorizationTransaction }> {
   validateOidcClientConfiguration(configuration);
+  if (!PROVIDER_ID.test(provider)) throw new Error("OIDC provider id is invalid");
   const transaction: OidcAuthorizationTransaction = {
     version: TRANSACTION_VERSION,
+    provider,
     state: base64UrlEncode(randomBytes(32)),
     nonce: base64UrlEncode(randomBytes(32)),
     codeVerifier: base64UrlEncode(randomBytes(32)),
@@ -133,10 +145,11 @@ export async function sealOidcTransaction(
 function parsedTransaction(value: unknown, now: number): OidcAuthorizationTransaction {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error("OIDC transaction is invalid");
   const candidate = value as Record<string, unknown>;
-  const exactKeys = ["version", "state", "nonce", "codeVerifier", "returnTo", "invitationToken", "createdAt", "expiresAt"];
+  const exactKeys = ["version", "provider", "state", "nonce", "codeVerifier", "returnTo", "invitationToken", "createdAt", "expiresAt"];
   if (Object.keys(candidate).sort().join("\0") !== exactKeys.sort().join("\0")) throw new Error("OIDC transaction shape is invalid");
   if (
     candidate.version !== TRANSACTION_VERSION ||
+    typeof candidate.provider !== "string" || !PROVIDER_ID.test(candidate.provider) ||
     typeof candidate.state !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.state) ||
     typeof candidate.nonce !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.nonce) ||
     typeof candidate.codeVerifier !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(candidate.codeVerifier) ||

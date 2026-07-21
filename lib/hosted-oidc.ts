@@ -29,19 +29,27 @@ async function boundedJson(response: Response, maximumBytes: number): Promise<un
 }
 
 function assertJwksUrl(configuration: HostedOidcConfiguration): void {
-  const issuer = new URL(configuration.issuer);
-  const expected = new URL(`${issuer.pathname.replace(/\/$/u, "")}/.well-known/jwks.json`, issuer.origin);
+  // The JWKS URI is an operator-trusted, per-provider configuration value. It is
+  // NOT required to be issuer-relative: federated providers publish their signing
+  // keys on their own hosts (Google's keys live on www.googleapis.com, not on
+  // accounts.google.com), so requiring same-origin would make multi-provider
+  // federation impossible. The per-request identity binding is enforced at token
+  // verification (issuer + audience + signature pinned to the SEALED provider),
+  // never by the transport host of the key set. We still reject anything that
+  // could smuggle credentials or an open-redirect: non-HTTPS, embedded
+  // credentials, a fragment, or a query string.
+  if (configuration.jwksUrl.length > 2048 || /[\u0000-\u001f\u007f]/u.test(configuration.jwksUrl)) {
+    throw new Error("OIDC JWKS endpoint must be a bounded HTTPS URL");
+  }
   const supplied = new URL(configuration.jwksUrl);
   if (
     supplied.protocol !== "https:" ||
     supplied.username ||
     supplied.password ||
     supplied.hash ||
-    supplied.origin !== issuer.origin ||
-    supplied.pathname !== expected.pathname ||
     supplied.search
   ) {
-    throw new Error("OIDC JWKS endpoint must be the issuer's exact HTTPS key endpoint");
+    throw new Error("OIDC JWKS endpoint must be a query-less HTTPS URL without credentials");
   }
 }
 

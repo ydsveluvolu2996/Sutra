@@ -20,7 +20,7 @@ const configuration = {
 const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 test("authorization request binds code flow, PKCE, nonce, state, and safe return path", async () => {
-  const created = await createOidcAuthorization(configuration, "/cmdb?region=us-east-1", 1_000_000);
+  const created = await createOidcAuthorization(configuration, "google", "/cmdb?region=us-east-1", 1_000_000);
   const url = new URL(created.url);
   assert.equal(url.searchParams.get("response_type"), "code");
   assert.equal(url.searchParams.get("code_challenge_method"), "S256");
@@ -28,11 +28,12 @@ test("authorization request binds code flow, PKCE, nonce, state, and safe return
   assert.equal(url.searchParams.get("nonce"), created.transaction.nonce);
   assert.match(url.searchParams.get("code_challenge") ?? "", /^[A-Za-z0-9_-]{43}$/u);
   assert.equal(created.transaction.returnTo, "/cmdb?region=us-east-1");
+  assert.equal(created.transaction.provider, "google");
   assert.equal(url.toString().includes(created.transaction.codeVerifier), false);
 });
 
 test("encrypted transaction round-trips and rejects tampering, wrong keys, and expiry", async () => {
-  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 2_000_000);
+  const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 2_000_000);
   const sealed = await sealOidcTransaction(transaction, key);
   assert.deepEqual(await openOidcTransaction(sealed, key, 2_001_000), transaction);
   const replacement = sealed.endsWith("A") ? "B" : "A";
@@ -42,7 +43,7 @@ test("encrypted transaction round-trips and rejects tampering, wrong keys, and e
 });
 
 test("callback requires exact state and creates a bounded token request", async () => {
-  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 3_000_000);
+  const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 3_000_000);
   const callback = new URL(configuration.redirectUri);
   callback.searchParams.set("code", "valid-code-value");
   callback.searchParams.set("state", transaction.state);
@@ -56,7 +57,7 @@ test("callback requires exact state and creates a bounded token request", async 
 });
 
 test("callback rejects a missing state, a missing/malformed code, and an IdP error", async () => {
-  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 3_500_000);
+  const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 3_500_000);
   // A code with no state (or a blank state) can never satisfy the constant-time
   // state comparison, so the callback is refused before any code exchange.
   const noState = new URL(configuration.redirectUri);
@@ -76,7 +77,7 @@ test("callback rejects a missing state, a missing/malformed code, and an IdP err
 });
 
 test("a sealed transaction cannot be replayed past its TTL or under a foreign key", async () => {
-  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 5_000_000);
+  const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 5_000_000);
   const sealed = await sealOidcTransaction(transaction, key);
   // Valid within the TTL window.
   assert.deepEqual(await openOidcTransaction(sealed, key, 5_100_000), transaction);
@@ -97,8 +98,9 @@ test("return paths reject external and authentication-loop targets", () => {
 
 test("a valid invitation is sealed into the transaction and malformed values are discarded", async () => {
   const token = "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII";
-  const invited = await createOidcAuthorization(configuration, "/dashboard", 4_000_000, token);
+  const invited = await createOidcAuthorization(configuration, "entra", "/dashboard", 4_000_000, token);
   assert.equal(invited.transaction.invitationToken, token);
-  const malformed = await createOidcAuthorization(configuration, "/dashboard", 4_000_000, "not-a-token");
+  assert.equal(invited.transaction.provider, "entra");
+  const malformed = await createOidcAuthorization(configuration, "entra", "/dashboard", 4_000_000, "not-a-token");
   assert.equal(malformed.transaction.invitationToken, null);
 });

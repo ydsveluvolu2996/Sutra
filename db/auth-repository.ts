@@ -525,6 +525,101 @@ export async function loginHostedUser(
   );
 }
 
+function selfServeOrgName(identity: HostedIdentity): string {
+  const candidate = (identity.displayName ?? "").trim().replace(/\s+/gu, " ");
+  const base =
+    candidate.length >= 2 && candidate.length <= 80 && !/[<>\u0000-\u001f\u007f]/u.test(candidate)
+      ? candidate
+      : identity.email;
+  return `${base}'s organization`.slice(0, 100);
+}
+
+/**
+ * Self-serve first-login provisioning. Creates a BRAND-NEW organization owned
+ * solely by a verified OIDC identity, plus that identity's owner membership, and
+ * issues a session scoped to the NEW org.
+ *
+ * Isolation invariants (all re-enforced here so they hold regardless of caller):
+ *  - An existing identity is matched only by the FULL verified (issuer, subject)
+ *    pair — never by email. Email is not an org key: two orgs may share an email
+ *    domain, and the same address on two providers (two issuers) is two distinct
+ *    identities. If that pair already exists, the request is REFUSED; it never
+ *    creates a second org for it and never joins it to any existing org.
+ *  - A brand-new identity only ever receives its OWN new org (a fresh org id and
+ *    a single owner membership), so two distinct identities land in two distinct
+ *    organizations with no shared rows.
+ *  - The identity is re-validated exactly as loginHostedUser validates it.
+ *
+ * The OIDC callback invokes this ONLY when the separate self-serve signup switch
+ * is enabled and loginHostedUser found no membership.
+ */
+export async function provisionSelfServeHostedOrg(
+  identity: HostedIdentity,
+  now = Date.now(),
+): Promise<{ token: string; session: AuthenticatedLocalSession }> {
+  if (
+    !identity.issuer.startsWith("https://") ||
+    identity.issuer.length > 2048 ||
+    !/^[^\u0000-\u001f\u007f]{1,255}$/u.test(identity.subject) ||
+    !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(identity.email) ||
+    identity.authenticatedAt > now + 60_000 ||
+    identity.expiresAt <= now
+  ) {
+    throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The hosted identity is invalid");
+  }
+  const email = identity.email.toLocaleLowerCase("en-US");
+  const db = await readyDatabase();
+  const existing = await db.prepare(
+    `SELECT id FROM users WHERE issuer = ? AND subject = ? LIMIT 1`,
+  ).bind(identity.issuer, identity.subject).first<{ id: string }>();
+  if (existing !== null) {
+    // A known (issuer, subject) that reached self-serve did not resolve to one
+    // active org above; self-serve must not paper over that by minting a second
+    // org. Fail exactly as the invite-only path would for an unprovisioned user.
+    throw new LocalAuthError(
+      403,
+      "IDENTITY_NOT_PROVISIONED",
+      "This identity does not have one active Sutra organization membership",
+    );
+  }
+  const orgId = opaqueId("org");
+  const orgSlug = `org-${crypto.randomUUID().replaceAll("-", "")}`;
+  const orgName = selfServeOrgName(identity);
+  const userId = opaqueId("user");
+  const membershipId = opaqueId("member");
+  try {
+    const results = await db.batch([
+      db.prepare(
+        `INSERT INTO organizations (id, slug, name, status, created_at)
+         VALUES (?, ?, ?, 'active', ?)`,
+      ).bind(orgId, orgSlug, orgName, now),
+      db.prepare(
+        `INSERT INTO users (id, issuer, subject, email, display_name, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'active', ?)`,
+      ).bind(userId, identity.issuer, identity.subject, email, identity.displayName, now),
+      db.prepare(
+        `INSERT INTO memberships (id, org_id, user_id, role, scope_mode, status, created_at)
+         VALUES (?, ?, ?, 'org_owner', 'all_customers', 'active', ?)`,
+      ).bind(membershipId, orgId, userId, now),
+    ]);
+    if (results.some((result) => Number(result.meta?.changes ?? 0) !== 1)) {
+      throw new Error("Self-serve provisioning batch was incomplete");
+    }
+  } catch {
+    // Lose the unique-index race (issuer+subject or issuer+email) rather than
+    // duplicate: a concurrent first login for the same identity is refused.
+    throw new LocalAuthError(409, "IDENTITY_NOT_PROVISIONED", "This identity could not be provisioned");
+  }
+  return createSession(
+    db,
+    userId,
+    orgId,
+    identity.authenticatedAt,
+    now,
+    Math.min(identity.expiresAt, now + 60 * 60 * 1000),
+  );
+}
+
 export async function getLocalSession(token: string, now = Date.now()): Promise<AuthenticatedLocalSession | null> {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) return null;
   const db = await readyDatabase();

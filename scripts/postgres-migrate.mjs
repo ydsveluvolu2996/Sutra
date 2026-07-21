@@ -52,6 +52,7 @@ const migrationFiles = [
   "0036_cmdb_relationships.sql",
   "0037_cmdb_custom_assets.sql",
   "0038_uptime_samples.sql",
+  "0041_hosted_broker_replay_nonces.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");
