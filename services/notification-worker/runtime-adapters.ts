@@ -16,6 +16,7 @@ import type {
   NotificationDnsResolver,
   NotificationHttpResponse,
   PinnedNotificationHttpTransport,
+  ResolvedRoutingKeySecret,
   ResolvedWebhookSecret,
   SecurityNotificationDeliveryDependencies,
   SecurityNotificationSecretResolver,
@@ -84,6 +85,29 @@ function parseSecretDocument(
   };
 }
 
+const PAGERDUTY_ROUTING_KEY = /^[A-Za-z0-9]{20,64}$/u;
+
+function parseRoutingKeyDocument(value: string): ResolvedRoutingKeySecret {
+  if (Buffer.byteLength(value, "utf8") > MAXIMUM_SECRET_BYTES) invalid();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return invalid();
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) invalid();
+  const record = parsed as Record<string, unknown>;
+  const allowed = new Set(["version", "channel", "routingKey"]);
+  if (
+    Object.keys(record).some((key) => !allowed.has(key)) ||
+    record.version !== 1 ||
+    record.channel !== "pagerduty" ||
+    typeof record.routingKey !== "string" ||
+    !PAGERDUTY_ROUTING_KEY.test(record.routingKey)
+  ) invalid();
+  return { routingKey: record.routingKey };
+}
+
 export interface ManagedSecretReader {
   getSecretString(secretId: string): Promise<string | null>;
 }
@@ -144,6 +168,17 @@ export class AwsManagedSecretResolver implements SecurityNotificationSecretResol
     if (match === null || match[1] === undefined || match[1].includes("..")) invalid();
     const value = await this.reader.getSecretString(`${this.secretPrefix}${match[1]}`);
     return value === null ? null : parseSecretDocument(value, input.channel);
+  }
+
+  public async resolveRoutingKey(input: {
+    readonly secretReference: string;
+    readonly channel: "pagerduty";
+  }): Promise<ResolvedRoutingKeySecret | null> {
+    if (input.channel !== "pagerduty") invalid();
+    const match = SECRET_REFERENCE.exec(input.secretReference);
+    if (match === null || match[1] === undefined || match[1].includes("..")) invalid();
+    const value = await this.reader.getSecretString(`${this.secretPrefix}${match[1]}`);
+    return value === null ? null : parseRoutingKeyDocument(value);
   }
 }
 

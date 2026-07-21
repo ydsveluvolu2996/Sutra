@@ -8,7 +8,11 @@ export interface EmailNotificationDestinationConfig {
 }
 
 export interface WebhookNotificationDestinationConfig {
-  readonly channel: "slack" | "microsoft_teams" | "generic_webhook";
+  // Every non-email channel is configured the same way: a managed-secret
+  // reference. Webhook channels store an Incoming-Webhook URL secret; PagerDuty
+  // stores an Events API v2 routing key secret. Neither the raw URL nor the
+  // routing key is ever persisted in the destination row.
+  readonly channel: "slack" | "microsoft_teams" | "generic_webhook" | "pagerduty";
   readonly secretReference: string;
 }
 

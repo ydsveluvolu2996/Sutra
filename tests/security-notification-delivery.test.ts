@@ -15,13 +15,13 @@ import {
 
 const deliveryId = `notify_${"a".repeat(48)}`;
 
-async function payloads() {
+async function payloads(severity: "critical" | "high" | "medium" | "low" = "critical") {
   const event = normalizeSecurityNotificationEvent({
     eventId: deliveryId,
     orgId: "org_sutra",
     customerId: "cust_customer",
     clusterId: "cluster_customer",
-    severity: "critical",
+    severity,
     title: "Runtime threat detected",
     summary: "A privileged shell was detected in the production namespace.",
     occurredAt: "2026-07-17T08:30:00.000Z",
@@ -33,6 +33,48 @@ async function payloads() {
     event,
     emailRecipients: ["security@example.com"],
   });
+}
+
+const ROUTING_KEY = "a".repeat(32);
+
+function pagerdutyDependencies(input: {
+  readonly routingKey?: string | null;
+  readonly withResolver?: boolean;
+  readonly dnsAddresses?: readonly string[];
+  readonly responseStatus?: number;
+} = {}): {
+  readonly dependencies: SecurityNotificationDeliveryDependencies;
+  readonly calls: Array<Record<string, unknown>>;
+} {
+  const calls: Array<Record<string, unknown>> = [];
+  const withResolver = input.withResolver ?? true;
+  const routingKey = input.routingKey === undefined ? ROUTING_KEY : input.routingKey;
+  return {
+    calls,
+    dependencies: {
+      secrets: {
+        async resolveWebhook() { return null; },
+        ...(withResolver
+          ? {
+              async resolveRoutingKey({ channel }) {
+                assert.equal(channel, "pagerduty");
+                return routingKey === null ? null : { routingKey };
+              },
+            }
+          : {}),
+      },
+      dns: {
+        async resolve() { return input.dnsAddresses ?? ["8.8.8.8"]; },
+      },
+      http: {
+        async post(request) {
+          calls.push({ ...request });
+          return successfulResponse(input.responseStatus ?? 202);
+        },
+      },
+      ses: { async post() { return successfulResponse(200); } },
+    },
+  };
 }
 
 function successfulResponse(status = 200): NotificationHttpResponse {
@@ -379,6 +421,148 @@ test("still rejects a generic webhook whose resolved host does not match the pin
     }),
     (error: unknown) => error instanceof SecurityNotificationDeliveryError && error.code === "UNSAFE_DESTINATION",
   );
+});
+
+test("sends the Slack incoming-webhook message body ({text, blocks}) on 2xx only", async () => {
+  const fixture = dependencies();
+  const built = await payloads();
+  const results = await deliverSecurityNotification({
+    deliveryId,
+    payloads: built,
+    destinations: { slackSecretReference: "secret://notifications/slack/customer" },
+    dependencies: fixture.dependencies,
+  });
+  assert.deepEqual(results.map((result) => [result.channel, result.status]), [
+    ["slack", "delivered"],
+  ]);
+  const call = fixture.calls.find((entry) => entry.kind === "webhook");
+  assert.equal(String(call?.url), "https://hooks.slack.com/services/T12345678/B12345678/abcdefghijklmnop");
+  const body = JSON.parse(new TextDecoder().decode(call?.body as Uint8Array));
+  assert.equal(body.text, built.slack.text);
+  assert.ok(Array.isArray(body.blocks) && body.blocks.length === 4);
+  assert.equal(body.blocks[0].type, "header");
+});
+
+test("rejects a Slack destination whose resolved URL is non-https or loopback-pinned", async () => {
+  const unsafe = [
+    { webhookUrl: "http://hooks.slack.com/services/T12345678/B12345678/abcdefghijklmnop", expectedHostname: "hooks.slack.com" },
+    { webhookUrl: "https://127.0.0.1/services/T12345678/B12345678/abcdefghijklmnop", expectedHostname: "127.0.0.1" },
+  ];
+  for (const resolved of unsafe) {
+    const fixture = dependencies({ secrets: { async resolveWebhook() { return resolved; } } });
+    await assert.rejects(
+      deliverSecurityNotification({
+        deliveryId,
+        payloads: await payloads(),
+        destinations: { slackSecretReference: "secret://notifications/slack/customer" },
+        dependencies: fixture.dependencies,
+      }),
+      (error: unknown) =>
+        error instanceof SecurityNotificationDeliveryError &&
+        error.code === "UNSAFE_DESTINATION",
+    );
+    assert.equal(fixture.calls.length, 0);
+  }
+});
+
+test("delivers a PagerDuty Events v2 trigger with the injected routing key and mapped severity", async () => {
+  const fixture = pagerdutyDependencies();
+  const built = await payloads("medium");
+  // The routing key is a credential and must never be persisted in the payload.
+  assert.equal("routing_key" in (built.pagerduty as Record<string, unknown>), false);
+
+  const results = await deliverSecurityNotification({
+    deliveryId,
+    payloads: built,
+    destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+    dependencies: fixture.dependencies,
+  });
+  assert.deepEqual(results.map((result) => [result.channel, result.status]), [
+    ["pagerduty", "delivered"],
+  ]);
+  const call = fixture.calls[0];
+  assert.equal(String(call?.url), "https://events.pagerduty.com/v2/enqueue");
+  assert.equal(call?.timeoutMs, 5_000);
+  assert.equal(call?.redirect, "error");
+  const body = JSON.parse(new TextDecoder().decode(call?.body as Uint8Array));
+  assert.equal(body.routing_key, ROUTING_KEY);
+  assert.equal(body.event_action, "trigger");
+  assert.equal(body.dedup_key, deliveryId);
+  assert.equal(body.payload.source, "sutra");
+  assert.equal(body.payload.severity, "warning"); // medium -> warning
+  assert.match(body.payload.summary, /^\[Sutra MEDIUM\]/u);
+});
+
+test("maps every Sutra severity onto the PagerDuty severity scale", async () => {
+  for (const [sutra, pagerduty] of [
+    ["critical", "critical"],
+    ["high", "error"],
+    ["medium", "warning"],
+    ["low", "info"],
+  ] as const) {
+    const fixture = pagerdutyDependencies();
+    await deliverSecurityNotification({
+      deliveryId,
+      payloads: await payloads(sutra),
+      destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+      dependencies: fixture.dependencies,
+    });
+    const body = JSON.parse(new TextDecoder().decode(fixture.calls[0]?.body as Uint8Array));
+    assert.equal(body.payload.severity, pagerduty, sutra);
+  }
+});
+
+test("never fakes PagerDuty delivery: non-2xx, missing key, and unconfigured resolver", async () => {
+  // Non-2xx from the provider is not a delivery.
+  const throttled = pagerdutyDependencies({ responseStatus: 429 });
+  const [throttledResult] = await deliverSecurityNotification({
+    deliveryId,
+    payloads: await payloads(),
+    destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+    dependencies: throttled.dependencies,
+  });
+  assert.equal(throttledResult.status, "retryable_failure");
+  assert.equal(throttledResult.errorCode, "PROVIDER_THROTTLED");
+
+  // Secret resolves to nothing -> permanent failure, no transport call.
+  const missing = pagerdutyDependencies({ routingKey: null });
+  const [missingResult] = await deliverSecurityNotification({
+    deliveryId,
+    payloads: await payloads(),
+    destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+    dependencies: missing.dependencies,
+  });
+  assert.equal(missingResult.status, "permanent_failure");
+  assert.equal(missingResult.errorCode, "DESTINATION_REJECTED");
+  assert.equal(missing.calls.length, 0);
+
+  // No routing-key resolver wired at all -> honest "adapter not configured".
+  const unconfigured = pagerdutyDependencies({ withResolver: false });
+  const [unconfiguredResult] = await deliverSecurityNotification({
+    deliveryId,
+    payloads: await payloads(),
+    destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+    dependencies: unconfigured.dependencies,
+  });
+  assert.equal(unconfiguredResult.status, "permanent_failure");
+  assert.equal(unconfiguredResult.errorCode, "DESTINATION_REJECTED");
+  assert.equal(unconfigured.calls.length, 0);
+});
+
+test("SSRF-screens the PagerDuty endpoint against a poisoned DNS answer", async () => {
+  const fixture = pagerdutyDependencies({ dnsAddresses: ["169.254.169.254"] });
+  await assert.rejects(
+    deliverSecurityNotification({
+      deliveryId,
+      payloads: await payloads(),
+      destinations: { pagerdutySecretReference: "secret://notifications/org_sutra/cust_customer/pagerduty/oncall" },
+      dependencies: fixture.dependencies,
+    }),
+    (error: unknown) =>
+      error instanceof SecurityNotificationDeliveryError &&
+      error.code === "UNSAFE_DESTINATION",
+  );
+  assert.equal(fixture.calls.length, 0);
 });
 
 test("rejects oversized payloads before a transport call", async () => {

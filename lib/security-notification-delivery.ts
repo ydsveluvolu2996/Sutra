@@ -17,6 +17,13 @@ const MAXIMUM_SES_PAYLOAD_BYTES = 128 * 1024;
 const MAXIMUM_SLACK_PAYLOAD_BYTES = 48 * 1024;
 const MAXIMUM_TEAMS_PAYLOAD_BYTES = 64 * 1024;
 const MAXIMUM_GENERIC_PAYLOAD_BYTES = 32 * 1024;
+const MAXIMUM_PAGERDUTY_PAYLOAD_BYTES = 32 * 1024;
+// PagerDuty Events API v2 is a single fixed ingestion endpoint. There is no
+// per-destination URL: the routing key is the credential and travels in the
+// request body, so the host is hard-pinned here (mirroring the Slack host
+// allowlist) and never sourced from a resolved secret.
+const PAGERDUTY_EVENTS_URL = "https://events.pagerduty.com/v2/enqueue";
+const PAGERDUTY_ROUTING_KEY = /^[A-Za-z0-9]{20,64}$/u;
 
 export type SecurityNotificationDeliveryStatus =
   | "delivered"
@@ -50,11 +57,25 @@ export interface ResolvedWebhookSecret {
 
 export type WebhookNotificationChannel = "slack" | "microsoft_teams" | "generic_webhook";
 
+export interface ResolvedRoutingKeySecret {
+  /** PagerDuty Events API v2 routing key, returned only inside the worker trust boundary. */
+  readonly routingKey: string;
+}
+
 export interface SecurityNotificationSecretResolver {
   resolveWebhook(input: {
     readonly secretReference: string;
     readonly channel: WebhookNotificationChannel;
   }): Promise<ResolvedWebhookSecret | null>;
+  /**
+   * Resolves a PagerDuty routing key from the managed secret store. Optional so
+   * existing resolver implementations remain valid; when absent, a PagerDuty
+   * destination is reported as an unconfigured adapter rather than delivered.
+   */
+  resolveRoutingKey?(input: {
+    readonly secretReference: string;
+    readonly channel: "pagerduty";
+  }): Promise<ResolvedRoutingKeySecret | null>;
 }
 
 export interface NotificationDnsResolver {
@@ -118,6 +139,7 @@ export interface SecurityNotificationDestinations {
   readonly slackSecretReference?: string;
   readonly microsoftTeamsSecretReference?: string;
   readonly genericWebhookSecretReference?: string;
+  readonly pagerdutySecretReference?: string;
 }
 
 export class SecurityNotificationDeliveryError extends Error {
@@ -371,6 +393,73 @@ async function deliverWebhook(input: {
   }
 }
 
+function permanentDestinationRejected(
+  channel: SecurityNotificationChannel,
+): SecurityNotificationDeliveryResult {
+  return {
+    channel,
+    status: "permanent_failure",
+    providerStatus: null,
+    errorCode: "DESTINATION_REJECTED",
+    retryAfterSeconds: null,
+  };
+}
+
+async function deliverPagerDuty(input: {
+  readonly secretReference: string;
+  readonly payload: SecurityNotificationPayloads["pagerduty"];
+  readonly dependencies: SecurityNotificationDeliveryDependencies;
+}): Promise<SecurityNotificationDeliveryResult> {
+  if (!SECRET_REFERENCE.test(input.secretReference)) invalid("INVALID_CONFIGURATION");
+  const resolve = input.dependencies.secrets.resolveRoutingKey;
+  // No routing-key resolver wired: honest "adapter not configured" outcome
+  // rather than a faked delivery.
+  if (resolve === undefined) return permanentDestinationRejected("pagerduty");
+  let secret: ResolvedRoutingKeySecret | null;
+  try {
+    secret = await resolve.call(input.dependencies.secrets, {
+      secretReference: input.secretReference,
+      channel: "pagerduty",
+    });
+  } catch (error) {
+    return transportFailure("pagerduty", error);
+  }
+  if (secret === null || !PAGERDUTY_ROUTING_KEY.test(secret.routingKey)) {
+    return permanentDestinationRejected("pagerduty");
+  }
+  // Fixed, hard-pinned ingestion endpoint. Still DNS-screened for public
+  // addresses so a poisoned resolver cannot steer the request at an internal
+  // host, matching the SSRF guarantees of the webhook path.
+  const url = new URL(PAGERDUTY_EVENTS_URL);
+  let addresses: readonly string[];
+  try {
+    addresses = await validatedAddresses(input.dependencies.dns, url.hostname);
+  } catch (error) {
+    if (error instanceof SecurityNotificationDeliveryError) throw error;
+    return transportFailure("pagerduty", error);
+  }
+  // The routing key is the credential and is injected here, at send time, only
+  // inside the worker trust boundary — never persisted in the stored payload.
+  const body = jsonBytes(
+    { routing_key: secret.routingKey, ...input.payload },
+    MAXIMUM_PAGERDUTY_PAYLOAD_BYTES,
+  );
+  try {
+    const response = await input.dependencies.http.post({
+      url,
+      headers: { "content-type": "application/json; charset=utf-8" },
+      body,
+      validatedAddresses: addresses,
+      redirect: "error",
+      timeoutMs: TIMEOUT_MS,
+      maximumResponseBytes: MAXIMUM_RESPONSE_BYTES,
+    });
+    return classify("pagerduty", response);
+  } catch (error) {
+    return transportFailure("pagerduty", error);
+  }
+}
+
 async function deliverEmail(input: {
   readonly deliveryId: string;
   readonly payload: SecurityNotificationPayloads["email"];
@@ -428,6 +517,7 @@ export async function deliverSecurityNotification(input: {
       slack: input.payloads.slack,
       microsoftTeams: input.payloads.microsoftTeams,
       genericWebhook: input.payloads.genericWebhook,
+      pagerduty: input.payloads.pagerduty,
     });
   } catch {
     return invalid("INVALID_CONFIGURATION");
@@ -474,6 +564,13 @@ export async function deliverSecurityNotification(input: {
       deliveryId: input.deliveryId,
       payload: input.payloads.genericWebhook,
       maximumPayloadBytes: MAXIMUM_GENERIC_PAYLOAD_BYTES,
+      dependencies: input.dependencies,
+    }));
+  }
+  if (input.destinations.pagerdutySecretReference !== undefined) {
+    deliveries.push(deliverPagerDuty({
+      secretReference: input.destinations.pagerdutySecretReference,
+      payload: input.payloads.pagerduty,
       dependencies: input.dependencies,
     }));
   }

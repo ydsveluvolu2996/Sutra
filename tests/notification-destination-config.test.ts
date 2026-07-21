@@ -96,6 +96,44 @@ test("accepts a generic ticketing webhook as a secret-referenced, tenant-scoped 
   );
 });
 
+test("accepts PagerDuty as a secret-referenced, tenant + channel-scoped destination", () => {
+  assert.deepEqual(normalizeNotificationDestinationConfig({
+    channel: "pagerduty",
+    secretReference: "secret://notifications/org-a/customer-a/pagerduty/oncall",
+  }), {
+    channel: "pagerduty",
+    secretReference: "secret://notifications/org-a/customer-a/pagerduty/oncall",
+  });
+  assert.doesNotThrow(() => assertNotificationSecretScope({
+    channel: "pagerduty",
+    secretReference: "secret://notifications/org-a/customer-a/pagerduty/oncall",
+  }, "org-a", "customer-a"));
+  // A raw routing key (not a secret reference) is rejected.
+  assert.throws(
+    () => normalizeNotificationDestinationConfig({
+      channel: "pagerduty",
+      secretReference: "R0ABCDEFGHIJKLMNOPQRSTUV",
+    }),
+    NotificationDestinationValidationError,
+  );
+  // The secret must stay inside the tenant scope...
+  assert.throws(
+    () => assertNotificationSecretScope({
+      channel: "pagerduty",
+      secretReference: "secret://notifications/org-a/customer-b/pagerduty/oncall",
+    }, "org-a", "customer-a"),
+    NotificationDestinationValidationError,
+  );
+  // ...and the channel scope: a Slack reference cannot be used for PagerDuty.
+  assert.throws(
+    () => assertNotificationSecretScope({
+      channel: "pagerduty",
+      secretReference: "secret://notifications/org-a/customer-a/slack/primary",
+    }, "org-a", "customer-a"),
+    NotificationDestinationValidationError,
+  );
+});
+
 test("rejects unbounded recipients and invalid SES regions", () => {
   assert.throws(
     () => normalizeNotificationDestinationConfig({

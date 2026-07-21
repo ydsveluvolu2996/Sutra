@@ -45,7 +45,8 @@ export function normalizeNotificationDestinationConfig(
   if (
     (config.channel !== "slack" &&
       config.channel !== "microsoft_teams" &&
-      config.channel !== "generic_webhook") ||
+      config.channel !== "generic_webhook" &&
+      config.channel !== "pagerduty") ||
     !SECRET_REFERENCE.test(config.secretReference)
   ) invalid();
   return { channel: config.channel, secretReference: config.secretReference };

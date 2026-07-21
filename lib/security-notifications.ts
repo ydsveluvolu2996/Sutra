@@ -4,8 +4,14 @@ const EVENT_ID = /^notify_[a-f0-9]{48}$/u;
 const SCOPED_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/u;
 
-export type SecurityNotificationChannel = "email" | "slack" | "microsoft_teams" | "generic_webhook";
+export type SecurityNotificationChannel =
+  | "email"
+  | "slack"
+  | "microsoft_teams"
+  | "generic_webhook"
+  | "pagerduty";
 export type SecurityNotificationSeverity = "critical" | "high" | "medium" | "low";
+export type PagerDutyEventSeverity = "critical" | "error" | "warning" | "info";
 
 export interface SecurityNotificationEvent {
   readonly schemaVersion: "sutra.security-notification.v1";
@@ -57,8 +63,38 @@ export interface SecurityNotificationPayloads {
     readonly evidenceSha256: string;
     readonly reportUrl: string;
   };
+  // PagerDuty Events API v2 "trigger" event, minus the routing key. The routing
+  // key is a per-destination credential resolved from the managed secret store
+  // and injected only inside the worker trust boundary at send time — it is
+  // never persisted in this stored payload. `severity` is the PagerDuty scale
+  // (critical/error/warning/info), mapped from the Sutra severity.
+  readonly pagerduty: {
+    readonly event_action: "trigger";
+    readonly dedup_key: string;
+    readonly payload: {
+      readonly summary: string;
+      readonly severity: PagerDutyEventSeverity;
+      readonly source: "sutra";
+      readonly timestamp: string;
+      readonly group: string;
+      readonly custom_details: {
+        readonly findingCount: number;
+        readonly clusterId: string;
+        readonly evidenceSha256: string;
+        readonly reportUrl: string;
+      };
+    };
+    readonly links: readonly { readonly href: string; readonly text: string }[];
+  };
   readonly payloadSha256: string;
 }
+
+const PAGERDUTY_SEVERITY: Readonly<Record<SecurityNotificationSeverity, PagerDutyEventSeverity>> = {
+  critical: "critical",
+  high: "error",
+  medium: "warning",
+  low: "info",
+};
 
 export class SecurityNotificationError extends Error {
   public readonly code = "INVALID_NOTIFICATION";
@@ -226,11 +262,30 @@ export async function buildSecurityNotificationPayloads(input: {
     evidenceSha256: event.evidenceSha256,
     reportUrl: event.reportUrl,
   };
+  const pagerduty = {
+    event_action: "trigger" as const,
+    dedup_key: event.eventId,
+    payload: {
+      summary: subject,
+      severity: PAGERDUTY_SEVERITY[event.severity],
+      source: "sutra" as const,
+      timestamp: event.occurredAt,
+      group: event.clusterId,
+      custom_details: {
+        findingCount: event.findingCount,
+        clusterId: event.clusterId,
+        evidenceSha256: event.evidenceSha256,
+        reportUrl: event.reportUrl,
+      },
+    },
+    links: [{ href: event.reportUrl, text: "Open Sutra" }],
+  };
   const payloads = {
     email: { to, subject, text: textBody },
     slack,
     microsoftTeams,
     genericWebhook,
+    pagerduty,
   };
   return { ...payloads, payloadSha256: await sha256(canonicalJson(payloads)) };
 }

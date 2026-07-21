@@ -71,6 +71,49 @@ test("resolves a generic ticketing webhook secret to an arbitrary pinned host", 
   assert.equal(resolved?.idempotencyHeader, "Idempotency-Key");
 });
 
+test("resolves a PagerDuty routing key from a bounded, channel-scoped secret document", async () => {
+  const requested: string[] = [];
+  const reader: ManagedSecretReader = {
+    async getSecretString(secretId) {
+      requested.push(secretId);
+      return JSON.stringify({
+        version: 1,
+        channel: "pagerduty",
+        routingKey: "a".repeat(32),
+      });
+    },
+  };
+  const resolver = new AwsManagedSecretResolver({ reader, secretPrefix: "sutra/notifications/" });
+  const resolved = await resolver.resolveRoutingKey({
+    secretReference: "secret://notifications/org-a/customer-a/pagerduty/oncall",
+    channel: "pagerduty",
+  });
+  assert.equal(requested[0], "sutra/notifications/org-a/customer-a/pagerduty/oncall");
+  assert.equal(resolved?.routingKey, "a".repeat(32));
+
+  // A webhook-shaped document (no routingKey) is not a valid PagerDuty secret.
+  const wrongShape = new AwsManagedSecretResolver({
+    reader: {
+      async getSecretString() {
+        return JSON.stringify({
+          version: 1,
+          channel: "pagerduty",
+          webhookUrl: "https://hooks.slack.com/services/T/B/token",
+          expectedHostname: "hooks.slack.com",
+        });
+      },
+    },
+    secretPrefix: "sutra/notifications/",
+  });
+  await assert.rejects(
+    wrongShape.resolveRoutingKey({
+      secretReference: "secret://notifications/org-a/customer-a/pagerduty/oncall",
+      channel: "pagerduty",
+    }),
+    /configuration rejected/u,
+  );
+});
+
 test("rejects malformed, cross-channel, and unexpected secret documents", async () => {
   for (const value of [
     "not-json",
