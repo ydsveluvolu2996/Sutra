@@ -10,6 +10,8 @@ import { exchangeOidcAuthorizationCode, fetchOidcJwks } from "../../../../../lib
 import {
   expiredOidcTransactionCookie,
   hostedOidcTransactionKey,
+  hostedSignupAllowedDomains,
+  hostedSignupSourceKey,
   isHostedSelfServeSignupEnabled,
   OIDC_TRANSACTION_COOKIE,
   requestCookie,
@@ -30,7 +32,10 @@ export const dynamic = "force-dynamic";
  * membership at all; provisionSelfServeHostedOrg itself re-checks that the
  * (issuer, subject) pair is brand new and never joins an existing org.
  */
-async function resolveHostedSession(identity: HostedIdentity): ReturnType<typeof loginHostedUser> {
+async function resolveHostedSession(
+  identity: HostedIdentity,
+  request: Request,
+): ReturnType<typeof loginHostedUser> {
   try {
     return await loginHostedUser(identity);
   } catch (error) {
@@ -39,7 +44,14 @@ async function resolveHostedSession(identity: HostedIdentity): ReturnType<typeof
       error.code === "IDENTITY_NOT_PROVISIONED" &&
       isHostedSelfServeSignupEnabled()
     ) {
-      return await provisionSelfServeHostedOrg(identity);
+      // Self-serve abuse controls (INFO-2) apply ONLY here, on the create-new-org
+      // path: a per-source-IP rate limit keyed on the trusted edge IP, and an
+      // OPTIONAL verified-email domain allowlist. Neither touches invited-join or
+      // an existing-identity login.
+      return await provisionSelfServeHostedOrg(identity, {
+        sourceKey: hostedSignupSourceKey(request),
+        allowedEmailDomains: hostedSignupAllowedDomains(),
+      });
     }
     throw error;
   }
@@ -69,7 +81,7 @@ export async function GET(request: Request): Promise<Response> {
       jwks,
     });
     const result = transaction.invitationToken === null
-      ? await resolveHostedSession(identity)
+      ? await resolveHostedSession(identity, request)
       : await acceptIdentityInvitation(identity, transaction.invitationToken);
     const maximumAgeSeconds = Math.max(
       1,

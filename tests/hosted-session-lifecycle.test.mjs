@@ -95,13 +95,13 @@ test("first-login provisioning is deny-by-default: an uninvited identity cannot 
   // which calls loginHostedUser FIRST — and loginHostedUser only issues a session
   // for an identity ALREADY provisioned into exactly one active org membership. An
   // uninvited subject matches zero memberships and is refused.
-  assert.match(callbackRoute, /transaction\.invitationToken === null\s*\?\s*await resolveHostedSession\(identity\)/u);
+  assert.match(callbackRoute, /transaction\.invitationToken === null\s*\?\s*await resolveHostedSession\(identity, request\)/u);
   assert.match(callbackRoute, /async function resolveHostedSession[\s\S]*return await loginHostedUser\(identity\)/u);
   // Self-serve org creation is attempted ONLY behind the separate signup switch
   // AND only when loginHostedUser reported no membership; otherwise the original
   // error is rethrown unchanged (deny-by-default preserved).
   assert.match(callbackRoute, /error\.code === "IDENTITY_NOT_PROVISIONED"\s*&&\s*isHostedSelfServeSignupEnabled\(\)/u);
-  assert.match(callbackRoute, /return await provisionSelfServeHostedOrg\(identity\)/u);
+  assert.match(callbackRoute, /return await provisionSelfServeHostedOrg\(identity, \{/u);
   assert.match(authRepo, /memberships\.length !== 1[\s\S]*IDENTITY_NOT_PROVISIONED/u);
   // The membership is looked up strictly by the VERIFIED issuer+subject+email,
   // all bound to active user/org/membership rows — never widened by email alone.

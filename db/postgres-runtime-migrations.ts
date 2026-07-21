@@ -38,6 +38,7 @@ import postgresCmdbRelationshipsSql from "../postgres/migrations/0036_cmdb_relat
 import postgresCmdbCustomAssetsSql from "../postgres/migrations/0037_cmdb_custom_assets.sql?raw";
 import postgresUptimeSamplesSql from "../postgres/migrations/0038_uptime_samples.sql?raw";
 import postgresHostedBrokerReplayNoncesSql from "../postgres/migrations/0041_hosted_broker_replay_nonces.sql?raw";
+import postgresHostedSignupRateLimitsSql from "../postgres/migrations/0042_hosted_signup_rate_limits.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -80,6 +81,7 @@ const migrations = [
   { id: "0037_cmdb_custom_assets", source: postgresCmdbCustomAssetsSql },
   { id: "0038_uptime_samples", source: postgresUptimeSamplesSql },
   { id: "0041_hosted_broker_replay_nonces", source: postgresHostedBrokerReplayNoncesSql },
+  { id: "0042_hosted_signup_rate_limits", source: postgresHostedSignupRateLimitsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

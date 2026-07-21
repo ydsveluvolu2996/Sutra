@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { register } from "node:module";
+import { resolve } from "node:path";
 import test from "node:test";
 import { Miniflare } from "miniflare";
 
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
+
+const root = resolve(import.meta.dirname, "..");
+// The signup rate-limit table ships as an unregistered migration (drizzle 0048,
+// parent registers). Apply it here so provisionSelfServeHostedOrg's durable
+// per-source counter is exercised end to end.
+const signupRateLimitSchema = (await readFile(resolve(root, "drizzle/0048_hosted_signup_rate_limits.sql"), "utf8"))
+  .split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean);
 
 const cloudflare = await import("cloudflare:workers");
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
@@ -43,6 +52,7 @@ async function withDatabase(run) {
     cloudflare.env.DB = database;
     runtimeMigrations.resetRuntimeSchemaCacheForTests();
     await runtimeMigrations.ensureRuntimeSchema(database);
+    for (const statement of signupRateLimitSchema) await database.prepare(statement).run();
     await run(database);
   } finally {
     await miniflare.dispose();

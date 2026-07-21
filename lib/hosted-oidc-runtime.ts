@@ -7,10 +7,12 @@ import { parseHostedOidcProviders, type HostedOidcProviderConfig } from "./hoste
 export const OIDC_TRANSACTION_COOKIE = "sutra_oidc_transaction";
 
 interface HostedOidcRuntimeEnvironment {
+  readonly SUTRA_HOSTED_ENABLED?: string;
   readonly SUTRA_PUBLIC_ORIGIN?: string;
   readonly SUTRA_OIDC_PROVIDERS?: string;
   readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
   readonly SUTRA_HOSTED_SELF_SERVE_SIGNUP?: string;
+  readonly SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS?: string;
 }
 
 function runtime(): HostedOidcRuntimeEnvironment {
@@ -34,6 +36,15 @@ function hostedOidcBase(request: Request): {
 } {
   assertAuthenticationRequest(request);
   const config = runtime();
+  // Defense in depth (INFO-1): re-check the SUTRA_HOSTED_ENABLED master switch
+  // here — exactly as lib/hosted-broker-ingest-runtime.ts already re-checks it —
+  // so the OIDC start/callback AND the self-serve provisioning path (reached only
+  // through this base) fail CLOSED even if the deployment boundary in
+  // lib/deployment-security.ts is ever bypassed. Off by default: anything other
+  // than the exact string "true" keeps the whole hosted OIDC surface inert (503),
+  // never open. This never affects local mode, which resolves above via
+  // assertAuthenticationRequest → assertLocalAuthRequest and never reaches here.
+  if (config.SUTRA_HOSTED_ENABLED !== "true") notConfigured();
   const origin = config.SUTRA_PUBLIC_ORIGIN?.trim() ?? "";
   const transactionKey = config.SUTRA_OIDC_TRANSACTION_KEY?.trim() ?? "";
   if (!/^[A-Za-z0-9_-]{43}$/u.test(transactionKey)) notConfigured();
@@ -94,6 +105,44 @@ export function resolveHostedOidcProvider(request: Request, providerId: string):
  */
 export function isHostedSelfServeSignupEnabled(): boolean {
   return runtime().SUTRA_HOSTED_SELF_SERVE_SIGNUP === "true";
+}
+
+/**
+ * The OPTIONAL verified-email domain allowlist for self-serve signup (INFO-2b).
+ * SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS is a comma-separated list of bare domains;
+ * when set, a self-serve org may only be created for a verified email whose
+ * domain is on the list. When unset (or empty) this returns null and NO domain
+ * restriction is imposed. Applies ONLY to the self-serve create-new-org path,
+ * never to invited-join or an existing-identity login.
+ */
+export function hostedSignupAllowedDomains(): readonly string[] | null {
+  const raw = runtime().SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS?.trim();
+  if (!raw) return null;
+  const domains = raw
+    .split(",")
+    .map((entry) => entry.trim().toLocaleLowerCase("en-US"))
+    .filter((entry) => entry.length > 0);
+  return domains.length > 0 ? domains : null;
+}
+
+const SIGNUP_SOURCE = /^[A-Za-z0-9.:_-]{1,64}$/u;
+// Everything without a trusted edge IP collapses into ONE shared bucket so a
+// caller that can strip/spoof the header cannot mint unlimited independent
+// buckets to evade the per-source signup rate limit.
+const UNATTRIBUTED_SIGNUP_SOURCE = "unattributed";
+
+/**
+ * The per-source rate-limit key for self-serve signup (INFO-2a). Only the
+ * Cloudflare edge header `cf-connecting-ip` is trusted — a client-supplied
+ * `x-forwarded-for` is NEVER honored, because it is trivially spoofable and would
+ * let an attacker mint unlimited independent buckets. When the trusted header is
+ * absent every request shares the single "unattributed" bucket. Mirrors the
+ * public /api/contact rate-limit source derivation.
+ */
+export function hostedSignupSourceKey(request: Request): string {
+  const direct = request.headers.get("cf-connecting-ip")?.trim();
+  if (direct !== undefined && SIGNUP_SOURCE.test(direct)) return direct;
+  return UNATTRIBUTED_SIGNUP_SOURCE;
 }
 
 export function requestCookie(request: Request, name: string): string | null {

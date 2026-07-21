@@ -76,16 +76,25 @@ export async function ingestHostedBrokerRequest(
     const connectionId = singleHeaderValue(request.headers, "x-sutra-connection-id");
     if (connectionId === null) return reject("AUTHENTICATION_FAILED", 401);
 
-    // Server-state scope resolution. This is the authoritative org/customer and
-    // never derives from the request beyond using the connection id as a key.
-    const scope = await deps.resolveScope(connectionId);
-    if (scope === null) return reject("NOT_FOUND", 404);
-
+    // Bound the body BEFORE the connection lookup, so the same bounded work runs
+    // whether or not the connection exists (LOW-1: no cheap pre-lookup shortcut
+    // that would leak existence via behaviour), and so the body is always bound
+    // before verification.
     const maximumBodyBytes = deps.maximumBodyBytes ?? MAX_HOSTED_BROKER_INGEST_BODY_BYTES;
     const declared = Number(request.headers.get("content-length") ?? "0");
     if (Number.isFinite(declared) && declared > maximumBodyBytes) return reject("BODY_TOO_LARGE", 413);
     const body = new Uint8Array(await request.arrayBuffer());
     if (body.byteLength > maximumBodyBytes) return reject("BODY_TOO_LARGE", 413);
+
+    // Server-state scope resolution. This is the authoritative org/customer and
+    // never derives from the request beyond using the connection id as a key.
+    // LOW-1: an UNKNOWN/inactive connection returns the SAME status+code as a bad
+    // signature (401 AUTHENTICATION_FAILED), so an unauthenticated caller cannot
+    // use the response to learn whether a connection id exists — the existence
+    // oracle is closed. A distinguishable SCOPE_MISMATCH (403) is only reachable
+    // AFTER a valid signature, which an attacker without the key cannot produce.
+    const scope = await deps.resolveScope(connectionId);
+    if (scope === null) return reject("AUTHENTICATION_FAILED", 401);
 
     const brokerJobId = singleHeaderValue(request.headers, "x-sutra-job-id");
     const verified = await deps.verifier.verify({
@@ -121,7 +130,8 @@ export async function ingestHostedBrokerRequest(
       return reject(error.code, SECURITY_STATUS[error.code]);
     }
     const code = (error as { code?: unknown } | null)?.code;
-    if (code === "SCOPE_NOT_FOUND") return reject("NOT_FOUND", 404);
+    // LOW-1: a scope-resolution miss is indistinguishable from an auth failure.
+    if (code === "SCOPE_NOT_FOUND") return reject("AUTHENTICATION_FAILED", 401);
     if (code === "INVALID_INPUT") return reject("INVALID_INPUT", 400);
     return reject("REQUEST_FAILED", 500);
   }

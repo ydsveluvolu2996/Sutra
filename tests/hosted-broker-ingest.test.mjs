@@ -156,16 +156,30 @@ test("a valid signed broker request enqueues a collector job scoped to the conne
   });
 });
 
-test("an unknown or inactive connection is refused before any verification", async () => {
+test("an unknown connection is indistinguishable from a bad signature (no existence oracle)", async () => {
   await withDatabase(async (database) => {
-    await seedOrgConnection(database);
+    const { orgId, connectionId } = await seedOrgConnection(database);
     const keys = generateKeyPairSync("ed25519");
     keys.pem = keys.publicKey.export({ type: "spki", format: "pem" });
     const deps = makeDeps(database, keys);
-    const scope = { tenantId: "org_missing", connectionId: "conn_does_not_exist_00000000000000000000", jobId: "job-1" };
-    const outcome = await ingestHostedBrokerRequest(buildRequest({ keys, scope, body: "{}" }), deps);
-    assert.equal(outcome.status, 404);
-    assert.equal(outcome.body.error.code, "NOT_FOUND");
+
+    // LOW-1: an unknown/inactive connection must NOT leak its non-existence. It
+    // returns the SAME status+code as a KNOWN connection presented with a bad
+    // signature, so an unauthenticated caller cannot probe which connection ids
+    // exist.
+    const unknownScope = { tenantId: "org_missing", connectionId: "conn_does_not_exist_00000000000000000000", jobId: "job-1" };
+    const unknown = await ingestHostedBrokerRequest(buildRequest({ keys, scope: unknownScope, body: "{}" }), deps);
+
+    const foreign = generateKeyPairSync("ed25519");
+    const knownScope = { tenantId: orgId, connectionId, jobId: "job-1" };
+    const badSignature = await ingestHostedBrokerRequest(
+      buildRequest({ keys: { privateKey: foreign.privateKey }, scope: knownScope, body: "{}" }),
+      deps,
+    );
+
+    assert.equal(unknown.status, 401);
+    assert.equal(unknown.body.error.code, "AUTHENTICATION_FAILED");
+    assert.deepEqual(unknown, badSignature, "unknown-connection and bad-signature responses must be identical");
   });
 });
 

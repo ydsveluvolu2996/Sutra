@@ -34,7 +34,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = exactInputObject(
       await readAuthJson(request, 4 * 1024),
       ["email", "role", "scopeMode", "lifetimeHours"],
-      ["customerId"],
+      ["customerId", "allowedIssuer"],
     );
     const role = boundedInputString(body.role, { label: "membership role", maximum: 32 }) as OrgRole;
     const scopeMode = boundedInputString(body.scopeMode, { label: "customer scope", maximum: 32 }) as ScopeMode;
@@ -45,12 +45,19 @@ export async function POST(request: Request): Promise<Response> {
       body.customerId === undefined || body.customerId === null
         ? null
         : boundedInputString(body.customerId, { label: "customer identifier", maximum: 128 });
+    // (LOW-2) OPTIONAL: pin the invitation to a specific OIDC issuer/provider so
+    // only an identity from that IdP can accept it. Absent => unpinned (unchanged).
+    const allowedIssuer =
+      body.allowedIssuer === undefined || body.allowedIssuer === null
+        ? null
+        : boundedInputString(body.allowedIssuer, { label: "sign-in provider issuer", maximum: 2048 });
     const created = await createIdentityInvitation(actor.authenticated, scope, {
       email: boundedInputString(body.email, { label: "email address", maximum: 254 }),
       role,
       scopeMode,
       lifetimeMs: body.lifetimeHours * 60 * 60 * 1000,
       customerId,
+      allowedIssuer,
     });
     const invitationUrl = new URL("/api/auth/oidc/start", request.url);
     invitationUrl.searchParams.set("invitation", created.token);

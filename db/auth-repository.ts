@@ -37,6 +37,7 @@ export type LocalAuthErrorCode =
   | "AUTHENTICATION_REQUIRED"
   | "AUTHORIZATION_DENIED"
   | "BOOTSTRAP_ALREADY_COMPLETED"
+  | "IDENTITY_ISSUER_MISMATCH"
   | "IDENTITY_NOT_PROVISIONED"
   | "INVALID_CREDENTIALS"
   | "INVALID_INPUT"
@@ -45,7 +46,9 @@ export type LocalAuthErrorCode =
   | "MFA_ENROLLMENT_REQUIRED"
   | "MFA_REQUIRED"
   | "MFA_RECENT_REQUIRED"
-  | "PERSISTENCE_FAILED";
+  | "PERSISTENCE_FAILED"
+  | "SIGNUP_DOMAIN_NOT_ALLOWED"
+  | "SIGNUP_RATE_LIMITED";
 
 export class LocalAuthError extends Error {
   public readonly status: number;
@@ -157,6 +160,70 @@ async function readyDatabase(): Promise<D1Database> {
 
 function opaqueId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
+// ---- Self-serve signup abuse controls (INFO-2) ----------------------------
+// These apply ONLY to the self-serve create-NEW-org path
+// (provisionSelfServeHostedOrg), never to invited-join or an existing-identity
+// login. Deny-by-default: a rate-limit breach OR a storage error refuses.
+const SIGNUP_RATE_WINDOW_MS = 60 * 60 * 1000;
+const MAX_SIGNUPS_PER_SOURCE_PER_WINDOW = 10;
+// A source without a trusted edge IP shares one bucket (see hostedSignupSourceKey).
+const UNATTRIBUTED_SIGNUP_SOURCE = "unattributed";
+
+/** Options controlling the self-serve signup abuse gates. All optional; every
+ * default keeps the sane production behaviour, and tests override them. */
+export interface SelfServeSignupOptions {
+  /** Per-source rate-limit key (a trusted edge IP, or a shared bucket name). */
+  readonly sourceKey?: string | null;
+  /** When non-null, the verified email's domain MUST be on this list. */
+  readonly allowedEmailDomains?: readonly string[] | null;
+  readonly now?: number;
+  readonly rateWindowMs?: number;
+  readonly maxSignupsPerWindow?: number;
+}
+
+async function signupSourceDigest(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Atomically reserve one unit of the per-source signup budget for the current
+ * fixed window and refuse once the cap is exceeded. The counter is a durable,
+ * database-executed conditional INSERT ... ON CONFLICT DO UPDATE (see migration
+ * 0048 / postgres 0042), so the count is atomic across worker instances and
+ * restarts. The bucket key is an OPAQUE SHA-256 of the source — no raw IP is
+ * stored. Fails CLOSED: if the counter table is unavailable (e.g. the migration
+ * is not yet registered by the parent) the signup is refused, never allowed.
+ */
+async function consumeSelfServeSignupBudget(
+  db: D1Database,
+  input: { readonly sourceKey: string | null; readonly now: number; readonly windowMs: number; readonly maxPerWindow: number },
+): Promise<void> {
+  const source = input.sourceKey && input.sourceKey.length > 0 ? input.sourceKey : UNATTRIBUTED_SIGNUP_SOURCE;
+  const windowStart = Math.floor(input.now / input.windowMs) * input.windowMs;
+  const expiresAt = windowStart + input.windowMs;
+  const bucketKey = `${await signupSourceDigest(source)}:${windowStart}`;
+  let attempts: number;
+  try {
+    await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    const row = await db.prepare(
+      `INSERT INTO hosted_signup_rate_limits (bucket_key, attempts, expires_at)
+         VALUES (?, 1, ?)
+       ON CONFLICT(bucket_key) DO UPDATE SET attempts = hosted_signup_rate_limits.attempts + 1
+       RETURNING attempts`,
+    ).bind(bucketKey, expiresAt).first<{ attempts: number }>();
+    attempts = Number(row?.attempts ?? 0);
+  } catch {
+    // Fail closed: the durable counter is unavailable. NEVER allow an unmetered
+    // signup — mirrors the hosted-broker replay store, which fails closed until
+    // its migration is registered.
+    throw new LocalAuthError(503, "SIGNUP_RATE_LIMITED", "Self-service sign-up is temporarily unavailable");
+  }
+  if (attempts < 1 || attempts > input.maxPerWindow) {
+    throw new LocalAuthError(429, "SIGNUP_RATE_LIMITED", "Too many sign-up attempts from this source; please try again later");
+  }
 }
 
 function normalizeEmail(value: unknown): string {
@@ -555,8 +622,9 @@ function selfServeOrgName(identity: HostedIdentity): string {
  */
 export async function provisionSelfServeHostedOrg(
   identity: HostedIdentity,
-  now = Date.now(),
+  options: SelfServeSignupOptions = {},
 ): Promise<{ token: string; session: AuthenticatedLocalSession }> {
+  const now = options.now ?? Date.now();
   if (
     !identity.issuer.startsWith("https://") ||
     identity.issuer.length > 2048 ||
@@ -569,6 +637,28 @@ export async function provisionSelfServeHostedOrg(
   }
   const email = identity.email.toLocaleLowerCase("en-US");
   const db = await readyDatabase();
+
+  // (INFO-2a) Per-source signup rate limit FIRST, so every self-serve attempt
+  // from a source is metered regardless of its outcome. Deny-by-default.
+  await consumeSelfServeSignupBudget(db, {
+    sourceKey: options.sourceKey ?? null,
+    now,
+    windowMs: options.rateWindowMs ?? SIGNUP_RATE_WINDOW_MS,
+    maxPerWindow: options.maxSignupsPerWindow ?? MAX_SIGNUPS_PER_SOURCE_PER_WINDOW,
+  });
+
+  // (INFO-2b) OPTIONAL verified-email domain allowlist. Only enforced when the
+  // caller passes a non-null list (from SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS);
+  // when null, no domain restriction. The domain is taken from the VERIFIED
+  // OIDC email, never from anything the request supplied.
+  const allowedDomains = options.allowedEmailDomains ?? null;
+  if (allowedDomains !== null) {
+    const domain = email.slice(email.lastIndexOf("@") + 1);
+    if (domain.length === 0 || !allowedDomains.includes(domain)) {
+      throw new LocalAuthError(403, "SIGNUP_DOMAIN_NOT_ALLOWED", "Self-service sign-up is not available for this email domain");
+    }
+  }
+
   const existing = await db.prepare(
     `SELECT id FROM users WHERE issuer = ? AND subject = ? LIMIT 1`,
   ).bind(identity.issuer, identity.subject).first<{ id: string }>();
