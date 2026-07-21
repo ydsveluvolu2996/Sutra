@@ -134,6 +134,7 @@ export default function LoginPage() {
   const [displayName, setDisplayName] = useState("");
   const [organizationName, setOrganizationName] = useState("Sutra MSP");
   const [bootstrapToken, setBootstrapToken] = useState("");
+  const [identityMode, setIdentityMode] = useState<"local" | "password">("local");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [returnTo] = useState(() =>
@@ -143,9 +144,11 @@ export default function LoginPage() {
   useEffect(() => {
     let active = true;
     void fetch("/api/auth/bootstrap", { cache: "no-store", credentials: "same-origin" })
-      .then((response) => readAuthResponse<{ bootstrapRequired: boolean }>(response))
+      .then((response) => readAuthResponse<{ bootstrapRequired: boolean; identityMode?: "local" | "password" }>(response))
       .then((body) => {
-        if (active) setMode(body.bootstrapRequired ? "bootstrap" : "login");
+        if (!active) return;
+        setIdentityMode(body.identityMode === "password" ? "password" : "local");
+        setMode(body.bootstrapRequired ? "bootstrap" : "login");
       })
       .catch((caught: unknown) => {
         if (!active) return;
@@ -220,8 +223,13 @@ export default function LoginPage() {
           <span className="auth-eyebrow">EKS-first CNAPP for managed service providers</span>
           <LoginShowcase />
         </div>
-        <ul className="auth-assurances" aria-label="Local security properties">
-          <li><span>✓</span> Credentials never leave this machine</li>
+        <ul className="auth-assurances" aria-label="Security properties">
+          <li>
+            <span>✓</span>{" "}
+            {identityMode === "password"
+              ? "Credentials sent only over TLS to this workspace"
+              : "Credentials never leave this machine"}
+          </li>
           <li><span>✓</span> MFA required before any workspace data</li>
           <li><span>✓</span> Every finding traced to cited evidence</li>
         </ul>
@@ -336,7 +344,11 @@ export default function LoginPage() {
           )}
           <p className="auth-local-note">
             <span aria-hidden="true">●</span>
-            {mode === "hosted" ? " Hosted identity · server-side membership required" : " Local access only · external sign-in is disabled"}
+            {mode === "hosted"
+              ? " Hosted identity · server-side membership required"
+              : identityMode === "password"
+                ? " Managed sign-in · password + mandatory MFA, membership provisioned by your operator"
+                : " Local access only · external sign-in is disabled"}
           </p>
         </div>
       </section>

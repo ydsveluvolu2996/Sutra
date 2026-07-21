@@ -312,7 +312,7 @@ async function sessionFromRow(db: D1Database, row: SessionRow): Promise<Authenti
   };
 }
 
-async function createSession(
+export async function createSession(
   db: D1Database,
   userId: string,
   orgId: string,

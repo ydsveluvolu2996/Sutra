@@ -153,7 +153,12 @@ test("hosted authentication requests are pinned to the canonical public origin",
 test("local loopback restriction and deny-by-default boundary are preserved unchanged", () => {
   // The local mode branch still requires a loopback host, unconditionally.
   assert.match(deploymentSecurity, /local mode is restricted to a loopback host/u);
-  assert.match(apiAuth, /SUTRA_LOCAL_MODE !== "true" \|\| !isLoopbackHostname\(url\.hostname\)/u);
+  assert.match(apiAuth, /const loopbackLocal = config\.SUTRA_LOCAL_MODE === "true" && isLoopbackHostname\(url\.hostname\)/u);
+  // The ONLY other accept path is managed-password network mode, and it is
+  // gated behind the (default-OFF) runtime switch AND pinned to the canonical
+  // public origin — it can never widen the loopback-local branch.
+  assert.match(apiAuth, /const managedPassword =\s*\n\s*isManagedPasswordRuntime\(\) && requestOriginMatchesPublicOrigin\(url, config\.SUTRA_PUBLIC_ORIGIN\)/u);
+  assert.match(apiAuth, /if \(!loopbackLocal && !managedPassword\) \{/u);
   // The two former hard-disable strings are gone, replaced by exactly one switch.
   assert.doesNotMatch(deploymentSecurity, /not implemented in this build/u);
   const switchMatches = deploymentSecurity.match(/SUTRA_HOSTED_ENABLED !== "true"/gu) ?? [];

@@ -15,6 +15,9 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_SECRET_STORE?: string;
   readonly SUTRA_ENVIRONMENT_KEY_SCOPE?: string;
   readonly SUTRA_HOSTED_ENABLED?: string;
+  readonly SUTRA_AUTH_ENCRYPTION_KEY?: string;
+  readonly SUTRA_PASSWORD_MFA_REQUIRED?: string;
+  readonly SUTRA_PASSWORD_IDENTITY_ENABLED?: string;
 }
 
 export interface DeploymentBoundaryDecision {
@@ -121,6 +124,47 @@ export function hostedConfigurationIssues(environment: DeploymentSecurityEnviron
   return issues;
 }
 
+/**
+ * Configuration contract for MANAGED-PASSWORD identity: the network-reachable
+ * form of the local email + password + TOTP stack. It shares every transport
+ * and secret requirement with the OIDC contract above (HTTPS origin, asymmetric
+ * broker, TLS/managed database, managed secret store, isolated key scope) but
+ * swaps the OIDC provider set for a managed 256-bit auth-encryption key (used to
+ * seal sessions and TOTP secrets) and REQUIRES multi-factor authentication to be
+ * mandatory — a password reachable from the internet is never sufficient on its
+ * own. Like the OIDC path it fails closed behind its own LAST master switch,
+ * `SUTRA_PASSWORD_IDENTITY_ENABLED`, which defaults OFF until an adversarial auth
+ * review signs off; every requirement above it must still pass independently.
+ */
+export function managedPasswordConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
+  const issues: string[] = [];
+  if (environment.SUTRA_LOCAL_MODE === "true") issues.push("local authentication must be disabled");
+  if (exactHttpsOrigin(environment.SUTRA_PUBLIC_ORIGIN) === null) issues.push("a canonical non-loopback HTTPS public origin is required");
+  if (environment.SUTRA_IDENTITY_MODE !== "password") issues.push("the managed password identity adapter is required");
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_AUTH_ENCRYPTION_KEY ?? "")) issues.push("a managed 256-bit auth encryption key is required");
+  if (environment.SUTRA_PASSWORD_MFA_REQUIRED !== "true") issues.push("multi-factor authentication must be mandatory for password identities");
+  if (!isExactHttpsUrl(environment.SUTRA_BROKER_URL)) issues.push("a non-loopback HTTPS broker URL is required");
+  if (environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") issues.push("asymmetric broker authentication is required");
+  if (!new Set(["d1", "postgres-tls"]).has(environment.SUTRA_DATABASE_MODE ?? "")) issues.push("a supported hosted database mode is required");
+  if (environment.SUTRA_SECRET_STORE !== "managed") issues.push("a managed secret store is required");
+  if (environment.SUTRA_ENVIRONMENT_KEY_SCOPE !== "isolated") issues.push("environment-isolated encryption and signing keys are required");
+  if (environment.SUTRA_PASSWORD_IDENTITY_ENABLED !== "true") {
+    issues.push("managed password deployment is disabled pending adversarial auth review (set SUTRA_PASSWORD_IDENTITY_ENABLED=true only after sign-off)");
+  }
+  return issues;
+}
+
+/**
+ * Selects the identity contract for a network deployment. `password` and `oidc`
+ * are the only supported hosted identity modes; anything else falls through to
+ * the OIDC contract, whose first check reports the missing adapter.
+ */
+export function networkConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
+  return environment.SUTRA_IDENTITY_MODE === "password"
+    ? managedPasswordConfigurationIssues(environment)
+    : hostedConfigurationIssues(environment);
+}
+
 function isPreviewPublicPath(pathname: string): boolean {
   return publicPreviewPaths.has(pathname) || pathname.startsWith("/assets/");
 }
@@ -163,7 +207,7 @@ export function evaluateDeploymentBoundary(
     };
   }
 
-  const issues = hostedConfigurationIssues(runtime);
+  const issues = networkConfigurationIssues(runtime);
   return {
     allowed: issues.length === 0,
     environment,

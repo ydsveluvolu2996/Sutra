@@ -6,6 +6,7 @@ import {
 import {
   assertBootstrapToken,
   assertLocalAuthRequest,
+  isManagedPasswordRuntime,
   sessionCookie,
 } from "../../../../lib/api-auth";
 import {
@@ -22,7 +23,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
   try {
     assertLocalAuthRequest(request);
-    return jsonResponse({ bootstrapRequired: await isLocalBootstrapRequired() });
+    return jsonResponse({
+      bootstrapRequired: await isLocalBootstrapRequired(),
+      identityMode: isManagedPasswordRuntime() ? "password" : "local",
+    });
   } catch (error) {
     return authErrorResponse(error);
   }

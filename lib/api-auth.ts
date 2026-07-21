@@ -23,6 +23,7 @@ interface LocalAuthRuntimeEnv {
   readonly SUTRA_AUTH_ENCRYPTION_KEY?: string;
   readonly SUTRA_AUTH_KEY_VERSION?: string;
   readonly SUTRA_LOCAL_BOOTSTRAP_TOKEN?: string;
+  readonly SUTRA_PASSWORD_IDENTITY_ENABLED?: string;
 }
 
 export interface AuthorizedPilotActor {
@@ -41,9 +42,49 @@ export function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
+function requestOriginMatchesPublicOrigin(url: URL, configuredOrigin: string | undefined): boolean {
+  const configured = configuredOrigin?.trim();
+  if (!configured) return false;
+  try {
+    return url.origin === new URL(configured).origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Managed-password identity is the network-reachable form of the local
+ * email + password + TOTP stack. It reuses the SAME vetted credential
+ * verification, mandatory-MFA gate (`requireMfa`), per-account throttling and
+ * sealed-cookie sessions as loopback local mode — the ONLY differences are that
+ * requests arrive on the canonical HTTPS public origin instead of a loopback
+ * host, and the whole mode stays disabled behind its own master switch
+ * (`SUTRA_PASSWORD_IDENTITY_ENABLED`, default OFF) until an adversarial auth
+ * review signs off. This is deliberately distinct from the OIDC master switch:
+ * enabling one never enables the other.
+ */
+export function isManagedPasswordRuntime(): boolean {
+  const config = runtimeEnv();
+  return (
+    (config.SUTRA_DEPLOYMENT_ENV === "staging" || config.SUTRA_DEPLOYMENT_ENV === "production") &&
+    config.SUTRA_LOCAL_MODE !== "true" &&
+    config.SUTRA_IDENTITY_MODE === "password" &&
+    config.SUTRA_PASSWORD_IDENTITY_ENABLED === "true"
+  );
+}
+
 export function assertLocalAuthRequest(request: Request): void {
   const url = new URL(request.url);
-  if (runtimeEnv().SUTRA_LOCAL_MODE !== "true" || !isLoopbackHostname(url.hostname)) {
+  const config = runtimeEnv();
+  // Loopback local mode: email/password over http on 127.0.0.1/localhost/::1.
+  const loopbackLocal = config.SUTRA_LOCAL_MODE === "true" && isLoopbackHostname(url.hostname);
+  // Managed-password network mode: the same credential stack, pinned to the
+  // canonical HTTPS public origin. Origin pinning here is defense-in-depth on
+  // top of the deployment boundary (which already 421s an origin mismatch) and
+  // the per-mutation same-origin assertion.
+  const managedPassword =
+    isManagedPasswordRuntime() && requestOriginMatchesPublicOrigin(url, config.SUTRA_PUBLIC_ORIGIN);
+  if (!loopbackLocal && !managedPassword) {
     throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Local authentication is unavailable");
   }
 }

@@ -5,6 +5,7 @@ import {
   evaluateDeploymentBoundary,
   generateScriptNonce,
   hostedConfigurationIssues,
+  managedPasswordConfigurationIssues,
   responseSecurityHeaders,
 } from "../lib/deployment-security.ts";
 
@@ -94,6 +95,99 @@ test("production stays disabled behind the SUTRA_HOSTED_ENABLED master switch (d
       `SUTRA_HOSTED_ENABLED=${JSON.stringify(value)} must not enable hosted mode`,
     );
   }
+});
+
+const passwordShape = {
+  SUTRA_DEPLOYMENT_ENV: "production",
+  SUTRA_PUBLIC_ORIGIN: "https://app.sutra.example",
+  SUTRA_LOCAL_MODE: "false",
+  SUTRA_IDENTITY_MODE: "password",
+  SUTRA_AUTH_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  SUTRA_PASSWORD_MFA_REQUIRED: "true",
+  SUTRA_BROKER_URL: "https://broker.sutra.example",
+  SUTRA_BROKER_AUTH_MODE: "asymmetric",
+  SUTRA_DATABASE_MODE: "postgres-tls",
+  SUTRA_SECRET_STORE: "managed",
+  SUTRA_ENVIRONMENT_KEY_SCOPE: "isolated",
+} as const;
+
+test("managed-password identity stays disabled behind its own master switch (default OFF)", () => {
+  // Every managed-password requirement satisfied but the switch unset: the ONLY
+  // remaining issue is the explicit release hold. This proves the credential
+  // stack (HTTPS origin, mandatory MFA, managed key, broker, DB, secrets, key
+  // scope) no longer hard-blocks, and the switch is the single final gate.
+  assert.deepEqual(managedPasswordConfigurationIssues(passwordShape), [
+    "managed password deployment is disabled pending adversarial auth review (set SUTRA_PASSWORD_IDENTITY_ENABLED=true only after sign-off)",
+  ]);
+  const decision = evaluateDeploymentBoundary("https://app.sutra.example/dashboard", passwordShape);
+  assert.equal(decision.allowed, false);
+  assert.equal(decision.status, 503);
+
+  // Deny-by-default: only the exact string "true" clears the hold.
+  for (const value of ["false", "TRUE", "1", "yes", " true", "true ", ""]) {
+    assert.deepEqual(
+      managedPasswordConfigurationIssues({ ...passwordShape, SUTRA_PASSWORD_IDENTITY_ENABLED: value }),
+      ["managed password deployment is disabled pending adversarial auth review (set SUTRA_PASSWORD_IDENTITY_ENABLED=true only after sign-off)"],
+      `SUTRA_PASSWORD_IDENTITY_ENABLED=${JSON.stringify(value)} must not enable managed-password mode`,
+    );
+  }
+});
+
+test("managed-password switch clears the hold only when every other requirement passes", () => {
+  const enabled = { ...passwordShape, SUTRA_PASSWORD_IDENTITY_ENABLED: "true" };
+  assert.deepEqual(managedPasswordConfigurationIssues(enabled), []);
+  const allowed = evaluateDeploymentBoundary("https://app.sutra.example/dashboard", enabled);
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.status, 200);
+
+  // The switch never bypasses the other gates. Notably, MFA must be mandatory
+  // and the OIDC transaction key is NOT what secures this mode — the managed
+  // auth-encryption key is.
+  for (const [key, value] of [
+    ["SUTRA_PUBLIC_ORIGIN", "http://app.sutra.example"],
+    ["SUTRA_IDENTITY_MODE", "oidc"],
+    ["SUTRA_AUTH_ENCRYPTION_KEY", "too-short"],
+    ["SUTRA_PASSWORD_MFA_REQUIRED", "false"],
+    ["SUTRA_BROKER_URL", "http://broker.sutra.example"],
+    ["SUTRA_BROKER_AUTH_MODE", "shared-secret"],
+    ["SUTRA_DATABASE_MODE", "sqlite"],
+    ["SUTRA_SECRET_STORE", "env"],
+    ["SUTRA_ENVIRONMENT_KEY_SCOPE", "shared"],
+    ["SUTRA_LOCAL_MODE", "true"],
+  ] as const) {
+    const broken = { ...enabled, [key]: value };
+    assert.ok(
+      managedPasswordConfigurationIssues(broken).length >= 1,
+      `${key}=${value} must still block managed-password mode even with the switch on`,
+    );
+    assert.equal(
+      evaluateDeploymentBoundary("https://app.sutra.example/dashboard", broken).allowed,
+      false,
+    );
+  }
+});
+
+test("the two identity master switches are independent (enabling one never enables the other)", () => {
+  // OIDC switch on, but identity mode is password → still blocked (password
+  // switch is off), and vice-versa. Neither switch leaks into the other's mode.
+  const oidcEnabledButPasswordMode = {
+    ...passwordShape,
+    SUTRA_HOSTED_ENABLED: "true",
+  };
+  assert.equal(
+    evaluateDeploymentBoundary("https://app.sutra.example/dashboard", oidcEnabledButPasswordMode).allowed,
+    false,
+    "the OIDC switch must not enable managed-password mode",
+  );
+  const passwordEnabledButOidcMode = {
+    ...hostedShape,
+    SUTRA_PASSWORD_IDENTITY_ENABLED: "true",
+  };
+  assert.equal(
+    evaluateDeploymentBoundary("https://app.sutra.example/dashboard", passwordEnabledButOidcMode).allowed,
+    false,
+    "the managed-password switch must not enable OIDC mode",
+  );
 });
 
 test("flipping the master switch clears the hold only when every other requirement passes", () => {
