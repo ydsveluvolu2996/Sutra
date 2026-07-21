@@ -29,6 +29,7 @@
     "notification:worker": "pnpm --dir services/notification-worker start",
     "pilot:setup": "node scripts/setup-local-pilot.mjs",
     "pilot:reset": "node scripts/reset-local-pilot.mjs",
+    "pilot:seed": "node scripts/seed-demo-data.mjs",
     "local:bootstrap-token": "node scripts/show-local-bootstrap-token.mjs",
     "local:backup": "node scripts/local-backup.mjs",
     "local:restore": "node scripts/local-restore.mjs",
