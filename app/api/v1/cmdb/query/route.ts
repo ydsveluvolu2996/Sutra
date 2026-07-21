@@ -3,16 +3,18 @@ import { CmdbWorkspaceRepository } from "../../../../../db/cmdb-workspace-reposi
 import { CmdbCustomAssetRepository } from "../../../../../db/cmdb-custom-asset-repository";
 import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { runCmdbQuery, validateCmdbQuery } from "../../../../../lib/cmdb-query";
+import { readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
+const MAX_BODY_BYTES = 32 * 1024;
 
 export async function POST(request: Request): Promise<Response> {
   try {
-    const body: unknown = await request.json().catch(() => null);
+    const body = await readBoundedJson(request, MAX_BODY_BYTES);
     if (typeof body !== "object" || body === null) {
       throw Object.assign(new Error("The query request is invalid"), { code: "INVALID_INPUT" });
     }

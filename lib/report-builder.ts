@@ -399,10 +399,20 @@ function validateFindingsFilters(value: unknown, catalog: ReadonlySet<string>, e
  * by one row per record. A field containing a comma, double quote, CR or LF is
  * wrapped in double quotes and any interior double quote is doubled. Records are
  * separated by CRLF. Missing cells render empty — no value is fabricated.
+ *
+ * A cell that begins with = + - @ (or a tab/CR) is prefixed with a single quote
+ * to neutralize spreadsheet formula injection: resource/asset names and tags are
+ * attacker-influenceable, so a value like `=HYPERLINK(...)` must not execute when
+ * the exported CSV is opened in Excel/Sheets. Mirrors safeSpreadsheetText used by
+ * the compliance CSV exports.
  */
 export function toCsv(columns: readonly ReportColumn[], rows: readonly Record<string, string>[]): string {
-  const escape = (value: string): string =>
-    /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  const neutralizeFormula = (value: string): string =>
+    /^[=+\-@\t\r]/u.test(value) ? `'${value}` : value;
+  const escape = (raw: string): string => {
+    const value = neutralizeFormula(raw);
+    return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+  };
   const lines: string[] = [columns.map((column) => escape(column.label)).join(",")];
   for (const row of rows) {
     lines.push(columns.map((column) => escape(row[column.key] ?? "")).join(","));
