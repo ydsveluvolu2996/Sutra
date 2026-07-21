@@ -153,14 +153,20 @@ export function sessionTokenFromRequest(request: Request): string | null {
 
 export function sessionCookie(request: Request, token: string, maximumAgeSeconds: number): string {
   const url = new URL(request.url);
-  // Hosted mode is pinned to an HTTPS public origin, so the session cookie is
-  // ALWAYS marked Secure there (even if TLS is terminated at an edge and the
-  // internal request looks like http). The Secure flag is relaxed ONLY for
-  // local mode served over http on a loopback host, so local login still works.
+  // The session cookie is ALWAYS marked Secure except on a genuine loopback
+  // HTTP dev box. Crucially, when a TLS-terminating edge (e.g. the EC2 Caddy
+  // proxy) served the public request over HTTPS it forwards
+  // `X-Forwarded-Proto: https`; we honour that and keep the cookie Secure even
+  // though the internal hop to the app is loopback HTTP. Spoofing the header can
+  // only ADD Secure (fail-safe), never drop it, and on a loopback-only box there
+  // is no untrusted client to spoof it.
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.trim().toLowerCase();
+  const servedOverHttps = url.protocol === "https:" || forwardedProto === "https";
   const localHttp =
     runtimeEnv().SUTRA_LOCAL_MODE === "true" &&
     isLoopbackHostname(url.hostname) &&
-    url.protocol !== "https:";
+    url.protocol !== "https:" &&
+    !servedOverHttps;
   const secure = localHttp ? "" : "; Secure";
   return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maximumAgeSeconds}${secure}`;
 }

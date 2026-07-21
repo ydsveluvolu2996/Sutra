@@ -46,6 +46,7 @@ export type LocalAuthErrorCode =
   | "MFA_ENROLLMENT_REQUIRED"
   | "MFA_REQUIRED"
   | "MFA_RECENT_REQUIRED"
+  | "LOGIN_RATE_LIMITED"
   | "PERSISTENCE_FAILED"
   | "SIGNUP_DOMAIN_NOT_ALLOWED"
   | "SIGNUP_RATE_LIMITED";
@@ -224,6 +225,91 @@ async function consumeSelfServeSignupBudget(
   if (attempts < 1 || attempts > input.maxPerWindow) {
     throw new LocalAuthError(429, "SIGNUP_RATE_LIMITED", "Too many sign-up attempts from this source; please try again later");
   }
+}
+
+const LOGIN_RATE_WINDOW_MS = 5 * 60 * 1000;
+const MAX_LOGIN_ATTEMPTS_PER_SOURCE = 30;
+const UNATTRIBUTED_LOGIN_SOURCE = "unattributed-login-source";
+
+/**
+ * Per-source (per-IP) rate limit for credential endpoints, layered ON TOP of the
+ * existing per-ACCOUNT lockout. The per-account lockout alone lets an attacker
+ * who knows one email keep that account perpetually locked; a per-source cap
+ * blunts distributed brute force and the lockout-DoS by throttling how many
+ * attempts any single origin can make in a window. Reuses the durable
+ * rate-limit table under a distinct `login:` key namespace, and FAILS CLOSED if
+ * the counter store is unavailable. The source key is the caller's client IP as
+ * resolved by the trusted edge (see clientSourceKey); a null/blank source is
+ * bucketed together as unattributed so it is still metered.
+ */
+export async function consumeLoginAttemptBudget(
+  input: { readonly sourceKey: string | null; readonly now: number; readonly windowMs?: number; readonly maxPerWindow?: number },
+): Promise<void> {
+  const db = await readyDatabase();
+  const windowMs = input.windowMs ?? LOGIN_RATE_WINDOW_MS;
+  const maxPerWindow = input.maxPerWindow ?? MAX_LOGIN_ATTEMPTS_PER_SOURCE;
+  const source = input.sourceKey && input.sourceKey.length > 0 ? input.sourceKey : UNATTRIBUTED_LOGIN_SOURCE;
+  const windowStart = Math.floor(input.now / windowMs) * windowMs;
+  const expiresAt = windowStart + windowMs;
+  const bucketKey = `login:${await signupSourceDigest(source)}:${windowStart}`;
+  let attempts: number;
+  try {
+    await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    const row = await db.prepare(
+      `INSERT INTO hosted_signup_rate_limits (bucket_key, attempts, expires_at)
+         VALUES (?, 1, ?)
+       ON CONFLICT(bucket_key) DO UPDATE SET attempts = hosted_signup_rate_limits.attempts + 1
+       RETURNING attempts`,
+    ).bind(bucketKey, expiresAt).first<{ attempts: number }>();
+    attempts = Number(row?.attempts ?? 0);
+  } catch {
+    throw new LocalAuthError(503, "LOGIN_RATE_LIMITED", "Sign-in is temporarily unavailable");
+  }
+  if (attempts < 1 || attempts > maxPerWindow) {
+    throw new LocalAuthError(429, "LOGIN_RATE_LIMITED", "Too many sign-in attempts from this source; please try again later");
+  }
+}
+
+/**
+ * Operator account-unlock. Clears the per-account failed-attempt counter and
+ * lockout for a LOCAL password identity in the actor's own organization. This is
+ * the recovery path for the lockout-DoS: only an org operator (org_owner /
+ * org_admin, i.e. the capability `membership:manage`) may call it, the target
+ * must be an active local member of the SAME org (verified by join, never taken
+ * from the request), and it only ever relaxes state — it can never escalate a
+ * role or cross an org boundary. Returns true if a locked/failed credential was
+ * reset, false if the target had nothing to clear.
+ */
+export async function unlockLocalUserAccount(
+  actor: AuthenticatedLocalSession,
+  targetUserId: string,
+  now = Date.now(),
+): Promise<boolean> {
+  if (!effectiveCapabilities(actor.subject).includes("membership:manage")) {
+    throw new LocalAuthError(403, "AUTHORIZATION_DENIED", "This account cannot unlock organization members");
+  }
+  if (typeof targetUserId !== "string" || !/^user_[a-f0-9]{32}$/u.test(targetUserId)) {
+    throw new LocalAuthError(400, "INVALID_INPUT", "The account identifier is invalid");
+  }
+  const db = await readyDatabase();
+  // The target must be an active LOCAL member of the actor's own org. This join
+  // is the isolation boundary: an id outside the org resolves to no row.
+  const member = await db.prepare(
+    `SELECT u.id
+       FROM users u
+       JOIN memberships m ON m.user_id = u.id AND m.org_id = ? AND m.status = 'active'
+      WHERE u.id = ? AND u.issuer = ?
+      LIMIT 1`,
+  ).bind(actor.subject.orgId, targetUserId, LOCAL_IDENTITY_ISSUER).first<{ id: string }>();
+  if (member === null) {
+    throw new LocalAuthError(404, "INVALID_INPUT", "No such local account in this organization");
+  }
+  const result = await db.prepare(
+    `UPDATE local_password_credentials
+        SET failed_attempts = 0, locked_until = NULL, updated_at = ?
+      WHERE user_id = ? AND (failed_attempts > 0 OR locked_until IS NOT NULL)`,
+  ).bind(now, targetUserId).run();
+  return Number(result.meta?.changes ?? 0) === 1;
 }
 
 function normalizeEmail(value: unknown): string {

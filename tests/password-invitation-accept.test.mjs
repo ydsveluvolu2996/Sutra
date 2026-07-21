@@ -182,3 +182,67 @@ test("an expired invitation is refused", async () => {
     );
   });
 });
+
+test("per-source login rate limit throttles a single origin and is per-source independent", async () => {
+  await withDatabase(async () => {
+    const opts = { windowMs: 5 * 60 * 1000, maxPerWindow: 3 };
+    // Three attempts from one IP are allowed; the fourth is blocked.
+    for (let i = 0; i < 3; i += 1) {
+      await auth.consumeLoginAttemptBudget({ sourceKey: "203.0.113.7", now: 10_000, ...opts });
+    }
+    await assert.rejects(
+      auth.consumeLoginAttemptBudget({ sourceKey: "203.0.113.7", now: 10_000, ...opts }),
+      /too many sign-in attempts/iu,
+    );
+    // A different source has its own budget in the same window.
+    await assert.doesNotReject(
+      auth.consumeLoginAttemptBudget({ sourceKey: "198.51.100.9", now: 10_000, ...opts }),
+    );
+    // The original source recovers in the next window.
+    await assert.doesNotReject(
+      auth.consumeLoginAttemptBudget({ sourceKey: "203.0.113.7", now: 10_000 + 5 * 60 * 1000, ...opts }),
+    );
+  });
+});
+
+test("operator can unlock a locked member; non-operator cannot; cross-org is refused", async () => {
+  await withDatabase(async ({ database, owner, orgId }) => {
+    const { token } = await inviteClientAdmin(owner, 2000);
+    const accepted = await invitations.acceptPasswordInvitation(token, { password: STRONG_PASSWORD, displayName: "Alpha Admin" }, 3000);
+    const userId = accepted.session.subject.userId;
+
+    // Force the account into a locked state.
+    await database.prepare(
+      `UPDATE local_password_credentials SET failed_attempts = 5, locked_until = ? WHERE user_id = ?`,
+    ).bind(9_999_999_999_999, userId).run();
+
+    // A customer-scoped admin (no org-wide membership:manage) is refused.
+    const customerAdmin = {
+      subject: {
+        userId: "usr_x", orgId, membershipId: "mem_x",
+        role: "customer_admin", scopeMode: "assigned_customers",
+        grants: [{ customerId: "cust_alpha", role: "customer_admin" }],
+      },
+    };
+    await assert.rejects(auth.unlockLocalUserAccount(customerAdmin, userId, 4000), /cannot unlock/iu);
+
+    // A well-formed id that is not a member of this org -> 404.
+    await assert.rejects(
+      auth.unlockLocalUserAccount(owner, "user_" + "a".repeat(32), 4000),
+      /No such local account/iu,
+    );
+
+    // The org owner unlocks the real member.
+    const unlocked = await auth.unlockLocalUserAccount(owner, userId, 4000);
+    assert.equal(unlocked, true);
+
+    // The lockout is cleared and the member can log in again.
+    const secrets = { encryptionKey: "A".repeat(43), keyVersion: "local-auth-v1" };
+    const login = await auth.loginLocalUser(
+      { email: "client-alpha-admin@client.invalid", password: STRONG_PASSWORD },
+      secrets,
+      5000,
+    );
+    assert.equal(login.session.subject.userId, userId);
+  });
+});

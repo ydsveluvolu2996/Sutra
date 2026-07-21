@@ -1,4 +1,4 @@
-import { LOCAL_SESSION_TTL_MS } from "../../../../../db/auth-repository";
+import { LOCAL_SESSION_TTL_MS, consumeLoginAttemptBudget } from "../../../../../db/auth-repository";
 import {
   acceptPasswordInvitation,
   previewPasswordInvitation,
@@ -8,6 +8,7 @@ import {
   assertLocalAuthMutation,
   authErrorResponse,
   boundedInputString,
+  clientSourceKey,
   exactInputObject,
   readAuthJson,
 } from "../../../../../lib/auth-http";
@@ -35,6 +36,8 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   try {
     assertLocalAuthMutation(request);
+    // Per-source throttle so invitation tokens can't be brute-forced from one origin.
+    await consumeLoginAttemptBudget({ sourceKey: clientSourceKey(request), now: Date.now() });
     const body = exactInputObject(await readAuthJson(request, 4 * 1024), ["token", "password", "displayName"], []);
     const token = boundedInputString(body.token, { label: "invitation token", minimum: 43, maximum: 43, trim: false });
     const result = await acceptPasswordInvitation(token, {

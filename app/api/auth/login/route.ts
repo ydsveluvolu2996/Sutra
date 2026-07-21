@@ -1,9 +1,10 @@
-import { LOCAL_SESSION_TTL_MS, loginLocalUser } from "../../../../db/auth-repository";
+import { LOCAL_SESSION_TTL_MS, consumeLoginAttemptBudget, loginLocalUser } from "../../../../db/auth-repository";
 import { localAuthSecrets, sessionCookie } from "../../../../lib/api-auth";
 import {
   assertLocalAuthMutation,
   authErrorResponse,
   boundedInputString,
+  clientSourceKey,
   exactInputObject,
   readAuthJson,
 } from "../../../../lib/auth-http";
@@ -14,6 +15,9 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request): Promise<Response> {
   try {
     assertLocalAuthMutation(request);
+    // Per-source (per-IP) throttle IN FRONT of the credential check, so a single
+    // origin cannot brute-force accounts or weaponize the per-account lockout.
+    await consumeLoginAttemptBudget({ sourceKey: clientSourceKey(request), now: Date.now() });
     const body = exactInputObject(
       await readAuthJson(request, 2 * 1024),
       ["email", "password"],

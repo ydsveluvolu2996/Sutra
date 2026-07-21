@@ -5,7 +5,7 @@ import test from "node:test";
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const cloudflare = await import("cloudflare:workers");
-const { assertLocalAuthRequest, isManagedPasswordRuntime } = await import("../lib/api-auth.ts");
+const { assertLocalAuthRequest, isManagedPasswordRuntime, sessionCookie } = await import("../lib/api-auth.ts");
 
 // Managed-password identity is the network-reachable form of the local
 // email+password+TOTP stack. `assertLocalAuthRequest` is the single request gate
@@ -61,6 +61,30 @@ test("managed-password runtime pins the origin: a mismatched host is rejected", 
   assert.throws(() => assertLocalAuthRequest(req("https://evil.example/api/auth/login")));
   // A loopback host is NOT a shortcut around the public-origin pin in this mode.
   assert.throws(() => assertLocalAuthRequest(req("http://127.0.0.1:3000/api/auth/login")));
+});
+
+test("session cookie is Secure behind a TLS edge; relaxed only on genuine loopback http", () => {
+  applyEnv({ SUTRA_LOCAL_MODE: "true" });
+  // Genuine local dev: loopback http, no forwarded-proto -> Secure relaxed so
+  // http://127.0.0.1 login still works.
+  const dev = sessionCookie(new Request("http://127.0.0.1:3000/x"), "t".repeat(43), 3600);
+  assert.ok(!/;\s*Secure/u.test(dev), "loopback http dev cookie must not be Secure");
+  assert.match(dev, /HttpOnly/u);
+  assert.match(dev, /SameSite=Strict/u);
+
+  // Same loopback host, but a TLS edge (Caddy) served the public request over
+  // HTTPS -> the cookie MUST be Secure even though the internal hop is http.
+  const proxied = sessionCookie(
+    new Request("http://127.0.0.1:3000/x", { headers: { "x-forwarded-proto": "https" } }),
+    "t".repeat(43),
+    3600,
+  );
+  assert.match(proxied, /;\s*Secure/u, "cookie must be Secure when the edge served HTTPS");
+
+  // Non-local (managed-password / hosted) is always Secure.
+  applyEnv(FULL_MANAGED);
+  const hosted = sessionCookie(new Request(`${ORIGIN}/x`), "t".repeat(43), 3600);
+  assert.match(hosted, /;\s*Secure/u);
 });
 
 test("every managed-password precondition is load-bearing for the request gate", () => {

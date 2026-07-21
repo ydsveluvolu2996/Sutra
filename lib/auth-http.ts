@@ -14,8 +14,25 @@ const PUBLIC_AUTH_CODES = new Set([
   "MFA_ENROLLMENT_REQUIRED",
   "MFA_REQUIRED",
   "MFA_RECENT_REQUIRED",
+  "LOGIN_RATE_LIMITED",
   "PERSISTENCE_FAILED",
 ]);
+
+/**
+ * Resolves the caller's client IP for per-source rate limiting, taken from the
+ * left-most entry of `X-Forwarded-For` (the original client as recorded by the
+ * trusted edge proxy). Returns null when no forwarded chain is present (e.g. a
+ * direct loopback dev request), in which case the limiter buckets it as
+ * unattributed. This is used ONLY for throttling, never for authorization.
+ */
+export function clientSourceKey(request: Request): string | null {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    const first = forwarded.split(",")[0]?.trim();
+    if (first && first.length <= 64) return first;
+  }
+  return null;
+}
 
 export function assertLocalAuthMutation(request: Request): void {
   assertLocalAuthRequest(request);
