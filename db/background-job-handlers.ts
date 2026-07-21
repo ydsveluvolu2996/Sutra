@@ -44,6 +44,7 @@ import { KubernetesRepository } from "./kubernetes-repository";
 import { getLatestConnectionForOrg, listConnectionsForOrg } from "./pilot-repository";
 import { RetentionSweepRepository } from "./retention-sweep-repository";
 import { SecurityNotificationRepository } from "./security-notification-repository";
+import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -507,6 +508,7 @@ export function buildJobHandlers(): Record<string, JobHandler> {
         now: Date.now,
       });
     },
+    "uptime-probe": (job) => runUptimeProbeJob(job, buildUptimeProbeDeps()),
   };
 }
 

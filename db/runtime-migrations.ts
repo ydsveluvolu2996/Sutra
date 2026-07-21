@@ -42,6 +42,7 @@ import savedReportsSchemaSql from "../drizzle/0040_saved_reports.sql?raw";
 import alertRulesSchemaSql from "../drizzle/0041_alert_rules.sql?raw";
 import cmdbRelationshipsSchemaSql from "../drizzle/0042_cmdb_relationships.sql?raw";
 import cmdbCustomAssetsSchemaSql from "../drizzle/0043_cmdb_custom_assets.sql?raw";
+import uptimeSamplesSchemaSql from "../drizzle/0044_uptime_samples.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -101,6 +102,7 @@ const migrations = [
   { id: "0041_alert_rules", statements: statementsFrom(alertRulesSchemaSql) },
   { id: "0042_cmdb_relationships", statements: statementsFrom(cmdbRelationshipsSchemaSql) },
   { id: "0043_cmdb_custom_assets", statements: statementsFrom(cmdbCustomAssetsSchemaSql) },
+  { id: "0044_uptime_samples", statements: statementsFrom(uptimeSamplesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
