@@ -60,14 +60,60 @@ test("canonical origin mismatch fails before application routing", () => {
   assert.equal(decision.status, 421);
 });
 
-test("production remains hard-blocked until hosted identity and broker adapters land", () => {
+test("production stays disabled behind the SUTRA_HOSTED_ENABLED master switch (default OFF)", () => {
+  // With every hosted configuration requirement satisfied but the master switch
+  // unset, the ONLY remaining issue is the explicit release hold — proving the
+  // identity/session and broker/jobs adapters no longer hard-block, and that the
+  // switch is the single, deliberate final gate.
   assert.deepEqual(hostedConfigurationIssues(hostedShape), [
-    "hosted identity and session lifecycle are not implemented in this build",
-    "hosted broker ingestion and durable jobs are not implemented in this build",
+    "hosted deployment is disabled pending adversarial auth review (set SUTRA_HOSTED_ENABLED=true only after sign-off)",
   ]);
   const decision = evaluateDeploymentBoundary("https://app.sutra.example/dashboard", hostedShape);
   assert.equal(decision.allowed, false);
   assert.equal(decision.status, 503);
+
+  // The switch is deny-by-default: only the exact string "true" clears the hold.
+  for (const value of ["false", "TRUE", "1", "yes", " true", "true ", ""]) {
+    assert.deepEqual(
+      hostedConfigurationIssues({ ...hostedShape, SUTRA_HOSTED_ENABLED: value }),
+      ["hosted deployment is disabled pending adversarial auth review (set SUTRA_HOSTED_ENABLED=true only after sign-off)"],
+      `SUTRA_HOSTED_ENABLED=${JSON.stringify(value)} must not enable hosted mode`,
+    );
+  }
+});
+
+test("flipping the master switch clears the hold only when every other requirement passes", () => {
+  // With the switch on AND all config valid, hosted production is allowed.
+  const enabled = { ...hostedShape, SUTRA_HOSTED_ENABLED: "true" };
+  assert.deepEqual(hostedConfigurationIssues(enabled), []);
+  const allowed = evaluateDeploymentBoundary("https://app.sutra.example/dashboard", enabled);
+  assert.equal(allowed.allowed, true);
+  assert.equal(allowed.status, 200);
+
+  // The switch never bypasses the other gates: each config requirement still
+  // fails closed on its own even with the switch on.
+  for (const [key, value] of [
+    ["SUTRA_PUBLIC_ORIGIN", "http://app.sutra.example"],
+    ["SUTRA_IDENTITY_MODE", "password"],
+    ["SUTRA_OIDC_ISSUER", "https://127.0.0.1/issuer"],
+    ["SUTRA_OIDC_TOKEN_ENDPOINT", "http://login.sutra.example/oauth2/token"],
+    ["SUTRA_BROKER_URL", "http://broker.sutra.example"],
+    ["SUTRA_BROKER_AUTH_MODE", "shared-secret"],
+    ["SUTRA_DATABASE_MODE", "sqlite"],
+    ["SUTRA_SECRET_STORE", "env"],
+    ["SUTRA_ENVIRONMENT_KEY_SCOPE", "shared"],
+    ["SUTRA_LOCAL_MODE", "true"],
+  ] as const) {
+    const broken = { ...enabled, [key]: value };
+    assert.ok(
+      hostedConfigurationIssues(broken).length >= 1,
+      `${key}=${value} must still block hosted mode even with the master switch on`,
+    );
+    assert.equal(
+      evaluateDeploymentBoundary("https://app.sutra.example/dashboard", broken).allowed,
+      false,
+    );
+  }
 });
 
 test("security headers protect framing, MIME handling, capabilities, and HTTPS transport", () => {

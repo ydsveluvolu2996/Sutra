@@ -15,6 +15,7 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_DATABASE_MODE?: string;
   readonly SUTRA_SECRET_STORE?: string;
   readonly SUTRA_ENVIRONMENT_KEY_SCOPE?: string;
+  readonly SUTRA_HOSTED_ENABLED?: string;
 }
 
 export interface DeploymentBoundaryDecision {
@@ -103,10 +104,20 @@ export function hostedConfigurationIssues(environment: DeploymentSecurityEnviron
   if (environment.SUTRA_SECRET_STORE !== "managed") issues.push("a managed secret store is required");
   if (environment.SUTRA_ENVIRONMENT_KEY_SCOPE !== "isolated") issues.push("environment-isolated encryption and signing keys are required");
 
-  // These release holds are removed only when their adapters and adversarial
-  // acceptance tests land. Configuration flags alone cannot create readiness.
-  issues.push("hosted identity and session lifecycle are not implemented in this build");
-  issues.push("hosted broker ingestion and durable jobs are not implemented in this build");
+  // The hosted identity + session lifecycle (OIDC authorization-code + PKCE with
+  // sealed state/nonce transactions, invitation-bound first-login provisioning,
+  // and session issuance through the same hardened cookie/crypto path as local
+  // mode) now exists in this build, as do the durable background-job runner and
+  // the asymmetric hosted-broker request verifier — all covered by tests. Even
+  // so, production stays disabled behind ONE explicit master switch until a
+  // dedicated adversarial auth review signs off. The switch defaults OFF:
+  // anything other than the exact string "true" keeps hosted deployments blocked.
+  // This is intentionally the LAST gate — every configuration requirement above
+  // (HTTPS origin, OIDC endpoints, broker URL + asymmetric auth, database mode,
+  // managed secret store, isolated key scope) must still pass on its own.
+  if (environment.SUTRA_HOSTED_ENABLED !== "true") {
+    issues.push("hosted deployment is disabled pending adversarial auth review (set SUTRA_HOSTED_ENABLED=true only after sign-off)");
+  }
   return issues;
 }
 

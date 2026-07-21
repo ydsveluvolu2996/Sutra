@@ -82,6 +82,27 @@ test("rejects wrong issuer, audience, nonce, token use, and unverified email", a
   }
 });
 
+test("rejects a token whose signature was produced by a foreign key", async () => {
+  const subject = await fixture();
+  // Sign a well-formed payload with an attacker key while presenting a header
+  // kid that matches the legitimate JWKS entry. The signature must not verify
+  // against the published public key.
+  const foreign = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const header = { alg: "RS256", typ: "JWT", kid: "sutra-key-1" };
+  const signingInput = `${encode(header)}.${encode(subject.payload)}`;
+  const forgedSignature = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    foreign.privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  const forged = `${signingInput}.${Buffer.from(forgedSignature).toString("base64url")}`;
+  await assert.rejects(verifyOidcIdToken(forged, subject.verification), /signature is invalid/u);
+});
+
 test("rejects expired, future, and overlong token lifetimes", async () => {
   const subject = await fixture();
   const nowSeconds = subject.verification.now / 1000;

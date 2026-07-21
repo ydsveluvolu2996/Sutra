@@ -55,6 +55,38 @@ test("callback requires exact state and creates a bounded token request", async 
   assert.throws(() => validateOidcCallback(callback.toString(), transaction));
 });
 
+test("callback rejects a missing state, a missing/malformed code, and an IdP error", async () => {
+  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 3_500_000);
+  // A code with no state (or a blank state) can never satisfy the constant-time
+  // state comparison, so the callback is refused before any code exchange.
+  const noState = new URL(configuration.redirectUri);
+  noState.searchParams.set("code", "valid-code-value");
+  assert.throws(() => validateOidcCallback(noState.toString(), transaction));
+  // A matching state but absent/short code is rejected on the code shape guard.
+  const noCode = new URL(configuration.redirectUri);
+  noCode.searchParams.set("state", transaction.state);
+  assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
+  noCode.searchParams.set("code", "x");
+  assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
+  // An IdP-reported error aborts even when a state is echoed back.
+  const errored = new URL(configuration.redirectUri);
+  errored.searchParams.set("error", "access_denied");
+  errored.searchParams.set("state", transaction.state);
+  assert.throws(() => validateOidcCallback(errored.toString(), transaction));
+});
+
+test("a sealed transaction cannot be replayed past its TTL or under a foreign key", async () => {
+  const { transaction } = await createOidcAuthorization(configuration, "/dashboard", 5_000_000);
+  const sealed = await sealOidcTransaction(transaction, key);
+  // Valid within the TTL window.
+  assert.deepEqual(await openOidcTransaction(sealed, key, 5_100_000), transaction);
+  // Replayed after expiry (createdAt + TTL) is refused — a stale login attempt
+  // cannot be resurrected.
+  await assert.rejects(openOidcTransaction(sealed, key, transaction.expiresAt + 1));
+  // A cookie sealed under a different transaction key never opens.
+  await assert.rejects(openOidcTransaction(sealed, "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", 5_100_000));
+});
+
 test("return paths reject external and authentication-loop targets", () => {
   assert.equal(safeOidcReturnTo("https://attacker.example/"), "/dashboard");
   assert.equal(safeOidcReturnTo("//attacker.example/"), "/dashboard");
