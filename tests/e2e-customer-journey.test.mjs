@@ -904,6 +904,21 @@ test("onboarded customer can exercise every app section without a crash", async 
       ["app/api/public/v1/snapshots/route.ts", "public/snapshots", { auth: "bearer" }],
       ["app/api/public/v1/vulnerabilities/route.ts", "public/vulnerabilities", { auth: "bearer" }],
       ["app/api/public/v1/compliance/route.ts", "public/compliance", { auth: "bearer" }],
+      // Release-readiness features (report builder, alerting, patch, universal
+      // CMDB relationships/custom-assets, FinOps unit-counts + scheduled reports,
+      // automated status).
+      ["app/api/v1/reports/saved/route.ts", "reports/saved", { params: {} }],
+      ["app/api/v1/reports/run/route.ts", "reports/run", {
+        method: "POST",
+        body: { definition: { dataset: "cmdb-resources", filters: { combine: "and", predicates: [{ kind: "field", field: "service", op: "eq", value: "ec2" }] }, columns: ["service", "name"] } },
+      }],
+      ["app/api/v1/alerts/route.ts", "alerts", { params: { customerId: CUSTOMER_ID } }],
+      ["app/api/v1/patch/route.ts", "patch", { params: conn }],
+      ["app/api/v1/cmdb/relationships/route.ts", "cmdb/relationships", { params: {} }],
+      ["app/api/v1/cmdb/custom-assets/route.ts", "cmdb/custom-assets", { params: {} }],
+      ["app/api/v1/finops/unit-counts/route.ts", "finops/unit-counts", { params: {} }],
+      ["app/api/v1/finops/reports/route.ts", "finops/reports", { params: {} }],
+      ["app/api/status/route.ts", "status", { auth: "none" }],
       // System-internal background-job drain (shared runner token).
       ["app/api/internal/jobs/run/route.ts", "internal/jobs/run", { method: "POST", auth: "job" }],
     ];
