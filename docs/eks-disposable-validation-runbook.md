@@ -29,9 +29,9 @@ Export only identifiers and configuration, never AWS keys:
 
 ```bash
 export AWS_REGION=ap-south-1
-export SUTRA_AWS_ACCOUNT_ID=738663485493
+export SUTRA_AWS_ACCOUNT_ID=111122223333
 export SUTRA_EKS_CLUSTER_NAME=sutra-validation-YYYYMMDD
-export SUTRA_KUBERNETES_CONTEXT=arn:aws:eks:ap-south-1:738663485493:cluster/sutra-validation-YYYYMMDD
+export SUTRA_KUBERNETES_CONTEXT=arn:aws:eks:ap-south-1:111122223333:cluster/sutra-validation-YYYYMMDD
 export SUTRA_DISPOSABLE_EXPIRES_AT=2026-07-18T12:00:00Z
 export SUTRA_DISPOSABLE_BUDGET_USD=40
 export SUTRA_BUDGET_NOTIFICATION_EMAIL=<approved-address>
@@ -102,7 +102,7 @@ Therefore, in GitHub create an environment named exactly
 prevent self-review, and allow only the protected `main` branch. Do not approve
 a run from a changed or unreviewed release workflow. The workflow also fails
 before requesting AWS credentials unless it is a manual run from protected
-`main` in `ydsveluvolu2996/Sutra`.
+`main` in `<your-org>/sutra`.
 
 Configure these environment variables; do not create AWS key secrets:
 
@@ -268,7 +268,7 @@ Budgets afterwards; the billing owner records the final cost.
 
 ## Validation record — 2026-07-17
 
-The disposable cluster `sutra-validation-20260717` in account `738663485493`,
+The disposable cluster `sutra-validation-20260717` in account `111122223333`,
 region `ap-south-1`, was used for this acceptance run. No long-lived AWS access
 key was created.
 

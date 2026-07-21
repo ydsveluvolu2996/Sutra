@@ -3,7 +3,7 @@
 ## Scope
 
 Sutra was validated against a temporary, real Amazon EKS cluster in AWS account
-`738663485493`, Region `ap-south-1`. The environment existed only for this
+`111122223333`, Region `ap-south-1`. The environment existed only for this
 test and used one `t3.medium` managed node, public subnets, no NAT gateway, no
 load balancer and no SSH access.
 

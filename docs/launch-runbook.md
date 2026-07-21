@@ -24,7 +24,7 @@ hosted production SLA.
 
    ```bash
    AWS_PROFILE=sutra-demo-collector \
-   SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::738663485493:role/sutra/SutraLocalCollectorRole' \
+   SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::111122223333:role/sutra/SutraLocalCollectorRole' \
    pnpm live:aws:status
    ```
 

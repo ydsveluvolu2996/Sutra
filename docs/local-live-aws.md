@@ -105,7 +105,7 @@ account root.
 The reviewed operator permission-set inline policy for this pilot is checked in as
 `infrastructure/sutra-operator-permission-set-policy.json` (SHA-256
 `093292b0f6733bdddbcdb5bc34b31a0562e6350c77d8d4d76b744a7892b9ba7e`). It is
-deliberately fixed to account `738663485493`, Region `us-east-1`, stack
+deliberately fixed to account `111122223333`, Region `us-east-1`, stack
 `sutra-local-collector`, the current Identity Center role suffix, the exact source
 role and boundary, the deterministic template bucket, and both reviewed template
 digests. It contains no placeholders and can be installed directly only in that

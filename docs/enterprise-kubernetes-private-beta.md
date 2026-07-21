@@ -50,7 +50,7 @@ change has a larger connectivity blast radius.
 
 ## Disposable live-validation controls
 
-The validation environment is limited to AWS account `738663485493`,
+The validation environment is limited to AWS account `111122223333`,
 `ap-south-1`, a USD 40 budget and tagged disposable resources. The guard script
 does not call AWS in plan mode. Creation and teardown require explicit execution
 and exact account/tag/expiry checks; teardown also requires a typed
