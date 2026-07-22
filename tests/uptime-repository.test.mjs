@@ -10,11 +10,12 @@ register(new URL("./cloudflare-loader.mjs", import.meta.url));
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
 const { UptimeRepository, UptimeRepositoryError } = await import("../db/uptime-repository.ts");
 const {
+  runPlatformUptimeProbeTick,
   runUptimeProbeJob,
-  ensureUptimeProbeEnqueued,
+  UPTIME_PROBE_INTERVAL_MS,
+  UPTIME_RETENTION_MS,
   UPTIME_PROBE_JOB_KIND,
 } = await import("../lib/uptime-probe-handler.ts");
-const { JobQueueRepository } = await import("../db/job-queue-repository.ts");
 
 const root = resolve(import.meta.dirname, "..");
 // The parent registers migration 0044 in the runtime appliers; until then the
@@ -93,6 +94,18 @@ test("recordSamples rejects an unknown component before any write", async () => 
   });
 });
 
+test("recordSamples is idempotent for one component and observed timestamp", async () => {
+  await withDatabase(async (database) => {
+    const repo = new UptimeRepository(database);
+    await repo.recordSamples([{ component: "web-app", healthy: true, detail: "first" }], T0);
+    await repo.recordSamples([{ component: "web-app", healthy: false, detail: "racing duplicate" }], T0);
+    const rows = await repo.listRecent({ component: "web-app" }, T0);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].healthy, true);
+    assert.equal(rows[0].detail, "first");
+  });
+});
+
 test("listRecent honours the since floor so old samples roll off the window", async () => {
   await withDatabase(async (database) => {
     const repo = new UptimeRepository(database);
@@ -100,6 +113,17 @@ test("listRecent honours the since floor so old samples roll off the window", as
     await repo.recordSamples([{ component: "collector", healthy: true, detail: null }], T0 - 5 * MINUTE);
     const recent = await repo.listRecent({ sinceMs: T0 - 60 * MINUTE }, T0);
     assert.equal(recent.length, 1);
+  });
+});
+
+test("retention pruning keeps the 31-day history bounded", async () => {
+  await withDatabase(async (database) => {
+    const repo = new UptimeRepository(database);
+    await repo.recordSamples([{ component: "collector", healthy: true, detail: "old" }], T0 - UPTIME_RETENTION_MS - MINUTE);
+    await repo.recordSamples([{ component: "collector", healthy: true, detail: "current" }], T0);
+    assert.equal(await repo.pruneBefore(T0 - UPTIME_RETENTION_MS), 1);
+    const remaining = await repo.listRecent({ component: "collector", sinceMs: 0 }, T0);
+    assert.deepEqual(remaining.map((sample) => sample.detail), ["current"]);
   });
 });
 
@@ -118,15 +142,21 @@ test("summarize derives an honest report: recorded component measured, unobserve
 
 test("runUptimeProbeJob records four component samples, turning a failed check into an unhealthy sample", async () => {
   const recorded = [];
+  let recordedAt = null;
   await runUptimeProbeJob(
     { id: "j", orgId: "org_carrier", customerId: null, kind: UPTIME_PROBE_JOB_KIND, payload: {}, attempt: 1, maxAttempts: 3 },
     {
       probeDatabase: async () => true,
       probeCollector: async () => { throw new Error("broker unreachable"); },
-      record: async (samples) => { recorded.push(...samples); },
+      record: async (samples, observedAtMs) => {
+        recorded.push(...samples);
+        recordedAt = observedAtMs;
+        return samples.length;
+      },
       now: () => T0,
     },
   );
+  assert.equal(recordedAt, T0);
   assert.equal(recorded.length, 4);
   const byComponent = Object.fromEntries(recorded.map((sample) => [sample.component, sample]));
   assert.equal(byComponent["web-app"].healthy, true);
@@ -151,21 +181,51 @@ test("runUptimeProbeJob rethrows only when persistence fails, so the queue can r
   );
 });
 
-test("ensureUptimeProbeEnqueued hosts one probe on the lowest-id carrier org and is idempotent", async () => {
+test("platform uptime tick records without a tenant and only once per ten-minute bucket", async () => {
   await withDatabase(async (database) => {
-    await database.batch([
-      database.prepare("INSERT INTO organizations (id, slug, name, status) VALUES ('org_a', 'up-a', 'Up A', 'active')"),
-      database.prepare("INSERT INTO organizations (id, slug, name, status) VALUES ('org_b', 'up-b', 'Up B', 'active')"),
-    ]);
-    const queue = new JobQueueRepository(database);
-    const orgIds = ["org_b", "org_a"]; // deliberately unsorted; the tick picks org_a
-    const first = await ensureUptimeProbeEnqueued(queue, orgIds, T0);
-    assert.equal(first, 1);
-    const second = await ensureUptimeProbeEnqueued(queue, orgIds, T0 + MINUTE);
-    assert.equal(second, 0);
-    const onCarrier = (await queue.list("org_a", null)).filter((job) => job.kind === UPTIME_PROBE_JOB_KIND);
-    assert.equal(onCarrier.length, 1);
-    // With no active org there is nothing to host the system probe.
-    assert.equal(await ensureUptimeProbeEnqueued(queue, [], T0), 0);
+    const repo = new UptimeRepository(database);
+    let now = T0 + MINUTE;
+    const firstSlot = Math.floor(now / UPTIME_PROBE_INTERVAL_MS) * UPTIME_PROBE_INTERVAL_MS;
+    // A future sample and a partial current slot must not suppress the missing
+    // platform measurements. The tick repairs the partial slot idempotently.
+    await repo.recordSamples(
+      [{ component: "collector", healthy: true, detail: "future" }],
+      now + 2 * UPTIME_PROBE_INTERVAL_MS,
+    );
+    await repo.recordSamples(
+      [{ component: "web-app", healthy: true, detail: "partial" }],
+      now,
+      firstSlot,
+    );
+    assert.equal(await repo.hasCompleteProbeSlot(firstSlot), false);
+    const deps = {
+      probeDatabase: async () => true,
+      probeCollector: async () => true,
+      record: (samples, observedAtMs, idempotencySlotMs) =>
+        repo.recordSamples(samples, observedAtMs, idempotencySlotMs),
+      hasCompleteProbeSlot: (slotMs) => repo.hasCompleteProbeSlot(slotMs),
+      pruneBefore: (cutoffMs) => repo.pruneBefore(cutoffMs),
+      now: () => now,
+    };
+
+    const first = await runPlatformUptimeProbeTick(deps);
+    assert.equal(first.recorded, true);
+    assert.equal(first.observedAt, new Date(now).toISOString());
+    assert.equal(await repo.hasCompleteProbeSlot(firstSlot), true);
+    const firstSlotRows = (await repo.listRecent({}, now)).filter(
+      (sample) => sample.observedAt === new Date(now).toISOString(),
+    );
+    assert.equal(firstSlotRows.length, 4);
+    const sameBucket = await runPlatformUptimeProbeTick(deps);
+    assert.equal(sameBucket.recorded, false);
+    assert.equal((await repo.listRecent({}, now)).length, 5);
+
+    now += UPTIME_PROBE_INTERVAL_MS;
+    const nextBucket = await runPlatformUptimeProbeTick(deps);
+    assert.equal(nextBucket.recorded, true);
+    assert.equal((await repo.listRecent({}, now)).length, 9);
+
+    const organizations = await database.prepare("SELECT COUNT(*) AS total FROM organizations").first();
+    assert.equal(Number(organizations.total), 0, "platform metrics must not create or require a tenant");
   });
 });

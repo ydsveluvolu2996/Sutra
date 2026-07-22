@@ -174,9 +174,18 @@ test("durable background-job runner works under hosted mode: token-gated and env
   // guard, so it runs identically in hosted staging/production.
   assert.match(jobRunnerRoute, /verifyInternalToken\(jobRunnerToken\(\), request\.headers\.get\("x-sutra-job-token"\)\)/u);
   assert.doesNotMatch(jobRunnerRoute, /assertLocalAuthRequest|SUTRA_LOCAL_MODE|isLoopbackHost/u);
-  // Every job it runs carries its own org scope, so handlers stay tenant-scoped.
+  // Platform monitoring is system-scoped and runs before tenant discovery, so
+  // a fresh deployment reports real health before the first customer bootstrap.
+  assert.match(jobRunnerRoute, /runPlatformUptimeProbeTick\(buildPlatformUptimeProbeTickDeps\(\)\)/u);
+  assert.ok(
+    jobRunnerRoute.indexOf("const platformUptime = await runPlatformUptimeProbeTick") <
+      jobRunnerRoute.indexOf("const activeOrgIds = await listActiveOrgIds"),
+    "platform uptime must not depend on an active organization",
+  );
+  assert.doesNotMatch(jobRunnerRoute, /ensureUptimeProbeEnqueued/u);
+  // Every queued business job still carries its own org scope.
   assert.match(jobRunnerRoute, /runDueBackgroundJobs\(\{ queue, handlers: buildJobHandlers\(\)/u);
-  assert.match(jobRunnerRoute, /every job it runs\s*\n\s*\* carries its own org scope/u);
+  assert.match(jobRunnerRoute, /every queued business job still carries its own org scope/u);
 });
 
 test("hosted broker ingestion authenticates with asymmetric signatures and server-derived scope", () => {

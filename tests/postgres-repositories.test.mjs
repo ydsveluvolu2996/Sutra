@@ -13,6 +13,7 @@ const outboxRepository = await import("../db/local-schedule-outbox-repository.ts
 const pilotRepository = await import("../db/pilot-repository.ts");
 const caseRepository = await import("../db/case-repository.ts");
 const complianceExceptionRepository = await import("../db/compliance-exception-repository.ts");
+const { UptimeRepository } = await import("../db/uptime-repository.ts");
 const { closePostgresDatabase } = await import("../db/postgres-d1-adapter.ts");
 const { computeSnapshotSha256 } = await import("../lib/pilot-boundary.ts");
 const authCrypto = await import("../lib/local-auth-crypto.ts");
@@ -52,6 +53,17 @@ test("real PostgreSQL repositories persist auth, CMDB publication, and concurren
       bootstrapped.session.subject.userId,
     );
     const rawDatabase = (await import("../db/index.ts")).getRawDb();
+    const uptimeRepository = new UptimeRepository(rawDatabase);
+    const uptimeSlot = Date.parse("2026-07-22T06:00:00.000Z");
+    const uptimeSamples = ["web-app", "database", "job-runner", "collector"].map((component) => ({
+      component,
+      healthy: true,
+      detail: "PostgreSQL platform probe acceptance",
+    }));
+    assert.equal(await uptimeRepository.recordSamples(uptimeSamples, uptimeSlot, uptimeSlot), 4);
+    assert.equal(await uptimeRepository.recordSamples(uptimeSamples, uptimeSlot + 1_000, uptimeSlot), 0);
+    assert.equal(await uptimeRepository.hasCompleteProbeSlot(uptimeSlot), true);
+    assert.equal(await uptimeRepository.pruneBefore(uptimeSlot - 1), 0);
     await rawDatabase.prepare(
       `INSERT INTO totp_credentials
         (user_id, secret_ciphertext, secret_key_version, confirmed_at,
