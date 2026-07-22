@@ -62,7 +62,7 @@ export ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 test "$ACCOUNT_ID" = 738663485493
 export ECR_REPOSITORY=sutra/app
 export ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-export RELEASE_TAG="$(git rev-parse --short=12 HEAD)"
+export RELEASE_TAG="sha-$(git rev-parse --short=12 HEAD)"
 
 aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
   aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
@@ -70,10 +70,10 @@ aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>
     --image-scanning-configuration scanOnPush=false \
     --encryption-configuration encryptionType=AES256 >/dev/null
 aws ecr put-lifecycle-policy --repository-name "$ECR_REPOSITORY" \
-  --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Keep three immutable private-beta releases","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}' >/dev/null
+  --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Keep three tagged immutable private-beta releases","selection":{"tagStatus":"tagged","tagPrefixList":["sha-"],"countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}},{"rulePriority":2,"description":"Clean unreferenced build artifacts after fourteen days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":14},"action":{"type":"expire"}}]}' >/dev/null
 aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 docker buildx build --platform linux/amd64 \
-  -t "$ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_TAG" --push .
+  --provenance=true -t "$ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_TAG" --push .
 export IMAGE_DIGEST="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
   --image-ids imageTag="$RELEASE_TAG" \
   --query 'imageDetails[0].imageDigest' --output text)"
