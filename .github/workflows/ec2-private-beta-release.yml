@@ -25,9 +25,6 @@ jobs:
     name: Build, scan, deploy, and verify
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    environment:
-      name: ec2-private-beta-release
-      url: https://www.sutracmdb.com/status
     permissions:
       contents: read
       id-token: write

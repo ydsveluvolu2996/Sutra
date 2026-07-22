@@ -234,6 +234,75 @@ h3 { letter-spacing: -.02em; }
 .primary-cell { display: grid; gap: 3px; min-width: 0; }
 .primary-cell strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10.5px; }
 .primary-cell small, .muted-cell { color: var(--ink-faint); font-size: 9px; }
+
+/* Access records carry more identity and lifecycle data than the generic
+   five-column rows. Give each Access table its own flexible tracks so a long
+   name, email, session id, or action cannot paint into a neighbouring cell. */
+.access-table-panel { container-name: access-table; container-type: inline-size; }
+.access-data-table { position: relative; overflow-x: auto; overflow-y: hidden; }
+.access-data-table .data-row { min-width: 0; }
+.access-session-row { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.1fr) minmax(72px, .55fr) minmax(0, 1.1fr) minmax(74px, auto); }
+.access-invitation-row { grid-template-columns: minmax(0, 1.35fr) minmax(0, .9fr) minmax(68px, .48fr) minmax(0, .85fr) minmax(105px, .75fr) minmax(140px, 1fr); }
+.access-data-cell { min-width: 0; display: grid; align-content: start; gap: 3px; overflow-wrap: anywhere; line-height: 1.35; }
+.access-data-table .primary-cell strong,
+.access-data-table .primary-cell small { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.access-row-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.access-row-actions .button { max-width: 100%; flex: 0 1 auto; white-space: normal; text-align: center; }
+.access-data-cell::before { display: none; }
+
+/* The available panel width, rather than the viewport, decides when rows
+   become cards. This also covers the narrow main column while the sidebar is
+   still present. Column headers remain available to assistive technology. */
+@container access-table (max-width: 860px) {
+  .access-data-table .data-header {
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    position: absolute;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    border: 0;
+    white-space: nowrap;
+  }
+  .access-data-table .data-row:not(.data-header) {
+    min-width: 0;
+    min-height: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 24px;
+    align-items: start;
+    padding: 10px 20px 14px;
+  }
+  .access-data-cell { padding: 7px 0; }
+  .access-data-cell::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--ink-faint);
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+  .access-record-identity,
+  .access-session-activity,
+  .access-row-actions { grid-column: 1 / -1; }
+  .access-row-actions::before { flex-basis: 100%; }
+  .access-row-actions .button { flex: 0 1 auto; }
+}
+
+@container access-table (max-width: 520px) {
+  .access-data-table .data-row:not(.data-header) {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding-inline: 16px;
+  }
+  .access-data-table .access-data-cell { grid-column: 1; }
+  .access-row-actions .button { flex: 1 1 140px; }
+}
 .severity-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 54px; height: 21px; border-radius: 5px; font-size: 8px; font-weight: 750; }
 .severity-badge.severity-critical { background: #fae6e6; color: #a53030; }
 .severity-badge.severity-high { background: #fbebdf; color: #aa552c; }

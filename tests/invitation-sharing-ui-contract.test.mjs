@@ -4,10 +4,21 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
-const [access, sharing] = await Promise.all([
+const [access, sharing, styles] = await Promise.all([
   readFile(resolve(root, "app/access/access-browser.tsx"), "utf8"),
   readFile(resolve(root, "app/access/invitation-sharing.ts"), "utf8"),
+  readFile(resolve(root, "app/globals.css"), "utf8"),
 ]);
+
+function styleRuleBody(selector) {
+  const marker = `${selector} {`;
+  const start = styles.indexOf(marker);
+  assert.notEqual(start, -1, `missing CSS rule for ${selector}`);
+  const bodyStart = start + marker.length;
+  const end = styles.indexOf("}", bodyStart);
+  assert.notEqual(end, -1, `unterminated CSS rule for ${selector}`);
+  return styles.slice(bodyStart, end);
+}
 
 test("invitation UI distinguishes provider acceptance from inbox delivery", () => {
   assert.match(access, /provider accepted this message/iu);
@@ -76,4 +87,57 @@ test("assigned-customer invitations always submit an exact customer identifier",
 test("expired invitations can be renewed without creating a conflicting duplicate", () => {
   assert.match(access, /invitation\.status === "pending" \|\| invitation\.status === "expired"/u);
   assert.match(access, /Renew invitation/u);
+});
+
+test("Access records use dedicated shrinkable desktop grids instead of the generic table tracks", () => {
+  assert.match(access, /data-table access-data-table access-session-table/u);
+  assert.match(access, /data-row access-session-row/u);
+  assert.match(access, /data-table access-data-table access-invitation-table/u);
+  assert.match(access, /data-row access-invitation-row/u);
+  assert.match(access, /access-session-table" role="table"/u);
+  assert.match(access, /access-invitation-table" role="table"/u);
+  assert.match(access, /role="columnheader"/u);
+  assert.match(access, /role="cell"/u);
+  assert.doesNotMatch(access, /gridTemplateColumns/u, "Access row geometry belongs in responsive CSS, not inline styles");
+
+  const sessionTracks = styleRuleBody(".access-session-row");
+  const invitationTracks = styleRuleBody(".access-invitation-row");
+  assert.equal([...sessionTracks.matchAll(/minmax\(/gu)].length, 5);
+  assert.equal([...invitationTracks.matchAll(/minmax\(/gu)].length, 6);
+  assert.match(sessionTracks, /minmax\(0,/u);
+  assert.match(invitationTracks, /minmax\(0,/u);
+  assert.match(styleRuleBody(".access-data-table"), /overflow-x:\s*auto;/u);
+  assert.match(styles, /\.access-data-table \.data-row\s*\{\s*min-width:\s*0;/u);
+  assert.match(styleRuleBody(".access-data-cell"), /min-width:\s*0;[^}]*overflow-wrap:\s*anywhere;/u);
+  assert.match(styleRuleBody(".access-row-actions"), /display:\s*flex;[^}]*flex-wrap:\s*wrap;/u);
+  assert.match(
+    styles,
+    /\.access-data-table \.primary-cell strong,\s*\.access-data-table \.primary-cell small\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/u,
+    "both primary and secondary identifiers must wrap inside their own track",
+  );
+});
+
+test("Access records become labeled cards when their panel narrows without dropping data or actions", () => {
+  const compactStart = styles.indexOf("@container access-table (max-width: 860px)");
+  const narrowStart = styles.indexOf("@container access-table (max-width: 520px)");
+  assert.notEqual(compactStart, -1);
+  assert.ok(narrowStart > compactStart);
+  const compact = styles.slice(compactStart, narrowStart);
+  const narrow = styles.slice(narrowStart);
+
+  assert.match(styles, /\.access-table-panel\s*\{[^}]*container-name:\s*access-table;[^}]*container-type:\s*inline-size;/u);
+  assert.match(compact, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/u);
+  assert.match(compact, /\.access-data-cell::before\s*\{[^}]*content:\s*attr\(data-label\);/u);
+  assert.match(compact, /\.access-data-table \.data-header\s*\{[^}]*clip-path:\s*inset\(50%\);/u);
+  assert.doesNotMatch(compact, /\.access-data-table \.data-header\s*\{[^}]*display:\s*none;/u);
+  assert.match(compact, /\.access-record-identity,\s*\.access-session-activity,\s*\.access-row-actions\s*\{\s*grid-column:\s*1 \/ -1;/u);
+  assert.match(narrow, /grid-template-columns:\s*minmax\(0,\s*1fr\);/u);
+  assert.match(narrow, /\.access-data-table \.access-data-cell\s*\{\s*grid-column:\s*1;/u);
+  assert.match(narrow, /\.access-row-actions \.button\s*\{\s*flex:\s*1 1 140px;/u);
+
+  for (const label of ["User / session", "Identity source", "Last verified activity", "Email", "Role / scope", "Delivery", "Expiry", "Actions"]) {
+    assert.match(access, new RegExp(`data-label=["']${label.replace("/", "\\/")}["']`, "u"));
+  }
+  assert.match(access, /access-row-actions[^>]*>[\s\S]*?revokeSession\(managed\)/u);
+  assert.match(access, /access-row-actions[^>]*>[\s\S]*?resend\(invitation\)[\s\S]*?revoke\(invitation\.id\)/u);
 });

@@ -490,21 +490,21 @@ export function AccessBrowser() {
       </section>
 
       {customerScoped ? null : (
-      <section className="panel">
+      <section className="panel access-table-panel">
         <div className="panel-heading">
           <div><p className="eyebrow">Session administration</p><h2>Signed-in browser sessions</h2></div>
           <button className="button button-secondary button-small" disabled={busy || sessions.filter((managed) => managed.status === "active" && !managed.current).length === 0} onClick={() => void revokeOtherSessions()} type="button">Revoke all other org sessions</button>
         </div>
         <p className="limitation-note">Each row is a server-side session, not a fingerprint of a physical device. Sutra does not retain raw IP addresses or browser fingerprints. Revocation is organization-scoped, MFA-protected, and committed with hash-chained audit evidence.</p>
         {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading active sessions…</div> : (
-          <div className="data-table">
-            <div className="data-row data-header"><span>User / session</span><span>Identity source</span><span>Status</span><span>Last verified activity</span><span>Action</span></div>
-            {sessions.map((managed) => <div className="data-row" key={managed.id}>
-              <span className="primary-cell"><strong>{managed.user.displayName}{managed.current ? " · This browser" : ""}</strong><small>{managed.user.email} · {managed.id}</small></span>
-              <span className="primary-cell"><strong>{managed.identitySourceLabel}</strong><small>{managed.deviceLabel} · MFA {managed.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
-              <span><span className={`connection-status connection-${managed.status === "active" ? "active" : "disabled"}`}>{managed.status}</span></span>
-              <span className="primary-cell"><strong>{new Date(managed.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(managed.expiresAt).toLocaleString()}</small></span>
-              <span>{managed.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(managed)} type="button">{managed.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
+          <div className="data-table access-data-table access-session-table" role="table" aria-label="Signed-in browser sessions">
+            <div className="data-row data-header access-session-row" role="row"><span role="columnheader">User / session</span><span role="columnheader">Identity source</span><span role="columnheader">Status</span><span role="columnheader">Last verified activity</span><span role="columnheader">Action</span></div>
+            {sessions.map((managed) => <div className="data-row access-session-row" role="row" key={managed.id}>
+              <span className="primary-cell access-data-cell access-record-identity" data-label="User / session" role="cell"><strong>{managed.user.displayName}{managed.current ? " · This browser" : ""}</strong><small>{managed.user.email} · {managed.id}</small></span>
+              <span className="primary-cell access-data-cell" data-label="Identity source" role="cell"><strong>{managed.identitySourceLabel}</strong><small>{managed.deviceLabel} · MFA {managed.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
+              <span className="access-data-cell" data-label="Status" role="cell"><span className={`connection-status connection-${managed.status === "active" ? "active" : "disabled"}`}>{managed.status}</span></span>
+              <span className="primary-cell access-data-cell access-session-activity" data-label="Last verified activity" role="cell"><strong>{new Date(managed.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(managed.expiresAt).toLocaleString()}</small></span>
+              <span className="access-data-cell access-row-actions" data-label="Action" role="cell">{managed.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(managed)} type="button">{managed.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
             </div>)}
             {sessions.length === 0 ? <div className="empty-row">No organization-scoped sessions were found.</div> : null}
           </div>
@@ -512,18 +512,18 @@ export function AccessBrowser() {
       </section>
       )}
 
-      <section className="panel">
+      <section className="panel access-table-panel">
         <div className="panel-heading"><div><p className="eyebrow">Membership activation queue</p><h2>Invitations</h2></div><span className="status-pill">{invitations.length} recorded</span></div>
         {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading invitation history…</div> : (
-          <div className="data-table">
-            <div className="data-row data-header" style={{ gridTemplateColumns: "minmax(190px, 1.4fr) minmax(130px, .9fr) 80px minmax(110px, .75fr) minmax(120px, .85fr) minmax(150px, 1fr)" }}><span>Email</span><span>Role / scope</span><span>Status</span><span>Delivery</span><span>Expiry</span><span>Actions</span></div>
-            {invitations.map((invitation) => <div className="data-row" style={{ gridTemplateColumns: "minmax(190px, 1.4fr) minmax(130px, .9fr) 80px minmax(110px, .75fr) minmax(120px, .85fr) minmax(150px, 1fr)" }} key={invitation.id}>
-              <span className="primary-cell"><strong>{invitation.email}</strong><small>{invitation.id}</small></span>
-              <span className="primary-cell"><strong>{invitation.role.replaceAll("_", " ")}</strong><small>{invitation.customerId ? customerNames.get(invitation.customerId) ?? invitation.customerId : invitation.scopeMode.replaceAll("_", " ")}</small></span>
-              <span><span className={`connection-status connection-${invitation.status === "pending" ? "active" : invitation.status === "accepted" ? "active" : "disabled"}`}>{invitation.status}</span></span>
-              <span className="primary-cell"><strong>{deliveryLabel(invitation.delivery)}</strong><small>{invitation.delivery?.provider && invitation.delivery.provider !== "none" ? `${invitation.delivery.provider} · ${invitation.delivery.attempts} attempt${invitation.delivery.attempts === 1 ? "" : "s"}` : "Manual sharing"}{invitation.delivery?.errorCode ? ` · ${invitation.delivery.errorCode}` : ""}</small></span>
-              <span>{new Date(invitation.expiresAt).toLocaleString()}</span>
-              <span className="heading-actions">{invitation.status === "pending" || invitation.status === "expired" ? <><button className="button button-secondary button-small" disabled={busy} onClick={() => void resend(invitation)} type="button">{invitation.status === "expired" ? "Renew invitation" : invitation.delivery?.status === "failed" ? "Retry email" : invitation.delivery?.status === "not_attempted" || invitation.delivery === undefined ? "Send email" : "Resend email"}</button><button className="button button-danger button-small" disabled={busy} onClick={() => void revoke(invitation.id)} type="button">Revoke</button></> : "—"}</span>
+          <div className="data-table access-data-table access-invitation-table" role="table" aria-label="Membership invitations">
+            <div className="data-row data-header access-invitation-row" role="row"><span role="columnheader">Email</span><span role="columnheader">Role / scope</span><span role="columnheader">Status</span><span role="columnheader">Delivery</span><span role="columnheader">Expiry</span><span role="columnheader">Actions</span></div>
+            {invitations.map((invitation) => <div className="data-row access-invitation-row" role="row" key={invitation.id}>
+              <span className="primary-cell access-data-cell access-record-identity" data-label="Email" role="cell"><strong>{invitation.email}</strong><small>{invitation.id}</small></span>
+              <span className="primary-cell access-data-cell" data-label="Role / scope" role="cell"><strong>{invitation.role.replaceAll("_", " ")}</strong><small>{invitation.customerId ? customerNames.get(invitation.customerId) ?? invitation.customerId : invitation.scopeMode.replaceAll("_", " ")}</small></span>
+              <span className="access-data-cell" data-label="Status" role="cell"><span className={`connection-status connection-${invitation.status === "pending" ? "active" : invitation.status === "accepted" ? "active" : "disabled"}`}>{invitation.status}</span></span>
+              <span className="primary-cell access-data-cell" data-label="Delivery" role="cell"><strong>{deliveryLabel(invitation.delivery)}</strong><small>{invitation.delivery?.provider && invitation.delivery.provider !== "none" ? `${invitation.delivery.provider} · ${invitation.delivery.attempts} attempt${invitation.delivery.attempts === 1 ? "" : "s"}` : "Manual sharing"}{invitation.delivery?.errorCode ? ` · ${invitation.delivery.errorCode}` : ""}</small></span>
+              <span className="access-data-cell" data-label="Expiry" role="cell">{new Date(invitation.expiresAt).toLocaleString()}</span>
+              <span className="access-data-cell access-row-actions" data-label="Actions" role="cell">{invitation.status === "pending" || invitation.status === "expired" ? <><button className="button button-secondary button-small" disabled={busy} onClick={() => void resend(invitation)} type="button">{invitation.status === "expired" ? "Renew invitation" : invitation.delivery?.status === "failed" ? "Retry email" : invitation.delivery?.status === "not_attempted" || invitation.delivery === undefined ? "Send email" : "Resend email"}</button><button className="button button-danger button-small" disabled={busy} onClick={() => void revoke(invitation.id)} type="button">Revoke</button></> : "—"}</span>
             </div>)}
             {invitations.length === 0 ? <div className="empty-row">No invitations have been created.</div> : null}
           </div>

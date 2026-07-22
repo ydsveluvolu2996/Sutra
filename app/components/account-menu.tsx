@@ -75,9 +75,10 @@ export function AccountMenu({
           <div className="account-menu-links">
             <Link href="/settings" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="gear" size={14} />Settings</Link>
             <Link href="/settings/notifications" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="bell" size={14} />Notification destinations</Link>
-            {capabilities.has("membership:manage")
+            {capabilities.has("membership:manage") || capabilities.has("membership:manage:customer")
               ? <Link href="/access" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="key" size={14} />Access &amp; invitations</Link>
               : null}
+            <Link href="/docs" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="fileText" size={14} />Documentation</Link>
             <Link href="/controls#architecture" role="menuitem" onClick={() => setOpen(false)}><GlyphIcon className="account-menu-glyph" name="policy" size={14} />Architecture &amp; trust</Link>
           </div>
           <button

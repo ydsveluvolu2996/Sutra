@@ -126,7 +126,14 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
 
   assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/mu);
   assert.doesNotMatch(workflow, /^\s{2}(push|pull_request):\s*$/mu);
-  assert.match(workflow, /environment:\s*\n\s+name: ec2-private-beta-release/u);
+  assert.doesNotMatch(
+    workflow,
+    /^\s{4}environment:\s*$/mu,
+    "GitHub Free private repositories cannot use deployment environments",
+  );
+  for (const variable of ["AWS_ACCOUNT_ID", "AWS_REGION", "AWS_ROLE_ARN", "EC2_INSTANCE_ID"]) {
+    assert.match(workflow, new RegExp(`\\$\\{\\{ vars\\.${variable} \\}\\}`));
+  }
   assert.match(workflow, /GITHUB_REF.+refs\/heads\/main/u);
   assert.doesNotMatch(workflow, /GITHUB_REF_PROTECTED/u);
   assert.match(workflow, /id-token: write/u);
@@ -160,9 +167,9 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
   assert.match(
     role,
-    /token\.actions\.githubusercontent\.com:sub: !Sub repo:\$\{GitHubRepository\}:environment:\$\{ReleaseEnvironment\}/u,
+    /token\.actions\.githubusercontent\.com:sub: repo:ydsveluvolu2996\/Sutra:ref:refs\/heads\/main/u,
   );
-  assert.match(role, /AllowedValues:\s*\n\s+- ec2-private-beta-release/u);
+  assert.doesNotMatch(role, /GitHubRepository|ReleaseEnvironment|:environment:/u);
   assert.match(role, /Action: ssm:GetConnectionStatus/u);
   assert.match(role, /Action: ssm:SendCommand/u);
   assert.match(role, /Sutra-DeployImmutableRelease/u);

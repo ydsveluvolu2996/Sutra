@@ -8,16 +8,6 @@ Parameters:
     Type: String
     Description: Existing account-local token.actions.githubusercontent.com OIDC provider ARN.
     AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
-  GitHubRepository:
-    Type: String
-    Default: ydsveluvolu2996/Sutra
-    Description: Exact, case-sensitive owner/repository slug.
-    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
-  ReleaseEnvironment:
-    Type: String
-    Default: ec2-private-beta-release
-    AllowedValues:
-      - ec2-private-beta-release
   AppRepositoryName:
     Type: String
     Default: sutra/app
@@ -68,8 +58,8 @@ Resources:
     Properties:
       MaxSessionDuration: 3600
       Description: >-
-        Short-lived GitHub OIDC role scoped to the protected Sutra EC2 private-beta
-        release environment, one ECR repository and one EC2 managed node.
+        Short-lived GitHub OIDC role scoped to the exact Sutra repository main
+        branch, one ECR repository and one EC2 managed node.
       Tags:
         - Key: sutra:component
           Value: ec2-private-beta-release
@@ -85,7 +75,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${ReleaseEnvironment}
+                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996/Sutra:ref:refs/heads/main
       Policies:
         - PolicyName: PushOnlyImmutableSutraApplicationRelease
           PolicyDocument:
@@ -131,7 +121,7 @@ Resources:
 
 Outputs:
   GitHubEc2ReleaseRoleArn:
-    Description: Configure the protected GitHub environment variable AWS_ROLE_ARN with this value.
+    Description: Configure the GitHub repository Actions variable AWS_ROLE_ARN with this value.
     Value: !GetAtt GitHubEc2ReleaseRole.Arn
   AppEcrRepositoryArn:
     Description: Repository boundary enforced by the role.

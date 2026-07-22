@@ -13,7 +13,7 @@ The fast release path is instead:
 
 ```text
 reviewed main commit
-  -> manual GitHub environment release
+  -> manual GitHub Actions release
   -> short-lived GitHub OIDC session (no AWS keys)
   -> build + Trivy gate + immutable ECR digest
   -> SSM command to one exact EC2 instance
@@ -34,10 +34,12 @@ workflow and must be created only once. Deploy
 `infrastructure/github-ec2-release-role.yaml` as a separate stack, passing:
 
 - the existing OIDC provider ARN;
-- exact repository `ydsveluvolu2996/Sutra`;
-- release environment `ec2-private-beta-release`;
 - existing ECR repository `sutra/app`; and
 - the exact instance ID output by `sutra-private-beta`.
+
+The template itself fixes the OIDC subject to exact repository
+`ydsveluvolu2996/Sutra` and exact ref `refs/heads/main`; neither value is a
+deploy-time parameter that can accidentally broaden the trust policy.
 
 The role cannot create or delete repositories, mutate general infrastructure,
 start or stop EC2, deploy to another instance, read SSM parameters, or open an
@@ -69,14 +71,16 @@ scan-on-push mode.
 
 ## One-time GitHub setup
 
-Create the environment `ec2-private-beta-release`. The current private-repository
-plan does not expose branch protection, so the workflow is manual-only, rejects
-every ref except exact `main`, runs its own bounded source/release gates, and uses
-an environment-bound OIDC subject. If the repository moves to a plan that
-supports private branch and environment protection, require reviewed pull
-requests on `main` and an independent deployment reviewer.
+Do not create a deployment environment for this workflow. GitHub Free does not
+make environments or environment variables available to a private repository.
+The workflow instead uses ordinary repository Actions variables, is
+manual-only, rejects every ref except exact `main`, and runs its own bounded
+source/release gates. AWS independently rejects every OIDC subject except the
+exact `main` branch of `ydsveluvolu2996/Sutra`, so a workflow created on another
+branch cannot assume the release role.
 
-Set these environment variables (not secrets):
+Under **Settings -> Secrets and variables -> Actions -> Variables**, set these
+repository variables (not secrets):
 
 | Variable | Value |
 | --- | --- |
@@ -88,12 +92,18 @@ Set these environment variables (not secrets):
 No `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, GitHub personal access token,
 SSH key, database password or Cloudflare credential belongs in GitHub.
 
-Keep the existing CI and security jobs required on `main`. The release workflow
-is deliberately manual and serialized: GitHub Actions → **Release Sutra private
-beta to EC2** → **Run workflow**, then enter a release reason. Add an independent
-environment approval if the repository plan later supports it. The reason must
-be 10–100 characters because it is also recorded as the SSM command comment. A
-push alone does not spend AWS compute or deploy.
+Run the existing CI and security jobs for `main` before release. The release
+workflow also reruns its bounded source gates and is deliberately manual and
+serialized: GitHub Actions -> **Release Sutra private beta to EC2** -> **Run
+workflow**, then enter a release reason. The reason must be 10-100 characters
+because it is also recorded as the SSM command comment. A push alone does not
+spend AWS compute or deploy.
+
+The exact-branch cloud trust is not a replacement for pull-request review or
+branch protection: a repository writer who can change `main` can change released
+code. If the repository later moves to GitHub Pro or a plan with private-repo
+environment controls, add protected-branch review and migrate the workflow,
+OIDC subject and IAM template together to a protected deployment environment.
 
 ## Runtime and cost behavior
 
