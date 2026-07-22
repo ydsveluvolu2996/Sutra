@@ -13,6 +13,8 @@ const outboxRepository = await import("../db/local-schedule-outbox-repository.ts
 const pilotRepository = await import("../db/pilot-repository.ts");
 const caseRepository = await import("../db/case-repository.ts");
 const complianceExceptionRepository = await import("../db/compliance-exception-repository.ts");
+const invitationRepository = await import("../db/identity-invitation-repository.ts");
+const { UptimeRepository } = await import("../db/uptime-repository.ts");
 const { closePostgresDatabase } = await import("../db/postgres-d1-adapter.ts");
 const { computeSnapshotSha256 } = await import("../lib/pilot-boundary.ts");
 const authCrypto = await import("../lib/local-auth-crypto.ts");
@@ -40,6 +42,112 @@ test("real PostgreSQL repositories persist auth, CMDB publication, and concurren
     assert.equal(bootstrapped.session.session.user.email, "postgres-repository@sutra.invalid");
     assert.equal(await authRepository.isLocalBootstrapRequired(), false);
 
+    const inviteNow = Date.now();
+    const creationInput = {
+      email: `postgres-invite-${crypto.randomUUID()}@example.com`,
+      role: "viewer",
+      scopeMode: "assigned_customers",
+      lifetimeMs: 60 * 60 * 1_000,
+    };
+    const creationKey = "postgres-create-key-000000000000001";
+    const competingCreations = await Promise.all([
+      invitationRepository.createIdentityInvitationIdempotently(
+        bootstrapped.session,
+        { mode: "org" },
+        creationInput,
+        creationKey,
+        inviteNow,
+      ),
+      invitationRepository.createIdentityInvitationIdempotently(
+        bootstrapped.session,
+        { mode: "org" },
+        creationInput,
+        creationKey,
+        inviteNow,
+      ),
+    ]);
+    assert.equal(competingCreations.filter((result) => result.replayed === false).length, 1);
+    assert.equal(competingCreations.filter((result) => result.replayed === true).length, 1);
+    assert.equal(competingCreations.filter((result) => result.token !== null).length, 1);
+    assert.equal(new Set(competingCreations.map((result) => result.invitation.id)).size, 1);
+    const invitation = competingCreations[0];
+    const firstInviteKey = "postgres-resend-key-000000000000001";
+    const secondInviteKey = "postgres-resend-key-000000000000002";
+    await invitationRepository.beginIdentityInvitationDelivery(
+      bootstrapped.session,
+      { mode: "org" },
+      {
+        invitationId: invitation.invitation.id,
+        idempotencyKey: firstInviteKey,
+        rotateToken: true,
+        lifetimeMs: 60 * 60 * 1_000,
+      },
+      inviteNow + 1,
+    );
+    await invitationRepository.completeIdentityInvitationDelivery(
+      bootstrapped.session,
+      { mode: "org" },
+      invitation.invitation.id,
+      firstInviteKey,
+      { status: "accepted", transport: "email-api", provider: "resend", errorCode: null, httpStatus: 202 },
+      inviteNow + 2,
+    );
+    await invitationRepository.beginIdentityInvitationDelivery(
+      bootstrapped.session,
+      { mode: "org" },
+      {
+        invitationId: invitation.invitation.id,
+        idempotencyKey: secondInviteKey,
+        rotateToken: true,
+        lifetimeMs: 2 * 60 * 60 * 1_000,
+      },
+      inviteNow + 3,
+    );
+    await invitationRepository.completeIdentityInvitationDelivery(
+      bootstrapped.session,
+      { mode: "org" },
+      invitation.invitation.id,
+      secondInviteKey,
+      { status: "failed", transport: "email-api", provider: "resend", errorCode: "PROVIDER_REJECTED", httpStatus: 400 },
+      inviteNow + 4,
+    );
+    const historicalReplay = await invitationRepository.beginIdentityInvitationDelivery(
+      bootstrapped.session,
+      { mode: "org" },
+      {
+        invitationId: invitation.invitation.id,
+        idempotencyKey: firstInviteKey,
+        rotateToken: true,
+        lifetimeMs: 60 * 60 * 1_000,
+      },
+      inviteNow + 5,
+    );
+    assert.equal(historicalReplay.replayed, true);
+    assert.equal(historicalReplay.token, null);
+    await assert.rejects(
+      invitationRepository.beginIdentityInvitationDelivery(
+        bootstrapped.session,
+        { mode: "org" },
+        {
+          invitationId: invitation.invitation.id,
+          idempotencyKey: firstInviteKey,
+          rotateToken: true,
+          lifetimeMs: 3 * 60 * 60 * 1_000,
+        },
+        inviteNow + 6,
+      ),
+      (error) => error?.status === 409,
+    );
+    const invitationLedger = await (await import("../db/index.ts")).getRawDb().prepare(
+      `SELECT operation_status, outcome_status FROM identity_invitation_operations
+        WHERE invitation_id = ? ORDER BY created_at, id`,
+    ).bind(invitation.invitation.id).all();
+    assert.deepEqual(invitationLedger.results, [
+      { operation_status: "completed", outcome_status: null },
+      { operation_status: "completed", outcome_status: "accepted" },
+      { operation_status: "completed", outcome_status: "failed" },
+    ]);
+
     const mfaNow = 59_000;
     const mfaSecrets = {
       encryptionKey: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc",
@@ -52,6 +160,17 @@ test("real PostgreSQL repositories persist auth, CMDB publication, and concurren
       bootstrapped.session.subject.userId,
     );
     const rawDatabase = (await import("../db/index.ts")).getRawDb();
+    const uptimeRepository = new UptimeRepository(rawDatabase);
+    const uptimeSlot = Date.parse("2026-07-22T06:00:00.000Z");
+    const uptimeSamples = ["web-app", "database", "job-runner", "collector"].map((component) => ({
+      component,
+      healthy: true,
+      detail: "PostgreSQL platform probe acceptance",
+    }));
+    assert.equal(await uptimeRepository.recordSamples(uptimeSamples, uptimeSlot, uptimeSlot), 4);
+    assert.equal(await uptimeRepository.recordSamples(uptimeSamples, uptimeSlot + 1_000, uptimeSlot), 0);
+    assert.equal(await uptimeRepository.hasCompleteProbeSlot(uptimeSlot), true);
+    assert.equal(await uptimeRepository.pruneBefore(uptimeSlot - 1), 0);
     await rawDatabase.prepare(
       `INSERT INTO totp_credentials
         (user_id, secret_ciphertext, secret_key_version, confirmed_at,

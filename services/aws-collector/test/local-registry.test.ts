@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createCipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,6 +38,9 @@ test("registry stages verified trust until the control plane explicitly activate
     assert.equal(scoped?.externalId, EXTERNAL_ID);
     assert.equal(scoped?.status, "PENDING");
     assert.equal(scoped?.permissionPackVersion, "live-demo-2026-07.1");
+    assert.equal(scoped?.roleProvisioningMode, "sutra_template");
+    assert.equal(scoped?.expectedRolePath, "/sutra/");
+    assert.equal(scoped?.expectedRoleName, "SutraReadOnlyRole");
     assert.equal(
       await registry.resolve(
         { tenantId: "org_other" },
@@ -59,7 +62,8 @@ test("registry stages verified trust until the control plane explicitly activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07" as const,
+      permissionPackVersion: "standard-2026-07.2" as const,
+      capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(
       { tenantId: "org_local_sutra" },
@@ -78,7 +82,7 @@ test("registry stages verified trust until the control plane explicitly activate
         { tenantId: "org_local_sutra" },
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.permissionPackVersion,
-      "standard-2026-07",
+      "standard-2026-07.2",
     );
     await registry.activateOnboarding(
       { tenantId: "org_local_sutra" },
@@ -113,6 +117,32 @@ test("registry stages verified trust until the control plane explicitly activate
       "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       verification.roleArn,
     );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("registry persists a customer-managed dedicated role contract", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sutra-registry-custom-role-"));
+  const path = join(directory, "connections.enc.json");
+  const key = randomBytes(32).toString("base64");
+  try {
+    const connectionId = "conn_customroleaaaaaaaaaaaaaaaaaaaaa";
+    const input = {
+      ...connection(connectionId),
+      roleArn: "arn:aws:iam::123456789012:role/sutra/acme/security/AcmeSutraEvidenceRole",
+      roleProvisioningMode: "customer_managed" as const,
+      expectedRolePath: "/sutra/acme/security/",
+      expectedRoleName: "AcmeSutraEvidenceRole",
+    };
+    const first = new EncryptedFileConnectionRegistry({ filePath: path, encryptionKey: key });
+    await first.upsert(input);
+
+    const reopened = new EncryptedFileConnectionRegistry({ filePath: path, encryptionKey: key });
+    const stored = await reopened.resolve({ tenantId: input.tenantId }, connectionId);
+    assert.equal(stored?.roleProvisioningMode, "customer_managed");
+    assert.equal(stored?.expectedRolePath, "/sutra/acme/security/");
+    assert.equal(stored?.expectedRoleName, "AcmeSutraEvidenceRole");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -157,6 +187,96 @@ test("legacy encrypted records decode as permission pack .1 until complete proof
     assert.equal(resolved?.permissionPackVersion, "live-demo-2026-07.1");
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("v1 and v2 registry documents preserve the previous pack and migrate in place to v3", async () => {
+  for (const documentVersion of [1, 2] as const) {
+    const directory = await mkdtemp(join(tmpdir(), `sutra-registry-v${documentVersion}-upgrade-`));
+    const path = join(directory, "connections.enc.json");
+    const keyBytes = randomBytes(32);
+    const key = keyBytes.toString("base64");
+    const connectionId = `conn_${String(documentVersion).repeat(32)}`;
+    const candidate = {
+      ...connection(connectionId),
+      roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
+    };
+    const persisted = {
+      ...candidate,
+      status: "ACTIVE",
+      permissionPackVersion: "standard-2026-07",
+      createdAt: NOW.toISOString(),
+      updatedAt: NOW.toISOString(),
+    };
+    const document = documentVersion === 1
+      ? {
+          version: 1,
+          connections: { [`org_local_sutra\u001f${connectionId}`]: persisted },
+        }
+      : {
+          version: 2,
+          connections: { [`org_local_sutra\u001f${connectionId}`]: persisted },
+          tombstones: {},
+        };
+    await writeEncryptedDocument(path, keyBytes, document);
+
+    try {
+      const registry = new EncryptedFileConnectionRegistry({
+        filePath: path,
+        encryptionKey: key,
+        now: () => NOW,
+      });
+      const before = await registry.resolve({ tenantId: candidate.tenantId }, connectionId);
+      assert.equal(before?.status, "ACTIVE");
+      assert.equal(before?.permissionPackVersion, "standard-2026-07");
+      assert.equal(before?.roleProvisioningMode, "sutra_template");
+      assert.equal(before?.expectedRolePath, "/sutra/");
+      assert.equal(before?.expectedRoleName, "SutraReadOnlyRole");
+
+      // Registration of the same contract must preserve the active previous
+      // pack until a complete current-pack proof is committed.
+      await registry.upsert(candidate);
+      assert.equal(
+        (await registry.resolve({ tenantId: candidate.tenantId }, connectionId))
+          ?.permissionPackVersion,
+        "standard-2026-07",
+      );
+      await registry.markOnboardingVerified(
+        { tenantId: candidate.tenantId },
+        connectionId,
+        {
+          connectionId,
+          accountId: candidate.expectedAccountId,
+          partition: candidate.partition,
+          roleArn: candidate.roleArn,
+          callerIdentityArn:
+            "arn:aws:sts::123456789012:assumed-role/SutraReadOnlyRole/sutra-upgrade-test",
+          roleSessionName: "sutra-upgrade-test",
+          missingExternalIdDenied: true,
+          wrongExternalIdDenied: true,
+          trustPolicyAttested: true,
+          permissionPolicyAttested: true,
+          sessionPolicyApplied: true,
+          permissionPackVersion: "standard-2026-07.2",
+          capabilityAssessment: { grantedActions: [], missingActions: [] },
+        },
+      );
+      const after = await registry.resolve({ tenantId: candidate.tenantId }, connectionId);
+      assert.equal(after?.status, "ACTIVE");
+      assert.equal(after?.permissionPackVersion, "standard-2026-07.2");
+
+      const migrated = await readEncryptedDocument(path, keyBytes) as {
+        version: number;
+        connections: Record<string, { permissionPackVersion: string }>;
+      };
+      assert.equal(migrated.version, 3);
+      assert.equal(
+        migrated.connections[`org_local_sutra\u001f${connectionId}`]?.permissionPackVersion,
+        "standard-2026-07.2",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 });
 
@@ -232,7 +352,8 @@ test("staged activation is role-bound and cannot remove an active connection", a
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07" as const,
+      permissionPackVersion: "standard-2026-07.2" as const,
+      capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(
       { tenantId: candidate.tenantId },
@@ -428,4 +549,39 @@ function connection(connectionId: string) {
     enabledRegions: ["us-east-1", "ap-south-1"],
     sessionNamePrefix: "sutra-",
   };
+}
+
+async function writeEncryptedDocument(
+  path: string,
+  key: Buffer,
+  document: unknown,
+): Promise<void> {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from("sutra-local-registry:v1", "utf8"));
+  const ciphertext = Buffer.concat([
+    cipher.update(JSON.stringify(document), "utf8"),
+    cipher.final(),
+  ]);
+  await writeFile(path, JSON.stringify({
+    version: 1,
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+    ciphertext: ciphertext.toString("base64url"),
+  }), { mode: 0o600 });
+}
+
+async function readEncryptedDocument(path: string, key: Buffer): Promise<unknown> {
+  const envelope = JSON.parse(await readFile(path, "utf8")) as {
+    iv: string;
+    tag: string;
+    ciphertext: string;
+  };
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+  decipher.setAAD(Buffer.from("sutra-local-registry:v1", "utf8"));
+  decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+  return JSON.parse(Buffer.concat([
+    decipher.update(Buffer.from(envelope.ciphertext, "base64url")),
+    decipher.final(),
+  ]).toString("utf8")) as unknown;
 }

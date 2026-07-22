@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { postInternalJobRun } from "./internal-job-request.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const variablesPath = resolve(root, ".dev.vars");
@@ -45,19 +46,18 @@ const web = spawn(resolve(root, "node_modules/.bin/wrangler"), [
 // Durable background-job ticker. When a runner token is configured, poll the
 // system-internal drain endpoint on an interval. Failures are logged and never
 // crash the pilot — the endpoint is idempotent and the next tick simply retries.
-const jobRunnerToken = process.env.SUTRA_JOB_RUNNER_TOKEN;
+const jobRunnerToken = environment.SUTRA_JOB_RUNNER_TOKEN;
 let jobRunnerTimer;
 if (typeof jobRunnerToken === "string" && jobRunnerToken.length > 0) {
-  const requestedInterval = Number(process.env.SUTRA_JOB_RUNNER_INTERVAL_MS ?? "15000");
+  const requestedInterval = Number(environment.SUTRA_JOB_RUNNER_INTERVAL_MS ?? "15000");
   const intervalMs = Number.isFinite(requestedInterval)
     ? Math.min(300_000, Math.max(5_000, requestedInterval))
     : 15_000;
-  const runUrl = `http://127.0.0.1:${webPort}/api/internal/jobs/run`;
   jobRunnerTimer = setInterval(() => {
-    fetch(runUrl, {
-      method: "POST",
-      headers: { "x-sutra-job-token": jobRunnerToken },
-      signal: AbortSignal.timeout(30_000),
+    postInternalJobRun({
+      port: webPort,
+      token: jobRunnerToken,
+      publicOrigin: environment.SUTRA_PUBLIC_ORIGIN,
     })
       .then((response) => {
         if (!response.ok) {

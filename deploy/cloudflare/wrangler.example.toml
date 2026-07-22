@@ -1,0 +1,21 @@
+# Copy this file to wrangler.toml before deploying. The Worker contains no
+# tunnel secret: origin.sutracmdb.com is a proxied CNAME to
+# <tunnel-id>.cfargotunnel.com, and the tunnel forwards it to internal HTTP Caddy.
+name = "sutra-edge-fallback"
+main = "edge-fallback.mjs"
+compatibility_date = "2026-07-01"
+workers_dev = false
+
+[vars]
+PUBLIC_HOSTNAME = "www.sutracmdb.com"
+APEX_HOSTNAME = "sutracmdb.com"
+ORIGIN_HOSTNAME = "origin.sutracmdb.com"
+
+
+[[routes]]
+pattern = "www.sutracmdb.com/*"
+zone_name = "sutracmdb.com"
+
+[[routes]]
+pattern = "sutracmdb.com/*"
+zone_name = "sutracmdb.com"

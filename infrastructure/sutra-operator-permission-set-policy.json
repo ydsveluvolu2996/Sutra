@@ -55,7 +55,7 @@
         "StringEquals": {
           "aws:RequestTag/sutra:stack-owner": "sutra-live-aws-preparation",
           "aws:RequestTag/sutra:stack-purpose": "local-collector-source-role",
-          "aws:RequestTag/sutra:template-sha256": "c8bbaa5b20b33b576ad33c930a98ea51afdb67013bd263833b16c91bcfe4006d"
+          "aws:RequestTag/sutra:template-sha256": "571c9004cfd8816509b74f3b41ae3d2cf9708a7b8a7f61097ed3b76dccf0b58e"
         },
         "ForAllValues:StringEquals": {
           "aws:TagKeys": [
@@ -166,7 +166,7 @@
       "Sid": "PublishExactReviewedTemplateObject",
       "Effect": "Allow",
       "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07/17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml"
+      "Resource": "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07.2/8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml"
     }
   ]
 }

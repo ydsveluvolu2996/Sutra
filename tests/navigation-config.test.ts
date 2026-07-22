@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import type { Capability } from "../lib/auth-policy.ts";
 import { groupContainsActiveItem, navGroups, visibleNavigation } from "../app/components/navigation-config.ts";
@@ -26,7 +27,6 @@ describe("grouped workspace navigation", () => {
       "Compliance",
       "FinOps",
       "Operations",
-      "Administration",
     ]);
     assert.deepEqual(
       visibleNavigation(allCapabilities).find((group) => group.key === "security")?.items.map((item) => item.label),
@@ -64,9 +64,20 @@ describe("grouped workspace navigation", () => {
         "Security findings",
       ],
     );
-    assert.deepEqual(
-      visibleNavigation(allCapabilities).find((group) => group.key === "administration")?.items.map((item) => item.label),
-      ["Settings", "Access & invitations", "Documentation", "Notification destinations"],
+    assert.equal(navGroups.some((group) => group.label === "Administration"), false);
+  });
+
+  it("keeps administration destinations in the account menu without a duplicate left-nav group", async () => {
+    const accountMenu = await readFile(new URL("../app/components/account-menu.tsx", import.meta.url), "utf8");
+
+    assert.equal(navGroups.some((group) => group.label === "Administration"), false);
+    for (const href of ["/settings", "/settings/notifications", "/access", "/docs"]) {
+      assert.match(accountMenu, new RegExp(`href=["']${href.replace("/", "\\/")}["']`, "u"));
+    }
+    assert.match(
+      accountMenu,
+      /capabilities\.has\("membership:manage"\) \|\| capabilities\.has\("membership:manage:customer"\)/u,
+      "both organization and customer-scoped administrators keep Access & invitations in the account menu",
     );
   });
 

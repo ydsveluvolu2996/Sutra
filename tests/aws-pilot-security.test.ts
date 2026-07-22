@@ -100,6 +100,9 @@ test("onboarding accepts only the sole all-enabled Region selection marker", () 
       awsAccountId: "123456789012",
       partition: "aws",
       enabledRegions: [ALL_ENABLED_AWS_REGIONS],
+      roleProvisioningMode: "sutra_template",
+      rolePath: "/sutra/",
+      roleName: "SutraReadOnlyRole",
     },
   );
   assert.throws(
@@ -161,6 +164,9 @@ test("initial connection route boundary requires an opaque retry operation and c
     ...request,
     customerName: "Pilot Customer",
     enabledRegions: ["us-east-1", "us-west-2"],
+    roleProvisioningMode: "sutra_template",
+    rolePath: "/sutra/",
+    roleName: "SutraReadOnlyRole",
   });
 
   for (const invalid of [
@@ -174,6 +180,34 @@ test("initial connection route boundary requires an opaque retry operation and c
   ]) {
     assert.throws(
       () => parseAwsConnectionDraftRequest(invalid),
+      isPilotError("INVALID_INPUT"),
+    );
+  }
+});
+
+test("customer-managed onboarding accepts only a dedicated safe /sutra role contract", () => {
+  const request = {
+    operationId: `onb_${"c".repeat(32)}`,
+    customerName: "Customer Security",
+    awsAccountId: "123456789012",
+    partition: "aws",
+    enabledRegions: ["ap-south-1"],
+    roleProvisioningMode: "customer_managed",
+    rolePath: "/sutra/customer-a/security/",
+    roleName: "SutraMetadataReader",
+  } as const;
+  assert.deepEqual(parseAwsConnectionDraftRequest(request), request);
+
+  for (const unsafe of [
+    { rolePath: "/sutra/", roleName: "AdministratorAccess" },
+    { rolePath: "/sutra/", roleName: "sutra-admin" },
+    { rolePath: "/sutra/", roleName: "shared_operations" },
+    { rolePath: "/sutra/", roleName: "breakglass-reader" },
+    { rolePath: "/sutra/", roleName: "OrganizationAccountAccessRole" },
+    { rolePath: "/sutra-lookalike/", roleName: "SutraReader" },
+  ]) {
+    assert.throws(
+      () => parseAwsConnectionDraftRequest({ ...request, ...unsafe }),
       isPilotError("INVALID_INPUT"),
     );
   }
@@ -642,6 +676,30 @@ test("same-origin boundary rejects absent, cross-site, and malformed origins", (
       isPilotError("INVALID_INPUT"),
     );
   }
+});
+
+test("same-origin boundary honors TLS termination only when upstream Host is canonical", () => {
+  const privateHop = new Request("http://sutra.example/api/pilot/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://sutra.example",
+      "sec-fetch-site": "same-origin",
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "attacker.invalid",
+    },
+  });
+  assert.doesNotThrow(() => assertSameOrigin(privateHop, "https://sutra.example"));
+
+  const nonCanonicalHost = new Request("http://internal.invalid/api/pilot/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://sutra.example",
+      "sec-fetch-site": "same-origin",
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "sutra.example",
+    },
+  });
+  assert.throws(() => assertSameOrigin(nonCanonicalHost), isPilotError("INVALID_INPUT"));
 });
 
 test("bounded JSON reader checks content type, declared size, and streamed size", async () => {

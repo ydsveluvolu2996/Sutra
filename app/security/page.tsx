@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/security",
   title: "Security",
   description: "How Sutra secures your data — read-only, customer-owned IAM access with a unique ExternalId, no stored access keys, tenant isolation and evidence-cited findings.",
-};
+});
 
 export default function SecurityPage() {
   return (

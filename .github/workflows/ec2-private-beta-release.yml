@@ -1,0 +1,271 @@
+name: Release Sutra private beta to EC2
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseReason:
+        description: Approved reason for this production-like private-beta release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sutra-ec2-private-beta-release
+  cancel-in-progress: false
+
+env:
+  APP_ECR_REPOSITORY: sutra/app
+  PUBLIC_ORIGIN: https://www.sutracmdb.com
+  RELEASE_DOCUMENT_NAME: Sutra-DeployImmutableRelease
+
+jobs:
+  release:
+    name: Build, scan, deploy, and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact release revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate release configuration
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
+          [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${EC2_INSTANCE_ID}" =~ ^i-[0-9a-f]{17}$ ]]
+          [[ "${APP_ECR_REPOSITORY}" == "sutra/app" ]]
+          [[ "${PUBLIC_ORIGIN}" == "https://www.sutracmdb.com" ]]
+          [[ "${RELEASE_DOCUMENT_NAME}" == "Sutra-DeployImmutableRelease" ]]
+          [[ "${#RELEASE_REASON}" -ge 10 && "${#RELEASE_REASON}" -le 100 ]]
+          [[ "${RELEASE_REASON}" != *$'\n'* && "${RELEASE_REASON}" != *$'\r'* ]]
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run bounded source and release gates
+        run: |
+          set -euo pipefail
+          pnpm security:secrets
+          pnpm typecheck
+          pnpm typecheck:collector
+          pnpm lint
+          pnpm test:templates
+          node --test \
+            tests/github-workflow-security.test.mjs \
+            tests/backup-contract.test.mjs \
+            tests/deployment-security.test.ts \
+            tests/docker-runtime-isolation.test.mjs
+          bash deploy/ec2/validate-ops.sh
+
+      - name: Configure short-lived AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-ec2-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Verify account and immutable repository boundary
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "${account}" == "${AWS_ACCOUNT_ID}" ]]
+          read -r repository_uri tag_mutability scan_on_push encryption_type < <(
+            aws ecr describe-repositories \
+              --region "${AWS_REGION}" \
+              --repository-names "${APP_ECR_REPOSITORY}" \
+              --query 'repositories[0].[repositoryUri,imageTagMutability,imageScanningConfiguration.scanOnPush,encryptionConfiguration.encryptionType]' \
+              --output text
+          )
+          [[ "${repository_uri}" == "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${APP_ECR_REPOSITORY}" ]]
+          [[ "${tag_mutability}" == "IMMUTABLE" ]]
+          [[ "${scan_on_push}" == "True" || "${scan_on_push}" == "False" ]]
+          [[ "${encryption_type}" == "AES256" || "${encryption_type}" == "KMS" ]]
+
+      - name: Install Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate Docker to the approved ECR registry
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecr get-login-password --region "${AWS_REGION}" |
+            docker login --username AWS --password-stdin "${registry}"
+
+      - name: Build and push an immutable application image
+        id: image
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          tagged_image="${registry}/${APP_ECR_REPOSITORY}:${tag}"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-app \
+            --cache-to type=gha,mode=max,scope=sutra-app \
+            --push \
+            --tag "${tagged_image}" \
+            .
+          digest="$(aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${tag}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image_ref="${registry}/${APP_ECR_REPOSITORY}@${digest}"
+          [[ "${image_ref}" =~ ^${AWS_ACCOUNT_ID}\.dkr\.ecr\.${AWS_REGION}\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$ ]]
+          echo "ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan the exact application digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Require the manually started host to be online in SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+        run: |
+          set -euo pipefail
+          connection_status="notconnected"
+          for _ in $(seq 1 6); do
+            connection_status="$(aws ssm get-connection-status \
+              --region "${AWS_REGION}" \
+              --target "${EC2_INSTANCE_ID}" \
+              --query Status --output text 2>/dev/null || printf 'notconnected')"
+            [[ "${connection_status}" == "connected" ]] && break
+            sleep 5
+          done
+          [[ "${connection_status}" == "connected" ]] || {
+            echo "Start Sutra manually and wait for the exact EC2 host to become an online SSM managed node, then retry this release." >&2
+            exit 1
+          }
+
+      - name: Deploy the exact digest through SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+        run: |
+          set -euo pipefail
+          [[ "${IMAGE_REF}" =~ ^[0-9]{12}\.dkr\.ecr\.${AWS_REGION}\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$ ]]
+          [[ "${RELEASE_DOCUMENT_NAME}" == "Sutra-DeployImmutableRelease" ]]
+          parameters="$(jq -cn --arg image_ref "${IMAGE_REF}" '{ImageRef:[$image_ref]}')"
+          command_id="$(aws ssm send-command \
+            --region "${AWS_REGION}" \
+            --instance-ids "${EC2_INSTANCE_ID}" \
+            --document-name "${RELEASE_DOCUMENT_NAME}" \
+            --comment "${RELEASE_REASON}" \
+            --timeout-seconds 60 \
+            --parameters "${parameters}" \
+            --query 'Command.CommandId' \
+            --output text)"
+          [[ "${command_id}" =~ ^[0-9a-f-]{36}$ ]]
+
+          status="Pending"
+          for _ in $(seq 1 180); do
+            status="$(aws ssm get-command-invocation \
+              --region "${AWS_REGION}" \
+              --command-id "${command_id}" \
+              --instance-id "${EC2_INSTANCE_ID}" \
+              --query Status --output text 2>/dev/null || printf 'Pending')"
+            case "${status}" in
+              Success) break ;;
+              Cancelled|TimedOut|Failed|Cancelling)
+                status_details="$(aws ssm get-command-invocation \
+                  --region "${AWS_REGION}" \
+                  --command-id "${command_id}" \
+                  --instance-id "${EC2_INSTANCE_ID}" \
+                  --query StatusDetails --output text 2>/dev/null || printf 'Unavailable')"
+                echo "SSM release failed: ${status_details}" >&2
+                exit 1
+                ;;
+              Pending|InProgress|Delayed) sleep 5 ;;
+              *) echo "Unexpected SSM command status: ${status}" >&2; exit 1 ;;
+            esac
+          done
+          [[ "${status}" == "Success" ]] || {
+            echo "SSM release did not complete within 15 minutes." >&2
+            exit 1
+          }
+          response_code="$(aws ssm get-command-invocation \
+            --region "${AWS_REGION}" \
+            --command-id "${command_id}" \
+            --instance-id "${EC2_INSTANCE_ID}" \
+            --query ResponseCode --output text)"
+          [[ "${response_code}" == "0" ]]
+
+      - name: Verify the public application and status endpoints
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          for path in /api/healthz /login /status; do
+            code="$(curl --silent --show-error \
+              --retry 12 --retry-delay 5 --retry-all-errors \
+              --connect-timeout 10 --max-time 15 \
+              --output /dev/null --write-out '%{http_code}' \
+              "${PUBLIC_ORIGIN}${path}")"
+            [[ "${code}" == "200" ]] || {
+              echo "${PUBLIC_ORIGIN}${path} returned HTTP ${code}; expected 200." >&2
+              exit 1
+            }
+          done
+          {
+            echo "### Sutra EC2 release verified"
+            echo
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Public origin: ${PUBLIC_ORIGIN}"
+            echo "- SSM deployment and all public health checks passed."
+          } >> "${GITHUB_STEP_SUMMARY}"

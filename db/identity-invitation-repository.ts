@@ -9,6 +9,7 @@ import {
   type HostedIdentity,
 } from "./auth-repository";
 import { canonicalJson } from "../lib/canonical-json";
+import type { InvitationDeliveryResult } from "../lib/invitation-delivery";
 import { digestSessionToken, generateSessionToken, hashPassword, validatePassword } from "../lib/local-auth-crypto";
 import {
   CUSTOMER_ROLES,
@@ -32,6 +33,8 @@ const CUSTOMER_ACCESS_ROLES = new Set<OrgRole>(CUSTOMER_ROLES as readonly OrgRol
 const CUSTOMER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const MINIMUM_INVITATION_MS = 60 * 60 * 1000;
 const MAXIMUM_INVITATION_MS = 7 * 24 * 60 * 60 * 1000;
+const DELIVERY_RESULT_UNKNOWN_AFTER_MS = 60_000;
+const DELIVERY_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{16,128}$/u;
 
 function forbidden(message: string): never {
   throw new LocalAuthError(403, "AUTHORIZATION_DENIED", message);
@@ -45,7 +48,69 @@ export interface IdentityInvitationSummary {
   readonly customerId: string | null;
   readonly expiresAt: string;
   readonly status: "pending" | "accepted" | "revoked" | "expired";
+  readonly delivery: IdentityInvitationDeliveryState;
   readonly createdAt: string;
+}
+
+export interface IdentityInvitationDeliveryState {
+  readonly status: "not_attempted" | "sending" | "accepted" | "failed" | "unknown";
+  readonly transport: "none" | "email-api";
+  readonly provider: "none" | "resend" | "sendgrid" | "generic";
+  readonly attempts: number;
+  readonly lastAttemptedAt: string | null;
+  readonly completedAt: string | null;
+  readonly errorCode: string | null;
+}
+
+interface IdentityInvitationRow {
+  readonly id: string;
+  readonly email: string;
+  readonly role: Exclude<OrgRole, "org_owner">;
+  readonly scope_mode: ScopeMode;
+  readonly customer_id: string | null;
+  readonly expires_at: number;
+  readonly accepted_at: number | null;
+  readonly revoked_at: number | null;
+  readonly created_at: number;
+  readonly delivery_status: IdentityInvitationDeliveryState["status"];
+  readonly delivery_transport: IdentityInvitationDeliveryState["transport"];
+  readonly delivery_provider: IdentityInvitationDeliveryState["provider"];
+  readonly delivery_attempts: number;
+  readonly delivery_last_attempted_at: number | null;
+  readonly delivery_completed_at: number | null;
+  readonly delivery_error_code: string | null;
+  readonly delivery_idempotency_digest: string | null;
+  readonly delivery_revision: number;
+}
+
+export type IdentityInvitationOperationKind = "creation" | "initial_delivery" | "resend";
+
+export interface CreateIdentityInvitationInput {
+  readonly email: string;
+  readonly role: OrgRole;
+  readonly scopeMode: ScopeMode;
+  readonly lifetimeMs: number;
+  readonly customerId?: string | null;
+  /** Optional exact OIDC issuer pin for federated invitation acceptance. */
+  readonly allowedIssuer?: string | null;
+}
+
+interface IdentityInvitationOperationRow {
+  readonly id: string;
+  readonly org_id: string;
+  readonly operation_kind: IdentityInvitationOperationKind;
+  readonly idempotency_scope_id: string;
+  readonly invitation_id: string | null;
+  readonly idempotency_digest: string;
+  readonly request_fingerprint: string;
+  readonly operation_status: "claimed" | "completed";
+  readonly outcome_status: InvitationDeliveryResult["status"] | null;
+  readonly delivery_transport: InvitationDeliveryResult["transport"];
+  readonly delivery_provider: InvitationDeliveryResult["provider"];
+  readonly delivery_error_code: string | null;
+  readonly delivery_http_status: number | null;
+  readonly created_at: number;
+  readonly completed_at: number | null;
 }
 
 function opaqueId(prefix: string): string {
@@ -76,11 +141,139 @@ async function sha256Hex(value: string): Promise<string> {
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * Stable request binding shared by creation and delivery idempotency claims.
+ * Callers pass plain JSON only; secrets and raw activation tokens must never be
+ * included because the resulting digest is durable audit/control-plane state.
+ */
+export function identityInvitationOperationRequestFingerprint(
+  operationKind: IdentityInvitationOperationKind,
+  requestBody: unknown,
+): Promise<string> {
+  return sha256Hex(canonicalJson({ operationKind, requestBody }));
+}
+
+async function identityInvitationIdempotencyDigest(idempotencyKey: string): Promise<string> {
+  if (!DELIVERY_IDEMPOTENCY_KEY.test(idempotencyKey)) {
+    throw new LocalAuthError(400, "INVALID_INPUT", "Provide a valid Idempotency-Key (16 to 128 safe characters)");
+  }
+  return sha256Hex(idempotencyKey);
+}
+
+function deliveryFromRow(row: IdentityInvitationRow, now: number): IdentityInvitationDeliveryState {
+  const status = row.delivery_status === "sending" && row.delivery_last_attempted_at !== null
+    && now - row.delivery_last_attempted_at > DELIVERY_RESULT_UNKNOWN_AFTER_MS
+    ? "unknown"
+    : row.delivery_status;
+  return {
+    status,
+    transport: row.delivery_transport,
+    provider: row.delivery_provider,
+    attempts: row.delivery_attempts,
+    lastAttemptedAt: row.delivery_last_attempted_at === null ? null : new Date(row.delivery_last_attempted_at).toISOString(),
+    completedAt: row.delivery_completed_at === null ? null : new Date(row.delivery_completed_at).toISOString(),
+    errorCode: row.delivery_error_code,
+  };
+}
+
+function invitationFromRow(row: IdentityInvitationRow, now: number): IdentityInvitationSummary {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role,
+    scopeMode: row.scope_mode,
+    customerId: row.customer_id,
+    expiresAt: new Date(row.expires_at).toISOString(),
+    status: row.revoked_at !== null
+      ? "revoked"
+      : row.accepted_at !== null
+        ? "accepted"
+        : row.expires_at <= now
+          ? "expired"
+          : "pending",
+    delivery: deliveryFromRow(row, now),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+
+const INVITATION_SUMMARY_COLUMNS = `id, email, role, scope_mode, customer_id, expires_at,
+  accepted_at, revoked_at, created_at, delivery_status, delivery_transport,
+  delivery_provider, delivery_attempts, delivery_last_attempted_at,
+  delivery_completed_at, delivery_error_code, delivery_idempotency_digest,
+  delivery_revision`;
+
+const INVITATION_OPERATION_COLUMNS = `id, org_id, operation_kind, idempotency_scope_id,
+  invitation_id, idempotency_digest, request_fingerprint, operation_status,
+  outcome_status, delivery_transport, delivery_provider, delivery_error_code,
+  delivery_http_status, created_at, completed_at`;
+
+async function invitationOperationByKey(
+  db: D1Database,
+  orgId: string,
+  invitationId: string,
+  idempotencyDigest: string,
+): Promise<IdentityInvitationOperationRow | null> {
+  return db.prepare(
+    `SELECT ${INVITATION_OPERATION_COLUMNS}
+       FROM identity_invitation_operations
+      WHERE org_id = ? AND invitation_id = ? AND idempotency_digest = ?
+      LIMIT 1`,
+  ).bind(orgId, invitationId, idempotencyDigest).first<IdentityInvitationOperationRow>();
+}
+
+async function creationOperationByKey(
+  db: D1Database,
+  orgId: string,
+  actorId: string,
+  idempotencyDigest: string,
+): Promise<IdentityInvitationOperationRow | null> {
+  return db.prepare(
+    `SELECT ${INVITATION_OPERATION_COLUMNS}
+       FROM identity_invitation_operations
+      WHERE org_id = ? AND operation_kind = 'creation'
+        AND idempotency_scope_id = ? AND idempotency_digest = ?
+      LIMIT 1`,
+  ).bind(orgId, actorId, idempotencyDigest).first<IdentityInvitationOperationRow>();
+}
+
+function assertMatchingOperationFingerprint(
+  operation: IdentityInvitationOperationRow,
+  requestFingerprint: string,
+): void {
+  if (operation.request_fingerprint !== requestFingerprint) {
+    throw new LocalAuthError(
+      409,
+      "INVALID_INPUT",
+      "This Idempotency-Key was already used with a different invitation operation",
+    );
+  }
+}
+
+function operationMatchesOutcome(
+  operation: IdentityInvitationOperationRow,
+  result: InvitationDeliveryResult,
+): boolean {
+  return operation.operation_status === "completed"
+    && operation.outcome_status === result.status
+    && operation.delivery_transport === result.transport
+    && operation.delivery_provider === result.provider
+    && operation.delivery_error_code === result.errorCode
+    && operation.delivery_http_status === result.httpStatus;
+}
+
 async function invitationEventHash(input: {
   readonly invitationId: string;
   readonly orgId: string;
   readonly actorId: string;
-  readonly action: "created" | "accepted" | "revoked";
+  readonly action:
+    | "created"
+    | "accepted"
+    | "revoked"
+    | "resent"
+    | "delivery_started"
+    | "delivery_accepted"
+    | "delivery_failed"
+    | "delivery_unknown";
   readonly occurredAt: number;
   readonly metadataJson: string;
   readonly previousEventHash: string | null;
@@ -88,21 +281,15 @@ async function invitationEventHash(input: {
   return sha256Hex(canonicalJson(input));
 }
 
-export async function createIdentityInvitation(
+async function createIdentityInvitationInternal(
   authenticated: AuthenticatedLocalSession,
   scope: MembershipManagementScope,
-  input: {
-    readonly email: string;
-    readonly role: OrgRole;
-    readonly scopeMode: ScopeMode;
-    readonly lifetimeMs: number;
-    readonly customerId?: string | null;
-    // (LOW-2) OPTIONAL issuer/provider pin. When set, the invitation may ONLY be
-    // accepted by an identity whose verified OIDC issuer matches EXACTLY. When
-    // unset (null/undefined) the invited-join path is unchanged.
-    readonly allowedIssuer?: string | null;
-  },
+  input: CreateIdentityInvitationInput,
   now = Date.now(),
+  creationOperation?: {
+    readonly idempotencyDigest: string;
+    readonly requestFingerprint: string;
+  },
 ): Promise<{ readonly invitation: IdentityInvitationSummary; readonly token: string }> {
   const email = normalizedEmail(input.email);
   if (
@@ -174,6 +361,7 @@ export async function createIdentityInvitation(
 
   const invitationId = opaqueId("invite");
   const eventId = opaqueId("invite_event");
+  const operationId = creationOperation === undefined ? null : opaqueId("invite_operation");
   const token = generateSessionToken();
   const tokenDigest = await digestSessionToken(token);
   const expiresAt = now + input.lifetimeMs;
@@ -231,10 +419,47 @@ export async function createIdentityInvitation(
         metadataJson,
         eventHash,
       ),
+      ...(creationOperation === undefined || operationId === null ? [] : [
+        db.prepare(
+          `INSERT INTO identity_invitation_operations
+            (id, org_id, operation_kind, idempotency_scope_id, invitation_id,
+             idempotency_digest, request_fingerprint, operation_status, outcome_status,
+             delivery_transport, delivery_provider, delivery_error_code,
+             delivery_http_status, created_at, completed_at)
+           VALUES (?, ?, 'creation', ?, ?, ?, ?, 'completed', NULL,
+                   'none', 'none', NULL, NULL, ?, ?)`,
+        ).bind(
+          operationId,
+          authenticated.subject.orgId,
+          authenticated.subject.userId,
+          invitationId,
+          creationOperation.idempotencyDigest,
+          creationOperation.requestFingerprint,
+          now,
+          now,
+        ),
+      ]),
     ]);
     if (results.some((result) => Number(result.meta?.changes ?? 0) !== 1)) throw new Error("Invitation batch was incomplete");
   } catch {
-    throw new LocalAuthError(409, "INVALID_INPUT", "An active invitation already exists for this email address");
+    // A uniqueness conflict on the active-email index is an actionable 409. Do
+    // not classify every transaction failure that way: a database outage,
+    // broken audit insert, or foreign-key failure must remain a server-side
+    // persistence error so clients do not incorrectly abandon a safe retry.
+    let active: { readonly id: string } | null;
+    try {
+      active = await db.prepare(
+        `SELECT id FROM identity_invitations
+          WHERE org_id = ? AND email = ? AND accepted_at IS NULL AND revoked_at IS NULL
+          LIMIT 1`,
+      ).bind(authenticated.subject.orgId, email).first<{ id: string }>();
+    } catch {
+      throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The invitation could not be committed atomically");
+    }
+    if (active !== null) {
+      throw new LocalAuthError(409, "INVALID_INPUT", "An active invitation already exists for this email address");
+    }
+    throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The invitation could not be committed atomically");
   }
   return {
     invitation: {
@@ -245,10 +470,103 @@ export async function createIdentityInvitation(
       customerId,
       expiresAt: new Date(expiresAt).toISOString(),
       status: "pending",
+      delivery: {
+        status: "not_attempted",
+        transport: "none",
+        provider: "none",
+        attempts: 0,
+        lastAttemptedAt: null,
+        completedAt: null,
+        errorCode: null,
+      },
       createdAt: new Date(now).toISOString(),
     },
     token,
   };
+}
+
+export function createIdentityInvitation(
+  authenticated: AuthenticatedLocalSession,
+  scope: MembershipManagementScope,
+  input: CreateIdentityInvitationInput,
+  now = Date.now(),
+): Promise<{ readonly invitation: IdentityInvitationSummary; readonly token: string }> {
+  return createIdentityInvitationInternal(authenticated, scope, input, now);
+}
+
+/**
+ * Creates an invitation once for an actor-scoped idempotency key. A replay can
+ * return the durable invitation summary but never the plaintext bearer token;
+ * the administrator must use the separately idempotent resend flow to rotate a
+ * fresh token after a lost response.
+ */
+export async function createIdentityInvitationIdempotently(
+  authenticated: AuthenticatedLocalSession,
+  scope: MembershipManagementScope,
+  input: CreateIdentityInvitationInput,
+  idempotencyKey: string,
+  now = Date.now(),
+): Promise<{
+  readonly invitation: IdentityInvitationSummary;
+  readonly token: string | null;
+  readonly replayed: boolean;
+}> {
+  const idempotencyDigest = await identityInvitationIdempotencyDigest(idempotencyKey);
+  const normalizedRequest = {
+    email: normalizedEmail(input.email),
+    role: input.role,
+    scopeMode: input.scopeMode,
+    lifetimeMs: input.lifetimeMs,
+    customerId: input.customerId === undefined || input.customerId === null || input.customerId === ""
+      ? null
+      : input.customerId,
+    allowedIssuer: input.allowedIssuer === undefined || input.allowedIssuer === null || input.allowedIssuer === ""
+      ? null
+      : input.allowedIssuer,
+  };
+  const requestFingerprint = await identityInvitationOperationRequestFingerprint(
+    "creation",
+    normalizedRequest,
+  );
+  const db = await database();
+  const replay = async (operation: IdentityInvitationOperationRow) => {
+    assertMatchingOperationFingerprint(operation, requestFingerprint);
+    if (operation.operation_status !== "completed" || operation.invitation_id === null) {
+      throw new LocalAuthError(409, "INVALID_INPUT", "The invitation creation operation is still in progress");
+    }
+    return {
+      invitation: invitationFromRow(
+        await scopedInvitation(db, authenticated, scope, operation.invitation_id),
+        now,
+      ),
+      token: null,
+      replayed: true,
+    } as const;
+  };
+  const prior = await creationOperationByKey(
+    db,
+    authenticated.subject.orgId,
+    authenticated.subject.userId,
+    idempotencyDigest,
+  );
+  if (prior !== null) return replay(prior);
+
+  try {
+    const created = await createIdentityInvitationInternal(authenticated, scope, input, now, {
+      idempotencyDigest,
+      requestFingerprint,
+    });
+    return { ...created, replayed: false };
+  } catch (error) {
+    const raced = await creationOperationByKey(
+      db,
+      authenticated.subject.orgId,
+      authenticated.subject.userId,
+      idempotencyDigest,
+    );
+    if (raced !== null) return replay(raced);
+    throw error;
+  }
 }
 
 export async function listIdentityInvitations(
@@ -266,7 +584,7 @@ export async function listIdentityInvitations(
       ? ` AND customer_id IN (${scope.customerIds.map(() => "?").join(", ")})`
       : "";
   const result = await db.prepare(
-    `SELECT id, email, role, scope_mode, customer_id, expires_at, accepted_at, revoked_at, created_at
+    `SELECT ${INVITATION_SUMMARY_COLUMNS}
        FROM identity_invitations
       WHERE org_id = ?${customerFilter}
       ORDER BY created_at DESC, id DESC
@@ -274,33 +592,411 @@ export async function listIdentityInvitations(
   ).bind(
     authenticated.subject.orgId,
     ...(scope.mode === "customer" ? scope.customerIds : []),
-  ).all<{
-    id: string;
-    email: string;
-    role: Exclude<OrgRole, "org_owner">;
-    scope_mode: ScopeMode;
-    customer_id: string | null;
-    expires_at: number;
-    accepted_at: number | null;
-    revoked_at: number | null;
-    created_at: number;
-  }>();
-  return (result.results ?? []).map((row) => ({
-    id: row.id,
-    email: row.email,
-    role: row.role,
-    scopeMode: row.scope_mode,
-    customerId: row.customer_id,
-    expiresAt: new Date(row.expires_at).toISOString(),
-    status: row.revoked_at !== null
-      ? "revoked"
-      : row.accepted_at !== null
-        ? "accepted"
-        : row.expires_at <= now
-          ? "expired"
-          : "pending",
-    createdAt: new Date(row.created_at).toISOString(),
-  }));
+  ).all<IdentityInvitationRow>();
+  return (result.results ?? []).map((row) => invitationFromRow(row, now));
+}
+
+async function scopedInvitation(
+  db: D1Database,
+  authenticated: AuthenticatedLocalSession,
+  scope: MembershipManagementScope,
+  invitationId: string,
+): Promise<IdentityInvitationRow> {
+  if (!/^invite_[a-f0-9]{32}$/u.test(invitationId)) {
+    throw new LocalAuthError(400, "INVALID_INPUT", "The invitation identifier is invalid");
+  }
+  const row = await db.prepare(
+    `SELECT ${INVITATION_SUMMARY_COLUMNS}
+       FROM identity_invitations WHERE id = ? AND org_id = ? LIMIT 1`,
+  ).bind(invitationId, authenticated.subject.orgId).first<IdentityInvitationRow>();
+  if (row === null) throw new LocalAuthError(404, "INVALID_INPUT", "The invitation is unavailable");
+  if (
+    scope.mode === "customer"
+    && (row.customer_id === null || !scope.customerIds.includes(row.customer_id))
+  ) {
+    forbidden("This account cannot manage an invitation outside its administered customers");
+  }
+  return row;
+}
+
+export interface BegunIdentityInvitationDelivery {
+  readonly invitation: IdentityInvitationSummary;
+  /** Present only for a newly rotated resend token; never persisted. */
+  readonly token: string | null;
+  readonly replayed: boolean;
+}
+
+/**
+ * Claims one delivery attempt. Repeating the same idempotency key never rotates
+ * the invitation token and never authorizes a second send. A resend appends a
+ * hash-chained `resent` event while persisting only the new token digest.
+ */
+export async function beginIdentityInvitationDelivery(
+  authenticated: AuthenticatedLocalSession,
+  scope: MembershipManagementScope,
+  input: {
+    readonly invitationId: string;
+    readonly idempotencyKey: string;
+    readonly rotateToken: boolean;
+    readonly lifetimeMs?: number;
+  },
+  now = Date.now(),
+): Promise<BegunIdentityInvitationDelivery> {
+  if (
+    input.rotateToken
+    && (!Number.isSafeInteger(input.lifetimeMs) || (input.lifetimeMs as number) < MINIMUM_INVITATION_MS
+      || (input.lifetimeMs as number) > MAXIMUM_INVITATION_MS)
+  ) {
+    throw new LocalAuthError(400, "INVALID_INPUT", "The invitation lifetime is invalid");
+  }
+
+  const db = await database();
+  const current = await scopedInvitation(db, authenticated, scope, input.invitationId);
+  const operationKind: IdentityInvitationOperationKind = input.rotateToken ? "resend" : "initial_delivery";
+  const idempotencyDigest = await identityInvitationIdempotencyDigest(input.idempotencyKey);
+  const requestFingerprint = await identityInvitationOperationRequestFingerprint(operationKind, {
+    invitationId: input.invitationId,
+    ...(input.rotateToken ? { lifetimeMs: input.lifetimeMs } : {}),
+  });
+  const priorOperation = await invitationOperationByKey(
+    db,
+    authenticated.subject.orgId,
+    input.invitationId,
+    idempotencyDigest,
+  );
+  if (priorOperation !== null) {
+    assertMatchingOperationFingerprint(priorOperation, requestFingerprint);
+    return { invitation: invitationFromRow(current, now), token: null, replayed: true };
+  }
+  if (current.accepted_at !== null || current.revoked_at !== null) {
+    throw new LocalAuthError(409, "INVALID_INPUT", "Only a pending or expired invitation can be sent again");
+  }
+  if (
+    current.delivery_status === "sending"
+    && current.delivery_last_attempted_at !== null
+    && now - current.delivery_last_attempted_at <= DELIVERY_RESULT_UNKNOWN_AFTER_MS
+  ) {
+    throw new LocalAuthError(409, "INVALID_INPUT", "Another invitation delivery attempt is still in progress");
+  }
+
+  const previous = await db.prepare(
+    `SELECT event_hash FROM identity_invitation_events
+      WHERE invitation_id = ? AND org_id = ?
+      ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+  ).bind(input.invitationId, authenticated.subject.orgId).first<{ event_hash: string }>();
+  if (previous === null) throw new LocalAuthError(404, "INVALID_INPUT", "The invitation is unavailable");
+
+  const expectedRevision = current.delivery_revision;
+  const nextRevision = expectedRevision + 1;
+  const operationId = opaqueId("invite_operation");
+  const eventId = opaqueId("invite_event");
+  const expiresAt = input.rotateToken ? now + (input.lifetimeMs as number) : current.expires_at;
+  const eventAction = input.rotateToken ? "resent" : "delivery_started";
+  const metadataJson = canonicalJson(input.rotateToken
+    ? { expiresAt, deliveryIdempotencyDigest: idempotencyDigest }
+    : { deliveryAttempt: current.delivery_attempts + 1, deliveryIdempotencyDigest: idempotencyDigest });
+  const eventHash = await invitationEventHash({
+    invitationId: input.invitationId,
+    orgId: authenticated.subject.orgId,
+    actorId: authenticated.subject.userId,
+    action: eventAction,
+    occurredAt: now,
+    metadataJson,
+    previousEventHash: previous.event_hash,
+  });
+
+  let token: string | null = null;
+  let tokenDigest: string | null = null;
+  if (input.rotateToken) {
+    token = generateSessionToken();
+    tokenDigest = await digestSessionToken(token);
+  }
+
+  const update = input.rotateToken
+    ? db.prepare(
+        `UPDATE identity_invitations
+            SET token_digest = ?, expires_at = ?, delivery_status = 'sending',
+                delivery_transport = 'none', delivery_provider = 'none',
+                delivery_attempts = delivery_attempts + 1, delivery_last_attempted_at = ?,
+                delivery_completed_at = NULL, delivery_error_code = NULL, delivery_http_status = NULL,
+                delivery_idempotency_digest = ?, delivery_revision = delivery_revision + 1
+          WHERE id = ? AND org_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
+            AND delivery_revision = ?
+            AND (delivery_status != 'sending' OR delivery_last_attempted_at IS NULL
+              OR delivery_last_attempted_at <= ?)`,
+      ).bind(
+        tokenDigest,
+        expiresAt,
+        now,
+        idempotencyDigest,
+        input.invitationId,
+        authenticated.subject.orgId,
+        expectedRevision,
+        now - DELIVERY_RESULT_UNKNOWN_AFTER_MS,
+      )
+    : db.prepare(
+        `UPDATE identity_invitations
+            SET delivery_status = 'sending', delivery_transport = 'none', delivery_provider = 'none',
+                delivery_attempts = delivery_attempts + 1, delivery_last_attempted_at = ?,
+                delivery_completed_at = NULL, delivery_error_code = NULL, delivery_http_status = NULL,
+                delivery_idempotency_digest = ?, delivery_revision = delivery_revision + 1
+          WHERE id = ? AND org_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
+            AND delivery_revision = ?
+            AND (delivery_status != 'sending' OR delivery_last_attempted_at IS NULL
+              OR delivery_last_attempted_at <= ?)`,
+      ).bind(
+        now,
+        idempotencyDigest,
+        input.invitationId,
+        authenticated.subject.orgId,
+        expectedRevision,
+        now - DELIVERY_RESULT_UNKNOWN_AFTER_MS,
+      );
+
+  let results: readonly D1Result<unknown>[];
+  try {
+    results = await db.batch([
+      update,
+      db.prepare(
+        `INSERT INTO identity_invitation_operations
+          (id, org_id, operation_kind, idempotency_scope_id, invitation_id,
+           idempotency_digest, request_fingerprint, operation_status, outcome_status,
+           delivery_transport, delivery_provider, delivery_error_code,
+           delivery_http_status, created_at, completed_at)
+         SELECT ?, org_id, ?, id, id, ?, ?, 'claimed', NULL,
+                'none', 'none', NULL, NULL, ?, NULL
+           FROM identity_invitations
+          WHERE id = ? AND org_id = ? AND delivery_revision = ?
+            AND delivery_status = 'sending' AND delivery_last_attempted_at = ?
+            AND delivery_idempotency_digest = ?`,
+      ).bind(
+        operationId,
+        operationKind,
+        idempotencyDigest,
+        requestFingerprint,
+        now,
+        input.invitationId,
+        authenticated.subject.orgId,
+        nextRevision,
+        now,
+        idempotencyDigest,
+      ),
+      db.prepare(
+        `INSERT INTO identity_invitation_events
+          (id, invitation_id, org_id, actor_id, action, occurred_at, metadata_json,
+           previous_event_hash, event_hash)
+         SELECT ?, id, org_id, ?, ?, ?, ?, ?, ?
+           FROM identity_invitations
+          WHERE id = ? AND org_id = ? AND delivery_revision = ?
+            AND delivery_status = 'sending' AND delivery_last_attempted_at = ?
+            AND delivery_idempotency_digest = ?`,
+      ).bind(
+        eventId,
+        authenticated.subject.userId,
+        eventAction,
+        now,
+        metadataJson,
+        previous.event_hash,
+        eventHash,
+        input.invitationId,
+        authenticated.subject.orgId,
+        nextRevision,
+        now,
+        idempotencyDigest,
+      ),
+    ]);
+  } catch {
+    const racedOperation = await invitationOperationByKey(
+      db,
+      authenticated.subject.orgId,
+      input.invitationId,
+      idempotencyDigest,
+    );
+    if (racedOperation !== null) {
+      assertMatchingOperationFingerprint(racedOperation, requestFingerprint);
+      return {
+        invitation: invitationFromRow(await scopedInvitation(db, authenticated, scope, input.invitationId), now),
+        token: null,
+        replayed: true,
+      };
+    }
+    throw new LocalAuthError(409, "INVALID_INPUT", "The invitation changed while delivery was starting");
+  }
+  if (results.some((result) => Number(result.meta?.changes ?? 0) !== 1)) {
+    const racedOperation = await invitationOperationByKey(
+      db,
+      authenticated.subject.orgId,
+      input.invitationId,
+      idempotencyDigest,
+    );
+    if (racedOperation !== null) {
+      assertMatchingOperationFingerprint(racedOperation, requestFingerprint);
+      return {
+        invitation: invitationFromRow(await scopedInvitation(db, authenticated, scope, input.invitationId), now),
+        token: null,
+        replayed: true,
+      };
+    }
+    throw new LocalAuthError(409, "INVALID_INPUT", "The invitation changed while delivery was starting");
+  }
+  const started = await scopedInvitation(db, authenticated, scope, input.invitationId);
+  return { invitation: invitationFromRow(started, now), token, replayed: false };
+}
+
+/** Persists only a bounded outcome classification; provider bodies and tokens are never stored. */
+export async function completeIdentityInvitationDelivery(
+  authenticated: AuthenticatedLocalSession,
+  scope: MembershipManagementScope,
+  invitationId: string,
+  idempotencyKey: string,
+  result: InvitationDeliveryResult,
+  now = Date.now(),
+): Promise<IdentityInvitationSummary> {
+  const db = await database();
+  const current = await scopedInvitation(db, authenticated, scope, invitationId);
+  const digest = await identityInvitationIdempotencyDigest(idempotencyKey);
+  const operation = await invitationOperationByKey(
+    db,
+    authenticated.subject.orgId,
+    invitationId,
+    digest,
+  );
+  if (operation === null) {
+    throw new LocalAuthError(409, "INVALID_INPUT", "The invitation delivery operation is unavailable");
+  }
+  if (operation.operation_status === "completed") {
+    if (!operationMatchesOutcome(operation, result)) {
+      throw new LocalAuthError(409, "INVALID_INPUT", "The invitation delivery operation already has a different outcome");
+    }
+    return invitationFromRow(current, now);
+  }
+  if (current.delivery_status !== "sending" || current.delivery_idempotency_digest !== digest) {
+    throw new LocalAuthError(409, "INVALID_INPUT", "A newer invitation delivery attempt is active");
+  }
+  const previous = await db.prepare(
+    `SELECT event_hash FROM identity_invitation_events
+      WHERE invitation_id = ? AND org_id = ?
+      ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+  ).bind(invitationId, authenticated.subject.orgId).first<{ event_hash: string }>();
+  if (previous === null) throw new LocalAuthError(404, "INVALID_INPUT", "The invitation is unavailable");
+  const eventId = opaqueId("invite_event");
+  const action = `delivery_${result.status}` as
+    "delivery_accepted" | "delivery_failed" | "delivery_unknown";
+  const metadataJson = canonicalJson({
+    deliveryIdempotencyDigest: digest,
+    status: result.status,
+    transport: result.transport,
+    provider: result.provider,
+    errorCode: result.errorCode,
+    httpStatus: result.httpStatus,
+  });
+  const eventHash = await invitationEventHash({
+    invitationId,
+    orgId: authenticated.subject.orgId,
+    actorId: authenticated.subject.userId,
+    action,
+    occurredAt: now,
+    metadataJson,
+    previousEventHash: previous.event_hash,
+  });
+  const nextRevision = current.delivery_revision + 1;
+  let results: readonly D1Result<unknown>[];
+  try {
+    results = await db.batch([
+      db.prepare(
+        `UPDATE identity_invitations
+            SET delivery_status = ?, delivery_transport = ?, delivery_provider = ?,
+                delivery_completed_at = ?, delivery_error_code = ?, delivery_http_status = ?,
+                delivery_revision = delivery_revision + 1
+          WHERE id = ? AND org_id = ? AND delivery_status = 'sending'
+            AND delivery_idempotency_digest = ? AND delivery_revision = ?`,
+      ).bind(
+        result.status,
+        result.transport,
+        result.provider,
+        now,
+        result.errorCode,
+        result.httpStatus,
+        invitationId,
+        authenticated.subject.orgId,
+        digest,
+        current.delivery_revision,
+      ),
+      db.prepare(
+        `UPDATE identity_invitation_operations
+            SET operation_status = 'completed', outcome_status = ?,
+                delivery_transport = ?, delivery_provider = ?, delivery_error_code = ?,
+                delivery_http_status = ?, completed_at = ?
+          WHERE id = ? AND org_id = ? AND invitation_id = ?
+            AND idempotency_digest = ? AND operation_status = 'claimed'`,
+      ).bind(
+        result.status,
+        result.transport,
+        result.provider,
+        result.errorCode,
+        result.httpStatus,
+        now,
+        operation.id,
+        authenticated.subject.orgId,
+        invitationId,
+        digest,
+      ),
+      db.prepare(
+        `INSERT INTO identity_invitation_events
+          (id, invitation_id, org_id, actor_id, action, occurred_at, metadata_json,
+           previous_event_hash, event_hash)
+         SELECT ?, i.id, i.org_id, ?, ?, ?, ?, ?, ?
+           FROM identity_invitations i
+           JOIN identity_invitation_operations operation
+             ON operation.id = ? AND operation.org_id = i.org_id
+            AND operation.invitation_id = i.id
+          WHERE i.id = ? AND i.org_id = ? AND i.delivery_status = ?
+            AND i.delivery_completed_at = ? AND i.delivery_idempotency_digest = ?
+            AND i.delivery_revision = ? AND operation.operation_status = 'completed'
+            AND operation.outcome_status = ?`,
+      ).bind(
+        eventId,
+        authenticated.subject.userId,
+        action,
+        now,
+        metadataJson,
+        previous.event_hash,
+        eventHash,
+        operation.id,
+        invitationId,
+        authenticated.subject.orgId,
+        result.status,
+        now,
+        digest,
+        nextRevision,
+        result.status,
+      ),
+    ]);
+  } catch {
+    const afterFailure = await invitationOperationByKey(
+      db,
+      authenticated.subject.orgId,
+      invitationId,
+      digest,
+    );
+    if (afterFailure !== null && operationMatchesOutcome(afterFailure, result)) {
+      return invitationFromRow(await scopedInvitation(db, authenticated, scope, invitationId), now);
+    }
+    throw new LocalAuthError(409, "INVALID_INPUT", "The invitation changed while delivery was completing");
+  }
+  if (results.some((updated) => Number(updated.meta?.changes ?? 0) !== 1)) {
+    const afterRace = await invitationOperationByKey(
+      db,
+      authenticated.subject.orgId,
+      invitationId,
+      digest,
+    );
+    if (afterRace !== null && operationMatchesOutcome(afterRace, result)) {
+      return invitationFromRow(await scopedInvitation(db, authenticated, scope, invitationId), now);
+    }
+    throw new LocalAuthError(409, "INVALID_INPUT", "The invitation changed while delivery was completing");
+  }
+  return invitationFromRow(await scopedInvitation(db, authenticated, scope, invitationId), now);
 }
 
 export async function revokeIdentityInvitation(
@@ -383,7 +1079,10 @@ export async function acceptIdentityInvitation(
   const tokenDigest = await digestSessionToken(token);
   const email = normalizedEmail(identity.email);
   const invitation = await db.prepare(
-    `SELECT i.id, i.org_id, i.role, i.scope_mode, i.customer_id, e.event_hash, e.metadata_json
+    `SELECT i.id, i.org_id, i.role, i.scope_mode, i.customer_id, e.event_hash,
+            (SELECT created.metadata_json FROM identity_invitation_events created
+              WHERE created.invitation_id = i.id AND created.action = 'created'
+              ORDER BY created.occurred_at ASC, created.id ASC LIMIT 1) AS metadata_json
        FROM identity_invitations i
        JOIN identity_invitation_events e ON e.invitation_id = i.id
       WHERE i.token_digest = ? AND i.email = ? AND i.accepted_at IS NULL
@@ -566,7 +1265,10 @@ export async function acceptPasswordInvitation(
   const db = await database();
   const tokenDigest = await digestSessionToken(token);
   const invitation = await db.prepare(
-    `SELECT i.id, i.org_id, i.email, i.role, i.scope_mode, i.customer_id, e.event_hash, e.metadata_json
+    `SELECT i.id, i.org_id, i.email, i.role, i.scope_mode, i.customer_id, e.event_hash,
+            (SELECT created.metadata_json FROM identity_invitation_events created
+              WHERE created.invitation_id = i.id AND created.action = 'created'
+              ORDER BY created.occurred_at ASC, created.id ASC LIMIT 1) AS metadata_json
        FROM identity_invitations i
        JOIN identity_invitation_events e ON e.invitation_id = i.id
       WHERE i.token_digest = ? AND i.accepted_at IS NULL

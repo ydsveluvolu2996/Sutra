@@ -29,6 +29,7 @@ const COLLECTOR_COMMANDS = {
   GetRoleCommand: { action: "iam:GetRole", scope: "customer" },
   GetRolePolicyCommand: { action: "iam:GetRolePolicy", scope: "customer" },
   ListRolePoliciesCommand: { action: "iam:ListRolePolicies", scope: "customer" },
+  ListAttachedRolePoliciesCommand: { action: "iam:ListAttachedRolePolicies", scope: "customer" },
   GetAccountSummaryCommand: { action: "iam:GetAccountSummary", scope: "customer" },
   GetAccountPasswordPolicyCommand: { action: "iam:GetAccountPasswordPolicy", scope: "customer" },
   DescribeRegionsCommand: { action: "ec2:DescribeRegions", scope: "customer" },

@@ -87,6 +87,16 @@ export const identityInvitations = sqliteTable("identity_invitations", {
   acceptedAt: integer("accepted_at", { mode: "timestamp_ms" }),
   acceptedUserId: text("accepted_user_id"),
   revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  deliveryStatus: text("delivery_status", { enum: ["not_attempted", "sending", "accepted", "failed", "unknown"] }).notNull().default("not_attempted"),
+  deliveryTransport: text("delivery_transport", { enum: ["none", "email-api"] }).notNull().default("none"),
+  deliveryProvider: text("delivery_provider", { enum: ["none", "resend", "sendgrid", "generic"] }).notNull().default("none"),
+  deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+  deliveryLastAttemptedAt: integer("delivery_last_attempted_at", { mode: "timestamp_ms" }),
+  deliveryCompletedAt: integer("delivery_completed_at", { mode: "timestamp_ms" }),
+  deliveryErrorCode: text("delivery_error_code"),
+  deliveryHttpStatus: integer("delivery_http_status"),
+  deliveryIdempotencyDigest: text("delivery_idempotency_digest"),
+  deliveryRevision: integer("delivery_revision").notNull().default(0),
   createdAt: timestamp("created_at"),
 }, (table) => [
   uniqueIndex("identity_invitations_token_uq").on(table.tokenDigest),
@@ -94,6 +104,41 @@ export const identityInvitations = sqliteTable("identity_invitations", {
     .on(table.orgId, table.email)
     .where(sql`${table.acceptedAt} IS NULL AND ${table.revokedAt} IS NULL`),
   index("identity_invitations_org_expiry_idx").on(table.orgId, table.expiresAt, table.revokedAt),
+  index("identity_invitations_org_delivery_idx").on(table.orgId, table.deliveryStatus, table.deliveryLastAttemptedAt),
+]);
+
+/**
+ * Durable idempotency ledger for invitation lifecycle mutations. Creation may
+ * claim an operation before an invitation exists, so `invitationId` is nullable
+ * and `idempotencyScopeId` supplies the stable pre-create scope (normally the
+ * actor id). Resend and initial-delivery rows set both fields to the invitation
+ * id. Plaintext idempotency keys, invitation tokens and activation URLs never
+ * enter this table.
+ */
+export const identityInvitationOperations = sqliteTable("identity_invitation_operations", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  operationKind: text("operation_kind", { enum: ["creation", "initial_delivery", "resend"] }).notNull(),
+  idempotencyScopeId: text("idempotency_scope_id").notNull(),
+  invitationId: text("invitation_id").references(() => identityInvitations.id),
+  idempotencyDigest: text("idempotency_digest").notNull(),
+  requestFingerprint: text("request_fingerprint").notNull(),
+  operationStatus: text("operation_status", { enum: ["claimed", "completed"] }).notNull().default("claimed"),
+  outcomeStatus: text("outcome_status", { enum: ["accepted", "failed", "unknown"] }),
+  deliveryTransport: text("delivery_transport", { enum: ["none", "email-api"] }).notNull().default("none"),
+  deliveryProvider: text("delivery_provider", { enum: ["none", "resend", "sendgrid", "generic"] }).notNull().default("none"),
+  deliveryErrorCode: text("delivery_error_code"),
+  deliveryHttpStatus: integer("delivery_http_status"),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("identity_invitation_operations_scope_key_uq")
+    .on(table.orgId, table.operationKind, table.idempotencyScopeId, table.idempotencyDigest),
+  uniqueIndex("identity_invitation_operations_invitation_key_uq")
+    .on(table.orgId, table.invitationId, table.idempotencyDigest)
+    .where(sql`${table.invitationId} IS NOT NULL`),
+  index("identity_invitation_operations_invitation_time_idx")
+    .on(table.orgId, table.invitationId, table.createdAt, table.id),
 ]);
 
 export const identityInvitationEvents = sqliteTable("identity_invitation_events", {
@@ -101,13 +146,19 @@ export const identityInvitationEvents = sqliteTable("identity_invitation_events"
   invitationId: text("invitation_id").notNull().references(() => identityInvitations.id),
   orgId: text("org_id").notNull().references(() => organizations.id),
   actorId: text("actor_id").notNull(),
-  action: text("action", { enum: ["created", "accepted", "revoked"] }).notNull(),
+  action: text("action", { enum: [
+    "created", "accepted", "revoked", "resent", "delivery_started",
+    "delivery_accepted", "delivery_failed", "delivery_unknown",
+  ] }).notNull(),
   occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
   metadataJson: text("metadata_json").notNull().default("{}"),
   previousEventHash: text("previous_event_hash"),
   eventHash: text("event_hash").notNull(),
 }, (table) => [
   uniqueIndex("identity_invitation_events_hash_uq").on(table.invitationId, table.eventHash),
+  uniqueIndex("identity_invitation_events_previous_hash_uq")
+    .on(table.invitationId, table.previousEventHash)
+    .where(sql`${table.previousEventHash} IS NOT NULL`),
   index("identity_invitation_events_org_time_idx").on(table.orgId, table.occurredAt, table.id),
 ]);
 
@@ -149,6 +200,10 @@ export const awsConnections = sqliteTable("aws_connections", {
   externalIdCiphertext: text("external_id_ciphertext").notNull(),
   externalIdKeyVersion: text("external_id_key_version").notNull(),
   permissionPackVersion: text("permission_pack_version").notNull(),
+  roleProvisioningMode: text("role_provisioning_mode", { enum: ["sutra_template", "customer_managed"] }).notNull().default("sutra_template"),
+  expectedRolePath: text("expected_role_path").notNull().default("/sutra/"),
+  expectedRoleName: text("expected_role_name").notNull().default("SutraReadOnlyRole"),
+  permissionCapabilitiesJson: text("permission_capabilities_json"),
   status: text("status", { enum: ["pending", "validating", "active", "needs_attention", "disabled"] }).notNull().default("pending"),
   enabledRegionsJson: text("enabled_regions_json").notNull().default("[]"),
   lastValidatedAt: integer("last_validated_at", { mode: "timestamp_ms" }),

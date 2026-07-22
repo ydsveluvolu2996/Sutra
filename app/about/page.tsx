@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
 /* ================================================================== *
@@ -12,11 +13,12 @@ import LegalShell from "../components/legal-shell";
  * behaves today. No fabricated team, history, customers or metrics.
  * ================================================================== */
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/about",
   title: "About us",
   description:
     "Sutra is the evidence-honest cloud operations and security platform for AWS MSPs — read-only, reachability-backed, and citing the observation behind every finding.",
-};
+});
 
 const PRINCIPLES: Array<{ n: string; h: string; p: string }> = [
   {

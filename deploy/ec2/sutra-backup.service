@@ -1,0 +1,26 @@
+[Unit]
+Description=Sutra encrypted PostgreSQL and runtime backup
+Documentation=https://github.com/ydsveluvolu2996/Sutra
+Requires=docker.service
+After=docker.service network-online.target sutra.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=SUTRA_BACKUP_CONFIG=/etc/sutra/backup.conf
+ExecStart=/opt/sutra/deploy/ec2/backup-prod.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/backups/sutra /opt/sutra/.sutra /run /var/run
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

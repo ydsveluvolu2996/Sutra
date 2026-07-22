@@ -1,0 +1,481 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Cost-bounded single-node Sutra host: Ubuntu 24.04 x86_64, Docker, PostgreSQL,
+  Cloudflare Tunnel egress, SSM-only administration and no inbound
+  security-group rules. Intended for ap-south-1 private-beta use.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Network }
+        Parameters: [VpcId, PublicSubnetId]
+      - Label: { default: Compute and cost guardrails }
+        Parameters: [AmiId, InstanceType, RootVolumeGiB, EnableMaximumRuntimeStop, MaximumRuntimeHours, EnableDailyAutoStop, DailyStopSchedule, DailyStopTimezone]
+      - Label: { default: Sutra deployment }
+        Parameters: [SutraAppImage, SutraDomain]
+      - Label: { default: Cloudflare Tunnel }
+        Parameters: [CloudflareTunnelCredentialsParameterName]
+    ParameterLabels:
+      CloudflareTunnelCredentialsParameterName:
+        default: Existing SecureString parameter containing named-tunnel credentials JSON
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC containing an internet-routed public subnet.
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: >-
+      Public subnet with a route to an Internet Gateway. The instance receives an
+      ephemeral public IPv4 solely for outbound access; no inbound rule is opened.
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Default: ami-07e5ce642bbc48c0d
+    Description: >-
+      Explicit Ubuntu 24.04 amd64 AMI approved for ap-south-1. CloudFormation
+      never follows a moving SSM alias; change this parameter only during a
+      deliberate replacement maintenance window.
+  InstanceType:
+    Type: String
+    Default: t3a.large
+    AllowedValues: [t3a.large, t3a.xlarge]
+    Description: x86_64 instance type. t3a.large is the private-beta default.
+  RootVolumeGiB:
+    Type: Number
+    Default: 15
+    MinValue: 15
+    MaxValue: 500
+    Description: Encrypted gp3 root volume size.
+  MaximumRuntimeHours:
+    Type: Number
+    Default: 6
+    MinValue: 1
+    MaxValue: 24
+    Description: >-
+      When EnableMaximumRuntimeStop is true, the safety timer stops the instance
+      this many hours after boot. It is ignored in manual-control mode.
+  EnableMaximumRuntimeStop:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Opt-in host-local maximum-runtime stop timer. Disabled for manual control.
+  EnableDailyAutoStop:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Enables a second EventBridge Scheduler stop guardrail.
+  DailyStopSchedule:
+    Type: String
+    Default: cron(30 23 * * ? *)
+    AllowedPattern: "^cron\\(.+\\)$"
+    Description: EventBridge Scheduler cron expression (default 23:30 local time).
+  DailyStopTimezone:
+    Type: String
+    Default: Asia/Kolkata
+    AllowedPattern: "^[A-Za-z_]+/[A-Za-z_]+$"
+  SutraAppImage:
+    Type: String
+    AllowedPattern: "^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/sutra/app@sha256:[a-f0-9]{64}$"
+    Description: >-
+      Required immutable ECR image digest. Tags are rejected so a deployment
+      cannot silently change while the EC2 host is stopped.
+  SutraDomain:
+    Type: String
+    Default: sutracmdb.com
+    AllowedPattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$"
+  CloudflareTunnelCredentialsParameterName:
+    Type: String
+    Default: /sutra/production/cloudflare-tunnel-credentials
+    AllowedPattern: "^/[A-Za-z0-9_.@/+,:=-]{1,900}$"
+    Description: >-
+      Existing SSM SecureString parameter containing Cloudflare named-tunnel
+      credentials JSON. Compose owns the only cloudflared connector.
+Conditions:
+  CreateDailyStop:
+    Fn::Equals:
+      - Ref: EnableDailyAutoStop
+      - "true"
+
+Resources:
+  # This is an egress-only host with no inbound rules. Its six explicit,
+  # port-bounded destinations must reach dynamic AWS, Cloudflare, DNS and
+  # signed package endpoints; fixed destination CIDRs are not available. The
+  # path-scoped risk acceptance is documented in .trivyignore.yaml.
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sutra egress-only host; Cloudflare Tunnel provides ingress
+      VpcId: { Ref: VpcId }
+      SecurityGroupEgress:
+        - Description: HTTPS container-registry, package and AWS API access
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: Ubuntu package mirrors that redirect from HTTP
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: Cloudflare Tunnel QUIC
+          IpProtocol: udp
+          FromPort: 7844
+          ToPort: 7844
+          CidrIp: 0.0.0.0/0
+        - Description: Cloudflare Tunnel HTTP2 fallback
+          IpProtocol: tcp
+          FromPort: 7844
+          ToPort: 7844
+          CidrIp: 0.0.0.0/0
+        - Description: DNS over UDP
+          IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+        - Description: DNS over TCP fallback
+          IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - { Key: Name, Value: sutra-single-node-egress-only }
+        - { Key: "sutra:component", Value: host }
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DeterministicSsmManagedNodeCore
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # SSM, ssmmessages and legacy ec2messages control/data channels
+              # do not support useful resource scoping for a managed node.
+              - Sid: SsmAgentControlPlane
+                Effect: Allow
+                Action:
+                  - ssm:DescribeAssociation
+                  - ssm:DescribeDocument
+                  - ssm:GetDeployablePatchSnapshotForInstance
+                  - ssm:GetDocument
+                  - ssm:GetManifest
+                  - ssm:ListAssociations
+                  - ssm:ListInstanceAssociations
+                  - ssm:PutComplianceItems
+                  - ssm:PutConfigurePackageResult
+                  - ssm:PutInventory
+                  - ssm:UpdateAssociationStatus
+                  - ssm:UpdateInstanceAssociationStatus
+                  - ssm:UpdateInstanceInformation
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:DeleteMessage
+                  - ec2messages:FailMessage
+                  - ec2messages:GetEndpoint
+                  - ec2messages:GetMessages
+                  - ec2messages:SendReply
+                Resource: "*"
+        - PolicyName: PullOnlyImmutableSutraImage
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: EcrAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PullOnlySutraAppRepository
+                Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/app
+        - PolicyName: AssumeOnlyDedicatedSutraCustomerRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenyAssumeRoleOutsideSutraRoleNamespace
+                Effect: Deny
+                Action: sts:AssumeRole
+                NotResource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
+              - Sid: AssumeDedicatedSutraCustomerRolesOnly
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
+        - PolicyName: ReadOnlyExactCloudflareTunnelCredential
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ["ssm:GetParameter", "ssm:GetParameters"]
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CloudflareTunnelCredentialsParameterName}
+      Tags:
+        - { Key: "sutra:component", Value: host }
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [{ Ref: InstanceRole }]
+
+  # Trivy 0.72 misclassifies this CloudFormation resource even though
+  # MetadataOptions.HttpTokens below is `required`; deployment verification
+  # also asserts the applied EC2 metadata posture through the AWS API.
+  # trivy:ignore:AWS-0028
+  SutraInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: { Ref: AmiId }
+      InstanceType: { Ref: InstanceType }
+      IamInstanceProfile: { Ref: InstanceProfile }
+      InstanceInitiatedShutdownBehavior: stop
+      Monitoring: false
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          AssociatePublicIpAddress: true
+          DeleteOnTermination: true
+          SubnetId: { Ref: PublicSubnetId }
+          GroupSet: [{ Ref: InstanceSecurityGroup }]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            # Preserve the database/runtime disk after an accidental stack delete.
+            DeleteOnTermination: false
+            Encrypted: true
+            VolumeSize: { Ref: RootVolumeGiB }
+            VolumeType: gp3
+            Iops: 3000
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        # The application collector runs on a Docker bridge and needs one
+        # additional hop to retrieve short-lived instance-role credentials.
+        HttpPutResponseHopLimit: 2
+        InstanceMetadataTags: enabled
+      CreditSpecification: { CPUCredits: standard }
+      Tags:
+        - { Key: Name, Value: sutra-private-beta }
+        - { Key: "sutra:component", Value: host }
+      UserData:
+        Fn::Base64:
+          Fn::Sub:
+            - |
+              #!/usr/bin/env bash
+              set -Eeuo pipefail
+              exec > >(tee -a /var/log/sutra-bootstrap.log | logger -t sutra-bootstrap -s 2>/dev/console) 2>&1
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update
+              apt-get install -y ca-certificates curl jq openssl unzip
+
+              # Ubuntu 24.04 no longer publishes awscli from the enabled apt
+              # repositories. Install an exact, checksummed AWS CLI v2 bundle
+              # so bootstrap cannot silently drift to an unreviewed release.
+              AWS_CLI_VERSION='2.35.24'
+              AWS_CLI_SHA256='d71b4388a3f9e2c56819de40936b018674b04352766eef615b444c4c38b043d7'
+              curl -fsSL --retry 3 \
+                "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$AWS_CLI_VERSION.zip" \
+                -o /tmp/awscliv2.zip
+              printf '%s  %s\n' "$AWS_CLI_SHA256" /tmp/awscliv2.zip | sha256sum --check --strict
+              unzip -q /tmp/awscliv2.zip -d /tmp/awscliv2
+              /tmp/awscliv2/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
+              rm -rf /tmp/awscliv2 /tmp/awscliv2.zip
+              aws --version
+
+              systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || \
+                systemctl enable --now amazon-ssm-agent.service
+
+              # Source is private and never cloned onto the host. The approved,
+              # immutable app image is also the signed release bundle. Extract
+              # only the host deployment assets needed by this single node.
+              curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+              sh /tmp/get-docker.sh
+              rm -f /tmp/get-docker.sh
+              systemctl enable --now docker.service
+
+              APP_IMAGE='${AppImage}'
+              ECR_REGISTRY='${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com'
+              case "$APP_IMAGE" in
+                "$ECR_REGISTRY/sutra/app@sha256:"*) ;;
+                *) echo "Refusing a release outside the account-local sutra/app repository" >&2; exit 1 ;;
+              esac
+              aws ecr get-login-password --region '${AWS::Region}' | \
+                docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
+              docker pull "$APP_IMAGE"
+
+              RELEASE_STAGE="$(mktemp -d /opt/sutra-release-seed.XXXXXX)"
+              RELEASE_CONTAINER="$(docker create "$APP_IMAGE")"
+              cleanup_release_seed() {
+                docker rm -f "$RELEASE_CONTAINER" >/dev/null 2>&1 || true
+                rm -rf "$RELEASE_STAGE"
+              }
+              trap cleanup_release_seed EXIT
+              install -d -m 0755 "$RELEASE_STAGE/deploy/ec2" "$RELEASE_STAGE/docker"
+              docker cp "$RELEASE_CONTAINER:/app/deploy/ec2/." "$RELEASE_STAGE/deploy/ec2/"
+              docker cp "$RELEASE_CONTAINER:/app/docker/postgres-init.sh" "$RELEASE_STAGE/docker/postgres-init.sh"
+              test -f "$RELEASE_STAGE/deploy/ec2/compose.prod.yaml"
+              test -f "$RELEASE_STAGE/deploy/ec2/bootstrap.sh"
+              test -f "$RELEASE_STAGE/deploy/ec2/release-update.sh"
+              test -f "$RELEASE_STAGE/docker/postgres-init.sh"
+
+              install -d -m 0755 /opt/sutra/deploy /opt/sutra/docker
+              cp -a "$RELEASE_STAGE/deploy/ec2" /opt/sutra/deploy/ec2
+              install -m 0755 "$RELEASE_STAGE/docker/postgres-init.sh" /opt/sutra/docker/postgres-init.sh
+              cleanup_release_seed
+              trap - EXIT
+
+              cat > /etc/sutra-release.conf <<'RELEASE_CONFIG'
+              SUTRA_ECR_REGISTRY=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+              SUTRA_ECR_REPOSITORY=sutra/app
+              SUTRA_AWS_REGION=${AWS::Region}
+              RELEASE_CONFIG
+              chmod 0644 /etc/sutra-release.conf
+
+              cd /opt/sutra
+              cp -n deploy/ec2/.env.ec2.example deploy/ec2/.env.ec2
+              sed -i "s|^SUTRA_DOMAIN=.*|SUTRA_DOMAIN=${Domain}|" deploy/ec2/.env.ec2
+              if grep -q '^SUTRA_APP_IMAGE=' deploy/ec2/.env.ec2; then
+                sed -i "s|^SUTRA_APP_IMAGE=.*|SUTRA_APP_IMAGE=${AppImage}|" deploy/ec2/.env.ec2
+              else
+                printf 'SUTRA_APP_IMAGE=%s\n' '${AppImage}' >> deploy/ec2/.env.ec2
+              fi
+              if grep -q '^SUTRA_COLLECTOR_PRINCIPAL_ARN=' deploy/ec2/.env.ec2; then
+                sed -i "s|^SUTRA_COLLECTOR_PRINCIPAL_ARN=.*|SUTRA_COLLECTOR_PRINCIPAL_ARN=${CollectorPrincipal}|" deploy/ec2/.env.ec2
+              else
+                printf 'SUTRA_COLLECTOR_PRINCIPAL_ARN=%s\n' '${CollectorPrincipal}' >> deploy/ec2/.env.ec2
+              fi
+              chmod 0600 deploy/ec2/.env.ec2
+
+              # Compose owns the sole cloudflared connector. Materialize the
+              # named-tunnel credential before bootstrap's fail-closed checks.
+              TUNNEL_PARAMETER='${TunnelCredentialsParameter}'
+              if [ -n "$TUNNEL_PARAMETER" ]; then
+                install -d -m 0700 .sutra/cloudflared
+                aws ssm get-parameter --name "$TUNNEL_PARAMETER" --with-decryption \
+                  --query Parameter.Value --output text --region '${AWS::Region}' \
+                  > .sutra/cloudflared/credentials.json
+                jq -e 'type == "object" and (.AccountTag | type == "string") and (.TunnelSecret | type == "string") and (.TunnelID | type == "string")' \
+                  .sutra/cloudflared/credentials.json >/dev/null
+                install -m 0400 deploy/ec2/cloudflared-config.yml.example .sutra/cloudflared/config.yml
+                CONFIGURED_TUNNEL="$(awk '$1 == "tunnel:" {print $2; exit}' .sutra/cloudflared/config.yml)"
+                CREDENTIAL_TUNNEL="$(jq -r '.TunnelID' .sutra/cloudflared/credentials.json)"
+                [ -n "$CONFIGURED_TUNNEL" ] && [ "$CONFIGURED_TUNNEL" = "$CREDENTIAL_TUNNEL" ]
+                chown 65532:65532 .sutra/cloudflared/config.yml .sutra/cloudflared/credentials.json
+                chmod 0400 .sutra/cloudflared/config.yml .sutra/cloudflared/credentials.json
+              fi
+              bash deploy/ec2/bootstrap.sh
+
+              install -m 0644 deploy/ec2/sutra.service /etc/systemd/system/sutra.service
+              install -m 0755 deploy/ec2/release-update.sh /usr/local/sbin/sutra-release-update
+              if [ '${EnableMaxRuntime}' = true ]; then
+                cat > /etc/systemd/system/sutra-max-runtime.service <<'UNIT'
+              [Unit]
+              Description=Stop this cost-bounded Sutra EC2 host
+              [Service]
+              Type=oneshot
+              ExecStart=/usr/sbin/shutdown -h now
+              UNIT
+                cat > /etc/systemd/system/sutra-max-runtime.timer <<'UNIT'
+              [Unit]
+              Description=Maximum Sutra runtime guardrail
+              [Timer]
+              OnBootSec=${MaxRuntime}h
+              AccuracySec=1m
+              Unit=sutra-max-runtime.service
+              [Install]
+              WantedBy=timers.target
+              UNIT
+                systemctl daemon-reload
+                systemctl enable --now sutra-max-runtime.timer
+              else
+                systemctl disable --now sutra-max-runtime.timer >/dev/null 2>&1 || true
+                rm -f /etc/systemd/system/sutra-max-runtime.timer /etc/systemd/system/sutra-max-runtime.service
+                systemctl daemon-reload
+              fi
+
+              systemctl enable --now sutra.service
+            - AppImage: { Ref: SutraAppImage }
+              CollectorPrincipal:
+                Fn::GetAtt: [InstanceRole, Arn]
+              Domain: { Ref: SutraDomain }
+              EnableMaxRuntime: { Ref: EnableMaximumRuntimeStop }
+              MaxRuntime: { Ref: MaximumRuntimeHours }
+              TunnelCredentialsParameter: { Ref: CloudflareTunnelCredentialsParameterName }
+
+  DailyStopRole:
+    Type: AWS::IAM::Role
+    Condition: CreateDailyStop
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StopOnlyThisSutraInstance
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:StopInstances
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${SutraInstance}
+
+  DailyStopScheduleResource:
+    Type: AWS::Scheduler::Schedule
+    Condition: CreateDailyStop
+    Properties:
+      Description: Cost guardrail that stops the Sutra private-beta host every day
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: { Ref: DailyStopSchedule }
+      ScheduleExpressionTimezone: { Ref: DailyStopTimezone }
+      State: ENABLED
+      Target:
+        Arn:
+          Fn::Sub: arn:${AWS::Partition}:scheduler:::aws-sdk:ec2:stopInstances
+        RoleArn:
+          Fn::GetAtt: [DailyStopRole, Arn]
+        Input:
+          Fn::Sub: '{"InstanceIds":["${SutraInstance}"]}'
+
+Outputs:
+  InstanceId:
+    Description: Use with AWS Systems Manager Session Manager; there is no SSH rule.
+    Value: { Ref: SutraInstance }
+  EphemeralPublicIp:
+    Description: Informational only. Cloudflare Tunnel does not depend on this address.
+    Value:
+      Fn::GetAtt: [SutraInstance, PublicIp]
+  InitialAppImage:
+    Description: >-
+      Immutable bootstrap image. Later SSM release updates intentionally do not
+      mutate this historical CloudFormation parameter.
+    Value: { Ref: SutraAppImage }
+  CollectorPrincipalArn:
+    Description: >-
+      Exact principal customers allow to assume their dedicated role under the
+      reserved /sutra/ IAM path.
+    Value:
+      Fn::GetAtt: [InstanceRole, Arn]
+  Administration:
+    Value:
+      Fn::Sub: aws ssm start-session --target ${SutraInstance} --region ${AWS::Region}
+  ImmutableReleaseUpdate:
+    Description: >-
+      Run this from an authorized operator shell after replacing FULL_IMAGE_URI
+      with the complete account-local sutra/app@sha256 digest URI. No SSH or
+      GitHub token is used.
+    Value:
+      Fn::Sub: >-
+        aws ssm send-command --instance-ids ${SutraInstance}
+        --region ${AWS::Region} --document-name AWS-RunShellScript
+        --parameters 'commands=["sudo /usr/local/sbin/sutra-release-update FULL_IMAGE_URI"]'

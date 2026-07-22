@@ -18,9 +18,9 @@ function tokenFromLocation(): string {
 }
 
 export default function AcceptInvitePage() {
-  const [phase, setPhase] = useState<Phase>("checking");
-  const [preview, setPreview] = useState<Preview | null>(null);
   const [token] = useState(tokenFromLocation);
+  const [phase, setPhase] = useState<Phase>(() => (token ? "checking" : "invalid"));
+  const [preview, setPreview] = useState<Preview | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -29,10 +29,7 @@ export default function AcceptInvitePage() {
 
   useEffect(() => {
     let active = true;
-    if (!token) {
-      setPhase("invalid");
-      return;
-    }
+    if (!token) return;
     void fetch(`/api/auth/invitations/accept?token=${encodeURIComponent(token)}`, {
       cache: "no-store",
       credentials: "same-origin",

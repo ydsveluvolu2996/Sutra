@@ -1,6 +1,7 @@
 import { parseAwsAccountId, parseAwsPartition, parseIamRoleArn } from "./aws-pilot-security.ts";
 import type {
   AwsPartition,
+  AwsPermissionCapabilityAssessment,
   CollectorHealth,
   CoverageStatus,
   FindingSeverity,
@@ -12,6 +13,7 @@ import type {
   PilotSnapshotPayload,
 } from "./pilot-types.ts";
 import { canonicalJson } from "./canonical-json.ts";
+import { isExactDeclaredAwsCapabilityPartition } from "./aws-permission-capabilities.ts";
 
 const HASH = /^[a-f0-9]{64}$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@/#+=-]*$/u;
@@ -352,21 +354,30 @@ export function parseRegisteredResponse(value: unknown): { readonly registered: 
 
 export function parseVerificationResponse(
   value: unknown,
-  expected: { readonly accountId: string; readonly partition: AwsPartition },
+  expected: {
+    readonly accountId: string;
+    readonly partition: AwsPartition;
+    readonly roleArn: string;
+    readonly sessionNamePrefix: string;
+  },
 ): {
   readonly verified: true;
   readonly accountId: string;
+  readonly roleArn: string;
+  readonly roleSessionName: string;
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07";
+  readonly permissionPackVersion: "standard-2026-07.2";
+  readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 } {
   const record = exactRecord(value, [
-    "verified", "accountId", "callerIdentityArn", "missingExternalIdDenied", "wrongExternalIdDenied",
+    "verified", "accountId", "roleArn", "roleSessionName", "callerIdentityArn", "missingExternalIdDenied", "wrongExternalIdDenied",
     "trustPolicyAttested", "permissionPolicyAttested", "sessionPolicyApplied", "permissionPackVersion",
+    "capabilityAssessment",
   ]);
   if (
     record.verified !== true ||
@@ -375,21 +386,56 @@ export function parseVerificationResponse(
     record.trustPolicyAttested !== true ||
     record.permissionPolicyAttested !== true ||
     record.sessionPolicyApplied !== true ||
-    record.permissionPackVersion !== "standard-2026-07"
+    record.permissionPackVersion !== "standard-2026-07.2"
   ) invalid();
   const accountId = awsAccountId(record.accountId);
+  const roleArn = string(record.roleArn, 2_048);
+  const roleSessionName = string(record.roleSessionName, 64);
   const arn = string(record.callerIdentityArn, 2_048);
-  const match = /^arn:(aws|aws-us-gov|aws-cn):sts::(\d{12}):assumed-role\/.+$/u.exec(arn);
-  if (!match || accountId !== expected.accountId || match[1] !== expected.partition || match[2] !== expected.accountId) invalid();
+  let expectedRole;
+  try {
+    expectedRole = parseIamRoleArn(expected.roleArn, expected);
+  } catch {
+    return invalid();
+  }
+  const match = /^arn:(aws|aws-us-gov|aws-cn):sts::(\d{12}):assumed-role\/([A-Za-z0-9_+=,.@-]{1,64})\/([A-Za-z0-9_+=,.@-]{2,64})$/u.exec(arn);
+  if (
+    !match ||
+    accountId !== expected.accountId ||
+    roleArn !== expectedRole.arn ||
+    !/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(expected.sessionNamePrefix) ||
+    !/^[A-Za-z0-9_+=,.@-]{2,64}$/u.test(roleSessionName) ||
+    !roleSessionName.startsWith(expected.sessionNamePrefix) ||
+    match[1] !== expected.partition ||
+    match[2] !== expected.accountId ||
+    match[3] !== expectedRole.roleName ||
+    match[4] !== roleSessionName
+  ) invalid();
+  const capabilityRecord = exactRecord(record.capabilityAssessment, ["grantedActions", "missingActions"]);
+  const capabilityList = (value: unknown): readonly string[] => {
+    if (
+      !Array.isArray(value) ||
+      value.length > 256 ||
+      !value.every((action) => typeof action === "string" && /^[a-z0-9-]+:[A-Za-z0-9*]+$/u.test(action)) ||
+      new Set(value).size !== value.length
+    ) invalid();
+    return value as string[];
+  };
+  const grantedActions = capabilityList(capabilityRecord.grantedActions);
+  const missingActions = capabilityList(capabilityRecord.missingActions);
+  if (!isExactDeclaredAwsCapabilityPartition(grantedActions, missingActions)) invalid();
   return {
     verified: true,
     accountId,
+    roleArn,
+    roleSessionName,
     callerIdentityArn: arn,
     missingExternalIdDenied: true,
     wrongExternalIdDenied: true,
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "standard-2026-07",
+    permissionPackVersion: "standard-2026-07.2",
+    capabilityAssessment: { grantedActions, missingActions },
   };
 }

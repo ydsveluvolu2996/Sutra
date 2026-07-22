@@ -1,6 +1,7 @@
 .git
 .dev.vars
 .env*
+!deploy/ec2/.env.ec2.example
 .sutra
 .wrangler
 .vinext

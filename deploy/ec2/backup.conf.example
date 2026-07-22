@@ -1,0 +1,24 @@
+# Sutra production backup configuration.
+#
+# Install as /etc/sutra/backup.conf, owned by root and mode 0600. This file is
+# read by backup-prod.sh and restore-prod.sh. The age recipient is a PUBLIC key;
+# keep the matching private identity offline and outside the EC2 instance.
+
+SUTRA_BACKUP_ROOT=/var/backups/sutra
+SUTRA_BACKUP_AGE_RECIPIENT=age1replace_with_the_public_recipient_generated_off_host
+
+# A trailing path is recommended so lifecycle rules and IAM can be scoped.
+SUTRA_BACKUP_S3_URI=s3://replace-with-stack-output-bucket/ec2-backups
+SUTRA_BACKUP_REQUIRE_OFFSITE=true
+
+# Local cleanup never removes the newest SUTRA_BACKUP_MIN_LOCAL_COPIES, even if
+# they are older than the retention period. S3 retention belongs to the bucket
+# lifecycle policy; this script never deletes remote objects.
+SUTRA_BACKUP_LOCAL_RETENTION_DAYS=14
+SUTRA_BACKUP_MIN_LOCAL_COPIES=3
+SUTRA_BACKUP_MIN_FREE_MIB=2048
+
+# Repository and Compose identity. Change only if Sutra is installed elsewhere.
+SUTRA_REPO_ROOT=/opt/sutra
+SUTRA_COMPOSE_PROJECT=sutra-prod
+SUTRA_BACKUP_HELPER_IMAGE=postgres:18.4-alpine@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15

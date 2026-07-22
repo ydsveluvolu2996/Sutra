@@ -35,14 +35,13 @@ const SOURCE_STACK_TAG_KEYS = Object.freeze({
 });
 const EXPECTED_STACK_PARAMETERS = Object.freeze({
   CollectorRoleName: "SutraLocalCollectorRole",
-  CustomerRoleName: "SutraReadOnlyRole",
 });
 const COLLECTOR_ROLE_NAME = "SutraLocalCollectorRole";
 const COLLECTOR_ROLE_PATH = "/sutra/";
 const COLLECTOR_ROLE_DESCRIPTION =
   "Short-lived source role used only by the local Sutra sandbox collector.";
 const COLLECTOR_ROLE_MAX_SESSION_SECONDS = 3_600;
-const COLLECTOR_INLINE_POLICY_NAME = "AssumeFixedSutraCustomerRole";
+const COLLECTOR_INLINE_POLICY_NAME = "AssumeDedicatedSutraCustomerRoles";
 const EXPECTED_COLLECTOR_ROLE_TAGS = Object.freeze({
   "sutra:access-mode": "assume-role-only",
   "sutra:environment": "disposable-sandbox",
@@ -60,16 +59,16 @@ const EXPECTED_COLLECTOR_BOUNDARY_DOCUMENT = Object.freeze({
       Resource: "*",
     }),
     Object.freeze({
-      Sid: "DenyAssumeRoleOutsideFixedCustomerRole",
+      Sid: "DenyAssumeRoleOutsideSutraRoleNamespace",
       Effect: "Deny",
       Action: "sts:AssumeRole",
-      NotResource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      NotResource: "arn:aws:iam::*:role/sutra/*",
     }),
     Object.freeze({
-      Sid: "AssumeFixedSutraCustomerRoleOnly",
+      Sid: "AssumeDedicatedSutraCustomerRolesOnly",
       Effect: "Allow",
       Action: "sts:AssumeRole",
-      Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      Resource: "arn:aws:iam::*:role/sutra/*",
     }),
   ]),
 });
@@ -318,12 +317,20 @@ export function attestCollectorRoleInlinePolicyNames(value) {
 export function attestCollectorRoleInlinePolicy(value, expectedAccountId) {
   const expectedDocument = {
     Version: "2012-10-17",
-    Statement: [{
-      Sid: "AssumeCustomerMetadataRoleOnly",
-      Effect: "Allow",
-      Action: "sts:AssumeRole",
-      Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
-    }],
+    Statement: [
+      {
+        Sid: "DenyAssumeRoleOutsideSutraRoleNamespace",
+        Effect: "Deny",
+        Action: "sts:AssumeRole",
+        NotResource: "arn:aws:iam::*:role/sutra/*",
+      },
+      {
+        Sid: "AssumeDedicatedSutraCustomerRolesOnly",
+        Effect: "Allow",
+        Action: "sts:AssumeRole",
+        Resource: "arn:aws:iam::*:role/sutra/*",
+      },
+    ],
   };
   if (
     !ACCOUNT_ID.test(expectedAccountId) ||

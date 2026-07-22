@@ -128,11 +128,11 @@ AWS recommends a unique, third-party-controlled ExternalId per customer account 
 
 1. Create the integration in `pending` state and generate at least 128 bits of cryptographically random ExternalId entropy. Do not derive it from org/customer IDs, email, account name, or a sequential value.
 2. Render a trust-policy/CloudFormation template that names the exact vendor AWS principal and requires `StringEquals` on `sts:ExternalId`. Provide the minimum read-only permissions for only the collectors enabled in the plan.
-3. Accept only a canonical IAM role ARN in a supported AWS partition. Reject STS assumed-role ARNs, users, wildcard components, control characters, and unsupported partitions.
+3. Accept only a canonical IAM role ARN in a supported AWS partition whose selected role path is below the dedicated `/sutra/` namespace. Reject STS assumed-role ARNs, users, administrator/shared-role names or contracts, wildcard components, control characters, lookalike paths, and unsupported partitions.
 4. From the AWS broker, call `AssumeRole` with fixed duration, a vendor-controlled restrictive read-only session policy for the enabled collectors, and a sanitized session name/source identity containing only internal, non-secret trace identifiers. The session policy is an additional permissions ceiling and is never supplied by the browser or job payload.
 5. Call `GetCallerIdentity` with the temporary credentials and require its 12-digit account ID to match the account encoded by the role ARN and the integration record.
 6. Negative-probe the role with the same session name and session policy while omitting ExternalId and changing exactly one character of the platform-shaped value. Both calls must fail. These are complementary behavioral samples, not proof of every possible wrong value.
-7. Require `iam:GetRole`, `iam:ListRolePolicies`, and `iam:GetRolePolicy` on the reviewed role itself. Attest the exact principal, `StringEquals` ExternalId, session-name condition, fixed role path/name, permission-pack tag, and inline policy before activation.
+7. Require `iam:GetRole`, `iam:ListRolePolicies`, `iam:GetRolePolicy`, and `iam:ListAttachedRolePolicies` on the reviewed role itself. Attest the exact stored role path/name, exact principal, `StringEquals` ExternalId, session-name condition, permission-pack tag, one reviewed inline policy, and zero attached managed policies before activation and before every scan.
 8. Mark active only after the positive and negative checks, persist the validation time and broker principal, and append an audit event. Never persist the returned STS credentials.
 
 ### Abuse-case matrix
@@ -146,9 +146,10 @@ AWS recommends a unique, third-party-controlled ExternalId per customer account 
 | Role returns a different account ID | Onboarding is rejected; no inventory calls are made |
 | Same AWS account/role is registered twice | Cross-org duplicate blocks and alerts; same-org duplicate requires an explicit, audited ownership workflow |
 | Crafted ARN changes partition or principal type | Strict parser rejects it before any AWS call; supported partition must match broker deployment |
+| Existing administrator/shared role or wildcard trust is submitted | Onboarding rejects it; only a dedicated role below `/sutra/` with the exact stored trust and permission contract is eligible |
 | Job embeds a role ARN or STS options | Schema rejects extra sensitive fields; worker resolves fixed configuration by scoped integration ID |
 | Session name/source identity contains tenant input | Input is replaced with a server-generated safe identifier |
-| Customer role has write privileges | A fixed read-only STS session policy limits the effective session; optional policy inspection warns/rejects; documentation and templates still require a least-privilege role. Code allowlists alone are not treated as the permission boundary |
+| Customer role has write or broader privileges | Onboarding rejects the role: the dedicated role must have one reviewed inline policy, its exact-action deny ceiling, and no attached managed policies. A fixed read-only STS session policy is still applied as defense in depth; code allowlists alone are not treated as the permission boundary |
 | Integration is disabled or membership revoked mid-run | Worker re-checks integration state before assume, before ingest promotion, and before retry; results are quarantined/discarded |
 | ExternalId rotates | Required production design: versioned two-phase rotation supports one short overlap, revalidates, then proves the old value is denied; every transition is audited. The current local release rejects rotation instead of performing an unsafe one-step overwrite. |
 | STS throttles or credentials expire | Bounded jittered retry; refresh only within the same claimed run; never fall back to base credentials or another integration |

@@ -6,10 +6,12 @@ import type {
 } from "@aws-sdk/client-sts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
-export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
+export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.2" as const;
+export const PREVIOUS_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
 export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof LEGACY_PERMISSION_PACK_VERSION;
 
 export type AwsConnectionStatus =
@@ -18,6 +20,13 @@ export type AwsConnectionStatus =
   | "ACTIVE"
   | "DEGRADED"
   | "DISABLED";
+
+export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
+
+export interface PermissionCapabilityAssessment {
+  readonly grantedActions: readonly string[];
+  readonly missingActions: readonly string[];
+}
 
 /**
  * Trusted execution context supplied by the queue/API authorization layer. The
@@ -38,6 +47,14 @@ export interface StoredAwsConnection {
   readonly status: AwsConnectionStatus;
   readonly permissionPackVersion: PermissionPackVersion;
   readonly sessionNamePrefix?: string;
+  /**
+   * Optional only for backwards compatibility with encrypted records created
+   * before customer-managed dedicated roles were introduced. The broker
+   * resolves missing values to the canonical Sutra template contract.
+   */
+  readonly roleProvisioningMode?: AwsRoleProvisioningMode;
+  readonly expectedRolePath?: string;
+  readonly expectedRoleName?: string;
 }
 
 export interface ScopedConnectionRegistry {
@@ -93,6 +110,17 @@ export interface RoleContractClient {
     readonly isTruncated: boolean;
     readonly marker?: string;
   }>;
+  listAttachedRolePolicies(
+    roleName: string,
+    marker?: string,
+  ): Promise<{
+    readonly policies: readonly {
+      readonly policyName?: string;
+      readonly policyArn?: string;
+    }[];
+    readonly isTruncated: boolean;
+    readonly marker?: string;
+  }>;
   getRolePolicy(roleName: string, policyName: string): Promise<{
     readonly policyDocument?: string;
   }>;
@@ -136,6 +164,7 @@ export interface OnboardingTrustVerification {
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
   readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
+  readonly capabilityAssessment: PermissionCapabilityAssessment;
 }
 
 export interface InventoryJobRequest {
@@ -275,6 +304,7 @@ export interface OnboardingVerificationJobResult {
   readonly accountId: string;
   readonly partition: AwsPartition;
   readonly roleArn: string;
+  readonly roleSessionName: string;
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
@@ -282,6 +312,7 @@ export interface OnboardingVerificationJobResult {
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
   readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
+  readonly capabilityAssessment: PermissionCapabilityAssessment;
   readonly verifiedAt: string;
 }
 
@@ -291,6 +322,7 @@ export type CollectorErrorCode =
   | "CONNECTION_SCOPE_VIOLATION"
   | "CONNECTION_STATE_INVALID"
   | "CONNECTION_INTEGRITY_INVALID"
+  | "ASSUME_ROLE_DENIED"
   | "ASSUME_ROLE_FAILED"
   | "STS_RESPONSE_INVALID"
   | "CALLER_IDENTITY_FAILED"
@@ -349,6 +381,15 @@ export class AssumeRoleFailedError extends CollectorError {
 
   public constructor(awsErrorName: string) {
     super("ASSUME_ROLE_FAILED", "AWS STS AssumeRole failed for the scoped connection");
+    this.awsErrorName = awsErrorName;
+  }
+}
+
+export class AssumeRoleDeniedError extends CollectorError {
+  public readonly awsErrorName: string;
+
+  public constructor(awsErrorName: string) {
+    super("ASSUME_ROLE_DENIED", "AWS denied AssumeRole for the scoped connection");
     this.awsErrorName = awsErrorName;
   }
 }

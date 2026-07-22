@@ -90,7 +90,7 @@ const LIVE_CONNECTION = {
   roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
   externalId: "sutra_external_id_1234567890abcd",
   status: "ACTIVE" as const,
-  permissionPackVersion: "standard-2026-07" as const,
+  permissionPackVersion: "standard-2026-07.2" as const,
   enabledRegions: ["us-east-1"],
   createdAt: NOW.toISOString(),
   updatedAt: NOW.toISOString(),
@@ -294,7 +294,7 @@ test("live snapshot exposes bounded evidence overflow as partial coverage and a 
       roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
       externalId: "sutra_external_id_1234567890abcd",
       status: "ACTIVE",
-      permissionPackVersion: "standard-2026-07",
+      permissionPackVersion: "standard-2026-07.2",
       enabledRegions: ["us-east-1"],
       createdAt: NOW.toISOString(),
       updatedAt: NOW.toISOString(),
@@ -554,9 +554,12 @@ test("signed loopback fixture API completes register, trust verification, and sy
         connectionId: CONNECTION_ID,
         accountId: "123456789012",
         partition: "aws",
-        roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+        roleArn: "arn:aws:iam::123456789012:role/sutra/acme/security/AcmeSutraEvidenceRole",
         externalId: "sutra_external_id_1234567890abcd",
         enabledRegions: ["us-east-1", "ap-south-1"],
+        roleProvisioningMode: "customer_managed",
+        expectedRolePath: "/sutra/acme/security/",
+        expectedRoleName: "AcmeSutraEvidenceRole",
       },
     );
     assert.equal(registration.status, 200);
@@ -579,6 +582,10 @@ test("signed loopback fixture API completes register, trust verification, and sy
     assert.equal(verificationValue.accountId, "123456789012");
     assert.equal(verificationValue.missingExternalIdDenied, true);
     assert.equal(verificationValue.wrongExternalIdDenied, true);
+    assert.deepEqual(
+      (verificationValue.capabilityAssessment as Record<string, unknown>).missingActions,
+      [],
+    );
 
     const stagedSync = await signedRequest(
       baseUrl,
@@ -601,7 +608,7 @@ test("signed loopback fixture API completes register, trust verification, and sy
       {
         tenantId: TENANT_ID,
         connectionId: CONNECTION_ID,
-        roleArn: "arn:aws:iam::123456789012:role/mspcmdb/SutraReadOnlyRole",
+        roleArn: "arn:aws:iam::123456789012:role/sutra/acme/security/AcmeSutraEvidenceRole",
       },
     );
     assert.equal(activated.status, 200);

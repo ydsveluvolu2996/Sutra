@@ -76,9 +76,10 @@ export async function POST(request: Request): Promise<Response> {
           accountId: current.accountId,
           partition: current.partition,
         });
-        if (role.rolePathAndName !== "sutra/SutraReadOnlyRole") {
+        const expectedRolePathAndName = `${current.expectedRolePath.slice(1)}${current.expectedRoleName}`;
+        if (role.rolePathAndName !== expectedRolePathAndName) {
           throw Object.assign(
-            new Error("Use the reviewed /sutra/SutraReadOnlyRole from the versioned Sutra template"),
+            new Error(`Use the dedicated ${current.expectedRolePath}${current.expectedRoleName} role selected for this connection`),
             { code: "INVALID_INPUT" },
           );
         }
@@ -96,6 +97,9 @@ export async function POST(request: Request): Promise<Response> {
           roleArn,
           externalId,
           enabledRegions: current.enabledRegions,
+          roleProvisioningMode: current.roleProvisioningMode,
+          expectedRolePath: current.expectedRolePath,
+          expectedRoleName: current.expectedRoleName,
         });
         const verifyRoleWithCollector = () => verifyCollectorConnection({
           tenantId: actor.orgId,
@@ -103,6 +107,8 @@ export async function POST(request: Request): Promise<Response> {
           jobId: `verify_role_${crypto.randomUUID().replaceAll("-", "")}`,
           accountId: current.accountId,
           partition: current.partition,
+          roleArn: role.arn,
+          sessionNamePrefix: "sutra-",
         });
         const activateRoleWithCollector = (roleArn: string) => activateCollectorConnection({
           tenantId: actor.orgId,
@@ -142,6 +148,8 @@ export async function POST(request: Request): Promise<Response> {
               jobId: `restore_role_${crypto.randomUUID().replaceAll("-", "")}`,
               accountId: current.accountId,
               partition: current.partition,
+              roleArn: current.roleArn,
+              sessionNamePrefix: "sutra-",
             });
             await activateRoleWithCollector(current.roleArn);
           },

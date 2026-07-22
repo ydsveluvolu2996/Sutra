@@ -10,8 +10,13 @@ import {
   ALL_ENABLED_AWS_REGIONS,
   type AwsRegionSelection,
 } from "./aws-region-selection.ts";
+import { effectiveRequestOrigin } from "./request-origin.ts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
+
+export const SUTRA_ROLE_PATH = "/sutra/" as const;
+export const SUTRA_TEMPLATE_ROLE_NAME = "SutraReadOnlyRole" as const;
 
 export type PilotConnectionStatus =
   | "pending"
@@ -29,6 +34,7 @@ export type PilotSyncStatus =
   | "cancelled";
 
 export type SafePilotFailureCode =
+  | "ASSUME_ROLE_DENIED"
   | "ASSUME_ROLE_FAILED"
   | "BROKER_UNAVAILABLE"
   | "CALLER_IDENTITY_MISMATCH"
@@ -97,6 +103,9 @@ export interface AwsConnectionDraftRequest {
   readonly awsAccountId: string;
   readonly partition: AwsPartition;
   readonly enabledRegions: AwsRegionSelection;
+  readonly roleProvisioningMode: AwsRoleProvisioningMode;
+  readonly rolePath: string;
+  readonly roleName: string;
 }
 
 export interface LocalAwsConnectionIdentity {
@@ -153,6 +162,7 @@ const MAX_CONFIGURABLE_JSON_BODY_LIMIT = 1024 * 1024;
 
 const PARTITIONS = new Set<AwsPartition>(["aws", "aws-us-gov", "aws-cn"]);
 const FAILURE_CODES = new Set<SafePilotFailureCode>([
+  "ASSUME_ROLE_DENIED",
   "ASSUME_ROLE_FAILED",
   "BROKER_UNAVAILABLE",
   "CALLER_IDENTITY_MISMATCH",
@@ -223,12 +233,18 @@ export function parseAwsOnboardingInput(value: unknown): AwsOnboardingInput {
  * trust material, role policy, credentials, or lifecycle state.
  */
 export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDraftRequest {
+  const candidate = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const hasRoleContract = candidate !== null && ["roleProvisioningMode", "rolePath", "roleName"]
+    .some((key) => Object.hasOwn(candidate, key));
   const record = exactRecord(value, [
     "operationId",
     "customerName",
     "awsAccountId",
     "partition",
     "enabledRegions",
+    ...(hasRoleContract ? ["roleProvisioningMode", "rolePath", "roleName"] : []),
   ]);
   if (
     typeof record.operationId !== "string" ||
@@ -253,12 +269,48 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
   if (enabledRegions.length === 0) {
     invalidInput("Choose at least one AWS region");
   }
+  const roleProvisioningMode = record.roleProvisioningMode === undefined
+    ? "sutra_template"
+    : record.roleProvisioningMode;
+  if (roleProvisioningMode !== "sutra_template" && roleProvisioningMode !== "customer_managed") {
+    invalidInput("Choose a supported IAM role provisioning mode");
+  }
+  const rolePath = record.rolePath === undefined ? SUTRA_ROLE_PATH : record.rolePath;
+  const roleName = record.roleName === undefined ? SUTRA_TEMPLATE_ROLE_NAME : record.roleName;
+  if (typeof rolePath !== "string" || typeof roleName !== "string") {
+    invalidInput("The dedicated IAM role path and name are required");
+  }
+  if (roleProvisioningMode === "sutra_template") {
+    if (rolePath !== SUTRA_ROLE_PATH || roleName !== SUTRA_TEMPLATE_ROLE_NAME) {
+      invalidInput("The Sutra template uses the reviewed /sutra/SutraReadOnlyRole contract");
+    }
+  } else {
+    if (
+      rolePath.length > 512 ||
+      !/^\/sutra\/(?:[A-Za-z0-9+=,.@_-]+\/)*$/u.test(rolePath)
+    ) {
+      invalidInput("Customer-managed roles must use a dedicated path inside /sutra/");
+    }
+    if (!/^[A-Za-z0-9+=,.@_-]{1,64}$/u.test(roleName)) {
+      invalidInput("Enter a valid dedicated IAM role name between 1 and 64 characters");
+    }
+    const loweredRoleName = roleName.toLowerCase();
+    if (
+      /(admin|poweruser|root|shared|operation|break[-_.]?glass)/u.test(loweredRoleName) ||
+      loweredRoleName === "organizationaccountaccessrole"
+    ) {
+      invalidInput("Admin, shared, root, power-user, and operational IAM roles cannot be onboarded");
+    }
+  }
   return {
     operationId: record.operationId,
     customerName,
     awsAccountId,
     partition,
     enabledRegions,
+    roleProvisioningMode,
+    rolePath,
+    roleName,
   };
 }
 
@@ -486,7 +538,9 @@ export async function decryptExternalId(
  * authentication path instead of bypassing this check.
  */
 export function assertSameOrigin(request: Request, configuredOrigin?: string): void {
-  const requestOrigin = canonicalOrigin(new URL(request.url).origin);
+  const effectiveOrigin = effectiveRequestOrigin(request);
+  if (effectiveOrigin === null) invalidInput("The request origin is invalid");
+  const requestOrigin = canonicalOrigin(effectiveOrigin);
   const expectedOrigin = configuredOrigin === undefined
     ? requestOrigin
     : canonicalOrigin(configuredOrigin);

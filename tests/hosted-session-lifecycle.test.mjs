@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
+// Keep the loopback job-runner transport test in the main hosted-runtime suite.
+await import("./start-pilot-job-runner.test.mjs");
+
 // Contract test for the hosted (public multi-tenant) identity + session
 // lifecycle and the hosted broker/durable-job wiring. Following the repository
 // convention, the end-to-end route/DB flow is asserted against source so it can
@@ -143,7 +146,7 @@ test("hosted sessions reuse the hardened local session cookie (Secure, SameSite,
 });
 
 test("hosted authentication requests are pinned to the canonical public origin", () => {
-  assert.match(apiAuth, /requestOrigin !== configuredOrigin/u);
+  assert.match(apiAuth, /requestMatchesCanonicalOrigin\(request, runtimeEnv\(\)\.SUTRA_PUBLIC_ORIGIN\)/u);
   assert.match(apiAuth, /isHostedOidcRuntime\(\)/u);
   // Hosted runtime requires the OIDC identity mode and a non-local deployment env.
   assert.match(apiAuth, /SUTRA_IDENTITY_MODE === "oidc"/u);
@@ -157,7 +160,7 @@ test("local loopback restriction and deny-by-default boundary are preserved unch
   // The ONLY other accept path is managed-password network mode, and it is
   // gated behind the (default-OFF) runtime switch AND pinned to the canonical
   // public origin — it can never widen the loopback-local branch.
-  assert.match(apiAuth, /const managedPassword =\s*\n\s*isManagedPasswordRuntime\(\) && requestOriginMatchesPublicOrigin\(url, config\.SUTRA_PUBLIC_ORIGIN\)/u);
+  assert.match(apiAuth, /const managedPassword =\s*\n\s*isManagedPasswordRuntime\(\) && requestMatchesCanonicalOrigin\(request, config\.SUTRA_PUBLIC_ORIGIN\)/u);
   assert.match(apiAuth, /if \(!loopbackLocal && !managedPassword\) \{/u);
   // The two former hard-disable strings are gone, replaced by exactly one switch.
   assert.doesNotMatch(deploymentSecurity, /not implemented in this build/u);
@@ -171,9 +174,18 @@ test("durable background-job runner works under hosted mode: token-gated and env
   // guard, so it runs identically in hosted staging/production.
   assert.match(jobRunnerRoute, /verifyInternalToken\(jobRunnerToken\(\), request\.headers\.get\("x-sutra-job-token"\)\)/u);
   assert.doesNotMatch(jobRunnerRoute, /assertLocalAuthRequest|SUTRA_LOCAL_MODE|isLoopbackHost/u);
-  // Every job it runs carries its own org scope, so handlers stay tenant-scoped.
+  // Platform monitoring is system-scoped and runs before tenant discovery, so
+  // a fresh deployment reports real health before the first customer bootstrap.
+  assert.match(jobRunnerRoute, /runPlatformUptimeProbeTick\(buildPlatformUptimeProbeTickDeps\(\)\)/u);
+  assert.ok(
+    jobRunnerRoute.indexOf("const platformUptime = await runPlatformUptimeProbeTick") <
+      jobRunnerRoute.indexOf("const activeOrgIds = await listActiveOrgIds"),
+    "platform uptime must not depend on an active organization",
+  );
+  assert.doesNotMatch(jobRunnerRoute, /ensureUptimeProbeEnqueued/u);
+  // Every queued business job still carries its own org scope.
   assert.match(jobRunnerRoute, /runDueBackgroundJobs\(\{ queue, handlers: buildJobHandlers\(\)/u);
-  assert.match(jobRunnerRoute, /every job it runs\s*\n\s*\* carries its own org scope/u);
+  assert.match(jobRunnerRoute, /every queued business job still carries its own org scope/u);
 });
 
 test("hosted broker ingestion authenticates with asymmetric signatures and server-derived scope", () => {

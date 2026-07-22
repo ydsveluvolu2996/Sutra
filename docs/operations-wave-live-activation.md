@@ -24,14 +24,21 @@ The reviewed template adds only these metadata/history actions to the existing r
 
 All actions use `Resource: '*'` because these AWS list/describe APIs do not consistently support resource-level authorization. The role still grants no resource mutation, object/database/secret payload read, decryption, credential creation, remediation, security-service enablement, purchase, or commitment action.
 
-The customer role carries an explicit Deny with the exact implemented-action exceptions, so resource policies cannot expand the role session beyond this reviewed pack. The STS session policy also retains an exact Allow list and a compact read-family outer Deny to remain below AWS STS plaintext and packed-policy safety limits.
+The customer role carries an explicit Deny with the exact implemented-action exceptions, so resource policies cannot expand the role session beyond this reviewed pack. The STS session policy adds a compact read-family Allow intersection while the attested role policy remains the explicit-deny ceiling; the compact form stays below AWS STS plaintext and packed-policy safety limits.
 
 ## Reviewed artifacts
 
-- Permission pack: `standard-2026-07`
-- Template: `public/sutra-customer-onboarding-role.yaml`
-- Template SHA-256: `3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f`
-- Operator policy source: `infrastructure/sutra-operator-permission-set-policy.json`
+- Historical permission pack activated on 2026-07-17: `standard-2026-07`
+- Historical template SHA-256 attested for that activation:
+  `3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f`
+- Historical artifact note: that digest identifies the superseded activation
+  artifact. It must not be compared with the mutable working-tree path below.
+- Current successor permission pack: `standard-2026-07.2`
+- Current canonical template: `public/sutra-customer-onboarding-role.yaml`
+- Current canonical template SHA-256:
+  `8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98`
+- Current operator policy source:
+  `infrastructure/sutra-operator-permission-set-policy.json`
 
 ## Completed activation sequence
 

@@ -68,7 +68,7 @@ export interface NavSection {
 }
 
 export interface NavGroup {
-  readonly key: "overview" | "onboarding" | "cmdb" | "kubernetes" | "security" | "compliance" | "finops" | "operations" | "administration";
+  readonly key: "overview" | "onboarding" | "cmdb" | "kubernetes" | "security" | "compliance" | "finops" | "operations";
   readonly label: string;
   readonly items: readonly NavItem[];
   /**
@@ -196,16 +196,6 @@ export const navGroups: readonly NavGroup[] = [
       { key: "alerts", label: "Alerts", href: "/alerts", icon: "AL", capabilities: readConnection },
       { key: "patch", label: "Patch management", href: "/patch", icon: "PM", capabilities: readConnection },
       { key: "roadmap", label: "Product roadmap", href: "/roadmap", icon: "PR", capabilities: readWorkspace },
-    ],
-  },
-  {
-    key: "administration",
-    label: "Administration",
-    items: [
-      { key: "settings", label: "Settings", href: "/settings", icon: "SG", capabilities: readWorkspace },
-      { key: "access", label: "Access & invitations", href: "/access", icon: "AI", capabilities: ["membership:manage:customer"] },
-      { key: "docs", label: "Documentation", href: "/docs", icon: "DO", capabilities: readWorkspace },
-      { key: "notification_settings", label: "Notification destinations", href: "/settings/notifications", icon: "NT", capabilities: readConnection },
     ],
   },
 ] as const;

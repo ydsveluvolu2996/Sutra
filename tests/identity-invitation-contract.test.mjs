@@ -26,6 +26,10 @@ test("invitation creation and revocation require centralized authorization and r
   assert.match(route, /requireRecentMfa\(actor\.authenticated\)/u);
   assert.match(route, /assertAuthMutation\(request\)/u);
   assert.match(route, /activationUrlShownOnce: true/u);
+  assert.match(route, /deliverInvitationEmail/u);
+  assert.match(route, /completeIdentityInvitationDelivery/u);
+  assert.match(route, /createIdentityInvitationIdempotently/u);
+  assert.match(route, /request\.headers\.get\("idempotency-key"\)/u);
 });
 
 test("acceptance is exact-email, single-use, expiry-bound, and creates membership atomically", () => {

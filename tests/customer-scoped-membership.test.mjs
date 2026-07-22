@@ -273,7 +273,7 @@ test("NEGATIVE: a cross-organization invitation target is rejected", async () =>
 });
 
 test("a customer_admin only lists invitations bound to its administered customers", async () => {
-  await withScopeDatabase(async ({ orgId, actor, scope, owner }) => {
+  await withScopeDatabase(async ({ actor, scope, owner }) => {
     // An org owner invitation into beta must never appear in the admin's list.
     await invitations.createIdentityInvitation(owner, { mode: "org" }, {
       email: "beta-owner-invite@sutra.invalid",

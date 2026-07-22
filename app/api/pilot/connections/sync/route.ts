@@ -4,6 +4,7 @@ import {
   failSyncRun,
   getPilotStateForOrg,
   getStoredConnectionSecretForOrg,
+  markConnectionNeedsAttention,
   persistSnapshot,
 } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
@@ -69,7 +70,16 @@ export async function POST(request: Request): Promise<Response> {
   } catch (error) {
     if (runId !== null && connectionId !== null && actorId !== null) {
       try {
-        await failSyncRun(runId, connectionId, actorId, safeCollectionFailureCode(error));
+        const safeReason = safeCollectionFailureCode(error);
+        await failSyncRun(runId, connectionId, actorId, safeReason);
+        if (
+          safeReason === "ASSUME_ROLE_DENIED" ||
+          safeReason === "TRUST_POLICY_UNSAFE" ||
+          safeReason === "CALLER_IDENTITY_MISMATCH" ||
+          safeReason === "NEGATIVE_PROBE_INCONCLUSIVE"
+        ) {
+          await markConnectionNeedsAttention(connectionId, actorId, safeReason);
+        }
       } catch {
         // Preserve the original collection error; a stale failure transition
         // must not replace the evidence-boundary error returned to the caller.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Sutra encrypted backup every day
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+Persistent=true
+RandomizedDelaySec=15m
+AccuracySec=1m
+Unit=sutra-backup.service
+
+[Install]
+WantedBy=timers.target

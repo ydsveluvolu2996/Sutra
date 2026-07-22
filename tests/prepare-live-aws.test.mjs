@@ -40,16 +40,16 @@ const COLLECTOR_BOUNDARY_DOCUMENT = {
       Resource: "*",
     },
     {
-      Sid: "DenyAssumeRoleOutsideFixedCustomerRole",
+      Sid: "DenyAssumeRoleOutsideSutraRoleNamespace",
       Effect: "Deny",
       Action: "sts:AssumeRole",
-      NotResource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      NotResource: "arn:aws:iam::*:role/sutra/*",
     },
     {
-      Sid: "AssumeFixedSutraCustomerRoleOnly",
+      Sid: "AssumeDedicatedSutraCustomerRolesOnly",
       Effect: "Allow",
       Action: "sts:AssumeRole",
-      Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+      Resource: "arn:aws:iam::*:role/sutra/*",
     },
   ],
 };
@@ -69,7 +69,6 @@ function existingStack(overrides = {}) {
     Parameters: [
       { ParameterKey: "OperatorRoleArn", ParameterValue: OPERATOR_ROLE },
       { ParameterKey: "CollectorRoleName", ParameterValue: "SutraLocalCollectorRole" },
-      { ParameterKey: "CustomerRoleName", ParameterValue: "SutraReadOnlyRole" },
     ],
     Outputs: [{ OutputKey: "CollectorRoleArn", OutputValue: COLLECTOR_ROLE }],
     ...overrides,
@@ -130,20 +129,28 @@ function capturedIamResponse(args) {
     };
   }
   if (args[1] === "list-role-policies") {
-    return { PolicyNames: ["AssumeFixedSutraCustomerRole"], IsTruncated: false };
+    return { PolicyNames: ["AssumeDedicatedSutraCustomerRoles"], IsTruncated: false };
   }
   if (args[1] === "get-role-policy") {
     return {
       RoleName: "SutraLocalCollectorRole",
-      PolicyName: "AssumeFixedSutraCustomerRole",
+      PolicyName: "AssumeDedicatedSutraCustomerRoles",
       PolicyDocument: {
         Version: "2012-10-17",
-        Statement: [{
-          Sid: "AssumeCustomerMetadataRoleOnly",
-          Effect: "Allow",
-          Action: "sts:AssumeRole",
-          Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
-        }],
+        Statement: [
+          {
+            Sid: "DenyAssumeRoleOutsideSutraRoleNamespace",
+            Effect: "Deny",
+            Action: "sts:AssumeRole",
+            NotResource: "arn:aws:iam::*:role/sutra/*",
+          },
+          {
+            Sid: "AssumeDedicatedSutraCustomerRolesOnly",
+            Effect: "Allow",
+            Action: "sts:AssumeRole",
+            Resource: "arn:aws:iam::*:role/sutra/*",
+          },
+        ],
       },
     };
   }
@@ -328,7 +335,7 @@ test("collector role attestation requires exact live IAM state, not CloudFormati
   }
   assert.throws(
     () => attestCollectorRoleInlinePolicyNames({
-      PolicyNames: ["AssumeFixedSutraCustomerRole", "Escalate"],
+      PolicyNames: ["AssumeDedicatedSutraCustomerRoles", "Escalate"],
       IsTruncated: false,
     }),
     /exactly its reviewed inline policy/u,
@@ -378,7 +385,6 @@ test("existing stack attestation requires exact ownership, template, parameters,
         Parameters: [
           { ParameterKey: "OperatorRoleArn", ParameterValue: OPERATOR_ROLE },
           { ParameterKey: "CollectorRoleName", ParameterValue: "UnrelatedRole" },
-          { ParameterKey: "CustomerRoleName", ParameterValue: "SutraReadOnlyRole" },
         ],
       })],
     }, EXPECTED_STACK),

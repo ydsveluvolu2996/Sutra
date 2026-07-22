@@ -23,7 +23,9 @@ test("server-renders the Sutra public product site", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>Sutra<\/title>/i);
+  assert.match(html, /<title>Sutra — AWS CMDB &amp; Kubernetes Security for MSPs<\/title>/i);
+  assert.match(html, /<link rel="canonical" href="https:\/\/www\.sutracmdb\.com\/"\/>/i);
+  assert.match(html, /type="application\/ld\+json"[^>]*>[^<]*"SoftwareApplication"/i);
   assert.match(html, /See every risk/i);
   assert.match(html, /Read-only access/i);
   assert.match(html, /Cloud security, woven together/i);

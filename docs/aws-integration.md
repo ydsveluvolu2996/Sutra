@@ -86,47 +86,69 @@ one hour.
 ### 2.3 Vendor-side isolation
 
 Use a dedicated credential-broker/collector workload role in a security tooling AWS
-account. It should have only `sts:AssumeRole` to the fixed customer role path/name,
-for example:
+account. It should have only `sts:AssumeRole` to dedicated roles under Sutra's
+reserved customer-role namespace, for example:
 
 ```json
 {
-  "Effect": "Allow",
-  "Action": "sts:AssumeRole",
-  "Resource": [
-    "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Action": "sts:AssumeRole",
+      "NotResource": "arn:aws:iam::*:role/sutra/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "arn:aws:iam::*:role/sutra/*"
+    }
   ]
 }
 ```
 
-Apply the same target as a fixed, customer-managed permissions boundary on the
+Apply the same namespace as a fixed, customer-managed permissions boundary on the
 collector workload role, with explicit denies for every action other than
 `sts:AssumeRole` and for `sts:AssumeRole` against any other resource. The matching
-allow then permits only `arn:aws:iam::*:role/sutra/SutraReadOnlyRole`. Create and
+allow then permits only `arn:aws:iam::*:role/sutra/*`. Create and
 control that boundary independently of the
 operator-mutable collector stack. The operator may attach the exact boundary ARN
 but must not create new versions, change the default version, or delete it. This
-keeps the effective collector permissions at the fixed customer-role target even
+keeps the effective collector permissions within the dedicated customer-role namespace even
 if an alternate role policy is submitted through CloudFormation.
 
 Use separate vendor accounts and collector roles for `aws`, `aws-us-gov`, and
-`aws-cn`; AWS partitions do not share trust. If customers can choose a role name,
-generate an exact-ARN allowlist or shard policies rather than widening to every IAM
-role. Workers must receive a signed job envelope containing a connection ID; the
-broker resolves role ARN/External ID server-side after checking tenant ownership.
+`aws-cn`; AWS partitions do not share trust. Never widen the source role to
+`arn:...:role/*`. Workers must receive a signed job envelope containing a connection
+ID; the broker resolves one exact registered role ARN and External ID server-side
+after checking tenant ownership. Onboarding accepts a customer-selected name/path
+only below `/sutra/`, then rejects wildcard trust, managed-policy attachments,
+administrator/shared-role contracts, or a mismatch from the stored selection.
 
 The application database remains part of the authorization boundary: a wildcard
 account number in the vendor IAM policy is scalable but means a compromised broker
-can attempt every customer role. Mitigations are a fixed role path/name, exact
+can attempt names within the reserved `/sutra/` namespace. Mitigations are that
+dedicated path boundary, one exact registered role ARN per connection, an exact
 trusted vendor principal, tenant-unique External IDs, no interactive access to the
 broker, short sessions, egress controls, workload identity, CloudTrail alerting, and
 strong separation between public API and collector credentials.
 
-Every customer `AssumeRole` request also carries a fixed inline session policy. It
-explicitly denies actions outside the release's reviewed metadata/attestation API
-set and explicitly denies role-policy attestation reads outside the one registered
-customer role ARN, before adding the narrow allows. This makes the runtime ceiling
-auditable as an explicit deny contract instead of depending only on implicit deny.
+Every customer `AssumeRole` request also carries a fixed inline session policy whose
+read-only allows are intersected with the role's permissions. The freshly attested
+customer role supplies the exact-action `Deny`/`NotAction` ceiling, including for
+resource-policy grants, and restricts role-policy attestation reads to the registered
+role ARN. Sutra rejects broader or attached permission policies instead of treating
+the session policy as a substitute for a dedicated least-privilege role.
+
+### Permission-pack upgrade order
+
+`standard-2026-07.2` adds live attached-policy attestation. It is intentionally
+distinct from `standard-2026-07`: a role deployed from the earlier template does
+not authorize that self-inspection call. Upgrade in two phases—publish and apply
+the immutable `.2` customer-role template, revalidate the unchanged role ARN until
+Sutra records the `.2` tag and proof, and only then make `.2` collector work
+runnable. Older connections remain identifiable and fail closed with an upgrade
+instruction; never deploy a new broker contract under an old pack label.
 
 Do not expose assumed credentials or AWS console federation URLs to MSP/customer
 users. They access normalized CMDB data through SaaS RBAC. If customers need AWS
@@ -562,7 +584,7 @@ reachability impact, and rollback. Deny remediation when the CMDB snapshot is st
 | Risk | Required control |
 | --- | --- |
 | Cross-tenant confused deputy | Vendor-generated unique External ID, exact vendor role principal, canonical connection lookup, account verification |
-| Vendor collector compromise | Dedicated account/role, fixed customer role path, no public-path credentials, short STS sessions, egress and CloudTrail monitoring |
+| Vendor collector compromise | Dedicated account/role, reserved `/sutra/` customer-role namespace plus exact connection registry, no public-path credentials, short STS sessions, egress and CloudTrail monitoring |
 | Customer configuration contains secrets | Field allowlists and redaction before logs/queues/storage; Lambda, CloudFront, and SSM opt-in; exclude code, object, task-definition, user-data, secret-value APIs |
 | Tenant data leak in SaaS | Tenant-prefixed keys, row-level controls, RBAC, export audit, negative multi-tenant tests, per-tenant encryption/retention where required |
 | Policy or template drift | Versioned immutable templates, SHA-256, periodic capability probes, drift alert, sandbox deploy test on every release |

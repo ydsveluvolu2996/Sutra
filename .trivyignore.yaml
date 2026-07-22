@@ -1,0 +1,16 @@
+misconfigurations:
+  - id: AWS-0104
+    paths:
+      - deploy/ec2/cloudformation-single-node.yaml
+    statement: >-
+      The private-beta host has no inbound security-group rules. Its explicit,
+      port-bounded egress rules must reach dynamic AWS APIs, Cloudflare Tunnel,
+      DNS and signed package endpoints, for which stable destination CIDRs are
+      not available. Runtime validation separately asserts the empty ingress.
+  - id: KSV-0109
+    paths:
+      - deploy/charts/sutra-visibility/charts/trivy-operator/templates/configmaps/trivy-operator-config.yaml
+    statement: >-
+      This vendored upstream ConfigMap contains scanner feature flags and names
+      of optional Secret references, not credential values. Sutra disables
+      global Secret access and exposed-secret scanning by default.

@@ -34,7 +34,7 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const boundary = evaluateDeploymentBoundary(request.url, env);
+    const boundary = evaluateDeploymentBoundary(request, env);
     if (!boundary.allowed) {
       const response = Response.json(
         { ok: false, code: boundary.code, message: "This Sutra deployment is not available in the requested environment." },

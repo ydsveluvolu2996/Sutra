@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 import StatusClient from "./status-client";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/status",
   title: "Status",
   description: "Sutra system status — live, measured health of the app, database, background jobs and collector, with uptime history.",
-};
+});
 
 export default function StatusPage() {
   return (

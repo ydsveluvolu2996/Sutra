@@ -45,6 +45,9 @@ import cmdbCustomAssetsSchemaSql from "../drizzle/0043_cmdb_custom_assets.sql?ra
 import uptimeSamplesSchemaSql from "../drizzle/0044_uptime_samples.sql?raw";
 import hostedBrokerReplayNoncesSchemaSql from "../drizzle/0047_hosted_broker_replay_nonces.sql?raw";
 import hostedSignupRateLimitsSchemaSql from "../drizzle/0048_hosted_signup_rate_limits.sql?raw";
+import customerManagedAwsRolesSchemaSql from "../drizzle/0049_customer_managed_aws_roles.sql?raw";
+import invitationDeliverySchemaSql from "../drizzle/0050_invitation_delivery.sql?raw";
+import invitationOperationLedgerSchemaSql from "../drizzle/0051_invitation_operation_ledger.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -107,6 +110,9 @@ const migrations = [
   { id: "0044_uptime_samples", statements: statementsFrom(uptimeSamplesSchemaSql) },
   { id: "0047_hosted_broker_replay_nonces", statements: statementsFrom(hostedBrokerReplayNoncesSchemaSql) },
   { id: "0048_hosted_signup_rate_limits", statements: statementsFrom(hostedSignupRateLimitsSchemaSql) },
+  { id: "0049_customer_managed_aws_roles", statements: statementsFrom(customerManagedAwsRolesSchemaSql) },
+  { id: "0050_invitation_delivery", statements: statementsFrom(invitationDeliverySchemaSql) },
+  { id: "0051_invitation_operation_ledger", statements: statementsFrom(invitationOperationLedgerSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
