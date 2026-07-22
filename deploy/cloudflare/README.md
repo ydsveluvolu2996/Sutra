@@ -98,7 +98,7 @@ Worker on a temporary route or with `wrangler dev`. Then verify:
 
 ```bash
 curl -fsS -D- https://www.sutracmdb.com/login -o /dev/null
-curl -fsS -D- https://www.sutracmdb.com/api/health -o /dev/null
+curl -fsS -D- https://www.sutracmdb.com/api/healthz -o /dev/null
 curl -fsS -I https://sutracmdb.com/docs
 curl -sS -o /dev/null -w '%{http_code}\n' https://origin.sutracmdb.com/api/healthz
 ```
