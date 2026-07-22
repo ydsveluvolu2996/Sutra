@@ -1,11 +1,18 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { resolve } from "node:path";
 import pg from "pg";
 
 const root = resolve(import.meta.dirname, "..");
 const snapshot = JSON.parse(await readFile(resolve(root, "drizzle/meta/0013_snapshot.json"), "utf8"));
+const postBaselineD1Migrations = await Promise.all(
+  (await readdir(resolve(root, "drizzle"), { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && /^\d{4}_.+\.sql$/u.test(entry.name))
+    .filter((entry) => Number.parseInt(entry.name.slice(0, 4), 10) > 13)
+    .sort((left, right) => left.name.localeCompare(right.name))
+    .map((entry) => readFile(resolve(root, "drizzle", entry.name), "utf8")),
+);
 const postgresMigrations = (
   await Promise.all([
     "0000_sutra_baseline.sql",
@@ -33,6 +40,26 @@ function expectedSchema() {
     }
   }
   return { tables, indexes };
+}
+
+function expectedCurrentSchema() {
+  const schema = expectedSchema();
+  const addColumn = /^ALTER TABLE\s+[`"]?([a-z_][a-z0-9_]*)[`"]?\s+ADD(?:\s+COLUMN)?\s+[`"]?([a-z_][a-z0-9_]*)[`"]?\b/gimu;
+
+  // Snapshot 0013 is the immutable source for the PostgreSQL baseline. Later
+  // hand-authored D1 migrations can still evolve those baseline tables, so the
+  // live catalog comparison must apply their forward-only ADD COLUMN changes.
+  for (const migration of postBaselineD1Migrations) {
+    for (const match of migration.matchAll(addColumn)) {
+      const columns = schema.tables.get(match[1]);
+      if (columns !== undefined && !columns.includes(match[2])) {
+        columns.push(match[2]);
+        columns.sort();
+      }
+    }
+  }
+
+  return schema;
 }
 
 function postgresBaselineSchema() {
@@ -73,6 +100,12 @@ test("PostgreSQL baseline contains every current D1 application table, column, a
   assert.deepEqual(sortedEntries(actual.indexes), sortedEntries(expected.indexes));
 });
 
+test("current D1 expectations include columns added after the generated baseline snapshot", () => {
+  const current = expectedCurrentSchema();
+  assert.ok(current.tables.get("identity_invitations")?.includes("customer_id"));
+  assert.ok(current.tables.get("kubernetes_scan_runs")?.includes("nodes_json"));
+});
+
 const databaseUrl = process.env.SUTRA_POSTGRES_TEST_URL?.trim();
 
 test("migrated PostgreSQL catalog matches the current D1 application schema", {
@@ -81,7 +114,7 @@ test("migrated PostgreSQL catalog matches the current D1 application schema", {
   assert.ok(databaseUrl);
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   try {
-    const expected = expectedSchema();
+    const expected = expectedCurrentSchema();
     const tableNames = [...expected.tables.keys()];
     const columnResult = await pool.query(
       `SELECT table_name, column_name
