@@ -90,6 +90,8 @@ if grep -Eq '^[[:space:]]*- hostname: (www\.)?sutracmdb\.com$' deploy/ec2/cloudf
 fi
 git check-ignore -q --no-index .sutra/cloudflared/config.yml || die "cloudflared config is not gitignored."
 git check-ignore -q --no-index .sutra/cloudflared/credentials.json || die "cloudflared credential is not gitignored."
+grep -Fq 'chown 65532:65532 "$CLOUDFLARED_CONFIG" "$CLOUDFLARED_CREDENTIAL"' deploy/ec2/bootstrap.sh || die "cloudflared non-root ownership contract is missing."
+grep -Fq 'chmod 400 "$CLOUDFLARED_CONFIG" "$CLOUDFLARED_CREDENTIAL"' deploy/ec2/bootstrap.sh || die "cloudflared credential is not host-read-only."
 
 # systemctl stop must preserve Caddy + tunnel so application maintenance still
 # produces an edge-visible 503 rather than tearing down the ingress connector.

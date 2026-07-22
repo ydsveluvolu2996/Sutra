@@ -344,13 +344,14 @@ Resources:
                 aws ssm get-parameter --name "$TUNNEL_PARAMETER" --with-decryption \
                   --query Parameter.Value --output text --region '${AWS::Region}' \
                   > .sutra/cloudflared/credentials.json
-                chmod 0600 .sutra/cloudflared/credentials.json
                 jq -e 'type == "object" and (.AccountTag | type == "string") and (.TunnelSecret | type == "string") and (.TunnelID | type == "string")' \
                   .sutra/cloudflared/credentials.json >/dev/null
-                install -m 0600 deploy/ec2/cloudflared-config.yml.example .sutra/cloudflared/config.yml
+                install -m 0400 deploy/ec2/cloudflared-config.yml.example .sutra/cloudflared/config.yml
                 CONFIGURED_TUNNEL="$(awk '$1 == "tunnel:" {print $2; exit}' .sutra/cloudflared/config.yml)"
                 CREDENTIAL_TUNNEL="$(jq -r '.TunnelID' .sutra/cloudflared/credentials.json)"
                 [ -n "$CONFIGURED_TUNNEL" ] && [ "$CONFIGURED_TUNNEL" = "$CREDENTIAL_TUNNEL" ]
+                chown 65532:65532 .sutra/cloudflared/config.yml .sutra/cloudflared/credentials.json
+                chmod 0400 .sutra/cloudflared/config.yml .sutra/cloudflared/credentials.json
               fi
               bash deploy/ec2/bootstrap.sh
 

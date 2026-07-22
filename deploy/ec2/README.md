@@ -274,7 +274,8 @@ be treated as a spending control.
 The security group has no inbound rules. Do not add `22`, `80`, `443`, app, or
 database ports. Keep IMDSv2 required, EBS encryption enabled, standard CPU
 credits selected, Cloudflare DNS proxied, tunnel credentials encrypted in SSM,
-and all secret files ignored with mode `0600`.
+runtime environment secrets ignored with mode `0600`, and tunnel files owned by
+the pinned cloudflared UID with read-only mode `0400`.
 
 ## Private-beta limitations
 

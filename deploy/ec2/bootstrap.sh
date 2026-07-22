@@ -12,7 +12,8 @@
 #   2. Require the release bundle extracted from the immutable app image.
 #   3. Generate database/job secrets into .sutra/docker.env if absent (0600).
 #   4. Ensure deploy/ec2/.env.ec2 exists (copied from the template; prompt on a TTY).
-#   5. Validate the ignored Cloudflare named-tunnel config + credential.
+#   5. Validate and permission the ignored Cloudflare tunnel files for the
+#      pinned image's non-root UID.
 #   6. Pull the immutable app release and bring the stack up with `up -d --wait`.
 #
 # Never echoes secret values. Fails fast with clear messages.
@@ -140,14 +141,15 @@ ensure_cloudflared() {
   chmod 700 "$CLOUDFLARED_DIR"
   if [ ! -f "$CLOUDFLARED_CONFIG" ]; then
     cp "$CLOUDFLARED_CONFIG_EXAMPLE" "$CLOUDFLARED_CONFIG"
-    chmod 600 "$CLOUDFLARED_CONFIG"
     warn "Created $CLOUDFLARED_CONFIG from the committed tunnel template."
-  else
-    chmod 600 "$CLOUDFLARED_CONFIG"
   fi
   [ -f "$CLOUDFLARED_CREDENTIAL" ] || die "Missing $CLOUDFLARED_CREDENTIAL. Install the credential JSON for the named Sutra tunnel; never commit or paste it into logs."
-  chmod 600 "$CLOUDFLARED_CREDENTIAL"
-  log "Ignored Cloudflare named-tunnel files are present."
+  # cloudflare/cloudflared runs as numeric UID/GID 65532. Bind-mounted files
+  # remain root-managed on the host but must be readable by that exact UID.
+  # Mode 0400 prevents every other host/container identity from reading them.
+  sudo chown 65532:65532 "$CLOUDFLARED_CONFIG" "$CLOUDFLARED_CREDENTIAL"
+  sudo chmod 400 "$CLOUDFLARED_CONFIG" "$CLOUDFLARED_CREDENTIAL"
+  log "Ignored Cloudflare named-tunnel files are present with non-root read-only ownership."
 }
 ensure_cloudflared
 
