@@ -129,6 +129,9 @@ docker run -d --rm \
   --name "$container" \
   --network none \
   --read-only \
+  --security-opt no-new-privileges:true \
+  --cap-drop ALL \
+  --cap-add NET_BIND_SERVICE \
   --tmpfs /tmp:size=16m,mode=1777 \
   -e SUTRA_DOMAIN=example.test \
   -v "$REPO_ROOT/deploy/ec2/Caddyfile:/etc/caddy/Caddyfile:ro" \

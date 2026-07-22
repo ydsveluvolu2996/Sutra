@@ -184,6 +184,10 @@ services:
     tmpfs:
       - /tmp:size=16m,mode=1777
     cap_drop: ["ALL"]
+    # The upstream Caddy binary carries a file capability. Retaining only this
+    # capability is required for Linux to execute it under no-new-privileges;
+    # the service itself still listens solely on unprivileged port 8080.
+    cap_add: ["NET_BIND_SERVICE"]
     pids_limit: 128
     mem_reservation: 64m
     mem_limit: 256m
