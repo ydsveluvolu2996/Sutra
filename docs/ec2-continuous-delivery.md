@@ -37,9 +37,12 @@ workflow and must be created only once. Deploy
 - existing ECR repository `sutra/app`; and
 - the exact instance ID output by `sutra-private-beta`.
 
-The template itself fixes the OIDC subject to exact repository
-`ydsveluvolu2996/Sutra` and exact ref `refs/heads/main`; neither value is a
-deploy-time parameter that can accidentally broaden the trust policy.
+The template fixes the OIDC subject to the immutable GitHub owner/repository
+identity `ydsveluvolu2996@229068958/Sutra@1301833628` and exact ref
+`refs/heads/main`; neither value is a deploy-time parameter that can
+accidentally broaden the trust policy. These numeric IDs are emitted by the
+repository's customized OIDC subject and keep the trust boundary pinned if an
+owner or repository display name is later reused.
 
 The role cannot create or delete repositories, mutate general infrastructure,
 start or stop EC2, deploy to another instance, read SSM parameters, or open an
@@ -76,8 +79,9 @@ make environments or environment variables available to a private repository.
 The workflow instead uses ordinary repository Actions variables, is
 manual-only, rejects every ref except exact `main`, and runs its own bounded
 source/release gates. AWS independently rejects every OIDC subject except the
-exact `main` branch of `ydsveluvolu2996/Sutra`, so a workflow created on another
-branch cannot assume the release role.
+exact `main` branch of the immutable `ydsveluvolu2996@229068958/Sutra@1301833628`
+repository identity, so a workflow created on another branch or a renamed
+lookalike repository cannot assume the release role.
 
 Under **Settings -> Secrets and variables -> Actions -> Variables**, set these
 repository variables (not secrets):
