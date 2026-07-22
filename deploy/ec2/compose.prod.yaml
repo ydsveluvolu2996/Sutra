@@ -129,7 +129,10 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:3000/api/healthz',{headers:{Host:'www.${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}','X-Forwarded-Proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        # Node fetch deliberately normalizes the Host header. The low-level
+        # client preserves the canonical public Host required by origin checks.
+        - >-
+          const{request}=require('node:http');const r=request({hostname:'127.0.0.1',port:3000,path:'/api/healthz',headers:{Host:'www.${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}','X-Forwarded-Proto':'https'}},s=>{s.resume();s.on('end',()=>process.exit(s.statusCode>=200&&s.statusCode<300?0:1))});r.on('error',()=>process.exit(1));r.setTimeout(4000,()=>r.destroy(new Error('timeout')));r.end()
       interval: 5s
       timeout: 5s
       retries: 30

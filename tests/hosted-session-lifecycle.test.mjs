@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
+// Keep the loopback job-runner transport test in the main hosted-runtime suite.
+await import("./start-pilot-job-runner.test.mjs");
+
 // Contract test for the hosted (public multi-tenant) identity + session
 // lifecycle and the hosted broker/durable-job wiring. Following the repository
 // convention, the end-to-end route/DB flow is asserted against source so it can
