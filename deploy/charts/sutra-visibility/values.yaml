@@ -36,6 +36,18 @@ trivyReports:
 # image contents and does NOT require accessGlobalSecretsAndServiceAccount, which
 # stays false so Trivy is never granted read access to live cluster Secrets.
 trivy-operator:
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    privileged: false
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    capabilities:
+      drop:
+        - ALL
   operator:
     scanJobsConcurrentLimit: 1
     vulnerabilityScannerEnabled: true

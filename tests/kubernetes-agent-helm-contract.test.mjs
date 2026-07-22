@@ -97,6 +97,10 @@ test("helm renders the managed scanner by default and suppresses it when scanner
   assert.match(managed, /name: trivy-operator/u, "managed scanner should render by default");
   assert.match(managed, /OPERATOR_VULNERABILITY_SCANNER_ENABLED: "true"/u);
   assert.match(managed, /OPERATOR_EXPOSED_SECRET_SCANNER_ENABLED: "false"/u);
+  assert.match(managed, /runAsNonRoot: true/u);
+  assert.match(managed, /seccompProfile:\s*\n\s+type: RuntimeDefault/u);
+  assert.match(managed, /allowPrivilegeEscalation: false/u);
+  assert.match(managed, /capabilities:\s*\n\s+drop:\s*\n\s+- ALL/u);
   const unmanaged = helmTemplate("--set", "scanner.managed=false");
   assert.doesNotMatch(unmanaged ?? "", /name: trivy-operator/u, "scanner must be fully suppressed when unmanaged");
 });

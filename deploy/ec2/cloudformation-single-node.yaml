@@ -94,8 +94,8 @@ Conditions:
 Resources:
   # This is an egress-only host with no inbound rules. Its six explicit,
   # port-bounded destinations must reach dynamic AWS, Cloudflare, DNS and
-  # signed package endpoints; fixed destination CIDRs are not available.
-  # trivy:ignore:AWS-0104
+  # signed package endpoints; fixed destination CIDRs are not available. The
+  # path-scoped risk acceptance is documented in .trivyignore.yaml.
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
