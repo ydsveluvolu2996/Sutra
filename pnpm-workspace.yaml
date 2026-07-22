@@ -1,6 +1,11 @@
 packages:
   - "services/*"
 
+# pnpm 11's deploy command produces package-scoped production dependency
+# closures only when workspace injection is explicit. The runtime image uses
+# those closures instead of carrying the build workspace into production.
+injectWorkspacePackages: true
+
 overrides:
   postcss: 8.5.19
   sharp: 0.35.0

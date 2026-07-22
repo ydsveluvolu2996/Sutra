@@ -3,6 +3,7 @@ lockfileVersion: '9.0'
 settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
+  injectWorkspacePackages: true
 
 overrides:
   postcss: 8.5.19
@@ -27,6 +28,9 @@ importers:
       react-dom:
         specifier: 19.2.6
         version: 19.2.6(react@19.2.6)
+      wrangler:
+        specifier: 4.102.0
+        version: 4.102.0
     devDependencies:
       '@cloudflare/vite-plugin':
         specifier: 1.42.0
@@ -79,9 +83,6 @@ importers:
       vite:
         specifier: 8.0.16
         version: 8.0.16(@types/node@22.19.19)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.49.0)(tsx@4.23.1)
-      wrangler:
-        specifier: 4.102.0
-        version: 4.102.0
 
   services/aws-collector:
     dependencies:

@@ -130,7 +130,7 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" |
             docker login --username AWS --password-stdin "${registry}"
 
-      - name: Build and push an immutable application image
+      - name: Build and push an immutable scan candidate
         id: image
         env:
           AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
@@ -138,8 +138,11 @@ jobs:
         run: |
           set -euo pipefail
           registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          tagged_image="${registry}/${APP_ECR_REPOSITORY}:${tag}"
+          candidate_tag="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "${candidate_tag}" =~ ^candidate-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${release_tag}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          candidate_image="${registry}/${APP_ECR_REPOSITORY}:${candidate_tag}"
           docker buildx build \
             --file Dockerfile \
             --platform linux/amd64 \
@@ -148,17 +151,20 @@ jobs:
             --cache-from type=gha,scope=sutra-app \
             --cache-to type=gha,mode=max,scope=sutra-app \
             --push \
-            --tag "${tagged_image}" \
+            --tag "${candidate_image}" \
             .
           digest="$(aws ecr describe-images \
             --region "${AWS_REGION}" \
             --repository-name "${APP_ECR_REPOSITORY}" \
-            --image-ids "imageTag=${tag}" \
+            --image-ids "imageTag=${candidate_tag}" \
             --query 'imageDetails[0].imageDigest' \
             --output text)"
           [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
           image_ref="${registry}/${APP_ECR_REPOSITORY}@${digest}"
           [[ "${image_ref}" =~ ^${AWS_ACCOUNT_ID}\.dkr\.ecr\.${AWS_REGION}\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$ ]]
+          echo "candidate_tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
           echo "ref=${image_ref}" >> "${GITHUB_OUTPUT}"
 
       - name: Scan the exact application digest
@@ -170,6 +176,61 @@ jobs:
           ignore-unfixed: true
           exit-code: "1"
           hide-progress: true
+
+      - name: Promote the scanned digest to a retained release tag
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CANDIDATE_TAG: ${{ steps.image.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ steps.image.outputs.release_tag }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${CANDIDATE_TAG}" =~ ^candidate-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${RELEASE_TAG}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+          candidate="$(aws ecr batch-get-image \
+            --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${CANDIDATE_TAG}" \
+            --output json)"
+          jq -e '(.images | length) == 1 and ((.failures // []) | length) == 0' \
+            <<< "${candidate}" >/dev/null
+          source_digest="$(jq -r '.images[0].imageId.imageDigest' <<< "${candidate}")"
+          source_tag="$(jq -r '.images[0].imageId.imageTag' <<< "${candidate}")"
+          media_type="$(jq -r '.images[0].imageManifestMediaType' <<< "${candidate}")"
+          manifest="$(jq -r '.images[0].imageManifest' <<< "${candidate}")"
+          [[ "${source_digest}" == "${DIGEST}" ]]
+          [[ "${source_tag}" == "${CANDIDATE_TAG}" ]]
+          [[ "${media_type}" == "application/vnd.oci.image.index.v1+json" ]]
+          printf '%s' "${manifest}" | jq -e '
+            .schemaVersion == 2
+            and .mediaType == "application/vnd.oci.image.index.v1+json"
+            and any(.manifests[];
+              .platform.os == "linux" and .platform.architecture == "amd64")
+            and any(.manifests[];
+              .annotations["vnd.docker.reference.type"] == "attestation-manifest")
+          ' >/dev/null
+          manifest_digest="sha256:$(printf '%s' "${manifest}" | sha256sum | awk '{print $1}')"
+          [[ "${manifest_digest}" == "${DIGEST}" ]]
+
+          promoted_digest="$(aws ecr put-image \
+            --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" \
+            --image-manifest "${manifest}" \
+            --image-manifest-media-type "${media_type}" \
+            --image-tag "${RELEASE_TAG}" \
+            --image-digest "${DIGEST}" \
+            --query 'image.imageId.imageDigest' \
+            --output text)"
+          [[ "${promoted_digest}" == "${DIGEST}" ]]
+          retained_digest="$(aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${RELEASE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          [[ "${retained_digest}" == "${DIGEST}" ]]
 
       - name: Require the manually started host to be online in SSM
         env:
@@ -249,9 +310,11 @@ jobs:
       - name: Verify the public application and status endpoints
         env:
           IMAGE_REF: ${{ steps.image.outputs.ref }}
+          RELEASE_TAG: ${{ steps.image.outputs.release_tag }}
         run: |
           set -euo pipefail
-          for path in /api/healthz /login /status; do
+          [[ "${RELEASE_TAG}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          for path in /api/healthz /api/status /login /status /robots.txt /sitemap.xml; do
             code="$(curl --silent --show-error \
               --retry 12 --retry-delay 5 --retry-all-errors \
               --connect-timeout 10 --max-time 15 \
@@ -262,10 +325,15 @@ jobs:
               exit 1
             }
           done
+          robots="$(curl --silent --show-error --fail "${PUBLIC_ORIGIN}/robots.txt")"
+          sitemap="$(curl --silent --show-error --fail "${PUBLIC_ORIGIN}/sitemap.xml")"
+          grep -Fq "Sitemap: ${PUBLIC_ORIGIN}/sitemap.xml" <<< "${robots}"
+          grep -Fq "<loc>${PUBLIC_ORIGIN}/" <<< "${sitemap}"
           {
             echo "### Sutra EC2 release verified"
             echo
             echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Retained release tag: \`${RELEASE_TAG}\`"
             echo "- Public origin: ${PUBLIC_ORIGIN}"
             echo "- SSM deployment and all public health checks passed."
           } >> "${GITHUB_STEP_SUMMARY}"

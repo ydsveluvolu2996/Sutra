@@ -76,7 +76,8 @@
     "next": "16.2.6",
     "pg": "8.22.0",
     "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react-dom": "19.2.6",
+    "wrangler": "4.102.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.42.0",
@@ -95,8 +96,7 @@
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
-    "vite": "8.0.16",
-    "wrangler": "4.102.0"
+    "vite": "8.0.16"
   },
   "type": "module"
 }

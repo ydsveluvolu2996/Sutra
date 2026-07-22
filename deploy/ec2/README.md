@@ -25,6 +25,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `redeploy.sh` | Reapply the already-selected digest, migrate and health-check; no build |
 | `release-update.sh` | Stage a new immutable ECR digest, validate, deploy and roll back on failure |
 | `manual-host-control.sh` | SSO-only start, stop and status for the exact retained EC2 host |
+| `ecr-lifecycle-policy.json` | Retain three validated releases and age out failed scan candidates |
 | `Caddyfile` | Private HTTP origin, canonical public Host boundary and app-down `503` |
 | `cloudflared-config.yml.example` | Named-tunnel ingress contract; copied to ignored `.sutra/` storage |
 | `sutra.service` | Boot start; app-only stop for maintenance |
@@ -64,7 +65,10 @@ export ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 test "$ACCOUNT_ID" = 738663485493
 export ECR_REPOSITORY=sutra/app
 export ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-export RELEASE_TAG="sha-$(git rev-parse --short=12 HEAD)"
+export RELEASE_REVISION="$(git rev-parse HEAD)"
+export RELEASE_RUN="bootstrap-$(date -u +%Y%m%d%H%M%S)"
+export CANDIDATE_TAG="candidate-${RELEASE_REVISION}-${RELEASE_RUN}"
+export RELEASE_TAG="sha-${RELEASE_REVISION}-${RELEASE_RUN}"
 
 aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
   aws ecr create-repository --repository-name "$ECR_REPOSITORY" \
@@ -72,15 +76,49 @@ aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>
     --image-scanning-configuration scanOnPush=false \
     --encryption-configuration encryptionType=AES256 >/dev/null
 aws ecr put-lifecycle-policy --repository-name "$ECR_REPOSITORY" \
-  --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Keep three tagged immutable private-beta releases","selection":{"tagStatus":"tagged","tagPrefixList":["sha-"],"countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}},{"rulePriority":2,"description":"Clean unreferenced build artifacts after fourteen days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":14},"action":{"type":"expire"}}]}' >/dev/null
+  --lifecycle-policy-text file://deploy/ec2/ecr-lifecycle-policy.json >/dev/null
 aws ecr get-login-password | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 docker buildx build --platform linux/amd64 \
-  --provenance=true -t "$ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_TAG" --push .
+  --provenance=mode=max --sbom=true \
+  -t "$ECR_REGISTRY/$ECR_REPOSITORY:$CANDIDATE_TAG" --push .
 export IMAGE_DIGEST="$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
-  --image-ids imageTag="$RELEASE_TAG" \
+  --image-ids imageTag="$CANDIDATE_TAG" \
   --query 'imageDetails[0].imageDigest' --output text)"
 export SUTRA_APP_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY@$IMAGE_DIGEST"
+
+# Never create the retained sha-* release tag until the exact digest passes.
+trivy image --pkg-types os,library --severity HIGH,CRITICAL \
+  --ignore-unfixed --exit-code 1 "$SUTRA_APP_IMAGE"
+
+export CANDIDATE_RESPONSE="$(aws ecr batch-get-image \
+  --repository-name "$ECR_REPOSITORY" \
+  --image-ids imageTag="$CANDIDATE_TAG" --output json)"
+test "$(jq -r '.images[0].imageId.imageDigest' <<<"$CANDIDATE_RESPONSE")" = "$IMAGE_DIGEST"
+export IMAGE_MEDIA_TYPE="$(jq -r '.images[0].imageManifestMediaType' <<<"$CANDIDATE_RESPONSE")"
+export IMAGE_MANIFEST="$(jq -r '.images[0].imageManifest' <<<"$CANDIDATE_RESPONSE")"
+test "$IMAGE_MEDIA_TYPE" = application/vnd.oci.image.index.v1+json
+printf '%s' "$IMAGE_MANIFEST" | jq -e '
+  .schemaVersion == 2
+  and .mediaType == "application/vnd.oci.image.index.v1+json"
+  and any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")
+  and any(.manifests[]; .annotations["vnd.docker.reference.type"] == "attestation-manifest")
+' >/dev/null
+test "sha256:$(printf '%s' "$IMAGE_MANIFEST" | openssl dgst -sha256 -r | awk '{print $1}')" = "$IMAGE_DIGEST"
+test "$(aws ecr put-image --repository-name "$ECR_REPOSITORY" \
+  --image-manifest "$IMAGE_MANIFEST" \
+  --image-manifest-media-type "$IMAGE_MEDIA_TYPE" \
+  --image-tag "$RELEASE_TAG" --image-digest "$IMAGE_DIGEST" \
+  --query 'image.imageId.imageDigest' --output text)" = "$IMAGE_DIGEST"
 ```
+
+Normal releases use the manual GitHub Actions workflow documented in
+[`../../docs/ec2-continuous-delivery.md`](../../docs/ec2-continuous-delivery.md),
+which performs the same candidate, exact-digest scan and manifest-promotion
+sequence. The lifecycle policy's validated `sha-` rule must remain priority 1:
+that higher-priority match protects promoted images (which also retain their
+candidate tag) from the priority-2 candidate expiry rule. A scan failure never
+creates a `sha-` tag and its candidate ages out after one day. The GitHub role
+therefore does not need permission to delete any image or release tag.
 
 The named Tunnel is `sutra-prod`, UUID
 `c0766d48-bf0b-45d3-8a69-ffa167139e3d`. Its credential must already exist at
