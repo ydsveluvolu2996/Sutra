@@ -23,13 +23,14 @@ ruby -e '
   abort "CloudFormation Resources are missing" unless document["Resources"].is_a?(Hash)
 ' "$TEMPLATE"
 
-python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" <<'PY'
+python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" "$EC2/release-update.sh" <<'PY'
 from pathlib import Path
 import sys
 
 template = Path(sys.argv[1]).read_text(encoding="utf-8")
 backup = Path(sys.argv[2]).read_text(encoding="utf-8")
 restore = Path(sys.argv[3]).read_text(encoding="utf-8")
+release_update = Path(sys.argv[4]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -46,7 +47,10 @@ required_template = [
     "DeleteOnTermination: false",
     "AWS::Scheduler::Schedule",
     "PolicyName: DeterministicSsmManagedNodeCore",
-    "arn:${AWS::Partition}:iam::*:role/sutra/SutraReadOnlyRole",
+    "PolicyName: AssumeOnlyDedicatedSutraCustomerRoles",
+    "Sid: DenyAssumeRoleOutsideSutraRoleNamespace",
+    "NotResource:",
+    "arn:${AWS::Partition}:iam::*:role/sutra/*",
     "docker cp \"$RELEASE_CONTAINER:/app/deploy/ec2/.\"",
     "install -m 0755 deploy/ec2/release-update.sh /usr/local/sbin/sutra-release-update",
 ]
@@ -65,6 +69,7 @@ prohibited_template = [
     "git clone",
     "git -C /opt/sutra",
     "AmazonSSMManagedInstanceCore",
+    "arn:${AWS::Partition}:iam::*:role/*",
     "resolve:ssm:/aws/service/canonical/ubuntu",
 ]
 for fragment in prohibited_template:
@@ -84,6 +89,7 @@ for fragment in (
     "sha256sum",
     "SUTRA_BACKUP_MIN_LOCAL_COPIES",
     "s3 cp",
+    "/run/lock/sutra-data-mutation.lock",
 ):
     if fragment not in backup:
         raise SystemExit(f"Backup contract is missing: {fragment}")
@@ -93,9 +99,31 @@ for fragment in (
     "Preflight passed",
     "automatic rollback point",
     "preserve_stage=true",
+    "/run/lock/sutra-data-mutation.lock",
 ):
     if fragment not in restore:
         raise SystemExit(f"Restore contract is missing: {fragment}")
+for fragment in (
+    "archive_application_data",
+    "restore_application_data",
+    "application-data.tar.gz.sha256",
+    "The Sutra application did not quiesce",
+    "ALL_PROFILES_COMPOSE=",
+    "--profile \"*\"",
+    "recovering the prior application state and host bundle",
+    "--ulimit fsize=536870912:536870912",
+    "trap 'exit 130' INT",
+    "RELEASE_COMMITTED=true",
+    "/run/lock/sutra-data-mutation.lock",
+):
+    if fragment not in release_update:
+        raise SystemExit(f"Release rollback contract is missing: {fragment}")
+for fragment in (
+    "TARGET_STATE_DIR",
+    "Restoring the verified application-data snapshot for the selected release",
+):
+    if fragment in release_update:
+        raise SystemExit(f"Release update may not replace current customer state from history: {fragment}")
 PY
 
 if [[ "${1:-}" == --online ]]; then

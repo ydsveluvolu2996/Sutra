@@ -10,7 +10,7 @@ Metadata:
       - Label: { default: Network }
         Parameters: [VpcId, PublicSubnetId]
       - Label: { default: Compute and cost guardrails }
-        Parameters: [AmiId, InstanceType, RootVolumeGiB, MaximumRuntimeHours, EnableDailyAutoStop, DailyStopSchedule, DailyStopTimezone]
+        Parameters: [AmiId, InstanceType, RootVolumeGiB, EnableMaximumRuntimeStop, MaximumRuntimeHours, EnableDailyAutoStop, DailyStopSchedule, DailyStopTimezone]
       - Label: { default: Sutra deployment }
         Parameters: [SutraAppImage, SutraDomain]
       - Label: { default: Cloudflare Tunnel }
@@ -52,11 +52,16 @@ Parameters:
     MinValue: 1
     MaxValue: 24
     Description: >-
-      Safety timer stops the instance this many hours after every boot. Set the
-      CloudFormation parameter deliberately; there is no unlimited default.
+      When EnableMaximumRuntimeStop is true, the safety timer stops the instance
+      this many hours after boot. It is ignored in manual-control mode.
+  EnableMaximumRuntimeStop:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Opt-in host-local maximum-runtime stop timer. Disabled for manual control.
   EnableDailyAutoStop:
     Type: String
-    Default: "true"
+    Default: "false"
     AllowedValues: ["true", "false"]
     Description: Enables a second EventBridge Scheduler stop guardrail.
   DailyStopSchedule:
@@ -192,15 +197,20 @@ Resources:
                 Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
                 Resource:
                   Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/app
-        - PolicyName: AssumeOnlyCustomerSutraReadOnlyRole
+        - PolicyName: AssumeOnlyDedicatedSutraCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              - Sid: AssumeOnlyNamedCustomerCollectorRoles
+              - Sid: DenyAssumeRoleOutsideSutraRoleNamespace
+                Effect: Deny
+                Action: sts:AssumeRole
+                NotResource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
+              - Sid: AssumeDedicatedSutraCustomerRolesOnly
                 Effect: Allow
                 Action: sts:AssumeRole
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/SutraReadOnlyRole
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
         - PolicyName: ReadOnlyExactCloudflareTunnelCredential
           PolicyDocument:
             Version: "2012-10-17"
@@ -365,14 +375,15 @@ Resources:
 
               install -m 0644 deploy/ec2/sutra.service /etc/systemd/system/sutra.service
               install -m 0755 deploy/ec2/release-update.sh /usr/local/sbin/sutra-release-update
-              cat > /etc/systemd/system/sutra-max-runtime.service <<'UNIT'
+              if [ '${EnableMaxRuntime}' = true ]; then
+                cat > /etc/systemd/system/sutra-max-runtime.service <<'UNIT'
               [Unit]
               Description=Stop this cost-bounded Sutra EC2 host
               [Service]
               Type=oneshot
               ExecStart=/usr/sbin/shutdown -h now
               UNIT
-              cat > /etc/systemd/system/sutra-max-runtime.timer <<'UNIT'
+                cat > /etc/systemd/system/sutra-max-runtime.timer <<'UNIT'
               [Unit]
               Description=Maximum Sutra runtime guardrail
               [Timer]
@@ -382,13 +393,20 @@ Resources:
               [Install]
               WantedBy=timers.target
               UNIT
+                systemctl daemon-reload
+                systemctl enable --now sutra-max-runtime.timer
+              else
+                systemctl disable --now sutra-max-runtime.timer >/dev/null 2>&1 || true
+                rm -f /etc/systemd/system/sutra-max-runtime.timer /etc/systemd/system/sutra-max-runtime.service
+                systemctl daemon-reload
+              fi
 
-              systemctl daemon-reload
-              systemctl enable --now sutra.service sutra-max-runtime.timer
+              systemctl enable --now sutra.service
             - AppImage: { Ref: SutraAppImage }
               CollectorPrincipal:
                 Fn::GetAtt: [InstanceRole, Arn]
               Domain: { Ref: SutraDomain }
+              EnableMaxRuntime: { Ref: EnableMaximumRuntimeStop }
               MaxRuntime: { Ref: MaximumRuntimeHours }
               TunnelCredentialsParameter: { Ref: CloudflareTunnelCredentialsParameterName }
 
@@ -443,7 +461,9 @@ Outputs:
       mutate this historical CloudFormation parameter.
     Value: { Ref: SutraAppImage }
   CollectorPrincipalArn:
-    Description: Exact principal customers allow to assume their SutraReadOnlyRole.
+    Description: >-
+      Exact principal customers allow to assume their dedicated role under the
+      reserved /sutra/ IAM path.
     Value:
       Fn::GetAtt: [InstanceRole, Arn]
   Administration:

@@ -113,3 +113,87 @@ test("the in-cluster security gate runs with an immutable root filesystem", () =
     "a read-only gate must not attempt to mutate the base image",
   );
 });
+
+test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host SSM and public verification", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/ec2-private-beta-release.yml", import.meta.url),
+    "utf8",
+  );
+  const role = readFileSync(
+    new URL("../infrastructure/github-ec2-release-role.yaml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s{2}(push|pull_request):\s*$/mu);
+  assert.match(workflow, /environment:\s*\n\s+name: ec2-private-beta-release/u);
+  assert.match(workflow, /GITHUB_REF.+refs\/heads\/main/u);
+  assert.doesNotMatch(workflow, /GITHUB_REF_PROTECTED/u);
+  assert.match(workflow, /id-token: write/u);
+  assert.match(workflow, /allowed-account-ids:/u);
+  assert.match(workflow, /role-duration-seconds: 3600/u);
+  assert.match(workflow, /#RELEASE_REASON.+-le 100/u);
+  assert.match(workflow, /cancel-in-progress: false/u);
+  assert.match(workflow, /pnpm install --frozen-lockfile/u);
+  assert.match(workflow, /pnpm security:secrets/u);
+  assert.match(workflow, /pnpm typecheck/u);
+  assert.match(workflow, /pnpm typecheck:collector/u);
+  assert.match(workflow, /pnpm lint/u);
+  assert.match(workflow, /pnpm test:templates/u);
+  assert.match(workflow, /deploy\/ec2\/validate-ops\.sh/u);
+  assert.match(workflow, /imageTagMutability/u);
+  assert.match(workflow, /tag_mutability.+IMMUTABLE/u);
+  assert.match(workflow, /imageScanningConfiguration\.scanOnPush/u);
+  assert.match(workflow, /--provenance=mode=max/u);
+  assert.match(workflow, /--sbom=true/u);
+  assert.match(workflow, /aquasecurity\/trivy-action@[a-f0-9]{40}/u);
+  assert.match(workflow, /sutra\/app@sha256:\[a-f0-9\]\{64\}/u);
+  assert.match(workflow, /aws ssm get-connection-status/u);
+  assert.match(workflow, /aws ssm send-command/u);
+  assert.match(workflow, /aws ssm get-command-invocation/u);
+  assert.match(workflow, /\/api\/healthz \/login \/status/u);
+  assert.doesNotMatch(
+    workflow,
+    /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws ssm start-session|AWS-RunShellScript|aws ec2 (?:start|stop)-instances/u,
+  );
+
+  assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
+  assert.match(
+    role,
+    /token\.actions\.githubusercontent\.com:sub: !Sub repo:\$\{GitHubRepository\}:environment:\$\{ReleaseEnvironment\}/u,
+  );
+  assert.match(role, /AllowedValues:\s*\n\s+- ec2-private-beta-release/u);
+  assert.match(role, /Action: ssm:GetConnectionStatus/u);
+  assert.match(role, /Action: ssm:SendCommand/u);
+  assert.match(role, /Sutra-DeployImmutableRelease/u);
+  assert.match(role, /interpolationType: ENV_VAR/u);
+  assert.match(role, /\/usr\/local\/sbin\/sutra-release-update/u);
+  assert.match(role, /instance\/\$\{TargetInstanceId\}/u);
+  assert.match(role, /Action: ssm:GetCommandInvocation/u);
+  assert.match(role, /repository\/\$\{AppRepositoryName\}/u);
+  assert.doesNotMatch(
+    role,
+    /ssm:StartSession|ec2:(?:Start|Stop)Instances|ecr:DeleteRepository|ecr:BatchDeleteImage|iam:PassRole/u,
+  );
+});
+
+test("private-beta host start and stop remain explicit, SSO-only, and exact-instance bounded", () => {
+  const control = readFileSync(
+    new URL("../deploy/ec2/manual-host-control.sh", import.meta.url),
+    "utf8",
+  );
+  const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+
+  assert.match(control, /manual-host-control\.sh <start\|stop\|status>/u);
+  assert.match(control, /EXPECTED_ACCOUNT="738663485493"/u);
+  assert.match(control, /INSTANCE_ID="i-0a7af7b477174a14b"/u);
+  assert.match(control, /SUTRA_AWS_ADMIN_PROFILE:-sutra-administrator/u);
+  assert.match(control, /aws sso login --profile/u);
+  assert.match(control, /AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN/u);
+  assert.match(control, /ec2 start-instances --instance-ids "\$INSTANCE_ID"/u);
+  assert.match(control, /ec2 stop-instances --instance-ids "\$INSTANCE_ID"/u);
+  assert.doesNotMatch(control, /scheduler|cron\(|at\s/u);
+  assert.match(packageJson, /"cloud:status": "bash deploy\/ec2\/manual-host-control\.sh status"/u);
+  assert.match(packageJson, /"cloud:start": "bash deploy\/ec2\/manual-host-control\.sh start"/u);
+  assert.match(packageJson, /"cloud:stop": "bash deploy\/ec2\/manual-host-control\.sh stop"/u);
+});

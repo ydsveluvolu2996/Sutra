@@ -24,6 +24,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `bootstrap.sh` | Idempotent install, secret generation, immutable pulls and first launch |
 | `redeploy.sh` | Reapply the already-selected digest, migrate and health-check; no build |
 | `release-update.sh` | Stage a new immutable ECR digest, validate, deploy and roll back on failure |
+| `manual-host-control.sh` | SSO-only start, stop and status for the exact retained EC2 host |
 | `Caddyfile` | Private HTTP origin, canonical public Host boundary and app-down `503` |
 | `cloudflared-config.yml.example` | Named-tunnel ingress contract; copied to ignored `.sutra/` storage |
 | `sutra.service` | Boot start; app-only stop for maintenance |
@@ -31,6 +32,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `validate-ops.sh` | CloudFormation and backup/restore static checks; optional AWS validation |
 | `backup-prod.sh`, `restore-prod.sh` | Optional encrypted coordinated backup/restore; disabled by default |
 | `sutra-backup.*` | Optional backup unit/timer; do not enable until configured and drilled |
+| `configure-invitation-email.sh` | Hidden-prompt invitation-email setup; keeps API keys out of CloudFormation and shell history |
 
 ## Fixed pilot defaults
 
@@ -39,8 +41,8 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | Region | `ap-south-1` |
 | Instance | `t3a.large` (2 vCPU, 8 GiB), standard CPU credits |
 | Root disk | 15 GiB encrypted gp3, retained on stack deletion |
-| Runtime limit | 6 hours after every boot |
-| Daily stop | 23:30 `Asia/Kolkata` through EventBridge Scheduler |
+| Runtime limit | Disabled; start and stop are explicit operator actions |
+| Daily stop | Disabled; EventBridge Scheduler is opt-in only |
 | Public origin | `https://www.sutracmdb.com` through Cloudflare only |
 | Edge Worker | `sutra-edge-fallback`; apex and `www` routes |
 | AWS Budget | `SutraPrivateBeta-20USD`; $20 gross, credits excluded; not a hard cap |
@@ -97,8 +99,9 @@ aws cloudformation deploy \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides \
     VpcId="$VPC_ID" PublicSubnetId="$PUBLIC_SUBNET_ID" \
-    InstanceType=t3a.large RootVolumeGiB=15 MaximumRuntimeHours=6 \
-    EnableDailyAutoStop=true 'DailyStopSchedule=cron(30 23 * * ? *)' \
+    InstanceType=t3a.large RootVolumeGiB=15 \
+    EnableMaximumRuntimeStop=false MaximumRuntimeHours=6 \
+    EnableDailyAutoStop=false 'DailyStopSchedule=cron(30 23 * * ? *)' \
     DailyStopTimezone=Asia/Kolkata \
     SutraAppImage="$SUTRA_APP_IMAGE" \
     SutraDomain=sutracmdb.com \
@@ -107,9 +110,16 @@ aws cloudformation deploy \
 
 CloudFormation user data installs the runtime, pulls the approved image by
 digest, extracts only its host deployment bundle, materializes the tunnel
-credential from SSM, runs `bootstrap.sh`, and enables `sutra.service` plus the
-six-hour runtime timer. It never clones GitHub and does not enable the optional
+credential from SSM, runs `bootstrap.sh`, and enables `sutra.service`. Both
+automatic EC2 stop mechanisms are opt-in and are disabled in the current
+manual-control phase. It never clones GitHub and does not enable the optional
 backup timer.
+
+After the app is healthy, configure a provider-verified invitation sender with
+`sudo deploy/ec2/configure-invitation-email.sh`. The helper stores the API key
+only in ignored mode-`0600` runtime configuration on encrypted EBS and recreates
+the app container. See [membership invitation delivery](../../docs/invitation-delivery.md)
+for the truthful provider-acceptance and resend contract.
 
 ## Direct bootstrap and future deploys
 
@@ -140,9 +150,13 @@ sudo /usr/local/sbin/sutra-release-update "$NEW_SUTRA_APP_IMAGE"
 
 `release-update.sh` extracts and validates the new bundle, preserves operator
 settings, runs migrations, waits for service health, and rolls back the bundle
-and selected image on failure. Named PostgreSQL and application volumes remain
-untouched. Mutable tags, GitHub tokens and host builds are deliberately
-unsupported.
+and selected image on failure. PostgreSQL remains on its additive migration
+path. Before the change, the script quiesces application writers and captures a
+bounded, checksum-verified application-data snapshot alongside the prior image
+bundle. A failed release restores that exact pre-release state. Selecting an
+older digest never substitutes a historical customer-data snapshot: the older
+image must read current state or the release fails back to the current image and
+data. Mutable tags, GitHub tokens and host builds are deliberately unsupported.
 
 ## Start, stop, and maintenance behavior
 
@@ -171,8 +185,9 @@ origin request into the branded maintenance page, with `503`, `Retry-After`, and
 cache customer data. This behavior depends on all three DNS records remaining
 proxied and both Worker routes remaining active.
 
-The six-hour timer stops the host after every boot. The 23:30 IST Scheduler is a
-second guardrail if the machine was started later. Neither deletes the EBS disk.
+During the manual-control phase, neither the host-local maximum-runtime timer nor
+the EventBridge Scheduler is enabled. Use `pnpm cloud:start`, `pnpm cloud:stop`
+and `pnpm cloud:status`; stopping the instance does not delete the EBS disk.
 
 ## Runtime verification
 
@@ -190,8 +205,8 @@ After deployment, in SSM:
 
 ```bash
 sudo cloud-init status --wait
-sudo systemctl is-active sutra.service sutra-max-runtime.timer
-sudo systemctl list-timers sutra-max-runtime.timer
+sudo systemctl is-active sutra.service
+sudo systemctl is-enabled sutra-max-runtime.timer || true # expected disabled
 cd /opt/sutra
 CE='sudo docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env'
 $CE ps

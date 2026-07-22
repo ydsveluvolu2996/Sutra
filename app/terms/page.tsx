@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/terms",
   title: "Terms of Use",
   description: "The terms governing use of Sutra — the evidence-backed cloud-operations platform for AWS managed service providers.",
-};
+});
 
 export default function TermsPage() {
   return (

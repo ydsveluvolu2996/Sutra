@@ -345,16 +345,27 @@ test("connection creation cannot run when public template verification fails", a
   assert.equal(connectionCreations, 0);
 });
 
-test("connection route verifies the artifact before ExternalId generation and persistence", () => {
+test("connection route authenticates template handoffs and does not require that artifact for customer-managed IaC", () => {
   const routeStart = CONNECTION_ROUTE_SOURCE.indexOf("export async function POST");
-  const verification = CONNECTION_ROUTE_SOURCE.indexOf(
-    "return await withVerifiedPublicCustomerRoleTemplate(",
-    routeStart,
-  );
+  const handoff = CONNECTION_ROUTE_SOURCE.indexOf("const createHandoff =", routeStart);
   const generation = CONNECTION_ROUTE_SOURCE.indexOf("generateExternalId();", routeStart);
   const persistence = CONNECTION_ROUTE_SOURCE.indexOf("createConnectionDraft({", routeStart);
+  const customerManagedBranch = CONNECTION_ROUTE_SOURCE.indexOf(
+    'if (body.roleProvisioningMode === "customer_managed")',
+    routeStart,
+  );
+  const customerManagedHandoff = CONNECTION_ROUTE_SOURCE.indexOf("createHandoff(null)", customerManagedBranch);
+  const verification = CONNECTION_ROUTE_SOURCE.indexOf(
+    "return await withVerifiedPublicCustomerRoleTemplate(",
+    customerManagedBranch,
+  );
+  const verifiedCallback = CONNECTION_ROUTE_SOURCE.indexOf("createHandoff,", verification);
   assert.ok(routeStart >= 0);
-  assert.ok(verification > routeStart);
-  assert.ok(generation > verification);
+  assert.ok(handoff > routeStart);
+  assert.ok(generation > handoff);
   assert.ok(persistence > generation);
+  assert.ok(customerManagedBranch > persistence);
+  assert.ok(customerManagedHandoff > customerManagedBranch);
+  assert.ok(verification > customerManagedHandoff);
+  assert.ok(verifiedCallback > verification);
 });

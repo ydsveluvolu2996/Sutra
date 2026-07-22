@@ -4,7 +4,9 @@ import {
   computeSnapshotSha256,
   parseCollectorHealth,
   parsePilotSnapshot,
+  parseVerificationResponse,
 } from "../lib/pilot-boundary.ts";
+import { CUSTOMER_ROLE_METADATA_ACTIONS } from "../lib/aws-customer-role-artifacts.ts";
 import {
   describeLatestCollection,
   describeLiveSyncFailure,
@@ -83,6 +85,10 @@ const connection: PilotConnection = {
   status: "active",
   enabledRegions: ["us-east-1"],
   permissionPackVersion: "aws-pilot-v1",
+  roleProvisioningMode: "sutra_template",
+  expectedRolePath: "/sutra/",
+  expectedRoleName: "SutraReadOnlyRole",
+  permissionCapabilities: null,
   lastValidatedAt: "2026-07-16T10:00:00.000Z",
   lastSuccessfulSyncAt: null,
   createdAt: "2026-07-16T09:00:00.000Z",
@@ -188,6 +194,52 @@ describe("collector boundary validation", () => {
         accountId: payload.accountId,
         partition: payload.partition,
       }),
+      /failed Sutra validation/u,
+    );
+  });
+
+  it("binds verification evidence to the exact role, session, and declared capability partition", () => {
+    const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
+    const roleSessionName = "sutra-verify-123";
+    const response = {
+      verified: true,
+      accountId: "123456789012",
+      roleArn,
+      roleSessionName,
+      callerIdentityArn:
+        `arn:aws:sts::123456789012:assumed-role/SutraReadOnlyRole/${roleSessionName}`,
+      missingExternalIdDenied: true,
+      wrongExternalIdDenied: true,
+      trustPolicyAttested: true,
+      permissionPolicyAttested: true,
+      sessionPolicyApplied: true,
+      permissionPackVersion: "standard-2026-07.2",
+      capabilityAssessment: {
+        grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
+        missingActions: [],
+      },
+    };
+    const expected = {
+      accountId: "123456789012",
+      partition: "aws" as const,
+      roleArn,
+      sessionNamePrefix: "sutra-",
+    };
+
+    assert.equal(parseVerificationResponse(response, expected).roleSessionName, roleSessionName);
+    assert.throws(
+      () => parseVerificationResponse({ ...response, roleArn: "arn:aws:iam::123456789012:role/sutra/OtherRole" }, expected),
+      /failed Sutra validation/u,
+    );
+    assert.throws(
+      () => parseVerificationResponse({ ...response, roleSessionName: "sutra-other-session" }, expected),
+      /failed Sutra validation/u,
+    );
+    assert.throws(
+      () => parseVerificationResponse({
+        ...response,
+        capabilityAssessment: { grantedActions: ["sts:GetCallerIdentity"], missingActions: [] },
+      }, expected),
       /failed Sutra validation/u,
     );
   });

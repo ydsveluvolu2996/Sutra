@@ -1,0 +1,145 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Least-privilege GitHub Actions OIDC role for immutable Sutra application
+  releases to one existing ECR repository and one exact SSM-managed EC2 host.
+
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    Description: Existing account-local token.actions.githubusercontent.com OIDC provider ARN.
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
+  GitHubRepository:
+    Type: String
+    Default: ydsveluvolu2996/Sutra
+    Description: Exact, case-sensitive owner/repository slug.
+    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  ReleaseEnvironment:
+    Type: String
+    Default: ec2-private-beta-release
+    AllowedValues:
+      - ec2-private-beta-release
+  AppRepositoryName:
+    Type: String
+    Default: sutra/app
+    AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
+    Description: Existing immutable ECR repository used only for Sutra application releases.
+  TargetInstanceId:
+    Type: String
+    AllowedPattern: ^i-[0-9a-f]{17}$
+    Description: Exact SSM-managed Sutra EC2 instance that this role may update.
+
+Resources:
+  ImmutableReleaseDocument:
+    Type: AWS::SSM::Document
+    Properties:
+      Name: Sutra-DeployImmutableRelease
+      DocumentType: Command
+      DocumentFormat: YAML
+      TargetType: /AWS::EC2::Instance
+      UpdateMethod: NewVersion
+      Tags:
+        - Key: sutra:component
+          Value: ec2-private-beta-release
+        - Key: sutra:managed-by
+          Value: cloudformation
+      Content:
+        schemaVersion: "2.2"
+        description: Deploy one validated immutable Sutra ECR digest.
+        parameters:
+          ImageRef:
+            type: String
+            description: Full account-local sutra/app digest reference.
+            interpolationType: ENV_VAR
+            allowedPattern: '^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$'
+        mainSteps:
+          - action: aws:runShellScript
+            name: deployImmutableSutraRelease
+            precondition:
+              StringEquals: [platformType, Linux]
+            inputs:
+              timeoutSeconds: "1800"
+              runCommand:
+                - set -eu
+                - 'printf "%s\n" "${SSM_ImageRef:-}" | grep -Eq ''^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$'''
+                - 'sudo /usr/local/sbin/sutra-release-update "$SSM_ImageRef"'
+
+  GitHubEc2ReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      Description: >-
+        Short-lived GitHub OIDC role scoped to the protected Sutra EC2 private-beta
+        release environment, one ECR repository and one EC2 managed node.
+      Tags:
+        - Key: sutra:component
+          Value: ec2-private-beta-release
+        - Key: sutra:managed-by
+          Value: cloudformation
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${ReleaseEnvironment}
+      Policies:
+        - PolicyName: PushOnlyImmutableSutraApplicationRelease
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ObtainShortLivedEcrAuthorization
+                Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Sid: PushAndVerifyOnlySutraAppRepository
+                Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+        - PolicyName: DeployOnlyToExactSutraManagedNode
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadExactManagedNodeConnection
+                Effect: Allow
+                Action: ssm:GetConnectionStatus
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${TargetInstanceId}
+              - Sid: SendOnlyImmutableReleaseDocumentToExactHost
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource:
+                  - Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:document/${ImmutableReleaseDocument}
+                  - Fn::Sub: arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${TargetInstanceId}
+              - Sid: ReadCommandResult
+                Effect: Allow
+                Action: ssm:GetCommandInvocation
+                Resource: "*"
+
+Outputs:
+  GitHubEc2ReleaseRoleArn:
+    Description: Configure the protected GitHub environment variable AWS_ROLE_ARN with this value.
+    Value: !GetAtt GitHubEc2ReleaseRole.Arn
+  AppEcrRepositoryArn:
+    Description: Repository boundary enforced by the role.
+    Value:
+      Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+  TargetInstanceId:
+    Description: Managed-node boundary enforced by the role.
+    Value: !Ref TargetInstanceId
+  ImmutableReleaseDocumentName:
+    Description: Fixed command document accepted by the release role.
+    Value: !Ref ImmutableReleaseDocument

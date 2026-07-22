@@ -48,7 +48,11 @@ import {
   type LocalScheduleRecord,
   type LocalJobStateStore,
 } from "./local-job-state.js";
-import { createWorkloadIdentityRoleBroker, parseIamRoleArn } from "./role-broker.js";
+import {
+  createWorkloadIdentityRoleBroker,
+  IMPLEMENTED_READ_ACTIONS,
+  parseIamRoleArn,
+} from "./role-broker.js";
 import { runSandboxIdentityPreflight } from "./aws-sandbox-preflight.js";
 import {
   RequestAuthenticationError,
@@ -75,6 +79,9 @@ const RESPONSE_LIMIT = 12 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
+const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
+const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
+const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
   /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|disable|offboard)$/;
@@ -1031,7 +1038,11 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07",
+        permissionPackVersion: "standard-2026-07.2",
+        capabilityAssessment: {
+          grantedActions: [...IMPLEMENTED_READ_ACTIONS],
+          missingActions: [],
+        },
       };
       await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
       return verificationResponse(verification);
@@ -1803,8 +1814,20 @@ export function normalizeCollectorCoverage(
 }
 
 function parseRegistration(body: string, pathConnectionId: string) {
+  let candidate: unknown;
+  try {
+    candidate = JSON.parse(body) as unknown;
+  } catch {
+    throw invalidRequest();
+  }
+  const hasRoleContract =
+    typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) &&
+    Object.hasOwn(candidate, "roleProvisioningMode");
   const record = exactJson(body, [
     "tenantId", "connectionId", "accountId", "partition", "roleArn", "externalId", "enabledRegions",
+    ...(hasRoleContract
+      ? ["roleProvisioningMode", "expectedRolePath", "expectedRoleName"]
+      : []),
   ]);
   if (
     typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId) ||
@@ -1814,6 +1837,21 @@ function parseRegistration(body: string, pathConnectionId: string) {
     (record.partition !== "aws" && record.partition !== "aws-us-gov" && record.partition !== "aws-cn") ||
     typeof record.roleArn !== "string" ||
     typeof record.externalId !== "string" || !EXTERNAL_ID.test(record.externalId) ||
+    (hasRoleContract &&
+      (record.roleProvisioningMode !== "sutra_template" &&
+        record.roleProvisioningMode !== "customer_managed")) ||
+    (hasRoleContract &&
+      (typeof record.expectedRolePath !== "string" ||
+        !ROLE_PATH.test(record.expectedRolePath) ||
+        record.expectedRolePath.length > 512)) ||
+    (hasRoleContract &&
+      (typeof record.expectedRoleName !== "string" || !ROLE_NAME.test(record.expectedRoleName))) ||
+    (record.roleProvisioningMode === "sutra_template" &&
+      (record.expectedRolePath !== "/sutra/" || record.expectedRoleName !== "SutraReadOnlyRole")) ||
+    (record.roleProvisioningMode === "customer_managed" &&
+      typeof record.expectedRoleName === "string" &&
+      (UNSAFE_ROLE_NAME.test(record.expectedRoleName) ||
+        record.expectedRoleName.toLowerCase() === "organizationaccountaccessrole")) ||
     !isValidAwsRegionSelection(record.enabledRegions, record.partition)
   ) {
     throw invalidRequest();
@@ -1834,6 +1872,15 @@ function parseRegistration(body: string, pathConnectionId: string) {
     externalId: record.externalId,
     enabledRegions: record.enabledRegions as string[],
     sessionNamePrefix: "sutra-",
+    ...(hasRoleContract
+      ? {
+          roleProvisioningMode: record.roleProvisioningMode as
+            | "sutra_template"
+            | "customer_managed",
+          expectedRolePath: record.expectedRolePath as string,
+          expectedRoleName: record.expectedRoleName as string,
+        }
+      : {}),
   };
 }
 
@@ -1972,6 +2019,8 @@ function verificationResponse(verification: OnboardingTrustVerification): unknow
   return {
     verified: true,
     accountId: verification.accountId,
+    roleArn: verification.roleArn,
+    roleSessionName: verification.roleSessionName,
     callerIdentityArn: verification.callerIdentityArn,
     missingExternalIdDenied: true,
     wrongExternalIdDenied: true,
@@ -1979,6 +2028,7 @@ function verificationResponse(verification: OnboardingTrustVerification): unknow
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
     permissionPackVersion: verification.permissionPackVersion,
+    capabilityAssessment: verification.capabilityAssessment,
   };
 }
 
@@ -2618,6 +2668,7 @@ function safeHttpError(error: unknown): LocalHttpError {
   }
   if (error instanceof CollectorError) {
     const mapped = new Map<string, string>([
+      ["ASSUME_ROLE_DENIED", "ASSUME_ROLE_DENIED"],
       ["ASSUME_ROLE_FAILED", "ASSUME_ROLE_FAILED"],
       ["CALLER_IDENTITY_MISMATCH", "CALLER_IDENTITY_MISMATCH"],
       ["NEGATIVE_PROBE_INCONCLUSIVE", "NEGATIVE_PROBE_INCONCLUSIVE"],
@@ -2625,7 +2676,7 @@ function safeHttpError(error: unknown): LocalHttpError {
       ["CONNECTION_NOT_FOUND", "CONNECTION_NOT_FOUND"],
     ]).get(error.code);
     return new LocalHttpError(
-      error.code === "CONNECTION_NOT_FOUND" ? 404 : 400,
+      error.code === "CONNECTION_NOT_FOUND" ? 404 : error.code === "ASSUME_ROLE_DENIED" ? 403 : 400,
       mapped ?? "COLLECTION_FAILED",
       collectorMessage(mapped),
     );
@@ -2642,6 +2693,7 @@ function safeHttpError(error: unknown): LocalHttpError {
 
 function collectorMessage(code: string | undefined): string {
   const messages: Record<string, string> = {
+    ASSUME_ROLE_DENIED: "AWS denied the customer role session; verify that the role and trust policy still exist and match this connection",
     ASSUME_ROLE_FAILED: "AWS rejected the customer role session",
     CALLER_IDENTITY_MISMATCH: "The assumed identity did not match the registered role and account",
     NEGATIVE_PROBE_INCONCLUSIVE: "The ExternalId trust-policy probes were inconclusive",

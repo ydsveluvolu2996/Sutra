@@ -35,7 +35,7 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.2");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -105,8 +105,8 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.2/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.2/u);
 
   const implemented = statementActions(infrastructure, "ImplementedMetadataApis");
   const trust = statementActions(infrastructure, "TrustContractAttestation");
@@ -115,9 +115,13 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.equal(implemented.includes("lambda:ListFunctions"), false);
 });
 
-test("local collector role can only assume the fixed Sutra customer role", async () => {
+test("local collector role can assume only dedicated roles in the Sutra IAM namespace", async () => {
   const template = await readFile(
     resolve(root, "infrastructure/local-collector-role.yaml"),
+    "utf8",
+  );
+  const hostedTemplate = await readFile(
+    resolve(root, "deploy/ec2/cloudformation-single-node.yaml"),
     "utf8",
   );
   const boundary = JSON.parse(await readFile(
@@ -126,11 +130,15 @@ test("local collector role can only assume the fixed Sutra customer role", async
   ));
 
   assert.match(template, /Action: sts:AssumeRole/);
-  assert.match(template, /CustomerRoleName:[\s\S]+AllowedValues:\s*\n\s*- SutraReadOnlyRole/u);
   assert.match(
     template,
-    /arn:\$\{AWS::Partition\}:iam::\*:role\/sutra\/\$\{CustomerRoleName\}/,
+    /NotResource:\s*\n\s*Fn::Sub: arn:\$\{AWS::Partition\}:iam::\*:role\/sutra\/\*/u,
   );
+  assert.match(
+    template,
+    /Resource:\s*\n\s*Fn::Sub: arn:\$\{AWS::Partition\}:iam::\*:role\/sutra\/\*/u,
+  );
+  assert.doesNotMatch(template, /CustomerRoleName/u);
   assert.doesNotMatch(template, /Action:\s*['"]?\*['"]?/);
   assert.doesNotMatch(template, /Principal:\s*['"]?\*['"]?/);
   assert.doesNotMatch(template, /AccessKey/);
@@ -149,19 +157,53 @@ test("local collector role can only assume the fixed Sutra customer role", async
         Resource: "*",
       },
       {
-        Sid: "DenyAssumeRoleOutsideFixedCustomerRole",
+        Sid: "DenyAssumeRoleOutsideSutraRoleNamespace",
         Effect: "Deny",
         Action: "sts:AssumeRole",
-        NotResource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+        NotResource: "arn:aws:iam::*:role/sutra/*",
       },
       {
-        Sid: "AssumeFixedSutraCustomerRoleOnly",
+        Sid: "AssumeDedicatedSutraCustomerRolesOnly",
         Effect: "Allow",
         Action: "sts:AssumeRole",
-        Resource: "arn:aws:iam::*:role/sutra/SutraReadOnlyRole",
+        Resource: "arn:aws:iam::*:role/sutra/*",
       },
     ],
   });
+
+  const allowedResource = boundary.Statement[2].Resource;
+  const namespacePattern = new RegExp(
+    `^${allowedResource.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&").replace(/\\\*/gu, ".*")}$`,
+    "u",
+  );
+  assert.equal(
+    namespacePattern.test("arn:aws:iam::123456789012:role/sutra/CustomerSecurityCollector"),
+    true,
+  );
+  assert.equal(
+    namespacePattern.test("arn:aws:iam::123456789012:role/sutra/acme/security/ReadOnlyCollector"),
+    true,
+  );
+  assert.equal(
+    namespacePattern.test("arn:aws:iam::123456789012:role/AdministratorAccess"),
+    false,
+  );
+  assert.equal(
+    namespacePattern.test("arn:aws:iam::123456789012:role/operations/SharedCollector"),
+    false,
+  );
+  assert.equal(
+    namespacePattern.test("arn:aws:iam::123456789012:role/sutrax/LookalikeCollector"),
+    false,
+  );
+
+  for (const sourceTemplate of [template, hostedTemplate]) {
+    assert.match(sourceTemplate, /Sid: DenyAssumeRoleOutsideSutraRoleNamespace/u);
+    assert.match(sourceTemplate, /Sid: AssumeDedicatedSutraCustomerRolesOnly/u);
+    assert.match(sourceTemplate, /arn:\$\{AWS::Partition\}:iam::\*:role\/sutra\/\*/u);
+    assert.doesNotMatch(sourceTemplate, /arn:\$\{AWS::Partition\}:iam::\*:role\/\*(?:\s|$)/u);
+    assert.doesNotMatch(sourceTemplate, /role\/AdministratorAccess/u);
+  }
 });
 
 test("SutraOperator permission-set policy is the exact account-scoped live contract", async () => {
@@ -170,7 +212,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "308f89a15bf382fec54537df18556fe9d5531dd2b9f57a8479f79d42d0a066fa",
+    "391fbfb39bba1237e054e9131c923065ae3ea448fcdbf0409862f60649ce57dc",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -199,14 +241,14 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   );
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
-    "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07/" +
-      "17c7a57637dedd150114d5100ec36609437aa4c75dd353cb311e9bbcdb4b668e.yaml",
+    "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07.2/" +
+      "8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml",
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[
       "aws:RequestTag/sutra:template-sha256"
     ],
-    "c8bbaa5b20b33b576ad33c930a98ea51afdb67013bd263833b16c91bcfe4006d",
+    "571c9004cfd8816509b74f3b41ae3d2cf9708a7b8a7f61097ed3b76dccf0b58e",
   );
   const serialized = JSON.stringify(policy);
   for (const forbidden of [

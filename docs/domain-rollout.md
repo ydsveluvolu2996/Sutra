@@ -24,3 +24,8 @@ Do not create placeholder A records, expose the laptop through a tunnel, or poin
 release step after the corresponding service is deployed and healthy. Email
 records must be added only when a mail provider is selected; publish SPF, DKIM
 and DMARC together rather than guessing placeholder values.
+
+The public crawl/indexing contract and the post-deployment Search Console steps
+are documented in [Google Search indexing](./google-search-indexing.md). Search
+Console ownership verification is an external domain-owner action; never commit
+its one-time DNS token to this repository.

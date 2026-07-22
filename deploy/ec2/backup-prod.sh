@@ -59,6 +59,8 @@ else
 fi
 [[ "$(stat -c '%u' "$BACKUP_ROOT")" == 0 ]] || die "Backup root must be owned by root"
 
+exec 8>/run/lock/sutra-data-mutation.lock
+flock -n 8 || die "Another release, backup, or restore is already running"
 exec 9>"$BACKUP_ROOT/.backup.lock"
 flock -n 9 || die "Another backup or restore is already running"
 free_mib="$(df -Pm "$BACKUP_ROOT" | awk 'NR==2 {print $4}')"

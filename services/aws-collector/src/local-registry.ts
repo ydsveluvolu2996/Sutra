@@ -16,6 +16,7 @@ import {
 import { dirname } from "node:path";
 
 import type {
+  AwsRoleProvisioningMode,
   ConnectionScope,
   OnboardingTrustVerification,
   ScopedConnectionRegistry,
@@ -24,6 +25,7 @@ import type {
 import {
   CURRENT_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
+  PREVIOUS_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   isValidAwsRegionSelection,
@@ -38,6 +40,9 @@ const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
 const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
+const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
+const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
+const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const MAX_CONNECTIONS = 10_000;
 
 export type { LocalAwsPartition } from "./aws-region-selection.js";
@@ -58,6 +63,9 @@ export interface RegisterAwsConnectionInput {
   readonly externalId: string;
   readonly enabledRegions: AwsRegionSelection;
   readonly sessionNamePrefix?: string;
+  readonly roleProvisioningMode?: AwsRoleProvisioningMode;
+  readonly expectedRolePath?: string;
+  readonly expectedRoleName?: string;
 }
 
 interface RegistryTombstone {
@@ -67,7 +75,7 @@ interface RegistryTombstone {
 }
 
 interface RegistryDocument {
-  readonly version: 2;
+  readonly version: 3;
   readonly connections: Readonly<Record<string, RegisteredAwsConnection>>;
   readonly tombstones: Readonly<Record<string, RegistryTombstone>>;
 }
@@ -119,6 +127,15 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       externalId: connection.externalId,
       status: connection.status,
       permissionPackVersion: connection.permissionPackVersion,
+      ...(connection.roleProvisioningMode === undefined
+        ? {}
+        : { roleProvisioningMode: connection.roleProvisioningMode }),
+      ...(connection.expectedRolePath === undefined
+        ? {}
+        : { expectedRolePath: connection.expectedRolePath }),
+      ...(connection.expectedRoleName === undefined
+        ? {}
+        : { expectedRoleName: connection.expectedRoleName }),
       ...(connection.sessionNamePrefix === undefined
         ? {}
         : { sessionNamePrefix: connection.sessionNamePrefix }),
@@ -162,10 +179,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         previous.roleArn === parsed.roleArn &&
         secretsEqual(previous.externalId, parsed.externalId) &&
         previous.sessionNamePrefix === parsed.sessionNamePrefix &&
+        previous.roleProvisioningMode === parsed.roleProvisioningMode &&
+        previous.expectedRolePath === parsed.expectedRolePath &&
+        previous.expectedRoleName === parsed.expectedRoleName &&
         arraysEqual(previous.enabledRegions, parsed.enabledRegions);
 
       return {
-        version: 2,
+        version: 3,
         connections: {
           ...document.connections,
           [key]: {
@@ -200,7 +220,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       }
       if (connection.status === "DISABLED") return document;
       return {
-        version: 2,
+        version: 3,
         connections: {
           ...document.connections,
           [key]: {
@@ -235,7 +255,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       const connections = { ...document.connections };
       delete connections[key];
       return {
-        version: 2,
+        version: 3,
         connections,
         tombstones: {
           ...document.tombstones,
@@ -285,7 +305,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         throw new RegistryIntegrityError();
       }
       return {
-        version: 2,
+        version: 3,
         connections: {
           ...document.connections,
           [key]: {
@@ -334,7 +354,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         throw new RegistryStateError();
       }
       return {
-        version: 2,
+        version: 3,
         connections: {
           ...document.connections,
           [key]: {
@@ -374,7 +394,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       }
       const connections = { ...document.connections };
       delete connections[key];
-      return { version: 2, connections, tombstones: document.tombstones };
+      return { version: 3, connections, tombstones: document.tombstones };
     });
   }
 
@@ -529,6 +549,22 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
   }
   const prefix = input.sessionNamePrefix ?? "sutra-";
   if (!/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(prefix)) throw new RegistryIntegrityError();
+  const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
+  const expectedRolePath = input.expectedRolePath ?? "/sutra/";
+  const expectedRoleName = input.expectedRoleName ?? "SutraReadOnlyRole";
+  if (
+    (roleProvisioningMode !== "sutra_template" && roleProvisioningMode !== "customer_managed") ||
+    !ROLE_PATH.test(expectedRolePath) ||
+    expectedRolePath.length > 512 ||
+    !ROLE_NAME.test(expectedRoleName) ||
+    (roleProvisioningMode === "sutra_template" &&
+      (expectedRolePath !== "/sutra/" || expectedRoleName !== "SutraReadOnlyRole")) ||
+    (roleProvisioningMode === "customer_managed" &&
+      (UNSAFE_ROLE_NAME.test(expectedRoleName) ||
+        expectedRoleName.toLowerCase() === "organizationaccountaccessrole"))
+  ) {
+    throw new RegistryIntegrityError();
+  }
   const timestamp = new Date(0).toISOString();
   return {
     tenantId: input.tenantId,
@@ -540,6 +576,9 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
     status: "PENDING",
     permissionPackVersion: LEGACY_PERMISSION_PACK_VERSION,
     sessionNamePrefix: prefix,
+    roleProvisioningMode,
+    expectedRolePath,
+    expectedRoleName,
     enabledRegions: [...input.enabledRegions],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -565,7 +604,7 @@ function parseEnvelope(value: unknown): EncryptedEnvelope {
 }
 
 function parseDocument(value: unknown): RegistryDocument {
-  if (!isRecord(value) || (value.version !== 1 && value.version !== 2)) {
+  if (!isRecord(value) || (value.version !== 1 && value.version !== 2 && value.version !== 3)) {
     throw new RegistryIntegrityError();
   }
   const expectedKeys = value.version === 1
@@ -585,7 +624,7 @@ function parseDocument(value: unknown): RegistryDocument {
     connections[key] = parsed;
   }
   const tombstones: Record<string, RegistryTombstone> = {};
-  if (record.version === 2) {
+  if (record.version === 2 || record.version === 3) {
     if (!isRecord(record.tombstones)) throw new RegistryIntegrityError();
     const tombstoneEntries = Object.entries(record.tombstones);
     if (tombstoneEntries.length > MAX_CONNECTIONS) throw new RegistryIntegrityError();
@@ -600,7 +639,7 @@ function parseDocument(value: unknown): RegistryDocument {
       tombstones[key] = tombstone;
     }
   }
-  return { version: 2, connections, tombstones };
+  return { version: 3, connections, tombstones };
 }
 
 function parseTombstone(value: unknown): RegistryTombstone {
@@ -636,7 +675,20 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
     "updatedAt",
   ];
   const currentKeys = [...legacyKeys, "permissionPackVersion"];
-  const record = exactRecord(value, Object.hasOwn(value, "permissionPackVersion") ? currentKeys : legacyKeys);
+  const roleContractKeys = [
+    ...currentKeys,
+    "roleProvisioningMode",
+    "expectedRolePath",
+    "expectedRoleName",
+  ];
+  const record = exactRecord(
+    value,
+    Object.hasOwn(value, "roleProvisioningMode")
+      ? roleContractKeys
+      : Object.hasOwn(value, "permissionPackVersion")
+        ? currentKeys
+        : legacyKeys,
+  );
   if (
     typeof record.tenantId !== "string" ||
     typeof record.connectionId !== "string" ||
@@ -645,6 +697,10 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
     typeof record.roleArn !== "string" ||
     typeof record.externalId !== "string" ||
     typeof record.sessionNamePrefix !== "string" ||
+    (Object.hasOwn(record, "roleProvisioningMode") &&
+      (typeof record.roleProvisioningMode !== "string" ||
+        typeof record.expectedRolePath !== "string" ||
+        typeof record.expectedRoleName !== "string")) ||
     !Array.isArray(record.enabledRegions)
   ) {
     throw new RegistryIntegrityError();
@@ -658,6 +714,13 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
     externalId: record.externalId,
     enabledRegions: record.enabledRegions as string[],
     sessionNamePrefix: record.sessionNamePrefix,
+    ...(record.roleProvisioningMode === undefined
+      ? {}
+      : {
+          roleProvisioningMode: record.roleProvisioningMode as AwsRoleProvisioningMode,
+          expectedRolePath: record.expectedRolePath as string,
+          expectedRoleName: record.expectedRoleName as string,
+        }),
   });
   if (
     record.status !== "PENDING" &&
@@ -674,6 +737,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   const permissionPackVersion = record.permissionPackVersion ?? LEGACY_PERMISSION_PACK_VERSION;
   if (
     permissionPackVersion !== LEGACY_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
@@ -688,7 +752,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
 }
 
 function emptyDocument(): RegistryDocument {
-  return { version: 2, connections: {}, tombstones: {} };
+  return { version: 3, connections: {}, tombstones: {} };
 }
 
 function connectionKey(tenantId: string, connectionId: string): string {

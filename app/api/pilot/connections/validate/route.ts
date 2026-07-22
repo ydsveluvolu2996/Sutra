@@ -66,6 +66,9 @@ export async function POST(request: Request): Promise<Response> {
       roleArn: stored.roleArn,
       externalId,
       enabledRegions: stored.enabledRegions,
+      roleProvisioningMode: stored.roleProvisioningMode,
+      expectedRolePath: stored.expectedRolePath,
+      expectedRoleName: stored.expectedRoleName,
     });
     const verification = await verifyCollectorConnection({
       tenantId: actor.orgId,
@@ -73,6 +76,8 @@ export async function POST(request: Request): Promise<Response> {
       jobId: `verify_${crypto.randomUUID().replaceAll("-", "")}`,
       accountId: stored.accountId,
       partition: stored.partition,
+      roleArn: stored.roleArn,
+      sessionNamePrefix: "sutra-",
     });
     await markConnectionValidated(connectionId, actor.id, verification);
     await activateCollectorConnection({

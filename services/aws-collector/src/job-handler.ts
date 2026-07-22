@@ -98,6 +98,7 @@ export class AwsCollectorJobHandler {
       accountId: verification.accountId,
       partition: verification.partition,
       roleArn: verification.roleArn,
+      roleSessionName: verification.roleSessionName,
       callerIdentityArn: verification.callerIdentityArn,
       missingExternalIdDenied: true,
       wrongExternalIdDenied: true,
@@ -105,6 +106,7 @@ export class AwsCollectorJobHandler {
       permissionPolicyAttested: true,
       sessionPolicyApplied: true,
       permissionPackVersion: verification.permissionPackVersion,
+      capabilityAssessment: verification.capabilityAssessment,
       verifiedAt: this.now().toISOString(),
     };
   }

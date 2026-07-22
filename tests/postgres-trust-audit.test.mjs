@@ -8,6 +8,7 @@ process.env.DATABASE_URL = databaseUrl;
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const pilotRepository = await import("../db/pilot-repository.ts");
+const { CUSTOMER_ROLE_METADATA_ACTIONS } = await import("../lib/aws-customer-role-artifacts.ts");
 const { getRawDb } = await import("../db/index.ts");
 const { closePostgresDatabase } = await import("../db/postgres-d1-adapter.ts");
 
@@ -43,7 +44,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
            permission_pack_version, status, enabled_regions_json,
            last_validated_at, created_at, updated_at)
          VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, ?, 'test-key-v1',
-                 'standard-2026-07', 'active', '["us-east-1"]', ?, ?, ?)`,
+                 'standard-2026-07.2', 'active', '["us-east-1"]', ?, ?, ?)`,
       ).bind(
         connectionId,
         pilotRepository.LOCAL_ORG_ID,
@@ -65,13 +66,19 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
       verification: {
         verified: true,
         accountId,
+        roleArn: replacementRoleArn,
+        roleSessionName: "sutra-postgres-test",
         callerIdentityArn: `arn:aws:sts::${accountId}:assumed-role/SutraReadOnlyRole/sutra-postgres-test`,
         missingExternalIdDenied: true,
         wrongExternalIdDenied: true,
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07",
+        permissionPackVersion: "standard-2026-07.2",
+        capabilityAssessment: {
+          grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
+          missingActions: [],
+        },
       },
     });
     assert.equal(registered.roleArn, replacementRoleArn);

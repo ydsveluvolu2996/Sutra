@@ -1,5 +1,10 @@
 import { hostedOidcProviderIssues } from "./hosted-oidc-providers.ts";
 import { effectiveRequestOrigin } from "./request-origin.ts";
+import {
+  isCanonicalPublicSiteUrl,
+  isPublicIndexablePath,
+  PUBLIC_INDEXABLE_PATHS,
+} from "./site-seo.ts";
 
 export type DeploymentEnvironment = "local" | "preview" | "staging" | "production";
 
@@ -30,7 +35,15 @@ export interface DeploymentBoundaryDecision {
   readonly issues: readonly string[];
 }
 
-const publicPreviewPaths = new Set(["/", "/about", "/contact", "/api/contact", "/privacy", "/terms", "/security", "/status", "/favicon.svg", "/og.png", "/robots.txt"]);
+const publicPreviewPaths = new Set([
+  ...PUBLIC_INDEXABLE_PATHS,
+  "/api/contact",
+  "/favicon.svg",
+  "/og.png",
+  "/robots.txt",
+  "/sitemap.xml",
+]);
+const publicSearchControlPaths = new Set(["/robots.txt", "/sitemap.xml"]);
 const protectedPrefixes = [
   "/api/",
   "/dashboard",
@@ -283,6 +296,15 @@ export function responseSecurityHeaders(
   if (url.protocol === "https:" && !isLoopbackHost(url.hostname)) {
     headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload";
   }
-  if (environment !== "production" || isProtectedPath(url.pathname)) headers["X-Robots-Tag"] = "noindex, nofollow";
+  const isPublicSearchResource = isPublicIndexablePath(url.pathname) || publicSearchControlPaths.has(url.pathname);
+  // The current private beta deliberately runs under the staging identity
+  // contract. Permit indexing only for reviewed marketing URLs on Sutra's one
+  // canonical public origin; every app/customer/API URL and every preview or
+  // alternate hostname remains noindex at the response layer.
+  const mayBeIndexed =
+    (environment === "staging" || environment === "production") &&
+    isCanonicalPublicSiteUrl(url) &&
+    isPublicSearchResource;
+  if (!mayBeIndexed) headers["X-Robots-Tag"] = "noindex, nofollow";
   return headers;
 }

@@ -5,7 +5,13 @@ import {
   parseRegisteredResponse,
   parseVerificationResponse,
 } from "./pilot-boundary";
-import type { AwsPartition, CollectorHealth, PilotSnapshotPayload } from "./pilot-types";
+import type {
+  AwsPartition,
+  AwsPermissionCapabilityAssessment,
+  AwsRoleProvisioningMode,
+  CollectorHealth,
+  PilotSnapshotPayload,
+} from "./pilot-types";
 import {
   parseLocalFixtureCatalog,
   parseLocalFixtureEnqueue,
@@ -250,6 +256,7 @@ async function readLimitedResponseText(response: Response, maximumBytes: number)
 }
 
 const BROKER_CODES = new Set([
+  "ASSUME_ROLE_DENIED",
   "ASSUME_ROLE_FAILED",
   "CALLER_IDENTITY_MISMATCH",
   "NEGATIVE_PROBE_INCONCLUSIVE",
@@ -273,6 +280,7 @@ function safeBrokerErrorCode(value: unknown): string {
 
 function publicBrokerMessage(code: string): string {
   const messages: Readonly<Record<string, string>> = {
+    ASSUME_ROLE_DENIED: "AWS denied the customer role session; verify that the role and trust policy still match this connection",
     ASSUME_ROLE_FAILED: "AWS rejected the customer role session",
     CALLER_IDENTITY_MISMATCH: "The assumed AWS identity did not match the onboarded account",
     NEGATIVE_PROBE_INCONCLUSIVE: "The role trust policy could not be proven to require the ExternalId",
@@ -305,6 +313,9 @@ export async function registerCollectorConnection(input: {
   readonly roleArn: string;
   readonly externalId: string;
   readonly enabledRegions: readonly string[];
+  readonly roleProvisioningMode: AwsRoleProvisioningMode;
+  readonly expectedRolePath: string;
+  readonly expectedRoleName: string;
 }): Promise<{ registered: true }> {
   return parseRegisteredResponse(
     await brokerFetch<unknown>(`/v1/connections/${input.connectionId}`, "PUT", input),
@@ -387,21 +398,31 @@ export async function verifyCollectorConnection(input: {
   readonly jobId: string;
   readonly accountId: string;
   readonly partition: AwsPartition;
+  readonly roleArn: string;
+  readonly sessionNamePrefix: string;
 }): Promise<{
   readonly verified: true;
   readonly accountId: string;
+  readonly roleArn: string;
+  readonly roleSessionName: string;
   readonly callerIdentityArn: string;
   readonly missingExternalIdDenied: true;
   readonly wrongExternalIdDenied: true;
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07";
+  readonly permissionPackVersion: "standard-2026-07.2";
+  readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parseVerificationResponse(
     await brokerFetch(`/v1/connections/${input.connectionId}/verify`, "POST", payload, 45_000),
-    { accountId: input.accountId, partition: input.partition },
+    {
+      accountId: input.accountId,
+      partition: input.partition,
+      roleArn: input.roleArn,
+      sessionNamePrefix: input.sessionNamePrefix,
+    },
   );
 }
 
@@ -712,6 +733,7 @@ export function errorResponse(error: unknown): Response {
 export function safeValidationFailureCode(error: unknown): string {
   const code = error instanceof PilotServerError ? error.code : "VALIDATION_FAILED";
   return new Set([
+    "ASSUME_ROLE_DENIED",
     "ASSUME_ROLE_FAILED",
     "BROKER_UNAVAILABLE",
     "CALLER_IDENTITY_MISMATCH",
@@ -722,7 +744,15 @@ export function safeValidationFailureCode(error: unknown): string {
 
 export function safeCollectionFailureCode(error: unknown): string {
   const code = error instanceof PilotServerError ? error.code : "COLLECTION_FAILED";
-  return new Set(["BROKER_UNAVAILABLE", "PERMISSION_DENIED", "THROTTLED"]).has(code)
+  return new Set([
+    "ASSUME_ROLE_DENIED",
+    "BROKER_UNAVAILABLE",
+    "CALLER_IDENTITY_MISMATCH",
+    "NEGATIVE_PROBE_INCONCLUSIVE",
+    "PERMISSION_DENIED",
+    "THROTTLED",
+    "TRUST_POLICY_UNSAFE",
+  ]).has(code)
     ? code
     : "COLLECTION_FAILED";
 }

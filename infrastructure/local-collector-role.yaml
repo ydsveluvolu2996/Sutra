@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Source workload role for a disposable Sutra live-AWS sandbox walkthrough. An operator
-  reaches this role through short-lived federation; the role can assume only the
-  fixed customer read-only role path and name and cannot access AWS resources itself.
+  reaches this role through short-lived federation; the role can assume only dedicated
+  customer roles under the reserved /sutra/ path and cannot access AWS resources itself.
 
 Parameters:
   OperatorRoleArn:
@@ -19,13 +19,6 @@ Parameters:
     MinLength: 1
     MaxLength: 64
     AllowedPattern: '^[A-Za-z0-9+=,.@_-]+$'
-
-  CustomerRoleName:
-    Type: String
-    Default: SutraReadOnlyRole
-    AllowedValues:
-      - SutraReadOnlyRole
-    Description: Fixed reviewed customer role name accepted by the Sutra broker.
 
 Resources:
   CollectorRole:
@@ -48,15 +41,20 @@ Resources:
                 Ref: OperatorRoleArn
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: AssumeFixedSutraCustomerRole
+        - PolicyName: AssumeDedicatedSutraCustomerRoles
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
-              - Sid: AssumeCustomerMetadataRoleOnly
+              - Sid: DenyAssumeRoleOutsideSutraRoleNamespace
+                Effect: Deny
+                Action: sts:AssumeRole
+                NotResource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
+              - Sid: AssumeDedicatedSutraCustomerRolesOnly
                 Effect: Allow
                 Action: sts:AssumeRole
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/${CustomerRoleName}
+                  Fn::Sub: arn:${AWS::Partition}:iam::*:role/sutra/*
       Tags:
         - Key: sutra:access-mode
           Value: assume-role-only

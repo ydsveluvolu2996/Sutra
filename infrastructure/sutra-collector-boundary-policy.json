@@ -8,16 +8,16 @@
       "Resource": "*"
     },
     {
-      "Sid": "DenyAssumeRoleOutsideFixedCustomerRole",
+      "Sid": "DenyAssumeRoleOutsideSutraRoleNamespace",
       "Effect": "Deny",
       "Action": "sts:AssumeRole",
-      "NotResource": "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
+      "NotResource": "arn:aws:iam::*:role/sutra/*"
     },
     {
-      "Sid": "AssumeFixedSutraCustomerRoleOnly",
+      "Sid": "AssumeDedicatedSutraCustomerRolesOnly",
       "Effect": "Allow",
       "Action": "sts:AssumeRole",
-      "Resource": "arn:aws:iam::*:role/sutra/SutraReadOnlyRole"
+      "Resource": "arn:aws:iam::*:role/sutra/*"
     }
   ]
 }

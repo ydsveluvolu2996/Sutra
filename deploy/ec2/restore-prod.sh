@@ -63,6 +63,8 @@ identity_file="$(realpath "$identity_file")"
 identity_mode="$(stat -c '%a' "$identity_file")"
 (( (8#$identity_mode & 8#077) == 0 )) || die "Age identity must have mode 0600 or stricter"
 
+exec 8>/run/lock/sutra-data-mutation.lock
+flock -n 8 || die "Another release, backup, or restore is already running"
 exec 9>"$BACKUP_ROOT/.backup.lock"
 flock -n 9 || die "Another backup or restore is already running"
 (cd "$BACKUP_ROOT" && sha256sum --check --status "$(basename "$source_artifact.sha256")") || die "Encrypted artifact checksum does not match"

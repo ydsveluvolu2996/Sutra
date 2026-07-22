@@ -144,6 +144,7 @@ Resources:
                   - ssm:DescribeInstancePatches
                   - iam:GetRole
                   - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
                   - iam:GetRolePolicy
                 Resource: '*'
               - Sid: ImplementedMetadataApis
@@ -203,6 +204,7 @@ Resources:
                 Action:
                   - iam:GetRole
                   - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
                   - iam:GetRolePolicy
                 Resource:
                   Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/sutra/${RoleName}'
@@ -213,7 +215,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: standard-2026-07
+          Value: standard-2026-07.2
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -227,4 +229,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: standard-2026-07
+    Value: standard-2026-07.2

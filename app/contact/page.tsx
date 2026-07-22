@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import CookieConsent from "../components/cookie-consent";
 import ContactForm from "./contact-form";
 
@@ -17,10 +18,11 @@ import ContactForm from "./contact-form";
  * email addresses here.
  * ================================================================== */
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/contact",
   title: "Contact us",
   description: "Talk to the Sutra team — book a walkthrough of the evidence-backed cloud operations platform for AWS MSPs.",
-};
+});
 
 function Arrow() {
   return (

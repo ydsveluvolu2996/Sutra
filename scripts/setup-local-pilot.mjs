@@ -74,7 +74,16 @@ const CONTACT_VARS = [
   "SUTRA_CONTACT_EMAIL_API_URL",
   "SUTRA_CONTACT_EMAIL_API_KEY",
 ];
-const contactVars = CONTACT_VARS.map((name) => {
+// Invitation delivery is deliberately separate from the public contact inbox:
+// invite links are bearer secrets and must never be routed through a generic
+// marketing webhook. These optional values select a transactional email API.
+const INVITATION_VARS = [
+  "SUTRA_INVITATION_FROM",
+  "SUTRA_INVITATION_EMAIL_PROVIDER",
+  "SUTRA_INVITATION_EMAIL_API_URL",
+  "SUTRA_INVITATION_EMAIL_API_KEY",
+];
+const contactVars = [...CONTACT_VARS, ...INVITATION_VARS].map((name) => {
   const value = process.env[name]?.trim();
   if (value !== undefined && /[\r\n]/u.test(value)) {
     throw new Error(`${name} must be a single line`);

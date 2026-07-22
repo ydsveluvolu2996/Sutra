@@ -39,6 +39,9 @@ import postgresCmdbCustomAssetsSql from "../postgres/migrations/0037_cmdb_custom
 import postgresUptimeSamplesSql from "../postgres/migrations/0038_uptime_samples.sql?raw";
 import postgresHostedBrokerReplayNoncesSql from "../postgres/migrations/0041_hosted_broker_replay_nonces.sql?raw";
 import postgresHostedSignupRateLimitsSql from "../postgres/migrations/0042_hosted_signup_rate_limits.sql?raw";
+import postgresCustomerManagedAwsRolesSql from "../postgres/migrations/0043_customer_managed_aws_roles.sql?raw";
+import postgresInvitationDeliverySql from "../postgres/migrations/0044_invitation_delivery.sql?raw";
+import postgresInvitationOperationLedgerSql from "../postgres/migrations/0045_invitation_operation_ledger.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -82,6 +85,9 @@ const migrations = [
   { id: "0038_uptime_samples", source: postgresUptimeSamplesSql },
   { id: "0041_hosted_broker_replay_nonces", source: postgresHostedBrokerReplayNoncesSql },
   { id: "0042_hosted_signup_rate_limits", source: postgresHostedSignupRateLimitsSql },
+  { id: "0043_customer_managed_aws_roles", source: postgresCustomerManagedAwsRolesSql },
+  { id: "0044_invitation_delivery", source: postgresInvitationDeliverySql },
+  { id: "0045_invitation_operation_ledger", source: postgresInvitationOperationLedgerSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

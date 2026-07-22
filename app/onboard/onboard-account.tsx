@@ -21,6 +21,14 @@ import {
   isAllEnabledAwsRegionSelection,
   type AwsRegionSelectionMode,
 } from "../../lib/aws-region-selection.ts";
+import {
+  buildCustomerManagedRoleArtifacts,
+  SUTRA_CUSTOM_ROLE_DEFAULT_NAME,
+  SUTRA_ROLE_NAMESPACE,
+  SUTRA_TEMPLATE_ROLE_NAME,
+  validateCustomerManagedRoleSelection,
+  type AwsRoleProvisioningMode,
+} from "../../lib/aws-customer-role-artifacts";
 import type { CollectorHealth, PilotConnection, PilotState } from "../../lib/pilot-types";
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 
@@ -29,9 +37,14 @@ interface CreateConnectionResponse {
   readonly handoff: { readonly recovered: boolean };
   readonly trust: {
     readonly externalId: string;
-    readonly vendorCollectorRoleArn: string;
-    readonly sessionNamePrefix: string;
+    readonly collectorPrincipal?: string;
+    readonly vendorCollectorRoleArn?: string;
+    readonly roleSessionName?: string;
+    readonly sessionNamePrefix?: string;
     readonly customerTenantId: string;
+    readonly permissionPackVersion?: string;
+    readonly roleProvisioningMode: AwsRoleProvisioningMode;
+    readonly rolePath: string;
     readonly roleName: string;
   };
   readonly deployment: { readonly publicTemplateUrl: string | null };
@@ -44,6 +57,9 @@ interface PendingHandoffDraft {
   readonly awsAccountId: string;
   readonly partition: string;
   readonly enabledRegions: readonly string[];
+  readonly roleProvisioningMode: AwsRoleProvisioningMode;
+  readonly rolePath: string;
+  readonly roleName: string;
 }
 
 interface LiveSyncResponse {
@@ -70,20 +86,57 @@ function arnPartition(partition: string): string {
   return partition === "aws-cn" ? "aws-cn" : partition === "aws-us-gov" ? "aws-us-gov" : "aws";
 }
 
+function expectedRoleArn(response: CreateConnectionResponse): string {
+  return `arn:${arnPartition(response.connection.partition)}:iam::${response.connection.awsAccountId}:role/${response.trust.rolePath.slice(1)}${response.trust.roleName}`;
+}
+
+function downloadSensitiveArtifact(filename: string, contents: string, mimeType: string): void {
+  const objectUrl = URL.createObjectURL(new Blob([contents], { type: mimeType }));
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+}
+
 const HANDOFF_STORAGE_KEY = "sutra.aws-onboarding-handoffs.v1";
 
 function readHandoffDrafts(): PendingHandoffDraft[] {
   try {
     const value = JSON.parse(window.sessionStorage.getItem(HANDOFF_STORAGE_KEY) ?? "[]") as unknown;
     if (!Array.isArray(value)) return [];
-    return value.filter((candidate): candidate is PendingHandoffDraft => {
-      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) return false;
+    const drafts: PendingHandoffDraft[] = [];
+    for (const candidate of value) {
+      if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
       const draft = candidate as Record<string, unknown>;
-      return typeof draft.operationId === "string" && /^onb_[a-f0-9]{32}$/u.test(draft.operationId) &&
+      if (!(typeof draft.operationId === "string" && /^onb_[a-f0-9]{32}$/u.test(draft.operationId) &&
         typeof draft.customerName === "string" && typeof draft.awsAccountId === "string" &&
         typeof draft.partition === "string" && Array.isArray(draft.enabledRegions) &&
-        draft.enabledRegions.every((region) => typeof region === "string");
-    }).slice(-5);
+        draft.enabledRegions.every((region) => typeof region === "string"))) continue;
+      const roleProvisioningMode = draft.roleProvisioningMode === "customer_managed"
+        ? "customer_managed"
+        : "sutra_template";
+      const rolePath = typeof draft.rolePath === "string" ? draft.rolePath : SUTRA_ROLE_NAMESPACE;
+      const roleName = typeof draft.roleName === "string"
+        ? draft.roleName
+        : roleProvisioningMode === "customer_managed"
+          ? SUTRA_CUSTOM_ROLE_DEFAULT_NAME
+          : SUTRA_TEMPLATE_ROLE_NAME;
+      drafts.push({
+        operationId: draft.operationId,
+        customerName: draft.customerName,
+        awsAccountId: draft.awsAccountId,
+        partition: draft.partition,
+        enabledRegions: draft.enabledRegions as string[],
+        roleProvisioningMode,
+        rolePath,
+        roleName,
+      });
+    }
+    return drafts.slice(-5);
   } catch {
     return [];
   }
@@ -118,6 +171,10 @@ export function OnboardAccount() {
   const [regionSelectionMode, setRegionSelectionMode] =
     useState<AwsRegionSelectionMode>(ALL_ENABLED_AWS_REGIONS);
   const [regions, setRegions] = useState("us-east-1, ap-south-1");
+  const [roleProvisioningMode, setRoleProvisioningMode] =
+    useState<AwsRoleProvisioningMode>("sutra_template");
+  const [rolePath, setRolePath] = useState(SUTRA_ROLE_NAMESPACE);
+  const [roleName, setRoleName] = useState(SUTRA_TEMPLATE_ROLE_NAME);
   const [roleArn, setRoleArn] = useState("");
   const [roleStepUpCode, setRoleStepUpCode] = useState("");
   const [created, setCreated] = useState<CreateConnectionResponse | null>(null);
@@ -138,8 +195,17 @@ export function OnboardAccount() {
   const connection = selectedConnection?.sourceKind === "aws_trust_role" ? selectedConnection : null;
   const effectiveRoleArn = roleArn || connection?.roleArn || "";
   const arnAccount = useMemo(() => effectiveRoleArn.match(/^arn:(?:aws|aws-us-gov|aws-cn):iam::(\d{12}):role\/[A-Za-z0-9+=,.@_\/-]+$/u)?.[1], [effectiveRoleArn]);
+  const selectedRoleArn = connection
+    ? `arn:${arnPartition(connection.partition)}:iam::${connection.awsAccountId}:role/${connection.expectedRolePath.slice(1)}${connection.expectedRoleName}`
+    : null;
   const accountValid = /^\d{12}$/u.test(accountId);
-  const roleValid = Boolean(arnAccount && connection && arnAccount === connection.awsAccountId);
+  const customerManagedRoleError = roleProvisioningMode === "customer_managed"
+    ? validateCustomerManagedRoleSelection(rolePath, roleName)
+    : null;
+  const roleValid = Boolean(
+    arnAccount && connection && arnAccount === connection.awsAccountId &&
+    selectedRoleArn !== null && effectiveRoleArn === selectedRoleArn,
+  );
   const currentStep = connection?.status === "active" || connection?.status === "disabled"
     ? 4
     : connection?.roleArn ? 3 : connection ? 2 : 1;
@@ -148,13 +214,17 @@ export function OnboardAccount() {
   const connectionOffboarded = connection?.status === "disabled" && connection.roleArn === null;
   const connectionDisabled = connection?.status === "disabled" && connection.roleArn !== null;
   const collectorMode = created?.collector.mode ?? health?.mode;
-  const principalArn = created?.trust.vendorCollectorRoleArn ?? health?.principalArn;
+  const principalArn = created?.trust.collectorPrincipal ?? created?.trust.vendorCollectorRoleArn ?? health?.principalArn;
+  const createdRoleMode = created?.trust.roleProvisioningMode ?? connection?.roleProvisioningMode ?? "sutra_template";
+  const createdRoleSessionName = created?.trust.roleSessionName ?? created?.trust.sessionNamePrefix ?? "sutra-";
   const recoverableDraft = useMemo(() => {
     if (!connection || connection.roleArn || connection.status !== "pending") return null;
     return [...handoffDrafts].reverse().find((draft) =>
       draft.awsAccountId === connection.awsAccountId && draft.partition === connection.partition &&
       draft.customerName === connection.customerName &&
-      JSON.stringify(draft.enabledRegions) === JSON.stringify(connection.enabledRegions),
+      JSON.stringify(draft.enabledRegions) === JSON.stringify(connection.enabledRegions) &&
+      draft.roleProvisioningMode === connection.roleProvisioningMode &&
+      draft.rolePath === connection.expectedRolePath && draft.roleName === connection.expectedRoleName,
     ) ?? null;
   }, [connection, handoffDrafts]);
   const canDisplayInitialExternalId = Boolean(
@@ -166,7 +236,8 @@ export function OnboardAccount() {
       !connection ||
       !created ||
       !oneTimeExternalId ||
-      !principalArn
+      !principalArn ||
+      createdRoleMode !== "sutra_template"
     ) return null;
     try {
       return buildOneTimeCloudFormationQuickCreateUrl({
@@ -177,7 +248,7 @@ export function OnboardAccount() {
         stackName: `sutra-customer-role-${connection.awsAccountId}`,
         externalId: oneTimeExternalId,
         vendorCollectorRoleArn: principalArn,
-        sessionNamePrefix: created.trust.sessionNamePrefix,
+        sessionNamePrefix: createdRoleSessionName,
         customerTenantId: created.trust.customerTenantId,
         roleName: created.trust.roleName,
       });
@@ -186,7 +257,32 @@ export function OnboardAccount() {
       // Any unexpected contract mismatch fails closed to the manual download.
       return null;
     }
-  }, [canDisplayInitialExternalId, connection, created, oneTimeExternalId, principalArn]);
+  }, [canDisplayInitialExternalId, connection, created, createdRoleMode, createdRoleSessionName, oneTimeExternalId, principalArn]);
+  const customerManagedArtifacts = useMemo(() => {
+    if (
+      !canDisplayInitialExternalId ||
+      !connection ||
+      !created ||
+      !oneTimeExternalId ||
+      !principalArn ||
+      createdRoleMode !== "customer_managed"
+    ) return null;
+    try {
+      return buildCustomerManagedRoleArtifacts({
+        partition: connection.partition as "aws" | "aws-us-gov" | "aws-cn",
+        accountId: connection.awsAccountId,
+        collectorPrincipal: principalArn,
+        externalId: oneTimeExternalId,
+        roleSessionName: createdRoleSessionName,
+        customerTenantId: created.trust.customerTenantId,
+        permissionPackVersion: created.trust.permissionPackVersion ?? connection.permissionPackVersion,
+        rolePath: created.trust.rolePath,
+        roleName: created.trust.roleName,
+      });
+    } catch {
+      return null;
+    }
+  }, [canDisplayInitialExternalId, connection, created, createdRoleMode, createdRoleSessionName, oneTimeExternalId, principalArn]);
 
   async function createConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -202,7 +298,9 @@ export function OnboardAccount() {
     const existingDraft = readHandoffDrafts().find((draft) =>
       draft.customerName === normalizedName && draft.awsAccountId === accountId &&
       draft.partition === partition &&
-      JSON.stringify(draft.enabledRegions) === JSON.stringify(enabledRegions),
+      JSON.stringify(draft.enabledRegions) === JSON.stringify(enabledRegions) &&
+      draft.roleProvisioningMode === roleProvisioningMode &&
+      draft.rolePath === rolePath && draft.roleName === roleName,
     );
     const draft: PendingHandoffDraft = existingDraft ?? {
       operationId: `onb_${crypto.randomUUID().replaceAll("-", "")}`,
@@ -210,6 +308,9 @@ export function OnboardAccount() {
       awsAccountId: accountId,
       partition,
       enabledRegions,
+      roleProvisioningMode,
+      rolePath,
+      roleName,
     };
     if (!storeHandoffDraft(draft)) {
       setError("Browser session storage is unavailable, so Sutra did not create a handoff that could be stranded by a lost response.");
@@ -221,7 +322,7 @@ export function OnboardAccount() {
       const response = await postPilot<CreateConnectionResponse>("/api/pilot/connections", draft);
       setCreated(response);
       setOneTimeExternalId(response.trust.externalId);
-      setRoleArn(`arn:${arnPartition(response.connection.partition)}:iam::${response.connection.awsAccountId}:role/sutra/SutraReadOnlyRole`);
+      setRoleArn(expectedRoleArn(response));
       setNotice({
         tone: "success",
         title: response.handoff.recovered ? "Trust handoff recovered" : "Connection contract created",
@@ -250,7 +351,7 @@ export function OnboardAccount() {
       );
       setCreated(response);
       setOneTimeExternalId(response.trust.externalId);
-      setRoleArn(`arn:${arnPartition(response.connection.partition)}:iam::${response.connection.awsAccountId}:role/sutra/SutraReadOnlyRole`);
+      setRoleArn(expectedRoleArn(response));
       setNotice({
         tone: "success",
         title: "Trust handoff recovered",
@@ -287,10 +388,15 @@ export function OnboardAccount() {
         forgetHandoffDraft(recoverableDraft.operationId);
         setHandoffDrafts(readHandoffDrafts());
       }
+      const missingCapabilities = response.connection.permissionCapabilities?.missingActions ?? [];
       setNotice({
-        tone: "success",
-        title: "Trust verified and customer role registered",
-        message: "AWS returned the expected caller identity, missing and incorrect ExternalIds were denied, and Sutra atomically activated the verified role.",
+        tone: missingCapabilities.length === 0 ? "success" : "warning",
+        title: missingCapabilities.length === 0
+          ? "Trust verified and customer role registered"
+          : `Trust verified with ${missingCapabilities.length} unavailable capabilities`,
+        message: missingCapabilities.length === 0
+          ? "AWS returned the expected caller identity, missing and incorrect ExternalIds were denied, and Sutra atomically activated the verified role."
+          : `The dedicated role is safe and active, but this customer omitted ${missingCapabilities.length} reviewed metadata actions. Sutra will report the affected collectors as unavailable instead of claiming coverage.`,
       });
       await refresh();
     } catch (caught) {
@@ -485,19 +591,33 @@ export function OnboardAccount() {
                   <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                   <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
                 </div>
+                <label><span>Role provisioning</span><select value={roleProvisioningMode} onChange={(event) => {
+                  const next = event.target.value as AwsRoleProvisioningMode;
+                  setRoleProvisioningMode(next);
+                  setRolePath(SUTRA_ROLE_NAMESPACE);
+                  setRoleName(next === "sutra_template" ? SUTRA_TEMPLATE_ROLE_NAME : SUTRA_CUSTOM_ROLE_DEFAULT_NAME);
+                }}><option value="sutra_template">Use Sutra template</option><option value="customer_managed">Use customer-managed role</option></select><small>{roleProvisioningMode === "sutra_template" ? "Fastest path: deploy Sutra's reviewed, fixed CloudFormation role." : "Sutra generates Terraform, CloudFormation, and JSON trust-policy downloads for a dedicated customer-named role."}</small></label>
+                {roleProvisioningMode === "customer_managed" ? <>
+                  <div className="form-grid">
+                    <label><span>Dedicated role path</span><input value={rolePath} maxLength={512} onChange={(event) => setRolePath(event.target.value.trim())} aria-invalid={Boolean(customerManagedRoleError)} placeholder="/sutra/acme/" required /><small>Must remain inside the reserved <code>/sutra/</code> namespace and end with <code>/</code>.</small></label>
+                    <label><span>Dedicated role name</span><input value={roleName} maxLength={64} onChange={(event) => setRoleName(event.target.value.trim())} aria-invalid={Boolean(customerManagedRoleError)} placeholder={SUTRA_CUSTOM_ROLE_DEFAULT_NAME} required /><small>Choose a new role used only by this Sutra connection.</small></label>
+                  </div>
+                  <div className="inline-warning" role={customerManagedRoleError ? "alert" : "note"}><strong>{customerManagedRoleError ? "Role contract needs attention" : "Dedicated customer role required"}</strong><span>{customerManagedRoleError ?? "Existing admin, shared operations, power-user, break-glass, account-access, broader-policy, and wildcard-trust roles are rejected during live attestation. Every accepted session is still intersected with Sutra's fixed read-only STS session policy."}</span></div>
+                </> : null}
                 <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
                 {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
-                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
+                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>
             </>
           ) : null}
 
           {connection ? (
             <>
-              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below as CloudFormation parameters. Sutra never creates or stores long-lived customer access keys.</p></div>
+              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below with the selected deployment method. Sutra never creates or stores long-lived customer access keys.</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{connection.customerName}</strong><span>{connection.awsAccountId} · {connection.partition}</span></div>
                 <div><small>Region scope</small><strong>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All" : connection.enabledRegions.length}</strong><span>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All account-enabled Regions; discovered at collection time" : connection.enabledRegions.join(", ")}</span></div>
+                <div><small>Role contract</small><strong>{createdRoleMode === "customer_managed" ? "Customer-managed" : "Sutra template"}</strong><span>{created?.trust.rolePath ?? connection.expectedRolePath}{created?.trust.roleName ?? connection.expectedRoleName}</span></div>
                 <div><small>Trust health</small><strong className={`connection-status connection-${connection.status}`} title={trustHealth?.detail}>{trustHealth?.label}</strong><span>Validated {formatTimestamp(connection.lastValidatedAt)}</span></div>
               </div>
 
@@ -507,10 +627,12 @@ export function OnboardAccount() {
                 <div className="inline-warning" role="status"><strong>Latest inventory: {collectionHealth.title}</strong><span>{collectionHealth.message}</span></div>
               ) : null}
 
+              {connection.permissionCapabilities && connection.permissionCapabilities.missingActions.length === 0 ? <div className="validation-result" role="status"><span>✓</span><div><strong>All reviewed inline-policy capabilities declared</strong><p>{connection.permissionCapabilities.grantedActions.length} actions are declared by the attested inline policy for permission pack <code>{connection.permissionPackVersion}</code>. Effective access is confirmed separately by collection results.</p></div></div> : connection.permissionCapabilities ? <div className="inline-warning" role="status"><strong>{connection.permissionCapabilities.missingActions.length} inline-policy capabilities omitted</strong><span>Not declared in the role policy: <code>{connection.permissionCapabilities.missingActions.slice(0, 8).join(", ")}</code>{connection.permissionCapabilities.missingActions.length > 8 ? ` and ${connection.permissionCapabilities.missingActions.length - 8} more` : ""}. Effective access can also be limited by permission boundaries, SCPs, or resource policies; collection coverage remains explicit.</span></div> : null}
+
               {canDisplayInitialExternalId && oneTimeExternalId ? <label className="contract-field"><span>Pending-handoff ExternalId</span><div className="copy-field"><code>{oneTimeExternalId}</code><button type="button" onClick={() => void navigator.clipboard?.writeText(oneTimeExternalId)}>Copy</button></div><small>This actor-bound value is recoverable only while the initial connection is pending. Role registration closes the handoff permanently.</small></label> : recoverableDraft && connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>The pending ExternalId handoff can be recovered.</strong><span>The previous response may have been lost. Retry the same stored operation to retrieve the original value; Sutra will not rotate or create a second contract.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void recoverConnectionHandoff()}>{busy === "create" ? "Recovering handoff…" : "Recover pending handoff"}</button></div> : <div className="inline-warning"><strong>ExternalId handoff is closed.</strong><span>{connectionOffboarded ? "This connection has been offboarded and no trust secret remains in Sutra's control plane." : connection.roleArn ? "The customer role has been registered, so Sutra will never display the initial ExternalId again." : "No matching actor-bound pending creation operation is available in this browser session."}</span></div>}
 
               <div className="deployment-parameters" aria-label="CloudFormation trust parameters">
-                <div><small>SessionNamePrefix</small><code>{created?.trust.sessionNamePrefix ?? "sutra-"}</code></div>
+                <div><small>SessionNamePrefix</small><code>{createdRoleSessionName}</code></div>
                 <div><small>CustomerTenantId</small><code>{created?.trust.customerTenantId ?? connection.customerId}</code></div>
                 <div><small>RoleName</small><code>{created?.trust.roleName ?? "SutraReadOnlyRole"}</code></div>
               </div>
@@ -531,14 +653,32 @@ export function OnboardAccount() {
                   </ol>
                   <div className="quick-launch-history-warning"><strong>One-time browser handoff</strong><span>The ExternalId is placed only in the AWS Console URL fragment and this button disappears when the handoff closes. A visited URL can remain in browser history, so use a private browser window and close it after role registration. Never paste the URL into chat, tickets, or logs.</span></div>
                 </section>
-              ) : canDisplayInitialExternalId ? (
+              ) : canDisplayInitialExternalId && createdRoleMode === "sutra_template" ? (
                 <div className="inline-warning"><strong>Use the manual CloudFormation path.</strong><span>{connection.partition !== "aws" ? "Quick launch currently supports only commercial AWS accounts." : !created?.deployment.publicTemplateUrl ? "The server does not have a reviewed public regional-S3 template URL configured." : "Sutra could not safely construct the quick-launch URL."} Download the template, upload it in the customer&apos;s CloudFormation console, and copy the displayed trust values into the matching parameters.</span></div>
               ) : null}
 
-              <div className="template-actions"><a className="button button-secondary" href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>Download least-privilege CloudFormation</a><span>Version <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> · SHA-256 <code>{AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}</code>. Deploy with <code>CAPABILITY_NAMED_IAM</code>. This version grants exactly the read-only metadata, network-exposure, IAM posture, and AWS-native finding APIs the collector invokes, and never enables AWS security services.</span></div>
+              {createdRoleMode === "sutra_template" ? <div className="template-actions"><a className="button button-secondary" href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>Download least-privilege CloudFormation</a><span>Version <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> · SHA-256 <code>{AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}</code>. Deploy with <code>CAPABILITY_NAMED_IAM</code>. This version grants exactly the read-only metadata, network-exposure, IAM posture, and AWS-native finding APIs the collector invokes, and never enables AWS security services.</span></div> : null}
+
+              {createdRoleMode === "customer_managed" && customerManagedArtifacts ? <section className="quick-launch-panel" aria-labelledby="customer-role-downloads-title">
+                <div className="quick-launch-heading"><div><p className="eyebrow">Customer-managed deployment</p><h3 id="customer-role-downloads-title">Download the exact dedicated-role contract</h3><p>Use the Terraform or CloudFormation file for the complete deployable role. The JSON download is only the exact trust-policy fragment for customers who reproduce the same permission policy and required tags through their own IAM tooling. Every artifact is generated in this browser from the one-time server handoff.</p></div></div>
+                <div className="heading-actions">
+                  <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}.tf`, customerManagedArtifacts.terraformHcl, "text/plain;charset=utf-8")}>Download Terraform</button>
+                  <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}.yaml`, customerManagedArtifacts.cloudFormationYaml, "application/yaml;charset=utf-8")}>Download CloudFormation</button>
+                  <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}-trust-policy.json`, customerManagedArtifacts.trustPolicyJson, "application/json;charset=utf-8")}>Download JSON trust policy</button>
+                </div>
+                <ol className="deployment-checklist">
+                  <li><b>1</b><span><strong>Create a new dedicated role.</strong> Do not reuse an administrator, power-user, shared operations, break-glass, or AWS account-access role.</span></li>
+                  <li><b>2</b><span><strong>Keep trust exact.</strong> The principal must be <code>{principalArn}</code>; account roots, multiple principals, and wildcard trust are rejected.</span></li>
+                  <li><b>3</b><span><strong>Preserve the permission ceiling.</strong> Sutra assesses missing metadata capabilities, rejects broader actions and attached managed policies, and applies a restrictive STS session policy on every scan.</span></li>
+                  <li><b>4</b><span><strong>Register the resulting ARN.</strong> Use <code>{customerManagedArtifacts.roleArn}</code>. Sutra re-attests trust and permission drift before every collection.</span></li>
+                </ol>
+                <div className="quick-launch-history-warning"><strong>Handle as a one-time handoff</strong><span>These downloads contain the connection-specific ExternalId. Store them in the customer&apos;s protected infrastructure repository, never in chat or tickets, and delete local copies after deployment if they are not source-controlled securely.</span></div>
+              </section> : createdRoleMode === "customer_managed" && canDisplayInitialExternalId ? <div className="inline-warning" role="alert"><strong>Customer-role artifacts are unavailable.</strong><span>The server-returned trust handoff did not pass local artifact validation. Do not create or reuse a role; recover the handoff or contact the Sutra operator.</span></div> : null}
+
+              {createdRoleMode === "customer_managed" ? <div className="inline-warning"><strong>Unsafe existing roles are rejected.</strong><span>Sutra accepts only the selected <code>/sutra/…/</code> path and role name with one exact trust statement, one reviewed inline permission contract, no attached managed policies, and the expected dedicated-role tags. Broad permissions on any reused role are not considered acceptable.</span></div> : null}
 
               {!connectionOffboarded ? <form className="onboard-form role-registration" onSubmit={registerRole}>
-                <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={`arn:${connection.partition}:iam::${connection.awsAccountId}:role/sutra/SutraReadOnlyRole`} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the CloudFormation output after the stack completes." : !roleValid ? "Use a canonical IAM role ARN from the connected account." : "Role ARN syntax and account binding match."}</small></label>
+                <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={created ? expectedRoleArn(created) : selectedRoleArn ?? "Dedicated role ARN"} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the deployment output after the role is created." : !roleValid ? `Use the exact selected dedicated role ARN: ${selectedRoleArn ?? "unavailable"}.` : "Role ARN syntax, account, path, and name match; the server will still attest its exact trust, permissions, and tags."}</small></label>
                 <label><span>Authenticator code</span><input autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={roleStepUpCode} onChange={(event) => setRoleStepUpCode(event.target.value.replace(/\D/gu, ""))} required /><small>A fresh six-digit MFA code is required before Sutra can register or replace AWS trust.</small></label>
                 <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || !/^\d{6}$/u.test(roleStepUpCode) || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
               </form> : null}

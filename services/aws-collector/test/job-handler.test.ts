@@ -119,7 +119,7 @@ function storedConnection(status: "ACTIVE" | "PENDING" = "ACTIVE"): StoredAwsCon
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status,
-    permissionPackVersion: "standard-2026-07",
+    permissionPackVersion: "standard-2026-07.2",
     sessionNamePrefix: "mspcmdb-",
   };
 }
@@ -232,6 +232,8 @@ test("onboarding handler marks verified only after both negative probes are deni
   assert.equal(registry.verificationMarks.length, 1);
   assert.equal(result.missingExternalIdDenied, true);
   assert.equal(result.wrongExternalIdDenied, true);
+  assert.deepEqual(result.capabilityAssessment.missingActions, []);
+  assert.ok(result.capabilityAssessment.grantedActions.length > 0);
   assert.equal(Object.hasOwn(result, "credentials"), false);
   assert.equal(Object.hasOwn(result, "externalId"), false);
   assert.equal(JSON.stringify(result).includes(stored.externalId), false);
@@ -270,12 +272,16 @@ function createHandler(
           })),
           tags: [
             { key: "sutra:access-mode", value: "read-only" },
-            { key: "sutra:permission-pack", value: "standard-2026-07" },
+            { key: "sutra:permission-pack", value: "standard-2026-07.2" },
             { key: "sutra:managed-by", value: "cloudformation" },
           ],
         }),
         listRolePolicies: async () => ({
           policyNames: ["SutraImplementedMetadataCollectors"],
+          isTruncated: false,
+        }),
+        listAttachedRolePolicies: async () => ({
+          policies: [],
           isTruncated: false,
         }),
         getRolePolicy: async () => ({

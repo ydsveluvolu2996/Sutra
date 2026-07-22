@@ -6,7 +6,9 @@ import { Miniflare } from "miniflare";
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const cloudflare = await import("cloudflare:workers");
+const { CUSTOMER_ROLE_METADATA_ACTIONS } = await import("../lib/aws-customer-role-artifacts.ts");
 const { computeSnapshotSha256 } = await import("../lib/pilot-boundary.ts");
+const { canonicalJson } = await import("../lib/canonical-json.ts");
 const awsSecurity = await import("../lib/aws-pilot-security.ts");
 const localOperations = await import("../db/local-operations-repository.ts");
 const pilotRepository = await import("../db/pilot-repository.ts");
@@ -28,18 +30,27 @@ const FIXTURE = {
 const LIVE_CUSTOMER_ID = "cust_99999999999999999999999999999999";
 const LIVE_CONNECTION_ID = "conn_99999999999999999999999999999999";
 const LIVE_ACCOUNT_ID = "999900001111";
+const LEGACY_LIVE_ROLE_ARN = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`;
+const DEDICATED_LIVE_ROLE_ARN = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`;
 
 function verifiedRoleEvidence(accountId = LIVE_ACCOUNT_ID, partition = "aws") {
+  const roleSessionName = "sutra-repository-test";
   return {
     verified: true,
     accountId,
-    callerIdentityArn: `arn:${partition}:sts::${accountId}:assumed-role/SutraReadOnlyRole/sutra-repository-test`,
+    roleArn: `arn:${partition}:iam::${accountId}:role/sutra/SutraReadOnlyRole`,
+    roleSessionName,
+    callerIdentityArn: `arn:${partition}:sts::${accountId}:assumed-role/SutraReadOnlyRole/${roleSessionName}`,
     missingExternalIdDenied: true,
     wrongExternalIdDenied: true,
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "standard-2026-07",
+    permissionPackVersion: "standard-2026-07.2",
+    capabilityAssessment: {
+      grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
+      missingActions: [],
+    },
   };
 }
 
@@ -60,7 +71,7 @@ function verifiedRoleCommit({
   });
 }
 
-async function provisionValidatedLiveConnection(database) {
+async function provisionValidatedLiveConnection(database, roleArn = DEDICATED_LIVE_ROLE_ARN) {
   await database.batch([
     database.prepare(
       `INSERT INTO customers (id, org_id, slug, name, status)
@@ -72,13 +83,13 @@ async function provisionValidatedLiveConnection(database) {
          role_arn, external_id_ciphertext, external_id_key_version,
          permission_pack_version, status, enabled_regions_json, last_validated_at)
        VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, 'test-ciphertext',
-               'test-key-v1', 'standard-2026-07', 'active', '["us-east-1"]', ?)`,
+               'test-key-v1', 'standard-2026-07.2', 'active', '["us-east-1"]', ?)`,
     ).bind(
       LIVE_CONNECTION_ID,
       FIXTURE.tenantId,
       LIVE_CUSTOMER_ID,
       LIVE_ACCOUNT_ID,
-      `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`,
+      roleArn,
       Date.now(),
     ),
   ]);
@@ -250,6 +261,9 @@ async function connectionDraftInput(overrides = {}) {
     enabledRegions: ["us-east-1"],
     externalIdCiphertext: "encrypted-external-id-material-first",
     externalIdKeyVersion: "test-key-v1",
+    roleProvisioningMode: "sutra_template",
+    expectedRolePath: "/sutra/",
+    expectedRoleName: "SutraReadOnlyRole",
     ...overrides,
   };
 }
@@ -278,6 +292,145 @@ describe("recoverable initial AWS connection handoff", () => {
         `aws.connection.created:${input.operationId}`,
       );
       assert.doesNotMatch(audits.results[0]?.metadata_json ?? "", /cipher|external.?id/iu);
+    });
+  });
+
+  it("persists a customer-managed dedicated-role contract and capability assessment", async () => {
+    await withDatabase(async (database) => {
+      const input = await connectionDraftInput({
+        operationId: `onb_${"e".repeat(32)}`,
+        roleProvisioningMode: "customer_managed",
+        expectedRolePath: "/sutra/acme/security/",
+        expectedRoleName: "SutraAcmeMetadataReader",
+      });
+      const created = await pilotRepository.createConnectionDraft(input);
+      assert.equal(created.connection.roleProvisioningMode, "customer_managed");
+      assert.equal(created.connection.expectedRolePath, "/sutra/acme/security/");
+      assert.equal(created.connection.expectedRoleName, "SutraAcmeMetadataReader");
+      assert.equal(created.connection.permissionCapabilities, null);
+
+      const roleArn = `arn:aws:iam::${input.accountId}:role/sutra/acme/security/SutraAcmeMetadataReader`;
+      const missingAction = "ec2:DescribeSnapshots";
+      const grantedActions = CUSTOMER_ROLE_METADATA_ACTIONS
+        .filter((action) => action !== missingAction)
+        .toSorted();
+      const roleSessionName = "sutra-contract-test";
+      const committed = await pilotRepository.commitVerifiedConnectionRole({
+        connectionId: input.connectionId,
+        expectedPreviousRoleArn: null,
+        roleArn,
+        actorId: input.actorId,
+        verification: {
+          verified: true,
+          accountId: input.accountId,
+          roleArn,
+          roleSessionName,
+          callerIdentityArn: `arn:aws:sts::${input.accountId}:assumed-role/SutraAcmeMetadataReader/${roleSessionName}`,
+          missingExternalIdDenied: true,
+          wrongExternalIdDenied: true,
+          trustPolicyAttested: true,
+          permissionPolicyAttested: true,
+          sessionPolicyApplied: true,
+          permissionPackVersion: "standard-2026-07.2",
+          capabilityAssessment: {
+            grantedActions,
+            missingActions: [missingAction],
+          },
+        },
+      });
+      assert.deepEqual(committed.permissionCapabilities, {
+        grantedActions,
+        missingActions: [missingAction],
+      });
+      const stored = await pilotRepository.getStoredConnectionSecret(input.connectionId);
+      assert.equal(stored.roleArn, roleArn);
+      assert.deepEqual(stored.permissionCapabilities, committed.permissionCapabilities);
+      const row = await database.prepare(
+        "SELECT permission_capabilities_json FROM aws_connections WHERE id = ?",
+      ).bind(input.connectionId).first();
+      assert.equal(
+        row?.permission_capabilities_json,
+        JSON.stringify({ grantedActions, missingActions: [missingAction] }),
+      );
+
+      const completeCapabilities = {
+        grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS].toSorted(),
+        missingActions: [],
+      };
+      const updatedRoleSessionName = "sutra-contract-update";
+      const updateInput = {
+        connectionId: input.connectionId,
+        expectedPreviousRoleArn: roleArn,
+        roleArn,
+        actorId: input.actorId,
+        verification: {
+          verified: true,
+          accountId: input.accountId,
+          roleArn,
+          roleSessionName: updatedRoleSessionName,
+          callerIdentityArn: `arn:aws:sts::${input.accountId}:assumed-role/SutraAcmeMetadataReader/${updatedRoleSessionName}`,
+          missingExternalIdDenied: true,
+          wrongExternalIdDenied: true,
+          trustPolicyAttested: true,
+          permissionPolicyAttested: true,
+          sessionPolicyApplied: true,
+          permissionPackVersion: "standard-2026-07.2",
+          capabilityAssessment: completeCapabilities,
+        },
+      };
+      const updated = await pilotRepository.commitVerifiedConnectionRole(updateInput);
+      assert.deepEqual(updated.permissionCapabilities, completeCapabilities);
+
+      // An exact retry is idempotent, while the changed capability contract
+      // above must have its own audit event even though the role ARN is stable.
+      const replayed = await pilotRepository.commitVerifiedConnectionRole(updateInput);
+      assert.deepEqual(replayed.permissionCapabilities, completeCapabilities);
+      const roleAudits = await database.prepare(
+        `SELECT request_id FROM audit_events
+          WHERE action = 'aws.connection.role_registered' AND target_id = ?
+          ORDER BY occurred_at, id`,
+      ).bind(input.connectionId).all();
+      assert.equal(roleAudits.results.length, 2);
+      assert.equal(new Set(roleAudits.results.map((audit) => audit.request_id)).size, 2);
+    });
+  });
+
+  it("recovers only an exact canonical-template handoff written with the v1 audit contract", async () => {
+    await withDatabase(async (database) => {
+      const input = await connectionDraftInput({ operationId: `onb_${"7".repeat(32)}` });
+      await pilotRepository.createConnectionDraft(input);
+      await database.prepare(
+        "UPDATE audit_events SET metadata_json = ? WHERE request_id = ?",
+      ).bind(
+        canonicalJson({
+          accountId: input.accountId,
+          partition: input.partition,
+          regions: [...input.enabledRegions],
+          customerName: input.customerName,
+          customerSlug: input.customerSlug,
+          handoffVersion: 1,
+        }),
+        `aws.connection.created:${input.operationId}`,
+      ).run();
+
+      const recovered = await pilotRepository.createConnectionDraft(input);
+      assert.equal(recovered.recovered, true);
+      await assert.rejects(
+        pilotRepository.createConnectionDraft({
+          ...input,
+          actorId: "usr_wrong_legacy_handoff_actor",
+        }),
+        (error) => error?.code === "INVALID_STATE",
+      );
+      await assert.rejects(
+        pilotRepository.createConnectionDraft({
+          ...input,
+          roleProvisioningMode: "customer_managed",
+          expectedRolePath: "/sutra/customer/",
+          expectedRoleName: "SutraCustomerReadOnlyRole",
+        }),
+        (error) => error?.code === "INVALID_STATE",
+      );
     });
   });
 
@@ -394,6 +547,22 @@ describe("recoverable initial AWS connection handoff", () => {
           verification: {
             ...verifiedRoleEvidence(input.accountId, input.partition),
             wrongExternalIdDenied: false,
+          },
+        }),
+        (error) => error?.code === "INVALID_STATE",
+      );
+      await assert.rejects(
+        pilotRepository.commitVerifiedConnectionRole({
+          connectionId: input.connectionId,
+          expectedPreviousRoleArn: null,
+          roleArn: `arn:aws:iam::${input.accountId}:role/sutra/SutraReadOnlyRole`,
+          actorId: input.actorId,
+          verification: {
+            ...verifiedRoleEvidence(input.accountId, input.partition),
+            capabilityAssessment: {
+              grantedActions: ["sts:GetCallerIdentity"],
+              missingActions: [],
+            },
           },
         }),
         (error) => error?.code === "INVALID_STATE",
@@ -650,6 +819,17 @@ describe("AWS trust health remains separate from collection health", () => {
           .bind(LIVE_CONNECTION_ID).first())?.status,
         "validating",
       );
+      await assert.rejects(
+        pilotRepository.markConnectionValidated(
+          LIVE_CONNECTION_ID,
+          "usr_local_operations_test",
+          {
+            ...verifiedRoleEvidence(),
+            roleSessionName: "sutra-different-session",
+          },
+        ),
+        (error) => error?.code === "INVALID_STATE",
+      );
       await pilotRepository.markConnectionValidated(
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
@@ -658,7 +838,7 @@ describe("AWS trust health remains separate from collection health", () => {
       assert.equal(
         (await database.prepare("SELECT permission_pack_version FROM aws_connections WHERE id = ?")
           .bind(LIVE_CONNECTION_ID).first())?.permission_pack_version,
-        "standard-2026-07",
+        "standard-2026-07.2",
       );
       await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
       await assert.rejects(
@@ -685,7 +865,7 @@ describe("AWS trust health remains separate from collection health", () => {
 describe("AWS trust connection lifecycle", () => {
   it("atomically activates a replacement only with complete fresh trust evidence", async () => {
     await withDatabase(async (database) => {
-      await provisionValidatedLiveConnection(database);
+      await provisionValidatedLiveConnection(database, LEGACY_LIVE_ROLE_ARN);
       const before = await database.prepare(
         "SELECT last_validated_at FROM aws_connections WHERE id = ? LIMIT 1",
       ).bind(LIVE_CONNECTION_ID).first();
@@ -713,11 +893,15 @@ describe("AWS trust connection lifecycle", () => {
       const metadata = JSON.parse(audit?.metadata_json ?? "{}");
       assert.deepEqual(metadata.trustProof, {
         assumeRoleSucceeded: true,
+        capabilityAssessment: {
+          grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS].toSorted(),
+          missingActions: [],
+        },
         exactPermissionPolicyAttested: true,
         exactTrustPolicyAttested: true,
         expectedCallerIdentityMatched: true,
         missingExternalIdDenied: true,
-        permissionPackVersion: "standard-2026-07",
+        permissionPackVersion: "standard-2026-07.2",
         sessionPolicyApplied: true,
         wrongExternalIdDenied: true,
       });
@@ -829,9 +1013,9 @@ describe("AWS trust connection lifecycle", () => {
     });
   });
 
-  it("replays each audited trust mutation without changing state or duplicating evidence", async () => {
+  it("replays exact trust mutations while keeping role evidence actor-scoped", async () => {
     await withDatabase(async (database) => {
-      await provisionValidatedLiveConnection(database);
+      await provisionValidatedLiveConnection(database, LEGACY_LIVE_ROLE_ARN);
       const actorId = "usr_local_operations_test";
       const previousRoleArn = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/SutraReadOnly`;
       const roleArn = `arn:aws:iam::${LIVE_ACCOUNT_ID}:role/sutra/SutraReadOnlyRole`;
@@ -848,14 +1032,13 @@ describe("AWS trust connection lifecycle", () => {
       });
       assert.equal(roleReplay.updatedAt, registered.updatedAt);
       assert.equal(roleReplay.roleArn, roleArn);
-      await assert.rejects(
-        verifiedRoleCommit({
-          expectedPreviousRoleArn: roleArn,
-          roleArn,
-          actorId: "usr_different_actor",
-        }),
-        (error) => error?.code === "INVALID_STATE",
-      );
+      const crossActorRegistration = await verifiedRoleCommit({
+        expectedPreviousRoleArn: roleArn,
+        roleArn,
+        actorId: "usr_different_actor",
+      });
+      assert.equal(crossActorRegistration.roleArn, roleArn);
+      assert.notEqual(crossActorRegistration.updatedAt, roleReplay.updatedAt);
 
       const disabled = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId);
       const disableReplay = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId);
@@ -890,7 +1073,7 @@ describe("AWS trust connection lifecycle", () => {
         {
           "aws.connection.disabled": 1,
           "aws.connection.offboarded": 1,
-          "aws.connection.role_registered": 1,
+          "aws.connection.role_registered": 2,
         },
       );
     });
@@ -898,7 +1081,7 @@ describe("AWS trust connection lifecycle", () => {
 
   it("rolls back IAM role registration when its audit insert is forced to fail", async () => {
     await withDatabase(async (database) => {
-      await provisionValidatedLiveConnection(database);
+      await provisionValidatedLiveConnection(database, LEGACY_LIVE_ROLE_ARN);
       const before = await database.prepare(
         `SELECT role_arn, status, last_validated_at, updated_at
            FROM aws_connections WHERE id = ? LIMIT 1`,

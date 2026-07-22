@@ -22,6 +22,8 @@ import {
   workloadIdentityAwsClientConfig,
 } from "../src/role-broker.js";
 import {
+  AssumeRoleDeniedError,
+  AssumeRoleFailedError,
   ConnectionIntegrityError,
   NegativeProbeInconclusiveError,
   UnsafeTrustPolicyError,
@@ -71,7 +73,12 @@ const EXPECTED_IMPLEMENTED_READ_ACTIONS = [
   "ce:GetCostAndUsage",
   "ce:GetCostForecast",
 ] as const;
-const EXPECTED_TRUST_ACTIONS = ["iam:GetRole", "iam:ListRolePolicies", "iam:GetRolePolicy"] as const;
+const EXPECTED_TRUST_ACTIONS = [
+  "iam:GetRole",
+  "iam:ListRolePolicies",
+  "iam:ListAttachedRolePolicies",
+  "iam:GetRolePolicy",
+] as const;
 
 function connection(
   overrides: Partial<StoredAwsConnection> = {},
@@ -83,7 +90,7 @@ function connection(
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status: "ACTIVE",
-    permissionPackVersion: "standard-2026-07",
+    permissionPackVersion: "standard-2026-07.2",
     sessionNamePrefix: "mspcmdb-",
     ...overrides,
   };
@@ -143,12 +150,21 @@ class FakeCallerIdentityClient implements CallerIdentityClient {
   }
 }
 
-function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractClient {
+function expectedRoleContractClient(
+  stored: StoredAwsConnection,
+  options: {
+    readonly metadataActions?: readonly string[];
+    readonly attachedPolicies?: readonly { readonly policyName?: string; readonly policyArn?: string }[];
+  } = {},
+): RoleContractClient {
+  const roleName = stored.expectedRoleName ?? "SutraReadOnlyRole";
+  const rolePath = stored.expectedRolePath ?? "/sutra/";
+  const metadataActions = options.metadataActions ?? IMPLEMENTED_READ_ACTIONS;
   return {
     getRole: async () => ({
       arn: stored.roleArn,
-      roleName: "SutraReadOnlyRole",
-      path: "/sutra/",
+      roleName,
+      path: rolePath,
       maxSessionDuration: 3_600,
       assumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
         Version: "2012-10-17",
@@ -165,12 +181,19 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "standard-2026-07" },
-        { key: "sutra:managed-by", value: "cloudformation" },
+        { key: "sutra:permission-pack", value: "standard-2026-07.2" },
+        {
+          key: "sutra:managed-by",
+          value: stored.roleProvisioningMode === "customer_managed" ? "customer" : "cloudformation",
+        },
       ],
     }),
     listRolePolicies: async () => ({
       policyNames: ["SutraImplementedMetadataCollectors"],
+      isTruncated: false,
+    }),
+    listAttachedRolePolicies: async () => ({
+      policies: options.attachedPolicies ?? [],
       isTruncated: false,
     }),
     getRolePolicy: async () => ({
@@ -186,7 +209,7 @@ function expectedRoleContractClient(stored: StoredAwsConnection): RoleContractCl
           {
             Sid: "ImplementedMetadataApis",
             Effect: "Allow",
-            Action: IMPLEMENTED_READ_ACTIONS,
+            Action: metadataActions,
             Resource: "*",
           },
           {
@@ -268,7 +291,7 @@ test("sanitizeRoleSessionName is deterministic, bounded, and collision resistant
   );
 });
 
-test("the compact STS session policy caps an overprivileged customer role to reviewed read families", () => {
+test("the compact STS session policy adds a read-family intersection cap to the attested role", () => {
   const roleArn = "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole";
   const serialized = readonlyMetadataSessionPolicy(roleArn);
   const policy = JSON.parse(serialized) as {
@@ -284,17 +307,14 @@ test("the compact STS session policy caps an overprivileged customer role to rev
   const actions = allows.flatMap((statement) => statement.Action ?? []);
 
   assert.ok(serialized.length <= 900);
-  assert.equal(policy.Statement.length, 2);
+  assert.equal(policy.Statement.length, 1);
   assert.equal(policy.Statement.some((statement) => "Sid" in statement), false);
   assert.equal(policy.Statement.every((statement) => statement.Effect === "Allow"), true);
   assert.equal(
     actions.every((action) => /^[a-z0-9]+:(?:Get|List|Describe|Lookup|BatchGet)[A-Za-z*]+$/u.test(action)),
     true,
   );
-  assert.equal(
-    allows.find((statement) => statement.Resource === roleArn)?.Resource,
-    roleArn,
-  );
+  assert.equal(allows[0]?.Resource, "*");
 });
 
 test("the compact session cap covers every exact permission-pack action", () => {
@@ -304,9 +324,6 @@ test("the compact session cap covers every exact permission-pack action", () => 
   };
   const metadata = policy.Statement.find(
     (statement) => statement.Effect === "Allow" && statement.Resource === "*",
-  );
-  const trust = policy.Statement.find(
-    (statement) => statement.Effect === "Allow" && statement.Resource === roleArn,
   );
   const patterns = metadata?.Action ?? [];
   for (const action of EXPECTED_IMPLEMENTED_READ_ACTIONS) {
@@ -318,7 +335,15 @@ test("the compact session cap covers every exact permission-pack action", () => 
       action,
     );
   }
-  assert.deepEqual(new Set(trust?.Action), new Set(EXPECTED_TRUST_ACTIONS));
+  for (const action of EXPECTED_TRUST_ACTIONS) {
+    assert.equal(
+      patterns.some((pattern) => pattern.endsWith("*")
+        ? action.startsWith(pattern.slice(0, -1))
+        : action === pattern),
+      true,
+      action,
+    );
+  }
 });
 
 test("workload STS and IAM clients use bounded standard-retry HTTP timeouts", () => {
@@ -402,6 +427,29 @@ test("an active legacy permission pack is denied before STS is called", async ()
     /not in a state/u,
   );
   assert.equal(assume.calls.length, 0);
+});
+
+test("AssumeRole access denial is classified as trust drift while transient STS failure is not", async () => {
+  const stored = connection();
+  const denied = new FakeAssumeRoleClient(() => {
+    throw accessDenied();
+  });
+  await assert.rejects(
+    brokerWithIdentity(new MemoryRegistry(stored), denied, stored)
+      .assumeValidatedSession(scope, stored.connectionId, "denied-role-job"),
+    AssumeRoleDeniedError,
+  );
+
+  const transient = new FakeAssumeRoleClient(() => {
+    const error = new Error("STS request timed out");
+    error.name = "TimeoutError";
+    throw error;
+  });
+  await assert.rejects(
+    brokerWithIdentity(new MemoryRegistry(stored), transient, stored)
+      .assumeValidatedSession(scope, stored.connectionId, "transient-role-job"),
+    AssumeRoleFailedError,
+  );
 });
 
 test("onboarding requires positive validation plus missing and wrong ExternalId denials", async () => {
@@ -598,6 +646,252 @@ test("onboarding rejects a role whose fetched trust policy is not an exact Strin
   );
 });
 
+test("onboarding rejects wildcard-principal trust even when ExternalId is exact", async () => {
+  const stored = connection({ status: "PENDING" });
+  const registry = new MemoryRegistry(stored);
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const base = expectedRoleContractClient(stored);
+  const broker = new AwsRoleBroker({
+    registry,
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls[0]?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    roleContractClientFactory: () => ({
+      ...base,
+      getRole: async (roleName) => ({
+        ...(await base.getRole(roleName)),
+        assumeRolePolicyDocument: encodeURIComponent(JSON.stringify({
+          Version: "2012-10-17",
+          Statement: [{
+            Sid: "ExactCollectorWithConnectionExternalId",
+            Effect: "Allow",
+            Principal: { AWS: "*" },
+            Action: "sts:AssumeRole",
+            Condition: {
+              StringEquals: { "sts:ExternalId": stored.externalId },
+              StringLike: { "sts:RoleSessionName": "mspcmdb-*" },
+            },
+          }],
+        })),
+      }),
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  await assert.rejects(
+    broker.verifyOnboardingTrust(scope, stored.connectionId, "wildcard-principal"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "ROLE_CONTRACT",
+  );
+});
+
+test("customer-managed dedicated roles support a dynamic path/name and report missing capabilities", async () => {
+  const missingAction = "ce:GetCostForecast";
+  const grantedActions = IMPLEMENTED_READ_ACTIONS.filter((action) => action !== missingAction);
+  const stored = connection({
+    status: "PENDING",
+    roleProvisioningMode: "customer_managed",
+    expectedRolePath: "/sutra/acme/security/",
+    expectedRoleName: "AcmeSutraEvidenceRole",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/acme/security/AcmeSutraEvidenceRole",
+  });
+  const registry = new MemoryRegistry(stored);
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const broker = new AwsRoleBroker({
+    registry,
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored, { metadataActions: grantedActions }),
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls[0]?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/AcmeSutraEvidenceRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  const verification = await broker.verifyOnboardingTrust(
+    scope,
+    stored.connectionId,
+    "custom-role-onboarding",
+  );
+
+  assert.deepEqual(verification.capabilityAssessment.missingActions, [missingAction]);
+  assert.deepEqual(verification.capabilityAssessment.grantedActions, grantedActions);
+  assert.equal(assume.calls[0]?.DurationSeconds, 900);
+  assert.equal(assume.calls[0]?.Policy, readonlyMetadataSessionPolicy(stored.roleArn));
+});
+
+test("customer-managed roles reject attached AdministratorAccess", async () => {
+  const stored = connection({
+    status: "PENDING",
+    roleProvisioningMode: "customer_managed",
+    expectedRolePath: "/sutra/customer/",
+    expectedRoleName: "SutraEvidenceRole",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/customer/SutraEvidenceRole",
+  });
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const registry = new MemoryRegistry(stored);
+  const base = expectedRoleContractClient(stored, {
+    attachedPolicies: [{
+      policyName: "AdministratorAccess",
+      policyArn: "arn:aws:iam::aws:policy/AdministratorAccess",
+    }],
+  });
+  const broker = new AwsRoleBroker({
+    registry,
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => base,
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls[0]?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraEvidenceRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  await assert.rejects(
+    broker.verifyOnboardingTrust(scope, stored.connectionId, "attached-admin-policy"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "ROLE_CONTRACT",
+  );
+});
+
+test("customer-managed permission subsets reject any unimplemented extra action", async () => {
+  const stored = connection({
+    status: "PENDING",
+    roleProvisioningMode: "customer_managed",
+    expectedRolePath: "/sutra/customer/",
+    expectedRoleName: "SutraEvidenceRole",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/customer/SutraEvidenceRole",
+  });
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const broker = new AwsRoleBroker({
+    registry: new MemoryRegistry(stored),
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => expectedRoleContractClient(stored, {
+      metadataActions: [...IMPLEMENTED_READ_ACTIONS, "iam:CreateUser"],
+    }),
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls[0]?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraEvidenceRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  await assert.rejects(
+    broker.verifyOnboardingTrust(scope, stored.connectionId, "extra-action"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "ROLE_CONTRACT",
+  );
+});
+
+test("unsafe admin and shared operational role names are rejected before STS", async () => {
+  for (const roleName of [
+    "customer-admin-role",
+    "AdministratorAccess",
+    "shared-operations-role",
+    "OrganizationAccountAccessRole",
+  ]) {
+    const stored = connection({
+      roleProvisioningMode: "customer_managed",
+      expectedRolePath: "/sutra/customer/",
+      expectedRoleName: roleName,
+      roleArn: `arn:aws:iam::123456789012:role/sutra/customer/${roleName}`,
+    });
+    const assume = new FakeAssumeRoleClient(() => successfulAssumeRole());
+    const broker = brokerWithIdentity(new MemoryRegistry(stored), assume, stored);
+    await assert.rejects(
+      broker.assumeValidatedSession(scope, stored.connectionId, `unsafe-${roleName}`),
+      ConnectionIntegrityError,
+    );
+    assert.equal(assume.calls.length, 0);
+  }
+});
+
+test("every scan re-attests the role and rejects managed-policy drift", async () => {
+  const stored = connection({ status: "ACTIVE" });
+  const registry = new MemoryRegistry(stored);
+  const assume = new FakeAssumeRoleClient((input) => {
+    if (input.ExternalId === stored.externalId) return successfulAssumeRole();
+    throw accessDenied();
+  });
+  const base = expectedRoleContractClient(stored);
+  let drifted = false;
+  const broker = new AwsRoleBroker({
+    registry,
+    assumeRoleClient: assume,
+    expectedPrincipalArn: COLLECTOR_PRINCIPAL_ARN,
+    roleContractClientFactory: () => ({
+      ...base,
+      listAttachedRolePolicies: async () => ({
+        policies: drifted
+          ? [{ policyName: "AdministratorAccess", policyArn: "arn:aws:iam::aws:policy/AdministratorAccess" }]
+          : [],
+        isTruncated: false,
+      }),
+    }),
+    callerIdentityClientFactory: () => new FakeCallerIdentityClient(() => {
+      const sessionName = assume.calls.at(-1)?.RoleSessionName;
+      assert.ok(sessionName);
+      return {
+        $metadata: {},
+        Account: stored.expectedAccountId,
+        Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
+        UserId: `AROATEST:${sessionName}`,
+      };
+    }),
+    now: () => new Date("2026-07-15T00:00:00.000Z"),
+  });
+
+  await broker.verifyOnboardingTrust(scope, stored.connectionId, "drift-baseline");
+  drifted = true;
+  await assert.rejects(
+    broker.assumeValidatedSession(scope, stored.connectionId, "drifted-scan"),
+    (error: unknown) =>
+      error instanceof UnsafeTrustPolicyError && error.probe === "ROLE_CONTRACT",
+  );
+});
+
 test("a transient negative-probe error is inconclusive, never treated as a safe denial", async () => {
   const stored = connection({ status: "PENDING" });
   const registry = new MemoryRegistry(stored);
@@ -631,10 +925,11 @@ function brokerWithIdentity(
       new FakeCallerIdentityClient(() => {
         const sessionName = assume.calls[0]?.RoleSessionName;
         assert.ok(sessionName);
+        const expectedRoleName = parseIamRoleArn(stored.roleArn).roleName;
         return {
           $metadata: {},
           Account: stored.expectedAccountId,
-          Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/SutraReadOnlyRole/${sessionName}`,
+          Arn: `arn:aws:sts::${stored.expectedAccountId}:assumed-role/${expectedRoleName}/${sessionName}`,
           UserId: `AROATEST:${sessionName}`,
         };
       }),

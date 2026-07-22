@@ -1,6 +1,11 @@
 import type { AwsRegionSelection } from "./aws-region-selection.ts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
+export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
+export interface AwsPermissionCapabilityAssessment {
+  readonly grantedActions: readonly string[];
+  readonly missingActions: readonly string[];
+}
 export type ConnectionStatus = "pending" | "validating" | "active" | "needs_attention" | "disabled";
 export type SyncStatus = "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
 export type CoverageStatus = "succeeded" | "partial" | "failed" | "skipped";
@@ -22,6 +27,10 @@ export interface PilotConnection {
   readonly status: ConnectionStatus;
   readonly enabledRegions: AwsRegionSelection;
   readonly permissionPackVersion: string;
+  readonly roleProvisioningMode: AwsRoleProvisioningMode;
+  readonly expectedRolePath: string;
+  readonly expectedRoleName: string;
+  readonly permissionCapabilities: AwsPermissionCapabilityAssessment | null;
   readonly lastValidatedAt: string | null;
   readonly lastSuccessfulSyncAt: string | null;
   readonly createdAt: string;

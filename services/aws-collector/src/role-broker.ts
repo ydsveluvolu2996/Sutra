@@ -9,10 +9,12 @@ import {
   GetRoleCommand,
   GetRolePolicyCommand,
   IAMClient,
+  ListAttachedRolePoliciesCommand,
   ListRolePoliciesCommand,
 } from "@aws-sdk/client-iam";
 
 import {
+  AssumeRoleDeniedError,
   AssumeRoleFailedError,
   CallerIdentityFailedError,
   ConnectionIntegrityError,
@@ -26,12 +28,14 @@ import {
   type AssumeRoleClient,
   type AwsConnectionStatus,
   type AwsPartition,
+  type AwsRoleProvisioningMode,
   type AwsTemporaryCredentials,
   type CallerIdentityClientFactory,
   type ConnectionScope,
   type NegativeExternalIdProbe,
   type OnboardingTrustVerification,
   type ParsedIamRoleArn,
+  type PermissionCapabilityAssessment,
   type RoleContractClient,
   type RoleContractClientFactory,
   type ScopedConnectionRegistry,
@@ -50,9 +54,12 @@ const ACCOUNT_ID = /^[0-9]{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const SESSION_PREFIX = /^[A-Za-z0-9_+=,.@-]{3,32}$/;
 const SESSION_NAME = /^[A-Za-z0-9_+=,.@-]{2,64}$/;
-const EXPECTED_ROLE_PATH_AND_NAME = "sutra/SutraReadOnlyRole";
 const EXPECTED_ROLE_PATH = "/sutra/";
 const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
+const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
+const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
+const UNSAFE_SHARED_ROLE_NAME =
+  /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
 const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
 export const IMPLEMENTED_READ_ACTIONS = [
@@ -108,6 +115,7 @@ export const IMPLEMENTED_READ_ACTIONS = [
 export const TRUST_ATTESTATION_ACTIONS = [
   "iam:GetRole",
   "iam:ListRolePolicies",
+  "iam:ListAttachedRolePolicies",
   "iam:GetRolePolicy",
 ] as const;
 /**
@@ -131,9 +139,9 @@ const SESSION_READ_ACTIONS = [
   "rds:Describe*",
   "iam:GetAccountSummary",
   "iam:GetAccountPasswordPolicy",
-  "iam:GetRole",
+  "iam:GetRole*",
   "iam:ListRolePolicies",
-  "iam:GetRolePolicy",
+  "iam:ListAttachedRolePolicies",
   "cloudtrail:Describe*",
   "cloudtrail:GetTrailStatus",
   "cloudtrail:LookupEvents",
@@ -164,6 +172,9 @@ interface ResolvedConnection {
   readonly connection: StoredAwsConnection;
   readonly parsedRoleArn: ParsedIamRoleArn;
   readonly sessionNamePrefix: string;
+  readonly roleProvisioningMode: AwsRoleProvisioningMode;
+  readonly expectedRolePath: string;
+  readonly expectedRoleName: string;
 }
 
 export interface AwsRoleBrokerDependencies {
@@ -260,7 +271,7 @@ export function accountIdFromRoleArn(roleArn: string): string {
  * exact-action deny ceiling that also blocks direct resource-policy grants.
  */
 export function readonlyMetadataSessionPolicy(roleArn: string): string {
-  const parsed = parseIamRoleArn(roleArn);
+  parseIamRoleArn(roleArn);
   const policy = JSON.stringify({
     Version: "2012-10-17",
     Statement: [
@@ -268,11 +279,6 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
         Effect: "Allow",
         Action: SESSION_READ_ACTIONS,
         Resource: "*",
-      },
-      {
-        Effect: "Allow",
-        Action: TRUST_ATTESTATION_ACTIONS,
-        Resource: parsed.arn,
       },
     ],
   });
@@ -361,7 +367,11 @@ function assertExpectedTrustPolicy(
   }
 }
 
-function assertExpectedPermissionPolicy(value: string | undefined, roleArn: string): void {
+function assertExpectedPermissionPolicy(
+  value: string | undefined,
+  roleArn: string,
+  provisioningMode: AwsRoleProvisioningMode,
+): PermissionCapabilityAssessment {
   const document = policyDocument(value);
   exactKeys(document, ["Version", "Statement"]);
   if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement) || document.Statement.length !== 3) {
@@ -377,6 +387,8 @@ function assertExpectedPermissionPolicy(value: string | undefined, roleArn: stri
   exactKeys(ceiling, ["Sid", "Effect", "NotAction", "Resource"]);
   exactKeys(metadata, ["Sid", "Effect", "Action", "Resource"]);
   exactKeys(attestation, ["Sid", "Effect", "Action", "Resource"]);
+  const metadataActions = stringList(metadata.Action);
+  const implemented = new Set<string>(IMPLEMENTED_READ_ACTIONS);
   if (
     ceiling.Effect !== "Deny" ||
     ceiling.Resource !== "*" ||
@@ -386,13 +398,21 @@ function assertExpectedPermissionPolicy(value: string | undefined, roleArn: stri
     ) ||
     metadata.Effect !== "Allow" ||
     metadata.Resource !== "*" ||
-    !sameStringSet(stringList(metadata.Action), IMPLEMENTED_READ_ACTIONS) ||
+    metadataActions.length !== new Set(metadataActions).size ||
+    metadataActions.some((action) => !implemented.has(action)) ||
+    (provisioningMode === "sutra_template" &&
+      !sameStringSet(metadataActions, IMPLEMENTED_READ_ACTIONS)) ||
     attestation.Effect !== "Allow" ||
     attestation.Resource !== roleArn ||
     !sameStringSet(stringList(attestation.Action), TRUST_ATTESTATION_ACTIONS)
   ) {
     throw new Error("unexpected permission policy");
   }
+  const granted = new Set(metadataActions);
+  return {
+    grantedActions: IMPLEMENTED_READ_ACTIONS.filter((action) => granted.has(action)),
+    missingActions: IMPLEMENTED_READ_ACTIONS.filter((action) => !granted.has(action)),
+  };
 }
 
 function assertExpectedRole(
@@ -400,11 +420,13 @@ function assertExpectedRole(
   resolved: ResolvedConnection,
   expectedPrincipalArn: string,
 ): void {
+  const expectedRolePathAndName =
+    `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
   if (
-    resolved.parsedRoleArn.rolePathAndName !== EXPECTED_ROLE_PATH_AND_NAME ||
+    resolved.parsedRoleArn.rolePathAndName !== expectedRolePathAndName ||
     role.arn !== resolved.connection.roleArn ||
-    role.roleName !== EXPECTED_ROLE_NAME ||
-    role.path !== EXPECTED_ROLE_PATH ||
+    role.roleName !== resolved.expectedRoleName ||
+    role.path !== resolved.expectedRolePath ||
     role.maxSessionDuration !== 3_600
   ) {
     throw new Error("unexpected customer role identity");
@@ -419,7 +441,8 @@ function assertExpectedRole(
   if (
     tags.get("sutra:access-mode") !== "read-only" ||
     tags.get("sutra:permission-pack") !== PERMISSION_PACK_VERSION ||
-    tags.get("sutra:managed-by") !== "cloudformation"
+    tags.get("sutra:managed-by") !==
+      (resolved.roleProvisioningMode === "sutra_template" ? "cloudformation" : "customer")
   ) {
     throw new Error("role attestation tags are missing");
   }
@@ -449,6 +472,26 @@ async function allInlinePolicyNames(
     marker = output.marker;
   }
   throw new Error("role-policy pagination limit exceeded");
+}
+
+async function allAttachedManagedPolicies(
+  client: RoleContractClient,
+  roleName: string,
+): Promise<readonly { readonly policyName?: string; readonly policyArn?: string }[]> {
+  const policies: { policyName?: string; policyArn?: string }[] = [];
+  let marker: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < 100; page += 1) {
+    const output = await client.listAttachedRolePolicies(roleName, marker);
+    policies.push(...output.policies);
+    if (!output.isTruncated) return policies;
+    if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
+      throw new Error("invalid attached-policy pagination");
+    }
+    seen.add(output.marker);
+    marker = output.marker;
+  }
+  throw new Error("attached-policy pagination limit exceeded");
 }
 
 /**
@@ -545,7 +588,10 @@ export class AwsRoleBroker {
       throw new UnsafeTrustPolicyError("WRONG_EXTERNAL_ID");
     }
 
-    await this.attestRoleContract(resolved, validated.credentials);
+    const capabilityAssessment = await this.attestRoleContract(
+      resolved,
+      validated.credentials,
+    );
 
     return {
       connectionId: validated.connectionId,
@@ -560,13 +606,14 @@ export class AwsRoleBroker {
       permissionPolicyAttested: true,
       sessionPolicyApplied: true,
       permissionPackVersion: PERMISSION_PACK_VERSION,
+      capabilityAssessment,
     };
   }
 
   private async attestRoleContract(
     resolved: ResolvedConnection,
     credentials: AwsTemporaryCredentials,
-  ): Promise<void> {
+  ): Promise<PermissionCapabilityAssessment> {
     try {
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -575,6 +622,15 @@ export class AwsRoleBroker {
       const client = this.dependencies.roleContractClientFactory(credentials);
       const role = await client.getRole(resolved.parsedRoleArn.roleName);
       assertExpectedRole(role, resolved, expectedPrincipal.arn);
+      const attachedPolicies = await allAttachedManagedPolicies(
+        client,
+        resolved.parsedRoleArn.roleName,
+      );
+      if (attachedPolicies.length !== 0) {
+        // This rejects AdministratorAccess and every other managed policy. A
+        // dedicated Sutra role has one reviewed inline policy and nothing else.
+        throw new Error("attached managed policies are prohibited");
+      }
       const policyNames = await allInlinePolicyNames(client, resolved.parsedRoleArn.roleName);
       if (policyNames.length !== 1 || policyNames[0] !== EXPECTED_POLICY_NAME) {
         throw new Error("unexpected inline policy set");
@@ -583,7 +639,11 @@ export class AwsRoleBroker {
         resolved.parsedRoleArn.roleName,
         EXPECTED_POLICY_NAME,
       );
-      assertExpectedPermissionPolicy(policy.policyDocument, resolved.connection.roleArn);
+      return assertExpectedPermissionPolicy(
+        policy.policyDocument,
+        resolved.connection.roleArn,
+        resolved.roleProvisioningMode,
+      );
     } catch {
       throw new UnsafeTrustPolicyError("ROLE_CONTRACT");
     }
@@ -630,7 +690,32 @@ export class AwsRoleBroker {
       throw new ConnectionIntegrityError("Stored STS session-name prefix is invalid");
     }
 
-    return { connection, parsedRoleArn, sessionNamePrefix };
+    const roleProvisioningMode = connection.roleProvisioningMode ?? "sutra_template";
+    const expectedRolePath = connection.expectedRolePath ?? EXPECTED_ROLE_PATH;
+    const expectedRoleName = connection.expectedRoleName ?? EXPECTED_ROLE_NAME;
+    if (
+      (roleProvisioningMode !== "sutra_template" &&
+        roleProvisioningMode !== "customer_managed") ||
+      !ROLE_PATH.test(expectedRolePath) ||
+      expectedRolePath.length > 512 ||
+      !ROLE_NAME.test(expectedRoleName) ||
+      (roleProvisioningMode === "sutra_template" &&
+        (expectedRolePath !== EXPECTED_ROLE_PATH || expectedRoleName !== EXPECTED_ROLE_NAME)) ||
+      (roleProvisioningMode === "customer_managed" &&
+        (UNSAFE_SHARED_ROLE_NAME.test(expectedRoleName) ||
+          expectedRoleName.toLowerCase() === "organizationaccountaccessrole"))
+    ) {
+      throw new ConnectionIntegrityError("Stored customer role contract is invalid or unsafe");
+    }
+
+    return {
+      connection,
+      parsedRoleArn,
+      sessionNamePrefix,
+      roleProvisioningMode,
+      expectedRolePath,
+      expectedRoleName,
+    };
   }
 
   private async assumeAndValidateIdentity(
@@ -652,7 +737,11 @@ export class AwsRoleBroker {
         }),
       );
     } catch (error: unknown) {
-      throw new AssumeRoleFailedError(errorName(error));
+      const name = errorName(error);
+      if (EXPECTED_ACCESS_DENIALS.has(name)) {
+        throw new AssumeRoleDeniedError(name);
+      }
+      throw new AssumeRoleFailedError(name);
     }
 
     const credentials = parseTemporaryCredentials(output.Credentials, this.now());
@@ -781,6 +870,20 @@ export function createWorkloadIdentityRoleBroker(
           }));
           return {
             policyNames: output.PolicyNames ?? [],
+            isTruncated: output.IsTruncated === true,
+            ...(output.Marker === undefined ? {} : { marker: output.Marker }),
+          };
+        },
+        listAttachedRolePolicies: async (roleName, marker) => {
+          const output = await client.send(new ListAttachedRolePoliciesCommand({
+            RoleName: roleName,
+            ...(marker === undefined ? {} : { Marker: marker }),
+          }));
+          return {
+            policies: (output.AttachedPolicies ?? []).map((policy) => ({
+              ...(policy.PolicyName === undefined ? {} : { policyName: policy.PolicyName }),
+              ...(policy.PolicyArn === undefined ? {} : { policyArn: policy.PolicyArn }),
+            })),
             isTruncated: output.IsTruncated === true,
             ...(output.Marker === undefined ? {} : { marker: output.Marker }),
           };

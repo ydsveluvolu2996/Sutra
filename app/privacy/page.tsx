@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
+import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = publicPageMetadata({
+  path: "/privacy",
   title: "Privacy Policy",
   description: "How Sutra collects, uses and protects data — data-minimizing by design, with read-only, customer-owned AWS access and no stored access keys.",
-};
+});
 
 export default function PrivacyPage() {
   return (

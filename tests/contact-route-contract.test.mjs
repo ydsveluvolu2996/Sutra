@@ -4,12 +4,14 @@ import test from "node:test";
 
 const route = await readFile(new URL("../app/api/contact/route.ts", import.meta.url), "utf8");
 const deploymentSecurity = await readFile(new URL("../lib/deployment-security.ts", import.meta.url), "utf8");
+const siteSeo = await readFile(new URL("../lib/site-seo.ts", import.meta.url), "utf8");
 
 test("contact route is force-dynamic and PUBLIC (no session requirement)", () => {
   assert.match(route, /export const dynamic = "force-dynamic"/u);
   assert.doesNotMatch(route, /requireApiSession/u);
   // The path is on the public preview allowlist alongside /contact.
-  assert.match(deploymentSecurity, /"\/contact", "\/api\/contact"/u);
+  assert.match(deploymentSecurity, /\.\.\.PUBLIC_INDEXABLE_PATHS,[\s\S]+"\/api\/contact"/u);
+  assert.match(siteSeo, /PUBLIC_INDEXABLE_PATHS[\s\S]+"\/contact"/u);
 });
 
 test("contact route reads a bounded body, validates, and answers with json/error helpers", () => {

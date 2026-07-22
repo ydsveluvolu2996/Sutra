@@ -61,10 +61,18 @@ profile.
 
 ## One-time source-role setup
 
-The source role can assume only `/sutra/SutraReadOnlyRole` and has no direct AWS
-resource permissions. Its fixed commercial-partition permissions boundary contains
-an explicit deny for every non-`sts:AssumeRole` action, an explicit deny for
-`sts:AssumeRole` outside that exact path/name, and the one matching allow. The deny
+The source role can assume only dedicated customer roles below the reserved
+`/sutra/` IAM path and has no direct AWS resource permissions. That namespace is
+wide enough for a customer-selected name and nested path such as
+`/sutra/acme/security/ReadOnlyCollector`; it does not include administrator roles,
+shared operational roles, lookalike paths such as `/sutrax/`, or a general
+`role/*` wildcard. The application registry still pins one exact role ARN per
+connection and the broker validates that role's exact trust and permission contract
+before every scan.
+
+The fixed commercial-partition permissions boundary contains an explicit deny for
+every non-`sts:AssumeRole` action, an explicit deny for `sts:AssumeRole` outside
+`arn:aws:iam::*:role/sutra/*`, and the one matching namespace allow. The deny
 statements keep this an absolute ceiling even if another identity policy is later
 attached. This local preparation flow rejects GovCloud and China partitions; use
 separate reviewed roles and policies for those partitions. Before delegating setup,
@@ -104,7 +112,7 @@ account root.
 
 The reviewed operator permission-set inline policy for this pilot is checked in as
 `infrastructure/sutra-operator-permission-set-policy.json` (SHA-256
-`093292b0f6733bdddbcdb5bc34b31a0562e6350c77d8d4d76b744a7892b9ba7e`). It is
+`391fbfb39bba1237e054e9131c923065ae3ea448fcdbf0409862f60649ce57dc`). It is
 deliberately fixed to account `111122223333`, Region `us-east-1`, stack
 `sutra-local-collector`, the current Identity Center role suffix, the exact source
 role and boundary, the deterministic template bucket, and both reviewed template
@@ -219,7 +227,7 @@ in the generated runtime file:
 ```bash
 AWS_PROFILE=sutra-demo-collector \
 SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::111122223333:role/sutra/SutraLocalCollectorRole' \
-SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/standard-2026-07/3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f.yaml?versionId=publisher-output' \
+SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/standard-2026-07.2/8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml?versionId=publisher-output' \
 SUTRA_LIVE_AWS_ACK='I_ACKNOWLEDGE_THIS_WILL_CONTACT_AWS' \
 pnpm live:aws:host
 ```
