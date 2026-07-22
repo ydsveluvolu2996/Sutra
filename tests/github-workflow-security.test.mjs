@@ -82,6 +82,23 @@ test("workflow inputs are never interpolated directly into shell scripts", () =>
   }
 });
 
+test("CI runs slow gates independently and aggregates them fail-closed", () => {
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+  assert.match(ci, /^\s{2}quality:\s*$/mu);
+  assert.match(ci, /^\s{2}integration:\s*$/mu);
+  assert.match(ci, /^\s{2}build:\s*$/mu);
+  assert.match(ci, /^\s{2}release-gate:\s*$/mu);
+  assert.match(ci, /needs: \[quality, integration, build\]/u);
+  assert.match(ci, /if: \$\{\{ always\(\) \}\}/u);
+  assert.match(ci, /QUALITY_RESULT: \$\{\{ needs\.quality\.result \}\}/u);
+  assert.match(ci, /INTEGRATION_RESULT: \$\{\{ needs\.integration\.result \}\}/u);
+  assert.match(ci, /BUILD_RESULT: \$\{\{ needs\.build\.result \}\}/u);
+  assert.match(ci, /test "\$QUALITY_RESULT" = success/u);
+  assert.match(ci, /test "\$INTEGRATION_RESULT" = success/u);
+  assert.match(ci, /test "\$BUILD_RESULT" = success/u);
+});
+
 test("the in-cluster security gate runs with an immutable root filesystem", () => {
   const manifest = readFileSync(
     new URL("../deploy/ci/kubernetes-gate-job.yaml", import.meta.url),
