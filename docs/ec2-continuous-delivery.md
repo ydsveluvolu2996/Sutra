@@ -15,7 +15,8 @@ The fast release path is instead:
 reviewed main commit
   -> manual GitHub Actions release
   -> short-lived GitHub OIDC session (no AWS keys)
-  -> build + Trivy gate + immutable ECR digest
+  -> immutable ECR candidate + exact-digest Trivy gate
+  -> promote the same OCI manifest to a retained sha-* tag
   -> SSM command to one exact EC2 instance
   -> transactional release-update.sh + automatic failure rollback
   -> public health, login and status checks
@@ -67,10 +68,23 @@ aws ecr describe-repositories \
 
 The current repository is already `IMMUTABLE`. If a future inspection differs,
 stop and restore that setting through a reviewed infrastructure change before
-releasing. Keep the existing lifecycle policy that retains three tagged `sha-`
-releases and expires abandoned untagged layers. The workflow scans the exact
-pushed digest with Trivy; it does not require or silently enable an ECR
-scan-on-push mode.
+releasing. Apply the versioned
+[`ecr-lifecycle-policy.json`](../deploy/ec2/ecr-lifecycle-policy.json) only after
+reviewing an ECR lifecycle preview. Its priority-1 rule retains three validated
+`sha-` releases. Its lower-priority rules expire unpromoted `candidate-` images
+after one day and abandoned untagged artifacts after fourteen days. ECR's rule
+priority protects an image carrying a validated `sha-` tag from the lower
+candidate rule even though the immutable candidate tag remains attached.
+
+The workflow first pushes a uniquely tagged candidate, then scans that exact
+digest with Trivy. Only a passing digest is promoted: the workflow reads the
+candidate's OCI index, verifies its SHA-256 and its linux/amd64 plus attestation
+manifests, and attaches a new immutable `sha-` tag with ECR `PutImage`. The
+returned and subsequently described digests must both equal the scanned digest
+before SSM is allowed to run. This preserves provenance and SBOM evidence while
+ensuring failed scans never consume the three-release retention window. It does
+not require or silently enable ECR scan-on-push mode, and the GitHub role has no
+image-deletion permission.
 
 ## One-time GitHub setup
 
@@ -134,11 +148,11 @@ timer or scheduled action. Starting EC2 begins instance billing; stopping ends
 instance-usage billing after the state transition, while retained EBS and small
 registry/object storage remain billable.
 
-ECR stores only a bounded number of tagged releases, and GitHub hosts the build
-runner/cache. Normal releases add no S3, CloudFront, load balancer, NAT Gateway,
-ECS or RDS resource. The single EC2/EBS host remains the availability and data
-failure domain, so this is a production-like private beta rather than an HA SaaS
-platform.
+ECR stores three retained validated releases; failed scan candidates age out
+after one day, and GitHub hosts the build runner/cache. Normal releases add no
+S3, CloudFront, load balancer, NAT Gateway, ECS or RDS resource. The single
+EC2/EBS host remains the availability and data failure domain, so this is a
+production-like private beta rather than an HA SaaS platform.
 
 ## Failure and rollback behavior
 

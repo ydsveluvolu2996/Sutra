@@ -1,0 +1,44 @@
+{
+  "rules": [
+    {
+      "rulePriority": 1,
+      "description": "Keep three security-validated immutable releases",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["sha-"],
+        "countType": "imageCountMoreThan",
+        "countNumber": 3
+      },
+      "action": {
+        "type": "expire"
+      }
+    },
+    {
+      "rulePriority": 2,
+      "description": "Expire unpromoted scan candidates after one day",
+      "selection": {
+        "tagStatus": "tagged",
+        "tagPrefixList": ["candidate-"],
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 1
+      },
+      "action": {
+        "type": "expire"
+      }
+    },
+    {
+      "rulePriority": 3,
+      "description": "Clean unreferenced build artifacts after fourteen days",
+      "selection": {
+        "tagStatus": "untagged",
+        "countType": "sinceImagePushed",
+        "countUnit": "days",
+        "countNumber": 14
+      },
+      "action": {
+        "type": "expire"
+      }
+    }
+  ]
+}

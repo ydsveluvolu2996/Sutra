@@ -12,6 +12,10 @@ const notificationWorkerDockerfile = await readFile(
 const packageManifest = JSON.parse(
   await readFile(new URL("../package.json", import.meta.url), "utf8"),
 );
+const workspaceManifest = await readFile(
+  new URL("../pnpm-workspace.yaml", import.meta.url),
+  "utf8",
+);
 
 test("the long-running app never receives or invokes the PostgreSQL owner credential", () => {
   const migrateStart = compose.indexOf("  migrate:\n");
@@ -44,4 +48,29 @@ test("Docker builders use the repository package-manager version", () => {
     assert.ok(match, "Dockerfile must pin pnpm through Corepack");
     assert.equal(match[1], packageManifest.packageManager);
   }
+});
+
+test("the application runtime contains only deployed runtime dependencies and built artifacts", () => {
+  assert.match(rootDockerfile, /pnpm --filter sutra deploy --prod \/app\/\.runtime\/root/u);
+  assert.match(
+    rootDockerfile,
+    /pnpm --filter @msp\/aws-collector deploy --prod \/app\/\.runtime\/collector/u,
+  );
+  assert.match(workspaceManifest, /injectWorkspacePackages: true/u);
+  assert.match(rootDockerfile, /FROM node:22-bookworm-slim@sha256:[a-f0-9]{64} AS runtime/u);
+  assert.match(rootDockerfile, /rm -rf \/usr\/local\/lib\/node_modules\/npm/u);
+  assert.match(rootDockerfile, /\/opt\/yarn-\*/u);
+  assert.match(rootDockerfile, /rm -f \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/u);
+  assert.match(rootDockerfile, /\/app\/\.runtime\/root\/node_modules \/app\/node_modules/u);
+  assert.match(
+    rootDockerfile,
+    /\/app\/\.runtime\/collector\/node_modules \/app\/services\/aws-collector\/node_modules/u,
+  );
+  assert.match(rootDockerfile, /\/app\/dist \/app\/dist/u);
+  assert.match(rootDockerfile, /\/app\/services\/aws-collector\/dist \/app\/services\/aws-collector\/dist/u);
+  assert.match(rootDockerfile, /\/app\/docker\/postgres-init\.sh \/app\/docker\/postgres-init\.sh/u);
+  assert.match(rootDockerfile, /\/app\/deploy\/ec2 \/app\/deploy\/ec2/u);
+  assert.doesNotMatch(rootDockerfile, /COPY --from=builder[^\n]*\/app \/app/u);
+  assert.equal(packageManifest.dependencies.wrangler, "4.102.0");
+  assert.equal(packageManifest.devDependencies.wrangler, undefined);
 });
