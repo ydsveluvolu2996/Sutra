@@ -167,8 +167,9 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
   assert.match(
     role,
-    /token\.actions\.githubusercontent\.com:sub: repo:ydsveluvolu2996\/Sutra:ref:refs\/heads\/main/u,
+    /token\.actions\.githubusercontent\.com:sub: repo:ydsveluvolu2996@229068958\/Sutra@1301833628:ref:refs\/heads\/main/u,
   );
+  assert.doesNotMatch(role, /token\.actions\.githubusercontent\.com:sub:.*\*/u);
   assert.doesNotMatch(role, /GitHubRepository|ReleaseEnvironment|:environment:/u);
   assert.match(role, /Action: ssm:GetConnectionStatus/u);
   assert.match(role, /Action: ssm:SendCommand/u);

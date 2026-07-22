@@ -58,8 +58,8 @@ Resources:
     Properties:
       MaxSessionDuration: 3600
       Description: >-
-        Short-lived GitHub OIDC role scoped to the exact Sutra repository main
-        branch, one ECR repository and one EC2 managed node.
+        Short-lived GitHub OIDC role scoped to the immutable Sutra repository
+        identity and main branch, one ECR repository and one EC2 managed node.
       Tags:
         - Key: sutra:component
           Value: ec2-private-beta-release
@@ -75,7 +75,7 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996/Sutra:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main
       Policies:
         - PolicyName: PushOnlyImmutableSutraApplicationRelease
           PolicyDocument:
