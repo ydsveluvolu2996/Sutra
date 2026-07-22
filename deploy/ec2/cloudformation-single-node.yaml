@@ -92,10 +92,10 @@ Conditions:
       - "true"
 
 Resources:
-  # trivy:ignore:AWS-0104
   # This is an egress-only host with no inbound rules. Its six explicit,
   # port-bounded destinations must reach dynamic AWS, Cloudflare, DNS and
   # signed package endpoints; fixed destination CIDRs are not available.
+  # trivy:ignore:AWS-0104
   InstanceSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -217,10 +217,10 @@ Resources:
     Properties:
       Roles: [{ Ref: InstanceRole }]
 
-  # trivy:ignore:AWS-0028
   # Trivy 0.72 misclassifies this CloudFormation resource even though
   # MetadataOptions.HttpTokens below is `required`; deployment verification
   # also asserts the applied EC2 metadata posture through the AWS API.
+  # trivy:ignore:AWS-0028
   SutraInstance:
     Type: AWS::EC2::Instance
     Properties:
