@@ -256,7 +256,21 @@ Resources:
               exec > >(tee -a /var/log/sutra-bootstrap.log | logger -t sutra-bootstrap -s 2>/dev/console) 2>&1
               export DEBIAN_FRONTEND=noninteractive
               apt-get update
-              apt-get install -y awscli ca-certificates curl jq openssl
+              apt-get install -y ca-certificates curl jq openssl unzip
+
+              # Ubuntu 24.04 no longer publishes awscli from the enabled apt
+              # repositories. Install an exact, checksummed AWS CLI v2 bundle
+              # so bootstrap cannot silently drift to an unreviewed release.
+              AWS_CLI_VERSION='2.35.24'
+              AWS_CLI_SHA256='d71b4388a3f9e2c56819de40936b018674b04352766eef615b444c4c38b043d7'
+              curl -fsSL --retry 3 \
+                "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$AWS_CLI_VERSION.zip" \
+                -o /tmp/awscliv2.zip
+              printf '%s  %s\n' "$AWS_CLI_SHA256" /tmp/awscliv2.zip | sha256sum --check --strict
+              unzip -q /tmp/awscliv2.zip -d /tmp/awscliv2
+              /tmp/awscliv2/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli
+              rm -rf /tmp/awscliv2 /tmp/awscliv2.zip
+              aws --version
 
               systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || \
                 systemctl enable --now amazon-ssm-agent.service
