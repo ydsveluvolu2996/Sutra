@@ -4,16 +4,16 @@
 # =============================================================================
 # Idempotent one-command setup AND redeploy path. Safe to re-run.
 #
-#   curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/deploy/ec2/bootstrap.sh | bash
-#   # or, from a checkout:
+#   # Run from the host bundle extracted from an approved immutable app image:
 #   bash deploy/ec2/bootstrap.sh
 #
 # It will:
 #   1. Install Docker Engine + compose plugin if missing.
-#   2. Ensure the repo is present (clone if run standalone via SUTRA_REPO_URL).
+#   2. Require the release bundle extracted from the immutable app image.
 #   3. Generate database/job secrets into .sutra/docker.env if absent (0600).
 #   4. Ensure deploy/ec2/.env.ec2 exists (copied from the template; prompt on a TTY).
-#   5. Build the app image and bring the stack up with `up -d --wait`.
+#   5. Validate the ignored Cloudflare named-tunnel config + credential.
+#   6. Pull the immutable app release and bring the stack up with `up -d --wait`.
 #
 # Never echoes secret values. Fails fast with clear messages.
 # -----------------------------------------------------------------------------
@@ -22,10 +22,6 @@ set -euo pipefail
 log()  { printf '\033[36m[sutra]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[sutra:warn]\033[0m %s\n' "$*" >&2; }
 die()  { printf '\033[31m[sutra:error]\033[0m %s\n' "$*" >&2; exit 1; }
-
-# --- 0. Configuration ---------------------------------------------------------
-SUTRA_REPO_URL="${SUTRA_REPO_URL:-}"
-SUTRA_REPO_DIR="${SUTRA_REPO_DIR:-/opt/sutra}"
 
 # --- 1. Docker Engine + compose plugin ---------------------------------------
 install_docker() {
@@ -52,28 +48,21 @@ if ! docker info >/dev/null 2>&1; then
   if sudo docker info >/dev/null 2>&1; then DOCKER="sudo docker"; else die "Cannot talk to the Docker daemon."; fi
 fi
 
-# --- 2. Locate (or clone) the repository -------------------------------------
+# --- 2. Locate the immutable release bundle ----------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
-if [ -f "$SCRIPT_DIR/compose.prod.yaml" ]; then
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-else
-  # Piped execution (curl | bash): we have no checkout — clone one.
-  [ -n "$SUTRA_REPO_URL" ] || die "Run standalone requires SUTRA_REPO_URL=<git url> (target dir: $SUTRA_REPO_DIR)."
-  if [ ! -d "$SUTRA_REPO_DIR/.git" ]; then
-    log "Cloning $SUTRA_REPO_URL -> $SUTRA_REPO_DIR"
-    sudo mkdir -p "$SUTRA_REPO_DIR"
-    sudo chown "$(id -un)":"$(id -gn)" "$SUTRA_REPO_DIR"
-    git clone "$SUTRA_REPO_URL" "$SUTRA_REPO_DIR"
-  fi
-  REPO_ROOT="$SUTRA_REPO_DIR"
-fi
+[ -f "$SCRIPT_DIR/compose.prod.yaml" ] || die "bootstrap.sh must run from deploy/ec2 in the host bundle extracted from the approved immutable Sutra app image. Git cloning is intentionally unsupported."
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
-log "Repository root: $REPO_ROOT"
+log "Immutable release bundle root: $REPO_ROOT"
 
 COMPOSE_FILE="deploy/ec2/compose.prod.yaml"
 ENV_EC2="deploy/ec2/.env.ec2"
 ENV_EC2_EXAMPLE="deploy/ec2/.env.ec2.example"
 DOCKER_ENV=".sutra/docker.env"
+CLOUDFLARED_DIR=".sutra/cloudflared"
+CLOUDFLARED_CONFIG="$CLOUDFLARED_DIR/config.yml"
+CLOUDFLARED_CREDENTIAL="$CLOUDFLARED_DIR/credentials.json"
+CLOUDFLARED_CONFIG_EXAMPLE="deploy/ec2/cloudflared-config.yml.example"
 [ -f "$COMPOSE_FILE" ] || die "$COMPOSE_FILE not found under $REPO_ROOT."
 
 # --- 3. Generate database/job secrets (idempotent) ----------------------------
@@ -124,26 +113,45 @@ ensure_env_ec2() {
     warn "Created $ENV_EC2 from template."
     if [ -t 0 ]; then
       printf 'Enter your domain (apex, e.g. sutracmdb.com): '; read -r dom
-      printf 'Enter the Let'\''s Encrypt contact email: '; read -r mail
       [ -n "$dom" ]  && sed -i.bak "s#^SUTRA_DOMAIN=.*#SUTRA_DOMAIN=${dom}#"       "$ENV_EC2"
-      [ -n "$mail" ] && sed -i.bak "s#^SUTRA_ACME_EMAIL=.*#SUTRA_ACME_EMAIL=${mail}#" "$ENV_EC2"
       rm -f "$ENV_EC2.bak"
     else
-      warn "Non-interactive: edit $ENV_EC2 to set SUTRA_DOMAIN and SUTRA_ACME_EMAIL, then re-run."
+      warn "Non-interactive: review $ENV_EC2 and set SUTRA_DOMAIN if needed."
     fi
   fi
   # Validate required keys are non-empty (no values are printed).
   # shellcheck disable=SC1090
-  local dom mail
+  local dom app_image collector_principal
   dom="$(grep -E '^SUTRA_DOMAIN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
-  mail="$(grep -E '^SUTRA_ACME_EMAIL=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  app_image="$(grep -E '^SUTRA_APP_IMAGE=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  collector_principal="$(grep -E '^SUTRA_COLLECTOR_PRINCIPAL_ARN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   [ -n "$dom" ]  || die "SUTRA_DOMAIN is empty in $ENV_EC2."
-  [ -n "$mail" ] || die "SUTRA_ACME_EMAIL is empty in $ENV_EC2."
-  log "Domain and ACME email are set."
+  [[ "$app_image" =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || die "SUTRA_APP_IMAGE must be an immutable OCI sha256 digest in $ENV_EC2."
+  [[ "$app_image" != 000000000000.* ]] || die "Replace the SUTRA_APP_IMAGE placeholder in $ENV_EC2 before deployment."
+  [[ "$collector_principal" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]] || die "SUTRA_COLLECTOR_PRINCIPAL_ARN must be the exact canonical IAM role ARN in $ENV_EC2."
+  [[ "$collector_principal" != arn:aws:iam::000000000000:* ]] || die "Replace the SUTRA_COLLECTOR_PRINCIPAL_ARN placeholder before deployment."
+  log "Canonical domain, immutable application image and collector role are set."
 }
 ensure_env_ec2
 
-# --- 5. Build + launch --------------------------------------------------------
+# --- 5. Cloudflare named-tunnel files -----------------------------------------
+ensure_cloudflared() {
+  mkdir -p "$CLOUDFLARED_DIR"
+  chmod 700 "$CLOUDFLARED_DIR"
+  if [ ! -f "$CLOUDFLARED_CONFIG" ]; then
+    cp "$CLOUDFLARED_CONFIG_EXAMPLE" "$CLOUDFLARED_CONFIG"
+    chmod 600 "$CLOUDFLARED_CONFIG"
+    warn "Created $CLOUDFLARED_CONFIG from the committed tunnel template."
+  else
+    chmod 600 "$CLOUDFLARED_CONFIG"
+  fi
+  [ -f "$CLOUDFLARED_CREDENTIAL" ] || die "Missing $CLOUDFLARED_CREDENTIAL. Install the credential JSON for the named Sutra tunnel; never commit or paste it into logs."
+  chmod 600 "$CLOUDFLARED_CREDENTIAL"
+  log "Ignored Cloudflare named-tunnel files are present."
+}
+ensure_cloudflared
+
+# --- 6. Pull + launch ---------------------------------------------------------
 # Env-file ordering is deliberate: .env.ec2 first (operator settings + harmless
 # placeholders), then .sutra/docker.env LAST so the real secrets win over any
 # placeholders left in .env.ec2. Only the 3 secret keys are overridden.
@@ -154,12 +162,27 @@ if grep -Eq '^SUTRA_NOTIFICATIONS_ENABLED=true' "$ENV_EC2"; then
   PROFILE_ARGS=(--profile notifications)
 fi
 
-log "Building the app image (this can take a few minutes on first run)..."
-$DOCKER compose -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" "${PROFILE_ARGS[@]}" build
+authenticate_registry() {
+  local app_image registry region
+  app_image="$(grep -E '^SUTRA_APP_IMAGE=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  registry="${app_image%%/*}"
+  if [[ "$registry" =~ ^[0-9]{12}\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com$ ]]; then
+    command -v aws >/dev/null 2>&1 || die "AWS CLI is required to authenticate to the private ECR release registry."
+    region="${BASH_REMATCH[1]}"
+    log "Authenticating Docker to the scoped ECR registry."
+    aws ecr get-login-password --region "$region" | $DOCKER login --username AWS --password-stdin "$registry" >/dev/null
+  fi
+}
+authenticate_registry
+
+log "Pulling immutable application and infrastructure images..."
+$DOCKER compose -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" "${PROFILE_ARGS[@]}" pull postgres migrate app caddy cloudflared
 
 log "Starting the stack and waiting for health..."
-$DOCKER compose -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" "${PROFILE_ARGS[@]}" up -d --wait
+$DOCKER compose -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" "${PROFILE_ARGS[@]}" up -d --wait --no-build
 
 log "Stack status:"
 $DOCKER compose -f "$COMPOSE_FILE" "${ENV_ARGS[@]}" "${PROFILE_ARGS[@]}" ps
-log "Done. Point DNS at this box (see deploy/ec2/README.md) and Caddy will obtain HTTPS automatically."
+sudo apt-get clean >/dev/null 2>&1 || true
+sudo rm -rf /var/lib/apt/lists/* >/dev/null 2>&1 || true
+log "Done. Cloudflare Tunnel is the only ingress; no EC2 host port is published."

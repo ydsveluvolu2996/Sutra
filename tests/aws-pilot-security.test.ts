@@ -644,6 +644,30 @@ test("same-origin boundary rejects absent, cross-site, and malformed origins", (
   }
 });
 
+test("same-origin boundary honors TLS termination only when upstream Host is canonical", () => {
+  const privateHop = new Request("http://sutra.example/api/pilot/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://sutra.example",
+      "sec-fetch-site": "same-origin",
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "attacker.invalid",
+    },
+  });
+  assert.doesNotThrow(() => assertSameOrigin(privateHop, "https://sutra.example"));
+
+  const nonCanonicalHost = new Request("http://internal.invalid/api/pilot/onboard", {
+    method: "POST",
+    headers: {
+      origin: "https://sutra.example",
+      "sec-fetch-site": "same-origin",
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "sutra.example",
+    },
+  });
+  assert.throws(() => assertSameOrigin(nonCanonicalHost), isPilotError("INVALID_INPUT"));
+});
+
 test("bounded JSON reader checks content type, declared size, and streamed size", async () => {
   const parsed = await readBoundedJson(
     new Request("https://sutra.example/api/pilot/onboard", {

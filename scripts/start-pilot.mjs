@@ -53,10 +53,16 @@ if (typeof jobRunnerToken === "string" && jobRunnerToken.length > 0) {
     ? Math.min(300_000, Math.max(5_000, requestedInterval))
     : 15_000;
   const runUrl = `http://127.0.0.1:${webPort}/api/internal/jobs/run`;
+  const jobHeaders = { "x-sutra-job-token": jobRunnerToken };
+  if (environment.SUTRA_PUBLIC_ORIGIN) {
+    const publicOrigin = new URL(environment.SUTRA_PUBLIC_ORIGIN);
+    jobHeaders.host = publicOrigin.host;
+    jobHeaders["x-forwarded-proto"] = publicOrigin.protocol.slice(0, -1);
+  }
   jobRunnerTimer = setInterval(() => {
     fetch(runUrl, {
       method: "POST",
-      headers: { "x-sutra-job-token": jobRunnerToken },
+      headers: jobHeaders,
       signal: AbortSignal.timeout(30_000),
     })
       .then((response) => {

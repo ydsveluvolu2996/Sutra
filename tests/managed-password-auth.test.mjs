@@ -20,7 +20,16 @@ const FULL_MANAGED = {
   SUTRA_LOCAL_MODE: "false",
   SUTRA_IDENTITY_MODE: "password",
   SUTRA_PUBLIC_ORIGIN: ORIGIN,
+  SUTRA_PASSWORD_MFA_REQUIRED: "true",
   SUTRA_PASSWORD_IDENTITY_ENABLED: "true",
+};
+const FULL_PRIVATE_BETA = {
+  SUTRA_DEPLOYMENT_ENV: "staging",
+  SUTRA_LOCAL_MODE: "false",
+  SUTRA_IDENTITY_MODE: "password",
+  SUTRA_PUBLIC_ORIGIN: ORIGIN,
+  SUTRA_PASSWORD_MFA_REQUIRED: "true",
+  SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
 };
 
 const ALL_KEYS = [
@@ -28,7 +37,9 @@ const ALL_KEYS = [
   "SUTRA_LOCAL_MODE",
   "SUTRA_IDENTITY_MODE",
   "SUTRA_PUBLIC_ORIGIN",
+  "SUTRA_PASSWORD_MFA_REQUIRED",
   "SUTRA_PASSWORD_IDENTITY_ENABLED",
+  "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED",
 ];
 
 function applyEnv(overrides) {
@@ -62,6 +73,47 @@ test("managed-password runtime pins the origin: a mismatched host is rejected", 
   assert.throws(() => assertLocalAuthRequest(req("https://evil.example/api/auth/login")));
   // A loopback host is NOT a shortcut around the public-origin pin in this mode.
   assert.throws(() => assertLocalAuthRequest(req("http://127.0.0.1:3000/api/auth/login")));
+});
+
+test("private-beta password runtime is staging-only and uses its own opt-in", () => {
+  applyEnv(FULL_PRIVATE_BETA);
+  assert.equal(isManagedPasswordRuntime(), true);
+  assert.doesNotThrow(() => assertLocalAuthRequest(req(`${ORIGIN}/api/auth/login`)));
+
+  applyEnv({ ...FULL_PRIVATE_BETA, SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false" });
+  assert.equal(isManagedPasswordRuntime(), false);
+  assert.throws(() => assertLocalAuthRequest(req(`${ORIGIN}/api/auth/login`)));
+
+  applyEnv({ ...FULL_PRIVATE_BETA, SUTRA_PASSWORD_IDENTITY_ENABLED: "true", SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false" });
+  assert.equal(isManagedPasswordRuntime(), false, "the production switch must not enable staging");
+
+  applyEnv({ ...FULL_MANAGED, SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true", SUTRA_PASSWORD_IDENTITY_ENABLED: "false" });
+  assert.equal(isManagedPasswordRuntime(), false, "the private-beta switch must not enable production");
+
+  applyEnv({ ...FULL_PRIVATE_BETA, SUTRA_LOCAL_MODE: undefined });
+  assert.equal(isManagedPasswordRuntime(), false, "staging must explicitly disable local mode");
+
+  applyEnv({ ...FULL_PRIVATE_BETA, SUTRA_PASSWORD_MFA_REQUIRED: "false" });
+  assert.equal(isManagedPasswordRuntime(), false, "staging must explicitly require MFA");
+});
+
+test("canonical Host plus trusted TLS scheme preserves public same-origin without rewriting Origin", () => {
+  applyEnv(FULL_PRIVATE_BETA);
+  const privateHop = new Request("http://app.sutra.example/api/auth/login", {
+    headers: {
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "attacker.invalid",
+    },
+  });
+  assert.doesNotThrow(() => assertLocalAuthRequest(privateHop));
+
+  const wrongHost = new Request("http://internal.invalid/api/auth/login", {
+    headers: {
+      "x-forwarded-proto": "https",
+      "x-forwarded-host": "app.sutra.example",
+    },
+  });
+  assert.throws(() => assertLocalAuthRequest(wrongHost));
 });
 
 test("rate-limit source key trusts the right-most X-Forwarded-For hop, not a spoofed left value", () => {

@@ -1,34 +1,44 @@
-# Sutra edge reverse proxy.
+# Sutra private origin reverse proxy.
 #
 # Environment (injected by the caddy service in compose.prod.yaml):
 #   {$SUTRA_DOMAIN}      apex domain, e.g. sutracmdb.com  (default below)
-#   {$SUTRA_ACME_EMAIL}  Let's Encrypt registration/expiry contact
 #
 # Behaviour:
-#   * Auto-HTTPS via Let's Encrypt (HTTP-01 + TLS-ALPN). The ACME challenge on
-#     :80 is handled by Caddy internally before any site route runs.
-#   * reverse_proxy -> app:3000. The upstream Host header is rewritten to
-#     127.0.0.1 on purpose: the Sutra app runs in its single-tenant "local"
-#     deployment mode, whose boundary (lib/deployment-security.ts) serves the
-#     full product only for a loopback Host. Preserving the loopback identity to
-#     the app is what lets a public domain be served WITHOUT weakening any auth
-#     or security header (all app-owned CSP/headers are still emitted). See
-#     README.md -> "Deployment boundary".
+#   * Plain HTTP on the Compose-only :8080 origin. Cloudflare Tunnel is the only
+#     ingress path and Cloudflare terminates public TLS; EC2 publishes no ports.
+#   * reverse_proxy -> app:3000. The upstream Host is the canonical public
+#     hostname. Sutra runs its explicit staging/private-beta password boundary;
+#     no loopback Host or Origin rewrite is used to bypass the network boundary.
 #   * When app:3000 is stopped / down / unhealthy, handle_errors serves the
 #     static maintenance page with HTTP 503 instead of a raw 502/504.
 {
-	email {$SUTRA_ACME_EMAIL}
-	# Redirect any bare error to our own handler; keep the admin API local only.
+	auto_https off
 	admin off
 }
 
-{$SUTRA_DOMAIN:sutracmdb.com}, www.{$SUTRA_DOMAIN:sutracmdb.com} {
+:8080 {
 	encode zstd gzip
 
-	# Edge HSTS. App-owned security headers (CSP, X-Frame-Options, etc.) still
-	# flow through untouched from the origin; this only adds transport pinning.
+	# This endpoint is reachable only from Caddy's own loopback socket. Tunnel
+	# requests for the same path do not match and continue to the application.
+	@container_health {
+		path /caddy-healthz
+		remote_ip 127.0.0.1 ::1
+	}
+	respond @container_health "ok" 200
+
+	# Only the WAF-protected tunnel origin is accepted. Local loopback probes
+	# remain exempt; no Docker port is published to the EC2 host.
+	@unexpected_tunnel_host {
+		not host origin.{$SUTRA_DOMAIN:sutracmdb.com}
+		not remote_ip 127.0.0.1 ::1
+	}
+	respond @unexpected_tunnel_host "Misdirected request" 421
+
+	# Start HSTS with a short, reversible pilot window. Raise it only after every
+	# subdomain has been reviewed; do not preload a private-beta deployment.
 	header {
-		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		Strict-Transport-Security "max-age=300"
 		-Server
 	}
 
@@ -50,26 +60,42 @@
 	}
 
 	reverse_proxy app:3000 {
-		# Serve the app under its loopback deployment identity (see note above).
-		# Caddy still forwards the real public host as X-Forwarded-Host by default.
-		header_up Host 127.0.0.1
+		# Preserve the real browser origin for the explicit private-beta boundary
+		# and same-origin mutation checks.
+		header_up Host www.{$SUTRA_DOMAIN:sutracmdb.com}
 
-		# Pin X-Forwarded-For to the real client IP that Caddy observed, discarding
-		# any client-supplied value. The app's per-IP login/accept rate limiter
-		# reads the right-most X-Forwarded-For hop, so this guarantees it throttles
-		# on the true origin and a spoofed header cannot mint fresh buckets.
-		header_up X-Forwarded-For {remote_host}
+		# Trust boundary: :8080 is never published by Docker and is reachable from
+		# the tunnel/application bridges only. `cloudflared` is therefore the sole
+		# external ingress and its CF-Connecting-IP is authoritative. If a host port
+		# is ever added, this assumption becomes false and this mapping MUST be
+		# replaced by an allowlisted-proxy policy before deployment.
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
+		# The public browser/API connection is always HTTPS at Cloudflare even though
+		# the private cloudflared -> Caddy hop is intentionally plain HTTP.
+		header_up X-Forwarded-Proto https
+		header_up X-Forwarded-Host www.{$SUTRA_DOMAIN:sutracmdb.com}
+
+		# Do not expose multiple competing client-identity inputs to application
+		# code after canonicalizing X-Forwarded-For above.
+		header_up -CF-Connecting-IP
+		header_up -True-Client-IP
+		# Cloudflare identity headers are not part of Sutra's application protocol;
+		# remove any client-supplied values before the request reaches the app.
+		header_up -CF-Access-Client-Id
+		header_up -CF-Access-Client-Secret
+		header_up -CF-Access-Jwt-Assertion
 
 		# Active health gating: if the app reports unhealthy, mark the upstream
 		# down so requests fall through to handle_errors (the maintenance page).
-		# The probe carries a loopback Host so the app's deployment boundary
-		# allows /api/healthz just like the container healthcheck does.
+		# The probe carries the canonical Host expected by the private-beta
+		# deployment boundary.
 		health_uri /api/healthz
 		health_interval 10s
 		health_timeout 5s
 		health_status 2xx
 		health_headers {
-			Host 127.0.0.1
+			Host www.{$SUTRA_DOMAIN:sutracmdb.com}
+			X-Forwarded-Proto https
 		}
 
 		# Fail fast to the maintenance page rather than hanging on a dead upstream.

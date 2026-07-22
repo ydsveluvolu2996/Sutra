@@ -12,6 +12,7 @@ import {
   type Capability,
   type MembershipManagementScope,
 } from "./auth-policy";
+import { requestMatchesCanonicalOrigin } from "./request-origin";
 
 export const LOCAL_SESSION_COOKIE = "sutra_session";
 
@@ -23,7 +24,9 @@ interface LocalAuthRuntimeEnv {
   readonly SUTRA_AUTH_ENCRYPTION_KEY?: string;
   readonly SUTRA_AUTH_KEY_VERSION?: string;
   readonly SUTRA_LOCAL_BOOTSTRAP_TOKEN?: string;
+  readonly SUTRA_PASSWORD_MFA_REQUIRED?: string;
   readonly SUTRA_PASSWORD_IDENTITY_ENABLED?: string;
+  readonly SUTRA_PRIVATE_BETA_PASSWORD_ENABLED?: string;
 }
 
 export interface AuthorizedPilotActor {
@@ -42,34 +45,30 @@ export function isLoopbackHostname(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-function requestOriginMatchesPublicOrigin(url: URL, configuredOrigin: string | undefined): boolean {
-  const configured = configuredOrigin?.trim();
-  if (!configured) return false;
-  try {
-    return url.origin === new URL(configured).origin;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Managed-password identity is the network-reachable form of the local
  * email + password + TOTP stack. It reuses the SAME vetted credential
  * verification, mandatory-MFA gate (`requireMfa`), per-account throttling and
  * sealed-cookie sessions as loopback local mode — the ONLY differences are that
  * requests arrive on the canonical HTTPS public origin instead of a loopback
- * host, and the whole mode stays disabled behind its own master switch
- * (`SUTRA_PASSWORD_IDENTITY_ENABLED`, default OFF) until an adversarial auth
- * review signs off. This is deliberately distinct from the OIDC master switch:
- * enabling one never enables the other.
+ * host. Production stays disabled behind `SUTRA_PASSWORD_IDENTITY_ENABLED`
+ * until an adversarial auth review signs off. Approved staging pilots use the
+ * separate `SUTRA_PRIVATE_BETA_PASSWORD_ENABLED` switch; that switch can never
+ * enable production.
  */
 export function isManagedPasswordRuntime(): boolean {
   const config = runtimeEnv();
+  const environmentGate = config.SUTRA_DEPLOYMENT_ENV === "staging"
+    ? config.SUTRA_PRIVATE_BETA_PASSWORD_ENABLED === "true"
+    : config.SUTRA_DEPLOYMENT_ENV === "production" && config.SUTRA_PASSWORD_IDENTITY_ENABLED === "true";
+  const localModeDisabled = config.SUTRA_DEPLOYMENT_ENV === "staging"
+    ? config.SUTRA_LOCAL_MODE === "false"
+    : config.SUTRA_LOCAL_MODE !== "true";
   return (
-    (config.SUTRA_DEPLOYMENT_ENV === "staging" || config.SUTRA_DEPLOYMENT_ENV === "production") &&
-    config.SUTRA_LOCAL_MODE !== "true" &&
+    environmentGate &&
+    localModeDisabled &&
     config.SUTRA_IDENTITY_MODE === "password" &&
-    config.SUTRA_PASSWORD_IDENTITY_ENABLED === "true"
+    config.SUTRA_PASSWORD_MFA_REQUIRED === "true"
   );
 }
 
@@ -83,7 +82,7 @@ export function assertLocalAuthRequest(request: Request): void {
   // top of the deployment boundary (which already 421s an origin mismatch) and
   // the per-mutation same-origin assertion.
   const managedPassword =
-    isManagedPasswordRuntime() && requestOriginMatchesPublicOrigin(url, config.SUTRA_PUBLIC_ORIGIN);
+    isManagedPasswordRuntime() && requestMatchesCanonicalOrigin(request, config.SUTRA_PUBLIC_ORIGIN);
   if (!loopbackLocal && !managedPassword) {
     throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Local authentication is unavailable");
   }
@@ -103,14 +102,7 @@ export function assertAuthenticationRequest(request: Request): void {
     assertLocalAuthRequest(request);
     return;
   }
-  const configuredOrigin = runtimeEnv().SUTRA_PUBLIC_ORIGIN?.trim();
-  let requestOrigin: string;
-  try {
-    requestOrigin = new URL(request.url).origin;
-  } catch {
-    throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Authentication is unavailable");
-  }
-  if (!configuredOrigin || requestOrigin !== configuredOrigin) {
+  if (!requestMatchesCanonicalOrigin(request, runtimeEnv().SUTRA_PUBLIC_ORIGIN)) {
     throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "Authentication is unavailable");
   }
 }

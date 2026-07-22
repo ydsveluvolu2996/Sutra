@@ -1,19 +1,20 @@
 # =============================================================================
 # Sutra stack — systemd unit (auto-start on boot; stop => maintenance page)
 # =============================================================================
-# INSTALL (edit WorkingDirectory below if you did not clone to /opt/sutra):
+# INSTALL (CloudFormation normally extracts this file from the immutable image):
 #
 #   sudo cp deploy/ec2/sutra.service /etc/systemd/system/sutra.service
-#   # If your checkout is not at /opt/sutra, fix the path first:
+#   # If a repair bundle is not at /opt/sutra, fix the path first:
 #   sudo sed -i "s#/opt/sutra#$(pwd)#g" /etc/systemd/system/sutra.service
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now sutra
 #
 # BEHAVIOUR (this is how "stop the server -> maintenance page" is satisfied):
 #   sudo systemctl start sutra   -> whole stack up; site is LIVE.
-#   sudo systemctl stop  sutra   -> stops ONLY the app container. Caddy + Postgres
-#                                   keep running, so visitors get the branded
-#                                   maintenance page (HTTP 503), not a dead port.
+#   sudo systemctl stop  sutra   -> stops ONLY the app container. Cloudflare
+#                                   Tunnel + Caddy + Postgres keep running, so
+#                                   visitors get the branded maintenance page
+#                                   (HTTP 503), not a dead origin.
 #   sudo systemctl restart sutra -> maintenance briefly, then live again.
 #   reboot                       -> stack comes back up automatically.
 #
@@ -36,7 +37,7 @@ RemainAfterExit=yes
 WorkingDirectory=/opt/sutra
 # Bring the whole stack up and wait for health. Env-file order matters: the
 # real secrets in .sutra/docker.env must be the LAST --env-file so they win.
-ExecStart=/usr/bin/docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env up -d --wait
+ExecStart=/usr/bin/docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env up -d --wait --no-build
 # On stop, take down ONLY the app so Caddy serves the maintenance page.
 ExecStop=/usr/bin/docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env stop app
 # Bring the app back if the compose control process itself dies.

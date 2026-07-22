@@ -6,6 +6,7 @@ import {
   generateScriptNonce,
   hostedConfigurationIssues,
   managedPasswordConfigurationIssues,
+  privateBetaPasswordConfigurationIssues,
   responseSecurityHeaders,
 } from "../lib/deployment-security.ts";
 
@@ -75,6 +76,27 @@ test("canonical origin mismatch fails before application routing", () => {
   assert.equal(decision.status, 421);
 });
 
+test("TLS termination uses the canonical upstream Host and never a forwarded host", () => {
+  const runtime = { SUTRA_DEPLOYMENT_ENV: "preview", SUTRA_PUBLIC_ORIGIN: "https://preview.sutra.example" };
+  const canonicalHost = new Request("http://preview.sutra.example/about", {
+    headers: { "x-forwarded-proto": "https" },
+  });
+  assert.equal(evaluateDeploymentBoundary(canonicalHost, runtime).allowed, true);
+
+  const spoofedForwardedHost = new Request("http://internal.invalid/about", {
+    headers: {
+      "x-forwarded-host": "preview.sutra.example",
+      "x-forwarded-proto": "https",
+    },
+  });
+  assert.equal(evaluateDeploymentBoundary(spoofedForwardedHost, runtime).status, 421);
+
+  const malformedProtocol = new Request("http://preview.sutra.example/about", {
+    headers: { "x-forwarded-proto": "https, http" },
+  });
+  assert.equal(evaluateDeploymentBoundary(malformedProtocol, runtime).status, 421);
+});
+
 test("production stays disabled behind the SUTRA_HOSTED_ENABLED master switch (default OFF)", () => {
   // With every hosted configuration requirement satisfied but the master switch
   // unset, the ONLY remaining issue is the explicit release hold — proving the
@@ -110,6 +132,59 @@ const passwordShape = {
   SUTRA_SECRET_STORE: "managed",
   SUTRA_ENVIRONMENT_KEY_SCOPE: "isolated",
 } as const;
+
+const privateBetaPasswordShape = {
+  SUTRA_DEPLOYMENT_ENV: "staging",
+  SUTRA_PUBLIC_ORIGIN: "https://beta.sutra.example",
+  SUTRA_LOCAL_MODE: "false",
+  SUTRA_IDENTITY_MODE: "password",
+  SUTRA_AUTH_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  SUTRA_PASSWORD_MFA_REQUIRED: "true",
+} as const;
+
+test("private-beta password mode is staging-only and independently deny-by-default", () => {
+  assert.deepEqual(privateBetaPasswordConfigurationIssues(privateBetaPasswordShape), [
+    "private-beta password deployment is disabled (set SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true only for an approved staging pilot)",
+  ]);
+  assert.equal(
+    evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", privateBetaPasswordShape).allowed,
+    false,
+  );
+
+  const enabled = { ...privateBetaPasswordShape, SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true" };
+  assert.deepEqual(privateBetaPasswordConfigurationIssues(enabled), []);
+  assert.equal(evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", enabled).allowed, true);
+
+  for (const value of ["false", "TRUE", "1", "yes", " true", "true ", ""]) {
+    assert.equal(
+      evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", {
+        ...privateBetaPasswordShape,
+        SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: value,
+      }).allowed,
+      false,
+      `private-beta switch ${JSON.stringify(value)} must fail closed`,
+    );
+  }
+});
+
+test("private-beta and production password switches cannot cross-enable environments", () => {
+  assert.equal(
+    evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", {
+      ...privateBetaPasswordShape,
+      SUTRA_PASSWORD_IDENTITY_ENABLED: "true",
+    }).allowed,
+    false,
+    "the production switch must not enable staging",
+  );
+  assert.equal(
+    evaluateDeploymentBoundary("https://app.sutra.example/dashboard", {
+      ...passwordShape,
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+    }).allowed,
+    false,
+    "the private-beta switch must not enable production",
+  );
+});
 
 test("managed-password identity stays disabled behind its own master switch (default OFF)", () => {
   // Every managed-password requirement satisfied but the switch unset: the ONLY

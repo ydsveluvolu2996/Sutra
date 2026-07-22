@@ -10,6 +10,7 @@ import {
   ALL_ENABLED_AWS_REGIONS,
   type AwsRegionSelection,
 } from "./aws-region-selection.ts";
+import { effectiveRequestOrigin } from "./request-origin.ts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 
@@ -486,7 +487,9 @@ export async function decryptExternalId(
  * authentication path instead of bypassing this check.
  */
 export function assertSameOrigin(request: Request, configuredOrigin?: string): void {
-  const requestOrigin = canonicalOrigin(new URL(request.url).origin);
+  const effectiveOrigin = effectiveRequestOrigin(request);
+  if (effectiveOrigin === null) invalidInput("The request origin is invalid");
+  const requestOrigin = canonicalOrigin(effectiveOrigin);
   const expectedOrigin = configuredOrigin === undefined
     ? requestOrigin
     : canonicalOrigin(configuredOrigin);

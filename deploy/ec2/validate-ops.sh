@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Offline contract checks for the EC2 infrastructure and recovery tooling.
+# Add --online to also ask AWS CloudFormation to validate the template.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+EC2="$ROOT/deploy/ec2"
+TEMPLATE="$EC2/cloudformation-single-node.yaml"
+
+grep -Fxq '!deploy/ec2/.env.ec2.example' "$ROOT/.dockerignore" || {
+  printf 'Immutable image would omit deploy/ec2/.env.ec2.example\n' >&2
+  exit 1
+}
+
+bash -n "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
+  "$EC2/bootstrap.sh" "$EC2/redeploy.sh" "$EC2/release-update.sh"
+[[ -x "$EC2/backup-prod.sh" && -x "$EC2/restore-prod.sh" && -x "$EC2/release-update.sh" ]]
+
+ruby -e '
+  require "yaml"
+  document = YAML.safe_load(File.read(ARGV.fetch(0)), aliases: true)
+  abort "CloudFormation document is not a mapping" unless document.is_a?(Hash)
+  abort "CloudFormation Resources are missing" unless document["Resources"].is_a?(Hash)
+' "$TEMPLATE"
+
+python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" <<'PY'
+from pathlib import Path
+import sys
+
+template = Path(sys.argv[1]).read_text(encoding="utf-8")
+backup = Path(sys.argv[2]).read_text(encoding="utf-8")
+restore = Path(sys.argv[3]).read_text(encoding="utf-8")
+
+required_template = [
+    "Default: t3a.large",
+    "Default: 15",
+    "Default: ami-07e5ce642bbc48c0d",
+    "SutraAppImage:",
+    "/sutra/production/cloudflare-tunnel-credentials",
+    "repository/sutra/app",
+    "HttpTokens: required",
+    "HttpPutResponseHopLimit: 2",
+    "CPUCredits: standard",
+    "Monitoring: false",
+    "Encrypted: true",
+    "DeleteOnTermination: false",
+    "AWS::Scheduler::Schedule",
+    "PolicyName: DeterministicSsmManagedNodeCore",
+    "arn:${AWS::Partition}:iam::*:role/sutra/SutraReadOnlyRole",
+    "docker cp \"$RELEASE_CONTAINER:/app/deploy/ec2/.\"",
+    "install -m 0755 deploy/ec2/release-update.sh /usr/local/sbin/sutra-release-update",
+]
+for fragment in required_template:
+    if fragment not in template:
+        raise SystemExit(f"CloudFormation contract is missing: {fragment}")
+
+prohibited_template = [
+    "SecurityGroupIngress:",
+    "AWS::EC2::EIP",
+    "AWS::S3::Bucket",
+    "AWS::Logs::LogGroup",
+    "AWS::CloudWatch::Alarm",
+    "cloudflared-sutra.service",
+    "sutra-backup.timer sutra-max-runtime.timer",
+    "git clone",
+    "git -C /opt/sutra",
+    "AmazonSSMManagedInstanceCore",
+    "resolve:ssm:/aws/service/canonical/ubuntu",
+]
+for fragment in prohibited_template:
+    if fragment in template:
+        raise SystemExit(f"Minimal-cost template unexpectedly contains: {fragment}")
+
+credentials = template.index(".sutra/cloudflared/credentials.json")
+bootstrap = template.index("bash deploy/ec2/bootstrap.sh")
+if credentials >= bootstrap:
+    raise SystemExit("Tunnel credentials must be materialized before bootstrap")
+if "@sha256:[a-f0-9]{64}" not in template:
+    raise SystemExit("SutraAppImage must reject mutable image tags")
+
+for fragment in (
+    "age --encrypt",
+    "SUTRA_BACKUP_REQUIRE_OFFSITE",
+    "sha256sum",
+    "SUTRA_BACKUP_MIN_LOCAL_COPIES",
+    "s3 cp",
+):
+    if fragment not in backup:
+        raise SystemExit(f"Backup contract is missing: {fragment}")
+for fragment in (
+    "--confirm-restore=sutra-prod",
+    "age --decrypt",
+    "Preflight passed",
+    "automatic rollback point",
+    "preserve_stage=true",
+):
+    if fragment not in restore:
+        raise SystemExit(f"Restore contract is missing: {fragment}")
+PY
+
+if [[ "${1:-}" == --online ]]; then
+  profile="${AWS_PROFILE:-sutra-administrator}"
+  region="${AWS_REGION:-ap-south-1}"
+  aws cloudformation validate-template --profile "$profile" --region "$region" \
+    --template-body "file://$TEMPLATE" --output json >/dev/null
+fi
+
+printf 'Sutra EC2 operations validation passed%s.\n' "$( [[ "${1:-}" == --online ]] && printf ' (including AWS)' || true )"

@@ -1,252 +1,320 @@
-# Sutra — EC2 deployment runbook
+# Sutra — minimal EC2 private-beta deployment
 
-This is a **complete, step-by-step runbook for deploying Sutra on a single Ubuntu
-EC2 instance**. It is written to be executed top-to-bottom by an operator or an
-autonomous coding agent working **on the EC2 host** (over SSH). Every phase ends
-with an explicit **success check** — do not proceed to the next phase until the
-check passes.
+This is the operator runbook for Sutra's current low-cost hosted pilot. It uses
+one `t3a.large` in `ap-south-1`, a 15 GiB encrypted gp3 root volume, Docker
+Compose, PostgreSQL on the same host, a named Cloudflare Tunnel, and a
+Cloudflare Worker maintenance fallback. The EC2 security group has **no inbound
+rules**; there is no Elastic IP, SSH, ALB, NAT Gateway, RDS, or public Docker
+port. Administration is through AWS Systems Manager Session Manager.
 
-The deep reference for each topic is [`deploy/ec2/README.md`](deploy/ec2/README.md);
-this file is the authoritative execution order.
+The deeper design and recovery notes are in
+[`deploy/ec2/README.md`](deploy/ec2/README.md). The edge Worker is documented in
+[`deploy/cloudflare/README.md`](deploy/cloudflare/README.md).
 
----
+## 1. Deployed shape and cost guardrails
 
-## 0. What gets deployed
-
-One Ubuntu box running the whole stack with Docker Compose, fronted by Caddy:
-
-| Service | Role | Host port |
-| --- | --- | --- |
-| `caddy` | TLS edge (Let's Encrypt), reverse proxy, automatic 503 maintenance page | 80, 443 |
-| `app` | Sutra application (Next.js on workerd) | internal only |
-| `postgres` | PostgreSQL 18 database | internal only |
-| `migrate` | one-shot schema migrator (runs, then exits 0) | — |
-
-Sign-in is email + password + **mandatory MFA**. Tenant isolation, per-account
-lockout, a per-IP login rate limit, and always-`Secure` session cookies are all
-on by default. `systemctl stop sutra` shows a maintenance page automatically.
-
-### Agent boundaries (must respect)
-
-An automated agent running this runbook **must NOT**:
-- Enter or invent any human password, MFA code, or the first-run bootstrap token
-  into the application — those are entered by the human operator in the browser
-  (the agent prepares the box and reports the token; the human uses it).
-- Weaken the deployment (no exposing `app`/`postgres` host ports, no disabling
-  MFA, no committing `.env.ec2` or `.sutra/docker.env`).
-- Proceed past a failed success check — stop and report instead.
-
----
-
-## 1. Prerequisites (human provides before the agent starts)
-
-| Item | Value |
+| Component | Current setting |
 | --- | --- |
-| Instance | Ubuntu 22.04/24.04 LTS, `t3.large` (2 vCPU / 8 GB), 40 GB gp3 root |
-| Elastic IP | Allocated + associated to the instance |
-| DNS | `A` record for the apex domain **and** `www` → the Elastic IP |
-| Security group | Inbound: `22/tcp` (your IP only), `80/tcp`, `443/tcp` (world). Outbound: all |
-| Domain + email | A domain you control + an email address for Let's Encrypt |
-| Repo access | The instance can `git clone` this repository |
+| Region / compute | `ap-south-1`, `t3a.large`, standard CPU credits |
+| Disk | 15 GiB encrypted gp3; retained if the CloudFormation stack is deleted |
+| Ingress | Outbound-only Cloudflare named Tunnel; no public inbound or SSH |
+| Edge fallback | Worker `sutra-edge-fallback` on the apex and `www` routes |
+| Administration | SSM Session Manager |
+| Application release | Immutable `sutra/app@sha256:…` digest from private ECR |
+| Database | PostgreSQL container on the same encrypted EC2 disk |
+| Start / stop | Starts with EC2; stops at 6 hours after each boot and again at 23:30 IST |
+| Cost warning | AWS Budget alerts against **gross** monthly cost at a $20 budget |
+| Backups / notifications | Implemented but disabled until explicitly configured |
 
-Ports 80/443 must be world-reachable so Let's Encrypt can issue the certificate.
-DNS must already resolve to the Elastic IP before Phase 3 (cert issuance).
+The $20 AWS Budget is an alert, not a hard spending cap. The two stop controls
+are the compute guardrails. EBS and small ECR storage remain billable while EC2
+is stopped, and promotional-credit eligibility is determined by the credit's
+AWS terms. Do not enable paid native security services, NAT Gateway, RDS, load
+balancers, paid Cloudflare features, offsite S3 backup, or the notification
+worker for this pilot without a separate cost review.
 
----
+## 2. One-time prerequisites
 
-## 2. Phase 1 — Bootstrap the stack
-
-SSH into the instance, then:
+From an administrator workstation with AWS CLI, Docker Buildx, Node.js,
+`cloudflared`, Wrangler, and `jq`:
 
 ```bash
-sudo mkdir -p /opt/sutra && sudo chown "$USER":"$USER" /opt/sutra
-git clone <your-repo-url> /opt/sutra
+export AWS_PROFILE=sutra-administrator
+export AWS_REGION=ap-south-1
+export AWS_DEFAULT_REGION=ap-south-1
+export STACK_NAME=sutra-private-beta
+export DOMAIN=sutracmdb.com
+export TUNNEL_NAME=sutra-prod
+export TUNNEL_ID=c0766d48-bf0b-45d3-8a69-ffa167139e3d
+export TUNNEL_PARAMETER=/sutra/production/cloudflare-tunnel-credentials
+
+export ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+test "$ACCOUNT_ID" = 738663485493
+```
+
+Never put an AWS key, Cloudflare token, tunnel credential, application secret,
+password, MFA code, or bootstrap token in Git, a command argument visible to
+another user, or a support transcript.
+
+### 2.1 Build once off-host and publish an immutable ECR release
+
+The 15 GiB EC2 host never compiles the application. Build on the workstation,
+push to ECR, then deploy the digest:
+
+```bash
+export ECR_REPOSITORY=sutra/app
+export ECR_REGISTRY="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+export RELEASE_TAG="$(git rev-parse --short=12 HEAD)"
+
+aws ecr describe-repositories --repository-names "$ECR_REPOSITORY" >/dev/null 2>&1 || \
+  aws ecr create-repository \
+    --repository-name "$ECR_REPOSITORY" \
+    --image-scanning-configuration scanOnPush=false \
+    --image-tag-mutability IMMUTABLE \
+    --encryption-configuration encryptionType=AES256 >/dev/null
+aws ecr put-lifecycle-policy --repository-name "$ECR_REPOSITORY" \
+  --lifecycle-policy-text '{"rules":[{"rulePriority":1,"description":"Keep three immutable private-beta releases","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}}]}' >/dev/null
+aws ecr get-login-password | \
+  docker login --username AWS --password-stdin "$ECR_REGISTRY"
+docker buildx build --platform linux/amd64 \
+  --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$RELEASE_TAG" --push .
+
+export IMAGE_DIGEST="$(aws ecr describe-images \
+  --repository-name "$ECR_REPOSITORY" \
+  --image-ids imageTag="$RELEASE_TAG" \
+  --query 'imageDetails[0].imageDigest' --output text)"
+export SUTRA_APP_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY@$IMAGE_DIGEST"
+printf 'Release: %s\n' "$SUTRA_APP_IMAGE"
+```
+
+The value must contain `@sha256:`. A mutable tag is rejected by the
+CloudFormation template and bootstrap script.
+
+### 2.2 Create the named Tunnel and Worker edge
+
+Authenticate interactively to the correct Cloudflare account, then create or
+select the named tunnel. The credential file is secret; the tunnel UUID is not.
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel list --name "$TUNNEL_NAME"
+
+cloudflared tunnel route dns "$TUNNEL_ID" origin."$DOMAIN"
+cloudflared tunnel route dns "$TUNNEL_ID" www."$DOMAIN"
+cloudflared tunnel route dns "$TUNNEL_ID" "$DOMAIN"
+```
+
+The deployed named tunnel is `sutra-prod` (`c0766d48-bf0b-45d3-8a69-ffa167139e3d`).
+All three records must be proxied CNAMEs to
+`$TUNNEL_ID.cfargotunnel.com`. Never create an A record to the EC2 address.
+Ensure `deploy/ec2/cloudflared-config.yml.example` uses this tunnel UUID before
+creating the release commit.
+
+Store the credential as an encrypted SSM parameter without printing it:
+
+```bash
+aws ssm put-parameter \
+  --name "$TUNNEL_PARAMETER" \
+  --type SecureString \
+  --value "$(jq -c . "$HOME/.cloudflared/$TUNNEL_ID.json")" \
+  --overwrite >/dev/null
+```
+
+Before deploying the Worker, create the Free-plan WAF custom rule documented in
+[`deploy/cloudflare/README.md`](deploy/cloudflare/README.md). It blocks direct
+requests to `origin.sutracmdb.com` while allowing only an internal subrequest
+from this zone's Worker:
+
+```text
+(http.host eq "origin.sutracmdb.com" and cf.worker.upstream_zone ne "sutracmdb.com")
+```
+
+Deploy the tested Worker routes for the apex and `www` hostnames:
+
+```bash
+cp deploy/cloudflare/wrangler.example.toml deploy/cloudflare/wrangler.toml
+(cd deploy/cloudflare && npx wrangler deploy --config wrangler.toml)
+```
+
+`wrangler.toml` and tunnel credentials stay uncommitted. The Worker forwards
+healthy responses unchanged and returns a branded `503` (or RFC problem JSON
+for APIs) when the EC2 origin is stopped or unreachable.
+
+### 2.3 Create the $20 gross-cost alerts
+
+Set a real operator email. These notifications do not stop resources:
+
+```bash
+export BUDGET_EMAIL='<operator-email>'
+aws budgets create-budget --account-id "$ACCOUNT_ID" \
+  --budget '{"BudgetName":"SutraPrivateBeta-20USD","BudgetLimit":{"Amount":"20","Unit":"USD"},"TimeUnit":"MONTHLY","BudgetType":"COST","CostTypes":{"IncludeTax":true,"IncludeSubscription":true,"UseBlended":false,"IncludeRefund":false,"IncludeCredit":false,"IncludeUpfront":true,"IncludeRecurring":true,"IncludeOtherSubscription":true,"IncludeSupport":true,"IncludeDiscount":true,"UseAmortized":false}}' \
+  --notifications-with-subscribers "[{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":50,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$BUDGET_EMAIL\"}]},{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":75,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$BUDGET_EMAIL\"}]},{\"Notification\":{\"NotificationType\":\"ACTUAL\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":100,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$BUDGET_EMAIL\"}]},{\"Notification\":{\"NotificationType\":\"FORECASTED\",\"ComparisonOperator\":\"GREATER_THAN\",\"Threshold\":100,\"ThresholdType\":\"PERCENTAGE\"},\"Subscribers\":[{\"SubscriptionType\":\"EMAIL\",\"Address\":\"$BUDGET_EMAIL\"}]}]"
+```
+
+If the named budget already exists, inspect it rather than creating a second:
+
+```bash
+aws budgets describe-budget --account-id "$ACCOUNT_ID" \
+  --budget-name SutraPrivateBeta-20USD
+```
+
+## 3. Validate, deploy, and observe bootstrap
+
+Validate before touching AWS:
+
+```bash
+node --test deploy/cloudflare/edge-fallback.test.mjs
+bash deploy/ec2/validate-ops.sh
+bash deploy/ec2/verify-runtime.sh
+AWS_PROFILE="$AWS_PROFILE" AWS_REGION="$AWS_REGION" \
+  bash deploy/ec2/validate-ops.sh --online
+```
+
+Select an existing VPC and public subnet with internet egress. The instance has
+an ephemeral public IPv4 for outbound package/ECR/Tunnel access, but no inbound
+security-group rules and no Elastic IP:
+
+```bash
+export VPC_ID=vpc-55f7053e
+export PUBLIC_SUBNET_ID=subnet-d74e55bf
+
+aws cloudformation deploy \
+  --stack-name "$STACK_NAME" \
+  --template-file deploy/ec2/cloudformation-single-node.yaml \
+  --capabilities CAPABILITY_IAM \
+  --parameter-overrides \
+    VpcId="$VPC_ID" \
+    PublicSubnetId="$PUBLIC_SUBNET_ID" \
+    InstanceType=t3a.large \
+    RootVolumeGiB=15 \
+    MaximumRuntimeHours=6 \
+    EnableDailyAutoStop=true \
+    'DailyStopSchedule=cron(30 23 * * ? *)' \
+    DailyStopTimezone=Asia/Kolkata \
+    SutraAppImage="$SUTRA_APP_IMAGE" \
+    SutraDomain="$DOMAIN" \
+    CloudflareTunnelCredentialsParameterName="$TUNNEL_PARAMETER"
+
+export INSTANCE_ID="$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+  --output text)"
+export COLLECTOR_PRINCIPAL_ARN="$(aws cloudformation describe-stacks \
+  --stack-name "$STACK_NAME" \
+  --query 'Stacks[0].Outputs[?OutputKey==`CollectorPrincipalArn`].OutputValue' \
+  --output text)"
+aws ssm start-session --target "$INSTANCE_ID"
+```
+
+Each customer role must trust the exact `COLLECTOR_PRINCIPAL_ARN` and retain its
+server-generated External ID condition. For the management account's existing
+CloudFormation-managed onboarding role, update only the vendor principal and
+reuse every other parameter; never paste or replace the External ID:
+
+```bash
+aws cloudformation update-stack \
+  --region us-east-1 \
+  --stack-name sutra-customer-role-738663485493 \
+  --use-previous-template \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=RoleName,UsePreviousValue=true \
+    ParameterKey=VendorCollectorRoleArn,ParameterValue="$COLLECTOR_PRINCIPAL_ARN" \
+    ParameterKey=CustomerTenantId,UsePreviousValue=true \
+    ParameterKey=ExternalId,UsePreviousValue=true \
+    ParameterKey=PermissionsBoundaryArn,UsePreviousValue=true \
+    ParameterKey=SessionNamePrefix,UsePreviousValue=true
+aws cloudformation wait stack-update-complete \
+  --region us-east-1 --stack-name sutra-customer-role-738663485493
+```
+
+In the SSM session:
+
+```bash
+sudo cloud-init status --wait
+sudo systemctl is-enabled sutra.service sutra-max-runtime.timer
+sudo systemctl is-active sutra.service sutra-max-runtime.timer
+sudo journalctl -u sutra.service --no-pager -n 100
 cd /opt/sutra
-bash deploy/ec2/bootstrap.sh
-```
-
-`bootstrap.sh` is idempotent (it is also the redeploy path). It:
-1. Installs Docker Engine + the compose plugin if missing.
-2. Generates `.sutra/docker.env` (Postgres owner/app passwords + job-runner
-   token, 256-bit each, mode `0600`) **only if absent**.
-3. Creates `deploy/ec2/.env.ec2` from the template (prompts for `SUTRA_DOMAIN`
-   and `SUTRA_ACME_EMAIL` on a TTY — set them non-interactively by copying
-   `deploy/ec2/.env.ec2.example` to `deploy/ec2/.env.ec2` and editing first).
-4. Builds the app image and runs `docker compose … up -d --wait`.
-
-Define the compose invocation once (used throughout):
-
-```bash
-CE="docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env"
-```
-
-**✅ Success check — all containers up, migrate succeeded, app healthy:**
-
-```bash
+CE='sudo docker compose -f deploy/ec2/compose.prod.yaml --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env'
 $CE ps
-docker inspect -f '{{.State.ExitCode}}' sutra-prod-migrate-1   # expect: 0
-docker inspect -f '{{.State.Health.Status}}' sutra-prod-app-1  # expect: healthy
-docker inspect -f '{{.State.Health.Status}}' sutra-prod-postgres-1 # expect: healthy
+$CE exec -T app node -e "fetch('http://127.0.0.1:3000/api/healthz').then(r=>{console.log(r.status);process.exit(r.ok?0:1)})"
+df -h /
 ```
 
-Expected: `postgres` healthy, `migrate` exited 0, `app` healthy, `caddy` running.
-
-### 2.1 Enable boot-start + the maintenance-page control (systemd)
-
-`bootstrap.sh` does **not** install the systemd unit — do it once so the stack
-starts on boot and `systemctl stop sutra` yields the maintenance page:
+From the workstation:
 
 ```bash
-sudo cp deploy/ec2/sutra.service /etc/systemd/system/sutra.service
-sudo sed -i "s#/opt/sutra#$(pwd)#g" /etc/systemd/system/sutra.service   # only if not /opt/sutra
-sudo systemctl daemon-reload
-sudo systemctl enable --now sutra
+curl -fsS -o /dev/null -w '%{http_code}\n' https://www.sutracmdb.com/login
+curl -fsS -o /dev/null -w '%{http_code}\n' https://www.sutracmdb.com/api/healthz
+curl -sSI https://sutracmdb.com/ | sed -n '1,6p'
 ```
 
-**✅ Success check:** `systemctl is-enabled sutra` → `enabled`;
-`systemctl is-active sutra` → `active`.
+## 4. Operator setup and cookies
 
----
-
-## 3. Phase 2 — Verify database + application
+The agent may prepare the deployment and display the one-time bootstrap token,
+but a human must enter the token, password, and TOTP code in the browser:
 
 ```bash
-# Database schema was applied (expect a count around 88, never 0):
-docker exec sutra-prod-postgres-1 psql -U sutra_owner -d sutra -tAc \
-  "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';"
-
-# Core tables exist:
-docker exec sutra-prod-postgres-1 psql -U sutra_owner -d sutra -tAc \
-  "SELECT string_agg(table_name, ',') FROM information_schema.tables
-   WHERE table_schema='public'
-     AND table_name IN ('users','organizations','memberships',
-                        'identity_invitations','local_password_credentials');"
-
-# App answers its health endpoint and connects to Postgres (not D1):
-docker exec sutra-prod-app-1 node -e \
-  "fetch('http://127.0.0.1:3000/api/healthz').then(r=>{console.log('healthz',r.status);process.exit(r.ok?0:1)}).catch(()=>process.exit(1))"
-docker exec sutra-prod-app-1 printenv DATABASE_URL | sed -E 's#(://[^:]+:)[^@]+@#\1***@#'
+$CE exec -T app node scripts/show-local-bootstrap-token.mjs
 ```
 
-**✅ Success check:** table count > 0 and includes the five core tables; `healthz`
-prints `200`; `DATABASE_URL` starts with `postgresql://sutra_app:***@postgres`.
+Open `https://www.sutracmdb.com/login`, bootstrap the owner, and enroll MFA.
+Sutra's authentication cookie is `HttpOnly`, `Secure`, `SameSite=Strict`, and
+expires after 12 hours. Cloudflare Worker passes healthy `Set-Cookie` headers
+unchanged and does not store application sessions. The public cookie-consent
+choice lasts one year; no third-party tracker is currently loaded. Do not copy
+session cookies between users or expose them to support tooling.
 
----
-
-## 4. Phase 3 — TLS + public reachability
-
-Caddy obtains a Let's Encrypt certificate automatically once DNS resolves to the
-box. Give it up to ~60s after first start.
+## 5. Start, stop, maintenance, and redeploy
 
 ```bash
-curl -sI https://<your-domain>/ | head -1        # expect: HTTP/2 200
-docker logs sutra-prod-caddy-1 2>&1 | grep -i "certificate obtained" | tail -1
+# Start or stop the EC2 compute from the workstation.
+aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+
+# App-only maintenance while EC2 remains running (inside SSM).
+sudo systemctl stop sutra
+sudo systemctl start sutra
+
+# Future release after publishing a new immutable ECR digest.
+export NEW_SUTRA_APP_IMAGE='738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra/app@sha256:<64-hex-digest>'
+aws ssm send-command --instance-ids "$INSTANCE_ID" \
+  --document-name AWS-RunShellScript \
+  --parameters "commands=['sudo /usr/local/sbin/sutra-release-update $NEW_SUTRA_APP_IMAGE']"
 ```
 
-**✅ Success check:** `https://<your-domain>/` returns `200` and serves the Sutra
-marketing site. If it returns the 503 maintenance page, the `app` container is not
-healthy — re-check Phase 2. If the cert fails, confirm DNS resolves to the
-Elastic IP and ports 80/443 are open to the world.
+`systemctl stop sutra` stops only the app; Caddy and the Tunnel stay up. A full
+EC2 stop disconnects the Tunnel. In both cases the Cloudflare Worker remains at
+the edge and returns the maintenance page. Starting EC2 causes cloud-init/
+systemd and Docker restart policies to restore the stack; allow several minutes
+before testing.
 
----
+For each future release: test locally, build and push on the workstation, obtain
+the new ECR digest, then select it through `sutra-release-update` over SSM. That
+command stages and validates the host bundle, runs migrations, waits for health,
+and restores the prior release if deployment fails. Never build on the 15 GiB
+host and never deploy a mutable tag.
 
-## 5. Phase 4 — Bootstrap the operator (master admin) — human-driven
+## 6. Honest private-beta boundary
 
-The platform starts with **no accounts**. This step is done **by the human
-operator in a browser**; the agent only retrieves the one-time token.
+This is suitable for a controlled private beta and customer demo, not an
+SLA-backed production SaaS. It has one EC2 host and one database disk, so there
+is no high availability, automatic failover, managed database, multi-AZ
+durability, penetration-test attestation, or guaranteed recovery time. Hosted
+OIDC/enterprise SSO and the full hosted multi-tenant release boundary remain
+release work. This deployment uses an explicit staging-only password identity
+boundary with mandatory MFA, a canonical public origin, and search indexing
+disabled. The separate production password-identity release gate remains off.
 
-```bash
-# Agent: print the one-time bootstrap token for the operator to paste.
-$CE exec app node scripts/show-local-bootstrap-token.mjs
-```
+Encrypted backup and restore scripts exist, but their timer is **not enabled**
+and no S3 bucket is created. Configure an age recipient, reviewed offsite target,
+restore drill, retention, and associated cost before enabling them. Until then,
+the retained EBS volume is persistence, not a backup. A 15 GiB root disk also
+needs active free-space monitoring and is a temporary pilot constraint.
 
-Operator, in a browser:
-1. Open `https://<your-domain>/login` → the first-time setup screen appears.
-2. Paste the token, set operator **email + password + organization name**. This
-   creates the sole `org_owner` (the master admin over every client).
-3. **Enroll MFA immediately** (scan the QR, confirm a code) over your trusted
-   connection, before the account is used anywhere else. MFA is mandatory — no
-   workspace data is reachable until it is enrolled and verified.
-
-**✅ Success check:** the operator can sign in with email + password + a TOTP code
-and reach `/dashboard`.
-
----
-
-## 6. Phase 5 — Onboard the clients
-
-For each client, as the signed-in operator (browser):
-
-1. **Create the client workspace:** *Onboarding → Onboard a client*
-   (`/onboard/client`), or *Customers* (`/customers`). Each customer is an
-   isolated tenant.
-2. **Invite the client's admin:** *Administration → Access & invitations*
-   (`/access`) → enter their email, role **`customer_admin`**, scope assigned to
-   that customer → **copy the one-time activation URL**
-   (`https://<your-domain>/accept-invite?token=…`, shown once) and send it to the
-   client over a trusted channel.
-3. The client opens the link, sets their own password, enrolls MFA, and lands in
-   **only** their own workspace. Client admins can then invite their own users
-   (`customer_admin` / `customer_viewer`) into their customer only.
-
-**✅ Success check:** an invited client can accept the link, set a password + MFA,
-and sees only their own customer's data (never another client's).
-
----
-
-## 7. Phase 6 — Operate
-
-```bash
-# Maintenance page: stop ONLY the app; Caddy keeps serving the 503 page.
-sudo systemctl stop sutra          # maintenance page shows
-sudo systemctl start sutra         # back online
-sudo systemctl status sutra
-
-# Logs:
-$CE logs -f app
-$CE logs --since 15m caddy
-
-# Redeploy after pulling new code (idempotent; rebuilds + rolls forward):
-git -C /opt/sutra pull --ff-only && bash /opt/sutra/deploy/ec2/redeploy.sh
-
-# Database backup (owner role; run on the box):
-docker exec sutra-prod-postgres-1 pg_dump -U sutra_owner -d sutra \
-  | gzip > "sutra-backup-$(date +%Y%m%d).sql.gz"
-
-# Unlock a client locked out by failed logins (operator, with a fresh MFA step-up):
-curl -sS -X POST https://<your-domain>/api/v1/accounts/unlock \
-  -H 'content-type: application/json' \
-  -b sutra_session=<operator-session-cookie> \
-  --data '{"userId":"user_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}'
-```
-
----
-
-## 8. Troubleshooting
-
-| Symptom | Likely cause | Action |
-| --- | --- | --- |
-| `https://domain` shows the maintenance page | `app` unhealthy | `$CE logs app`; re-check Phase 2; `$CE restart app` |
-| Cert never issues | DNS not resolving / 80·443 closed | Confirm `A` record → Elastic IP and the security group |
-| `migrate` exit code ≠ 0 | DB not reachable / bad secret | `$CE logs migrate`; ensure `.sutra/docker.env` present and unchanged |
-| Login page never loads setup | bootstrap already completed | An operator already exists; sign in instead |
-| `healthz` not 200 | app still starting or DB down | Wait for the 30s start period; check `postgres` health |
-
----
-
-## 9. What NOT to change
-
-- Do not publish `app` or `postgres` host ports — only Caddy is internet-facing.
-- Do not commit `deploy/ec2/.env.ec2` or `.sutra/docker.env` (both git-ignored).
-- Do not disable MFA or the deployment boundary.
-- The optional AWS notification worker stays off until AWS credentials are wired
-  (`deploy/ec2/README.md` §8); leaving it off is fine.
-
-## 10. Repo-level checks (optional, on any machine with the repo)
-
-```bash
-pnpm install
-pnpm typecheck
-pnpm test        # full suite
-pnpm build       # production build
-```
+CloudFormation intentionally retains the root EBS volume if the stack is
+deleted. That protects against accidental data loss, but the detached disk keeps
+billing until an operator explicitly snapshots (if required) and deletes it.
+Never delete that retained volume until the database and ignored secret files
+have been recovered or the data has been deliberately abandoned.

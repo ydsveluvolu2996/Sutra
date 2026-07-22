@@ -3,6 +3,7 @@ packages:
 
 overrides:
   postcss: 8.5.19
+  sharp: 0.35.0
 
 allowBuilds:
   esbuild: true

@@ -1,4 +1,5 @@
 import { hostedOidcProviderIssues } from "./hosted-oidc-providers.ts";
+import { effectiveRequestOrigin } from "./request-origin.ts";
 
 export type DeploymentEnvironment = "local" | "preview" | "staging" | "production";
 
@@ -18,6 +19,7 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_AUTH_ENCRYPTION_KEY?: string;
   readonly SUTRA_PASSWORD_MFA_REQUIRED?: string;
   readonly SUTRA_PASSWORD_IDENTITY_ENABLED?: string;
+  readonly SUTRA_PRIVATE_BETA_PASSWORD_ENABLED?: string;
 }
 
 export interface DeploymentBoundaryDecision {
@@ -155,14 +157,36 @@ export function managedPasswordConfigurationIssues(environment: DeploymentSecuri
 }
 
 /**
+ * Deliberately narrower contract for the single-host, invitation-only private
+ * beta. It may run only as `staging` and has a separate exact-string opt-in, so
+ * it cannot clear the production managed-password release hold. The common
+ * public-password invariants remain load-bearing: canonical HTTPS, local mode
+ * explicitly off, a 256-bit session/TOTP key, and mandatory MFA.
+ */
+export function privateBetaPasswordConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
+  const issues: string[] = [];
+  if (environment.SUTRA_DEPLOYMENT_ENV !== "staging") issues.push("private-beta password identity is restricted to staging");
+  if (environment.SUTRA_LOCAL_MODE !== "false") issues.push("local authentication must be explicitly disabled");
+  if (exactHttpsOrigin(environment.SUTRA_PUBLIC_ORIGIN) === null) issues.push("a canonical non-loopback HTTPS public origin is required");
+  if (environment.SUTRA_IDENTITY_MODE !== "password") issues.push("the private-beta password identity adapter is required");
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_AUTH_ENCRYPTION_KEY ?? "")) issues.push("a private-beta 256-bit auth encryption key is required");
+  if (environment.SUTRA_PASSWORD_MFA_REQUIRED !== "true") issues.push("multi-factor authentication must be mandatory for password identities");
+  if (environment.SUTRA_PRIVATE_BETA_PASSWORD_ENABLED !== "true") {
+    issues.push("private-beta password deployment is disabled (set SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true only for an approved staging pilot)");
+  }
+  return issues;
+}
+
+/**
  * Selects the identity contract for a network deployment. `password` and `oidc`
  * are the only supported hosted identity modes; anything else falls through to
  * the OIDC contract, whose first check reports the missing adapter.
  */
 export function networkConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
-  return environment.SUTRA_IDENTITY_MODE === "password"
-    ? managedPasswordConfigurationIssues(environment)
-    : hostedConfigurationIssues(environment);
+  if (environment.SUTRA_IDENTITY_MODE !== "password") return hostedConfigurationIssues(environment);
+  return environment.SUTRA_DEPLOYMENT_ENV === "staging"
+    ? privateBetaPasswordConfigurationIssues(environment)
+    : managedPasswordConfigurationIssues(environment);
 }
 
 function isPreviewPublicPath(pathname: string): boolean {
@@ -174,9 +198,10 @@ export function isProtectedPath(pathname: string): boolean {
 }
 
 export function evaluateDeploymentBoundary(
-  requestUrl: string,
+  request: Request | string,
   runtime: DeploymentSecurityEnvironment,
 ): DeploymentBoundaryDecision {
+  const requestUrl = typeof request === "string" ? request : request.url;
   const url = new URL(requestUrl);
   const environment = deploymentEnvironment(runtime.SUTRA_DEPLOYMENT_ENV);
   if (environment === null) {
@@ -192,7 +217,7 @@ export function evaluateDeploymentBoundary(
   if (canonicalOrigin === null) {
     return { allowed: false, environment, status: 503, code: "INVALID_CONFIGURATION", issues: ["a canonical non-loopback HTTPS public origin is required"] };
   }
-  if (url.origin !== canonicalOrigin.origin) {
+  if (effectiveRequestOrigin(request) !== canonicalOrigin.origin) {
     return { allowed: false, environment, status: 421, code: "ORIGIN_MISMATCH", issues: ["the request origin does not match SUTRA_PUBLIC_ORIGIN"] };
   }
 

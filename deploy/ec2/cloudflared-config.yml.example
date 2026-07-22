@@ -1,0 +1,18 @@
+# Copy this file to ../../.sutra/cloudflared/config.yml on the EC2 host and put
+# the named-tunnel credential JSON at ../../.sutra/cloudflared/credentials.json.
+# The entire .sutra directory is gitignored. Never commit the credential.
+
+tunnel: c0766d48-bf0b-45d3-8a69-ffa167139e3d
+credentials-file: /etc/cloudflared/credentials.json
+
+# The Compose healthcheck calls this container-local endpoint. It is not
+# published to the host or shared with any other service.
+metrics: 127.0.0.1:2000
+
+ingress:
+  # The edge fallback Worker makes its one origin attempt through this hostname.
+  - hostname: origin.sutracmdb.com
+    service: http://caddy:8080
+  # A named tunnel must end with an explicit catch-all. Unknown hostnames never
+  # become an open proxy into the private Compose network.
+  - service: http_status:404

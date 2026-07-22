@@ -1,11 +1,12 @@
 # Sutra single-box production-ish stack for a fresh Ubuntu EC2 instance.
 #
 # Derived from the repository root `compose.yaml` (the local pilot). Differences:
-#   * `app` is NOT published to the host; it is reachable only on the internal
-#     compose network. A `caddy` reverse proxy terminates TLS and publishes 80/443.
+#   * `app` is NOT published to the host; it is reachable only on internal
+#     Compose networks. Caddy is a private HTTP origin and Cloudflare Tunnel is
+#     the sole external ingress. No container publishes a host port.
 #   * `postgres` is not published to the host either (internal network only).
-#   * A `caddy` service serves auto-HTTPS and an automatic maintenance page (503)
-#     whenever `app` is stopped/down/unhealthy.
+#   * Caddy serves an automatic maintenance page (503) whenever `app` is
+#     stopped/down/unhealthy; the Cloudflare edge fallback covers a stopped EC2.
 #   * `notification-worker` is profile-gated ("notifications"); enable it only when
 #     AWS Secrets Manager + SES are configured, otherwise it flaps to unready.
 #
@@ -15,10 +16,20 @@
 # Hence the `../../` prefixes that point back at the repository root.
 #
 # Secrets (SUTRA_POSTGRES_*/SUTRA_JOB_RUNNER_TOKEN) come from ../../.sutra/docker.env,
-# operator settings (SUTRA_DOMAIN/SUTRA_ACME_EMAIL/SUTRA_CONTACT_*) come from
+# operator settings (SUTRA_DOMAIN/SUTRA_CONTACT_*) come from
 # ./.env.ec2. See bootstrap.sh / README.md for the exact --env-file ordering.
+# The named-tunnel config and credential are ignored files under
+# ../../.sutra/cloudflared/; see cloudflared-config.yml.example.
 
 name: sutra-prod
+
+x-default-logging: &default-logging
+  # Bound every container's json-file logs so an error loop cannot consume the
+  # EC2 root volume. `docker compose logs` continues to work as usual.
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   postgres:
@@ -40,10 +51,19 @@ services:
       start_period: 10s
     security_opt:
       - no-new-privileges:true
+    networks:
+      - data
+    logging: *default-logging
+    shm_size: 256m
+    pids_limit: 256
+    mem_reservation: 768m
+    mem_limit: 2g
+    cpus: "1.25"
     restart: unless-stopped
 
   migrate:
-    image: sutra-local-app
+    image: ${SUTRA_APP_IMAGE:?Set SUTRA_APP_IMAGE to an immutable OCI digest in deploy/ec2/.env.ec2}
+    pull_policy: always
     entrypoint: ["node", "scripts/postgres-migrate.mjs"]
     environment:
       SUTRA_MIGRATOR_DATABASE_URL: postgresql://sutra_owner:${SUTRA_POSTGRES_OWNER_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored owner secret in .sutra/docker.env}@postgres:5432/sutra
@@ -53,16 +73,37 @@ services:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
+    networks:
+      - data
+    logging: *default-logging
+    pids_limit: 256
+    mem_reservation: 256m
+    mem_limit: 1g
+    cpus: "1.0"
     restart: "no"
 
   app:
-    image: sutra-local-app
-    build:
-      context: ../..
-      dockerfile: Dockerfile
+    image: ${SUTRA_APP_IMAGE:?Set SUTRA_APP_IMAGE to an immutable OCI digest in deploy/ec2/.env.ec2}
+    pull_policy: always
     environment:
       DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}@postgres:5432/sutra
       SUTRA_WEB_HOST: 0.0.0.0
+      # Explicit public private-beta identity boundary. Production remains
+      # disabled behind its separate managed-hosting release gates.
+      SUTRA_DEPLOYMENT_ENV: staging
+      SUTRA_PUBLIC_ORIGIN: https://www.${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}
+      SUTRA_LOCAL_MODE: "false"
+      SUTRA_IDENTITY_MODE: password
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true"
+      SUTRA_PASSWORD_MFA_REQUIRED: "true"
+      # The collector runs inside this container and receives only short-lived
+      # EC2 workload credentials. Customer access remains External-ID protected.
+      SUTRA_COLLECTOR_MODE: live
+      SUTRA_ALLOW_LIVE_AWS: "true"
+      SUTRA_COLLECTOR_PRINCIPAL_ARN: ${SUTRA_COLLECTOR_PRINCIPAL_ARN:?Set the exact EC2 instance-role ARN}
+      SUTRA_BROKER_URL: http://127.0.0.1:8788
+      AWS_REGION: ${AWS_REGION:-ap-south-1}
+      AWS_DEFAULT_REGION: ${AWS_REGION:-ap-south-1}
       SUTRA_NOTIFICATION_WORKER_CONFIGURED: ${SUTRA_NOTIFICATION_WORKER_CONFIGURED:-false}
       SUTRA_JOB_RUNNER_TOKEN: ${SUTRA_JOB_RUNNER_TOKEN}
       SUTRA_JOB_RUNNER_INTERVAL_MS: ${SUTRA_JOB_RUNNER_INTERVAL_MS:-15000}
@@ -88,47 +129,121 @@ services:
         - CMD
         - node
         - -e
-        - fetch('http://127.0.0.1:3000/api/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
+        - fetch('http://127.0.0.1:3000/api/healthz',{headers:{Host:'www.${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}','X-Forwarded-Proto':'https'}}).then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 30s
     security_opt:
       - no-new-privileges:true
+    networks:
+      application:
+      app-egress:
+        # Make the internet-capable bridge the deterministic default route;
+        # `data` is deliberately internal and must never capture AWS/API egress.
+        gw_priority: 1
+      data:
+    logging: *default-logging
+    init: true
+    pids_limit: 512
+    mem_reservation: 1g
+    mem_limit: 3g
+    cpus: "1.5"
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    # Multi-architecture manifest pinned so a redeploy cannot silently acquire
+    # a different edge binary.
+    image: caddy:2-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648
     depends_on:
       - app
     environment:
       SUTRA_DOMAIN: ${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2 (e.g. sutracmdb.com)}
-      SUTRA_ACME_EMAIL: ${SUTRA_ACME_EMAIL:?Set SUTRA_ACME_EMAIL in deploy/ec2/.env.ec2 for Let's Encrypt}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+    # Private origin only; Cloudflare Tunnel reaches this port on the `tunnel`
+    # bridge and Docker publishes nothing to the EC2 host/network interface.
+    expose:
+      - "8080"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - ./maintenance:/srv/maintenance:ro
       - caddy_data:/data
       - caddy_config:/config
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/caddy-healthz"]
       interval: 10s
       timeout: 5s
       retries: 6
       start_period: 15s
     security_opt:
       - no-new-privileges:true
+    networks:
+      - tunnel
+      - application
+    logging: *default-logging
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: ["ALL"]
+    pids_limit: 128
+    mem_reservation: 64m
+    mem_limit: 256m
+    cpus: "0.5"
+    restart: unless-stopped
+
+  cloudflared:
+    # Multi-architecture manifest pinned to the reviewed connector binary. The
+    # image entrypoint disables autoupdate;
+    # updates are deliberate digest changes followed by a normal redeploy.
+    image: cloudflare/cloudflared:latest@sha256:4f6655284ab3d252b7f28fedb19fe6c8fc82ee5b1295c20ac74d475e5398a52d
+    command: ["tunnel", "--config", "/etc/cloudflared/config.yml", "run"]
+    depends_on:
+      caddy:
+        condition: service_healthy
+    volumes:
+      # Long syntax with create_host_path=false fails closed when an operator
+      # has not provisioned the ignored named-tunnel files. Docker must never
+      # create an empty directory where a credential file was expected.
+      - type: bind
+        source: ../../.sutra/cloudflared/config.yml
+        target: /etc/cloudflared/config.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../../.sutra/cloudflared/credentials.json
+        target: /etc/cloudflared/credentials.json
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "--metrics", "127.0.0.1:2000", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      tunnel:
+        gw_priority: 1
+    logging: *default-logging
+    pids_limit: 128
+    mem_reservation: 64m
+    mem_limit: 256m
+    cpus: "0.5"
+    stop_grace_period: 30s
     restart: unless-stopped
 
   notification-worker:
     profiles: ["notifications"]
-    image: sutra-notification-worker
-    build:
-      context: ../..
-      dockerfile: services/notification-worker/Dockerfile
+    # The 15 GiB private-beta host must never compile images. Enabling this
+    # profile therefore requires a separately published immutable worker image.
+    image: ${SUTRA_NOTIFICATION_WORKER_IMAGE:-sutra-notification-worker:unavailable}
+    pull_policy: always
     environment:
       DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}@postgres:5432/sutra
       AWS_REGION: ${AWS_REGION:-ap-south-1}
@@ -156,9 +271,15 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
+    networks:
+      data:
+      worker-egress:
+        gw_priority: 1
+    logging: *default-logging
     pids_limit: 128
+    mem_reservation: 128m
     mem_limit: 512m
-    cpus: "1.0"
+    cpus: "0.75"
     restart: unless-stopped
 
 volumes:
@@ -167,3 +288,18 @@ volumes:
   sutra_application_data:
   caddy_data:
   caddy_config:
+
+networks:
+  # Sole internet ingress: cloudflared makes outbound tunnel connections and
+  # reaches Caddy here. No service publishes a host port.
+  tunnel:
+  # Private Caddy -> app path with no internet gateway.
+  application:
+    internal: true
+  # Postgres is reachable solely by app/migrate/worker on this no-egress bridge.
+  data:
+    internal: true
+  # The app requires outbound AWS/API access but no additional ingress peer.
+  app-egress:
+  # Notification delivery needs AWS egress but no network path to Caddy/app.
+  worker-egress:

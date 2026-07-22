@@ -143,7 +143,7 @@ test("hosted sessions reuse the hardened local session cookie (Secure, SameSite,
 });
 
 test("hosted authentication requests are pinned to the canonical public origin", () => {
-  assert.match(apiAuth, /requestOrigin !== configuredOrigin/u);
+  assert.match(apiAuth, /requestMatchesCanonicalOrigin\(request, runtimeEnv\(\)\.SUTRA_PUBLIC_ORIGIN\)/u);
   assert.match(apiAuth, /isHostedOidcRuntime\(\)/u);
   // Hosted runtime requires the OIDC identity mode and a non-local deployment env.
   assert.match(apiAuth, /SUTRA_IDENTITY_MODE === "oidc"/u);
@@ -157,7 +157,7 @@ test("local loopback restriction and deny-by-default boundary are preserved unch
   // The ONLY other accept path is managed-password network mode, and it is
   // gated behind the (default-OFF) runtime switch AND pinned to the canonical
   // public origin — it can never widen the loopback-local branch.
-  assert.match(apiAuth, /const managedPassword =\s*\n\s*isManagedPasswordRuntime\(\) && requestOriginMatchesPublicOrigin\(url, config\.SUTRA_PUBLIC_ORIGIN\)/u);
+  assert.match(apiAuth, /const managedPassword =\s*\n\s*isManagedPasswordRuntime\(\) && requestMatchesCanonicalOrigin\(request, config\.SUTRA_PUBLIC_ORIGIN\)/u);
   assert.match(apiAuth, /if \(!loopbackLocal && !managedPassword\) \{/u);
   // The two former hard-disable strings are gone, replaced by exactly one switch.
   assert.doesNotMatch(deploymentSecurity, /not implemented in this build/u);
