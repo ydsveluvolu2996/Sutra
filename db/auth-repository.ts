@@ -23,6 +23,7 @@ import {
   type PasswordDigest,
 } from "../lib/local-auth-crypto";
 import { isRecentMfaVerification } from "../lib/recent-mfa";
+import { BROWSER_SESSION_IDLE_TTL_MS } from "../lib/browser-session-lifecycle.ts";
 
 export const LOCAL_IDENTITY_ISSUER = "sutra-local";
 export const LOCAL_AUTH_ORG_ID = "org_local_sutra";
@@ -812,14 +813,16 @@ export async function getLocalSession(token: string, now = Date.now()): Promise<
        JOIN memberships m ON m.user_id = u.id AND m.org_id = o.id AND m.status = 'active'
        LEFT JOIN totp_credentials t ON t.user_id = u.id
       WHERE s.token_digest = ? AND s.revoked_at IS NULL AND s.expires_at > ?
+        AND s.last_seen_at > ?
       LIMIT 1`,
-  ).bind(LOCAL_IDENTITY_ISSUER, digest, now).first<SessionRow>();
+  ).bind(LOCAL_IDENTITY_ISSUER, digest, now, now - BROWSER_SESSION_IDLE_TTL_MS).first<SessionRow>();
   if (row === null) return null;
   await db.prepare(
     `UPDATE local_sessions SET last_seen_at = ?
       WHERE token_digest = ? AND revoked_at IS NULL AND expires_at > ?
+        AND last_seen_at > ?
         AND last_seen_at < ?`,
-  ).bind(now, digest, now, now - 60_000).run();
+  ).bind(now, digest, now, now - BROWSER_SESSION_IDLE_TTL_MS, now - 60_000).run();
   return sessionFromRow(db, row);
 }
 

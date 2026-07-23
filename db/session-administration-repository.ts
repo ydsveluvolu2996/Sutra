@@ -1,6 +1,10 @@
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import { LocalAuthError, type AuthenticatedLocalSession } from "./auth-repository";
+import {
+  BROWSER_SESSION_IDLE_TTL_MS,
+  browserSessionEffectiveExpiresAt,
+} from "../lib/browser-session-lifecycle.ts";
 import { canonicalJson } from "../lib/canonical-json";
 import {
   canAdministerSession,
@@ -64,11 +68,14 @@ function publicRecord(row: SessionAdminRow, currentSessionId: string, now: numbe
     identitySourceLabel: hosted ? "Enterprise SSO" : "Local password",
     createdAt: new Date(row.created_at).toISOString(),
     lastSeenAt: new Date(row.last_seen_at).toISOString(),
-    expiresAt: new Date(row.expires_at).toISOString(),
+    expiresAt: new Date(browserSessionEffectiveExpiresAt({
+      absoluteExpiresAt: row.expires_at,
+      lastSeenAt: row.last_seen_at,
+    })).toISOString(),
     revokedAt: row.revoked_at === null ? null : new Date(row.revoked_at).toISOString(),
     mfaVerifiedAt: row.mfa_verified_at === null ? null : new Date(row.mfa_verified_at).toISOString(),
     current: row.id === currentSessionId,
-    status: sessionStatus(row.expires_at, row.revoked_at, now),
+    status: sessionStatus(row.expires_at, row.last_seen_at, row.revoked_at, now),
     deviceLabel: "Browser session",
   };
 }
@@ -88,7 +95,10 @@ export async function listManagedSessions(
         AND m.org_id = s.selected_org_id
       WHERE s.selected_org_id = ?
         AND (? = 1 OR s.user_id = ?)
-      ORDER BY CASE WHEN s.revoked_at IS NULL AND s.expires_at > ? THEN 0 ELSE 1 END,
+      ORDER BY CASE
+                 WHEN s.revoked_at IS NULL AND s.expires_at > ? AND s.last_seen_at > ? THEN 0
+                 ELSE 1
+               END,
                s.last_seen_at DESC, s.id DESC
       LIMIT 500`,
   ).bind(
@@ -96,6 +106,7 @@ export async function listManagedSessions(
     organizationWide ? 1 : 0,
     actor.subject.userId,
     now,
+    now - BROWSER_SESSION_IDLE_TTL_MS,
   ).all<SessionAdminRow>();
   return (result.results ?? []).map((row) => publicRecord(row, actor.session.id, now));
 }

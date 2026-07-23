@@ -117,7 +117,7 @@ UI hiding is not authorization. Background tasks and exports repeat the authoriz
 
 ### 3.4 Authentication/session requirements
 
-- Use a production OIDC/OAuth provider with MFA policy, short-lived sessions, rotating secure/HttpOnly/SameSite cookies, CSRF defenses on cookie-authenticated mutations, logout/revocation, and session/device audit.
+- Use a production OIDC/OAuth provider with MFA policy, non-persistent secure/HttpOnly/SameSite browser cookies, server-enforced idle and absolute deadlines, CSRF defenses on cookie-authenticated mutations, logout/revocation, and session/device audit. Never rely on `unload`/`beforeunload` for logout: browsers do not guarantee those events.
 - The current Sites identity headers may bootstrap a sample identity but do not establish organization membership or production-grade customer authorization on their own.
 - Invitations are single-use, expire, bind to normalized email plus organization/customer/role, and store only a token hash.
 - Service-to-service calls never reuse browser auth. Use separate audiences, short TTLs, key rotation, request-body signatures, timestamps, nonces, and replay rejection.

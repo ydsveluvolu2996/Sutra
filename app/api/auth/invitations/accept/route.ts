@@ -1,4 +1,4 @@
-import { LOCAL_SESSION_TTL_MS, consumeLoginAttemptBudget } from "../../../../../db/auth-repository";
+import { consumeLoginAttemptBudget } from "../../../../../db/auth-repository";
 import {
   acceptPasswordInvitation,
   previewPasswordInvitation,
@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       {
         headers: {
-          "set-cookie": sessionCookie(request, result.token, LOCAL_SESSION_TTL_MS / 1000),
+          "set-cookie": sessionCookie(request, result.token),
         },
       },
     );

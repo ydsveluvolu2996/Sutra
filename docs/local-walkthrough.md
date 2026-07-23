@@ -51,7 +51,10 @@ On the first start, open `http://localhost:3000/login`. Run
 token into that screen, then create the owner password and enroll a TOTP
 authenticator. Sutra stores only a costed password digest, a session-token digest,
 and an encrypted TOTP secret. Every CMDB API requires the persisted session, MFA,
-and the corresponding RBAC capability.
+and the corresponding RBAC capability. The login cookie is non-persistent and
+the server rejects it after fifteen idle minutes or the session's absolute
+deadline, whichever comes first. Use **Sign out** when immediate revocation is
+required; closing a tab alone does not sign out other open tabs.
 
 After MFA verification, open `http://localhost:3000/operations`:
 
