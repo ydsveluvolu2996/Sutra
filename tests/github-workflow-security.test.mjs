@@ -86,17 +86,30 @@ test("CI runs slow gates independently and aggregates them fail-closed", () => {
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 
   assert.match(ci, /^\s{2}quality:\s*$/mu);
+  assert.match(ci, /^\s{2}test:\s*$/mu);
   assert.match(ci, /^\s{2}integration:\s*$/mu);
   assert.match(ci, /^\s{2}build:\s*$/mu);
   assert.match(ci, /^\s{2}release-gate:\s*$/mu);
-  assert.match(ci, /needs: \[quality, integration, build\]/u);
+  assert.match(ci, /needs: \[quality, test, integration, build\]/u);
   assert.match(ci, /if: \$\{\{ always\(\) \}\}/u);
   assert.match(ci, /QUALITY_RESULT: \$\{\{ needs\.quality\.result \}\}/u);
+  assert.match(ci, /TEST_RESULT: \$\{\{ needs\.test\.result \}\}/u);
   assert.match(ci, /INTEGRATION_RESULT: \$\{\{ needs\.integration\.result \}\}/u);
   assert.match(ci, /BUILD_RESULT: \$\{\{ needs\.build\.result \}\}/u);
   assert.match(ci, /test "\$QUALITY_RESULT" = success/u);
+  assert.match(ci, /test "\$TEST_RESULT" = success/u);
   assert.match(ci, /test "\$INTEGRATION_RESULT" = success/u);
   assert.match(ci, /test "\$BUILD_RESULT" = success/u);
+});
+
+test("the CI test job shards deterministically and never runs files concurrently", () => {
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+
+  // Every shard runs on its own runner; parallelism is across runners, not
+  // within one — the shard runner keeps --test-concurrency=1 internally.
+  assert.match(ci, /matrix:\s*\n\s*shard: \[1, 2, 3, 4, 5, 6\]/u);
+  assert.match(ci, /fail-fast: false/u);
+  assert.match(ci, /node scripts\/ci-test-shard\.mjs --shard \$\{\{ matrix\.shard \}\}\/6/u);
 });
 
 test("the in-cluster security gate runs with an immutable root filesystem", () => {
