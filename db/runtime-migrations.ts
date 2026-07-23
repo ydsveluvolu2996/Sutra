@@ -48,6 +48,7 @@ import hostedSignupRateLimitsSchemaSql from "../drizzle/0048_hosted_signup_rate_
 import customerManagedAwsRolesSchemaSql from "../drizzle/0049_customer_managed_aws_roles.sql?raw";
 import invitationDeliverySchemaSql from "../drizzle/0050_invitation_delivery.sql?raw";
 import invitationOperationLedgerSchemaSql from "../drizzle/0051_invitation_operation_ledger.sql?raw";
+import backgroundJobsConnectionScopeSql from "../drizzle/0052_background_jobs_connection_scope.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -113,6 +114,7 @@ const migrations = [
   { id: "0049_customer_managed_aws_roles", statements: statementsFrom(customerManagedAwsRolesSchemaSql) },
   { id: "0050_invitation_delivery", statements: statementsFrom(invitationDeliverySchemaSql) },
   { id: "0051_invitation_operation_ledger", statements: statementsFrom(invitationOperationLedgerSchemaSql) },
+  { id: "0052_background_jobs_connection_scope", statements: statementsFrom(backgroundJobsConnectionScopeSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

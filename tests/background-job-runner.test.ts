@@ -10,6 +10,7 @@ interface FakeJob {
   id: string;
   orgId: string;
   customerId: string | null;
+  connectionId: string | null;
   kind: string;
   payload: unknown;
   attempt: number;
@@ -53,7 +54,7 @@ class FakeQueue implements JobQueuePort {
 }
 
 function job(id: string, kind: string, overrides: Partial<JobSeed> = {}): JobSeed {
-  return { id, orgId: "org_1", customerId: null, kind, payload: {}, attempt: 0, maxAttempts: 3, ...overrides };
+  return { id, orgId: "org_1", customerId: null, connectionId: null, kind, payload: {}, attempt: 0, maxAttempts: 3, ...overrides };
 }
 
 const clock = () => 1_000;

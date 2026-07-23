@@ -25,6 +25,7 @@ function actor(role: AuthenticatedLocalSession["subject"]["role"]): Authenticate
       user: { id: "user_actor", email: "actor@example.test", displayName: "Actor" },
       organization: { id: "org_a", slug: "org-a", name: "Org A" },
       membership: { id: "member_a", role, scopeMode: "all_customers" },
+      availableOrganizations: [{ id: "org_a", slug: "org-a", name: "Org A", role }],
       capabilities: ["workspace:read"],
       mfa: { enrolled: true, verified: true },
       expiresAt: "2026-07-18T00:00:00.000Z",

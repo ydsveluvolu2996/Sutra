@@ -42,6 +42,7 @@ import postgresHostedSignupRateLimitsSql from "../postgres/migrations/0042_hoste
 import postgresCustomerManagedAwsRolesSql from "../postgres/migrations/0043_customer_managed_aws_roles.sql?raw";
 import postgresInvitationDeliverySql from "../postgres/migrations/0044_invitation_delivery.sql?raw";
 import postgresInvitationOperationLedgerSql from "../postgres/migrations/0045_invitation_operation_ledger.sql?raw";
+import postgresBackgroundJobsConnectionScopeSql from "../postgres/migrations/0046_background_jobs_connection_scope.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -88,6 +89,7 @@ const migrations = [
   { id: "0043_customer_managed_aws_roles", source: postgresCustomerManagedAwsRolesSql },
   { id: "0044_invitation_delivery", source: postgresInvitationDeliverySql },
   { id: "0045_invitation_operation_ledger", source: postgresInvitationOperationLedgerSql },
+  { id: "0046_background_jobs_connection_scope", source: postgresBackgroundJobsConnectionScopeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
