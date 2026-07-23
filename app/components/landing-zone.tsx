@@ -201,19 +201,19 @@ const LAYERS = [
 ];
 
 /* ------------------------------------------------------------------ *
- * Pricing — the dollar amounts below are DELIBERATE PLACEHOLDERS.
- * Every tier renders "$—" with a "set your price" note; there are no
- * real, final prices here. Replace `price`/`note` with your own
- * commercial terms. Feature bullets are drawn only from capabilities
- * that already ship on this page (see CAPS / PLATFORM above); any
- * numeric limit is explicitly marked "example".
+ * Pricing. `monthly` is the list price in USD per month, per connected
+ * workspace/account scope. Annual billing bills 10 months for 12 (two
+ * months free ≈ 17% off), computed in the renderer. A tier with no
+ * `monthly` is custom/enterprise ("Contact us"). Feature bullets are
+ * drawn only from capabilities that already ship on this page (see CAPS
+ * / PLATFORM above); any numeric limit is explicitly marked "example".
  * ------------------------------------------------------------------ */
-type Tier = { name: string; tagline: string; note: string; cta: string; ctaHref: string; feat?: boolean; lead: string; points: string[]; eg: string };
+type Tier = { name: string; tagline: string; monthly?: number; cta: string; ctaHref: string; feat?: boolean; lead: string; points: string[]; eg: string };
 const TIERS: Tier[] = [
   {
     name: "Starter",
     tagline: "Single-account posture, proven from day one",
-    note: "set your price",
+    monthly: 15,
     cta: "Book a walkthrough",
     ctaHref: "/contact",
     lead: "Agentless collection and the evidence graph for a small AWS + EKS footprint.",
@@ -229,7 +229,7 @@ const TIERS: Tier[] = [
   {
     name: "Growth",
     tagline: "The full CNAPP + FinOps operations suite",
-    note: "set your price",
+    monthly: 30,
     cta: "Book a walkthrough",
     ctaHref: "/contact",
     feat: true,
@@ -247,8 +247,7 @@ const TIERS: Tier[] = [
   {
     name: "Portfolio",
     tagline: "Multi-tenant operations for the whole book",
-    note: "set your price",
-    cta: "Talk to us",
+    cta: "Contact us",
     ctaHref: "/contact",
     lead: "Everything in Growth, built for running many customers at once.",
     points: [
@@ -261,6 +260,11 @@ const TIERS: Tier[] = [
     eg: "Example scope: unlimited customers, priced per workspace",
   },
 ];
+
+/* Annual billing = 10 months billed for 12 (two months free). */
+function annualTotal(monthly: number): number {
+  return monthly * 10;
+}
 
 /* Trust content. NO customer claims — no logos, quotes or testimonials, because
  * Sutra has no customers to cite yet and will not invent social proof. The badge
@@ -714,15 +718,18 @@ export default function LandingZone() {
 
         <section className="block" style={{ paddingTop: 0 }} id="pricing">
           <div className="intro center rise"><span className="sec-kicker">Plans</span><h2>Pricing that scales with your book of business.</h2><p className="lead">Three tiers built around what Sutra already does — collection, the evidence graph, vulnerability management, FinOps, compliance readiness, the API and MSP multi-tenancy.</p></div>
-          {/* Prices below are editable placeholders — no real, final numbers are shown. */}
-          <p className="lx-price-note">Placeholder pricing — every amount below is a <strong>&ldquo;set your price&rdquo;</strong> slot for you to replace with your own commercial terms. Feature scopes marked <em>example</em> are illustrative, not fixed limits.</p>
+          <p className="lx-price-note">Simple per-month pricing, billed per connected workspace. Pay yearly and get <strong>two months free</strong> (about 17% off). Feature scopes marked <em>example</em> are illustrative, not fixed limits.</p>
           <div className="lx-tiers rise">
             {TIERS.map((t) => (
               <article key={t.name} className={"lx-tier" + (t.feat ? " feat" : "")}>
                 {t.feat ? <span className="lx-tier-badge">Most popular</span> : null}
                 <h3>{t.name}</h3>
                 <p className="tagline">{t.tagline}</p>
-                <div className="lx-price"><b>$—</b><small>{t.note}</small></div>
+                <div className="lx-price">
+                  {t.monthly !== undefined
+                    ? <><b>${t.monthly}<span className="lx-price-unit">/mo</span></b><small>or ${annualTotal(t.monthly)}/yr billed annually — two months free</small></>
+                    : <><b>Custom</b><small>volume pricing for the whole book — let&rsquo;s talk</small></>}
+                </div>
                 <p className="lx-tier-lead">{t.lead}</p>
                 <ul>
                   {t.points.map((pt) => (

@@ -2969,9 +2969,10 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-tier-badge { position: absolute; top: -11px; left: 26px; font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #051020; background: var(--grad); border-radius: 20px; padding: 5px 11px; }
 .lz .lx-tier h3 { font-size: 20px; margin: 0; }
 .lz .lx-tier .tagline { margin-top: 6px; font-size: 12.5px; color: var(--body-2); min-height: 34px; }
-.lz .lx-price { display: flex; align-items: baseline; gap: 10px; margin: 16px 0 4px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.lz .lx-price { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; margin: 16px 0 4px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
 .lz .lx-price b { font-size: 42px; font-weight: 700; letter-spacing: -.05em; color: var(--title); line-height: 1; }
-.lz .lx-price small { font-family: var(--mono); font-size: 11px; color: var(--cyan); letter-spacing: .03em; }
+.lz .lx-price small { flex: 1 1 100%; font-family: var(--mono); font-size: 11px; color: var(--cyan); letter-spacing: .03em; }
+.lz .lx-price-unit { font-size: 15px; font-weight: 600; letter-spacing: 0; color: var(--body-2); margin-left: 2px; }
 .lz .lx-tier-lead { margin: 16px 0 4px; font-size: 12.5px; color: var(--body); }
 .lz .lx-tier ul { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 11px; }
 .lz .lx-tier li { display: flex; gap: 9px; align-items: flex-start; font-size: 12.5px; color: var(--text-1); line-height: 1.5; }
