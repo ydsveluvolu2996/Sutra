@@ -11,6 +11,7 @@ const setupScript = resolve(import.meta.dirname, "../scripts/setup-local-pilot.m
 const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_DEPLOYMENT_ENV",
   "SUTRA_PUBLIC_ORIGIN",
+  "SUTRA_RELEASE_IMAGE",
   "SUTRA_LOCAL_MODE",
   "SUTRA_IDENTITY_MODE",
   "SUTRA_PASSWORD_MFA_REQUIRED",
@@ -21,6 +22,9 @@ const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_ALLOW_LIVE_AWS",
   "SUTRA_COLLECTOR_PRINCIPAL_ARN",
 ]);
+
+const RELEASE_IMAGE =
+  "738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra/app@sha256:" + "a".repeat(64);
 
 function cleanEnvironment(overrides = {}) {
   const environment = Object.fromEntries(
@@ -45,6 +49,7 @@ test("setup materializes only the explicit staging private-beta password allowli
       SUTRA_LOCAL_CONFIG_PATH: config,
       SUTRA_DEPLOYMENT_ENV: "staging",
       SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
       SUTRA_LOCAL_MODE: "false",
       SUTRA_IDENTITY_MODE: "password",
       SUTRA_PASSWORD_MFA_REQUIRED: "true",
@@ -54,6 +59,7 @@ test("setup materializes only the explicit staging private-beta password allowli
     const contents = await readFile(config, "utf8");
     assert.match(contents, /^SUTRA_DEPLOYMENT_ENV=staging$/mu);
     assert.match(contents, /^SUTRA_PUBLIC_ORIGIN=https:\/\/www\.sutracmdb\.com$/mu);
+    assert.match(contents, new RegExp(`^SUTRA_RELEASE_IMAGE=${RELEASE_IMAGE}$`, "mu"));
     assert.match(contents, /^SUTRA_LOCAL_MODE=false$/mu);
     assert.match(contents, /^SUTRA_IDENTITY_MODE=password$/mu);
     assert.match(contents, /^SUTRA_PASSWORD_MFA_REQUIRED=true$/mu);
@@ -69,7 +75,9 @@ test("setup materializes only the explicit staging private-beta password allowli
         SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
       }),
     });
-    assert.match(await readFile(config, "utf8"), /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=false$/mu);
+    const localContents = await readFile(config, "utf8");
+    assert.match(localContents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=false$/mu);
+    assert.doesNotMatch(localContents, /^SUTRA_RELEASE_IMAGE=/mu);
   });
 });
 
@@ -78,6 +86,7 @@ test("setup refuses production, loopback and implicit private-beta activation", 
     {
       SUTRA_DEPLOYMENT_ENV: "production",
       SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
       SUTRA_LOCAL_MODE: "false",
       SUTRA_IDENTITY_MODE: "password",
       SUTRA_PASSWORD_MFA_REQUIRED: "true",
@@ -86,6 +95,24 @@ test("setup refuses production, loopback and implicit private-beta activation", 
     {
       SUTRA_DEPLOYMENT_ENV: "staging",
       SUTRA_PUBLIC_ORIGIN: "http://127.0.0.1:3000",
+      SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+      SUTRA_LOCAL_MODE: "false",
+      SUTRA_IDENTITY_MODE: "password",
+      SUTRA_PASSWORD_MFA_REQUIRED: "true",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+    },
+    {
+      SUTRA_DEPLOYMENT_ENV: "staging",
+      SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_LOCAL_MODE: "false",
+      SUTRA_IDENTITY_MODE: "password",
+      SUTRA_PASSWORD_MFA_REQUIRED: "true",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+    },
+    {
+      SUTRA_DEPLOYMENT_ENV: "staging",
+      SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_RELEASE_IMAGE: "738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra/app:latest",
       SUTRA_LOCAL_MODE: "false",
       SUTRA_IDENTITY_MODE: "password",
       SUTRA_PASSWORD_MFA_REQUIRED: "true",

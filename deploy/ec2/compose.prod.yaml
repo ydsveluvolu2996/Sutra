@@ -92,6 +92,9 @@ services:
       # disabled behind its separate managed-hosting release gates.
       SUTRA_DEPLOYMENT_ENV: staging
       SUTRA_PUBLIC_ORIGIN: https://www.${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}
+      # The health endpoint exposes this non-secret immutable identity so both
+      # the host transaction and the edge release gate prove the served build.
+      SUTRA_RELEASE_IMAGE: ${SUTRA_APP_IMAGE:?Set SUTRA_APP_IMAGE to an immutable OCI digest in deploy/ec2/.env.ec2}
       SUTRA_LOCAL_MODE: "false"
       SUTRA_IDENTITY_MODE: password
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true"

@@ -113,11 +113,19 @@ for fragment in (
     "recovering the prior application state and host bundle",
     "--ulimit fsize=536870912:536870912",
     "trap 'exit 130' INT",
+    "verify_public_release",
+    "x-sutra-release-image:",
+    "Sitemap: $PUBLIC_ORIGIN/sitemap.xml",
+    "x-robots-tag:.*noindex",
     "RELEASE_COMMITTED=true",
     "/run/lock/sutra-data-mutation.lock",
 ):
     if fragment not in release_update:
         raise SystemExit(f"Release rollback contract is missing: {fragment}")
+public_gate = release_update.rindex("\nverify_public_release\n")
+release_commit = release_update.index("\nRELEASE_COMMITTED=true\n")
+if public_gate >= release_commit:
+    raise SystemExit("Public verification must complete before the release transaction commits")
 for fragment in (
     "TARGET_STATE_DIR",
     "Restoring the verified application-data snapshot for the selected release",

@@ -164,6 +164,9 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /imageTagMutability/u);
   assert.match(workflow, /tag_mutability.+IMMUTABLE/u);
   assert.match(workflow, /imageScanningConfiguration\.scanOnPush/u);
+  assert.match(workflow, /aws ecr get-lifecycle-policy/u);
+  assert.match(workflow, /deploy\/ec2\/ecr-lifecycle-policy\.json/u);
+  assert.match(workflow, /actual_lifecycle.+expected_lifecycle/u);
   assert.match(workflow, /--provenance=mode=max/u);
   assert.match(workflow, /--sbom=true/u);
   assert.match(candidateBuild, /candidate_tag="candidate-\$\{GITHUB_SHA\}-run-/u);
@@ -183,10 +186,13 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /aws ssm get-connection-status/u);
   assert.match(workflow, /aws ssm send-command/u);
   assert.match(workflow, /aws ssm get-command-invocation/u);
-  assert.match(workflow, /\/api\/status \/login \/status \/robots\.txt \/sitemap\.xml/u);
+  assert.match(workflow, /\/about \/contact \/security \/privacy \/terms \/status \/robots\.txt \/sitemap\.xml/u);
   assert.match(workflow, /Sitemap: \$\{PUBLIC_ORIGIN\}\/sitemap\.xml/u);
   assert.match(workflow, /<loc>\$\{PUBLIC_ORIGIN\}\//u);
-  assert.match(workflow, /\/api\/healthz \/api\/status/u);
+  assert.match(workflow, /x-sutra-release-image:/u);
+  assert.match(workflow, /served_image.+IMAGE_REF/u);
+  assert.match(workflow, /x-robots-tag:.*noindex/u);
+  assert.match(workflow, /apex_code.+308.+apex_location.+PUBLIC_ORIGIN/u);
   assert.doesNotMatch(
     workflow,
     /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws ssm start-session|AWS-RunShellScript|aws ec2 (?:start|stop)-instances/u,
@@ -208,6 +214,7 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(role, /Action: ssm:GetCommandInvocation/u);
   assert.match(role, /repository\/\$\{AppRepositoryName\}/u);
   assert.match(role, /- ecr:BatchGetImage/u);
+  assert.match(role, /- ecr:GetLifecyclePolicy/u);
   assert.match(role, /- ecr:PutImage/u);
   assert.doesNotMatch(
     role,

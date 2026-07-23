@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { validatedReleaseImage } from "../lib/release-identity.ts";
 
 const root = resolve(import.meta.dirname, "..");
 const variablesPath = resolve(root, process.env.SUTRA_LOCAL_CONFIG_PATH ?? ".dev.vars");
@@ -101,6 +102,7 @@ if (privateBetaSwitch !== undefined && privateBetaSwitch !== "true" && privateBe
   throw new Error("SUTRA_PRIVATE_BETA_PASSWORD_ENABLED must be exactly true or false");
 }
 const privateBetaRequested = privateBetaSwitch === "true";
+const releaseImage = validatedReleaseImage(process.env.SUTRA_RELEASE_IMAGE);
 let privateBetaVars = [];
 if (privateBetaRequested) {
   const expected = {
@@ -134,9 +136,13 @@ if (privateBetaRequested) {
   ) {
     throw new Error("SUTRA_PUBLIC_ORIGIN must be a canonical non-loopback HTTPS origin");
   }
+  if (releaseImage === null) {
+    throw new Error("SUTRA_RELEASE_IMAGE is required for the network-reachable private beta");
+  }
   privateBetaVars = [
     ...Object.entries(expected).map(([name, value]) => ({ name, value })),
     { name: "SUTRA_PUBLIC_ORIGIN", value: parsedOrigin.origin },
+    { name: "SUTRA_RELEASE_IMAGE", value: releaseImage },
     { name: "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", value: "true" },
   ];
 }
@@ -194,6 +200,11 @@ if (existingContents === null) {
   // when a persistent runtime volume still contains a prior enabled value.
   if (!privateBetaRequested && /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu.test(updatedContents)) {
     updatedContents = upsertVariable(updatedContents, additions, "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", "false");
+  }
+  // A retained production identity must never be exposed by a later local-mode
+  // start. Compose supplies the value again on every real private-beta start.
+  if (!privateBetaRequested && /^SUTRA_RELEASE_IMAGE=/mu.test(updatedContents)) {
+    updatedContents = updatedContents.replace(/^SUTRA_RELEASE_IMAGE=.*(?:\n|$)/mu, "");
   }
   if (databaseUrl) {
     if (/^DATABASE_URL=/mu.test(updatedContents)) {
