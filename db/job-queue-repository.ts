@@ -16,6 +16,7 @@ export interface BackgroundJob {
   readonly id: string;
   readonly orgId: string;
   readonly customerId: string | null;
+  readonly connectionId: string | null;
   readonly kind: string;
   readonly payload: unknown;
   readonly status: BackgroundJobStatus;
@@ -29,7 +30,7 @@ export interface BackgroundJob {
 }
 
 interface JobRow {
-  id: string; org_id: string; customer_id: string | null; kind: string; payload_json: string;
+  id: string; org_id: string; customer_id: string | null; connection_id: string | null; kind: string; payload_json: string;
   status: BackgroundJobStatus; attempt: number; max_attempts: number; lease_expires_at: number | null;
   run_after: number; last_error: string | null; created_at: number; updated_at: number;
 }
@@ -51,7 +52,7 @@ function parseRow(row: JobRow): BackgroundJob {
   let payload: unknown;
   try { payload = JSON.parse(row.payload_json); } catch { payload = { coverage: "unknown", reason: "invalid-stored-payload" }; }
   return {
-    id: row.id, orgId: row.org_id, customerId: row.customer_id, kind: row.kind, payload,
+    id: row.id, orgId: row.org_id, customerId: row.customer_id, connectionId: row.connection_id, kind: row.kind, payload,
     status: row.status, attempt: Number(row.attempt), maxAttempts: Number(row.max_attempts),
     leaseExpiresAt: row.lease_expires_at === null ? null : Number(row.lease_expires_at),
     runAfter: Number(row.run_after), lastError: row.last_error,
@@ -65,10 +66,15 @@ export class JobQueueRepository {
   private async ready(): Promise<D1Database> { await ensureRuntimeSchema(this.database); return this.database; }
 
   public async enqueue(input: {
-    readonly orgId: string; readonly customerId: string | null; readonly kind: string;
-    readonly payload: unknown; readonly maxAttempts?: number; readonly runAfter?: number;
+    readonly orgId: string; readonly customerId: string | null; readonly connectionId?: string | null;
+    readonly kind: string; readonly payload: unknown; readonly maxAttempts?: number; readonly runAfter?: number;
   }, now = Date.now()): Promise<BackgroundJob> {
     if (!IDENTIFIER.test(input.orgId) || (input.customerId !== null && !IDENTIFIER.test(input.customerId)) || !JOB_KIND.test(input.kind)) invalid();
+    const connectionId = input.connectionId ?? null;
+    // A connection-bound job must also be customer-bound; its ownership is
+    // re-verified against the persisted aws_connections row below, never trusted
+    // from the caller — the tenant-scoping enforcement point for hosted collection.
+    if (connectionId !== null && (!IDENTIFIER.test(connectionId) || input.customerId === null)) invalid();
     const maxAttempts = input.maxAttempts ?? 5;
     const runAfter = input.runAfter ?? now;
     if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 25 || !Number.isFinite(runAfter)) invalid();
@@ -77,7 +83,17 @@ export class JobQueueRepository {
     if (payloadJson === undefined || new TextEncoder().encode(payloadJson).byteLength > MAX_PAYLOAD_BYTES) invalid();
     const db = await this.ready();
     const id = `job_${crypto.randomUUID().replaceAll("-", "")}`;
-    const result = input.customerId === null
+    const result = connectionId !== null
+      ? await db.prepare(
+        `INSERT INTO background_jobs
+          (id, org_id, customer_id, connection_id, kind, payload_json, status, attempt, max_attempts, run_after, created_at, updated_at)
+         SELECT ?, cn.org_id, cn.customer_id, cn.id, ?, ?, 'queued', 0, ?, ?, ?, ?
+           FROM aws_connections cn
+           JOIN organizations o ON o.id = cn.org_id AND o.status = 'active'
+           JOIN customers c ON c.id = cn.customer_id AND c.org_id = cn.org_id AND c.status IN ('active', 'trial')
+          WHERE cn.id = ? AND cn.org_id = ? AND cn.customer_id = ? AND cn.status = 'active'`,
+      ).bind(id, input.kind, payloadJson, maxAttempts, runAfter, now, now, connectionId, input.orgId, input.customerId).run()
+      : input.customerId === null
       ? await db.prepare(
         `INSERT INTO background_jobs
           (id, org_id, customer_id, kind, payload_json, status, attempt, max_attempts, run_after, created_at, updated_at)
@@ -166,6 +182,64 @@ export class JobQueueRepository {
         WHERE id = ? AND org_id = ? AND status = 'leased'
        RETURNING *`,
     ).bind(terminal ? "dead_letter" : "queued", terminal ? current.run_after : decision.runAfterMs, error, now, id, orgId).first<JobRow>();
+    if (updated === null) throw new JobQueueRepositoryError("INVALID_STATE");
+    return parseRow(updated);
+  }
+
+  /**
+   * Lease the oldest ready job for ONE tenant connection. Unlike leaseNext (the
+   * cross-tenant system drain), this can only ever return a job whose org_id AND
+   * connection_id match — the dequeue surface for a per-tenant collector worker.
+   * Reclaims expired leases so a died worker's job is never stranded.
+   */
+  public async leaseConnectionJob(orgId: string, connectionId: string, kind: string, now = Date.now()): Promise<BackgroundJob | null> {
+    if (!IDENTIFIER.test(orgId) || !IDENTIFIER.test(connectionId) || !JOB_KIND.test(kind) || !Number.isFinite(now)) invalid();
+    const db = await this.ready();
+    const row = await db.prepare(
+      `UPDATE background_jobs
+          SET status = 'leased', attempt = attempt + 1, lease_expires_at = ?, updated_at = ?
+        WHERE id = (
+          SELECT id FROM background_jobs
+           WHERE org_id = ? AND connection_id = ? AND kind = ?
+             AND (
+               (status = 'queued' AND run_after <= ?)
+               OR (status = 'leased' AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?)
+             )
+           ORDER BY run_after ASC, created_at ASC, id ASC LIMIT 1
+        ) AND status IN ('queued', 'leased')
+       RETURNING *`,
+    ).bind(now + LEASE_MS, now, orgId, connectionId, kind, now, now).first<JobRow>();
+    return row === null ? null : parseRow(row);
+  }
+
+  public async completeConnectionJob(orgId: string, connectionId: string, id: string, now = Date.now()): Promise<boolean> {
+    if (!IDENTIFIER.test(orgId) || !IDENTIFIER.test(connectionId) || !JOB_ID.test(id)) invalid();
+    const db = await this.ready();
+    const result = await db.prepare(
+      `UPDATE background_jobs SET status = 'succeeded', lease_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND org_id = ? AND connection_id = ? AND status = 'leased'`,
+    ).bind(now, id, orgId, connectionId).run();
+    return Number(result.meta?.changes ?? 0) > 0;
+  }
+
+  public async failConnectionJob(orgId: string, connectionId: string, id: string, error: string, now = Date.now()): Promise<BackgroundJob> {
+    if (!IDENTIFIER.test(orgId) || !IDENTIFIER.test(connectionId) || !JOB_ID.test(id) || error.length < 1 || error.length > MAX_ERROR_LENGTH) invalid();
+    const db = await this.ready();
+    const current = await db.prepare(
+      `SELECT * FROM background_jobs WHERE id = ? AND org_id = ? AND connection_id = ? AND status = 'leased' LIMIT 1`,
+    ).bind(id, orgId, connectionId).first<JobRow>();
+    if (current === null) throw new JobQueueRepositoryError("INVALID_STATE");
+    const decision = decideNextAttempt({
+      attempt: Number(current.attempt), maxAttempts: Number(current.max_attempts),
+      baseDelayMs: BASE_RETRY_DELAY_MS, nowMs: now,
+    });
+    const terminal = decision.kind === "dead-letter";
+    const updated = await db.prepare(
+      `UPDATE background_jobs
+          SET status = ?, run_after = ?, lease_expires_at = NULL, last_error = ?, updated_at = ?
+        WHERE id = ? AND org_id = ? AND connection_id = ? AND status = 'leased'
+       RETURNING *`,
+    ).bind(terminal ? "dead_letter" : "queued", terminal ? current.run_after : decision.runAfterMs, error, now, id, orgId, connectionId).first<JobRow>();
     if (updated === null) throw new JobQueueRepositoryError("INVALID_STATE");
     return parseRow(updated);
   }

@@ -57,6 +57,7 @@ const migrationFiles = [
   "0043_customer_managed_aws_roles.sql",
   "0044_invitation_delivery.sql",
   "0045_invitation_operation_ledger.sql",
+  "0046_background_jobs_connection_scope.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

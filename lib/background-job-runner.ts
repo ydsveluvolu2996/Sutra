@@ -20,6 +20,7 @@ export interface RunnableJob {
   readonly id: string;
   readonly orgId: string;
   readonly customerId: string | null;
+  readonly connectionId: string | null;
   readonly kind: string;
   readonly payload: unknown;
   readonly attempt: number;
