@@ -144,6 +144,27 @@ export function authorize(subject: AuthorizationSubject, request: AuthorizationR
     : { allowed: false, reason: "ROLE" };
 }
 
+/**
+ * True when the subject holds the organization-owner role. Pure predicate over
+ * the already-resolved authorization subject; it derives nothing from the
+ * request and crosses no organization boundary.
+ */
+export function isOrganizationOwner(subject: AuthorizationSubject): boolean {
+  return subject.role === "org_owner";
+}
+
+/**
+ * The single gate for the recovery-administration workstream. Recovery is
+ * deliberately owner-only: an actor may administer recovery ONLY when it both
+ * carries org-wide `membership:manage` AND is an organization owner. org_admin
+ * carries `membership:manage` but is intentionally excluded, so the second
+ * conjunct is load-bearing, not redundant. This never mints a session and never
+ * bypasses MFA — it only authorizes credential resets / owner (re)provisioning.
+ */
+export function canAdministerRecovery(subject: AuthorizationSubject): boolean {
+  return ROLE_CAPABILITIES[subject.role].has("membership:manage") && subject.role === "org_owner";
+}
+
 export function effectiveCapabilities(subject: AuthorizationSubject): readonly Capability[] {
   return CAPABILITIES.filter((capability) => ROLE_CAPABILITIES[subject.role].has(capability));
 }

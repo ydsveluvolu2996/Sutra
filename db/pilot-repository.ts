@@ -2103,6 +2103,13 @@ export async function setFindingWorkflowStatus(
 export interface AuditInput {
   /** Defaults to the local pilot organization for local-only callers. */
   readonly orgId?: string;
+  /**
+   * The class of principal the event is attributed to. Defaults to "user" so
+   * every existing caller (which omits it) is byte-identical. A "system" actor
+   * is reserved for host-local platform operations that run without an
+   * authenticated end-user session (e.g. cold-path recovery).
+   */
+  readonly actorType?: "user" | "service" | "system";
   readonly actorId: string;
   readonly action: string;
   readonly targetType: string;
@@ -2134,6 +2141,7 @@ interface StoredAuditRequestRow {
 
 interface ResolvedAuditInput extends Omit<AuditInput, "orgId"> {
   readonly orgId: string;
+  readonly actorType: "user" | "service" | "system";
   readonly requestId: string;
   readonly metadataJson: string;
 }
@@ -2167,7 +2175,7 @@ function resolveAuditInput(input: AuditInput): ResolvedAuditInput {
       "The audit event metadata is not safe JSON",
     );
   }
-  return { ...input, orgId, requestId, metadataJson };
+  return { ...input, orgId, actorType: input.actorType ?? "user", requestId, metadataJson };
 }
 
 export function appendAuditEvent(input: AuditInput): Promise<void> {
@@ -2252,7 +2260,7 @@ function assertMatchingAuditRequest(
 ): void {
   if (
     existing.customer_id !== input.customerId ||
-    existing.actor_type !== "user" ||
+    existing.actor_type !== input.actorType ||
     existing.actor_id !== input.actorId ||
     existing.action !== input.action ||
     existing.target_type !== input.targetType ||
@@ -2358,7 +2366,7 @@ async function prepareAuditEventStatement(
       (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
        target_type, target_id, outcome, request_id, metadata_json,
        previous_event_hash, event_hash)
-     SELECT ?, ?, ?, CAST(? AS BIGINT), 'user', ?, ?, ?, ?, ?, ?, ?, ?, ?
+     SELECT ?, ?, ?, CAST(? AS BIGINT), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        FROM chain_guard, mutation_guard
       WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
      ${invalidGuard}`,
@@ -2372,6 +2380,7 @@ async function prepareAuditEventStatement(
     input.orgId,
     input.customerId,
     occurredAt,
+    input.actorType,
     input.actorId,
     input.action,
     input.targetType,
