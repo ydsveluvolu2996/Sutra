@@ -66,7 +66,11 @@ archive_application_data() {
   free_bytes="$(df -P -B1 "$directory" | awk 'NR == 2 {print $4}')"
   [[ "$free_bytes" =~ ^[0-9]+$ ]] || die "Available release-snapshot disk space could not be determined."
   (( free_bytes >= 1073741824 )) || die "At least 1 GiB of free disk is required before capturing release state."
-  docker run --rm --network none --read-only --cap-drop ALL \
+  # The app owns this volume with restrictive permissions. Keep the helper
+  # otherwise capability-free, but grant only the read/traverse capability
+  # required to capture every tenant-scoped state file.
+  docker run --rm --network none --read-only --user 0:0 \
+    --cap-drop ALL --cap-add DAC_READ_SEARCH \
     --ulimit fsize=536870912:536870912 \
     --security-opt no-new-privileges:true \
     --volume "$volume:/source:ro" --volume "$directory:/backup" "$HELPER_IMAGE" \
@@ -79,7 +83,11 @@ archive_application_data() {
 restore_application_data() {
   local volume="$1" directory="$2"
   (cd "$directory" && sha256sum --check application-data.tar.gz.sha256 >/dev/null)
-  docker run --rm --network none --cap-drop ALL \
+  # Rollback must be able to replace files owned by the unprivileged app UID.
+  # DAC_OVERRIDE and CHOWN are scoped to this offline, networkless one-shot
+  # helper so restored files remain readable by the unprivileged app UID.
+  docker run --rm --network none --user 0:0 \
+    --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add CHOWN \
     --security-opt no-new-privileges:true \
     --volume "$volume:/target" --volume "$directory:/backup:ro" "$HELPER_IMAGE" \
     sh -ec 'tar -tzf /backup/application-data.tar.gz >/dev/null; find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; tar -C /target -xzf /backup/application-data.tar.gz'

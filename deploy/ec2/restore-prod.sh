@@ -186,14 +186,17 @@ volume_name() {
 archive_volume() {
   local logical="$1" target="$2" volume
   volume="$(volume_name "$logical")"
-  docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+  docker run --rm --network none --read-only --user 0:0 \
+    --cap-drop ALL --cap-add DAC_READ_SEARCH --security-opt no-new-privileges:true \
     --volume "$volume:/source:ro" --volume "$stage:/backup" "$HELPER_IMAGE" \
     sh -ec "tar -C /source -cf /backup/$target ."
 }
 restore_volume() {
   local logical="$1" source="$2" volume
   volume="$(volume_name "$logical")"
-  docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges:true \
+  docker run --rm --network none --user 0:0 \
+    --cap-drop ALL --cap-add DAC_OVERRIDE --cap-add CHOWN \
+    --security-opt no-new-privileges:true \
     --volume "$volume:/target" --volume "$stage:/backup:ro" "$HELPER_IMAGE" \
     sh -ec "find /target -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +; tar -C /target -xf /backup/$source"
 }
