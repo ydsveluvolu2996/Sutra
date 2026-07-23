@@ -264,14 +264,19 @@ function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
 export async function assertBootstrapToken(request: Request): Promise<void> {
   assertLocalAuthRequest(request);
   const expected = runtimeEnv().SUTRA_LOCAL_BOOTSTRAP_TOKEN?.trim();
+  // Loopback-only path (assertLocalAuthRequest above), so distinguishing a
+  // missing server config from a wrong token is a helpful operator hint, not
+  // an internet-facing information leak.
+  if (!expected || expected.length < 32) {
+    throw new LocalAuthError(
+      401,
+      "AUTHENTICATION_REQUIRED",
+      "Bootstrap is not configured on this deployment: set SUTRA_LOCAL_BOOTSTRAP_TOKEN (>=32 chars) on the host and restart.",
+    );
+  }
   const suppliedHeader = request.headers.get("authorization") ?? "";
   const supplied = suppliedHeader.startsWith("Bearer ") ? suppliedHeader.slice(7) : "";
-  if (
-    !expected ||
-    expected.length < 32 ||
-    supplied.length < 32 ||
-    !constantTimeEqual(await sha256(supplied), await sha256(expected))
-  ) {
+  if (supplied.length < 32 || !constantTimeEqual(await sha256(supplied), await sha256(expected))) {
     throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The local bootstrap token is invalid");
   }
 }

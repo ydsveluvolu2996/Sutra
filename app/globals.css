@@ -250,6 +250,23 @@ h3 { letter-spacing: -.02em; }
 .access-row-actions .button { max-width: 100%; flex: 0 1 auto; white-space: normal; text-align: center; }
 .access-data-cell::before { display: none; }
 
+/* Signed-in-sessions table: view toggle (Active/Archived), status/source/search
+   filters, per-page selector, and the pager. */
+.access-session-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; margin: 4px 0 16px; }
+.access-session-control { display: grid; gap: 4px; }
+.access-session-control > span { color: var(--ink-faint); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.access-session-control select,
+.access-session-control input { min-height: 36px; min-width: 120px; padding: 0 11px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 12px; }
+.access-session-search { flex: 1 1 220px; }
+.access-session-search input { width: 100%; }
+.access-session-toggle { display: inline-flex; align-self: flex-end; border: 1px solid var(--line-dark); border-radius: 8px; overflow: hidden; }
+.access-session-toggle button { padding: 8px 14px; border: 0; background: var(--surface); color: var(--ink-soft); font-size: 12px; font-weight: 650; cursor: pointer; }
+.access-session-toggle button + button { border-left: 1px solid var(--line-dark); }
+.access-session-toggle button.is-active { background: var(--blue, #3b82f6); color: #fff; }
+.access-session-toggle button:disabled { opacity: .5; cursor: not-allowed; }
+.access-session-pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; color: var(--ink-faint); font-size: 12px; }
+.access-session-pager-controls { display: flex; align-items: center; gap: 10px; }
+
 /* The available panel width, rather than the viewport, decides when rows
    become cards. This also covers the narrow main column while the sidebar is
    still present. Column headers remain available to assistive technology. */

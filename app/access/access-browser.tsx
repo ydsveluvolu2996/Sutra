@@ -58,6 +58,7 @@ interface OneTimeInvitation {
 interface ManagedSession {
   readonly id: string;
   readonly user: { readonly id: string; readonly email: string; readonly displayName: string };
+  readonly identitySource: "local_password" | "hosted_oidc";
   readonly identitySourceLabel: string;
   readonly deviceLabel: "Browser session";
   readonly createdAt: string;
@@ -131,6 +132,15 @@ export function AccessBrowser() {
   const creationOperation = useRef<{ readonly key: string; readonly bodyJson: string } | null>(null);
   const resendOperations = useRef(new Map<string, string>());
 
+  // Signed-in-sessions table view controls (all client-side over the already
+  // fetched list — no extra API calls, nothing is deleted).
+  const [sessionStatusFilter, setSessionStatusFilter] = useState<"all" | "active" | "expired">("all");
+  const [sessionSourceFilter, setSessionSourceFilter] = useState<"all" | "local_password" | "hosted_oidc">("all");
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionPageSize, setSessionPageSize] = useState(10);
+  const [sessionPage, setSessionPage] = useState(0);
+  const [showArchivedSessions, setShowArchivedSessions] = useState(false);
+
   // A customer administrator may only ever send a customer-level role; clamp the
   // form value so the select can never carry an organization role for them.
   const effectiveRole = customerScoped && role !== "customer_admin" && role !== "customer_viewer" ? "customer_viewer" : role;
@@ -139,6 +149,36 @@ export function AccessBrowser() {
   const customerNames = useMemo(
     () => new Map(customers.map((customer) => [customer.id, customer.name])),
     [customers],
+  );
+
+  // Sessions are ordered current-first then most-recently-active; the newest 20
+  // stay in the "Active" view and older rows move to an "Archived" view. Nothing
+  // is deleted — the audit chain stays intact — they are just hidden by default.
+  const SESSION_ARCHIVE_THRESHOLD = 20;
+  const orderedSessions = useMemo(
+    () => [...sessions].sort(
+      (a, b) => (a.current === b.current ? Date.parse(b.lastSeenAt) - Date.parse(a.lastSeenAt) : a.current ? -1 : 1),
+    ),
+    [sessions],
+  );
+  const activeViewSessions = useMemo(() => orderedSessions.slice(0, SESSION_ARCHIVE_THRESHOLD), [orderedSessions]);
+  const archivedViewSessions = useMemo(() => orderedSessions.slice(SESSION_ARCHIVE_THRESHOLD), [orderedSessions]);
+  const filteredSessions = useMemo(() => {
+    const base = showArchivedSessions ? archivedViewSessions : activeViewSessions;
+    const query = sessionSearch.trim().toLowerCase();
+    return base.filter((managed) => {
+      if (sessionStatusFilter === "active" && managed.status !== "active") return false;
+      if (sessionStatusFilter === "expired" && managed.status === "active") return false;
+      if (sessionSourceFilter !== "all" && managed.identitySource !== sessionSourceFilter) return false;
+      if (query && !`${managed.user.email} ${managed.user.displayName} ${managed.id}`.toLowerCase().includes(query)) return false;
+      return true;
+    });
+  }, [showArchivedSessions, activeViewSessions, archivedViewSessions, sessionStatusFilter, sessionSourceFilter, sessionSearch]);
+  const sessionTotalPages = Math.max(1, Math.ceil(filteredSessions.length / sessionPageSize));
+  const sessionPageClamped = Math.min(sessionPage, sessionTotalPages - 1);
+  const visibleSessions = useMemo(
+    () => filteredSessions.slice(sessionPageClamped * sessionPageSize, sessionPageClamped * sessionPageSize + sessionPageSize),
+    [filteredSessions, sessionPageClamped, sessionPageSize],
   );
 
   const load = useCallback(async () => {
@@ -497,17 +537,40 @@ export function AccessBrowser() {
         </div>
         <p className="limitation-note">Each row is a server-side session, not a fingerprint of a physical device. Sutra does not retain raw IP addresses or browser fingerprints. Revocation is organization-scoped, MFA-protected, and committed with hash-chained audit evidence.</p>
         {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading active sessions…</div> : (
-          <div className="data-table access-data-table access-session-table" role="table" aria-label="Signed-in browser sessions">
-            <div className="data-row data-header access-session-row" role="row"><span role="columnheader">User / session</span><span role="columnheader">Identity source</span><span role="columnheader">Status</span><span role="columnheader">Last verified activity</span><span role="columnheader">Action</span></div>
-            {sessions.map((managed) => <div className="data-row access-session-row" role="row" key={managed.id}>
-              <span className="primary-cell access-data-cell access-record-identity" data-label="User / session" role="cell"><strong>{managed.user.displayName}{managed.current ? " · This browser" : ""}</strong><small>{managed.user.email} · {managed.id}</small></span>
-              <span className="primary-cell access-data-cell" data-label="Identity source" role="cell"><strong>{managed.identitySourceLabel}</strong><small>{managed.deviceLabel} · MFA {managed.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
-              <span className="access-data-cell" data-label="Status" role="cell"><span className={`connection-status connection-${managed.status === "active" ? "active" : "disabled"}`}>{managed.status}</span></span>
-              <span className="primary-cell access-data-cell access-session-activity" data-label="Last verified activity" role="cell"><strong>{new Date(managed.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(managed.expiresAt).toLocaleString()}</small></span>
-              <span className="access-data-cell access-row-actions" data-label="Action" role="cell">{managed.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(managed)} type="button">{managed.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
-            </div>)}
-            {sessions.length === 0 ? <div className="empty-row">No organization-scoped sessions were found.</div> : null}
-          </div>
+          <>
+            <div className="access-session-controls" role="group" aria-label="Session filters">
+              <div className="access-session-toggle" role="tablist" aria-label="Session view">
+                <button type="button" role="tab" aria-selected={!showArchivedSessions} className={!showArchivedSessions ? "is-active" : undefined} onClick={() => { setShowArchivedSessions(false); setSessionPage(0); }}>Active ({activeViewSessions.length})</button>
+                <button type="button" role="tab" aria-selected={showArchivedSessions} className={showArchivedSessions ? "is-active" : undefined} disabled={archivedViewSessions.length === 0} onClick={() => { setShowArchivedSessions(true); setSessionPage(0); }}>Archived ({archivedViewSessions.length})</button>
+              </div>
+              <label className="access-session-control access-session-search"><span>Search</span><input type="search" value={sessionSearch} placeholder="Email or session id" onChange={(event) => { setSessionSearch(event.target.value); setSessionPage(0); }} /></label>
+              <label className="access-session-control"><span>Status</span><select value={sessionStatusFilter} onChange={(event) => { setSessionStatusFilter(event.target.value as "all" | "active" | "expired"); setSessionPage(0); }}><option value="all">All</option><option value="active">Active</option><option value="expired">Expired</option></select></label>
+              <label className="access-session-control"><span>Identity source</span><select value={sessionSourceFilter} onChange={(event) => { setSessionSourceFilter(event.target.value as "all" | "local_password" | "hosted_oidc"); setSessionPage(0); }}><option value="all">All</option><option value="local_password">Local password</option><option value="hosted_oidc">Enterprise SSO</option></select></label>
+              <label className="access-session-control"><span>Per page</span><select value={String(sessionPageSize)} onChange={(event) => { setSessionPageSize(Number(event.target.value)); setSessionPage(0); }}><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="20">20</option></select></label>
+            </div>
+            {showArchivedSessions ? <p className="limitation-note">Archived view — sessions beyond the {SESSION_ARCHIVE_THRESHOLD} most recent. They remain in the audit record and can still be revoked.</p> : null}
+            <div className="data-table access-data-table access-session-table" role="table" aria-label="Signed-in browser sessions">
+              <div className="data-row data-header access-session-row" role="row"><span role="columnheader">User / session</span><span role="columnheader">Identity source</span><span role="columnheader">Status</span><span role="columnheader">Last verified activity</span><span role="columnheader">Action</span></div>
+              {visibleSessions.map((managed) => <div className="data-row access-session-row" role="row" key={managed.id}>
+                <span className="primary-cell access-data-cell access-record-identity" data-label="User / session" role="cell"><strong>{managed.user.displayName}{managed.current ? " · This browser" : ""}</strong><small>{managed.user.email} · {managed.id}</small></span>
+                <span className="primary-cell access-data-cell" data-label="Identity source" role="cell"><strong>{managed.identitySourceLabel}</strong><small>{managed.deviceLabel} · MFA {managed.mfaVerifiedAt === null ? "not verified" : "verified"}</small></span>
+                <span className="access-data-cell" data-label="Status" role="cell"><span className={`connection-status connection-${managed.status === "active" ? "active" : "disabled"}`}>{managed.status}</span></span>
+                <span className="primary-cell access-data-cell access-session-activity" data-label="Last verified activity" role="cell"><strong>{new Date(managed.lastSeenAt).toLocaleString()}</strong><small>Expires {new Date(managed.expiresAt).toLocaleString()}</small></span>
+                <span className="access-data-cell access-row-actions" data-label="Action" role="cell">{managed.status === "active" ? <button className="button button-ghost" disabled={busy} onClick={() => void revokeSession(managed)} type="button">{managed.current ? "Sign out" : "Revoke"}</button> : "—"}</span>
+              </div>)}
+              {filteredSessions.length === 0 ? <div className="empty-row">{sessions.length === 0 ? "No organization-scoped sessions were found." : "No sessions match the current filters."}</div> : null}
+            </div>
+            {filteredSessions.length > 0 ? (
+              <div className="access-session-pager">
+                <span>{filteredSessions.length} session{filteredSessions.length === 1 ? "" : "s"} · showing {sessionPageClamped * sessionPageSize + 1}–{Math.min(filteredSessions.length, sessionPageClamped * sessionPageSize + sessionPageSize)}</span>
+                <div className="access-session-pager-controls">
+                  <button className="button button-ghost button-small" type="button" disabled={sessionPageClamped === 0} onClick={() => setSessionPage(sessionPageClamped - 1)}>Previous</button>
+                  <span>Page {sessionPageClamped + 1} of {sessionTotalPages}</span>
+                  <button className="button button-ghost button-small" type="button" disabled={sessionPageClamped >= sessionTotalPages - 1} onClick={() => setSessionPage(sessionPageClamped + 1)}>Next</button>
+                </div>
+              </div>
+            ) : null}
+          </>
         )}
       </section>
       )}

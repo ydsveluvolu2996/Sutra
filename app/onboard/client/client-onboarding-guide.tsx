@@ -22,7 +22,12 @@ export function ClientOnboardingGuide() {
   const canInvite = capabilities.has("membership:manage") || capabilities.has("membership:manage:customer");
 
   const customers = portfolio?.customers ?? [];
-  const connectedCustomers = customers.filter((customer) => customer.connections.length > 0);
+  // Step 2 is "connect their AWS account" — only a live, customer-owned trust
+  // role counts as done. A simulated fixture is for demos and must not mark
+  // real onboarding as complete.
+  const connectedCustomers = customers.filter((customer) =>
+    customer.connections.some((connection) => connection.sourceKind === "aws_trust_role"),
+  );
 
   const steps: readonly GuideStep[] = [
     {
@@ -67,6 +72,7 @@ export function ClientOnboardingGuide() {
         <div className="heading-actions">
           <Link className="button button-secondary" href="/controls#architecture">Isolation model</Link>
           {canOnboard ? <Link className="button button-primary" href="/onboard">Connect an account</Link> : null}
+          {canOnboard ? <Link className="button button-secondary" href="/operations">Run a simulation</Link> : null}
         </div>
       </section>
 
