@@ -265,6 +265,140 @@ export function revokeManagedSession(
   });
 }
 
+const ORG_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
+
+/**
+ * Switches the actor's own session to another organization it is a member of.
+ * The active org is the `selected_org_id` on the session row, so the switch is
+ * a scoped UPDATE of that column plus a hash-linked audit event on the TARGET
+ * org's chain (the org gaining an active session), committed in one batch.
+ *
+ * Authorization is the membership join, never the request: a session can only
+ * ever move to an org where the user holds an active membership in an active
+ * org. The UPDATE is scoped to the actor's own session id + user id, so it can
+ * never move another user's session. All downstream tenant isolation
+ * re-derives from the new `selected_org_id` on the next getLocalSession.
+ */
+export function switchActiveOrganization(
+  actor: AuthenticatedLocalSession,
+  targetOrgId: string,
+  now = Date.now(),
+): Promise<{ readonly switched: boolean }> {
+  return serializeRevocation(async () => {
+    if (!ORG_IDENTIFIER.test(targetOrgId)) {
+      throw new LocalAuthError(400, "INVALID_INPUT", "The organization identifier is invalid");
+    }
+    const db = await database();
+    // Idempotent no-op: already on the requested org.
+    if (actor.subject.orgId === targetOrgId) {
+      return { switched: false };
+    }
+    // Authorization boundary: the user must hold an active membership in the
+    // target (active) org. Verified by join — never trusted from the request.
+    const membership = await db.prepare(
+      `SELECT m.id FROM memberships m
+         JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+        WHERE m.user_id = ? AND m.org_id = ? AND m.status = 'active'
+        LIMIT 1`,
+    ).bind(actor.subject.userId, targetOrgId).first<{ id: string }>();
+    if (membership === null) {
+      throw new LocalAuthError(403, "AUTHORIZATION_DENIED", "This account cannot switch to the requested organization");
+    }
+
+    const sessionId = actor.session.id;
+    const requestId = `auth.session.org_switched:${sessionId}:${now}`;
+    const metadataJson = canonicalJson({
+      fromOrgId: actor.subject.orgId,
+      toOrgId: targetOrgId,
+      sessionId,
+    });
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const previous = await db.prepare(
+        `SELECT event_hash, occurred_at FROM audit_events
+          WHERE org_id = ? ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+      ).bind(targetOrgId).first<{ event_hash: string; occurred_at: number }>();
+      const eventId = opaqueId("audit");
+      const occurredAt = Math.max(now, (previous?.occurred_at ?? -1) + 1);
+      const previousHash = previous?.event_hash ?? null;
+      const eventHash = await sha256Hex(canonicalJson({
+        eventId,
+        orgId: targetOrgId,
+        customerId: null,
+        occurredAt,
+        actorId: actor.subject.userId,
+        action: "auth.session.org_switched",
+        targetType: "session",
+        targetId: sessionId,
+        outcome: "allowed",
+        requestId,
+        metadataJson,
+        previousHash,
+      }));
+      try {
+        const results = await db.batch([
+          db.prepare(
+            `UPDATE local_sessions SET selected_org_id = ?
+              WHERE id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?`,
+          ).bind(targetOrgId, sessionId, actor.subject.userId, now),
+          db.prepare(
+            `WITH chain_guard(valid) AS (
+               SELECT CASE
+                 WHEN CAST(? AS TEXT) IS NULL THEN CASE
+                   WHEN NOT EXISTS (SELECT 1 FROM audit_events WHERE org_id = ?) THEN 1 ELSE 0 END
+                 WHEN (SELECT event_hash FROM audit_events WHERE org_id = ?
+                        ORDER BY occurred_at DESC, id DESC LIMIT 1) = ? THEN 1
+                 ELSE 0
+               END
+             ), mutation_guard(valid) AS (
+               SELECT CASE WHEN EXISTS (
+                 SELECT 1 FROM local_sessions
+                  WHERE id = ? AND user_id = ? AND selected_org_id = ? AND revoked_at IS NULL
+               ) THEN 1 ELSE 0 END
+             )
+             INSERT INTO audit_events
+              (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
+               target_type, target_id, outcome, request_id, metadata_json,
+               previous_event_hash, event_hash)
+             SELECT ?, ?, NULL, ?, 'user', ?, 'auth.session.org_switched',
+                    'session', ?, 'allowed', ?, ?, ?, ?
+               FROM chain_guard, mutation_guard
+              WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
+             UNION ALL
+             SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL, NULL, NULL
+               FROM chain_guard, mutation_guard
+              WHERE chain_guard.valid = 0 OR mutation_guard.valid = 0`,
+          ).bind(
+            previousHash,
+            targetOrgId,
+            targetOrgId,
+            previousHash,
+            sessionId,
+            actor.subject.userId,
+            targetOrgId,
+            eventId,
+            targetOrgId,
+            occurredAt,
+            actor.subject.userId,
+            sessionId,
+            requestId,
+            metadataJson,
+            previousHash,
+            eventHash,
+          ),
+        ]);
+        if (results.every((result) => Number(result.meta?.changes ?? 0) === 1)) {
+          return { switched: true };
+        }
+      } catch {
+        // Chain-head race: retry with a freshly read head.
+      }
+    }
+    throw new LocalAuthError(500, "PERSISTENCE_FAILED", "The organization switch could not be committed with its audit evidence");
+  });
+}
+
 export async function revokeOtherManagedSessions(
   actor: AuthenticatedLocalSession,
   now = Date.now(),

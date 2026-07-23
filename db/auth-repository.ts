@@ -93,6 +93,16 @@ export interface PublicLocalSession {
     readonly role: OrgRole;
     readonly scopeMode: ScopeMode;
   };
+  /**
+   * Every active organization this user belongs to, for the org switcher.
+   * Always includes the currently-active org. A single-org user gets one entry.
+   */
+  readonly availableOrganizations: readonly {
+    readonly id: string;
+    readonly slug: string;
+    readonly name: string;
+    readonly role: OrgRole;
+  }[];
   readonly capabilities: readonly Capability[];
   readonly mfa: {
     readonly enrolled: boolean;
@@ -348,6 +358,20 @@ function grantsFrom(rows: readonly { customer_id: string; role: CustomerGrant["r
   return rows.map((row) => ({ customerId: row.customer_id, role: row.role }));
 }
 
+async function loadMemberships(
+  db: D1Database,
+  userId: string,
+): Promise<PublicLocalSession["availableOrganizations"]> {
+  const result = await db.prepare(
+    `SELECT o.id, o.slug, o.name, m.role
+       FROM memberships m
+       JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
+      WHERE m.user_id = ? AND m.status = 'active'
+      ORDER BY o.name, o.id`,
+  ).bind(userId).all<{ id: string; slug: string; name: string; role: OrgRole }>();
+  return (result.results ?? []).map((row) => ({ id: row.id, slug: row.slug, name: row.name, role: row.role }));
+}
+
 async function loadGrants(db: D1Database, orgId: string, membershipId: string): Promise<CustomerGrant[]> {
   const result = await db.prepare(
     `SELECT ca.customer_id, ca.role
@@ -359,7 +383,11 @@ async function loadGrants(db: D1Database, orgId: string, membershipId: string): 
   return grantsFrom(result.results ?? []);
 }
 
-function publicSession(row: SessionRow, subject: AuthorizationSubject): PublicLocalSession {
+function publicSession(
+  row: SessionRow,
+  subject: AuthorizationSubject,
+  availableOrganizations: PublicLocalSession["availableOrganizations"],
+): PublicLocalSession {
   return {
     id: row.session_id,
     user: {
@@ -373,6 +401,7 @@ function publicSession(row: SessionRow, subject: AuthorizationSubject): PublicLo
       role: row.membership_role,
       scopeMode: row.scope_mode,
     },
+    availableOrganizations,
     capabilities: effectiveCapabilities(subject),
     mfa: {
       enrolled: row.mfa_confirmed_at !== null,
@@ -391,11 +420,12 @@ async function sessionFromRow(db: D1Database, row: SessionRow): Promise<Authenti
     scopeMode: row.scope_mode,
     grants: await loadGrants(db, row.org_id, row.membership_id),
   };
+  const availableOrganizations = await loadMemberships(db, row.user_id);
   return {
     tokenDigest: row.token_digest,
     mfaVerifiedAt: row.mfa_verified_at,
     subject,
-    session: publicSession(row, subject),
+    session: publicSession(row, subject, availableOrganizations),
   };
 }
 
@@ -653,19 +683,23 @@ export async function loginHostedUser(
        JOIN memberships m ON m.user_id = u.id AND m.status = 'active'
        JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
       WHERE u.issuer = ? AND u.subject = ? AND u.email = ? AND u.status = 'active'
-      ORDER BY m.created_at
-      LIMIT 2`,
+      ORDER BY m.created_at, m.id`,
   ).bind(
     identity.issuer,
     identity.subject,
     identity.email.toLocaleLowerCase("en-US"),
   ).all<{ user_id: string; org_id: string }>();
   const memberships = rows.results ?? [];
-  if (memberships.length !== 1) {
+  // A hosted identity may belong to more than one organization. Landing-org
+  // selection is deterministic (earliest active membership); the user can move
+  // between their organizations afterwards via the org switcher. Per-org
+  // authorization is unchanged — every query still authorizes against the
+  // active org. Zero memberships remains a hard IDENTITY_NOT_PROVISIONED.
+  if (memberships.length === 0) {
     throw new LocalAuthError(
       403,
       "IDENTITY_NOT_PROVISIONED",
-      "This identity does not have one active Sutra organization membership",
+      "This identity does not have an active Sutra organization membership",
     );
   }
   const selected = memberships[0];
