@@ -43,6 +43,7 @@ COPY --from=builder --chown=node:node /app/scripts/start-pilot.mjs /app/scripts/
 COPY --from=builder --chown=node:node /app/scripts/internal-job-request.mjs /app/scripts/internal-job-request.mjs
 COPY --from=builder --chown=node:node /app/scripts/setup-local-pilot.mjs /app/scripts/setup-local-pilot.mjs
 COPY --from=builder --chown=node:node /app/scripts/postgres-migrate.mjs /app/scripts/postgres-migrate.mjs
+COPY --from=builder --chown=node:node /app/lib/release-identity.ts /app/lib/release-identity.ts
 COPY --from=builder --chown=node:node /app/postgres/migrations /app/postgres/migrations
 COPY --from=builder --chown=node:node /app/docker/entrypoint.sh /app/docker/entrypoint.sh
 COPY --from=builder --chown=node:node /app/docker/postgres-init.sh /app/docker/postgres-init.sh

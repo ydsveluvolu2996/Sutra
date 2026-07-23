@@ -106,6 +106,10 @@ docker image inspect "$NEW_IMAGE" >/dev/null
 
 STAGE_ROOT="$(mktemp -d "$ROOT/.sutra/release-stage.XXXXXX")"
 RELEASE_CONTAINER="$(docker create "$NEW_IMAGE")"
+SUTRA_DOMAIN="$(awk -F= '$1 == "SUTRA_DOMAIN" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
+[[ "$SUTRA_DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || \
+  die "SUTRA_DOMAIN is invalid in $ENV_EC2."
+PUBLIC_ORIGIN="https://www.$SUTRA_DOMAIN"
 APPLICATION_VOLUME=""
 BACKUP_DIR=""
 ROLLBACK_DIR="$ROOT/deploy/ec2.release-rollback"
@@ -113,6 +117,84 @@ RELEASE_MUTATION_STARTED=false
 BACKUP_READY=false
 BUNDLE_SWITCH_STARTED=false
 RELEASE_COMMITTED=false
+
+# Use a fresh header/body file on every attempt so a transient maintenance
+# response cannot contaminate the final successful verification. These checks
+# run while the pre-release snapshot and bundle are still rollback-capable.
+PUBLIC_HEADERS=""
+PUBLIC_BODY=""
+PUBLIC_STATUS="000"
+fetch_public() {
+  local path="$1" label="$2" attempts="$3" attempt
+  PUBLIC_HEADERS="$STAGE_ROOT/public-$label.headers"
+  PUBLIC_BODY="$STAGE_ROOT/public-$label.body"
+  PUBLIC_STATUS="000"
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if PUBLIC_STATUS="$(curl --silent --show-error \
+      --connect-timeout 10 --max-time 15 \
+      --dump-header "$PUBLIC_HEADERS" --output "$PUBLIC_BODY" \
+      --write-out '%{http_code}' "$PUBLIC_ORIGIN$path")" \
+      && [[ "$PUBLIC_STATUS" == 200 ]]; then
+      return 0
+    fi
+    (( attempt == attempts )) || sleep 5
+  done
+  die "$PUBLIC_ORIGIN$path did not return HTTP 200 during the release transaction (last status: $PUBLIC_STATUS)."
+}
+
+require_indexable_response() {
+  local label="$1"
+  if tr -d '\r' < "$PUBLIC_HEADERS" | grep -Eiq '^x-robots-tag:.*noindex'; then
+    die "$PUBLIC_ORIGIN returned a noindex response for $label."
+  fi
+}
+
+verify_public_release() {
+  local apex_headers apex_location apex_status label path served_image
+  command -v curl >/dev/null 2>&1 || die "curl is required for public release verification."
+
+  fetch_public "/api/healthz" "health" 12
+  served_image="$(tr -d '\r' < "$PUBLIC_HEADERS" | awk '
+    tolower($1) == "x-sutra-release-image:" {
+      $1 = ""; sub(/^[[:space:]]+/, ""); print
+    }
+  ' | tail -n1)"
+  [[ "$served_image" == "$NEW_IMAGE" ]] || \
+    die "The public origin served '$served_image' instead of the selected immutable release."
+
+  for path in /api/status /login; do
+    label="${path//\//-}"
+    fetch_public "$path" "$label" 3
+  done
+
+  for path in / /about /contact /security /privacy /terms /status /robots.txt /sitemap.xml; do
+    label="${path//\//-}"
+    [[ "$path" == / ]] && label="home"
+    fetch_public "$path" "indexable-$label" 3
+    require_indexable_response "$path"
+    if [[ "$path" == "/robots.txt" ]]; then
+      grep -Fqx "Sitemap: $PUBLIC_ORIGIN/sitemap.xml" "$PUBLIC_BODY" || \
+        die "The public robots.txt does not advertise the canonical sitemap."
+    elif [[ "$path" == "/sitemap.xml" ]]; then
+      grep -Fq "<loc>$PUBLIC_ORIGIN/</loc>" "$PUBLIC_BODY" || \
+        die "The public sitemap does not contain the canonical site origin."
+    fi
+  done
+
+  apex_headers="$STAGE_ROOT/public-apex.headers"
+  apex_status="$(curl --silent --show-error \
+    --connect-timeout 10 --max-time 15 \
+    --dump-header "$apex_headers" --output /dev/null \
+    --write-out '%{http_code}' "https://$SUTRA_DOMAIN/")"
+  apex_location="$(tr -d '\r' < "$apex_headers" | awk '
+    tolower($1) == "location:" {
+      $1 = ""; sub(/^[[:space:]]+/, ""); print
+    }
+  ' | tail -n1)"
+  [[ "$apex_status" == 308 && "$apex_location" == "$PUBLIC_ORIGIN/" ]] || \
+    die "The apex domain did not redirect exactly to the canonical public origin."
+}
+
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
@@ -230,6 +312,12 @@ set -e
 if [[ "$update_status" -ne 0 ]]; then
   die "New release did not become healthy; automatic prior-release recovery was started."
 fi
+
+# Do not commit the host mutation until the Cloudflare-facing canonical origin
+# proves that it is serving this exact digest and crawl-control assets. Any
+# failure here exits through cleanup(), which restores the prior image, bundle
+# and application-data snapshot.
+verify_public_release
 
 RELEASE_COMMITTED=true
 rm -rf "$ROLLBACK_DIR"

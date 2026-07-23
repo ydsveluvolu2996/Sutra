@@ -69,6 +69,7 @@ test("the application runtime contains only deployed runtime dependencies and bu
   assert.match(rootDockerfile, /\/app\/dist \/app\/dist/u);
   assert.match(rootDockerfile, /\/app\/services\/aws-collector\/dist \/app\/services\/aws-collector\/dist/u);
   assert.match(rootDockerfile, /\/app\/docker\/postgres-init\.sh \/app\/docker\/postgres-init\.sh/u);
+  assert.match(rootDockerfile, /\/app\/lib\/release-identity\.ts \/app\/lib\/release-identity\.ts/u);
   assert.match(rootDockerfile, /\/app\/deploy\/ec2 \/app\/deploy\/ec2/u);
   assert.doesNotMatch(rootDockerfile, /COPY --from=builder[^\n]*\/app \/app/u);
   assert.equal(packageManifest.dependencies.wrangler, "4.102.0");

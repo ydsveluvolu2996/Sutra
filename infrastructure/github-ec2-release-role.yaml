@@ -93,6 +93,7 @@ Resources:
                   - ecr:CompleteLayerUpload
                   - ecr:DescribeImages
                   - ecr:DescribeRepositories
+                  - ecr:GetLifecyclePolicy
                   - ecr:GetDownloadUrlForLayer
                   - ecr:InitiateLayerUpload
                   - ecr:PutImage
