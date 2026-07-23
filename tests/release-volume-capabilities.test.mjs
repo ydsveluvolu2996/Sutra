@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -29,6 +29,10 @@ test("release volume helpers preserve restricted application state ownership", (
 
   const volume = `sutra-release-capability-${process.pid}-${Date.now()}`;
   const stage = mkdtempSync(join(tmpdir(), "sutra-release-capability-"));
+  // CI runs Node as an unprivileged user while the production snapshot stage
+  // is created by root. Permit the isolated helper to create the test archive;
+  // the capability boundary under test is the restricted named volume.
+  chmodSync(stage, 0o733);
   t.after(() => {
     try {
       docker(["volume", "rm", "--force", volume]);
