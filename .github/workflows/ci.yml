@@ -18,10 +18,7 @@ jobs:
   quality:
     name: Application quality
     runs-on: ubuntu-latest
-    # The deliberately single-threaded tenant-isolation suite can take more
-    # than 20 minutes on a contended hosted runner. Keep it bounded without
-    # starving the independent integration and build gates.
-    timeout-minutes: 35
+    timeout-minutes: 15
     env:
       CI: "true"
 
@@ -62,8 +59,46 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Test
-        run: pnpm test
+  test:
+    name: Test shard ${{ matrix.shard }} of 6
+    runs-on: ubuntu-latest
+    # Each shard runs its files with --test-concurrency=1 (the tenant-isolation
+    # and runtime-config suites mutate shared process state and must not run
+    # concurrently within a runner). Parallelism comes from the six shards
+    # executing on independent runners, cutting the ~10-minute serial suite to
+    # the wall-clock of a single shard.
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test shard
+        run: node scripts/ci-test-shard.mjs --shard ${{ matrix.shard }}/6
 
   integration:
     name: Collector, CloudFormation, and PostgreSQL
@@ -143,19 +178,21 @@ jobs:
 
   release-gate:
     # Preserve the required-check name while making it a fail-closed aggregate
-    # over the three independent jobs above.
+    # over every independent job above (including all test shards).
     name: Typecheck, lint, test, and build
     if: ${{ always() }}
-    needs: [quality, integration, build]
+    needs: [quality, test, integration, build]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Require every release gate
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           BUILD_RESULT: ${{ needs.build.result }}
         run: |
           test "$QUALITY_RESULT" = success
+          test "$TEST_RESULT" = success
           test "$INTEGRATION_RESULT" = success
           test "$BUILD_RESULT" = success
