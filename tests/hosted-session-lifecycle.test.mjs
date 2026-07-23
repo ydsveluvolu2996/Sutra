@@ -134,13 +134,15 @@ test("tenant identity is derived from the validated session/DB, never from a req
   assert.match(apiAuth, /orgId: authenticated\.subject\.orgId/u);
 });
 
-test("hosted sessions reuse the hardened local session cookie (Secure, SameSite, same crypto)", () => {
+test("hosted sessions reuse the non-persistent hardened browser cookie", () => {
   assert.match(callbackRoute, /import \{ sessionCookie \} from "\.\.\/\.\.\/\.\.\/\.\.\/\.\.\/lib\/api-auth"/u);
   // The cookie helper forces Secure off ONLY for loopback http local mode; every
   // hosted origin (https) is always Secure + HttpOnly + SameSite=Strict.
   assert.match(apiAuth, /SameSite=Strict/u);
   assert.match(apiAuth, /HttpOnly/u);
   assert.match(apiAuth, /const secure = localHttp \? "" : "; Secure"/u);
+  assert.match(apiAuth, /deliberately without Max-Age or Expires/u);
+  assert.doesNotMatch(apiAuth, /sessionCookie\(request: Request, token: string, maximumAgeSeconds/u);
   // Hosted sessions are bounded to at most one hour (min of IdP expiry and 1h).
   assert.match(authRepo, /Math\.min\(identity\.expiresAt, now \+ 60 \* 60 \* 1000\)/u);
 });

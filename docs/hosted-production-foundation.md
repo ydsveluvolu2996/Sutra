@@ -62,7 +62,11 @@ The application-side Cognito boundary now implements:
   tokens;
 - exact issuer JWKS endpoint pinning, bounded key sets, RS256 signature and
   issuer/audience/nonce/token-use/lifetime/email verification;
-- a rotating opaque server session stored only as an irreversible digest;
+- an opaque server session stored only as an irreversible digest, delivered in
+  a non-persistent `HttpOnly`, `Secure`, `SameSite=Strict` browser cookie;
+- a fixed fifteen-minute server-side idle deadline in addition to the stored
+  absolute deadline, so restored/stale cookies fail closed without relying on
+  JavaScript unload events;
 - exact `(issuer, subject, email)` matching to one active, pre-provisioned
   organization membership, without email-only account linking;
 - MFA-protected organization invitations with one-time token disclosure,
@@ -85,6 +89,15 @@ The application-side Cognito boundary now implements:
   contract;
 - hosted session lookup through the existing centralized authorization policy,
   plus local-auth compatibility for the laptop walkthrough.
+
+The non-persistent cookie is normally discarded when the browser process ends.
+Some browsers can restore session cookies after a crash or when session restore
+is enabled, so a web application cannot guarantee immediate logout merely from
+window closure. Sutra therefore treats the server-side idle and absolute
+deadlines as authoritative. Closing one tab does not log out other open Sutra
+tabs; users can use **Sign out** for immediate server-side revocation. Public API
+bearer tokens keep their independent expiry/revocation lifecycle and are not
+affected by the browser idle policy.
 
 The hosted release hold remains in place. Recovery administration, membership
 switching, hosted step-up authentication, distributed rate limiting, a shared

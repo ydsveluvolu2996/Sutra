@@ -83,16 +83,12 @@ export async function GET(request: Request): Promise<Response> {
     const result = transaction.invitationToken === null
       ? await resolveHostedSession(identity, request)
       : await acceptIdentityInvitation(identity, transaction.invitationToken);
-    const maximumAgeSeconds = Math.max(
-      1,
-      Math.floor((new Date(result.session.session.expiresAt).getTime() - Date.now()) / 1000),
-    );
     const headers = new Headers({
       "cache-control": "no-store",
       location: transaction.returnTo,
     });
     headers.append("set-cookie", expiredOidcTransactionCookie());
-    headers.append("set-cookie", sessionCookie(request, result.token, maximumAgeSeconds));
+    headers.append("set-cookie", sessionCookie(request, result.token));
     return new Response(null, { status: 302, headers });
   } catch {
     return Response.json(

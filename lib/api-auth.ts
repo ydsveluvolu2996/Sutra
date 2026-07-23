@@ -143,7 +143,7 @@ export function sessionTokenFromRequest(request: Request): string | null {
   return token !== null && /^[A-Za-z0-9_-]{43}$/u.test(token) ? token : null;
 }
 
-export function sessionCookie(request: Request, token: string, maximumAgeSeconds: number): string {
+function sessionCookieSecuritySuffix(request: Request): string {
   const url = new URL(request.url);
   // The session cookie is ALWAYS marked Secure except on a genuine loopback
   // HTTP dev box. Crucially, when a TLS-terminating edge (e.g. the EC2 Caddy
@@ -160,11 +160,21 @@ export function sessionCookie(request: Request, token: string, maximumAgeSeconds
     url.protocol !== "https:" &&
     !servedOverHttps;
   const secure = localHttp ? "" : "; Secure";
-  return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maximumAgeSeconds}${secure}`;
+  return `; Path=/; HttpOnly; SameSite=Strict${secure}`;
+}
+
+/**
+ * Issues a browser-session cookie, deliberately without Max-Age or Expires.
+ * The browser should discard it when the browser session ends; the server-side
+ * idle and absolute deadlines remain authoritative if a browser restores
+ * session cookies after a crash or "continue where you left off" restart.
+ */
+export function sessionCookie(request: Request, token: string): string {
+  return `${LOCAL_SESSION_COOKIE}=${encodeURIComponent(token)}${sessionCookieSecuritySuffix(request)}`;
 }
 
 export function expiredSessionCookie(request: Request): string {
-  return sessionCookie(request, "", 0);
+  return `${LOCAL_SESSION_COOKIE}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT${sessionCookieSecuritySuffix(request)}`;
 }
 
 export async function requireApiSession(

@@ -107,6 +107,24 @@ test("only canonical reviewed pages omit the response-level noindex header", () 
   );
 });
 
+test("canonical public pages remain indexable behind the trusted TLS proxy hop", () => {
+  const request = new Request("http://www.sutracmdb.com/", {
+    headers: { "x-forwarded-proto": "https" },
+  });
+  const headers = responseSecurityHeaders(request, "staging");
+
+  assert.equal(headers["X-Robots-Tag"], undefined);
+  assert.equal(headers["Strict-Transport-Security"], "max-age=63072000; includeSubDomains; preload");
+
+  const malformedProxy = new Request("http://www.sutracmdb.com/", {
+    headers: { "x-forwarded-proto": "https, http" },
+  });
+  assert.equal(
+    responseSecurityHeaders(malformedProxy, "staging")["X-Robots-Tag"],
+    "noindex, nofollow",
+  );
+});
+
 test("private pages inherit a fail-closed robots default and public pages opt in", async () => {
   const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
   assert.match(layout, /robots:\s*\{[\s\S]*?index:\s*false,[\s\S]*?follow:\s*false/u);

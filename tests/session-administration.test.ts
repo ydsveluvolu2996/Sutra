@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import "./browser-session-lifecycle.test.ts";
 import type { AuthenticatedLocalSession } from "../db/auth-repository.ts";
 import {
   canAdministerSession,
@@ -46,7 +47,7 @@ test("organization owners and admins can administer organization sessions", () =
 });
 
 test("revocation wins over expiry and active status is time bounded", () => {
-  assert.equal(sessionStatus(2_000, null, 1_000), "active");
-  assert.equal(sessionStatus(1_000, null, 1_000), "expired");
-  assert.equal(sessionStatus(2_000, 900, 1_000), "revoked");
+  assert.equal(sessionStatus(2_000, 900, null, 1_000), "active");
+  assert.equal(sessionStatus(1_000, 900, null, 1_000), "expired");
+  assert.equal(sessionStatus(2_000, 900, 900, 1_000), "revoked");
 });

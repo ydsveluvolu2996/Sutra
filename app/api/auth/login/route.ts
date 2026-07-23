@@ -1,4 +1,4 @@
-import { LOCAL_SESSION_TTL_MS, consumeLoginAttemptBudget, loginLocalUser } from "../../../../db/auth-repository";
+import { consumeLoginAttemptBudget, loginLocalUser } from "../../../../db/auth-repository";
 import { localAuthSecrets, sessionCookie } from "../../../../lib/api-auth";
 import {
   assertLocalAuthMutation,
@@ -48,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
       },
       {
         headers: {
-          "set-cookie": sessionCookie(request, result.token, LOCAL_SESSION_TTL_MS / 1000),
+          "set-cookie": sessionCookie(request, result.token),
         },
       },
     );

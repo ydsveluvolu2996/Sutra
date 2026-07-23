@@ -5,7 +5,12 @@ import test from "node:test";
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const cloudflare = await import("cloudflare:workers");
-const { assertLocalAuthRequest, isManagedPasswordRuntime, sessionCookie } = await import("../lib/api-auth.ts");
+const {
+  assertLocalAuthRequest,
+  expiredSessionCookie,
+  isManagedPasswordRuntime,
+  sessionCookie,
+} = await import("../lib/api-auth.ts");
 const { clientSourceKey } = await import("../lib/auth-http.ts");
 
 // Managed-password identity is the network-reachable form of the local
@@ -137,24 +142,29 @@ test("session cookie is Secure behind a TLS edge; relaxed only on genuine loopba
   applyEnv({ SUTRA_LOCAL_MODE: "true" });
   // Genuine local dev: loopback http, no forwarded-proto -> Secure relaxed so
   // http://127.0.0.1 login still works.
-  const dev = sessionCookie(new Request("http://127.0.0.1:3000/x"), "t".repeat(43), 3600);
+  const dev = sessionCookie(new Request("http://127.0.0.1:3000/x"), "t".repeat(43));
   assert.ok(!/;\s*Secure/u.test(dev), "loopback http dev cookie must not be Secure");
   assert.match(dev, /HttpOnly/u);
   assert.match(dev, /SameSite=Strict/u);
+  assert.doesNotMatch(dev, /Max-Age|Expires=/u, "human login must issue a non-persistent session cookie");
 
   // Same loopback host, but a TLS edge (Caddy) served the public request over
   // HTTPS -> the cookie MUST be Secure even though the internal hop is http.
   const proxied = sessionCookie(
     new Request("http://127.0.0.1:3000/x", { headers: { "x-forwarded-proto": "https" } }),
     "t".repeat(43),
-    3600,
   );
   assert.match(proxied, /;\s*Secure/u, "cookie must be Secure when the edge served HTTPS");
 
   // Non-local (managed-password / hosted) is always Secure.
   applyEnv(FULL_MANAGED);
-  const hosted = sessionCookie(new Request(`${ORIGIN}/x`), "t".repeat(43), 3600);
+  const hosted = sessionCookie(new Request(`${ORIGIN}/x`), "t".repeat(43));
   assert.match(hosted, /;\s*Secure/u);
+  assert.doesNotMatch(hosted, /Max-Age|Expires=/u);
+
+  const expired = expiredSessionCookie(new Request(`${ORIGIN}/x`));
+  assert.match(expired, /Max-Age=0/u);
+  assert.match(expired, /Expires=Thu, 01 Jan 1970 00:00:00 GMT/u);
 });
 
 test("every managed-password precondition is load-bearing for the request gate", () => {

@@ -9,6 +9,7 @@ const cloudflare = await import("cloudflare:workers");
 const auth = await import("../db/auth-repository.ts");
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
 const cryptoHelpers = await import("../lib/local-auth-crypto.ts");
+const sessionLifecycle = await import("../lib/browser-session-lifecycle.ts");
 
 const NOW = 59_000;
 const RFC_SECRET = "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ";
@@ -70,11 +71,22 @@ async function withEnrolledUser(run) {
     ).run();
     const second = await auth.getLocalSession(secondToken, NOW);
     assert.ok(second);
-    await run({ database, first, second });
+    await run({ database, first, second, secondToken });
   } finally {
     await miniflare.dispose();
   }
 }
+
+test("an idle browser session is rejected without reviving last-seen", async () => {
+  await withEnrolledUser(async ({ database, secondToken, second }) => {
+    const idleDeadline = NOW + sessionLifecycle.BROWSER_SESSION_IDLE_TTL_MS;
+    assert.equal(await auth.getLocalSession(secondToken, idleDeadline), null);
+    const persisted = await database.prepare(
+      "SELECT last_seen_at FROM local_sessions WHERE id = ?",
+    ).bind(second.session.id).first();
+    assert.equal(Number(persisted?.last_seen_at), NOW);
+  });
+});
 
 test("one TOTP code refreshes exactly one of two concurrent sessions", async () => {
   await withEnrolledUser(async ({ database, first, second }) => {

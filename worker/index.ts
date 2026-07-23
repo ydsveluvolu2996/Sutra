@@ -40,7 +40,7 @@ const worker = {
         { ok: false, code: boundary.code, message: "This Sutra deployment is not available in the requested environment." },
         { status: boundary.status },
       );
-      for (const [name, value] of Object.entries(responseSecurityHeaders(request.url, boundary.environment))) response.headers.set(name, value);
+      for (const [name, value] of Object.entries(responseSecurityHeaders(request, boundary.environment))) response.headers.set(name, value);
       response.headers.set("Cache-Control", "no-store");
       return response;
     }
@@ -54,7 +54,7 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
-      for (const [name, value] of Object.entries(responseSecurityHeaders(request.url, boundary.environment))) imageResponse.headers.set(name, value);
+      for (const [name, value] of Object.entries(responseSecurityHeaders(request, boundary.environment))) imageResponse.headers.set(name, value);
       return imageResponse;
     }
 
@@ -68,7 +68,7 @@ const worker = {
     renderRequest.headers.set("content-security-policy", `script-src 'self' 'nonce-${scriptNonce}'`);
     const applicationResponse = await handler.fetch(renderRequest, env, ctx);
     const response = new Response(applicationResponse.body, applicationResponse);
-    for (const [name, value] of Object.entries(responseSecurityHeaders(request.url, boundary.environment, scriptNonce))) response.headers.set(name, value);
+    for (const [name, value] of Object.entries(responseSecurityHeaders(request, boundary.environment, scriptNonce))) response.headers.set(name, value);
     response.headers.delete("X-Powered-By");
     if (url.pathname.startsWith("/api/") || boundary.environment !== "production") response.headers.set("Cache-Control", "no-store");
     return response;

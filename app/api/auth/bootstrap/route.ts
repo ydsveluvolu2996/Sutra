@@ -1,8 +1,4 @@
-import {
-  LOCAL_SESSION_TTL_MS,
-  bootstrapLocalAdmin,
-  isLocalBootstrapRequired,
-} from "../../../../db/auth-repository";
+import { bootstrapLocalAdmin, isLocalBootstrapRequired } from "../../../../db/auth-repository";
 import {
   assertBootstrapToken,
   assertLocalAuthRequest,
@@ -64,7 +60,7 @@ export async function POST(request: Request): Promise<Response> {
       {
         status: 201,
         headers: {
-          "set-cookie": sessionCookie(request, created.token, LOCAL_SESSION_TTL_MS / 1000),
+          "set-cookie": sessionCookie(request, created.token),
         },
       },
     );

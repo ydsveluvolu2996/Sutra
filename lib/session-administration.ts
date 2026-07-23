@@ -1,4 +1,5 @@
 import type { AuthenticatedLocalSession } from "../db/auth-repository";
+import { browserSessionIsActive } from "./browser-session-lifecycle.ts";
 
 export interface SessionAdministrationRecord {
   readonly id: string;
@@ -39,9 +40,14 @@ export function canViewOrganizationSessions(actor: AuthenticatedLocalSession): b
 
 export function sessionStatus(
   expiresAt: number,
+  lastSeenAt: number,
   revokedAt: number | null,
   now: number,
 ): SessionAdministrationRecord["status"] {
   if (revokedAt !== null) return "revoked";
-  return expiresAt <= now ? "expired" : "active";
+  return browserSessionIsActive({
+    absoluteExpiresAt: expiresAt,
+    lastSeenAt,
+    revokedAt,
+  }, now) ? "active" : "expired";
 }
