@@ -67,6 +67,7 @@ export function ClientOnboardingGuide() {
         <div className="heading-actions">
           <Link className="button button-secondary" href="/controls#architecture">Isolation model</Link>
           {canOnboard ? <Link className="button button-primary" href="/onboard">Connect an account</Link> : null}
+          {canOnboard ? <Link className="button button-secondary" href="/operations">Run a simulation</Link> : null}
         </div>
       </section>
 

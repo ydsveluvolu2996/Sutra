@@ -40,7 +40,7 @@ export function CustomersBrowser() {
       {error ? <div className="page-alert page-alert-error" role="alert"><strong>Customer portfolio is unavailable</strong><span>{error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading authorized customer scope…</div> : null}
 
-      {!loading && customers.length === 0 ? <section className="panel empty-workspace"><span className="empty-workspace-icon">MSP</span><h2>No customer workspaces in your scope</h2><p>{canOnboard ? "Onboard a simulated or customer-owned account to create the first scoped workspace." : "Ask an organization owner to assign a customer workspace to this membership."}</p>{canOnboard ? <a className="button button-primary" href="/onboard">Start onboarding</a> : null}</section> : null}
+      {!loading && customers.length === 0 ? <section className="panel empty-workspace"><span className="empty-workspace-icon">MSP</span><h2>No customer workspaces in your scope</h2><p>{canOnboard ? "Onboard a customer-owned AWS account, or run a simulation to create the first scoped workspace." : "Ask an organization owner to assign a customer workspace to this membership."}</p>{canOnboard ? <div className="heading-actions"><a className="button button-primary" href="/onboard">Start onboarding</a><a className="button button-secondary" href="/operations">Run a simulation</a></div> : null}</section> : null}
 
       {portfolio && customers.length > 0 ? (
         <>

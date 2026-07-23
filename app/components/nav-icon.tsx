@@ -105,6 +105,19 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   access: "userPlus",
   settings: "gear",
   notification_settings: "bell",
+  onboard_client: "userPlus",
+  cmdb_dependencies: "network",
+  cmdb_assets: "cube",
+  kubernetes_inventory: "grid",
+  kubernetes_security: "shieldCheck",
+  findings_exceptions: "listChecks",
+  vulnerabilities_exploitability: "target",
+  registry_inventory: "layers",
+  cloud_detections: "siren",
+  report_builder: "fileText",
+  showback: "dollar",
+  alerts: "bell",
+  patch: "wrench",
 };
 
 // Feature colors, Wiz-style: each destination carries a semantic hue so the
