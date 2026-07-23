@@ -273,11 +273,15 @@ export function generateScriptNonce(): string {
 }
 
 export function responseSecurityHeaders(
-  requestUrl: string,
+  request: Request | string,
   environment: DeploymentEnvironment,
   scriptNonce?: string,
 ): Readonly<Record<string, string>> {
-  const url = new URL(requestUrl);
+  const transportUrl = new URL(typeof request === "string" ? request : request.url);
+  const effectiveOrigin = effectiveRequestOrigin(request);
+  const url = effectiveOrigin === null
+    ? transportUrl
+    : new URL(`${transportUrl.pathname}${transportUrl.search}`, effectiveOrigin);
   // 'unsafe-inline' is removed from script-src. A valid per-request nonce (for
   // HTML responses) allowlists the inline hydration + theme scripts; responses
   // without inline scripts (API/image/boundary) fall back to 'self' only.
