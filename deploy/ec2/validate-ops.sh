@@ -112,6 +112,10 @@ for fragment in (
     "--profile \"*\"",
     "recovering the prior application state and host bundle",
     "--ulimit fsize=536870912:536870912",
+    "--cap-add DAC_READ_SEARCH",
+    "--cap-add DAC_OVERRIDE",
+    "--cap-add CHOWN",
+    "--user 0:0",
     "trap 'exit 130' INT",
     "verify_public_release",
     "x-sutra-release-image:",
@@ -122,6 +126,13 @@ for fragment in (
 ):
     if fragment not in release_update:
         raise SystemExit(f"Release rollback contract is missing: {fragment}")
+for name, script in (("backup", backup), ("restore", restore)):
+    for fragment in ("--user 0:0", "--cap-add DAC_READ_SEARCH"):
+        if fragment not in script:
+            raise SystemExit(f"{name.title()} volume helper contract is missing: {fragment}")
+for fragment in ("--cap-add DAC_OVERRIDE", "--cap-add CHOWN"):
+    if fragment not in restore:
+        raise SystemExit(f"Restore volume helper contract is missing: {fragment}")
 public_gate = release_update.rindex("\nverify_public_release\n")
 release_commit = release_update.index("\nRELEASE_COMMITTED=true\n")
 if public_gate >= release_commit:

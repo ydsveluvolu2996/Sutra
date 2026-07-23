@@ -121,7 +121,8 @@ volume_name() {
 archive_volume() {
   local logical="$1" target="$2" volume
   volume="$(volume_name "$logical")"
-  docker run --rm --network none --read-only --cap-drop ALL \
+  docker run --rm --network none --read-only --user 0:0 \
+    --cap-drop ALL --cap-add DAC_READ_SEARCH \
     --security-opt no-new-privileges:true \
     --volume "$volume:/source:ro" --volume "$stage:/backup" "$HELPER_IMAGE" \
     sh -ec "tar -C /source -cf /backup/$target ."

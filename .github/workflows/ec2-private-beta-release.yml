@@ -81,6 +81,7 @@ jobs:
           pnpm lint
           pnpm test:templates
           node --test \
+            tests/release-volume-capabilities.test.mjs \
             tests/github-workflow-security.test.mjs \
             tests/backup-contract.test.mjs \
             tests/deployment-security.test.ts \
