@@ -44,6 +44,7 @@ import postgresInvitationDeliverySql from "../postgres/migrations/0044_invitatio
 import postgresInvitationOperationLedgerSql from "../postgres/migrations/0045_invitation_operation_ledger.sql?raw";
 import postgresBackgroundJobsConnectionScopeSql from "../postgres/migrations/0046_background_jobs_connection_scope.sql?raw";
 import postgresContactRateLimitsSql from "../postgres/migrations/0047_contact_rate_limits.sql?raw";
+import postgresPasswordResetSql from "../postgres/migrations/0048_password_reset.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -92,6 +93,7 @@ const migrations = [
   { id: "0045_invitation_operation_ledger", source: postgresInvitationOperationLedgerSql },
   { id: "0046_background_jobs_connection_scope", source: postgresBackgroundJobsConnectionScopeSql },
   { id: "0047_contact_rate_limits", source: postgresContactRateLimitsSql },
+  { id: "0048_password_reset", source: postgresPasswordResetSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

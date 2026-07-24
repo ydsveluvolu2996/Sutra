@@ -107,6 +107,28 @@ export const identityInvitations = sqliteTable("identity_invitations", {
   index("identity_invitations_org_delivery_idx").on(table.orgId, table.deliveryStatus, table.deliveryLastAttemptedAt),
 ]);
 
+export const passwordResetTokens = sqliteTable("password_reset_tokens", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  tokenDigest: text("token_digest").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
+  consumedNonce: text("consumed_nonce"),
+  deliveryStatus: text("delivery_status", {
+    enum: ["not_attempted", "accepted", "failed", "unknown"],
+  }).notNull().default("not_attempted"),
+  deliveryErrorCode: text("delivery_error_code"),
+  requestedAt: integer("requested_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("password_reset_tokens_digest_uq").on(table.tokenDigest),
+  index("password_reset_tokens_user_expiry_idx").on(
+    table.userId,
+    table.expiresAt,
+    table.consumedAt,
+  ),
+]);
+
 /**
  * Durable idempotency ledger for invitation lifecycle mutations. Creation may
  * claim an operation before an invitation exists, so `invitationId` is nullable

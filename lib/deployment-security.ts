@@ -45,7 +45,13 @@ const publicPreviewPaths = new Set([
   "/sitemap.xml",
 ]);
 const publicSearchControlPaths = new Set(["/robots.txt", "/sitemap.xml"]);
-const turnstilePagePaths = new Set(["/login", "/contact", "/accept-invite"]);
+const turnstilePagePaths = new Set([
+  "/login",
+  "/contact",
+  "/accept-invite",
+  "/forgot-password",
+  "/reset-password",
+]);
 const protectedPrefixes = [
   "/api/",
   "/dashboard",

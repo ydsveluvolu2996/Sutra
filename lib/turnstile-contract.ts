@@ -10,6 +10,8 @@ export const TURNSTILE_ACTIONS = {
   login: "sutra_login",
   contact: "sutra_contact",
   acceptInvitation: "sutra_accept_invite",
+  passwordResetRequest: "sutra_reset_request",
+  passwordResetComplete: "sutra_reset_complete",
 } as const;
 
 export type TurnstileAction =

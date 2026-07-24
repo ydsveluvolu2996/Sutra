@@ -337,6 +337,9 @@ export default function LoginPage() {
                   <span>Password</span>
                   <input autoComplete="current-password" maxLength={128} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
                 </label>
+                <p className="auth-help auth-help-right">
+                  <Link href="/forgot-password">Forgot password?</Link>
+                </p>
                 {mfaRequired ? (
                   <label>
                     <span>Authenticator code</span>

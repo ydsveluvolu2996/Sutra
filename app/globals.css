@@ -890,6 +890,13 @@ h3 { letter-spacing: -.02em; }
 .auth-field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .auth-code-input { font: 700 18px var(--font-geist-mono), monospace !important; letter-spacing: .34em; }
 .auth-error { margin: 0; padding: 10px 12px; border: 1px solid #edc9cd; border-radius: 7px; background: #fff4f5; color: #973743; font-size: 10px; line-height: 1.45; }
+.auth-help { margin: -7px 0 0; color: var(--blue); font-size: 10px; }
+.auth-help-right { text-align: right; }
+.auth-help a { color: inherit; font-weight: 700; text-decoration: none; }
+.auth-help a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.auth-success { display: grid; gap: 14px; }
+.auth-success strong { font-size: 18px; }
+.auth-success p { margin: 0 0 6px; color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
 .auth-submit { width: 100%; min-height: 44px; }
 .sutra-turnstile { display: grid; gap: 7px; min-width: 0; }
 .sutra-turnstile > div { width: 100%; min-height: 1px; }
