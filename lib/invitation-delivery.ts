@@ -180,7 +180,13 @@ export async function deliverInvitationEmail(
   try {
     const response = await fetchImpl(request.url, {
       method: "POST",
-      redirect: "error",
+      // "manual" (not "error"): the Workers/workerd runtime can reject the
+      // "error" redirect mode outright, which surfaced as an immediate
+      // PROVIDER_RESULT_UNKNOWN (fast throw) in production. "manual" is
+      // workerd-safe and preserves the no-follow posture — any 3xx comes back
+      // with response.ok === false and is treated as a provider rejection below,
+      // so a redirect can never silently retarget the request.
+      redirect: "manual",
       headers: request.headers,
       body: JSON.stringify(request.body),
       signal: controller.signal,
@@ -193,10 +199,19 @@ export async function deliverInvitationEmail(
       errorCode: null,
       httpStatus: response.status,
     };
-  } catch {
+  } catch (error) {
     // A timeout/network exception is ambiguous: the provider may have accepted
     // the request before the response was lost. Mark UNKNOWN and never retry the
     // same idempotency key automatically, preventing duplicate messages.
+    // Log ONLY the exception class + a bounded message so the outbound failure
+    // cause (DNS / TLS / timeout / connect) is diagnosable. The request body
+    // (which carries the single-use invitation token) is never touched here, and
+    // fetch exception messages do not contain it.
+    const reason = error instanceof Error
+      ? `${error.name}: ${String(error.message).replace(/\s+/gu, " ").slice(0, 200)}`
+      : "non-error throw";
+    const cause = error instanceof Error && error.cause instanceof Error ? ` (cause ${error.cause.name})` : "";
+    console.warn(`invitation-delivery: outbound ${request.provider} request threw — ${reason}${cause}`);
     return {
       status: "unknown",
       transport: "email-api",
