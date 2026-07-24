@@ -18,7 +18,7 @@ Prerequisites:
   - a clean, pushed main branch
   - AWS IAM Identity Center login for sutra-administrator
   - Docker/Buildx, Node 22, pnpm 11.13.1, Trivy 0.72.0,
-    cfn-lint 1.53.0, AWS CLI v2, jq, curl and OpenSSL
+    cfn-lint 1.46.0, AWS CLI v2, jq, curl and OpenSSL
   - the retained Sutra EC2 host manually started and online in SSM
 
 The script has no skip-scan, skip-test, mutable-tag, host-start or arbitrary
@@ -66,7 +66,7 @@ done
 trivy_version="$(trivy --version | awk -F': ' '$1 == "Version" {print $2; exit}')"
 [[ "$trivy_version" == "0.72.0" ]] || die "Trivy 0.72.0 is required; found ${trivy_version:-unknown}."
 cfn_version="$(cfn-lint --version | awk '{print $NF; exit}')"
-[[ "$cfn_version" == "1.53.0" ]] || die "cfn-lint 1.53.0 is required; found ${cfn_version:-unknown}."
+[[ "$cfn_version" == "1.46.0" ]] || die "cfn-lint 1.46.0 is required; found ${cfn_version:-unknown}."
 aws --version 2>&1 | grep -Eq '^aws-cli/2\.' || die "AWS CLI v2 is required."
 docker buildx version >/dev/null 2>&1 || die "Docker Buildx is required."
 docker info >/dev/null 2>&1 || die "Docker is not ready."

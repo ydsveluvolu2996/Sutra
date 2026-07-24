@@ -68,7 +68,7 @@ arbitrary-command mode. It requires:
 1. the exact clean `main` commit already pushed to the canonical GitHub
    repository;
 2. a local Docker/Buildx runtime;
-3. Node 22, pnpm 11.13.1, Trivy 0.72.0, cfn-lint 1.53.0, AWS CLI v2, `jq`,
+3. Node 22, pnpm 11.13.1, Trivy 0.72.0, cfn-lint 1.46.0, AWS CLI v2, `jq`,
    `curl` and OpenSSL;
 4. an interactive IAM Identity Center session for the
    `sutra-administrator` profile; and
