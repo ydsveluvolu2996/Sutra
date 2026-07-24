@@ -158,7 +158,8 @@ require_indexable_response() {
 }
 
 verify_public_release() {
-  local apex_headers apex_location apex_status label path served_image turnstile_site_key
+  local apex_headers apex_location apex_status label path security_expected
+  local security_well_known_body served_image turnstile_site_key
   command -v curl >/dev/null 2>&1 || die "curl is required for public release verification."
 
   fetch_public "/api/healthz" "health" 12
@@ -199,6 +200,30 @@ verify_public_release() {
     fi
   done
 
+  # These files are served by the version-controlled Caddy maintenance mount
+  # and may also be cached at Cloudflare. Compare the public bodies byte for
+  # byte with the selected bundle and with each other before committing the
+  # host mutation. This catches a healthy app deployed behind a stale edge
+  # process or stale alternate-path response.
+  security_expected="$ROOT/deploy/ec2/maintenance/security.txt"
+  [[ -s "$security_expected" ]] || die "The selected release has no canonical security.txt document."
+  fetch_public "/.well-known/security.txt" "security-well-known" 3
+  tr -d '\r' < "$PUBLIC_HEADERS" | \
+    grep -Eiq '^content-type:[[:space:]]*text/plain([[:space:]]*;[[:space:]]*charset=utf-8)?[[:space:]]*$' || \
+    die "The public /.well-known/security.txt response is not text/plain."
+  cmp -s "$PUBLIC_BODY" "$security_expected" || \
+    die "The public /.well-known/security.txt bytes differ from the selected release."
+  security_well_known_body="$PUBLIC_BODY"
+
+  fetch_public "/security.txt" "security-root" 3
+  tr -d '\r' < "$PUBLIC_HEADERS" | \
+    grep -Eiq '^content-type:[[:space:]]*text/plain([[:space:]]*;[[:space:]]*charset=utf-8)?[[:space:]]*$' || \
+    die "The public /security.txt response is not text/plain."
+  cmp -s "$PUBLIC_BODY" "$security_expected" || \
+    die "The public /security.txt bytes differ from the selected release."
+  cmp -s "$PUBLIC_BODY" "$security_well_known_body" || \
+    die "The two public security.txt paths do not return identical bytes."
+
   apex_headers="$STAGE_ROOT/public-apex.headers"
   apex_status="$(curl --silent --show-error \
     --connect-timeout 10 --max-time 15 \
@@ -231,6 +256,14 @@ cleanup() {
         rm -rf "$ROOT/deploy/ec2"
         mv "$ROLLBACK_DIR" "$ROOT/deploy/ec2"
         install -m 0755 "$BACKUP_DIR/docker/postgres-init.sh" "$ROOT/docker/postgres-init.sh"
+        if [[ -f "$BACKUP_DIR/cloudflared-config.yml" ]]; then
+          rollback_cloudflared_config="$ROOT/.sutra/cloudflared/config.yml.rollback.$$"
+          install -o 65532 -g 65532 -m 0400 \
+            "$BACKUP_DIR/cloudflared-config.yml" "$rollback_cloudflared_config"
+          mv -f "$rollback_cloudflared_config" "$ROOT/.sutra/cloudflared/config.yml"
+        else
+          log "Prior named-tunnel routing is missing from $BACKUP_DIR; manual recovery may be required."
+        fi
         install -m 0644 "$ROOT/deploy/ec2/sutra.service" /etc/systemd/system/sutra.service
         install -m 0755 "$ROOT/deploy/ec2/release-update.sh" /usr/local/sbin/sutra-release-update
         systemctl daemon-reload
@@ -239,8 +272,17 @@ cleanup() {
       fi
     fi
     if [[ -x "$ROOT/deploy/ec2/redeploy.sh" ]]; then
-      "$ROOT/deploy/ec2/redeploy.sh" >/dev/null 2>&1 || \
+      if "$ROOT/deploy/ec2/redeploy.sh" >/dev/null 2>&1; then
+        # The immediately prior bundle may predate explicit edge-process
+        # recreation. Force both services onto the restored Caddyfile,
+        # maintenance assets and ignored tunnel-config inode.
+        "${COMPOSE[@]}" up -d --wait --no-build --no-deps --force-recreate caddy >/dev/null 2>&1 || \
+          log "Prior Caddy edge did not reload automatically; use $BACKUP_DIR for emergency recovery."
+        "${COMPOSE[@]}" up -d --wait --no-build --no-deps --force-recreate cloudflared >/dev/null 2>&1 || \
+          log "Prior named tunnel did not reload automatically; use $BACKUP_DIR for emergency recovery."
+      else
         log "Prior release did not restart automatically; use $BACKUP_DIR for emergency recovery."
+      fi
     fi
     set -e
   fi
@@ -293,6 +335,7 @@ BACKUP_DIR="$BACKUP_ROOT/$(date -u +%Y%m%dT%H%M%SZ)-$$-${CURRENT_IMAGE##*@sha256
 install -d -m 0700 "$BACKUP_DIR/deploy" "$BACKUP_DIR/docker"
 cp -a "$ROOT/deploy/ec2" "$BACKUP_DIR/deploy/ec2"
 cp -a "$ROOT/docker/postgres-init.sh" "$BACKUP_DIR/docker/postgres-init.sh"
+cp -a "$ROOT/.sutra/cloudflared/config.yml" "$BACKUP_DIR/cloudflared-config.yml"
 APPLICATION_VOLUME="$(application_volume)"
 RELEASE_MUTATION_STARTED=true
 "${ALL_PROFILES_COMPOSE[@]}" stop -t 30 notification-worker >/dev/null

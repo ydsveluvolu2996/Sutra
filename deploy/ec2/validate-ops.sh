@@ -24,7 +24,7 @@ ruby -e '
 ' "$TEMPLATE"
 
 python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
-  "$EC2/release-update.sh" "$EC2/Caddyfile" \
+  "$EC2/release-update.sh" "$EC2/redeploy.sh" "$EC2/Caddyfile" \
   "$EC2/cloudflared-config.yml.example" "$EC2/maintenance/security.txt" \
   "$EC2/compose.prod.yaml" <<'PY'
 from pathlib import Path
@@ -34,10 +34,11 @@ template = Path(sys.argv[1]).read_text(encoding="utf-8")
 backup = Path(sys.argv[2]).read_text(encoding="utf-8")
 restore = Path(sys.argv[3]).read_text(encoding="utf-8")
 release_update = Path(sys.argv[4]).read_text(encoding="utf-8")
-caddy = Path(sys.argv[5]).read_text(encoding="utf-8")
-tunnel = Path(sys.argv[6]).read_text(encoding="utf-8")
-security_text = Path(sys.argv[7]).read_text(encoding="utf-8")
-compose = Path(sys.argv[8]).read_text(encoding="utf-8")
+redeploy = Path(sys.argv[5]).read_text(encoding="utf-8")
+caddy = Path(sys.argv[6]).read_text(encoding="utf-8")
+tunnel = Path(sys.argv[7]).read_text(encoding="utf-8")
+security_text = Path(sys.argv[8]).read_text(encoding="utf-8")
+compose = Path(sys.argv[9]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -130,6 +131,13 @@ for fragment in (
     "x-robots-tag:.*noindex",
     "RELEASE_COMMITTED=true",
     "maintenance/security.txt",
+    'fetch_public "/.well-known/security.txt" "security-well-known" 3',
+    'fetch_public "/security.txt" "security-root" 3',
+    'cmp -s "$PUBLIC_BODY" "$security_expected"',
+    'cmp -s "$PUBLIC_BODY" "$security_well_known_body"',
+    'cp -a "$ROOT/.sutra/cloudflared/config.yml" "$BACKUP_DIR/cloudflared-config.yml"',
+    '--force-recreate caddy',
+    '--force-recreate cloudflared',
     "/run/lock/sutra-data-mutation.lock",
 ):
     if fragment not in release_update:
@@ -145,12 +153,50 @@ public_gate = release_update.rindex("\nverify_public_release\n")
 release_commit = release_update.index("\nRELEASE_COMMITTED=true\n")
 if public_gate >= release_commit:
     raise SystemExit("Public verification must complete before the release transaction commits")
+if release_update.count('cmp -s "$PUBLIC_BODY" "$security_expected"') != 2:
+    raise SystemExit("Both public security.txt paths must be byte-compared with the selected release")
+security_well_known = release_update.index(
+    'fetch_public "/.well-known/security.txt" "security-well-known" 3'
+)
+security_root = release_update.index('fetch_public "/security.txt" "security-root" 3')
+security_cross_compare = release_update.index(
+    'cmp -s "$PUBLIC_BODY" "$security_well_known_body"'
+)
+if not security_well_known < security_root < security_cross_compare < public_gate:
+    raise SystemExit("Both security.txt byte checks must execute inside the pre-commit public gate")
 for fragment in (
     "TARGET_STATE_DIR",
     "Restoring the verified application-data snapshot for the selected release",
 ):
     if fragment in release_update:
         raise SystemExit(f"Release update may not replace current customer state from history: {fragment}")
+
+for fragment in (
+    "CLOUDFLARED_CONFIG_TEMPLATE=",
+    "tunnel --config /etc/cloudflared/release-config.yml ingress validate",
+    "install -o 65532 -g 65532 -m 0400",
+    'cmp -s "$CLOUDFLARED_CONFIG_TEMPLATE" "$CLOUDFLARED_CONFIG"',
+    "--no-deps --force-recreate caddy",
+    "--no-deps --force-recreate cloudflared",
+):
+    if fragment not in redeploy:
+        raise SystemExit(f"Redeploy edge-refresh contract is missing: {fragment}")
+tunnel_validate = redeploy.index(
+    "tunnel --config /etc/cloudflared/release-config.yml ingress validate"
+)
+tunnel_activate = redeploy.index(
+    'mv -f "$staged_cloudflared_config" "$CLOUDFLARED_CONFIG"'
+)
+caddy_recreate = redeploy.index("--no-deps --force-recreate caddy")
+tunnel_recreate = redeploy.index("--no-deps --force-recreate cloudflared")
+if not tunnel_validate < tunnel_activate < caddy_recreate < tunnel_recreate:
+    raise SystemExit(
+        "Redeploy must validate/activate tunnel routing, then recreate Caddy before cloudflared"
+    )
+if redeploy.count("$CLOUDFLARED_CREDENTIAL") != 2:
+    raise SystemExit(
+        "Redeploy may only reference the named-tunnel credential in its existence check"
+    )
 
 for fragment in (
     "not host origin.{$SUTRA_DOMAIN:sutracmdb.com} www.{$SUTRA_DOMAIN:sutracmdb.com} {$SUTRA_DOMAIN:sutracmdb.com}",
