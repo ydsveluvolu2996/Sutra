@@ -58,6 +58,9 @@ test("the application runtime contains only deployed runtime dependencies and bu
   );
   assert.match(workspaceManifest, /injectWorkspacePackages: true/u);
   assert.match(rootDockerfile, /FROM node:22-bookworm-slim@sha256:[a-f0-9]{64} AS runtime/u);
+  assert.match(rootDockerfile, /apt-get install --yes --no-install-recommends ca-certificates/u);
+  assert.match(rootDockerfile, /update-ca-certificates/u);
+  assert.match(rootDockerfile, /rm -rf \/var\/lib\/apt\/lists\/\*/u);
   assert.match(rootDockerfile, /rm -rf \/usr\/local\/lib\/node_modules\/npm/u);
   assert.match(rootDockerfile, /\/opt\/yarn-\*/u);
   assert.match(rootDockerfile, /rm -f \/usr\/local\/bin\/npm \/usr\/local\/bin\/npx/u);

@@ -26,6 +26,14 @@ FROM node:22-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca440
 ENV NODE_ENV=production
 WORKDIR /app
 
+# Local workerd uses the operating-system trust store for outbound Worker
+# fetches. The slim Node base intentionally omits it, which makes fail-closed
+# integrations such as Turnstile reject otherwise-valid public TLS chains.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends ca-certificates \
+    && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # The runtime launches only Node, the built Worker through Wrangler, and the
 # compiled AWS collector. Package managers and their bundled build/signing
 # dependencies are not an application runtime surface.
