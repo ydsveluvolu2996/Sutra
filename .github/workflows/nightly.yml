@@ -1,19 +1,19 @@
-name: Nightly endurance tests
+name: Scheduled endurance tests
 
 # Deliberately long-running endurance/soak tests validate stability over time
-# rather than the correctness of a single change, so they run on a schedule
-# instead of blocking every PR. Keeping them here (not on the PR gate) is what
-# lets the per-PR test matrix stay fast.
+# rather than the correctness of a single change. A weekly run is proportionate
+# for the private beta and preserves most of the Actions allowance for release
+# gates; operators can dispatch an extra soak before a customer milestone.
 on:
   schedule:
-    - cron: "0 4 * * *"
+    - cron: "0 4 * * 6"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: nightly-${{ github.workflow }}-${{ github.ref }}
+  group: endurance-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

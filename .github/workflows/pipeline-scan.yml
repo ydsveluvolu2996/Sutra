@@ -2,12 +2,10 @@ name: Pipeline security gate
 
 # Combined CI/CD security gate: repository secret scan + dependency/filesystem
 # vulnerability scan (Trivy) + IaC misconfiguration gate, aggregated into one
-# pass/fail. Runs on every PR/push and is also reusable (workflow_call) so a
-# consumer pipeline can gate a build before promotion.
+# pass/fail. Sutra's primary CI invokes the same gate inside its consolidated
+# quality job, avoiding a second checkout/install/runner on every change. This
+# workflow remains reusable for customer pipelines and manually dispatchable.
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_call:
     inputs:
       fail-on:
@@ -41,21 +39,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
-        with:
-          version: 11.13.1
-          run_install: false
-
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
-
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile
 
       # Trivy is placed on PATH so the pipeline gate's image/fs stage can run.
       - name: Install Trivy
@@ -63,10 +50,27 @@ jobs:
         with:
           version: v0.72.0
 
-      - name: Trivy filesystem (dependency) scan
-        run: trivy fs --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
+      - name: Trivy dependency and configuration scans
+        env:
+          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
+        run: |
+          set -euo pipefail
+          case "$INPUT_FAIL_ON" in
+            critical) severities="CRITICAL" ;;
+            high) severities="HIGH,CRITICAL" ;;
+            medium) severities="MEDIUM,HIGH,CRITICAL" ;;
+            low) severities="LOW,MEDIUM,HIGH,CRITICAL" ;;
+            *)
+              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
+              exit 2
+              ;;
+          esac
+          trivy fs --quiet --severity "$severities" \
+            --ignore-unfixed --exit-code 1 .
+          trivy config --quiet --severity "$severities" \
+            --exit-code 1 --ignorefile .trivyignore.yaml .
 
-      - name: Combined pipeline security gate (secret + IaC)
+      - name: Sutra repository gate and normalized stage report
         env:
           INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
         run: |

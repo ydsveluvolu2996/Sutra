@@ -24,14 +24,14 @@ const PUBLIC_AUTH_CODES = new Set([
 
 /**
  * Resolves the caller's client IP for per-source rate limiting. Uses the
- * RIGHT-MOST entry of `X-Forwarded-For` — the hop appended by the trusted edge
- * proxy (the EC2 Caddy front door), which also pins `X-Forwarded-For` to its own
- * observed peer. A client-supplied left-most value is therefore NOT honored: it
- * cannot be used to mint unlimited independent throttle buckets. This mirrors
- * the rest of the auth code, which never trusts a client-supplied
- * `x-forwarded-for`. Returns null when no forwarded chain is present (e.g. a
- * direct loopback dev request), in which case the limiter buckets it as
- * unattributed. Used ONLY for throttling, never for authorization.
+ * RIGHT-MOST entry of `X-Forwarded-For`. In production, the unexposed Caddy
+ * front door replaces that header with Cloudflare's canonical
+ * `CF-Connecting-IP` value before forwarding and then removes the competing
+ * source headers. A client-supplied left-most value is therefore NOT honored:
+ * it cannot mint unlimited independent throttle buckets. Returns null when no
+ * forwarded chain is present (for example a direct loopback development
+ * request), in which case the limiter uses its shared unattributed bucket.
+ * Used ONLY for throttling, never for authorization.
  */
 export function clientSourceKey(request: Request): string | null {
   const forwarded = request.headers.get("x-forwarded-for");

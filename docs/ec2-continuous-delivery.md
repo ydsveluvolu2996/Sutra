@@ -27,6 +27,13 @@ normal releases. GitHub Actions uses a branch-scoped build cache; the EC2 host
 only pulls the new digest and applies the already-implemented release
 transaction.
 
+If GitHub hosted runners are unavailable because the Actions allowance or
+billing gate is exhausted, use the fail-closed
+[manual exact-digest release path](ci-quota-and-manual-release.md#quota-independent-release-when-actions-is-unavailable).
+It mirrors the immutable candidate, exact-digest scan, OCI manifest promotion,
+constrained SSM and public-verification boundaries with a short-lived operator
+SSO session. It never builds on EC2 and is not a reason to add static AWS keys.
+
 ## One-time AWS setup
 
 The account-level GitHub OIDC provider in

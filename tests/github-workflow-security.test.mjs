@@ -82,34 +82,111 @@ test("workflow inputs are never interpolated directly into shell scripts", () =>
   }
 });
 
-test("CI runs slow gates independently and aggregates them fail-closed", () => {
+test("CI reuses only exact successful PR verification and otherwise runs consolidated gates", () => {
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
 
+  assert.match(ci, /^\s{2}reuse-pr-gate:\s*$/mu);
   assert.match(ci, /^\s{2}quality:\s*$/mu);
-  assert.match(ci, /^\s{2}test:\s*$/mu);
   assert.match(ci, /^\s{2}integration:\s*$/mu);
-  assert.match(ci, /^\s{2}build:\s*$/mu);
   assert.match(ci, /^\s{2}release-gate:\s*$/mu);
-  assert.match(ci, /needs: \[quality, test, integration, build\]/u);
+  assert.doesNotMatch(ci, /^\s{2}(test|build):\s*$/mu);
+  assert.match(ci, /needs: \[reuse-pr-gate, quality, integration\]/u);
+  assert.match(ci, /repos\/\$\{REPOSITORY\}\/commits\/\$\{COMMIT_SHA\}\/pulls/u);
+  assert.match(ci, /actions\/workflows\/ci\.yml\/runs\?event=pull_request&head_sha=/u);
+  assert.match(ci, /\.merge_commit_sha == \$commit_sha/u);
+  assert.match(ci, /\.base\.ref == "main"/u);
+  assert.match(ci, /\.head_sha == \$head_sha/u);
+  assert.match(ci, /\.head_branch == \$head_branch/u);
+  assert.match(ci, /\.head_repository\.full_name == \$head_repository/u);
+  assert.match(ci, /\.display_title == \$pr_title/u);
+  assert.match(ci, /\.conclusion == "success"/u);
+  assert.match(ci, /\.created_at >= \$pr_created_at/u);
+  assert.match(ci, /\.updated_at <= \$merged_at/u);
+  assert.match(ci, /lookup unavailable; full gate required/u);
+  assert.match(ci, /node scripts\/ci-test-shard\.mjs\s*$/mu);
+  assert.doesNotMatch(ci, /node scripts\/ci-test-shard\.mjs --shard/u);
+  assert.match(ci, /trivy fs .*--severity HIGH,CRITICAL/u);
+  assert.match(ci, /trivy config .*--severity HIGH,CRITICAL/u);
+  assert.match(ci, /node scripts\/pipeline-scan\.mjs --fail-on high/u);
+  assert.match(ci, /pnpm build/u);
+  assert.match(ci, /pnpm test:rendered/u);
   assert.match(ci, /if: \$\{\{ always\(\) \}\}/u);
+  assert.match(ci, /PROVENANCE_RESULT: \$\{\{ needs\.reuse-pr-gate\.result \}\}/u);
+  assert.match(ci, /REUSE: \$\{\{ needs\.reuse-pr-gate\.outputs\.reuse \}\}/u);
   assert.match(ci, /QUALITY_RESULT: \$\{\{ needs\.quality\.result \}\}/u);
-  assert.match(ci, /TEST_RESULT: \$\{\{ needs\.test\.result \}\}/u);
   assert.match(ci, /INTEGRATION_RESULT: \$\{\{ needs\.integration\.result \}\}/u);
-  assert.match(ci, /BUILD_RESULT: \$\{\{ needs\.build\.result \}\}/u);
-  assert.match(ci, /test "\$QUALITY_RESULT" = success/u);
-  assert.match(ci, /test "\$TEST_RESULT" = success/u);
-  assert.match(ci, /test "\$INTEGRATION_RESULT" = success/u);
-  assert.match(ci, /test "\$BUILD_RESULT" = success/u);
+  assert.match(ci, /test "\$PROVENANCE_RESULT" = success/u);
+  assert.match(ci, /if \[\[ "\$REUSE" == "true" \]\]/u);
+  assert.equal(ci.match(/test "\$QUALITY_RESULT" = (?:skipped|success)/gu)?.length, 2);
+  assert.equal(ci.match(/test "\$INTEGRATION_RESULT" = (?:skipped|success)/gu)?.length, 2);
 });
 
-test("the CI test job shards deterministically and never runs files concurrently", () => {
-  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+test("expensive scheduled analysis is weekly or manual", () => {
+  const codeql = readFileSync(new URL("../.github/workflows/codeql.yml", import.meta.url), "utf8");
+  const endurance = readFileSync(new URL("../.github/workflows/nightly.yml", import.meta.url), "utf8");
 
-  // Every shard runs on its own runner; parallelism is across runners, not
-  // within one — the shard runner keeps --test-concurrency=1 internally.
-  assert.match(ci, /matrix:\s*\n\s*shard: \[1, 2, 3, 4, 5, 6\]/u);
-  assert.match(ci, /fail-fast: false/u);
-  assert.match(ci, /node scripts\/ci-test-shard\.mjs --shard \$\{\{ matrix\.shard \}\}\/6/u);
+  assert.doesNotMatch(codeql, /^\s{2}(pull_request|push):\s*$/mu);
+  assert.match(codeql, /cron: "23 3 \* \* 1"/u);
+  assert.match(codeql, /^\s{2}workflow_dispatch:\s*$/mu);
+  assert.match(endurance, /cron: "0 4 \* \* 6"/u);
+  assert.match(endurance, /^\s{2}workflow_dispatch:\s*$/mu);
+});
+
+test("the quota-independent EC2 release preserves exact-digest production gates", () => {
+  const release = readFileSync(
+    new URL("../scripts/manual-ec2-release.sh", import.meta.url),
+    "utf8",
+  );
+  const sourceGate = release.indexOf("Running the complete source and deployment gate on the detached release commit");
+  const candidateBuild = release.indexOf("Building and pushing an immutable candidate");
+  const exactScan = release.indexOf("Scanning the exact candidate digest");
+  const promotion = release.indexOf("Promoting only the scanned OCI manifest");
+  const deployment = release.indexOf("Deploying the exact promoted digest");
+  const verification = release.indexOf("Verifying the selected digest and public customer paths");
+
+  assert.ok(
+    sourceGate > 0
+      && candidateBuild > sourceGate
+      && exactScan > candidateBuild
+      && promotion > exactScan
+      && deployment > promotion
+      && verification > deployment,
+    "source, build, scan, promotion, deployment and verification must remain ordered",
+  );
+  assert.match(release, /Static or injected AWS credentials are rejected/u);
+  assert.match(release, /git branch --show-current.+main/u);
+  assert.match(release, /git status --porcelain=v1 --untracked-files=all/u);
+  assert.match(release, /COMMIT_SHA.+REMOTE_SHA/u);
+  assert.match(release, /git worktree add --quiet --detach "\$source_root" "\$COMMIT_SHA"/u);
+  assert.match(release, /EXPECTED_ACCOUNT="738663485493"/u);
+  assert.match(release, /imageTagMutability/u);
+  assert.match(release, /tag_mutability.+IMMUTABLE/u);
+  assert.match(release, /deploy\/ec2\/ecr-lifecycle-policy\.json/u);
+  assert.match(release, /pnpm install --frozen-lockfile/u);
+  assert.match(release, /node scripts\/ci-test-shard\.mjs/u);
+  assert.match(release, /pnpm db:postgres:test/u);
+  assert.match(release, /pnpm build/u);
+  assert.match(release, /--provenance=mode=max/u);
+  assert.match(release, /--sbom=true/u);
+  assert.match(release, /trivy image --pkg-types os,library/u);
+  assert.match(release, /application\/vnd\.oci\.image\.index\.v1\+json/u);
+  assert.match(release, /vnd\.docker\.reference\.type.+attestation-manifest/u);
+  assert.match(release, /manifest_digest="sha256:\$\(printf/u);
+  assert.match(release, /aws_cli ecr put-image/u);
+  assert.match(release, /--image-digest "\$IMAGE_DIGEST"/u);
+  assert.match(release, /INSTANCE_ID="i-0a7af7b477174a14b"/u);
+  assert.match(release, /RELEASE_DOCUMENT="Sutra-DeployImmutableRelease"/u);
+  assert.match(release, /aws_cli ssm get-connection-status/u);
+  assert.match(release, /aws_cli ssm send-command/u);
+  assert.match(release, /aws_cli ssm get-command-invocation/u);
+  assert.match(release, /x-sutra-release-image:/u);
+  assert.match(release, /\/api\/turnstile\/config/u);
+  assert.match(release, /\/\.well-known\/security\.txt/u);
+  assert.match(release, /\.sutra\/manual-releases/u);
+  assert.doesNotMatch(
+    release,
+    /AWS-RunShellScript|aws_cli ec2 (?:start|stop)-instances|--skip-(?:test|scan)/u,
+  );
 });
 
 test("the in-cluster security gate runs with an immutable root filesystem", () => {
