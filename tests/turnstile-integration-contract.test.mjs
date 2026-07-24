@@ -38,6 +38,11 @@ test("login, contact and invitation acceptance render a fixed-action Turnstile w
     assert.match(page, /turnstileToken/u);
     assert.match(page, /turnstileReady/u);
   }
+  assert.match(
+    loginPage,
+    /ready && turnstileErrorVisible\.current/u,
+    "a refreshed challenge must clear only a stale Turnstile error",
+  );
 });
 
 test("all three unauthenticated mutations require server-side Siteverify before the protected operation", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import {
@@ -142,6 +142,7 @@ export default function LoginPage() {
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileReady, setTurnstileReady] = useState(false);
   const [turnstileReset, setTurnstileReset] = useState(0);
+  const turnstileErrorVisible = useRef(false);
   const [returnTo] = useState(() =>
     typeof window === "undefined" ? "/dashboard" : safeReturnTo(window.location.search),
   );
@@ -177,10 +178,12 @@ export default function LoginPage() {
   async function submitLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!turnstileReady) {
+      turnstileErrorVisible.current = true;
       setError("Complete the security check before signing in");
       return;
     }
     setBusy(true);
+    turnstileErrorVisible.current = false;
     setError(null);
     try {
       const result = await postAuth<LoginResult>("/api/auth/login", {
@@ -195,6 +198,9 @@ export default function LoginPage() {
         setMfaRequired(true);
         setTotpCode("");
       }
+      turnstileErrorVisible.current =
+        caught instanceof AuthRequestError &&
+        caught.code.startsWith("TURNSTILE_");
       setError(caught instanceof Error ? caught.message : "Sutra could not sign in");
       setTurnstileToken(null);
       setTurnstileReady(false);
@@ -354,6 +360,10 @@ export default function LoginPage() {
                   onChange={(token, ready) => {
                     setTurnstileToken(token);
                     setTurnstileReady(ready);
+                    if (ready && turnstileErrorVisible.current) {
+                      turnstileErrorVisible.current = false;
+                      setError(null);
+                    }
                   }}
                 />
                 {error ? <p className="auth-error" role="alert">{error}</p> : null}

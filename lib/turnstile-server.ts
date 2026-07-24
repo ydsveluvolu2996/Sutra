@@ -7,8 +7,9 @@ const SITEVERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 const MAX_TOKEN_LENGTH = 2_048;
 const MAX_RESPONSE_BYTES = 8 * 1024;
-const DEFAULT_TIMEOUT_MS = 4_000;
-const MAX_TIMEOUT_MS = 5_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
+const MAX_TIMEOUT_MS = 12_000;
+const MAX_SITEVERIFY_ATTEMPTS = 2;
 const MAX_CHALLENGE_AGE_MS = 6 * 60 * 1_000;
 const MAX_FUTURE_SKEW_MS = 60 * 1_000;
 const KEY_PATTERN = /^[A-Za-z0-9_-]{20,128}$/u;
@@ -365,38 +366,65 @@ export async function verifyTurnstileToken(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let responseText: string;
+  let responseText: string | undefined;
   try {
-    const body = new URLSearchParams({
-      secret: resolved.secretKey,
-      response: token,
-      idempotency_key: crypto.randomUUID(),
-    });
-    const response = await abortable(
-      (options.fetch ?? fetch)(SITEVERIFY_URL, {
-        method: "POST",
-        headers: {
-          accept: "application/json",
-          "content-type": "application/x-www-form-urlencoded",
-        },
-        body,
-        signal: controller.signal,
-      }),
-      controller.signal,
-    );
-    if (
-      !response.ok ||
-      !/^application\/json(?:;|$)/iu.test(
-        response.headers.get("content-type") ?? "",
-      )
-    ) {
-      unavailable();
+    const idempotencyKey = crypto.randomUUID();
+    for (let attempt = 0; attempt < MAX_SITEVERIFY_ATTEMPTS; attempt += 1) {
+      let response: Response;
+      try {
+        response = await abortable(
+          (options.fetch ?? fetch)(SITEVERIFY_URL, {
+            method: "POST",
+            headers: {
+              accept: "application/json",
+              "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              secret: resolved.secretKey,
+              response: token,
+              // Cloudflare uses this key to make retries of a single-use token
+              // safe. It must remain identical across both attempts.
+              idempotency_key: idempotencyKey,
+            }),
+            signal: controller.signal,
+          }),
+          controller.signal,
+        );
+      } catch (error) {
+        if (
+          error instanceof TurnstileVerificationError ||
+          controller.signal.aborted ||
+          attempt === MAX_SITEVERIFY_ATTEMPTS - 1
+        ) {
+          throw error;
+        }
+        continue;
+      }
+
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        const transient =
+          response.status === 408 ||
+          response.status === 429 ||
+          response.status >= 500;
+        if (transient && attempt < MAX_SITEVERIFY_ATTEMPTS - 1) continue;
+        unavailable();
+      }
+      if (
+        !/^application\/json(?:;|$)/iu.test(
+          response.headers.get("content-type") ?? "",
+        )
+      ) {
+        unavailable();
+      }
+      responseText = await boundedResponseText(
+        response,
+        MAX_RESPONSE_BYTES,
+        controller.signal,
+      );
+      break;
     }
-    responseText = await boundedResponseText(
-      response,
-      MAX_RESPONSE_BYTES,
-      controller.signal,
-    );
+    if (responseText === undefined) unavailable();
   } catch (error) {
     if (error instanceof TurnstileVerificationError) throw error;
     unavailable();

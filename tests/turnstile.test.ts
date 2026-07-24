@@ -95,6 +95,50 @@ test("verification binds the one-time token to the exact route action and canoni
   assert.match(call?.body.get("idempotency_key") ?? "", /^[a-f0-9-]{36}$/u);
 });
 
+test("a transient Siteverify failure is retried once with the same idempotency key", async () => {
+  let calls = 0;
+  const idempotencyKeys: string[] = [];
+  await verifyTurnstileToken(
+    new Request("https://www.sutracmdb.com/api/auth/login"),
+    ACTIVE,
+    TOKEN,
+    TURNSTILE_ACTIONS.login,
+    {
+      now: NOW,
+      fetch: async (_url, init) => {
+        calls += 1;
+        assert.ok(init?.body instanceof URLSearchParams);
+        idempotencyKeys.push(init.body.get("idempotency_key") ?? "");
+        if (calls === 1) throw new Error("temporary network failure");
+        return siteverify();
+      },
+    },
+  );
+  assert.equal(calls, 2);
+  assert.match(idempotencyKeys[0] ?? "", /^[a-f0-9-]{36}$/u);
+  assert.equal(idempotencyKeys[1], idempotencyKeys[0]);
+});
+
+test("a transient Siteverify HTTP response is retried once", async () => {
+  let calls = 0;
+  await verifyTurnstileToken(
+    new Request("https://www.sutracmdb.com/api/auth/login"),
+    ACTIVE,
+    TOKEN,
+    TURNSTILE_ACTIONS.login,
+    {
+      now: NOW,
+      fetch: async () => {
+        calls += 1;
+        return calls === 1
+          ? Response.json({ success: false }, { status: 503 })
+          : siteverify();
+      },
+    },
+  );
+  assert.equal(calls, 2);
+});
+
 test("missing tokens, mismatched actions, mismatched hosts and stale challenges fail closed", async () => {
   let calls = 0;
   const fetcher = async () => {
