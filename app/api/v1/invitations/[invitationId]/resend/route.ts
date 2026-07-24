@@ -4,7 +4,6 @@ import {
   beginIdentityInvitationDelivery,
   completeIdentityInvitationDelivery,
 } from "../../../../../../db/identity-invitation-repository";
-import { requireRecentMfa } from "../../../../../../db/auth-repository";
 import { authorizeMembershipManagementRequest, isHostedOidcRuntime } from "../../../../../../lib/api-auth";
 import {
   assertAuthMutation,
@@ -57,8 +56,11 @@ export async function POST(
 ): Promise<Response> {
   try {
     assertAuthMutation(request);
+    // Invitation management is deliberately low-friction: a logged-in,
+    // MFA-verified org administrator (checked in authorizeMembershipManagementRequest
+    // -> requireApiSession) may resend without a fresh 5-minute step-up. Session
+    // auth + MFA-verified + membership:manage capability + same-origin still apply.
     const { actor, scope } = await authorizeMembershipManagementRequest(request);
-    requireRecentMfa(actor.authenticated);
     const idempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
     const body = exactInputObject(await readAuthJson(request, 1024), ["lifetimeHours"]);
     if (typeof body.lifetimeHours !== "number" || !Number.isSafeInteger(body.lifetimeHours)) {

@@ -7,7 +7,6 @@ import {
   listIdentityInvitations,
   revokeIdentityInvitation,
 } from "../../../../db/identity-invitation-repository";
-import { requireRecentMfa } from "../../../../db/auth-repository";
 import { authorizeMembershipManagementRequest, isHostedOidcRuntime } from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
@@ -55,8 +54,9 @@ export async function GET(request: Request): Promise<Response> {
 export async function POST(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
+    // Low-friction invite creation: logged-in + MFA-verified org admin
+    // (membership:manage) + same-origin. No fresh 5-minute step-up required.
     const { actor, scope } = await authorizeMembershipManagementRequest(request);
-    requireRecentMfa(actor.authenticated);
     const body = exactInputObject(
       await readAuthJson(request, 4 * 1024),
       ["email", "role", "scopeMode", "lifetimeHours"],
@@ -152,8 +152,9 @@ export async function POST(request: Request): Promise<Response> {
 export async function DELETE(request: Request): Promise<Response> {
   try {
     assertAuthMutation(request);
+    // Low-friction revoke: logged-in + MFA-verified org admin (membership:manage)
+    // + same-origin. No fresh 5-minute step-up required.
     const { actor, scope } = await authorizeMembershipManagementRequest(request);
-    requireRecentMfa(actor.authenticated);
     const body = exactInputObject(await readAuthJson(request, 1024), ["invitationId"]);
     await revokeIdentityInvitation(
       actor.authenticated,
