@@ -77,6 +77,13 @@ cd "$ROOT"
 [[ "$(git remote get-url origin)" == "$EXPECTED_REMOTE" ]] || die "The origin repository does not match Sutra."
 [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]] || \
   die "The worktree must be clean so the image is exactly reproducible from Git."
+LOCAL_POSTGRES_ENV="$ROOT/.sutra/docker.env"
+node -e '
+  const { lstatSync } = require("node:fs");
+  const value = lstatSync(process.argv[1]);
+  if (!value.isFile() || value.isSymbolicLink() || (value.mode & 0o077) !== 0) process.exit(1);
+' "$LOCAL_POSTGRES_ENV" || \
+  die "The existing .sutra/docker.env must be a readable, non-symlink regular file with no group/other permissions."
 
 log "Refreshing the immutable main reference."
 git fetch --quiet origin main
@@ -88,6 +95,34 @@ REMOTE_SHA="$(git rev-parse refs/remotes/origin/main)"
 
 aws_cli() {
   aws --profile "$PROFILE" --region "$REGION" --no-cli-pager --no-cli-auto-prompt "$@"
+}
+
+run_pr_gate_shards() {
+  local shard shard_log failed=0
+  local -a shard_pids shard_logs
+
+  # Each shard is a separate Node process and remains serial internally. This
+  # preserves the process-global isolation contract while using the duration-
+  # balanced partitioning already exercised by CI.
+  for shard in 1 2 3 4; do
+    shard_log="$work_root/pr-gate-shard-${shard}.log"
+    shard_logs[$shard]="$shard_log"
+    node scripts/ci-test-shard.mjs --shard "${shard}/4" >"$shard_log" 2>&1 &
+    shard_pids[$shard]=$!
+  done
+  for shard in 1 2 3 4; do
+    if wait "${shard_pids[$shard]}"; then
+      log "PR-gate shard ${shard}/4 passed."
+    else
+      failed=1
+      log "PR-gate shard ${shard}/4 failed."
+    fi
+  done
+  for shard in 1 2 3 4; do
+    printf '\n===== PR-gate shard %s/4 =====\n' "$shard"
+    cat "${shard_logs[$shard]}"
+  done
+  [[ "$failed" -eq 0 ]] || die "One or more PR-gate shards failed."
 }
 
 ACCOUNT_ID="$(aws_cli sts get-caller-identity --query Account --output text 2>/dev/null)" || \
@@ -141,9 +176,15 @@ git worktree add --quiet --detach "$source_root" "$COMMIT_SHA"
 cd "$source_root"
 [[ "$(git rev-parse HEAD)" == "$COMMIT_SHA" ]]
 [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]]
+mkdir -m 0700 "$source_root/.sutra"
+install -m 0600 "$LOCAL_POSTGRES_ENV" "$source_root/.sutra/docker.env"
 
 log "Running the complete source and deployment gate on the detached release commit."
 pnpm install --frozen-lockfile
+log "Running the isolated PostgreSQL gate with an ephemeral copy of the retained local database secret."
+pnpm db:postgres:test
+rm -f "$source_root/.sutra/docker.env"
+rmdir "$source_root/.sutra"
 node scripts/check-repository-secrets.mjs
 pnpm audit --prod --audit-level moderate
 pnpm typecheck
@@ -152,7 +193,7 @@ pnpm lint
 trivy fs --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
 trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml .
 node scripts/pipeline-scan.mjs --fail-on high
-node scripts/ci-test-shard.mjs
+run_pr_gate_shards
 pnpm test:collector
 cfn-lint \
   infrastructure/local-collector-role.yaml \
@@ -160,7 +201,6 @@ cfn-lint \
   infrastructure/hosted-identity.yaml \
   infrastructure/github-ec2-release-role.yaml \
   public/sutra-customer-onboarding-role.yaml
-pnpm db:postgres:test
 pnpm build
 pnpm test:rendered
 bash deploy/ec2/validate-ops.sh

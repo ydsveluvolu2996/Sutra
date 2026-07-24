@@ -87,10 +87,13 @@ The script:
 1. rejects static/injected AWS credentials, a dirty tree, another branch,
    another repository, an unpushed commit and the wrong AWS account;
 2. verifies immutable/encrypted ECR settings and the reviewed lifecycle policy;
-3. creates a private detached worktree at the pushed commit, then runs the
-   complete source, dependency, configuration, test, database, build,
-   rendered-route and deployment-contract gates there; the same detached tree
-   is the Docker build context;
+3. creates a private detached worktree at the pushed commit, copies the
+   permission-restricted local PostgreSQL secret into it only for the isolated
+   database gate, removes that ephemeral copy, then runs the complete source,
+   dependency, configuration, test, build, rendered-route and
+   deployment-contract gates there; the PR-gate suite uses four separate
+   duration-balanced Node processes that remain serial internally, and the same
+   secret-free detached tree is the Docker build context;
 4. pushes a unique `candidate-` OCI index with maximum provenance and SBOM
    attestations;
 5. scans the exact digest with Trivy;

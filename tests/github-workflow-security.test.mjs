@@ -163,8 +163,24 @@ test("the quota-independent EC2 release preserves exact-digest production gates"
   assert.match(release, /tag_mutability.+IMMUTABLE/u);
   assert.match(release, /deploy\/ec2\/ecr-lifecycle-policy\.json/u);
   assert.match(release, /pnpm install --frozen-lockfile/u);
-  assert.match(release, /node scripts\/ci-test-shard\.mjs/u);
+  assert.match(release, /LOCAL_POSTGRES_ENV="\$ROOT\/\.sutra\/docker\.env"/u);
+  assert.match(release, /value\.isFile\(\).+value\.isSymbolicLink\(\).+value\.mode & 0o077/su);
+  assert.match(release, /install -m 0600 "\$LOCAL_POSTGRES_ENV" "\$source_root\/\.sutra\/docker\.env"/u);
+  assert.match(release, /for shard in 1 2 3 4; do/u);
+  assert.match(release, /node scripts\/ci-test-shard\.mjs --shard "\$\{shard\}\/4"/u);
+  assert.match(release, /if wait "\$\{shard_pids\[\$shard\]\}"; then/u);
+  assert.match(release, /One or more PR-gate shards failed/u);
+  assert.doesNotMatch(release, /^node scripts\/ci-test-shard\.mjs$/mu);
   assert.match(release, /pnpm db:postgres:test/u);
+  assert.match(release, /rm -f "\$source_root\/\.sutra\/docker\.env"/u);
+  assert.ok(
+    release.indexOf("pnpm db:postgres:test") < release.indexOf("node scripts/check-repository-secrets.mjs"),
+    "the isolated database gate must fail before the long source gate",
+  );
+  assert.ok(
+    release.indexOf('rm -f "$source_root/.sutra/docker.env"') < candidateBuild,
+    "the ephemeral database secret must be removed before the Docker build",
+  );
   assert.match(release, /pnpm build/u);
   assert.match(release, /--provenance=mode=max/u);
   assert.match(release, /--sbom=true/u);
