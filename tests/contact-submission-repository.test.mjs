@@ -134,6 +134,46 @@ test("rate-window counters isolate per source and roll off with the window", asy
   });
 });
 
+test("atomic budget never oversubscribes the per-source cap under concurrent reservations", async () => {
+  await withDatabase(async (repo, database) => {
+    const now = 1_700_000_000_000;
+    const reservations = await Promise.all(
+      Array.from({ length: 20 }, () => repo.consumeRateBudget({
+        sourceIp: "203.0.113.7",
+        now,
+        windowMs: 60_000,
+        maxPerSource: 5,
+        maxGlobal: 60,
+      })),
+    );
+    assert.equal(reservations.filter(Boolean).length, 5);
+
+    const rows = await database.prepare(
+      `SELECT bucket_key, attempts FROM contact_rate_limits WHERE bucket_key LIKE 'contact:%'`,
+    ).all();
+    assert.equal(rows.results.length, 2);
+    assert.ok(rows.results.every((row) => !String(row.bucket_key).includes("203.0.113.7")));
+    const source = rows.results.find((row) => String(row.bucket_key).startsWith("contact:source:"));
+    assert.equal(Number(source.attempts), 5);
+  });
+});
+
+test("atomic budget enforces the global cap across concurrent independent sources", async () => {
+  await withDatabase(async (repo) => {
+    const now = 1_700_000_000_000;
+    const reservations = await Promise.all(
+      Array.from({ length: 12 }, (_, index) => repo.consumeRateBudget({
+        sourceIp: `198.51.100.${index + 1}`,
+        now,
+        windowMs: 60_000,
+        maxPerSource: 4,
+        maxGlobal: 4,
+      })),
+    );
+    assert.equal(reservations.filter(Boolean).length, 4);
+  });
+});
+
 test("delivery is honest: no transport => delivered=false, webhook 2xx => delivered=true", async () => {
   const payload = { name: "Ada", email: "ada@example.com", company: null, message: "hi", sourceIp: "203.0.113.7", submittedAt: new Date(0).toISOString() };
 

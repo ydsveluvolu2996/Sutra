@@ -1,0 +1,5 @@
+Contact: https://www.sutracmdb.com/contact
+Expires: 2027-07-24T23:59:00Z
+Canonical: https://www.sutracmdb.com/.well-known/security.txt
+Policy: https://www.sutracmdb.com/security
+Preferred-Languages: en

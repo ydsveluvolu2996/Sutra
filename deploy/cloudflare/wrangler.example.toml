@@ -11,11 +11,6 @@ PUBLIC_HOSTNAME = "www.sutracmdb.com"
 APEX_HOSTNAME = "sutracmdb.com"
 ORIGIN_HOSTNAME = "origin.sutracmdb.com"
 
-
-[[routes]]
-pattern = "www.sutracmdb.com/*"
-zone_name = "sutracmdb.com"
-
-[[routes]]
-pattern = "sutracmdb.com/*"
-zone_name = "sutracmdb.com"
+# Routes are intentionally managed by configure-routes.mjs, not Wrangler.
+# Keeping them out of this file prevents a script-only deployment from deleting
+# the no-script /assets/* exclusion or reverting request_limit_fail_open.

@@ -140,6 +140,32 @@ describe("buildProviderRequest — webhook + generic + none", () => {
       null,
     );
   });
+
+  it("rejects SSRF-shaped webhook and email endpoints before any egress", () => {
+    const blocked = [
+      "https://127.0.0.1/contact",
+      "https://169.254.169.254/latest/meta-data",
+      "https://10.0.0.1/contact",
+      "https://[::1]/contact",
+      "https://metadata.google.internal/contact",
+      "https://user:password@hook.example/contact",
+    ];
+    for (const endpoint of blocked) {
+      assert.equal(
+        buildProviderRequest({ SUTRA_CONTACT_WEBHOOK_URL: endpoint }, RECIPIENT, PAYLOAD),
+        null,
+        `expected webhook endpoint to be blocked: ${endpoint}`,
+      );
+      assert.equal(
+        buildProviderRequest({
+          SUTRA_CONTACT_EMAIL_API_URL: endpoint,
+          SUTRA_CONTACT_EMAIL_API_KEY: "secret",
+        }, RECIPIENT, PAYLOAD),
+        null,
+        `expected email endpoint to be blocked: ${endpoint}`,
+      );
+    }
+  });
 });
 
 describe("resolveContactFrom", () => {
@@ -206,6 +232,8 @@ describe("deliverContactSubmission — honest, never-throwing", () => {
     const headers = calls[0].init.headers as Record<string, string>;
     assert.equal(headers.authorization, "Bearer re_key");
     assert.match(headers["content-type"], /application\/json/u);
+    assert.equal(calls[0].init.redirect, "error");
+    assert.ok(calls[0].init.signal instanceof AbortSignal);
     const sent = JSON.parse(String(calls[0].init.body));
     assert.deepEqual(sent.to, [RECIPIENT]);
   });

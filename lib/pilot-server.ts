@@ -708,6 +708,10 @@ export function errorResponse(error: unknown): Response {
     "MFA_RECENT_REQUIRED",
     "MFA_REQUIRED",
     "NOT_FOUND",
+    "TURNSTILE_CONFIGURATION_INVALID",
+    "TURNSTILE_REJECTED",
+    "TURNSTILE_REQUIRED",
+    "TURNSTILE_UNAVAILABLE",
   ]);
   const publicMessage = safeCodes.has(code) && typeof candidate?.message === "string"
     ? candidate.message

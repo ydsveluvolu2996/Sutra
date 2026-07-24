@@ -10,6 +10,8 @@ import {
   safeReturnTo,
   useSession,
 } from "../components/use-session";
+import TurnstileWidget from "../components/turnstile-widget";
+import { TURNSTILE_ACTIONS } from "../../lib/turnstile-contract";
 
 type AuthMode = "checking" | "bootstrap" | "login" | "hosted";
 
@@ -137,6 +139,9 @@ export default function LoginPage() {
   const [identityMode, setIdentityMode] = useState<"local" | "password">("local");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReady, setTurnstileReady] = useState(false);
+  const [turnstileReset, setTurnstileReset] = useState(0);
   const [returnTo] = useState(() =>
     typeof window === "undefined" ? "/dashboard" : safeReturnTo(window.location.search),
   );
@@ -171,12 +176,17 @@ export default function LoginPage() {
 
   async function submitLogin(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (!turnstileReady) {
+      setError("Complete the security check before signing in");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const result = await postAuth<LoginResult>("/api/auth/login", {
         email,
         password,
+        turnstileToken: turnstileToken ?? "",
         ...(mfaRequired ? { totpCode } : {}),
       });
       redirectFor(result.session, safeReturnTo(window.location.search));
@@ -186,6 +196,9 @@ export default function LoginPage() {
         setTotpCode("");
       }
       setError(caught instanceof Error ? caught.message : "Sutra could not sign in");
+      setTurnstileToken(null);
+      setTurnstileReady(false);
+      setTurnstileReset((current) => current + 1);
     } finally {
       setBusy(false);
     }
@@ -335,8 +348,16 @@ export default function LoginPage() {
                     <small>Enter the current six-digit code. A used code cannot be replayed.</small>
                   </label>
                 ) : null}
+                <TurnstileWidget
+                  action={TURNSTILE_ACTIONS.login}
+                  resetSignal={turnstileReset}
+                  onChange={(token, ready) => {
+                    setTurnstileToken(token);
+                    setTurnstileReady(ready);
+                  }}
+                />
                 {error ? <p className="auth-error" role="alert">{error}</p> : null}
-                <button className="button button-primary auth-submit" disabled={busy} type="submit">
+                <button className="button button-primary auth-submit" disabled={busy || !turnstileReady} type="submit">
                   {busy ? "Verifying…" : mfaRequired ? "Verify and sign in" : "Continue securely"}
                 </button>
               </form>

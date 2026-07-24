@@ -13,6 +13,14 @@ ingress:
   # The edge fallback Worker makes its one origin attempt through this hostname.
   - hostname: origin.sutracmdb.com
     service: http://caddy:8080
+  # These exact public hostnames are the Workers Free-limit fail-open path.
+  # Cloudflare still terminates TLS/WAF and carries the request over this same
+  # outbound-only named tunnel; no EC2 port or instance address is exposed.
+  # Caddy keeps the canonical-host and unsafe-apex-method boundaries.
+  - hostname: www.sutracmdb.com
+    service: http://caddy:8080
+  - hostname: sutracmdb.com
+    service: http://caddy:8080
   # A named tunnel must end with an explicit catch-all. Unknown hostnames never
   # become an open proxy into the private Compose network.
   - service: http_status:404

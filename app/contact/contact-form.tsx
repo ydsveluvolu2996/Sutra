@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import TurnstileWidget from "../components/turnstile-widget";
+import { TURNSTILE_ACTIONS } from "../../lib/turnstile-contract";
 
 /* ================================================================== *
  * Real contact form for the public marketing site. Client component so
@@ -33,9 +35,13 @@ export default function ContactForm() {
   const [website, setWebsite] = useState(""); // honeypot — must stay empty
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReady, setTurnstileReady] = useState(false);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   const canSubmit =
     status !== "submitting" &&
+    turnstileReady &&
     name.trim().length > 0 &&
     EMAIL.test(email.trim()) &&
     message.trim().length > 0;
@@ -55,6 +61,7 @@ export default function ContactForm() {
           company: company.trim(),
           message: message.trim(),
           website, // honeypot: real users leave this blank
+          turnstileToken: turnstileToken ?? "",
         }),
       });
       const payload = (await response.json().catch(() => null)) as { ok?: boolean } | null;
@@ -66,6 +73,9 @@ export default function ContactForm() {
     } catch {
       setStatus("error");
       setError("Something went wrong sending your message. Please try again in a moment.");
+      setTurnstileToken(null);
+      setTurnstileReady(false);
+      setTurnstileReset((current) => current + 1);
     }
   }
 
@@ -159,6 +169,15 @@ export default function ContactForm() {
       {status === "error" ? (
         <p className="lx-form-status error" role="alert">{error}</p>
       ) : null}
+
+      <TurnstileWidget
+        action={TURNSTILE_ACTIONS.contact}
+        resetSignal={turnstileReset}
+        onChange={(token, ready) => {
+          setTurnstileToken(token);
+          setTurnstileReady(ready);
+        }}
+      />
 
       <button className="btn btn-solid lx-form-submit" type="submit" disabled={!canSubmit}>
         {status === "submitting" ? "Sending…" : <>Send message <Arrow /></>}

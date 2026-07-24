@@ -4,6 +4,8 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import { AuthRequestError, postAuth, readAuthResponse } from "../components/use-session";
+import TurnstileWidget from "../components/turnstile-widget";
+import { TURNSTILE_ACTIONS } from "../../lib/turnstile-contract";
 
 type Phase = "checking" | "ready" | "invalid" | "done";
 
@@ -26,6 +28,9 @@ export default function AcceptInvitePage() {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReady, setTurnstileReady] = useState(false);
+  const [turnstileReset, setTurnstileReset] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -55,11 +60,15 @@ export default function AcceptInvitePage() {
       setError("The two passwords do not match");
       return;
     }
+    if (!turnstileReady) {
+      setError("Complete the security check before accepting the invitation");
+      return;
+    }
     setBusy(true);
     try {
       const result = await postAuth<{ session: PublicLocalSession; mfaEnrollmentRequired: boolean }>(
         "/api/auth/invitations/accept",
-        { token, password, displayName },
+        { token, password, displayName, turnstileToken: turnstileToken ?? "" },
       );
       setPhase("done");
       // A freshly accepted account has no confirmed MFA yet (mfaEnrollmentRequired
@@ -74,6 +83,9 @@ export default function AcceptInvitePage() {
           : "Sutra could not accept this invitation",
       );
       setBusy(false);
+      setTurnstileToken(null);
+      setTurnstileReady(false);
+      setTurnstileReset((current) => current + 1);
     }
   }
 
@@ -165,8 +177,16 @@ export default function AcceptInvitePage() {
                 />
               </label>
               <p className="auth-hint">Use at least 14 characters. You&apos;ll set up an authenticator app next.</p>
+              <TurnstileWidget
+                action={TURNSTILE_ACTIONS.acceptInvitation}
+                resetSignal={turnstileReset}
+                onChange={(challengeToken, ready) => {
+                  setTurnstileToken(challengeToken);
+                  setTurnstileReady(ready);
+                }}
+              />
               {error ? <p className="auth-error" role="alert">{error}</p> : null}
-              <button className="auth-submit" type="submit" disabled={busy}>
+              <button className="auth-submit" type="submit" disabled={busy || !turnstileReady}>
                 {busy ? "Creating your account…" : "Continue securely"}
               </button>
             </form>

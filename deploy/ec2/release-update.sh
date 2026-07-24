@@ -158,7 +158,7 @@ require_indexable_response() {
 }
 
 verify_public_release() {
-  local apex_headers apex_location apex_status label path served_image
+  local apex_headers apex_location apex_status label path served_image turnstile_site_key
   command -v curl >/dev/null 2>&1 || die "curl is required for public release verification."
 
   fetch_public "/api/healthz" "health" 12
@@ -174,6 +174,16 @@ verify_public_release() {
     label="${path//\//-}"
     fetch_public "$path" "$label" 3
   done
+
+  # A 200 login shell is not enough: the page disables submission until this
+  # public runtime contract proves that the selected image loaded the real
+  # network widget rather than a stale/local bypass or invalid runtime
+  # configuration. This endpoint invokes the same fail-closed resolver as each
+  # protected mutation while exposing only the intentionally public site key.
+  turnstile_site_key="$(awk -F= '$1 == "SUTRA_TURNSTILE_SITE_KEY" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
+  fetch_public "/api/turnstile/config" "turnstile-config" 3
+  [[ "$(cat "$PUBLIC_BODY")" == "{\"enabled\":true,\"siteKey\":\"$turnstile_site_key\"}" ]] || \
+    die "The public Turnstile runtime is disabled, stale, or misconfigured."
 
   for path in / /about /contact /security /privacy /terms /status /robots.txt /sitemap.xml; do
     label="${path//\//-}"
@@ -250,7 +260,7 @@ RELEASE_CONTAINER=""
 
 for required in \
   compose.prod.yaml .env.ec2.example Caddyfile cloudflared-config.yml.example \
-  bootstrap.sh redeploy.sh release-update.sh sutra.service; do
+  maintenance/security.txt bootstrap.sh redeploy.sh release-update.sh sutra.service; do
   [[ -f "$STAGE_ROOT/deploy/ec2/$required" ]] || die "Release bundle is missing deploy/ec2/$required."
 done
 [[ -f "$STAGE_ROOT/docker/postgres-init.sh" ]] || die "Release bundle is missing docker/postgres-init.sh."

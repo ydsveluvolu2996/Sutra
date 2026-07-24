@@ -65,6 +65,8 @@
 //
 // delivered = 1 is recorded only when the transport returns a 2xx response.
 
+import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
+
 // Placeholder default only. Set SUTRA_CONTACT_RECIPIENT to your own destination
 // in production; leads are still persisted even when no email transport is
 // configured (see the contact route), so this address is never silently used
@@ -78,6 +80,7 @@ const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 // characters — that is a header-injection vector. Caps bound the built subject.
 const SUBJECT_MAX = 200;
 const FROM_MAX = 320;
+const DELIVERY_TIMEOUT_MS = 10_000;
 
 export interface ContactDeliveryEnv {
   readonly SUTRA_CONTACT_RECIPIENT?: string;
@@ -135,12 +138,17 @@ function headerSafe(value: string, max: number): string {
     .slice(0, max);
 }
 
-function httpsUrl(value: string | undefined): string | null {
+/**
+ * Apply the same SSRF boundary as invitation delivery. This rejects non-HTTPS,
+ * credentials, loopback/private/link-local IP literals and internal hostnames.
+ * Redirects are separately forbidden at fetch time so an allowed first hop
+ * cannot redirect the submission to an internal target.
+ */
+function safeOutboundUrl(value: string | undefined): string | null {
   const trimmed = value?.trim();
   if (trimmed === undefined || trimmed.length === 0 || /[\r\n]/u.test(trimmed)) return null;
   try {
-    const url = new URL(trimmed);
-    return url.protocol === "https:" ? url.toString() : null;
+    return assertSafeOutboundUrl(trimmed).toString();
   } catch {
     return null;
   }
@@ -217,13 +225,13 @@ export function buildProviderRequest(
   payload: ContactDeliveryPayload,
 ): ProviderRequest | null {
   // 1) Webhook takes precedence: the stable envelope, unchanged.
-  const webhookUrl = httpsUrl(env.SUTRA_CONTACT_WEBHOOK_URL);
+  const webhookUrl = safeOutboundUrl(env.SUTRA_CONTACT_WEBHOOK_URL);
   if (webhookUrl !== null) {
     return { url: webhookUrl, headers: {}, body: { recipient, submission: payload }, transport: "webhook" };
   }
 
   // 2) Transactional email API. Requires both a URL and a key.
-  const emailApiUrl = httpsUrl(env.SUTRA_CONTACT_EMAIL_API_URL);
+  const emailApiUrl = safeOutboundUrl(env.SUTRA_CONTACT_EMAIL_API_URL);
   const emailApiKey = env.SUTRA_CONTACT_EMAIL_API_KEY?.trim();
   if (emailApiUrl === null || emailApiKey === undefined || emailApiKey.length === 0) {
     return null;
@@ -275,14 +283,20 @@ export async function deliverContactSubmission(
   // No transport configured: honest non-delivery. The lead is still persisted.
   if (request === null) return { delivered: false, transport: "none" };
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
     const response = await fetchImpl(request.url, {
       method: "POST",
+      redirect: "error",
       headers: { "content-type": "application/json; charset=utf-8", ...request.headers },
       body: JSON.stringify(request.body),
+      signal: controller.signal,
     });
     return { delivered: response.ok, transport: request.transport };
   } catch {
     return { delivered: false, transport: request.transport };
+  } finally {
+    clearTimeout(timeout);
   }
 }

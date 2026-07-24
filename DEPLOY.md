@@ -18,7 +18,7 @@ The deeper design and recovery notes are in
 | Region / compute | `ap-south-1`, `t3a.large`, standard CPU credits |
 | Disk | 15 GiB encrypted gp3; retained if the CloudFormation stack is deleted |
 | Ingress | Outbound-only Cloudflare named Tunnel; no public inbound or SSH |
-| Edge fallback | Worker `sutra-edge-fallback` on the apex and `www` routes |
+| Edge fallback | Worker `sutra-edge-fallback` on apex/`www`, with route-limit fail-open through the same named Tunnel |
 | Administration | SSM Session Manager |
 | Application release | Immutable `sutra/app@sha256:…` digest from private ECR |
 | Database | PostgreSQL container on the same encrypted EC2 disk |
@@ -139,6 +139,20 @@ cp deploy/cloudflare/wrangler.example.toml deploy/cloudflare/wrangler.toml
 `wrangler.toml` and tunnel credentials stay uncommitted. The Worker forwards
 healthy responses unchanged and returns a branded `503` (or RFC problem JSON
 for APIs) when the EC2 origin is stopped or unreachable.
+
+Set `request_limit_fail_open=true` on both Worker route objects only after the
+committed cloudflared and Caddy fail-open contracts are deployed. At the Workers
+Free daily limit, Cloudflare then bypasses the Worker and carries `www`/apex
+through the same outbound-only named Tunnel. The active host config is ignored
+runtime state, so copy the reviewed
+`deploy/ec2/cloudflared-config.yml.example` to
+`.sutra/cloudflared/config.yml` with owner/group `65532:65532`, mode `0400`, and
+force-recreate Caddy/cloudflared as documented in
+[`deploy/cloudflare/README.md`](deploy/cloudflare/README.md#workers-free-limit-fail-open-path).
+Do not add an EC2 ingress rule, public port, DNS-only record, or weaker
+`origin` WAF exception. During this bypass, Caddy serves both security.txt paths
+from `deploy/ec2/maintenance/security.txt`; its bytes are contract-tested
+against the Worker copy.
 
 ### 2.3 Create the $20 gross-cost alerts
 

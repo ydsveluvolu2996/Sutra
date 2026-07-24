@@ -20,6 +20,8 @@ const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const SOURCE_IP = /^[A-Za-z0-9.:_-]{1,64}$/u;
 const SUBMISSION_ID = /^contact_[a-f0-9]{32}$/u;
+const MAXIMUM_RATE_LIMIT = 100_000;
+const MAXIMUM_RATE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export interface ContactSubmissionValue {
   readonly name: string;
@@ -96,6 +98,12 @@ function randomHex(bytes: number): string {
   return [...buffer].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function sourceDigest(sourceIp: string): Promise<string> {
+  const bytes = new TextEncoder().encode(sourceIp);
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 export class ContactSubmissionRepository {
   private readonly database: D1Database;
 
@@ -126,6 +134,78 @@ export class ContactSubmissionRepository {
       `SELECT COUNT(*) AS total FROM contact_submissions WHERE created_at >= ?`,
     ).bind(sinceMs).first<{ total: number }>();
     return Number(row?.total ?? 0);
+  }
+
+  /**
+   * Atomically consumes both the per-source and global contact-form budgets for
+   * one fixed window. The two counters are reserved by ONE conditional upsert,
+   * so PostgreSQL row locking prevents concurrent application instances from
+   * all observing a stale COUNT and oversubscribing either cap.
+   *
+   * The source bucket stores an opaque SHA-256 rather than another copy of the
+   * raw client IP. A rejected reservation can conservatively consume the other
+   * counter when only one cap was already full; it can never admit a request
+   * beyond either cap. Any database failure propagates and therefore fails the
+   * public write closed.
+   */
+  public async consumeRateBudget(input: {
+    readonly sourceIp: string;
+    readonly now: number;
+    readonly windowMs: number;
+    readonly maxPerSource: number;
+    readonly maxGlobal: number;
+  }): Promise<boolean> {
+    if (
+      !SOURCE_IP.test(input.sourceIp) ||
+      !Number.isSafeInteger(input.now) ||
+      !Number.isSafeInteger(input.windowMs) ||
+      input.windowMs < 1 ||
+      input.windowMs > MAXIMUM_RATE_WINDOW_MS ||
+      !Number.isSafeInteger(input.maxPerSource) ||
+      input.maxPerSource < 1 ||
+      input.maxPerSource > MAXIMUM_RATE_LIMIT ||
+      !Number.isSafeInteger(input.maxGlobal) ||
+      input.maxGlobal < input.maxPerSource ||
+      input.maxGlobal > MAXIMUM_RATE_LIMIT
+    ) {
+      throw new ContactSubmissionRepositoryError();
+    }
+
+    const db = await this.ready();
+    const windowStart = Math.floor(input.now / input.windowMs) * input.windowMs;
+    const expiresAt = windowStart + input.windowMs;
+    const digest = await sourceDigest(input.sourceIp);
+    const sourceBucket = `contact:source:${digest}:${windowStart}`;
+    const globalBucket = `contact:global:${windowStart}`;
+
+    // Opportunistic cleanup is deliberately separate from the authoritative
+    // reservation. Bucket keys include windowStart, so cleanup cannot race the
+    // current window's counters.
+    await db.prepare(
+      `DELETE FROM contact_rate_limits WHERE expires_at <= ?`,
+    ).bind(input.now).run();
+
+    const result = await db.prepare(
+      `INSERT INTO contact_rate_limits (bucket_key, attempts, expires_at)
+         VALUES (?, 1, ?), (?, 1, ?)
+       ON CONFLICT(bucket_key) DO UPDATE SET
+         attempts = contact_rate_limits.attempts + 1,
+         expires_at = excluded.expires_at
+       WHERE contact_rate_limits.attempts <
+         CASE WHEN contact_rate_limits.bucket_key = ? THEN ? ELSE ? END
+       RETURNING bucket_key`,
+    ).bind(
+      sourceBucket,
+      expiresAt,
+      globalBucket,
+      expiresAt,
+      sourceBucket,
+      input.maxPerSource,
+      input.maxGlobal,
+    ).all<{ bucket_key: string }>();
+
+    const reserved = new Set((result.results ?? []).map((row) => row.bucket_key));
+    return reserved.size === 2 && reserved.has(sourceBucket) && reserved.has(globalBucket);
   }
 
   /** Durably persist an accepted submission. Returns the generated id. */

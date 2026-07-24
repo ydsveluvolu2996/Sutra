@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+
 import { consumeLoginAttemptBudget, loginLocalUser } from "../../../../db/auth-repository";
 import { localAuthSecrets, sessionCookie } from "../../../../lib/api-auth";
 import {
@@ -9,6 +11,11 @@ import {
   readAuthJson,
 } from "../../../../lib/auth-http";
 import { jsonResponse } from "../../../../lib/pilot-server";
+import { TURNSTILE_ACTIONS } from "../../../../lib/turnstile-contract";
+import {
+  verifyTurnstileToken,
+  type TurnstileEnvironment,
+} from "../../../../lib/turnstile-server";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +27,14 @@ export async function POST(request: Request): Promise<Response> {
     await consumeLoginAttemptBudget({ sourceKey: clientSourceKey(request), now: Date.now() });
     const body = exactInputObject(
       await readAuthJson(request, 2 * 1024),
-      ["email", "password"],
+      ["email", "password", "turnstileToken"],
       ["totpCode"],
+    );
+    await verifyTurnstileToken(
+      request,
+      env as unknown as TurnstileEnvironment,
+      body.turnstileToken,
+      TURNSTILE_ACTIONS.login,
     );
     const result = await loginLocalUser({
       email: boundedInputString(body.email, { label: "email address", maximum: 254 }),

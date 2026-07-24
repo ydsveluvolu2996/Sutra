@@ -122,16 +122,32 @@ ensure_env_ec2() {
   fi
   # Validate required keys are non-empty (no values are printed).
   # shellcheck disable=SC1090
-  local dom app_image collector_principal
+  local dom app_image collector_principal turnstile_site_key turnstile_secret_key
   dom="$(grep -E '^SUTRA_DOMAIN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   app_image="$(grep -E '^SUTRA_APP_IMAGE=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   collector_principal="$(grep -E '^SUTRA_COLLECTOR_PRINCIPAL_ARN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  turnstile_site_key="$(grep -E '^SUTRA_TURNSTILE_SITE_KEY=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  turnstile_secret_key="$(grep -E '^SUTRA_TURNSTILE_SECRET_KEY=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   [ -n "$dom" ]  || die "SUTRA_DOMAIN is empty in $ENV_EC2."
   [[ "$app_image" =~ ^[^[:space:]]+@sha256:[0-9a-f]{64}$ ]] || die "SUTRA_APP_IMAGE must be an immutable OCI sha256 digest in $ENV_EC2."
   [[ "$app_image" != 000000000000.* ]] || die "Replace the SUTRA_APP_IMAGE placeholder in $ENV_EC2 before deployment."
   [[ "$collector_principal" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]] || die "SUTRA_COLLECTOR_PRINCIPAL_ARN must be the exact canonical IAM role ARN in $ENV_EC2."
   [[ "$collector_principal" != arn:aws:iam::000000000000:* ]] || die "Replace the SUTRA_COLLECTOR_PRINCIPAL_ARN placeholder before deployment."
-  log "Canonical domain, immutable application image and collector role are set."
+  [[ "$turnstile_site_key" =~ ^[A-Za-z0-9_-]{20,128}$ ]] || die "SUTRA_TURNSTILE_SITE_KEY is missing or invalid in $ENV_EC2."
+  [[ "$turnstile_secret_key" =~ ^[A-Za-z0-9_-]{20,128}$ ]] || die "SUTRA_TURNSTILE_SECRET_KEY is missing or invalid in $ENV_EC2."
+  [[ "$turnstile_site_key" != REPLACE_* && "$turnstile_secret_key" != REPLACE_* ]] || die "Replace both Cloudflare Turnstile placeholders in $ENV_EC2 before deployment."
+  [[ "$turnstile_site_key" != "$turnstile_secret_key" ]] || die "Turnstile site and secret keys must be distinct."
+  case "$turnstile_site_key" in
+    1x00000000000000000000AA|2x00000000000000000000AB|1x00000000000000000000BB|2x00000000000000000000BB|3x00000000000000000000FF)
+      die "Cloudflare Turnstile test site keys are forbidden on the public EC2 deployment."
+      ;;
+  esac
+  case "$turnstile_secret_key" in
+    1x0000000000000000000000000000000AA|2x0000000000000000000000000000000AA|3x0000000000000000000000000000000AA)
+      die "Cloudflare Turnstile test secret keys are forbidden on the public EC2 deployment."
+      ;;
+  esac
+  log "Canonical domain, immutable application image, collector role and Turnstile keys are set."
 }
 ensure_env_ec2
 

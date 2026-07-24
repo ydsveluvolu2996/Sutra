@@ -103,6 +103,70 @@ if (privateBetaSwitch !== undefined && privateBetaSwitch !== "true" && privateBe
 }
 const privateBetaRequested = privateBetaSwitch === "true";
 const releaseImage = validatedReleaseImage(process.env.SUTRA_RELEASE_IMAGE);
+
+// Cloudflare Turnstile protects public unauthenticated mutations. Network
+// deployments MUST provide a real widget key pair and can never use the
+// bypass. A generated local workspace receives one explicit, loopback-only
+// bypass flag so ordinary offline development does not depend on Cloudflare.
+const turnstileEnabled = process.env.SUTRA_TURNSTILE_ENABLED
+  ?? (privateBetaRequested ? "" : "false");
+const turnstileDevBypass = process.env.SUTRA_TURNSTILE_DEV_BYPASS
+  ?? (privateBetaRequested ? "false" : "true");
+const turnstileSiteKey = process.env.SUTRA_TURNSTILE_SITE_KEY?.trim() ?? "";
+const turnstileSecretKey = process.env.SUTRA_TURNSTILE_SECRET_KEY?.trim() ?? "";
+const cloudflareTestTurnstileKeys = new Set([
+  "1x00000000000000000000AA",
+  "2x00000000000000000000AB",
+  "1x00000000000000000000BB",
+  "2x00000000000000000000BB",
+  "3x00000000000000000000FF",
+  "1x0000000000000000000000000000000AA",
+  "2x0000000000000000000000000000000AA",
+  "3x0000000000000000000000000000000AA",
+]);
+if (!new Set(["true", "false"]).has(turnstileEnabled)) {
+  throw new Error("SUTRA_TURNSTILE_ENABLED must be exactly true or false");
+}
+if (!new Set(["true", "false"]).has(turnstileDevBypass)) {
+  throw new Error("SUTRA_TURNSTILE_DEV_BYPASS must be exactly true or false");
+}
+if (turnstileEnabled === "true" && turnstileDevBypass === "true") {
+  throw new Error("Turnstile verification and the local bypass cannot both be enabled");
+}
+if (privateBetaRequested && (turnstileEnabled !== "true" || turnstileDevBypass !== "false")) {
+  throw new Error("the network private beta requires Turnstile and forbids the development bypass");
+}
+if (
+  turnstileEnabled === "true" &&
+  (
+    !/^[A-Za-z0-9_-]{20,128}$/u.test(turnstileSiteKey) ||
+    !/^[A-Za-z0-9_-]{20,128}$/u.test(turnstileSecretKey)
+  )
+) {
+  throw new Error("Turnstile requires a valid site key and secret key");
+}
+if (turnstileEnabled === "true" && turnstileSiteKey === turnstileSecretKey) {
+  throw new Error("Turnstile site and secret keys must be distinct");
+}
+if (
+  privateBetaRequested &&
+  (
+    cloudflareTestTurnstileKeys.has(turnstileSiteKey) ||
+    cloudflareTestTurnstileKeys.has(turnstileSecretKey)
+  )
+) {
+  throw new Error("Cloudflare Turnstile test credentials are forbidden in the network private beta");
+}
+const turnstileVars = [
+  { name: "SUTRA_TURNSTILE_ENABLED", value: turnstileEnabled },
+  { name: "SUTRA_TURNSTILE_DEV_BYPASS", value: turnstileDevBypass },
+  ...(turnstileEnabled === "true"
+    ? [
+        { name: "SUTRA_TURNSTILE_SITE_KEY", value: turnstileSiteKey },
+        { name: "SUTRA_TURNSTILE_SECRET_KEY", value: turnstileSecretKey },
+      ]
+    : []),
+];
 let privateBetaVars = [];
 if (privateBetaRequested) {
   const expected = {
@@ -144,6 +208,7 @@ if (privateBetaRequested) {
     { name: "SUTRA_PUBLIC_ORIGIN", value: parsedOrigin.origin },
     { name: "SUTRA_RELEASE_IMAGE", value: releaseImage },
     { name: "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", value: "true" },
+    ...turnstileVars,
   ];
 }
 
@@ -161,7 +226,10 @@ if (existingContents === null) {
     "# Generated once by `npm run pilot:setup`. Never commit this file.",
     ...(privateBetaRequested
       ? privateBetaVars.map(({ name, value }) => `${name}=${value}`)
-      : ["SUTRA_LOCAL_MODE=true"]),
+      : [
+          "SUTRA_LOCAL_MODE=true",
+          ...turnstileVars.map(({ name, value }) => `${name}=${value}`),
+        ]),
     `SUTRA_LOCAL_BOOTSTRAP_TOKEN=${secret()}`,
     `SUTRA_AUTH_ENCRYPTION_KEY=${secret()}`,
     `SUTRA_AUTH_KEY_VERSION=${privateBetaRequested ? "private-beta-auth-v1" : "local-auth-v1"}`,
@@ -192,6 +260,16 @@ if (existingContents === null) {
   }
   for (const { name, value } of privateBetaVars) {
     updatedContents = upsertVariable(updatedContents, additions, name, value);
+  }
+  if (!privateBetaRequested) {
+    for (const { name, value } of turnstileVars) {
+      updatedContents = upsertVariable(updatedContents, additions, name, value);
+    }
+    if (turnstileEnabled === "false") {
+      updatedContents = updatedContents
+        .replace(/^SUTRA_TURNSTILE_SITE_KEY=.*(?:\n|$)/mu, "")
+        .replace(/^SUTRA_TURNSTILE_SECRET_KEY=.*(?:\n|$)/mu, "");
+    }
   }
   for (const { name, value } of collectorVars) {
     updatedContents = upsertVariable(updatedContents, additions, name, value);

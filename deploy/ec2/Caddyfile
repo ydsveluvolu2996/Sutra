@@ -27,13 +27,56 @@
 	}
 	respond @container_health "ok" 200
 
-	# Only the WAF-protected tunnel origin is accepted. Local loopback probes
-	# remain exempt; no Docker port is published to the EC2 host.
+	# Accept only the WAF-protected Worker origin and the two exact public
+	# hostnames carried by the same named Tunnel. The public names are required
+	# when a Workers Free request limit fails open to the DNS origin. Local
+	# loopback probes remain exempt; no Docker port is published to the EC2 host.
 	@unexpected_tunnel_host {
-		not host origin.{$SUTRA_DOMAIN:sutracmdb.com}
+		not host origin.{$SUTRA_DOMAIN:sutracmdb.com} www.{$SUTRA_DOMAIN:sutracmdb.com} {$SUTRA_DOMAIN:sutracmdb.com}
 		not remote_ip 127.0.0.1 ::1
 	}
 	respond @unexpected_tunnel_host "Misdirected request" 421
+
+	# Match the Worker's canonicalization contract during fail-open operation.
+	# Safe apex requests preserve path/query and redirect to www. Unsafe methods
+	# are never redirected because a client could replay the request body.
+	@apex_safe {
+		host {$SUTRA_DOMAIN:sutracmdb.com}
+		method GET HEAD
+	}
+	redir @apex_safe https://www.{$SUTRA_DOMAIN:sutracmdb.com}{uri} 308
+
+	@apex_unsafe {
+		host {$SUTRA_DOMAIN:sutracmdb.com}
+		not method GET HEAD
+	}
+	respond @apex_unsafe "Use https://www.{$SUTRA_DOMAIN:sutracmdb.com} for API and webhook requests." 421
+
+	# Keep the public security contact reachable when a Workers Free request
+	# limit bypasses the Worker. The file is version controlled and its exact
+	# bytes are contract-tested against the Worker's canonical SECURITY_TEXT.
+	@security_text {
+		host www.{$SUTRA_DOMAIN:sutracmdb.com}
+		method GET HEAD
+		path /.well-known/security.txt /security.txt
+	}
+	handle @security_text {
+		root * /srv/maintenance
+		rewrite * /security.txt
+		header {
+			Cache-Control "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+			CDN-Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+			Cloudflare-CDN-Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+			Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+			Content-Type "text/plain; charset=utf-8"
+			Cross-Origin-Resource-Policy "same-origin"
+			Referrer-Policy "no-referrer"
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			X-Robots-Tag "noindex, nofollow"
+		}
+		file_server
+	}
 
 	# Start HSTS with a short, reversible pilot window. Raise it only after every
 	# subdomain has been reviewed; do not preload a private-beta deployment.

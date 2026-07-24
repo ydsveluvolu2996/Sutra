@@ -16,6 +16,10 @@ const PUBLIC_AUTH_CODES = new Set([
   "MFA_RECENT_REQUIRED",
   "LOGIN_RATE_LIMITED",
   "PERSISTENCE_FAILED",
+  "TURNSTILE_CONFIGURATION_INVALID",
+  "TURNSTILE_REJECTED",
+  "TURNSTILE_REQUIRED",
+  "TURNSTILE_UNAVAILABLE",
 ]);
 
 /**
@@ -103,6 +107,29 @@ export function authErrorResponse(error: unknown): Response {
     );
   }
   const candidate = error as { readonly code?: unknown } | null;
+  if (
+    candidate !== null &&
+    typeof candidate.code === "string" &&
+    PUBLIC_AUTH_CODES.has(candidate.code)
+  ) {
+    const turnstile = error as {
+      readonly code: string;
+      readonly message?: unknown;
+      readonly status?: unknown;
+    };
+    const status =
+      turnstile.status === 400 || turnstile.status === 503
+        ? turnstile.status
+        : 500;
+    const message =
+      typeof turnstile.message === "string"
+        ? turnstile.message
+        : "Sutra could not complete the security check";
+    return jsonResponse(
+      { error: { code: turnstile.code, message } },
+      { status },
+    );
+  }
   if (candidate?.code === "INVALID_INPUT") {
     return jsonResponse(
       { error: { code: "INVALID_INPUT", message: "The authentication request is invalid" } },

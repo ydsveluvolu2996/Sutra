@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
   handleRequest,
   MAINTENANCE_CSS,
   MAINTENANCE_STYLE_SHA256,
+  SECURITY_TEXT,
 } from "./edge-fallback.mjs";
 
 const env = {
@@ -40,6 +42,70 @@ test("healthy origin responses are returned unchanged, including cookies", async
 
   assert.strictEqual(response, upstream);
   assert.equal(response.headers.get("set-cookie"), "sutra_session=opaque; HttpOnly; Secure; SameSite=Lax");
+});
+
+test("security.txt is served at both supported paths without contacting the origin", async () => {
+  for (const path of ["/.well-known/security.txt", "/security.txt"]) {
+    let calls = 0;
+    const response = await handleRequest(request(path), env, {
+      fetch: async () => {
+        calls += 1;
+        throw new Error("security.txt must not depend on the origin");
+      },
+    });
+
+    assert.equal(calls, 0);
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get("content-type") ?? "", /^text\/plain; charset=utf-8$/);
+    assert.match(response.headers.get("cache-control") ?? "", /\bpublic\b/);
+    assert.match(response.headers.get("cache-control") ?? "", /\bmax-age=3600\b/);
+    assert.match(response.headers.get("cdn-cache-control") ?? "", /\bmax-age=86400\b/);
+    assert.match(
+      response.headers.get("cloudflare-cdn-cache-control") ?? "",
+      /\bmax-age=86400\b/,
+    );
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+    assert.equal(await response.text(), SECURITY_TEXT);
+  }
+});
+
+test("security.txt has the required contact, expiry, canonical, policy and language fields", () => {
+  assert.equal(
+    SECURITY_TEXT,
+    [
+      "Contact: https://www.sutracmdb.com/contact",
+      "Expires: 2027-07-24T23:59:00Z",
+      "Canonical: https://www.sutracmdb.com/.well-known/security.txt",
+      "Policy: https://www.sutracmdb.com/security",
+      "Preferred-Languages: en",
+      "",
+    ].join("\n"),
+  );
+  assert.ok(Date.parse(SECURITY_TEXT.match(/^Expires: (.+)$/m)?.[1] ?? "") > Date.now());
+});
+
+test("Caddy fail-open security.txt is byte-identical to the Worker document", async () => {
+  const caddySecurityText = await readFile(
+    new URL("../ec2/maintenance/security.txt", import.meta.url),
+    "utf8",
+  );
+  assert.equal(caddySecurityText, SECURITY_TEXT);
+});
+
+test("HEAD security.txt is bodyless and remains independent of origin configuration", async () => {
+  const response = await handleRequest(
+    request("/.well-known/security.txt", { method: "HEAD" }),
+    { PUBLIC_HOSTNAME: env.PUBLIC_HOSTNAME, APEX_HOSTNAME: env.APEX_HOSTNAME },
+    {
+      fetch: async () => {
+        throw new Error("must not happen");
+      },
+    },
+  );
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/plain/);
+  assert.equal(await response.text(), "");
 });
 
 test("all configured origin failure statuses produce the branded HTML fallback", async () => {

@@ -7,6 +7,17 @@ const FALLBACK_STATUS_CODES = new Set([
 
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 const RETRY_AFTER_SECONDS = "60";
+const SECURITY_TEXT_PATHS = new Set([
+  "/.well-known/security.txt",
+  "/security.txt",
+]);
+
+export const SECURITY_TEXT = `Contact: https://www.sutracmdb.com/contact
+Expires: 2027-07-24T23:59:00Z
+Canonical: https://www.sutracmdb.com/.well-known/security.txt
+Policy: https://www.sutracmdb.com/security
+Preferred-Languages: en
+`;
 
 export const MAINTENANCE_CSS = `
 :root{color-scheme:dark;--night:#05070f;--panel:#0c1226;--ink:#f3f6ff;--muted:#9aa8c5;--cyan:#22d3ee;--blue:#3b82f6;--violet:#8b5cf6}
@@ -101,6 +112,23 @@ function bodyForMethod(request, body) {
   return request.method === "HEAD" ? null : body;
 }
 
+function securityTextResponse(request) {
+  const headers = new Headers({
+    "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+    "CDN-Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+    "Cloudflare-CDN-Cache-Control": "public, max-age=86400, stale-while-revalidate=604800",
+    "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "X-Robots-Tag": "noindex, nofollow",
+  });
+
+  return new Response(bodyForMethod(request, SECURITY_TEXT), { status: 200, headers });
+}
+
 function serviceUnavailable(request) {
   const machineEndpoint = isMachineEndpoint(new URL(request.url).pathname);
   const headers = commonSecurityHeaders(
@@ -189,6 +217,9 @@ export async function handleRequest(request, env = {}, runtime = {}) {
   if (!publicHostname || !apexHostname) return serviceUnavailable(request);
   if (requestHostname === apexHostname) return apexRedirect(request, publicHostname);
   if (requestHostname !== publicHostname) return misdirectedRequest(request);
+  if (SAFE_METHODS.has(request.method) && SECURITY_TEXT_PATHS.has(requestUrl.pathname)) {
+    return securityTextResponse(request);
+  }
 
   const originHostname = normalizedHostname(env.ORIGIN_HOSTNAME);
   if (

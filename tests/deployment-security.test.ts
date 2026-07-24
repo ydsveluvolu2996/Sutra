@@ -54,6 +54,7 @@ test("preview mode exposes only public marketing assets", () => {
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/about", runtime).allowed, true);
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/contact", runtime).allowed, true);
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/api/contact", runtime).allowed, true);
+  assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/api/turnstile/config", runtime).allowed, true);
   assert.equal(evaluateDeploymentBoundary("https://preview.sutra.example/assets/app.js", runtime).allowed, true);
   for (const legalPath of ["/privacy", "/terms", "/security", "/status"]) {
     assert.equal(
@@ -315,17 +316,21 @@ test("script-src drops 'unsafe-inline' and allowlists inline scripts via a per-r
   assert.match(nonce, /^[A-Za-z0-9+/=]{16,}$/u);
   assert.notEqual(generateScriptNonce(), generateScriptNonce());
 
-  const withNonce = responseSecurityHeaders("https://app.sutra.example/", "production", nonce)["Content-Security-Policy"];
+  const withNonce = responseSecurityHeaders("https://app.sutra.example/login", "production", nonce)["Content-Security-Policy"];
   assert.ok(withNonce.includes(`script-src 'self' 'nonce-${nonce}'`), withNonce);
+  assert.match(withNonce, /script-src[^;]*https:\/\/challenges\.cloudflare\.com/u);
+  assert.match(withNonce, /frame-src https:\/\/challenges\.cloudflare\.com/u);
   // 'unsafe-inline' must be gone from script-src (style-src may still use it).
   assert.doesNotMatch(withNonce, /script-src[^;]*'unsafe-inline'/u);
 
-  // Responses with no inline scripts (API/image/boundary) fall back to 'self'.
+  // Responses with no inline scripts (API/image/boundary) fall back to 'self'
+  // and do not inherit the Turnstile origin outside its three UI surfaces.
   const noNonce = responseSecurityHeaders("https://app.sutra.example/api/v1/cases", "production")["Content-Security-Policy"];
-  assert.match(noNonce, /script-src 'self'; connect-src/u);
+  assert.match(noNonce, /script-src 'self'; connect-src 'self'; frame-src 'none'/u);
+  assert.doesNotMatch(noNonce, /challenges\.cloudflare\.com/u);
   assert.doesNotMatch(noNonce, /script-src[^;]*'unsafe-inline'/u);
 
   // A malformed nonce is ignored rather than injected into the header.
-  const bogus = responseSecurityHeaders("https://app.sutra.example/", "production", "short")["Content-Security-Policy"];
-  assert.match(bogus, /script-src 'self'; connect-src/u);
+  const bogus = responseSecurityHeaders("https://app.sutra.example/login", "production", "short")["Content-Security-Policy"];
+  assert.match(bogus, /script-src 'self' https:\/\/challenges\.cloudflare\.com; connect-src/u);
 });

@@ -5,6 +5,7 @@ import test from "node:test";
 const route = await readFile(new URL("../app/api/contact/route.ts", import.meta.url), "utf8");
 const deploymentSecurity = await readFile(new URL("../lib/deployment-security.ts", import.meta.url), "utf8");
 const siteSeo = await readFile(new URL("../lib/site-seo.ts", import.meta.url), "utf8");
+const caddy = await readFile(new URL("../deploy/ec2/Caddyfile", import.meta.url), "utf8");
 
 test("contact route is force-dynamic and PUBLIC (no session requirement)", () => {
   assert.match(route, /export const dynamic = "force-dynamic"/u);
@@ -16,7 +17,8 @@ test("contact route is force-dynamic and PUBLIC (no session requirement)", () =>
 
 test("contact route reads a bounded body, validates, and answers with json/error helpers", () => {
   assert.match(route, /readBoundedJson\(request, MAX_BODY_BYTES\)/u);
-  assert.match(route, /parseContactSubmission\(body\)/u);
+  assert.match(route, /parseContactSubmission\(contactBody\)/u);
+  assert.match(route, /const \{ turnstileToken, \.\.\.contactBody \} = bodyRecord/u);
   assert.match(route, /return jsonResponse\(\{ ok: true \}\)/u);
   assert.match(route, /return errorResponse\(error\)/u);
   // Invalid input becomes a 400 via the INVALID_INPUT code path.
@@ -30,8 +32,8 @@ test("contact route drops honeypot hits silently with a 200", () => {
 });
 
 test("contact route enforces a durable per-source + global rate window (429)", () => {
-  assert.match(route, /countRecentForSource\(ip, since\)/u);
-  assert.match(route, /countRecentGlobal\(since\)/u);
+  assert.match(route, /consumeRateBudget\(\{/u);
+  assert.match(route, /sourceIp: ip/u);
   assert.match(route, /MAX_PER_SOURCE_PER_WINDOW/u);
   assert.match(route, /MAX_GLOBAL_PER_WINDOW/u);
   assert.match(route, /status: 429/u);
@@ -39,13 +41,14 @@ test("contact route enforces a durable per-source + global rate window (429)", (
   assert.match(route, /MAX_GLOBAL_PER_WINDOW = 60/u);
 });
 
-test("contact route only trusts cf-connecting-ip and never the spoofable x-forwarded-for", () => {
-  // The rate-limit bucket key comes ONLY from the Cloudflare edge header.
-  assert.match(route, /cf-connecting-ip/u);
-  // A client-supplied x-forwarded-for must NOT be READ as a bucket key, or a
-  // spoofer could mint unlimited independent buckets. (An explanatory comment
-  // may still name the header; what matters is that it is never fetched.)
-  assert.doesNotMatch(route, /\.get\(\s*["']x-forwarded-for/u);
+test("contact route uses Caddy's canonical trusted-proxy source helper", () => {
+  // Caddy is the app's only ingress peer and overwrites X-Forwarded-For with
+  // Cloudflare's canonical CF-Connecting-IP. The route must use that shared
+  // helper, not read a client-controlled identity header itself.
+  assert.match(route, /clientSourceKey\(request\)/u);
+  assert.doesNotMatch(route, /headers\.get\(\s*["'](?:cf-connecting-ip|x-forwarded-for)/iu);
+  assert.match(caddy, /header_up X-Forwarded-For \{http\.request\.header\.CF-Connecting-IP\}/u);
+  assert.match(caddy, /header_up -CF-Connecting-IP/u);
   // Absent the trusted header, everything collapses to one shared bucket.
   assert.match(route, /UNATTRIBUTED_SOURCE|"unattributed"/u);
 });
@@ -55,11 +58,15 @@ test("contact route records BEFORE delivering, then flips the delivered flag", (
   assert.match(route, /deliverContactSubmission\(/u);
   assert.match(route, /repository\.record\(/u);
   assert.match(route, /markDelivered\(id\)/u);
-  // The row is reserved (delivered: false) before the outbound delivery, so the
-  // rate-limit counts include in-flight submissions (TOCTOU close).
+  // The row is reserved (delivered: false) before the outbound delivery, and
+  // the atomic budget is consumed before both.
   assert.ok(
     route.indexOf("repository.record(") < route.indexOf("deliverContactSubmission("),
     "record() must be called before deliverContactSubmission()",
+  );
+  assert.ok(
+    route.indexOf("consumeRateBudget(") < route.indexOf("repository.record("),
+    "the atomic budget must be consumed before persistence and delivery",
   );
   assert.match(route, /delivered: false/u);
   // No mailto/placeholder leakage in the endpoint.

@@ -23,7 +23,10 @@ ruby -e '
   abort "CloudFormation Resources are missing" unless document["Resources"].is_a?(Hash)
 ' "$TEMPLATE"
 
-python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" "$EC2/release-update.sh" <<'PY'
+python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
+  "$EC2/release-update.sh" "$EC2/Caddyfile" \
+  "$EC2/cloudflared-config.yml.example" "$EC2/maintenance/security.txt" \
+  "$EC2/compose.prod.yaml" <<'PY'
 from pathlib import Path
 import sys
 
@@ -31,6 +34,10 @@ template = Path(sys.argv[1]).read_text(encoding="utf-8")
 backup = Path(sys.argv[2]).read_text(encoding="utf-8")
 restore = Path(sys.argv[3]).read_text(encoding="utf-8")
 release_update = Path(sys.argv[4]).read_text(encoding="utf-8")
+caddy = Path(sys.argv[5]).read_text(encoding="utf-8")
+tunnel = Path(sys.argv[6]).read_text(encoding="utf-8")
+security_text = Path(sys.argv[7]).read_text(encoding="utf-8")
+compose = Path(sys.argv[8]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -122,6 +129,7 @@ for fragment in (
     "Sitemap: $PUBLIC_ORIGIN/sitemap.xml",
     "x-robots-tag:.*noindex",
     "RELEASE_COMMITTED=true",
+    "maintenance/security.txt",
     "/run/lock/sutra-data-mutation.lock",
 ):
     if fragment not in release_update:
@@ -143,6 +151,51 @@ for fragment in (
 ):
     if fragment in release_update:
         raise SystemExit(f"Release update may not replace current customer state from history: {fragment}")
+
+for fragment in (
+    "not host origin.{$SUTRA_DOMAIN:sutracmdb.com} www.{$SUTRA_DOMAIN:sutracmdb.com} {$SUTRA_DOMAIN:sutracmdb.com}",
+    "redir @apex_safe https://www.{$SUTRA_DOMAIN:sutracmdb.com}{uri} 308",
+    "not method GET HEAD",
+    "path /.well-known/security.txt /security.txt",
+    "rewrite * /security.txt",
+    'Content-Type "text/plain; charset=utf-8"',
+    'Cloudflare-CDN-Cache-Control "public, max-age=86400, stale-while-revalidate=604800"',
+    'header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}',
+    "header_up Host www.{$SUTRA_DOMAIN:sutracmdb.com}",
+):
+    if fragment not in caddy:
+        raise SystemExit(f"Caddy fail-open contract is missing: {fragment}")
+
+host_routes = (
+    "- hostname: origin.sutracmdb.com",
+    "- hostname: www.sutracmdb.com",
+    "- hostname: sutracmdb.com",
+)
+positions = []
+for route in host_routes:
+    if tunnel.count(route) != 1:
+        raise SystemExit(f"Named Tunnel must contain exactly one exact route: {route}")
+    positions.append(tunnel.index(route))
+catchall = "- service: http_status:404"
+if tunnel.count(catchall) != 1:
+    raise SystemExit("Named Tunnel must contain exactly one fail-closed catch-all")
+positions.append(tunnel.index(catchall))
+if positions != sorted(positions):
+    raise SystemExit("Named Tunnel exact routes must precede the fail-closed catch-all")
+for wildcard in ("- hostname: *.sutracmdb.com", "- hostname: '*'"):
+    if wildcard in tunnel:
+        raise SystemExit(f"Named Tunnel must not contain a wildcard route: {wildcard}")
+
+expected_security_text = """Contact: https://www.sutracmdb.com/contact
+Expires: 2027-07-24T23:59:00Z
+Canonical: https://www.sutracmdb.com/.well-known/security.txt
+Policy: https://www.sutracmdb.com/security
+Preferred-Languages: en
+"""
+if security_text != expected_security_text:
+    raise SystemExit("Caddy fail-open security.txt differs from the reviewed canonical document")
+if "./maintenance:/srv/maintenance:ro" not in compose:
+    raise SystemExit("Caddy's version-controlled security.txt directory is not mounted read-only")
 PY
 
 if [[ "${1:-}" == --online ]]; then

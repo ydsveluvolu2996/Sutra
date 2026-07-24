@@ -891,6 +891,10 @@ h3 { letter-spacing: -.02em; }
 .auth-code-input { font: 700 18px var(--font-geist-mono), monospace !important; letter-spacing: .34em; }
 .auth-error { margin: 0; padding: 10px 12px; border: 1px solid #edc9cd; border-radius: 7px; background: #fff4f5; color: #973743; font-size: 10px; line-height: 1.45; }
 .auth-submit { width: 100%; min-height: 44px; }
+.sutra-turnstile { display: grid; gap: 7px; min-width: 0; }
+.sutra-turnstile > div { width: 100%; min-height: 1px; }
+.sutra-turnstile > p { margin: 0; color: var(--ink-faint); font-size: 10px; line-height: 1.45; }
+.sutra-turnstile.is-error > p { color: #b4233c; }
 .auth-local-note { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 25px 0 -7px; color: var(--ink-faint); font-size: 9px; }
 .auth-local-note span { color: var(--green); font-size: 7px; }
 .auth-loading { min-height: 220px; display: grid; place-items: center; align-content: center; text-align: center; }
@@ -3040,6 +3044,8 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-form-status { font-size: 13px; line-height: 1.55; padding: 11px 13px; border-radius: 11px; }
 .lz .lx-form-status.error { color: #ffd7dd; border: 1px solid rgba(251,113,133,.4); background: rgba(251,113,133,.1); }
 .lz .lx-form-fine { font-size: 11.5px; line-height: 1.6; color: var(--faint); }
+.lz .sutra-turnstile > p { color: var(--faint); }
+.lz .sutra-turnstile.is-error > p { color: #ffd7dd; }
 .lz .lx-form-done h2 { background: var(--grad-ink); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lz.lx-contact .foot .ftbottom { margin-top: 0; padding-top: 0; border-top: 0; }
 .lz.lx-contact .foot nav { display: flex; gap: 22px; flex-wrap: wrap; }

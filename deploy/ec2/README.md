@@ -5,7 +5,7 @@ Ubuntu 24.04 in `ap-south-1`.
 
 ```text
 Browser/API
-  -> Cloudflare Worker (maintenance fallback)
+  -> Cloudflare Worker (maintenance fallback; quota fail-open to public DNS)
   -> Cloudflare named Tunnel (outbound connector)
   -> Caddy :8080 (private Compose network)
   -> Sutra app :3000
@@ -27,6 +27,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `manual-host-control.sh` | SSO-only start, stop and status for the exact retained EC2 host |
 | `ecr-lifecycle-policy.json` | Retain three validated releases and age out failed scan candidates |
 | `Caddyfile` | Private HTTP origin, canonical public Host boundary and app-down `503` |
+| `maintenance/security.txt` | Canonical public security contact served when Worker limits fail open |
 | `cloudflared-config.yml.example` | Named-tunnel ingress contract; copied to ignored `.sutra/` storage |
 | `sutra.service` | Boot start; app-only stop for maintenance |
 | `verify-runtime.sh` | Compose, networks, pinned images, Caddy and maintenance contracts |
@@ -45,7 +46,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | Runtime limit | Disabled; start and stop are explicit operator actions |
 | Daily stop | Disabled; EventBridge Scheduler is opt-in only |
 | Public origin | `https://www.sutracmdb.com` through Cloudflare only |
-| Edge Worker | `sutra-edge-fallback`; apex and `www` routes |
+| Edge Worker | `sutra-edge-fallback`; apex and `www` routes with request-limit fail-open |
 | AWS Budget | `SutraPrivateBeta-20USD`; $20 gross, credits excluded; not a hard cap |
 
 The host receives an ephemeral public IPv4 only for outbound internet access.
@@ -223,6 +224,18 @@ origin request into the branded maintenance page, with `503`, `Retry-After`, and
 cache customer data. This behavior depends on all three DNS records remaining
 proxied and both Worker routes remaining active.
 
+If the Workers Free daily limit is exhausted, both route objects fail open and
+Cloudflare sends `www`/apex directly through the same named Tunnel. The Tunnel
+configuration has exact entries for `origin`, `www`, and apex; Caddy accepts
+only those hosts, redirects safe apex requests, rejects unsafe apex methods, and
+continues to normalize the upstream Host to canonical `www`. The protected
+`origin` WAF rule still blocks direct visitors. No EC2 port, Elastic IP, or
+inbound security-group rule is added. During this degraded mode, app-only
+maintenance still works through Caddy. Caddy also serves the version-controlled
+security.txt at both standard paths with the same bytes and headers as the
+Worker. A fully stopped instance produces a Cloudflare Tunnel/origin error until
+Worker capacity returns.
+
 During the manual-control phase, neither the host-local maximum-runtime timer nor
 the EventBridge Scheduler is enabled. Use `pnpm cloud:start`, `pnpm cloud:stop`
 and `pnpm cloud:status`; stopping the instance does not delete the EBS disk.
@@ -264,6 +277,15 @@ curl -sSI https://sutracmdb.com/ | sed -n '1,6p'
 Perform two controlled outage tests: first `systemctl stop sutra`, then a full
 EC2 stop. `www` must show the branded 503 in both cases. Start the instance and
 confirm login, health, API responses, and `Set-Cookie` work again.
+
+Also test the route-limit contingency after every Tunnel/Caddy change: confirm
+the active `.sutra/cloudflared/config.yml` matches the committed template,
+temporarily bypass the Worker on a controlled route, verify `www` reaches the
+app, verify apex `GET` returns the exact canonical `308`, verify apex `POST`
+returns `421`, verify both security.txt paths return the canonical document, and
+verify direct `origin` still returns `403`. The activation and rollback commands
+are in
+[`../cloudflare/README.md`](../cloudflare/README.md#workers-free-limit-fail-open-path).
 
 ## Cookies and application boundary
 

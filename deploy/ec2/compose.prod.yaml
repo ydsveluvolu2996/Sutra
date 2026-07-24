@@ -99,6 +99,13 @@ services:
       SUTRA_IDENTITY_MODE: password
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true"
       SUTRA_PASSWORD_MFA_REQUIRED: "true"
+      # Turnstile is mandatory for public password login, invitation acceptance
+      # and the unauthenticated contact form. The entrypoint persists these into
+      # the Worker runtime file; the loopback-only bypass is forbidden here.
+      SUTRA_TURNSTILE_ENABLED: "true"
+      SUTRA_TURNSTILE_SITE_KEY: ${SUTRA_TURNSTILE_SITE_KEY:?Create a hostname-restricted Cloudflare Turnstile widget}
+      SUTRA_TURNSTILE_SECRET_KEY: ${SUTRA_TURNSTILE_SECRET_KEY:?Store the Turnstile secret in the ignored EC2 environment}
+      SUTRA_TURNSTILE_DEV_BYPASS: "false"
       # The collector runs inside this container and receives only short-lived
       # EC2 workload credentials. Customer access remains External-ID protected.
       SUTRA_COLLECTOR_MODE: live

@@ -38,12 +38,14 @@ export interface DeploymentBoundaryDecision {
 const publicPreviewPaths = new Set([
   ...PUBLIC_INDEXABLE_PATHS,
   "/api/contact",
+  "/api/turnstile/config",
   "/favicon.svg",
   "/og.png",
   "/robots.txt",
   "/sitemap.xml",
 ]);
 const publicSearchControlPaths = new Set(["/robots.txt", "/sitemap.xml"]);
+const turnstilePagePaths = new Set(["/login", "/contact", "/accept-invite"]);
 const protectedPrefixes = [
   "/api/",
   "/dashboard",
@@ -282,14 +284,25 @@ export function responseSecurityHeaders(
   const url = effectiveOrigin === null
     ? transportUrl
     : new URL(`${transportUrl.pathname}${transportUrl.search}`, effectiveOrigin);
+  const usesTurnstile = turnstilePagePaths.has(url.pathname);
   // 'unsafe-inline' is removed from script-src. A valid per-request nonce (for
   // HTML responses) allowlists the inline hydration + theme scripts; responses
   // without inline scripts (API/image/boundary) fall back to 'self' only.
-  const scriptSrc = scriptNonce !== undefined && SCRIPT_NONCE_PATTERN.test(scriptNonce)
-    ? `script-src 'self' 'nonce-${scriptNonce}'`
-    : "script-src 'self'";
+  const scriptSrc = [
+    "script-src 'self'",
+    ...(scriptNonce !== undefined && SCRIPT_NONCE_PATTERN.test(scriptNonce)
+      ? [`'nonce-${scriptNonce}'`]
+      : []),
+    ...(usesTurnstile ? ["https://challenges.cloudflare.com"] : []),
+  ].join(" ");
+  const connectSrc = usesTurnstile
+    ? "connect-src 'self' https://challenges.cloudflare.com"
+    : "connect-src 'self'";
+  const frameSrc = usesTurnstile
+    ? "frame-src https://challenges.cloudflare.com"
+    : "frame-src 'none'";
   const headers: Record<string, string> = {
-    "Content-Security-Policy": `default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; ${scriptSrc}; connect-src 'self'`,
+    "Content-Security-Policy": `default-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; ${scriptSrc}; ${connectSrc}; ${frameSrc}`,
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",

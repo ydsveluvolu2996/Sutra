@@ -1,3 +1,5 @@
+import { env } from "cloudflare:workers";
+
 import { consumeLoginAttemptBudget } from "../../../../../db/auth-repository";
 import {
   acceptPasswordInvitation,
@@ -13,6 +15,11 @@ import {
   readAuthJson,
 } from "../../../../../lib/auth-http";
 import { jsonResponse } from "../../../../../lib/pilot-server";
+import { TURNSTILE_ACTIONS } from "../../../../../lib/turnstile-contract";
+import {
+  verifyTurnstileToken,
+  type TurnstileEnvironment,
+} from "../../../../../lib/turnstile-server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +45,17 @@ export async function POST(request: Request): Promise<Response> {
     assertLocalAuthMutation(request);
     // Per-source throttle so invitation tokens can't be brute-forced from one origin.
     await consumeLoginAttemptBudget({ sourceKey: clientSourceKey(request), now: Date.now() });
-    const body = exactInputObject(await readAuthJson(request, 4 * 1024), ["token", "password", "displayName"], []);
+    const body = exactInputObject(
+      await readAuthJson(request, 4 * 1024),
+      ["token", "password", "displayName", "turnstileToken"],
+      [],
+    );
+    await verifyTurnstileToken(
+      request,
+      env as unknown as TurnstileEnvironment,
+      body.turnstileToken,
+      TURNSTILE_ACTIONS.acceptInvitation,
+    );
     const token = boundedInputString(body.token, { label: "invitation token", minimum: 43, maximum: 43, trim: false });
     const result = await acceptPasswordInvitation(token, {
       password: boundedInputString(body.password, { label: "password", maximum: 128, trim: false }),

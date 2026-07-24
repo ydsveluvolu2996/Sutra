@@ -21,10 +21,20 @@ const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_COLLECTOR_MODE",
   "SUTRA_ALLOW_LIVE_AWS",
   "SUTRA_COLLECTOR_PRINCIPAL_ARN",
+  "SUTRA_TURNSTILE_ENABLED",
+  "SUTRA_TURNSTILE_SITE_KEY",
+  "SUTRA_TURNSTILE_SECRET_KEY",
+  "SUTRA_TURNSTILE_DEV_BYPASS",
 ]);
 
 const RELEASE_IMAGE =
   "738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra/app@sha256:" + "a".repeat(64);
+const TURNSTILE = {
+  SUTRA_TURNSTILE_ENABLED: "true",
+  SUTRA_TURNSTILE_SITE_KEY: "0x4AAAAAAAAAAAAAAAAAAAAAAA",
+  SUTRA_TURNSTILE_SECRET_KEY: "0x4BBBBBBBBBBBBBBBBBBBBBBB",
+  SUTRA_TURNSTILE_DEV_BYPASS: "false",
+};
 
 function cleanEnvironment(overrides = {}) {
   const environment = Object.fromEntries(
@@ -54,6 +64,7 @@ test("setup materializes only the explicit staging private-beta password allowli
       SUTRA_IDENTITY_MODE: "password",
       SUTRA_PASSWORD_MFA_REQUIRED: "true",
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+      ...TURNSTILE,
     });
     await execute(process.execPath, [setupScript], { env: environment });
     const contents = await readFile(config, "utf8");
@@ -65,6 +76,10 @@ test("setup materializes only the explicit staging private-beta password allowli
     assert.match(contents, /^SUTRA_PASSWORD_MFA_REQUIRED=true$/mu);
     assert.match(contents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu);
     assert.match(contents, /^SUTRA_AUTH_ENCRYPTION_KEY=[A-Za-z0-9_-]{43}$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_ENABLED=true$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_SITE_KEY=0x4A+$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_SECRET_KEY=0x4B+$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_DEV_BYPASS=false$/mu);
     assert.doesNotMatch(contents, /^SUTRA_PASSWORD_IDENTITY_ENABLED=true$/mu);
 
     // Removing the process-level opt-in disables a value retained on the
@@ -138,8 +153,43 @@ test("ordinary local setup remains loopback-local and does not opt into private 
     });
     const contents = await readFile(config, "utf8");
     assert.match(contents, /^SUTRA_LOCAL_MODE=true$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_ENABLED=false$/mu);
+    assert.match(contents, /^SUTRA_TURNSTILE_DEV_BYPASS=true$/mu);
     assert.doesNotMatch(contents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu);
   });
+});
+
+test("network private-beta setup rejects Cloudflare's public test credentials", async () => {
+  for (const turnstile of [
+    {
+      SUTRA_TURNSTILE_SITE_KEY: "1x00000000000000000000AA",
+      SUTRA_TURNSTILE_SECRET_KEY: TURNSTILE.SUTRA_TURNSTILE_SECRET_KEY,
+    },
+    {
+      SUTRA_TURNSTILE_SITE_KEY: TURNSTILE.SUTRA_TURNSTILE_SITE_KEY,
+      SUTRA_TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+    },
+  ]) {
+    await withConfig(async (config) => {
+      await assert.rejects(
+        execute(process.execPath, [setupScript], {
+          env: cleanEnvironment({
+            SUTRA_LOCAL_CONFIG_PATH: config,
+            SUTRA_DEPLOYMENT_ENV: "staging",
+            SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+            SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+            SUTRA_LOCAL_MODE: "false",
+            SUTRA_IDENTITY_MODE: "password",
+            SUTRA_PASSWORD_MFA_REQUIRED: "true",
+            SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+            ...TURNSTILE,
+            ...turnstile,
+          }),
+        }),
+        /test credentials are forbidden/u,
+      );
+    });
+  }
 });
 
 test("setup persists the explicit live collector boundary and replaces retained fixture values", async () => {
