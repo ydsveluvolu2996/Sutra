@@ -49,7 +49,7 @@ describe("invitation email delivery", () => {
     assert.equal(result.status, "accepted");
     assert.equal(result.provider, "resend");
     assert.equal(result.httpStatus, 202);
-    assert.equal(captured?.redirect, "error");
+    assert.equal(captured?.redirect, "manual");
     assert.equal((captured?.headers as Record<string, string>).authorization, "Bearer test-api-key-not-a-real-secret");
     const body = JSON.parse(String(captured?.body));
     assert.deepEqual(body.to, ["client@example.com"]);
