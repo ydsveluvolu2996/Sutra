@@ -21,9 +21,12 @@ test("identity invitations persist only token digests and enforce one active ema
   assert.match(repository, /input\.scopeMode,\s+customerId,\s+tokenDigest,/u);
 });
 
-test("invitation creation and revocation require centralized authorization and recent MFA", () => {
+test("invitation creation and revocation require centralized authorization and same-origin (no recent-MFA step-up)", () => {
   assert.match(route, /authorizeMembershipManagementRequest\(request\)/u);
-  assert.match(route, /requireRecentMfa\(actor\.authenticated\)/u);
+  // Invitation management is intentionally low-friction: session auth +
+  // MFA-verified + membership:manage capability + same-origin, but NOT a fresh
+  // 5-minute recent-MFA step-up (which silently blocked resend/revoke from the UI).
+  assert.doesNotMatch(route, /requireRecentMfa/u);
   assert.match(route, /assertAuthMutation\(request\)/u);
   assert.match(route, /activationUrlShownOnce: true/u);
   assert.match(route, /deliverInvitationEmail/u);
