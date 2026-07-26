@@ -23,7 +23,16 @@ RUN pnpm --filter sutra deploy --prod /app/.runtime/root \
     && pnpm --filter @msp/aws-collector deploy --prod /app/.runtime/collector
 
 FROM node:22-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS runtime
-ENV NODE_ENV=production
+# Pin the OpenSSL trust paths explicitly. workerd's TLS layer (kj-tls) verifies
+# outbound fetch() against the system trust store; relying on OpenSSL's default
+# path resolution alone left the store effectively empty in production, so every
+# outbound HTTPS failed with "unable to get local issuer certificate" — which
+# took down sign-in (503) and invitation email delivery. SSL_CERT_FILE points
+# workerd and Node directly at the bundle installed just below.
+ENV NODE_ENV=production \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_DIR=/etc/ssl/certs \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 WORKDIR /app
 
 # Local workerd uses the operating-system trust store for outbound Worker
