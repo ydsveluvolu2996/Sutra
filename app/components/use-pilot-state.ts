@@ -39,13 +39,31 @@ export async function postPilot<T>(path: string, body: unknown): Promise<T> {
   return result;
 }
 
-async function loadPilot(): Promise<{ state: PilotState; health: CollectorHealth | null }> {
+interface PilotBundle {
+  readonly state: PilotState;
+  readonly health: CollectorHealth | null;
+}
+
+// The app shell AND the rendered page each call usePilotState() independently
+// (there is no shared provider), so a single navigation mounted the hook twice
+// and fired two identical /api/pilot/state + /api/pilot/health fetches — each
+// downloading the full CMDB snapshot. Coalesce concurrent callers onto one
+// in-flight request (keyed by the resolved path) and hold a brief result cache
+// so the second mount reuses the first fetch instead of re-downloading it.
+const PILOT_CACHE_MS = 2500;
+let pilotInFlight: { key: string; promise: Promise<PilotBundle> } | null = null;
+let pilotCache: { key: string; at: number; value: PilotBundle } | null = null;
+
+function pilotStatePath(): string {
   const selectedConnectionId = typeof window === "undefined"
     ? null
     : new URLSearchParams(window.location.search).get("connectionId");
-  const statePath = selectedConnectionId !== null && /^conn_[a-f0-9]{32}$/u.test(selectedConnectionId)
+  return selectedConnectionId !== null && /^conn_[a-f0-9]{32}$/u.test(selectedConnectionId)
     ? `/api/pilot/state?connectionId=${encodeURIComponent(selectedConnectionId)}`
     : "/api/pilot/state";
+}
+
+async function fetchPilot(statePath: string): Promise<PilotBundle> {
   const [stateResponse, healthResponse] = await Promise.all([
     fetch(statePath, { cache: "no-store" }),
     fetch("/api/pilot/health", { cache: "no-store" }),
@@ -61,6 +79,27 @@ async function loadPilot(): Promise<{ state: PilotState; health: CollectorHealth
   }
 }
 
+async function loadPilot(options?: { fresh?: boolean }): Promise<PilotBundle> {
+  const key = pilotStatePath();
+  // Always coalesce onto a concurrent in-flight request for the same path.
+  if (pilotInFlight !== null && pilotInFlight.key === key) return pilotInFlight.promise;
+  // Serve the short cache for initial mounts; `fresh` (refresh / post-mutation)
+  // bypasses it so callers always see the latest snapshot after a change.
+  if (options?.fresh !== true && pilotCache !== null && pilotCache.key === key
+      && Date.now() - pilotCache.at < PILOT_CACHE_MS) {
+    return pilotCache.value;
+  }
+  const promise = fetchPilot(key);
+  pilotInFlight = { key, promise };
+  try {
+    const value = await promise;
+    pilotCache = { key, at: Date.now(), value };
+    return value;
+  } finally {
+    if (pilotInFlight !== null && pilotInFlight.promise === promise) pilotInFlight = null;
+  }
+}
+
 export function usePilotState(): PilotStateView {
   const [state, setState] = useState<PilotState | null>(null);
   const [health, setHealth] = useState<CollectorHealth | null>(null);
@@ -71,7 +110,7 @@ export function usePilotState(): PilotStateView {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      const loaded = await loadPilot();
+      const loaded = await loadPilot({ fresh: true });
       setState(loaded.state);
       setHealth(loaded.health);
       setError(null);
@@ -85,7 +124,7 @@ export function usePilotState(): PilotStateView {
 
   useEffect(() => {
     let current = true;
-    const loadCurrent = () => void loadPilot().then((loaded) => {
+    const run = (fresh: boolean) => void loadPilot(fresh ? { fresh: true } : undefined).then((loaded) => {
       if (!current) return;
       setState(loaded.state);
       setHealth(loaded.health);
@@ -95,11 +134,14 @@ export function usePilotState(): PilotStateView {
     }).finally(() => {
       if (current) setLoading(false);
     });
-    loadCurrent();
-    window.addEventListener("sutra:state-changed", loadCurrent);
+    // Initial mount reuses any in-flight/recent fetch (the shell + page mount
+    // this hook together); a mutation event forces a fresh reload.
+    run(false);
+    const onChanged = () => run(true);
+    window.addEventListener("sutra:state-changed", onChanged);
     return () => {
       current = false;
-      window.removeEventListener("sutra:state-changed", loadCurrent);
+      window.removeEventListener("sutra:state-changed", onChanged);
     };
   }, []);
 

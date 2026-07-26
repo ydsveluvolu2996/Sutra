@@ -106,15 +106,26 @@ async function migrationSha256(source: string): Promise<string> {
 export function ensurePostgresRuntimeSchema(db: D1Database): Promise<void> {
   if (schemaReady !== undefined) return schemaReady;
   const attempt = (async () => {
-    for (const migration of migrations) {
-      const applied = await db.prepare(
-        `SELECT migration_id, migration_sha256 FROM sutra_runtime_migrations WHERE migration_id = ? LIMIT 1`,
-      ).bind(migration.id).first<{ migration_id: string; migration_sha256: string | null }>();
-      if (applied === null) throw new Error("PostgreSQL is not migrated; run pnpm db:postgres:migrate with the owner role");
-      if (applied.migration_sha256 !== await migrationSha256(migration.source)) {
+    // Verify every applied migration in a SINGLE round-trip rather than one
+    // SELECT per migration. On a cold workerd isolate this ran ~48 sequential
+    // queries (each its own connection) before any real work; batching it into
+    // one IN(...) query removes that per-cold-request stall.
+    const placeholders = migrations.map(() => "?").join(", ");
+    const appliedRows = await db.prepare(
+      `SELECT migration_id, migration_sha256 FROM sutra_runtime_migrations WHERE migration_id IN (${placeholders})`,
+    ).bind(...migrations.map((migration) => migration.id)).all<{ migration_id: string; migration_sha256: string | null }>();
+    const appliedById = new Map<string, string | null>(
+      (appliedRows.results ?? []).map((row) => [row.migration_id, row.migration_sha256]),
+    );
+    // Checksum verification is pure CPU; compute the expected digests in parallel.
+    await Promise.all(migrations.map(async (migration) => {
+      if (!appliedById.has(migration.id)) {
+        throw new Error("PostgreSQL is not migrated; run pnpm db:postgres:migrate with the owner role");
+      }
+      if (appliedById.get(migration.id) !== await migrationSha256(migration.source)) {
         throw new Error(`Applied PostgreSQL migration ${migration.id} failed its immutable checksum`);
       }
-    }
+    }));
   })();
   schemaReady = attempt;
   void attempt.catch(() => {
