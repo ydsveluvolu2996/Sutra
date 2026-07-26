@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FinopsPanels } from "./finops-panels";
 import { VisibilityPanels } from "./visibility-panels";
+import { FinopsMorePanels } from "./finops-more-panels";
 import type { StoredCostSnapshot } from "../../lib/cost-types";
 import { buildCostOptimizations } from "../../lib/aws-cost-optimization";
 import { compactIdentifier, formatTimestamp, usePilotState } from "../components/use-pilot-state";
@@ -259,6 +260,7 @@ export function CostsBrowser() {
         </>
       ) : null}
       <VisibilityPanels connectionId={connectionId} />
+      <FinopsMorePanels connectionId={connectionId} />
       <FinopsPanels connectionId={connectionId} />
     </>
   );

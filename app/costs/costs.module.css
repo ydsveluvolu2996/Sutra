@@ -54,6 +54,21 @@
 .provenance dl > div { padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf9; }
 .provenance dt { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
 .provenance dd { margin: 3px 0 0; font-size: 11px; font-weight: 700; }
+.bStatus { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; }
+.bOk { background: #ecfdf5; color: #065f46; }
+.bRisk { background: #fef3c7; color: #92400e; }
+.bBreached { background: #fee2e2; color: #991b1b; }
+.budgetRow { display: grid; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.budgetRow:last-child { border-bottom: none; }
+.budgetTop { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.budgetTop strong { font-size: 14px; }
+.budgetMeta { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--muted); }
+.budgetMeta b { color: var(--ink); font-weight: 700; }
+.miniSpark { display: flex; align-items: end; gap: 3px; height: 42px; margin-top: 6px; }
+.miniSpark i { flex: 1; min-width: 2px; background: linear-gradient(180deg, #2dd4bf, #0f766e); border-radius: 3px 3px 0 0; min-height: 3px; }
+.metricRow { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.metricRow:last-child { border-bottom: none; }
+.metricRow .miniSpark { width: 120px; flex: 0 0 120px; height: 34px; margin: 0; }
 .windowTabs { display: inline-flex; gap: 5px; }
 .windowTabs button { font: inherit; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
 .windowActive { background: #0f766e !important; border-color: transparent !important; color: white !important; }
