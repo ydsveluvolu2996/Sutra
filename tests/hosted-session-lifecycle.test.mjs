@@ -129,7 +129,7 @@ test("tenant identity is derived from the validated session/DB, never from a req
   assert.match(authRepo, /return createSession\(\s*db,\s*selected\.user_id,\s*selected\.org_id/u);
   // Session validation reads org/role/scope from joined rows keyed on the
   // session token digest; it never accepts an org/customer/tenant id argument.
-  assert.match(apiAuth, /const authenticated = token === null \? null : await getLocalSession\(token\)/u);
+  assert.match(apiAuth, /const authenticated =\s*token === null \? null : await getLocalSession\(token, undefined, \{ withAvailableOrganizations: false \}\)/u);
   assert.doesNotMatch(apiAuth, /orgId\s*=\s*(request|url|params|searchParams|body)/u);
   // Authorization always uses the subject's own orgId, not a request-provided one.
   assert.match(apiAuth, /orgId: authenticated\.subject\.orgId/u);

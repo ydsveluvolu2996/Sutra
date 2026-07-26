@@ -1,9 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PilotResource } from "../../lib/pilot-types";
+import type { PilotFinding, PilotResource } from "../../lib/pilot-types";
 import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 import { CmdbWorkspacePanels } from "./workspace-panels";
+
+const MAX_ROWS = 200;
 
 function isSecurityGroup(resource: PilotResource): boolean {
   const type = resource.resourceType.toLowerCase();
@@ -45,6 +47,16 @@ export function InventoryBrowser() {
     }
     return counts;
   }, [relationships]);
+  const openFindingsByResourceKey = useMemo(() => {
+    const map = new Map<string, PilotFinding[]>();
+    for (const finding of findings) {
+      if (finding.status !== "open" || finding.resourceKey === null) continue;
+      const list = map.get(finding.resourceKey);
+      if (list) list.push(finding);
+      else map.set(finding.resourceKey, [finding]);
+    }
+    return map;
+  }, [findings]);
   const successfulCoverage = state?.coverage.filter((entry) => entry.status === "succeeded").length ?? 0;
   const coverageTotal = state?.coverage.length ?? 0;
   const coveragePercent = coverageTotal === 0 ? 0 : Math.round((successfulCoverage / coverageTotal) * 100);
@@ -108,7 +120,7 @@ export function InventoryBrowser() {
             </div>
             <div className="data-table cmdb-table" role="table" aria-label="AWS resources">
               <div className="data-row data-header" role="row"><span>Service</span><span>Resource</span><span>Customer / account</span><span>Region</span><span>State</span><span>Graph</span></div>
-              {filtered.map((resource) => {
+              {filtered.slice(0, MAX_ROWS).map((resource) => {
                 const edgeCount = edgeCounts.get(resource.resourceKey) ?? 0;
                 return <div className="data-row" role="row" key={resource.resourceKey}>
                   <span><span className="service-chip">{resource.service.toUpperCase()}</span></span>
@@ -119,6 +131,7 @@ export function InventoryBrowser() {
                   <span className="muted-cell">{edgeCount} edge{edgeCount === 1 ? "" : "s"}</span>
                 </div>;
               })}
+              {filtered.length > MAX_ROWS ? <div className="empty-state"><strong>Showing first {MAX_ROWS} of {filtered.length}</strong><span>Refine the filter to see more.</span></div> : null}
               {filtered.length === 0 ? <div className="empty-state"><strong>No matching resources</strong><span>Adjust or clear the current filters.</span></div> : null}
             </div>
           </section> : null}
@@ -127,7 +140,7 @@ export function InventoryBrowser() {
             <div className="panel-heading"><div><p className="eyebrow">Network exposure context</p><h2>Security groups</h2></div><a className="text-link" href="/findings">Open related findings →</a></div>
             {securityGroups.length > 0 ? <div className="security-group-grid">
               {securityGroups.map((group) => {
-                const groupFindings = findings.filter((finding) => finding.resourceKey === group.resourceKey && finding.status === "open");
+                const groupFindings = openFindingsByResourceKey.get(group.resourceKey) ?? [];
                 const groupEdgeCount = edgeCounts.get(group.resourceKey) ?? 0;
                 return <article className="security-group-card" key={group.resourceKey}>
                   <div><span className="service-chip">EC2</span><span className={groupFindings.some((finding) => finding.severity === "critical" || finding.severity === "high") ? "exposure exposure-open" : "exposure exposure-closed"}>{groupFindings.length ? `${groupFindings.length} open finding${groupFindings.length === 1 ? "" : "s"}` : "No open finding"}</span></div>

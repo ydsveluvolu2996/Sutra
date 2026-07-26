@@ -183,7 +183,11 @@ export async function requireApiSession(
 ): Promise<AuthenticatedLocalSession> {
   assertAuthenticationRequest(request);
   const token = sessionTokenFromRequest(request);
-  const authenticated = token === null ? null : await getLocalSession(token);
+  // Generic every-request authorize path: nothing downstream reads
+  // `session.availableOrganizations` here (only the session/org-switcher views
+  // do), so skip its extra memberships-join query.
+  const authenticated =
+    token === null ? null : await getLocalSession(token, undefined, { withAvailableOrganizations: false });
   if (authenticated === null) {
     throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "Sign in before using the Sutra workspace");
   }

@@ -220,7 +220,12 @@ async function consumeSelfServeSignupBudget(
   const bucketKey = `${await signupSourceDigest(source)}:${windowStart}`;
   let attempts: number;
   try {
-    await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    // Sampled GC (~10%): the count keys on the current window's bucketKey, so
+    // lingering expired rows never affect this window's count — they only need
+    // occasional cleanup, not a DELETE on every signup.
+    if (Math.random() < 0.1) {
+      await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    }
     const row = await db.prepare(
       `INSERT INTO hosted_signup_rate_limits (bucket_key, attempts, expires_at)
          VALUES (?, 1, ?)
@@ -266,7 +271,12 @@ export async function consumeLoginAttemptBudget(
   const bucketKey = `login:${await signupSourceDigest(source)}:${windowStart}`;
   let attempts: number;
   try {
-    await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    // Sampled GC (~10%): the count keys on the current window's bucketKey, so
+    // lingering expired rows never affect this window's count — they only need
+    // occasional cleanup, not a DELETE on every login attempt.
+    if (Math.random() < 0.1) {
+      await db.prepare(`DELETE FROM hosted_signup_rate_limits WHERE expires_at <= ?`).bind(input.now).run();
+    }
     const row = await db.prepare(
       `INSERT INTO hosted_signup_rate_limits (bucket_key, attempts, expires_at)
          VALUES (?, 1, ?)
@@ -412,7 +422,15 @@ function publicSession(
   };
 }
 
-async function sessionFromRow(db: D1Database, row: SessionRow): Promise<AuthenticatedLocalSession> {
+async function sessionFromRow(
+  db: D1Database,
+  row: SessionRow,
+  // `availableOrganizations` only feeds the session/org-switcher view, so the
+  // extra memberships-join is loaded lazily. The generic every-request authorize
+  // path (`requireApiSession`) skips it; callers that serialize the whole session
+  // to the client (session view, org switch, login, MFA verify) keep it on.
+  withAvailableOrganizations = true,
+): Promise<AuthenticatedLocalSession> {
   const subject: AuthorizationSubject = {
     userId: row.user_id,
     orgId: row.org_id,
@@ -421,7 +439,9 @@ async function sessionFromRow(db: D1Database, row: SessionRow): Promise<Authenti
     scopeMode: row.scope_mode,
     grants: await loadGrants(db, row.org_id, row.membership_id),
   };
-  const availableOrganizations = await loadMemberships(db, row.user_id);
+  const availableOrganizations = withAvailableOrganizations
+    ? await loadMemberships(db, row.user_id)
+    : [];
   return {
     tokenDigest: row.token_digest,
     mfaVerifiedAt: row.mfa_verified_at,
@@ -854,7 +874,11 @@ export async function provisionSelfServeHostedOrg(
   );
 }
 
-export async function getLocalSession(token: string, now = Date.now()): Promise<AuthenticatedLocalSession | null> {
+export async function getLocalSession(
+  token: string,
+  now = Date.now(),
+  options: { readonly withAvailableOrganizations?: boolean } = {},
+): Promise<AuthenticatedLocalSession | null> {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) return null;
   const db = await readyDatabase();
   const digest = await digestSessionToken(token);
@@ -880,7 +904,7 @@ export async function getLocalSession(token: string, now = Date.now()): Promise<
         AND last_seen_at > ?
         AND last_seen_at < ?`,
   ).bind(now, digest, now, now - BROWSER_SESSION_IDLE_TTL_MS, now - 60_000).run();
-  return sessionFromRow(db, row);
+  return sessionFromRow(db, row, options.withAvailableOrganizations ?? true);
 }
 
 export async function beginTotpEnrollment(

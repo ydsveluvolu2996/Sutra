@@ -314,7 +314,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
     try {
       const payload = await requestJson<Insights>(`/api/v1/finops/insights?${params.toString()}`);
       setInsights(payload);
-      setPeriod(payload.period);
+      if (payload.period !== period) setPeriod(payload.period);
     } catch {
       setInsights(null);
     }
