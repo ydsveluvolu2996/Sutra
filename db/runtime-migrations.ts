@@ -51,6 +51,7 @@ import invitationOperationLedgerSchemaSql from "../drizzle/0051_invitation_opera
 import backgroundJobsConnectionScopeSql from "../drizzle/0052_background_jobs_connection_scope.sql?raw";
 import contactRateLimitsSchemaSql from "../drizzle/0053_contact_rate_limits.sql?raw";
 import passwordResetSchemaSql from "../drizzle/0054_password_reset.sql?raw";
+import backgroundJobsKindIndexSchemaSql from "../drizzle/0055_background_jobs_kind_index.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -119,6 +120,7 @@ const migrations = [
   { id: "0052_background_jobs_connection_scope", statements: statementsFrom(backgroundJobsConnectionScopeSql) },
   { id: "0053_contact_rate_limits", statements: statementsFrom(contactRateLimitsSchemaSql) },
   { id: "0054_password_reset", statements: statementsFrom(passwordResetSchemaSql) },
+  { id: "0055_background_jobs_kind_index", statements: statementsFrom(backgroundJobsKindIndexSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

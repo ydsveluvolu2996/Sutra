@@ -23,6 +23,7 @@ import {
   resolveContactFrom,
   type ContactDeliveryEnv,
 } from "./contact-delivery.ts";
+import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
 
 export type ReportDeliveryKind = "webhook" | "email";
 export type ReportDeliveryTransport = "webhook" | "email-api" | "none";
@@ -53,6 +54,9 @@ export interface ReportDeliveryResult {
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/gu;
 const SUBJECT_MAX = 200;
+// Bound every outbound POST so a slow/hung transport cannot pin the job worker
+// (mirrors contact-delivery + the ITSM dispatch route).
+const DELIVERY_TIMEOUT_MS = 10_000;
 
 function hasControl(value: string): boolean {
   return /[\u0000-\u001f\u007f]/u.test(value);
@@ -127,10 +131,17 @@ export async function deliverScheduledReport(input: {
     // honest rather than throw.
     if (url === null) return { delivered: false, transport: "none" };
     try {
-      const response = await fetchImpl(url, {
+      // Re-screen the tenant-supplied URL right before egress (the store-time
+      // check cannot stop a later redirect to an internal target) and refuse to
+      // follow redirects so a 3xx cannot bypass the SSRF guard after the first
+      // hop. A blocked target throws here and resolves to an honest non-delivery.
+      const target = assertSafeOutboundUrl(url);
+      const response = await fetchImpl(target, {
         method: "POST",
         headers: { "content-type": "application/json; charset=utf-8" },
         body: JSON.stringify({ report: input.envelope }),
+        redirect: "error",
+        signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
       });
       return { delivered: response.ok, transport: "webhook" };
     } catch {
@@ -174,6 +185,8 @@ export async function deliverScheduledReport(input: {
       method: "POST",
       headers: { "content-type": "application/json; charset=utf-8", authorization: `Bearer ${emailApiKey}` },
       body: JSON.stringify(body),
+      redirect: "error",
+      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
     return { delivered: response.ok, transport: "email-api" };
   } catch {

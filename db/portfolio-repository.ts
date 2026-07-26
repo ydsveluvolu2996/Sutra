@@ -77,50 +77,85 @@ function scopeSql(alias: "c" | "a"): string {
 export async function getPortfolio(subject: AuthorizationSubject, now = Date.now()): Promise<PortfolioState> {
   const db = getRawDb();
   await ensureRuntimeSchema(db);
+  // Per-customer aggregates are pre-grouped once and LEFT JOINed by (org, customer)
+  // instead of being recomputed as a correlated subquery for every customer row.
+  // Each aggregate stays in its own grouped derived table so the one-to-many joins
+  // never fan out across each other; connection_heads has a single row per connection
+  // (PK connection_id) and finding_workflow_states is unique per (org, connection,
+  // fingerprint), so every join below matches at most one row and the COUNT/MAX values
+  // are identical to the previous correlated form. Missing groups yield NULL, which
+  // COALESCE restores to 0 exactly as the correlated COUNT(*) did.
   const customerResult = await db.prepare(
     `SELECT c.id, c.slug, c.name, c.status,
-            (SELECT COUNT(*) FROM aws_connections a
-              WHERE a.org_id = c.org_id AND a.customer_id = c.id) AS connection_count,
-            (SELECT COUNT(*) FROM cmdb_resources r
-              JOIN connection_heads h ON h.snapshot_id = r.snapshot_id
-                AND h.connection_id = r.connection_id AND h.org_id = r.org_id
-             WHERE r.org_id = c.org_id AND r.customer_id = c.id) AS resource_count,
-            (SELECT COUNT(*) FROM cmdb_findings f
-              JOIN connection_heads h ON h.snapshot_id = f.snapshot_id
-                AND h.connection_id = f.connection_id AND h.org_id = f.org_id
-              LEFT JOIN finding_workflow_states w ON w.org_id = f.org_id
-                AND w.connection_id = f.connection_id AND w.fingerprint = f.fingerprint
-             WHERE f.org_id = c.org_id AND f.customer_id = c.id
-               AND COALESCE(w.status, f.status) = 'open') AS open_finding_count,
-            (SELECT MAX(s.collected_at) FROM cmdb_snapshots s
-              JOIN connection_heads h ON h.snapshot_id = s.id AND h.connection_id = s.connection_id
-             WHERE s.org_id = c.org_id AND s.customer_id = c.id) AS latest_snapshot_at
+            COALESCE(cc.connection_count, 0) AS connection_count,
+            COALESCE(rc.resource_count, 0) AS resource_count,
+            COALESCE(fc.open_finding_count, 0) AS open_finding_count,
+            ls.latest_snapshot_at AS latest_snapshot_at
        FROM customers c
+       LEFT JOIN (
+         SELECT a.org_id, a.customer_id, COUNT(*) AS connection_count
+           FROM aws_connections a
+          GROUP BY a.org_id, a.customer_id
+       ) cc ON cc.org_id = c.org_id AND cc.customer_id = c.id
+       LEFT JOIN (
+         SELECT r.org_id, r.customer_id, COUNT(*) AS resource_count
+           FROM cmdb_resources r
+           JOIN connection_heads h ON h.snapshot_id = r.snapshot_id
+             AND h.connection_id = r.connection_id AND h.org_id = r.org_id
+          GROUP BY r.org_id, r.customer_id
+       ) rc ON rc.org_id = c.org_id AND rc.customer_id = c.id
+       LEFT JOIN (
+         SELECT f.org_id, f.customer_id, COUNT(*) AS open_finding_count
+           FROM cmdb_findings f
+           JOIN connection_heads h ON h.snapshot_id = f.snapshot_id
+             AND h.connection_id = f.connection_id AND h.org_id = f.org_id
+           LEFT JOIN finding_workflow_states w ON w.org_id = f.org_id
+             AND w.connection_id = f.connection_id AND w.fingerprint = f.fingerprint
+          WHERE COALESCE(w.status, f.status) = 'open'
+          GROUP BY f.org_id, f.customer_id
+       ) fc ON fc.org_id = c.org_id AND fc.customer_id = c.id
+       LEFT JOIN (
+         SELECT s.org_id, s.customer_id, MAX(s.collected_at) AS latest_snapshot_at
+           FROM cmdb_snapshots s
+           JOIN connection_heads h ON h.snapshot_id = s.id AND h.connection_id = s.connection_id
+          GROUP BY s.org_id, s.customer_id
+       ) ls ON ls.org_id = c.org_id AND ls.customer_id = c.id
       WHERE c.org_id = ? AND ${scopeSql("c")}
       ORDER BY c.name, c.id`,
   ).bind(subject.orgId, subject.scopeMode, subject.membershipId).all<CustomerRow>();
 
+  // The single head snapshot (connection_heads PK = connection_id) is LEFT JOINed once
+  // for both snapshot columns instead of two per-row LIMIT 1 subqueries; the two count
+  // aggregates stay in their own grouped derived tables so resources and findings never
+  // fan out across each other. Every join matches at most one row, so the emitted
+  // collected_at/origin_kind/COUNT values are identical to the previous correlated form.
   const connectionResult = await db.prepare(
     `SELECT a.id, a.customer_id, a.source_kind, a.fixture_id, a.fixture_version,
             a.partition, a.aws_account_id, a.role_arn,
             a.status, a.enabled_regions_json, a.permission_pack_version,
             a.last_successful_sync_at,
-            (SELECT s.collected_at FROM connection_heads h
-              JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
-             WHERE h.org_id = a.org_id AND h.connection_id = a.id LIMIT 1) AS latest_snapshot_at,
-            (SELECT s.origin_kind FROM connection_heads h
-              JOIN cmdb_snapshots s ON s.id = h.snapshot_id AND s.connection_id = h.connection_id
-             WHERE h.org_id = a.org_id AND h.connection_id = a.id LIMIT 1) AS latest_snapshot_origin,
-            (SELECT COUNT(*) FROM connection_heads h
-              JOIN cmdb_resources r ON r.snapshot_id = h.snapshot_id AND r.connection_id = h.connection_id
-             WHERE h.org_id = a.org_id AND h.connection_id = a.id) AS resource_count,
-            (SELECT COUNT(*) FROM connection_heads h
-              JOIN cmdb_findings f ON f.snapshot_id = h.snapshot_id AND f.connection_id = h.connection_id
-              LEFT JOIN finding_workflow_states w ON w.org_id = f.org_id
-                AND w.connection_id = f.connection_id AND w.fingerprint = f.fingerprint
-             WHERE h.org_id = a.org_id AND h.connection_id = a.id
-               AND COALESCE(w.status, f.status) = 'open') AS open_finding_count
+            hs.collected_at AS latest_snapshot_at,
+            hs.origin_kind AS latest_snapshot_origin,
+            COALESCE(rc.resource_count, 0) AS resource_count,
+            COALESCE(fc.open_finding_count, 0) AS open_finding_count
        FROM aws_connections a
+       LEFT JOIN connection_heads hd ON hd.org_id = a.org_id AND hd.connection_id = a.id
+       LEFT JOIN cmdb_snapshots hs ON hs.id = hd.snapshot_id AND hs.connection_id = hd.connection_id
+       LEFT JOIN (
+         SELECT h.org_id, h.connection_id, COUNT(*) AS resource_count
+           FROM connection_heads h
+           JOIN cmdb_resources r ON r.snapshot_id = h.snapshot_id AND r.connection_id = h.connection_id
+          GROUP BY h.org_id, h.connection_id
+       ) rc ON rc.org_id = a.org_id AND rc.connection_id = a.id
+       LEFT JOIN (
+         SELECT h.org_id, h.connection_id, COUNT(*) AS open_finding_count
+           FROM connection_heads h
+           JOIN cmdb_findings f ON f.snapshot_id = h.snapshot_id AND f.connection_id = h.connection_id
+           LEFT JOIN finding_workflow_states w ON w.org_id = f.org_id
+             AND w.connection_id = f.connection_id AND w.fingerprint = f.fingerprint
+          WHERE COALESCE(w.status, f.status) = 'open'
+          GROUP BY h.org_id, h.connection_id
+       ) fc ON fc.org_id = a.org_id AND fc.connection_id = a.id
       WHERE a.org_id = ? AND ${scopeSql("a")}
       ORDER BY a.customer_id, a.created_at, a.id`,
   ).bind(subject.orgId, subject.scopeMode, subject.membershipId).all<ConnectionRow>();

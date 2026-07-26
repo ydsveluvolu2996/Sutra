@@ -120,7 +120,7 @@ export async function listComplianceExceptions(input: {
   const rows = await db.prepare(
     `${EXCEPTION_SELECT}
       WHERE e.org_id = ? AND e.customer_id = ? AND e.connection_id = ?
-      ORDER BY e.requested_at DESC, e.id DESC`,
+      ORDER BY e.requested_at DESC, e.id DESC LIMIT 500`,
   ).bind(input.orgId, input.customerId, input.connectionId).all<ExceptionRow>();
   const records = (rows.results ?? []).map((row) => recordFrom(row));
   if (records.length === 0) return [];
@@ -132,12 +132,18 @@ export async function listComplianceExceptions(input: {
        JOIN compliance_exceptions e ON e.id = a.exception_id AND e.org_id = a.org_id
        JOIN users u ON u.id = a.actor_id
       WHERE e.org_id = ? AND e.customer_id = ? AND e.connection_id = ?
-      ORDER BY a.occurred_at ASC, a.id ASC`,
+      ORDER BY a.occurred_at ASC, a.id ASC LIMIT 4000`,
   ).bind(input.orgId, input.customerId, input.connectionId).all<ActivityRow>();
-  const activity = (activityRows.results ?? []).map(activityFrom);
+  const byException = new Map<string, ComplianceExceptionActivity[]>();
+  for (const row of activityRows.results ?? []) {
+    const entry = activityFrom(row);
+    const current = byException.get(entry.exceptionId) ?? [];
+    current.push(entry);
+    byException.set(entry.exceptionId, current);
+  }
   return records.map((record) => ({
     ...record,
-    activity: activity.filter((entry) => entry.exceptionId === record.id),
+    activity: byException.get(record.id) ?? [],
   }));
 }
 
