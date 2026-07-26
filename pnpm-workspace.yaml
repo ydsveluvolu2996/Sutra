@@ -12,6 +12,13 @@ overrides:
   # GHSA-v2hh-gcrm-f6hx: fast-uri host confusion via literal backslash
   # authority delimiter. Transitive via ajv (build toolchain). Patched in 3.1.4.
   "fast-uri@>=3.0.0 <=3.1.3": 3.1.4
+  # CVE-2026-14257: brace-expansion ReDoS. Patched in 5.0.8. Range-scoped to the
+  # 5.x line (transitive via minimatch@10 in the eslint/typescript-eslint dev
+  # toolchain). The legacy 1.x line (minimatch@3, also eslint-only) is NOT forced
+  # here: brace-expansion 1.x exports a callable default (`module.exports =
+  # expand`) while 5.x exports a named `expand`, so minimatch@3's
+  # `require('brace-expansion')(...)` would throw. No 1.x patch release exists.
+  "brace-expansion@>=5.0.0 <=5.0.7": 5.0.8
 
 allowBuilds:
   esbuild: true

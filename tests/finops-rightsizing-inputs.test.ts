@@ -121,6 +121,9 @@ function line(over: { instanceId: string; day: string; amountUnits: number; curr
     commitmentType: null,
     commitmentId: null,
     commitmentExpiry: null,
+    usageType: null,
+    usageAmountMicros: null,
+    usageUnit: null,
     tags: { resourceId: over.instanceId },
   };
 }

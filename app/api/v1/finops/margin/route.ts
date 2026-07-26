@@ -1,10 +1,12 @@
 import { listConnectionsForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
+import { FinopsExternalCostRepository } from "../../../../../db/finops-external-cost-repository";
 import { CustomerMarginRepository } from "../../../../../db/customer-margin-repository";
 import { buildShowback } from "../../../../../lib/finops-showback";
 import { buildShowbackInput } from "../../../../../lib/finops-showback-inputs";
 import { applyMargin, type CustomerCost, type MarginRate } from "../../../../../lib/finops-margin";
 import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
+import { EXTERNAL_COST_DISCLAIMER } from "../../../../../lib/finops-external-cost";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { authorize } from "../../../../../lib/auth-policy";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
@@ -27,12 +29,23 @@ function badRequest(): never {
  * billed-to-customer amount and margin using the configured per-customer rates.
  * Tenant isolation matches the showback route: org-level `connection:read`
  * gate + a per-customer readability filter. Currencies are never summed.
+ *
+ * Operator-asserted EXTERNAL costs (licences, support, third-party SaaS, the
+ * MSP's own fee) can be folded into the cost base with `?includeExternal=1`.
+ * That is strictly OPT-IN and always broken out: every row reports
+ * cloudCostMicros and externalCostMicros beside the combined costMicros, and
+ * `includesExternalCosts` states which basis the margin was computed on — a
+ * margin number that silently changed meaning would be worse than an incomplete
+ * one. Without the flag the response is byte-for-byte the cloud-only answer.
  */
 export async function GET(request: Request): Promise<Response> {
   try {
     const url = new URL(request.url);
     const period = url.searchParams.get("period");
     if (period !== null && !BILLING_PERIOD.test(period)) badRequest();
+    const includeExternalRaw = url.searchParams.get("includeExternal");
+    if (includeExternalRaw !== null && includeExternalRaw !== "1" && includeExternalRaw !== "0") badRequest();
+    const includeExternal = includeExternalRaw === "1";
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "connection:read");
     const orgId = authenticated.subject.orgId;
@@ -82,13 +95,38 @@ export async function GET(request: Request): Promise<Response> {
       }
     }
 
+    // External cost is an ADDITIONAL, clearly-labelled component of the cost
+    // base, read only when the caller opted in. Per-record customer attribution
+    // wins inside the repository; otherwise the cost belongs to the customer the
+    // connection belongs to. A customer we cannot read is dropped, not guessed.
+    const readableCustomers = new Set(connections.map((connection) => connection.customerId));
+    const externalCosts: CustomerCost[] = [];
+    let externalRecordCount = 0;
+    if (includeExternal && selected !== null) {
+      const externalRepository = new FinopsExternalCostRepository();
+      const perConnection = await Promise.all(
+        connections.map((connection) => externalRepository.customerTotalsForPeriod(
+          { orgId, customerId: connection.customerId },
+          connection.id,
+          selected,
+        )),
+      );
+      for (const totals of perConnection) {
+        for (const total of totals) {
+          if (!readableCustomers.has(total.customerId)) continue;
+          externalCosts.push({ customerId: total.customerId, currency: total.currency, costMicros: total.amountMicros });
+          externalRecordCount += total.recordCount;
+        }
+      }
+    }
+
     const rates: readonly MarginRate[] = (await new CustomerMarginRepository().list(orgId)).map((rate) => ({
       customerId: rate.customerId,
       markupPercent: rate.markupPercent,
       monthlyFeeMicros: rate.monthlyFeeMicros,
       currency: rate.currency,
     }));
-    const margin = applyMargin(customerCosts, rates);
+    const margin = applyMargin(customerCosts, rates, externalCosts);
     return jsonResponse({
       period: selected,
       periods,
@@ -96,6 +134,12 @@ export async function GET(request: Request): Promise<Response> {
       rows: margin.rows.map((row) => ({ ...row, customerName: customerNameById.get(row.customerId) ?? row.customerId })),
       totalsByCurrency: margin.totalsByCurrency,
       rateCount: rates.length,
+      // The basis of this margin, stated explicitly rather than implied.
+      externalCostsRequested: includeExternal,
+      includesExternalCosts: margin.includesExternalCosts,
+      externalRecordCount,
+      costBasis: margin.includesExternalCosts ? "cloud+external" : "cloud-only",
+      externalCostDisclaimer: margin.includesExternalCosts ? EXTERNAL_COST_DISCLAIMER : null,
     });
   } catch (error) {
     return errorResponse(error);

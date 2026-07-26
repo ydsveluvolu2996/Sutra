@@ -117,6 +117,9 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
           commitmentType: null,
           commitmentId: null,
           commitmentExpiry: null,
+          usageType: null,
+          usageAmountMicros: null,
+          usageUnit: null,
           tags: profile.tags,
         });
       }
@@ -134,6 +137,9 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
           commitmentType: null,
           commitmentId: null,
           commitmentExpiry: null,
+          usageType: null,
+          usageAmountMicros: null,
+          usageUnit: null,
           tags: covered.tags,
         });
       }
@@ -152,6 +158,9 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
       commitmentType: null,
       commitmentId: null,
       commitmentExpiry: null,
+      usageType: null,
+      usageAmountMicros: null,
+      usageUnit: null,
       tags: { commitment: "compute-sp-1yr" },
     });
     // One deliberate anomaly day in the latest period.
@@ -169,6 +178,9 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
         commitmentType: null,
         commitmentId: null,
         commitmentExpiry: null,
+        usageType: null,
+        usageAmountMicros: null,
+        usageUnit: null,
         tags: { env: "prod", team: "storefront", app: "web", incident: "load-test" },
       });
     }

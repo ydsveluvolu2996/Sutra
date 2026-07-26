@@ -51,6 +51,10 @@ import postgresFinopsCurCommitmentsSql from "../postgres/migrations/0051_finops_
 import postgresFinopsAllocationRulesSql from "../postgres/migrations/0052_finops_allocation_rules.sql?raw";
 import postgresFinopsCustomerMarginSql from "../postgres/migrations/0053_finops_customer_margin.sql?raw";
 import postgresFinopsBudgetsCustomerScopeSql from "../postgres/migrations/0054_finops_budgets_customer_scope.sql?raw";
+import postgresFinopsResourceSchedulesSql from "../postgres/migrations/0055_finops_resource_schedules.sql?raw";
+import postgresFinopsCurUsageTypeSql from "../postgres/migrations/0056_finops_cur_usage_type.sql?raw";
+import postgresFinopsExternalCostsSql from "../postgres/migrations/0057_finops_external_costs.sql?raw";
+import postgresGovernancePoliciesSql from "../postgres/migrations/0058_governance_policies.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -106,6 +110,10 @@ const migrations = [
   { id: "0052_finops_allocation_rules", source: postgresFinopsAllocationRulesSql },
   { id: "0053_finops_customer_margin", source: postgresFinopsCustomerMarginSql },
   { id: "0054_finops_budgets_customer_scope", source: postgresFinopsBudgetsCustomerScopeSql },
+  { id: "0055_finops_resource_schedules", source: postgresFinopsResourceSchedulesSql },
+  { id: "0056_finops_cur_usage_type", source: postgresFinopsCurUsageTypeSql },
+  { id: "0057_finops_external_costs", source: postgresFinopsExternalCostsSql },
+  { id: "0058_governance_policies", source: postgresGovernancePoliciesSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

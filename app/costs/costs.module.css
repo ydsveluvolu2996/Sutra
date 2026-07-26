@@ -175,3 +175,100 @@
   .w3Grid > button { width: 100%; }
   .w3Mini { font-size: 16px; }
 }
+
+/* External cost sources (appended) */
+.xcTotals { display: flex; flex-wrap: wrap; gap: 18px; margin: 4px 0 10px; }
+.xcTotals > span { display: flex; flex-direction: column; gap: 2px; }
+.xcTotals strong { font-size: 17px; font-weight: 800; color: var(--ink); }
+.xcTotals small { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; }
+.xcList { display: grid; gap: 2px; margin-top: 6px; }
+.xcRow { display: grid; grid-template-columns: minmax(100px, 1.6fr) 80px 70px minmax(80px, 1fr) minmax(88px, auto); gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid var(--line); font-size: 11px; }
+.xcRow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.xcHead { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+.xcPayload { display: block; width: 100%; margin-top: 8px; padding: 9px 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface-soft); font-family: var(--mono); font-size: 11px; line-height: 1.5; color: var(--ink); resize: vertical; }
+.xcResult { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); font-size: 11px; line-height: 1.55; }
+.xcResult p { margin: 0; }
+.xcRejectHead { margin-top: 7px !important; color: var(--muted); font-weight: 700; }
+.xcRejects { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; max-height: 168px; overflow-y: auto; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+
+@media screen and (max-width: 620px) {
+  .xcRow { grid-template-columns: 1fr 1fr; gap: 6px; font-size: 12px; }
+  .xcHead { display: none; }
+  .xcPayload { font-size: 16px; }
+}
+
+/* ---------------------------------------------------------------------------
+   Resource scheduling (advisory). The read-only notice is deliberately the
+   first thing in the panel and styled as information, not as a warning: it is
+   a statement of what Sutra is, not an error condition.
+   ------------------------------------------------------------------------- */
+.schedNotice { display: block; margin: 12px 0 0; padding: 13px 15px; border: 1px solid rgba(15, 118, 110, .22); border-radius: 12px; background: #ecfdf5; color: #0f5c52; font-size: 12px; line-height: 1.55; }
+.schedNotice b { color: #065f46; }
+.schedTotals { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.schedTotals > span { display: grid; gap: 3px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.schedTotals small { color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.schedTotals strong { font-size: 20px; letter-spacing: -.03em; color: var(--ink); }
+.schedList { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.schedList > li { padding: 12px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); }
+.schedRow { display: grid; grid-template-columns: minmax(0, 1.7fr) 118px 128px minmax(0, auto); gap: 12px; align-items: center; }
+.schedRow > span { display: grid; align-content: center; gap: 3px; min-width: 0; }
+.schedRow strong { font-size: 12.5px; }
+.schedRow small { color: var(--muted); font-size: 11px; line-height: 1.45; overflow: hidden; text-overflow: ellipsis; }
+.schedName small { white-space: nowrap; }
+.schedActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 7px; }
+.schedDetail { margin-top: 11px; padding-top: 11px; border-top: 1px solid var(--line); }
+.schedCandidates { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; }
+.schedCandidates > li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); }
+.schedCandidates > li > span { display: grid; gap: 2px; min-width: 0; }
+.schedCandidates > li > span:last-child { text-align: right; justify-items: end; }
+.schedCandidates strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.schedCandidates small { color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+
+/* Phone layer: the schedule row is four tracks with five controls in the last
+   one, so it becomes a labelled card at the same 860px boundary the margin
+   table uses. Nothing scrolls sideways at 375px. */
+@media screen and (max-width: 1050px) {
+  .schedRow { grid-template-columns: minmax(0, 1.4fr) 104px 116px; }
+  .schedActions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media screen and (max-width: 860px) {
+  .schedRow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; }
+  .schedRow > span { align-content: start; gap: 4px; }
+  .schedRow > span::before { content: attr(data-label); color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .schedRow small { white-space: normal; overflow: visible; }
+  .schedName { grid-column: 1 / -1; }
+  .schedName strong { font-size: 14px; font-weight: 750; }
+  .schedName small { white-space: normal; }
+  .schedActions { grid-column: 1 / -1; justify-content: stretch; gap: 12px; }
+  .schedActions::before { content: none; }
+  .schedActions > button { flex: 1 1 120px; min-height: 44px; }
+  .schedCandidates > li { display: grid; gap: 8px; }
+  .schedCandidates > li > span:last-child { text-align: left; justify-items: start; }
+  .schedCandidates strong { white-space: normal; }
+}
+
+/* AI/LLM token cost + GPU cost panel (finops-ai-gpu-panel.tsx). Appended; no
+   existing rule above is modified. The model table scrolls inside itself on
+   narrow viewports so the page body never scrolls sideways. */
+.aigTable { display: grid; gap: 2px; margin-top: 12px; }
+.aigRow { display: grid; grid-template-columns: minmax(0, 2fr) minmax(74px, .8fr) minmax(64px, .6fr) minmax(78px, .8fr); gap: 10px; align-items: center; padding: 9px 4px; border-bottom: 1px solid var(--line); font-size: 11.5px; }
+.aigRow > span { display: grid; gap: 3px; min-width: 0; }
+.aigRow > span:not(:first-child) { justify-items: end; text-align: right; font-variant-numeric: tabular-nums; }
+.aigRow strong { font-size: 12px; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aigRow small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.aigHead { border-bottom: 1px solid var(--line-dark); font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
+.aigHead > span { white-space: nowrap; }
+.aigBar { display: block; width: 100%; height: 3px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.aigBar > b { display: block; height: 100%; border-radius: 3px; background: var(--accent, #0f766e); }
+.aigWarn { color: var(--muted); font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.aigNotice { margin: 12px 0 0; padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-soft); color: var(--muted); font-size: 11px; line-height: 1.55; }
+.aigNotice b { color: var(--ink); }
+.aigRegions { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 12px 0 0; font-size: 11px; color: var(--muted); }
+.aigRegions > span { display: grid; gap: 2px; }
+.aigRegions b { color: var(--ink); font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 800; }
+@media screen and (max-width: 860px) {
+  .aigRow { grid-template-columns: minmax(0, 1.5fr) minmax(66px, 1fr) minmax(58px, .8fr); }
+  .aigRow > span:last-child { grid-column: 2 / -1; justify-items: start; text-align: left; }
+  .aigHead > span:last-child { display: none; }
+  .aigRow strong { white-space: normal; }
+}

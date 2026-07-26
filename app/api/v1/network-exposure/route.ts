@@ -3,7 +3,7 @@ import { LatencySampleRepository } from "../../../../db/latency-sample-repositor
 import { assertSessionCapability } from "../../../../lib/api-auth";
 import { buildNetworkExposure } from "../../../../lib/aws-network-exposure";
 import { buildNetworkExposureEvidence } from "../../../../lib/aws-network-exposure-inputs";
-import { buildReachabilityLatency } from "../../../../lib/reachability-latency";
+import { buildReachabilityLatency, latencyMeasurementFor } from "../../../../lib/reachability-latency";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -30,18 +30,23 @@ export async function GET(request: Request): Promise<Response> {
     const evidence = buildNetworkExposureEvidence(state.resources, { tenant: connection.customerId });
     const exposure = buildNetworkExposure(evidence);
 
-    // Endpoint latency samples ingested via POST /api/v1/latency-samples (from a
-    // CloudWatch exporter, APM agent, or synthetic monitor). Absent samples ->
-    // the overlay reports UNKNOWN rather than inventing timings.
+    // Endpoint latency samples are ingested via POST /api/v1/latency-samples (a
+    // CloudWatch exporter, APM agent, or synthetic monitor). No such producer
+    // ships in this repository — it is an operator-installed integration — so a
+    // normal deployment holds zero samples until one is wired up. Absent samples
+    // -> `latencyMeasurement.available: false` with the reason naming the missing
+    // producer, and the overlay reports UNKNOWN rather than inventing timings.
     const latencySamples = await new LatencySampleRepository().recentForConnection(
       { orgId: actor.orgId, customerId: connection.customerId },
       connectionId,
     );
     const latency = buildReachabilityLatency(latencySamples);
+    const latencyMeasurement = latencyMeasurementFor(latencySamples.length);
 
     return jsonResponse({
       exposure,
       latency,
+      latencyMeasurement,
       inputs: {
         networkInterfaces: exposure.summary.resources,
         securityGroups: Object.keys(evidence.securityGroups).length,

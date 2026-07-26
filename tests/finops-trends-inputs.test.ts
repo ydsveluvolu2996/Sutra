@@ -20,6 +20,9 @@ function line(over: Partial<NormalizedCurLine> & { usageStartIso: string; amount
     commitmentType: over.commitmentType ?? null,
     commitmentId: over.commitmentId ?? null,
     commitmentExpiry: over.commitmentExpiry ?? null,
+    usageType: over.usageType ?? null,
+    usageAmountMicros: over.usageAmountMicros ?? null,
+    usageUnit: over.usageUnit ?? null,
     tags: over.tags ?? {},
   };
 }

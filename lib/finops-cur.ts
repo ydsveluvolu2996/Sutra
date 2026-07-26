@@ -32,6 +32,22 @@ export interface NormalizedCurLine {
   readonly commitmentType: string | null;
   readonly commitmentId: string | null; // FOCUS CommitmentDiscountId / CUR reservation or SP ARN; null when absent
   readonly commitmentExpiry: string | null; // ISO expiry (FOCUS CommitmentDiscountExpirationDate / CUR end-time) when present
+  // Usage-type string verbatim from the billing file (CUR line_item_usage_type,
+  // FOCUS SkuId/SkuPriceId). This is the ONLY column that names the metered
+  // thing — the instance type behind compute spend ("USE1-BoxUsage:p4d.24xlarge")
+  // and the model + token direction behind Bedrock spend
+  // ("USE1-InputTokenCount-anthropic.claude-3-sonnet"). null when the billing
+  // file has no usage-type column; nothing is inferred from its absence.
+  readonly usageType: string | null;
+  // Metered QUANTITY (not money) as integer micro-units, bigint-safe decimal
+  // string, mirroring amountMicros: CUR line_item_usage_amount, FOCUS
+  // ConsumedQuantity/PricingQuantity. Token counts and GPU-hours are quantities,
+  // never derived from cost. null when the file carries no quantity column.
+  readonly usageAmountMicros: string | null;
+  // Unit the quantity is expressed in, verbatim (CUR pricing_unit, FOCUS
+  // ConsumedUnit/PricingUnit) — e.g. "tokens", "1K tokens", "Hrs". Without it a
+  // quantity is NOT rescaled; consumers must disclose the unit as unknown.
+  readonly usageUnit: string | null;
   readonly tags: Readonly<Record<string, string>>;
 }
 
@@ -160,6 +176,28 @@ function commitmentIdFor(columns: ColumnMap, cell: (index: number) => string): s
   return null;
 }
 
+/**
+ * Verbatim text from an optional column, trimmed; null when the column is
+ * absent or the cell is blank. Never "" — absence stays distinguishable.
+ */
+function optionalTextFor(index: number, cell: (index: number) => string, maxLength: number): string | null {
+  if (index < 0) return null;
+  const value = cell(index);
+  return value.length > 0 ? value.slice(0, maxLength) : null;
+}
+
+/**
+ * Metered quantity as integer micro-units. A blank cell or a non-decimal cell
+ * yields null — a quantity is never repaired, defaulted to zero, or back-derived
+ * from cost. Unlike the money columns a bad quantity does NOT reject the row:
+ * the cost is still trustworthy, only the quantity is unavailable.
+ */
+function usageAmountMicrosFor(columns: ColumnMap, cell: (index: number) => string): string | null {
+  if (columns.usageAmount < 0) return null;
+  const raw = cell(columns.usageAmount);
+  return raw.length === 0 ? null : toMicros(raw);
+}
+
 /** Commitment expiry normalized to ISO when parseable; raw string otherwise; null when absent. */
 function commitmentExpiryFor(columns: ColumnMap, cell: (index: number) => string): string | null {
   if (columns.commitmentExpiry < 0) return null;
@@ -192,6 +230,10 @@ interface ColumnMap {
   readonly reservationArn: number; // CUR reservation ARN
   readonly savingsPlanArn: number; // CUR savings-plan ARN
   readonly commitmentExpiry: number; // FOCUS expiry date / CUR reservation|SP end-time
+  // Usage-type / metered-quantity sources (each -1 when absent).
+  readonly usageType: number;
+  readonly usageAmount: number;
+  readonly usageUnit: number;
   readonly tagColumns: readonly { readonly index: number; readonly key: string }[];
 }
 
@@ -226,6 +268,12 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       reservationArn: -1,
       savingsPlanArn: -1,
       commitmentExpiry: firstIndex("CommitmentDiscountExpirationDate"),
+      // FOCUS 1.0 has no usage-type column; SkuId/SkuPriceId is the nearest
+      // metered-SKU identifier. ChargeDescription is deliberately NOT used as a
+      // fallback — it is free text and would make SKU parsing guesswork.
+      usageType: firstIndex("SkuId", "SkuPriceId"),
+      usageAmount: firstIndex("ConsumedQuantity", "PricingQuantity"),
+      usageUnit: firstIndex("ConsumedUnit", "PricingUnit"),
       tagColumns: header.flatMap((name, index) => (name.startsWith("Tags/") ? [{ index, key: name.slice(5) }] : [])),
     };
   }
@@ -250,6 +298,9 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       reservationArn: firstIndex("reservation_reservation_a_r_n", "reservation_reservationarn", "reservation_arn"),
       savingsPlanArn: firstIndex("savings_plan_savings_plan_a_r_n", "savings_plan_savings_plan_arn", "savings_plan_arn"),
       commitmentExpiry: firstIndex("reservation_end_time", "savings_plan_end_time"),
+      usageType: firstIndex("line_item_usage_type", "usage_type"),
+      usageAmount: firstIndex("line_item_usage_amount", "usage_amount"),
+      usageUnit: firstIndex("pricing_unit", "line_item_usage_unit", "product_usagetype_unit"),
       tagColumns: header.flatMap((name, index) =>
         name.startsWith("resource_tags_user_") ? [{ index, key: name.slice("resource_tags_user_".length) }] : []),
     };
@@ -315,6 +366,9 @@ export function parseCurCsv(text: string): CurParseResult | { readonly error: st
       commitmentType: commitmentTypeFor(columns, cell),
       commitmentId: commitmentIdFor(columns, cell),
       commitmentExpiry: commitmentExpiryFor(columns, cell),
+      usageType: optionalTextFor(columns.usageType, cell, 256),
+      usageAmountMicros: usageAmountMicrosFor(columns, cell),
+      usageUnit: optionalTextFor(columns.usageUnit, cell, 64),
       tags,
     });
     currencies.add(currency);

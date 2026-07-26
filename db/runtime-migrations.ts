@@ -57,6 +57,10 @@ import finopsCurCommitmentsSchemaSql from "../drizzle/0057_finops_cur_commitment
 import finopsAllocationRulesSchemaSql from "../drizzle/0058_finops_allocation_rules.sql?raw";
 import finopsCustomerMarginSchemaSql from "../drizzle/0059_finops_customer_margin.sql?raw";
 import finopsBudgetsCustomerScopeSchemaSql from "../drizzle/0060_finops_budgets_customer_scope.sql?raw";
+import finopsResourceSchedulesSchemaSql from "../drizzle/0061_finops_resource_schedules.sql?raw";
+import finopsCurUsageTypeSchemaSql from "../drizzle/0062_finops_cur_usage_type.sql?raw";
+import finopsExternalCostsSchemaSql from "../drizzle/0063_finops_external_costs.sql?raw";
+import governancePoliciesSchemaSql from "../drizzle/0064_governance_policies.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -131,6 +135,10 @@ const migrations = [
   { id: "0058_finops_allocation_rules", statements: statementsFrom(finopsAllocationRulesSchemaSql) },
   { id: "0059_finops_customer_margin", statements: statementsFrom(finopsCustomerMarginSchemaSql) },
   { id: "0060_finops_budgets_customer_scope", statements: statementsFrom(finopsBudgetsCustomerScopeSchemaSql) },
+  { id: "0061_finops_resource_schedules", statements: statementsFrom(finopsResourceSchedulesSchemaSql) },
+  { id: "0062_finops_cur_usage_type", statements: statementsFrom(finopsCurUsageTypeSchemaSql) },
+  { id: "0063_finops_external_costs", statements: statementsFrom(finopsExternalCostsSchemaSql) },
+  { id: "0064_governance_policies", statements: statementsFrom(governancePoliciesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

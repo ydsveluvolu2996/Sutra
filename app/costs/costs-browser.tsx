@@ -6,6 +6,9 @@ import { VisibilityPanels } from "./visibility-panels";
 import { FinopsMorePanels } from "./finops-more-panels";
 import { FinopsCommitmentsPanels } from "./finops-commitments-panels";
 import { FinopsWave3Panels } from "./finops-wave3-panels";
+import FinopsAiGpuPanel from "./finops-ai-gpu-panel";
+import FinopsSchedulePanel from "./finops-schedule-panel";
+import FinopsExternalCostPanel from "./finops-external-cost-panel";
 import type { StoredCostSnapshot } from "../../lib/cost-types";
 import { buildCostOptimizations } from "../../lib/aws-cost-optimization";
 import { compactIdentifier, formatTimestamp, usePilotState } from "../components/use-pilot-state";
@@ -265,6 +268,17 @@ export function CostsBrowser() {
       <FinopsMorePanels connectionId={connectionId} />
       <FinopsCommitmentsPanels connectionId={connectionId} />
       <FinopsWave3Panels connectionId={connectionId} />
+      {/* AI/LLM token + GPU spend, schedule savings, and operator-asserted
+          external costs. These panels require a resolved connection, so they
+          are gated here rather than each re-checking for null. Every one
+          discloses when its own input data is absent. */}
+      {connectionId !== null ? (
+        <>
+          <FinopsAiGpuPanel connectionId={connectionId} />
+          <FinopsSchedulePanel connectionId={connectionId} />
+          <FinopsExternalCostPanel connectionId={connectionId} />
+        </>
+      ) : null}
       <FinopsPanels connectionId={connectionId} />
     </>
   );

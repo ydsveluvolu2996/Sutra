@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { NetworkExposureReport, ResourceExposure } from "../../lib/aws-network-exposure";
-import type { LatencyReport } from "../../lib/reachability-latency";
+import type { LatencyMeasurement, LatencyReport } from "../../lib/reachability-latency";
 import { usePilotState } from "../components/use-pilot-state";
 
 interface NetworkExposureResponse {
   readonly exposure: NetworkExposureReport;
   readonly latency: LatencyReport;
+  // `available: false` + a reason naming the missing producer, mirroring the
+  // FinOps amortized/commitments panels: never show a timing we did not measure.
+  readonly latencyMeasurement?: LatencyMeasurement;
   readonly inputs: {
     readonly networkInterfaces: number;
     readonly securityGroups: number;
@@ -31,6 +34,12 @@ function statusClass(exposure: ResourceExposure["exposure"]): string {
 
 function statusLabel(exposure: ResourceExposure["exposure"]): string {
   return exposure === "internet-exposed" ? "Internet-exposed" : exposure === "unknown" ? "Unknown" : "Not exposed";
+}
+
+// A kind with no samples has a null p95. Rendering a bare dash there reads as
+// "fine"; say what is true instead.
+function p95Cell(p95Ms: number | null): string {
+  return p95Ms === null ? "not measured" : `${p95Ms} ms`;
 }
 
 export function NetworkExposureBrowser() {
@@ -61,6 +70,10 @@ export function NetworkExposureBrowser() {
     const task = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(task);
   }, [load]);
+
+  // Trust the server's explicit flag; fall back to "not measured" when it is
+  // absent or when no endpoint carries a sample — never assume measurement.
+  const latencyAvailable = (data?.latencyMeasurement?.available ?? false) && (data?.latency.summary.endpoints ?? 0) > 0;
 
   const exposed = (data?.exposure.resources ?? [])
     .slice()
@@ -125,9 +138,11 @@ export function NetworkExposureBrowser() {
           )}
 
           <section className="panel">
-            <h2>Endpoint latency</h2>
-            {data.latency.summary.endpoints === 0 ? (
-              <p>No latency samples have been collected yet, so every endpoint is <strong>unknown</strong> — response, application, and database latency light up once a CloudWatch/APM latency collector is configured. Sutra never fabricates timings.</p>
+            <h2>Endpoint latency <span className={`status-pill ${latencyAvailable ? "status-positive" : ""}`}>{latencyAvailable ? `${data.inputs.latencySamples} samples` : "not measured"}</span></h2>
+            {!latencyAvailable ? (
+              <p>
+                <strong>Latency was not measured.</strong> No latency samples have been ingested for this connection, so response, application, and database latency are all <strong>unknown</strong> — not fast, not zero, simply unobserved. Sutra never probes endpoints and never fabricates timings: this overlay requires an operator-installed collector (CloudWatch metric exporter, APM agent, or synthetic monitor) that posts observations to <code>POST /api/v1/latency-samples</code> for this connection. No such collector ships with Sutra.
+              </p>
             ) : (
               <div className="table-scroll">
                 <table className="data-table">
@@ -137,9 +152,9 @@ export function NetworkExposureBrowser() {
                       <tr key={endpoint.endpointRef}>
                         <td><code>{endpoint.endpointRef}</code></td>
                         <td>{endpoint.worstStatus}</td>
-                        <td>{endpoint.metrics.response.p95Ms ?? "—"}</td>
-                        <td>{endpoint.metrics.application.p95Ms ?? "—"}</td>
-                        <td>{endpoint.metrics.database.p95Ms ?? "—"}</td>
+                        <td>{p95Cell(endpoint.metrics.response.p95Ms)}</td>
+                        <td>{p95Cell(endpoint.metrics.application.p95Ms)}</td>
+                        <td>{p95Cell(endpoint.metrics.database.p95Ms)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -148,7 +163,7 @@ export function NetworkExposureBrowser() {
             )}
           </section>
 
-          <p className="page-footnote">Inputs: {data.inputs.networkInterfaces} interfaces · {data.inputs.securityGroups} security groups · {data.inputs.subnets} subnets · {data.inputs.routeTables} route tables · {data.inputs.internetGateways} internet gateways · {data.inputs.loadBalancers} load balancers · {data.inputs.dnsRecords} DNS records{data.scannedAt !== null ? ` · collected ${data.scannedAt}` : ""}</p>
+          <p className="page-footnote">Inputs: {data.inputs.networkInterfaces} interfaces · {data.inputs.securityGroups} security groups · {data.inputs.subnets} subnets · {data.inputs.routeTables} route tables · {data.inputs.internetGateways} internet gateways · {data.inputs.loadBalancers} load balancers · {data.inputs.dnsRecords} DNS records · {data.inputs.latencySamples} latency samples{data.scannedAt !== null ? ` · collected ${data.scannedAt}` : ""}</p>
         </>
       ) : null}
     </>

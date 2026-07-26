@@ -51,6 +51,11 @@ interface LineRow {
   commitment_type: string | null;
   commitment_id: string | null;
   commitment_expiry: string | null;
+  usage_type: string | null;
+  // usage_amount_micros is a bigint/integer column: postgres returns it as a
+  // string, SQLite as a number — coerced back to a bigint-safe micro string.
+  usage_amount_micros: string | number | null;
+  usage_unit: string | null;
   tags_json: string;
 }
 
@@ -155,8 +160,8 @@ export class FinopsWorkspaceRepository {
     ).bind(scope.orgId, scope.customerId, connectionId, billingPeriod).run();
     const insert = db.prepare(
       `INSERT INTO finops_cur_lines
-         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, tags_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, usage_type, usage_amount_micros, usage_unit, tags_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (let offset = 0; offset < lines.length; offset += BATCH_CHUNK) {
       const chunk = lines.slice(offset, offset + BATCH_CHUNK).map((line) => insert.bind(
@@ -169,6 +174,9 @@ export class FinopsWorkspaceRepository {
         typeof line.commitmentType === "string" ? line.commitmentType.slice(0, 64) : null,
         typeof line.commitmentId === "string" ? line.commitmentId.slice(0, 256) : null,
         typeof line.commitmentExpiry === "string" ? line.commitmentExpiry.slice(0, 64) : null,
+        typeof line.usageType === "string" ? line.usageType.slice(0, 256) : null,
+        typeof line.usageAmountMicros === "string" && MICROS.test(line.usageAmountMicros) ? line.usageAmountMicros : null,
+        typeof line.usageUnit === "string" ? line.usageUnit.slice(0, 64) : null,
         JSON.stringify(line.tags), timestamp,
       ));
       await db.batch(chunk);
@@ -201,7 +209,7 @@ export class FinopsWorkspaceRepository {
     if (!BILLING_PERIOD.test(billingPeriod)) invalid();
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, tags_json
+      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, usage_type, usage_amount_micros, usage_unit, tags_json
          FROM finops_cur_lines
         WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND billing_period = ?
         ORDER BY usage_start ASC, line_item_id ASC LIMIT ?`,
@@ -230,6 +238,9 @@ export class FinopsWorkspaceRepository {
         commitmentType: nonEmptyText(row.commitment_type),
         commitmentId: nonEmptyText(row.commitment_id),
         commitmentExpiry: nonEmptyText(row.commitment_expiry),
+        usageType: nonEmptyText(row.usage_type),
+        usageAmountMicros: optionalMicros(row.usage_amount_micros),
+        usageUnit: nonEmptyText(row.usage_unit),
         tags,
       }];
     });

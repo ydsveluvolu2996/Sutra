@@ -127,6 +127,9 @@ function line(over: { id: string; amount: number; currency?: string }): Normaliz
     commitmentType: null,
     commitmentId: null,
     commitmentExpiry: null,
+    usageType: null,
+    usageAmountMicros: null,
+    usageUnit: null,
     tags: { resourceId: over.id },
   };
 }

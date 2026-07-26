@@ -19,6 +19,9 @@ function line(
     commitmentType: overrides.commitmentType ?? null,
     commitmentId: overrides.commitmentId ?? null,
     commitmentExpiry: overrides.commitmentExpiry ?? null,
+    usageType: overrides.usageType ?? null,
+    usageAmountMicros: overrides.usageAmountMicros ?? null,
+    usageUnit: overrides.usageUnit ?? null,
     tags: overrides.tags ?? {},
   };
 }

@@ -169,9 +169,9 @@ describe("finops insights", () => {
       ...["01", "02", "03", "04"].map((day, index) => ({
         lineItemId: `d${index}`, usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage",
         usageStartIso: `2026-07-${day}T00:00:00.000Z`, amountMicros: "2000000", currency: "USD", region: null,
-        amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, tags: {},
+        amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, usageType: null, usageAmountMicros: null, usageUnit: null, tags: {},
       })),
-      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", region: null, amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, tags: {} },
+      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", region: null, amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, usageType: null, usageAmountMicros: null, usageUnit: null, tags: {} },
     ];
     const result = detectAnomalies(spikeLines);
     assert.equal(result.anomalies.length, 1);

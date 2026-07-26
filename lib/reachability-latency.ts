@@ -69,6 +69,32 @@ const DISCLAIMER =
   "not evidence of speed. The engine does not probe; it summarizes observations " +
   "the collector supplied.";
 
+// Whether latency was measured at all for a scope. Sutra never probes: samples
+// arrive only from an operator-installed collector that POSTs them, and no such
+// collector ships in this repository. With zero samples the honest answer is
+// "not measured, and here is exactly what is missing" — not a 0ms, not a dash
+// that reads as fast, not an empty table that reads as "no problems".
+export interface LatencyMeasurement {
+  readonly available: boolean;
+  readonly reason: string | null;
+}
+
+export const LATENCY_PRODUCER_ENDPOINT = "POST /api/v1/latency-samples";
+
+export const LATENCY_NOT_MEASURED_REASON =
+  "Latency was not measured: no latency samples have been ingested for this scope. " +
+  "Sutra does not probe endpoints — an operator-installed collector (CloudWatch metric " +
+  `exporter, APM agent, or synthetic monitor) must send observations to ${LATENCY_PRODUCER_ENDPOINT}. ` +
+  "No such collector ships with Sutra, so response, application, and database latency stay " +
+  "unknown until one is configured.";
+
+export function latencyMeasurementFor(sampleCount: number): LatencyMeasurement {
+  if (!Number.isFinite(sampleCount) || sampleCount <= 0) {
+    return { available: false, reason: LATENCY_NOT_MEASURED_REASON };
+  }
+  return { available: true, reason: null };
+}
+
 function validThreshold(value: LatencyThreshold): boolean {
   return (
     Number.isFinite(value.degradedMs) && Number.isFinite(value.slowMs) &&

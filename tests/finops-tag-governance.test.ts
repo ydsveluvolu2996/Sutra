@@ -102,6 +102,9 @@ function curLine(over: { amount: number; currency: string; tags: Record<string, 
     commitmentType: null,
     commitmentId: null,
     commitmentExpiry: null,
+    usageType: null,
+    usageAmountMicros: null,
+    usageUnit: null,
     tags: over.tags,
   };
 }

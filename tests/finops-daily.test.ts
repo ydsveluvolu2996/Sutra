@@ -18,6 +18,9 @@ function line(usageStartIso: string, amountMicros: string): NormalizedCurLine {
     commitmentType: null,
     commitmentId: null,
     commitmentExpiry: null,
+    usageType: null,
+    usageAmountMicros: null,
+    usageUnit: null,
     tags: {},
   };
 }

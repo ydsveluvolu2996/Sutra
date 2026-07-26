@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   buildReachabilityLatency,
   DEFAULT_LATENCY_THRESHOLDS,
+  LATENCY_PRODUCER_ENDPOINT,
+  latencyMeasurementFor,
   type LatencySample,
 } from "../lib/reachability-latency.ts";
 
@@ -15,6 +17,27 @@ test("no samples produces no endpoints and an all-zero summary", () => {
   assert.deepEqual(report.endpoints, []);
   assert.deepEqual(report.summary, { endpoints: 0, healthy: 0, degraded: 0, slow: 0, unknown: 0 });
   assert.equal(report.schema, "sutra.reachability-latency.v1");
+});
+
+test("zero samples reports unavailable with a reason naming the missing producer", () => {
+  const measurement = latencyMeasurementFor(0);
+  assert.equal(measurement.available, false);
+  assert.equal(typeof measurement.reason, "string");
+  // The reason must state that latency was NOT measured and name the exact
+  // ingest path an operator has to install, not merely be empty.
+  assert.match(measurement.reason ?? "", /not measured/iu);
+  assert.ok((measurement.reason ?? "").includes(LATENCY_PRODUCER_ENDPOINT));
+  assert.equal(LATENCY_PRODUCER_ENDPOINT, "POST /api/v1/latency-samples");
+  // And it must not fabricate a value: no zero/dash stand-in for a measurement.
+  const report = buildReachabilityLatency([]);
+  assert.deepEqual(report.endpoints, []);
+  assert.equal(report.summary.healthy, 0);
+
+  for (const count of [-1, Number.NaN]) {
+    assert.equal(latencyMeasurementFor(count).available, false);
+  }
+  const measured = latencyMeasurementFor(1);
+  assert.deepEqual(measured, { available: true, reason: null });
 });
 
 test("a kind with no samples is 'unknown', never defaulted to 'healthy'", () => {
