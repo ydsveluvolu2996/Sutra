@@ -28,19 +28,24 @@ export function AccountMenu({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
+    // pointerdown (not mousedown) so a touch outside the panel dismisses it on
+    // the first tap instead of waiting for the emulated mouse event.
+    const onPointerDown = (event: PointerEvent) => {
       if (containerRef.current !== null && !containerRef.current.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
     };
-    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
@@ -54,6 +59,7 @@ export function AccountMenu({
         aria-expanded={open}
         aria-label={`Account menu for ${displayName}`}
         onClick={() => setOpen((value) => !value)}
+        ref={triggerRef}
       >
         {initials}
       </button>

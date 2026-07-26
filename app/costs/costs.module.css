@@ -92,9 +92,72 @@
 .w3RuleList { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
 .w3RuleList li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); font-size: 11px; }
 .w3RuleList li span { overflow: hidden; text-overflow: ellipsis; }
+.w3RuleOff { opacity: .58; background: transparent !important; border-style: dashed !important; }
+.w3RuleControls { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; overflow: visible !important; }
+.w3RuleControls .w3Mini { width: 54px; flex: 0 0 54px; text-align: center; }
+.w3Switch { display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); cursor: pointer; }
+.w3Switch input { width: 15px; height: 15px; margin: 0; accent-color: #0f766e; cursor: pointer; }
+.w3Hint { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.budgetConfirm { display: inline-flex; align-items: center; gap: 6px; }
 .marginTable { display: grid; gap: 2px; margin-top: 6px; }
-.marginRow { display: grid; grid-template-columns: minmax(90px, 1.3fr) 90px 68px 68px 90px minmax(90px, 1fr) 60px; gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid #edf0fa; font-size: 11px; }
+.marginRow { display: grid; grid-template-columns: minmax(90px, 1.3fr) 90px 68px 68px 90px minmax(90px, 1fr) minmax(104px, auto); gap: 10px; align-items: center; padding: 8px 4px; border-bottom: 1px solid #edf0fa; font-size: 11px; }
+.w3RowActions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; overflow: visible !important; }
 .marginRow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marginHead { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; border-bottom: 1px solid var(--line); }
 .w3Mini { width: 100%; min-height: 28px; padding: 0 7px; border: 1px solid var(--line-dark); border-radius: 6px; background: var(--surface-soft); font-size: 11px; color: var(--ink); }
-@media (max-width: 900px) { .marginRow { grid-template-columns: minmax(80px, 1.2fr) 74px 58px 58px 74px minmax(74px, 1fr) 52px; gap: 6px; } }
+@media (max-width: 900px) { .marginRow { grid-template-columns: minmax(80px, 1.2fr) 74px 58px 58px 74px minmax(74px, 1fr) minmax(92px, auto); gap: 6px; } .w3RuleList li { flex-wrap: wrap; } }
+
+/* ---------------------------------------------------------------------------
+   Phone layer. Every rule is inside a max-width query, so the desktop FinOps
+   layout is unchanged.
+
+   The margin table is the one grid here that is edited rather than read: seven
+   tracks with two number inputs and two buttons need ~546px even after the
+   900px tightening, against ~295px of usable width inside a panel on a 375px
+   viewport. Horizontal scrolling while typing into a row is hostile, so each
+   row becomes a labelled card instead — the same data-label/::before pattern
+   the Access tables use. The visual header row is hidden from sight but kept
+   for assistive technology, because each cell now carries its own label.
+   ------------------------------------------------------------------------- */
+@media screen and (max-width: 860px) {
+  .windowTabs button { min-height: 44px; padding: 0 16px; font-size: 12px; }
+  .budgetConfirm { gap: 12px; }
+  .w3Input { min-height: 44px; }
+  .w3Mini { min-height: 44px; }
+  .trendChart { overflow-x: auto; scrollbar-width: thin; scrollbar-color: rgba(15, 118, 110, .45) rgba(15, 118, 110, .12); }
+  .trendChart::-webkit-scrollbar { -webkit-appearance: none; height: 9px; }
+  .trendChart::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(15, 118, 110, .45); }
+  .trendColumn { flex: 0 0 46px; }
+}
+
+/* 860px is where the sidebar collapses and the Access tables switch to cards;
+   the margin table follows the same boundary. */
+@media screen and (max-width: 860px) {
+  .marginTable { gap: 10px; margin-top: 12px; }
+  .marginHead { width: 1px; height: 1px; position: absolute; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); border: 0; white-space: nowrap; }
+  .marginRow { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; align-items: start; padding: 14px 13px; border: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); font-size: 13px; }
+  .marginRow > span { display: grid; align-content: start; gap: 4px; overflow: visible; white-space: normal; }
+  .marginRow > span::before { content: attr(data-label); color: var(--muted); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  .marginName { grid-column: 1 / -1; font-size: 14px; font-weight: 750; }
+  .marginRow > span:nth-child(6) { grid-column: 1 / -1; }
+  /* `.marginRow > span` above turns every cell into a grid; the action cell has
+     to be re-declared as a flex row or Save/Clear stack on top of each other. */
+  .marginRow > .w3RowActions { display: flex; grid-column: 1 / -1; justify-content: stretch; gap: 12px; margin-top: 2px; }
+  .marginRow > .w3RowActions::before { content: none; }
+  .w3RowActions > button { flex: 1 1 0; min-height: 44px; }
+  .w3RuleList li { display: grid; gap: 11px; padding: 13px; font-size: 12.5px; }
+  .w3RuleList li span { overflow: visible; }
+  .w3RuleControls { flex-wrap: wrap; justify-content: flex-start; gap: 12px; }
+  .w3RuleControls .w3Mini { width: 88px; flex: 0 0 88px; text-align: center; }
+  .w3RuleControls > button { flex: 1 1 110px; min-height: 44px; }
+  .w3Switch { min-height: 44px; font-size: 11px; }
+  .metricRow { flex-wrap: wrap; }
+  .metricRow .miniSpark { flex: 1 1 100%; width: 100%; }
+}
+
+@media screen and (max-width: 620px) {
+  .w3Grid { display: grid; gap: 10px; }
+  .w3Input { flex: none; width: 100%; min-width: 0; font-size: 16px; }
+  .w3Grid > button { width: 100%; }
+  .w3Mini { font-size: 16px; }
+}

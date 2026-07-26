@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { postAuth, readAuthResponse, useSession } from "../components/use-session";
+import { AccountRecovery } from "./account-recovery";
 import { CustomerAssignments } from "./customer-assignments";
 import { copyInvitationUrl, invitationEmailHref, shareInvitation } from "./invitation-sharing";
 
@@ -592,6 +593,10 @@ export function AccessBrowser() {
           </div>
         )}
       </section>
+
+      {/* The documented escape hatch for a locked-out or MFA-lost member. It
+          self-gates on the capabilities the recovery routes actually require. */}
+      <AccountRecovery />
     </>
   );
 }

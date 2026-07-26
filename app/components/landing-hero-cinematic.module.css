@@ -1,0 +1,541 @@
+/* ==================================================================== *
+ * LandingHeroCinematic — DESIGN PLAN
+ * ====================================================================
+ * A full-bleed cinematic band that opens the public marketing page, above
+ * the established hero ("See every risk. Prove every path." + the live
+ * security-graph card). The motif is a wide TUNNEL OF LIGHTS: an upper mass
+ * of dots descending from the top edge and a lower mass rising from the
+ * bottom, both receding to a horizon across the vertical middle, leaving a
+ * calm dark band where the type sits. The genre is borrowed; the palette is
+ * entirely Sutra's own.
+ *
+ * ---- 1. PALETTE — six named values, ONE accent --------------------
+ *   --hc-ground  #050b18  near-black at the extreme top/bottom edges
+ *   --hc-navy    #071021  deep navy body of the band
+ *   --hc-navy-2  #0a1628  lighter navy pooled along the horizon
+ *   --hc-ink     #f4f7ff  primary type (the small lead line)
+ *   --hc-muted   #a9b4d0  secondary type (subhead, cue caption)
+ *   --hc-cyan    #22d3ee  THE SINGLE ACCENT — display line, horizon glow,
+ *                         focus ring, cue wheel. Nothing else is saturated.
+ *   Support tints, used only by the canvas field and chip rims (they are
+ *   the same hue family as the accent, not extra colours):
+ *   --hc-dot     #bae6fd   --hc-dot-2  #7dd3fc   --hc-core  #e0f2fe
+ *   --hc-violet  #8b5cf6  deliberately the ONLY non-cyan hue, and only ever
+ *                         as a blurred sub-10%-alpha nebula wash.
+ *
+ * ---- 2. TYPE — four roles, pinned ---------------------------------
+ *   .lead     clamp(15px, 2vw, 27px) / 400 / -.012em / 1.32 / max 46ch
+ *   .display  clamp(38px, 7vw, 92px) / 680 / -.045em / 0.98 / max 20ch
+ *             `text-wrap: balance` — the display line must never orphan.
+ *   .sub      clamp(13px, 1.1vw, 16px) / 400 / 1.62 / max 64ch
+ *             (running text held near a 65-character measure)
+ *   .chip     10.5px / 620 / .01em, uppercase-free, nowrap
+ *   .cueLabel 9.5px / mono / .14em / uppercase — a label, not reading text
+ *   Nothing in the band is smaller than 9.5px, and nothing that is a
+ *   SENTENCE is smaller than 13px.
+ *
+ * ---- 3. LAYOUT — one spacing scale, gap only ----------------------
+ *   --hc-s1 6px  --hc-s2 10px  --hc-s3 14px  --hc-s4 18px  --hc-s5 26px
+ *   Vertical rhythm comes exclusively from flex/grid `gap` on .stage,
+ *   .copy, .head and .chips. NO per-element vertical margins — they
+ *   collapse and double, which is what made the spacing read as uneven.
+ *   The two optical offsets that DO use margin are horizontal and
+ *   intentional: .lead is nudged right and .display left of centre so the
+ *   pair reads as staged rather than stacked.
+ *   Structure: one `isolation: isolate` stage of full-bleed layers —
+ *   ground, nebula, <canvas> field, scrim, vignette — then the copy
+ *   column, then a single scroll cue. Exactly ONE scroll affordance
+ *   exists on the whole page and it is the one in this band.
+ *
+ * ---- 4. SPECIFICITY ----------------------------------------------
+ *   Every rule here is a single class (0,1,0) except the two theme rules,
+ *   which are attribute-qualified on :root so the viewer's toggle always
+ *   wins over the OS preference. Nothing in this file can silently cancel
+ *   anything else out; media queries only ever re-declare, never !important
+ *   (the sole exceptions are the reduced-motion kill-switches).
+ *
+ * ---- 5. THEME ----------------------------------------------------
+ *   The band is DELIBERATELY a dark lit stage in BOTH themes. Tokens are
+ *   declared once, then re-declared for light — where the stage is framed
+ *   as an intentional theater panel (inset radius, cool hairline, lifted
+ *   shadow) rather than an unconverted dark block. Order is: base tokens,
+ *   then `prefers-color-scheme` as the OS signal, then `:root[data-theme]`
+ *   last so the in-app toggle wins in BOTH directions.
+ *
+ * ---- 6. MOTION ---------------------------------------------------
+ *   Ambient only: a ~56s tunnel traverse plus a per-dot twinkle, tuned so
+ *   one second reads as still and three seconds as clearly shifted. Every
+ *   animation here is switched off under `prefers-reduced-motion: reduce`,
+ *   and the canvas paints exactly one static frame.
+ * ==================================================================== */
+
+.band {
+  /* colour */
+  --hc-ground: #050b18;
+  --hc-navy: #071021;
+  --hc-navy-2: #0a1628;
+  --hc-ink: #f4f7ff;
+  --hc-muted: #a9b4d0;
+  --hc-cyan: #22d3ee;
+  --hc-dot: #bae6fd;
+  --hc-dot-2: #7dd3fc;
+  --hc-core: #e0f2fe;
+  --hc-violet: #8b5cf6;
+  /* spacing scale — the ONLY vertical values used in this file */
+  --hc-s1: 6px;
+  --hc-s2: 10px;
+  --hc-s3: 14px;
+  --hc-s4: 18px;
+  --hc-s5: 26px;
+  /* frame */
+  --hc-radius: 0px;
+  --hc-shadow: none;
+  --hc-wrap: 1340px;
+
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: var(--hc-radius);
+  box-shadow: var(--hc-shadow);
+  background: var(--hc-ground);
+  color: var(--hc-ink);
+  color-scheme: dark;
+}
+
+/* The OS signal first: on a light desktop the stage still needs framing even
+   before the in-app toggle has written data-theme. */
+@media (prefers-color-scheme: light) {
+  .band {
+    --hc-radius: 18px;
+    --hc-shadow: 0 26px 70px rgba(20, 32, 68, 0.28), 0 0 0 1px rgba(35, 55, 120, 0.16);
+  }
+}
+
+/* Then the in-app toggle, declared LAST and attribute-qualified so it wins in
+   both directions regardless of the OS preference. */
+:root[data-theme="light"] .band {
+  --hc-radius: 18px;
+  --hc-shadow: 0 26px 70px rgba(20, 32, 68, 0.28), 0 0 0 1px rgba(35, 55, 120, 0.16);
+}
+
+:root[data-theme="dark"] .band {
+  --hc-radius: 0px;
+  --hc-shadow: none;
+}
+
+/* The band is an overture, not the act: it is sized so the real hero — the
+   headline and the live security-graph card — is always the next thing, not a
+   full screen away. Trimmed from 82vh/860px so the animated graph below is
+   reached sooner at every width. */
+.stage {
+  position: relative;
+  display: grid;
+  min-height: clamp(500px, 68vh, 720px);
+  align-content: center;
+  justify-items: center;
+  row-gap: var(--hc-s5);
+  padding-block: clamp(80px, 11vh, 132px);
+  padding-inline: var(--hc-s5);
+}
+
+/* ---- layer 1: navy ground + a faint violet nebula wash ---------- */
+.ground {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(76% 30% at 50% 50%, rgba(10, 22, 40, 0.92), transparent 74%),
+    linear-gradient(
+      180deg,
+      var(--hc-ground) 0%,
+      var(--hc-navy) 28%,
+      var(--hc-navy-2) 50%,
+      var(--hc-navy) 72%,
+      var(--hc-ground) 100%
+    );
+}
+
+/* Restrained secondary: violet only as a soft, blurred nebula mass. */
+.nebula {
+  position: absolute;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.42;
+  filter: blur(64px);
+  background:
+    radial-gradient(22% 16% at 14% 50%, rgba(139, 92, 246, 0.3), transparent 72%),
+    radial-gradient(20% 14% at 88% 46%, rgba(139, 92, 246, 0.2), transparent 72%),
+    radial-gradient(34% 14% at 50% 50%, rgba(34, 211, 238, 0.16), transparent 74%);
+}
+
+/* ---- layer 2: the generative dot field -------------------------- */
+.canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* ---- layer 3: dark scrim pooled over the calm middle ------------ */
+.scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(
+    60% 26% at 50% 50%,
+    rgba(4, 9, 22, 0.8),
+    rgba(4, 9, 22, 0.4) 58%,
+    transparent 84%
+  );
+}
+
+/* Soft dark vignette at the very top and bottom, plus the corners. */
+.vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(3, 6, 16, 0.6) 0%, transparent 15%),
+    linear-gradient(0deg, rgba(3, 6, 16, 0.5) 0%, transparent 13%),
+    radial-gradient(128% 96% at 50% 50%, transparent 56%, rgba(3, 6, 16, 0.6) 100%);
+}
+
+/* ---- layer 4: real, accessible copy ----------------------------- */
+.copy {
+  position: relative;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--hc-s4);
+  width: min(var(--hc-wrap), 100%);
+  text-align: center;
+}
+
+/* One heading, two voices: a small light line then a huge cyan one. Each
+   line carries its own measure, so the display size is never clamped by
+   the lead's. */
+.head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--hc-s2);
+  margin: 0;
+  font-weight: 400;
+}
+
+.lead {
+  display: block;
+  /* Staged, not dead-centred: the lead sits a little right of the display
+     line below it. Neutralised on small screens. */
+  margin-inline-start: clamp(0px, 3vw, 40px);
+  max-width: 46ch;
+  color: var(--hc-ink);
+  font-size: clamp(15px, 2vw, 27px);
+  font-weight: 400;
+  line-height: 1.32;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+
+.display {
+  display: block;
+  margin-inline-end: clamp(0px, 4vw, 56px);
+  max-width: 20ch;
+  font-size: clamp(38px, 7vw, 92px);
+  font-weight: 680;
+  line-height: 0.98;
+  letter-spacing: -0.045em;
+  text-wrap: balance;
+  background: linear-gradient(100deg, #22d3ee 0%, #67e8f9 42%, #38bdf8 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+.sub {
+  /* No vertical margin anywhere in the copy column — .copy's gap owns the
+     rhythm, so nothing can collapse or double. */
+  margin: 0;
+  max-width: 64ch;
+  color: var(--hc-muted);
+  font-size: clamp(13px, 1.1vw, 16px);
+  line-height: 1.62;
+  text-wrap: pretty;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--hc-s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid rgba(186, 230, 253, 0.24);
+  border-radius: 30px;
+  background: linear-gradient(140deg, rgba(8, 20, 44, 0.86), rgba(5, 11, 26, 0.72));
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: #dbe4fb;
+  font-size: 10.5px;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hc-dot);
+  box-shadow: 0 0 8px rgba(186, 230, 253, 0.7);
+}
+
+.chip:nth-child(even)::before {
+  background: var(--hc-dot-2);
+  box-shadow: 0 0 8px rgba(125, 211, 252, 0.7);
+}
+
+/* ---- layer 5: the scroll affordance -----------------------------
+ * Same visual language as the page's own `.scroll-cue` (mouse glyph,
+ * chevron, mono caption) but re-declared here so it stays legible on the
+ * dark stage in BOTH themes rather than inheriting light-theme ink. */
+.cue {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 5;
+  transform: translateX(-50%);
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--hc-s1);
+  min-width: 46px;
+  padding: var(--hc-s1) var(--hc-s3);
+  border-radius: var(--hc-s3);
+  color: var(--hc-muted);
+  text-decoration: none;
+  transition: color 0.18s ease;
+}
+
+.cue:hover {
+  color: var(--hc-ink);
+}
+
+.cue:focus-visible {
+  outline: 2px solid var(--hc-cyan);
+  outline-offset: 3px;
+}
+
+.cueMouse {
+  position: relative;
+  width: 24px;
+  height: 38px;
+  border: 1.6px solid rgba(186, 230, 253, 0.42);
+  border-radius: 14px;
+}
+
+.cueMouse::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 7px;
+  width: 3.5px;
+  height: 7px;
+  border-radius: 3px;
+  background: var(--hc-cyan);
+  transform: translateX(-50%);
+  animation: hc-wheel 1.8s ease-in-out infinite;
+}
+
+.cueChev {
+  width: 15px;
+  height: 15px;
+  animation: hc-bob 1.8s ease-in-out infinite;
+}
+
+.cueLabel {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+@keyframes hc-wheel {
+  0%, 100% { transform: translate(-50%, 0); opacity: 1; }
+  50% { transform: translate(-50%, 12px); opacity: 0.25; }
+}
+
+@keyframes hc-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+/* ---- motion ----------------------------------------------------- */
+.copy {
+  animation: hc-rise 0.9s cubic-bezier(0.22, 0.8, 0.24, 1) both;
+}
+
+.display {
+  animation:
+    hc-rise 0.9s cubic-bezier(0.22, 0.8, 0.24, 1) both,
+    hc-shimmer 8s ease-in-out infinite;
+}
+
+.nebula {
+  animation: hc-drift 30s ease-in-out infinite;
+}
+
+@keyframes hc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes hc-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(1.4%, -1%, 0) scale(1.05);
+  }
+}
+
+@keyframes hc-shimmer {
+  0%,
+  100% {
+    background-position: 0 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copy,
+  .display,
+  .nebula,
+  .cueChev {
+    animation: none;
+  }
+  .cueMouse::after {
+    animation: none;
+    top: 9px;
+  }
+}
+
+/* ---- responsive ------------------------------------------------- */
+@media (max-width: 900px) {
+  .stage {
+    min-height: clamp(440px, 62vh, 580px);
+    padding-block: clamp(60px, 9vh, 104px);
+  }
+  .copy {
+    gap: var(--hc-s3);
+  }
+}
+
+/* ---- phones ------------------------------------------------------
+ * The band is decoration in service of the message, so on a phone it must
+ * NOT eat the whole first screen: it is capped near 440px (vs 585px) so the
+ * real hero — headline plus the live security-graph card — is a short flick
+ * away. The dot field is laid out against the band's own box, so a shorter
+ * band re-seeds a proportionally shorter tunnel rather than cropping one. */
+@media (max-width: 560px) {
+  .stage {
+    min-height: clamp(380px, 52vh, 456px);
+    padding-inline: var(--hc-s4);
+    padding-block: 30px 34px;
+    row-gap: var(--hc-s3);
+  }
+  .copy {
+    gap: var(--hc-s2);
+  }
+  .head {
+    gap: var(--hc-s1);
+  }
+  .lead {
+    margin-inline-start: 0;
+    font-size: 15px;
+    max-width: 24ch;
+  }
+  .display {
+    margin-inline-end: 0;
+    font-size: 34px;
+    max-width: 16ch;
+  }
+  .sub {
+    max-width: 40ch;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .chips {
+    gap: var(--hc-s1);
+  }
+  .chip {
+    font-size: 9.5px;
+    padding: 7px 11px;
+  }
+  /* Two chips is a claim; four is a wall of pills on a 375px screen. */
+  .chip:nth-child(n + 3) {
+    display: none;
+  }
+  /* A 64px blur across an inset-oversized layer is the single most
+     expensive paint in the band; a phone gets a cheaper, tighter wash. */
+  .nebula {
+    inset: -4%;
+    opacity: 0.34;
+    filter: blur(34px);
+  }
+  /* At phone heights an absolutely-parked cue can collide with the copy, so
+     it joins the flow instead and the stage's row-gap keeps them apart. */
+  .cue {
+    position: static;
+    bottom: auto;
+    transform: none;
+    gap: var(--hc-s1);
+  }
+  .cueMouse {
+    width: 22px;
+    height: 34px;
+  }
+}
+
+/* Very narrow phones: the subhead gives way on MEASURE and leading, never on
+   size — 13px is the floor for a sentence anywhere in this band. */
+@media (max-width: 380px) {
+  .stage {
+    padding-block: 26px 30px;
+    row-gap: var(--hc-s2);
+  }
+  .sub {
+    max-width: 34ch;
+    line-height: 1.45;
+  }
+}

@@ -85,6 +85,7 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ name: "", dimension: "service", value: "", tagValue: "", targetKind: "customer", targetValue: "" });
+  const [priorityDraft, setPriorityDraft] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     try {
@@ -133,6 +134,40 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
     }
   }
 
+  async function patchRule(rule: StoredRule, patch: Json, failure: string): Promise<boolean> {
+    setBusy(true);
+    try {
+      await sendJson(`/api/v1/finops/allocation-rules?id=${encodeURIComponent(rule.id)}`, "PATCH", patch);
+      await reload();
+      return true;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : failure);
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function setRuleEnabled(rule: StoredRule, enabled: boolean): Promise<void> {
+    await patchRule(rule, { enabled }, enabled ? "Could not enable rule" : "Could not disable rule");
+  }
+
+  async function savePriority(rule: StoredRule): Promise<void> {
+    const raw = (priorityDraft[rule.id] ?? String(rule.priority)).trim();
+    if (!/^\d{1,6}$/u.test(raw)) {
+      setError("Priority must be a whole number — lower priority is matched first");
+      return;
+    }
+    const saved = await patchRule(rule, { priority: Number(raw) }, "Could not change priority");
+    if (saved) {
+      setPriorityDraft((prev) => {
+        const next = { ...prev };
+        delete next[rule.id];
+        return next;
+      });
+    }
+  }
+
   async function removeRule(id: string): Promise<void> {
     setBusy(true);
     try {
@@ -147,12 +182,13 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
 
   const alloc = data?.allocation ?? null;
   const maxBucket = alloc && alloc.allocated.length > 0 ? Math.max(...alloc.allocated.map((b) => b.amountUnits), 1) : 1;
+  const activeRuleCount = rules.length > 0 ? rules.filter((rule) => rule.enabled).length : alloc?.ruleCount ?? 0;
 
   return (
     <article className="panel">
       <div className="panel-heading">
         <div><p className="eyebrow">Virtual tags</p><h2>Allocation rules</h2></div>
-        <span className="result-count">{alloc?.ruleCount ?? 0} active</span>
+        <span className="result-count">{activeRuleCount} active{rules.length > activeRuleCount ? ` · ${rules.length - activeRuleCount} disabled` : ""}</span>
       </div>
       {error ? <p className={styles.emptyNote} role="alert">{error}</p> : null}
       {alloc === null ? <p className={styles.emptyNote}>Loading allocation…</p> : (
@@ -198,13 +234,46 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
 
           {rules.length > 0 ? (
             <ul className={styles.w3RuleList}>
-              {rules.map((rule) => (
-                <li key={rule.id}>
-                  <span><strong>{rule.name}</strong> — {rule.match.service ?? rule.match.account ?? (rule.match.tagKey ? `${rule.match.tagKey}${rule.match.tagValue ? `=${rule.match.tagValue}` : ""}` : "?")} → {rule.targetKind.replace("_", " ")} {rule.targetValue}</span>
-                  <button className="button button-ghost" type="button" disabled={busy} onClick={() => void removeRule(rule.id)} aria-label={`Delete ${rule.name}`}>Remove</button>
-                </li>
-              ))}
+              {rules.map((rule) => {
+                const priorityValue = priorityDraft[rule.id] ?? String(rule.priority);
+                const priorityChanged = priorityValue.trim() !== String(rule.priority);
+                return (
+                  <li key={rule.id} className={rule.enabled ? undefined : styles.w3RuleOff}>
+                    <span><strong>{rule.name}</strong> — {rule.match.service ?? rule.match.account ?? (rule.match.tagKey ? `${rule.match.tagKey}${rule.match.tagValue ? `=${rule.match.tagValue}` : ""}` : "?")} → {rule.targetKind.replace("_", " ")} {rule.targetValue}{rule.enabled ? "" : " · not applied"}</span>
+                    <span className={styles.w3RuleControls}>
+                      <label className={styles.w3Switch}>
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          checked={rule.enabled}
+                          aria-checked={rule.enabled}
+                          disabled={busy}
+                          onChange={(e) => void setRuleEnabled(rule, e.target.checked)}
+                          aria-label={`${rule.enabled ? "Disable" : "Enable"} rule ${rule.name}`}
+                        />
+                        <span>{rule.enabled ? "Active" : "Disabled"}</span>
+                      </label>
+                      <input
+                        className={styles.w3Mini}
+                        inputMode="numeric"
+                        value={priorityValue}
+                        disabled={busy}
+                        onChange={(e) => setPriorityDraft({ ...priorityDraft, [rule.id]: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter" && priorityChanged) void savePriority(rule); }}
+                        aria-label={`Match priority for rule ${rule.name} (lower is matched first)`}
+                      />
+                      {priorityChanged ? (
+                        <button className="button button-ghost" type="button" disabled={busy} onClick={() => void savePriority(rule)} aria-label={`Save priority for rule ${rule.name}`}>Save</button>
+                      ) : null}
+                      <button className="button button-ghost" type="button" disabled={busy} onClick={() => void removeRule(rule.id)} aria-label={`Delete ${rule.name}`}>Remove</button>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
+          ) : null}
+          {rules.length > 0 ? (
+            <p className={styles.w3Hint}>The number on each row is its match priority — lower is matched first. A disabled rule is kept but not applied, so its spend falls back to unallocated.</p>
           ) : null}
         </>
       )}
@@ -278,6 +347,23 @@ function MarginPanel() {
     }
   }
 
+  async function clearRate(row: MarginRow): Promise<void> {
+    setBusy(true);
+    try {
+      await sendJson(`/api/v1/finops/margin?customerId=${encodeURIComponent(row.customerId)}`, "DELETE", {});
+      setDraft((prev) => {
+        const next = { ...prev };
+        delete next[row.customerId];
+        return next;
+      });
+      await reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not clear rate");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <article className="panel">
       <div className="panel-heading">
@@ -296,19 +382,24 @@ function MarginPanel() {
               const edit = draft[row.customerId] ?? { markup: String(row.markupPercent), fee: "" };
               return (
                 <div className={styles.marginRow} key={`${row.customerId}:${row.currency}`} role="row">
-                  <span title={row.customerId}>{row.customerName}</span>
-                  <span>{money(row.costUnits, row.currency)}</span>
-                  <span><input className={styles.w3Mini} inputMode="decimal" value={edit.markup} onChange={(e) => setDraft({ ...draft, [row.customerId]: { ...edit, markup: e.target.value } })} aria-label={`Markup for ${row.customerName}`} /></span>
-                  <span><input className={styles.w3Mini} inputMode="decimal" placeholder="0" value={edit.fee} onChange={(e) => setDraft({ ...draft, [row.customerId]: { ...edit, fee: e.target.value } })} aria-label={`Monthly fee for ${row.customerName}`} /></span>
-                  <span>{money(row.billedUnits, row.currency)}</span>
-                  <span className={row.marginUnits >= 0 ? styles.costDown : styles.costUp}>{money(row.marginUnits, row.currency)}{row.marginPercent === null ? "" : ` (${Math.round(row.marginPercent)}%)`}</span>
-                  <button className="button button-ghost" type="button" disabled={busy} onClick={() => void saveRate(row)}>Save</button>
+                  <span className={styles.marginName} data-label="Customer" title={row.customerId}>{row.customerName}</span>
+                  <span data-label="Cloud cost">{money(row.costUnits, row.currency)}</span>
+                  <span data-label="Markup %"><input className={styles.w3Mini} inputMode="decimal" value={edit.markup} onChange={(e) => setDraft({ ...draft, [row.customerId]: { ...edit, markup: e.target.value } })} aria-label={`Markup for ${row.customerName}`} /></span>
+                  <span data-label="Monthly fee"><input className={styles.w3Mini} inputMode="decimal" placeholder="0" value={edit.fee} onChange={(e) => setDraft({ ...draft, [row.customerId]: { ...edit, fee: e.target.value } })} aria-label={`Monthly fee for ${row.customerName}`} /></span>
+                  <span data-label="Billed">{money(row.billedUnits, row.currency)}</span>
+                  <span className={row.marginUnits >= 0 ? styles.costDown : styles.costUp} data-label="Margin">{money(row.marginUnits, row.currency)}{row.marginPercent === null ? "" : ` (${Math.round(row.marginPercent)}%)`}</span>
+                  <span className={styles.w3RowActions}>
+                    <button className="button button-ghost" type="button" disabled={busy} onClick={() => void saveRate(row)} aria-label={`Save rate for ${row.customerName}`}>Save</button>
+                    {row.hasRate ? (
+                      <button className="button button-ghost" type="button" disabled={busy} onClick={() => void clearRate(row)} aria-label={`Clear configured rate for ${row.customerName}`}>Clear</button>
+                    ) : null}
+                  </span>
                 </div>
               );
             })}
           </div>
         )}
-      <p className={styles.emptyNote}>Billed = cloud cost × (1 + markup%) + fixed monthly fee. Currencies are never summed; a fee applies only in its own currency.</p>
+      <p className={styles.emptyNote}>Billed = cloud cost × (1 + markup%) + fixed monthly fee. Currencies are never summed; a fee applies only in its own currency. Clear removes the stored rate for that customer — the row stays visible with billed = cloud cost and no margin, so an un-rated customer is disclosed rather than hidden.</p>
     </article>
   );
 }

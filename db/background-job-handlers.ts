@@ -42,6 +42,7 @@ import { ItsmConnectorRepository } from "./itsm-connector-repository";
 import { JobQueueRepository } from "./job-queue-repository";
 import { KubernetesRepository } from "./kubernetes-repository";
 import {
+  appendAuditEvent,
   createSyncRun,
   getConnectionForOrg,
   getLatestConnectionForOrg,
@@ -54,7 +55,7 @@ import { RetentionSweepRepository } from "./retention-sweep-repository";
 import { SecurityNotificationRepository } from "./security-notification-repository";
 import {
   enqueueFinopsAlert,
-  evaluateFinopsAlertsForConnection,
+  evaluateFinopsAlertsForCustomer,
   recipientsForDestination,
 } from "./finops-alert-service";
 import type { FinopsAlert } from "../lib/finops-alerts.ts";
@@ -502,7 +503,12 @@ export interface FinopsAlertSweepDeps {
     readonly enabled: boolean;
     readonly configuration: { readonly channel: string; readonly recipients?: readonly string[] };
   }[]>;
-  readonly evaluate: (orgId: string, customerId: string, connectionId: string) => Promise<{ readonly alerts: readonly FinopsAlert[] }>;
+  /** Evaluates the WHOLE customer at once (budgets are customer-wide). */
+  readonly evaluate: (
+    orgId: string,
+    customerId: string,
+    connectionIds: readonly string[],
+  ) => Promise<{ readonly alerts: readonly FinopsAlert[] }>;
   readonly dispatch: (args: {
     readonly orgId: string;
     readonly customerId: string;
@@ -511,37 +517,205 @@ export interface FinopsAlertSweepDeps {
     readonly recipients: readonly string[];
     readonly alert: FinopsAlert;
   }) => Promise<void>;
+  /** Optional sink for per-alert dispatch failures, so one bad alert is visible without killing the sweep. */
+  readonly onDispatchError?: (alertId: string, destinationId: string, error: unknown) => void;
+  /**
+   * Durable trace of what the sweep decided. Optional so the unit tests can drive
+   * the handler without a database, but ALWAYS wired in production
+   * ({@link buildJobHandlers}) — without it the only evidence a cost alert ever
+   * fired is the outbox row, which does not exist at all for a tenant with no
+   * enabled destination.
+   */
+  readonly recordOutcome?: (outcome: FinopsAlertSweepOutcome) => Promise<void>;
 }
 
 /**
+ * What one sweep did, for the audit trail. `deliveryState` mirrors the metric-
+ * alerting vocabulary ({@link AlertEventDeliveryState}) and adds `no_alerts`:
+ * - `queued`: alerts existed and at least one dispatch was attempted.
+ * - `no_destination`: alerts existed but the tenant has NO enabled destination,
+ *   so they were undeliverable. This is the case that previously left no trace
+ *   whatsoever.
+ * - `no_alerts`: the engines produced nothing (not recorded; see the handler).
+ */
+export interface FinopsAlertSweepOutcome {
+  readonly orgId: string;
+  readonly customerId: string;
+  readonly jobId: string;
+  readonly attempt: number;
+  readonly connectionCount: number;
+  readonly destinationCount: number;
+  readonly alertsEvaluated: number;
+  readonly dispatched: number;
+  readonly dispatchFailures: number;
+  readonly truncated: boolean;
+  readonly deliveryState: "queued" | "no_destination" | "no_alerts";
+}
+
+/** Hard ceiling on dispatches per sweep, so one tenant cannot monopolise a tick. */
+const FINOPS_SWEEP_MAX_DISPATCHES = 200;
+
+/**
  * The `finops-alert-sweep` handler: for one tenant (org + customer), evaluate
- * cost/budget alerts across every connection and route each alert to every
- * ENABLED notification destination through the durable outbox. Idempotent per
- * (alert, destination), so repeated sweeps never spam a duplicate. A tenant with
- * no enabled destination is a no-op — nothing is fabricated or sent.
+ * cost/budget alerts ONCE across all of that customer's connections, then route
+ * each alert to every ENABLED notification destination through the durable
+ * outbox. Idempotent per (alert, destination) so repeated sweeps collapse rather
+ * than spam. A tenant with no enabled destination is a no-op.
+ *
+ * Resilience: a single failed dispatch must NOT abort the tenant's sweep —
+ * otherwise one malformed alert or a destination disabled mid-run would make the
+ * whole job throw, retry from scratch (re-dispatching everything before it), and
+ * eventually dead-letter. Failures are collected and reported; the sweep only
+ * throws if EVERY dispatch failed, which is a real systemic fault worth retrying.
+ *
+ * Evidence: the sweep records ONE durable outcome per run (`recordOutcome`) with
+ * the evaluated/dispatched/failed counts. Evaluation therefore runs BEFORE the
+ * enabled-destination check — mirroring the metric-alerting path, which evaluates
+ * and then records `no_destination` — because "alerts existed but nothing could
+ * be delivered" is precisely the state that otherwise leaves no trace. The hourly
+ * cadence gate keeps that extra read cheap.
  */
 export async function runFinopsAlertSweepJob(job: RunnableJob, deps: FinopsAlertSweepDeps): Promise<void> {
   if (job.customerId === null) throw new Error("finops-alert-sweep-requires-customer");
   const orgId = job.orgId;
   const customerId = job.customerId;
+  const connectionIds = (await deps.listConnections(orgId, customerId)).map((connection) => connection.id);
+  if (connectionIds.length === 0) return;
   const destinations = (await deps.listDestinations(orgId, customerId)).filter((destination) => destination.enabled);
-  if (destinations.length === 0) return;
-  const connections = await deps.listConnections(orgId, customerId);
-  for (const connection of connections) {
-    const { alerts } = await deps.evaluate(orgId, customerId, connection.id);
-    for (const alert of alerts) {
-      for (const destination of destinations) {
+
+  // One evaluation for the whole customer: anomalies per connection internally,
+  // budgets over the combined spend.
+  const { alerts } = await deps.evaluate(orgId, customerId, connectionIds);
+
+  const record = async (outcome: Omit<FinopsAlertSweepOutcome, "orgId" | "customerId" | "jobId" | "attempt" | "connectionCount" | "destinationCount">): Promise<void> => {
+    const full: FinopsAlertSweepOutcome = {
+      orgId,
+      customerId,
+      jobId: job.id,
+      attempt: job.attempt,
+      connectionCount: connectionIds.length,
+      destinationCount: destinations.length,
+      ...outcome,
+    };
+    // Always leave a log line: the durable write can itself fail, and a swallowed
+    // audit failure must not become an invisible one.
+    console.info(`finops-alert-sweep ${JSON.stringify(full)}`);
+    try {
+      await deps.recordOutcome?.(full);
+    } catch (error) {
+      // Evidence is not worth losing the delivered alerts over.
+      console.warn(`finops-alert-sweep audit write failed for ${orgId}/${customerId}: ${String(error)}`);
+    }
+  };
+
+  // Nothing fired. Recording an "all clear" for every tenant every hour would
+  // bury the audit chain in noise, so this stays untraced by design.
+  if (alerts.length === 0) return;
+  if (destinations.length === 0) {
+    // THE case the audit trail exists for: real alerts, zero delivery paths.
+    await record({
+      alertsEvaluated: alerts.length,
+      dispatched: 0,
+      dispatchFailures: 0,
+      truncated: false,
+      deliveryState: "no_destination",
+    });
+    return;
+  }
+
+  let attempted = 0;
+  let failed = 0;
+  let truncated = false;
+  for (const alert of alerts) {
+    for (const destination of destinations) {
+      if (attempted >= FINOPS_SWEEP_MAX_DISPATCHES) {
+        truncated = true;
+        break;
+      }
+      attempted += 1;
+      try {
         await deps.dispatch({
           orgId,
           customerId,
-          connectionId: connection.id,
+          // Alert identity already encodes its own connection scope; the event's
+          // grouping key uses the customer's first connection for context.
+          connectionId: connectionIds[0],
           destinationId: destination.id,
           recipients: recipientsForDestination(destination),
           alert,
         });
+      } catch (error) {
+        failed += 1;
+        deps.onDispatchError?.(alert.id, destination.id, error);
       }
     }
+    if (truncated) break;
   }
+  if (truncated) {
+    console.warn(`finops-alert-sweep truncated at ${FINOPS_SWEEP_MAX_DISPATCHES} dispatches for ${orgId}/${customerId}`);
+  }
+  // Recorded BEFORE the total-failure throw, so a systemic failure is evidenced
+  // rather than only visible as a dead-lettered job.
+  await record({
+    alertsEvaluated: alerts.length,
+    dispatched: attempted - failed,
+    dispatchFailures: failed,
+    truncated,
+    deliveryState: "queued",
+  });
+  // Only a total failure is a retryable fault; partial failures are reported.
+  if (attempted > 0 && failed === attempted) {
+    throw new Error(`finops-alert-sweep-all-dispatches-failed (${failed}/${attempted})`);
+  }
+}
+
+/**
+ * The system actor a FinOps alert sweep is attributed to. A sweep runs from the
+ * durable job queue with NO authenticated user, so it uses the same `actorType:
+ * "system"` convention the cold-path recovery administration already uses; the
+ * audit schema does not constrain `actor_id` to a user row.
+ */
+const FINOPS_SWEEP_ACTOR_ID = "system_finops_alert_sweep";
+
+/**
+ * Persist one sweep's outcome to the tenant's hash-chained `audit_events` table.
+ *
+ * Why the audit chain and not `alert_events`: the metric-alerting sibling's
+ * `AlertRuleRepository.recordEvent` inserts `SELECT … FROM alert_rules WHERE
+ * r.id = ?` and requires an `arule_<32 hex>` id, so recording a FinOps alert
+ * there would mean fabricating an alert_rule row that no operator created. The
+ * audit chain accepts a system actor honestly and needs no new table.
+ *
+ * The request id is derived from (org, customer, job, attempt), so the unique
+ * `audit_events(org_id, request_id)` index makes a replay of the same attempt
+ * idempotent while a genuine retry (new attempt) records its own row.
+ */
+async function recordFinopsAlertSweepAudit(outcome: FinopsAlertSweepOutcome): Promise<void> {
+  const requestKey = (await alertEvidenceHash(
+    `${outcome.orgId} ${outcome.customerId} ${outcome.jobId} ${outcome.attempt}`,
+  )).slice(0, 32);
+  await appendAuditEvent({
+    orgId: outcome.orgId,
+    actorType: "system",
+    actorId: FINOPS_SWEEP_ACTOR_ID,
+    action: "finops.alert_sweep.completed",
+    targetType: "finops_alert_sweep",
+    targetId: outcome.jobId,
+    customerId: outcome.customerId,
+    // An undeliverable or partially failed sweep is NOT an "allowed" outcome.
+    outcome: outcome.deliveryState === "queued" && outcome.dispatchFailures === 0 ? "allowed" : "failed",
+    requestId: `finops.alert_sweep.completed:${requestKey}`,
+    metadata: {
+      deliveryState: outcome.deliveryState,
+      connectionCount: outcome.connectionCount,
+      destinationCount: outcome.destinationCount,
+      alertsEvaluated: outcome.alertsEvaluated,
+      dispatched: outcome.dispatched,
+      dispatchFailures: outcome.dispatchFailures,
+      truncated: outcome.truncated,
+      attempt: outcome.attempt,
+    },
+  });
 }
 
 /**
@@ -575,9 +749,14 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       listConnections: async (orgId, customerId) =>
         (await listConnectionsForOrg(orgId)).filter((connection) => connection.customerId === customerId).map((connection) => ({ id: connection.id })),
       listDestinations: (orgId, customerId) => new SecurityNotificationRepository().listDestinations(orgId, customerId),
-      evaluate: async (orgId, customerId, connectionId) =>
-        (await evaluateFinopsAlertsForConnection(orgId, customerId, connectionId)).evaluation,
+      evaluate: async (orgId, customerId, connectionIds) =>
+        (await evaluateFinopsAlertsForCustomer(orgId, customerId, connectionIds)).evaluation,
       dispatch: (args) => enqueueFinopsAlert(new SecurityNotificationRepository(), args),
+      onDispatchError: (alertId, destinationId, error) => {
+        // Visible without aborting the sweep; the runner still completes the job.
+        console.warn(`finops-alert-sweep dispatch failed for ${alertId} → ${destinationId}: ${String(error)}`);
+      },
+      recordOutcome: recordFinopsAlertSweepAudit,
     }),
     "uptime-probe": (job) => runUptimeProbeJob(job, buildUptimeProbeDeps()),
     // The hosted broker ingestion job: persist a signed, server-scoped broker
@@ -704,11 +883,21 @@ export async function ensureDueAlertEvaluationsEnqueued(
  * only ever done where alerts can actually be delivered. Returns the number of
  * jobs enqueued.
  */
+/**
+ * Minimum gap between cost/budget sweeps for one tenant. The job runner ticks
+ * every ~15s; re-reading every connection's billing lines (up to 50k rows each)
+ * and re-running the engines that often is pure waste — cost data changes when a
+ * billing file is ingested, not second to second. Hourly is ample for spend
+ * alerting and keeps the tick cheap.
+ */
+export const FINOPS_ALERT_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
 export async function ensureDueFinopsAlertSweepsEnqueued(
   queue: JobQueueRepository,
   orgIds: readonly string[],
   connectionsForOrg: (orgId: string) => Promise<readonly { readonly customerId: string }[]>,
   now = Date.now(),
+  intervalMs = FINOPS_ALERT_SWEEP_INTERVAL_MS,
 ): Promise<number> {
   let enqueued = 0;
   for (const orgId of orgIds) {
@@ -716,10 +905,15 @@ export async function ensureDueFinopsAlertSweepsEnqueued(
     const customerIds = [...new Set(connections.map((connection) => connection.customerId))];
     for (const customerId of customerIds) {
       const existing = await queue.list(orgId, customerId);
-      const active = existing.some(
-        (job) => job.kind === "finops-alert-sweep" && (job.status === "queued" || job.status === "leased"),
-      );
-      if (active) continue;
+      const sweeps = existing.filter((job) => job.kind === "finops-alert-sweep");
+      // Never stack sweeps for the same tenant.
+      if (sweeps.some((job) => job.status === "queued" || job.status === "leased")) continue;
+      // CADENCE — and, deliberately, the dead-letter cooldown. `list` is ordered
+      // created_at DESC, so the first sweep is the newest whatever its status.
+      // Gating on age means a dead-lettered sweep is NOT retried on the very next
+      // tick forever; it gets one fresh attempt per interval instead.
+      const newest = sweeps[0];
+      if (newest !== undefined && now - newest.createdAt < intervalMs) continue;
       try {
         await queue.enqueue({ orgId, customerId, kind: "finops-alert-sweep", payload: {} }, now);
         enqueued += 1;

@@ -50,6 +50,7 @@ import postgresFinopsCurRegionSql from "../postgres/migrations/0050_finops_cur_r
 import postgresFinopsCurCommitmentsSql from "../postgres/migrations/0051_finops_cur_commitments.sql?raw";
 import postgresFinopsAllocationRulesSql from "../postgres/migrations/0052_finops_allocation_rules.sql?raw";
 import postgresFinopsCustomerMarginSql from "../postgres/migrations/0053_finops_customer_margin.sql?raw";
+import postgresFinopsBudgetsCustomerScopeSql from "../postgres/migrations/0054_finops_budgets_customer_scope.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -104,6 +105,7 @@ const migrations = [
   { id: "0051_finops_cur_commitments", source: postgresFinopsCurCommitmentsSql },
   { id: "0052_finops_allocation_rules", source: postgresFinopsAllocationRulesSql },
   { id: "0053_finops_customer_margin", source: postgresFinopsCustomerMarginSql },
+  { id: "0054_finops_budgets_customer_scope", source: postgresFinopsBudgetsCustomerScopeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

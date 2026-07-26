@@ -235,6 +235,11 @@ export class FinopsWorkspaceRepository {
     });
   }
 
+  // The ON CONFLICT target is customer-scoped — (org_id, customer_id, name),
+  // the `finops_budgets_scope_name` index from migration 0054/0060 — because
+  // finops_budgets.customer_id is NOT NULL and budget names are only unique per
+  // customer. An org-wide (org_id, name) target would make customer B's save
+  // silently UPDATE customer A's row instead of inserting B's own.
   public async saveBudget(
     scope: FinopsScope,
     input: { name: string; currency: string; limitMicros: string; filter?: BudgetDefinition["filter"] },
@@ -260,7 +265,7 @@ export class FinopsWorkspaceRepository {
        SELECT ?, c.org_id, c.id, ?, ?, ?, ?, ?, ?, ?
          FROM customers c
         WHERE c.id = ? AND c.org_id = ? AND c.status IN ('active', 'trial')
-       ON CONFLICT (org_id, name) DO UPDATE SET
+       ON CONFLICT (org_id, customer_id, name) DO UPDATE SET
          currency = excluded.currency,
          limit_micros = excluded.limit_micros,
          filter_json = excluded.filter_json,
@@ -280,8 +285,8 @@ export class FinopsWorkspaceRepository {
     const db = await this.ready();
     const rows = await db.prepare(
       `SELECT id, name, currency, limit_micros, filter_json, created_by, updated_at
-         FROM finops_budgets WHERE org_id = ? ORDER BY name ASC`,
-    ).bind(scope.orgId).all<BudgetRow>();
+         FROM finops_budgets WHERE org_id = ? AND customer_id = ? ORDER BY name ASC`,
+    ).bind(scope.orgId, scope.customerId).all<BudgetRow>();
     return (rows.results ?? []).map((row) => ({
       id: row.id,
       name: row.name,
@@ -297,7 +302,9 @@ export class FinopsWorkspaceRepository {
     assertScope(scope);
     if (!BUDGET_ID.test(id)) invalid();
     const db = await this.ready();
-    const result = await db.prepare(`DELETE FROM finops_budgets WHERE id = ? AND org_id = ?`).bind(id, scope.orgId).run();
+    const result = await db.prepare(
+      `DELETE FROM finops_budgets WHERE id = ? AND org_id = ? AND customer_id = ?`,
+    ).bind(id, scope.orgId, scope.customerId).run();
     return Number(result.meta?.changes ?? 0) > 0;
   }
 }

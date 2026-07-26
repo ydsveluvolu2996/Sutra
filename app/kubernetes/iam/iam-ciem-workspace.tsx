@@ -1,11 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { buildAwsIamCiem, type AwsIamCiemPrincipalResult, type IamEffectiveFlags } from "../../../lib/aws-iam-ciem";
-import { deriveAwsIamPrincipals } from "../../../lib/aws-iam-ciem-evidence";
+import { useCallback, useEffect, useState } from "react";
+import type { AwsIamCiemPrincipalResult, AwsIamCiemReport, IamEffectiveFlags } from "../../../lib/aws-iam-ciem";
 import { usePilotState } from "../../components/use-pilot-state";
-import { useKubernetesEvidence } from "../use-kubernetes-evidence";
+
+// The effective-permission engine runs server-side in /api/v1/kubernetes/iam,
+// which assembles the identical evidence set (authorized CMDB resources plus
+// the projected latest workspace of the first active cluster) inside the
+// authenticated tenant scope. Only the report *type* is imported here, so the
+// engine and its IAM action corpus no longer ship to the browser and there is
+// a single implementation to keep correct.
+interface IamCiemBody extends AwsIamCiemReport {
+  readonly connectionId: string;
+  readonly clusterId: string | null;
+  readonly error?: { readonly message?: string };
+}
 
 const FLAGS: readonly { readonly key: keyof IamEffectiveFlags; readonly label: string; readonly cls: string }[] = [
   { key: "adminLike", label: "Admin-like", cls: "compliance-status-fail" },
@@ -20,14 +30,53 @@ function activeFlags(result: AwsIamCiemPrincipalResult) {
 
 export function IamCiemWorkspace() {
   const { state, loading, error, refresh } = usePilotState();
-  const kubernetes = useKubernetesEvidence(state);
+  const connectionId = state?.connection?.id ?? null;
+  const [report, setReport] = useState<AwsIamCiemReport | null>(null);
+  const [ciemLoading, setCiemLoading] = useState(false);
+  const [ciemError, setCiemError] = useState<string | null>(null);
   const [onlyFlagged, setOnlyFlagged] = useState(false);
 
-  const report = useMemo(
-    () => buildAwsIamCiem(deriveAwsIamPrincipals(kubernetes.projectionInput.resources)),
-    [kubernetes.projectionInput.resources],
-  );
-  const principals = onlyFlagged ? report.principals.filter((result) => activeFlags(result).length > 0) : report.principals;
+  const refreshCiem = useCallback(async () => {
+    if (connectionId === null) {
+      setReport(null);
+      setCiemError(null);
+      return;
+    }
+    setCiemLoading(true);
+    try {
+      const response = await fetch(
+        `/api/v1/kubernetes/iam?connectionId=${encodeURIComponent(connectionId)}`,
+        { cache: "no-store", credentials: "same-origin" },
+      );
+      const body = await response.json().catch(() => null) as IamCiemBody | null;
+      if (!response.ok || body === null || body.schema !== "sutra.aws-iam-ciem.v1") {
+        throw new Error(body?.error?.message ?? "Sutra could not resolve IAM effective permissions");
+      }
+      setReport(body);
+      setCiemError(null);
+    } catch (caught) {
+      setReport(null);
+      setCiemError(caught instanceof Error ? caught.message : "Sutra could not resolve IAM effective permissions");
+    } finally {
+      setCiemLoading(false);
+    }
+  }, [connectionId]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void refreshCiem(), 0);
+    const listener = () => void refreshCiem();
+    window.addEventListener("sutra:kubernetes-changed", listener);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.removeEventListener("sutra:kubernetes-changed", listener);
+    };
+  }, [refreshCiem]);
+
+  const principals = report === null
+    ? []
+    : onlyFlagged
+      ? report.principals.filter((result) => activeFlags(result).length > 0)
+      : report.principals;
 
   return (
     <>
@@ -39,22 +88,24 @@ export function IamCiemWorkspace() {
         </div>
         <div className="heading-actions">
           <Link className="button button-secondary" href="/kubernetes/permissions">Kubernetes CIEM</Link>
-          <button className="button button-primary" onClick={() => { void refresh(); void kubernetes.refresh(); }} type="button">Refresh</button>
+          <button className="button button-primary" onClick={() => { void refresh(); void refreshCiem(); }} type="button">Refresh</button>
         </div>
       </section>
-      <div className="trust-strip" role="note"><span className="trust-icon">IAM</span><span>{report.disclaimer}</span></div>
+      {report !== null ? <div className="trust-strip" role="note"><span className="trust-icon">IAM</span><span>{report.disclaimer}</span></div> : null}
 
-      {error || kubernetes.error ? <div className="page-alert page-alert-error" role="alert"><strong>IAM evidence unavailable</strong><span>{error ?? kubernetes.error}</span><button onClick={() => { void refresh(); void kubernetes.refresh(); }} type="button">Retry</button></div> : null}
-      {loading || kubernetes.loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Resolving IAM effective permissions…</div> : null}
+      {error || ciemError ? <div className="page-alert page-alert-error" role="alert"><strong>IAM evidence unavailable</strong><span>{error ?? ciemError}</span><button onClick={() => { void refresh(); void refreshCiem(); }} type="button">Retry</button></div> : null}
+      {loading || ciemLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Resolving IAM effective permissions…</div> : null}
 
-      {!loading && !kubernetes.loading ? (
+      {!loading && !ciemLoading ? (
         <>
-          <section className="inventory-stats">
-            <article><small>IAM principals</small><strong>{report.totals.principals}</strong><span>{report.totals.resolved} resolved · {report.totals.unresolved} unresolved</span></article>
-            <article><small>Admin-like</small><strong>{report.totals.adminLike}</strong><span>Effective * on *</span></article>
-            <article><small>Privilege escalation</small><strong>{report.totals.privilegeEscalation}</strong><span>Can widen its own access</span></article>
-            <article><small>Right-size candidates</small><strong>{report.totals.rightSizeCandidates}</strong><span>{report.totals.rightSizeUnknown} usage unknown</span></article>
-          </section>
+          {report !== null ? (
+            <section className="inventory-stats">
+              <article><small>IAM principals</small><strong>{report.totals.principals}</strong><span>{report.totals.resolved} resolved · {report.totals.unresolved} unresolved</span></article>
+              <article><small>Admin-like</small><strong>{report.totals.adminLike}</strong><span>Effective * on *</span></article>
+              <article><small>Privilege escalation</small><strong>{report.totals.privilegeEscalation}</strong><span>Can widen its own access</span></article>
+              <article><small>Right-size candidates</small><strong>{report.totals.rightSizeCandidates}</strong><span>{report.totals.rightSizeUnknown} usage unknown</span></article>
+            </section>
+          ) : null}
 
           <section className="panel">
             <div className="panel-heading">

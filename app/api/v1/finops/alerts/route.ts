@@ -1,8 +1,8 @@
-import { getConnectionForOrg } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, listConnectionsForOrg } from "../../../../../db/pilot-repository";
 import { SecurityNotificationRepository } from "../../../../../db/security-notification-repository";
 import {
   enqueueFinopsAlert,
-  evaluateFinopsAlertsForConnection,
+  evaluateFinopsAlertsForCustomer,
   recipientsForDestination,
 } from "../../../../../db/finops-alert-service";
 import type { FinopsAlertSeverity } from "../../../../../lib/finops-alerts";
@@ -15,6 +15,17 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const BILLING_PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/u;
 const DESTINATION_ID = /^ndest_[a-f0-9]{32}$/u;
 const SEVERITIES = new Set<string>(["critical", "high", "medium", "low"]);
+
+/**
+ * Every connection belonging to this customer. Budgets are customer-wide, so the
+ * burn-down must see all of them even when the operator selected just one.
+ */
+async function customerConnectionIds(orgId: string, customerId: string, selected: string): Promise<readonly string[]> {
+  const owned = (await listConnectionsForOrg(orgId))
+    .filter((connection) => connection.customerId === customerId && CONNECTION_ID.test(connection.id))
+    .map((connection) => connection.id);
+  return owned.includes(selected) ? owned : [...owned, selected];
+}
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -34,10 +45,16 @@ export async function GET(request: Request): Promise<Response> {
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const orgId = authenticated.subject.orgId;
-    const result = await evaluateFinopsAlertsForConnection(orgId, connection.customerId, connectionId, {
-      period,
-      minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
-    });
+    const result = await evaluateFinopsAlertsForCustomer(
+      orgId,
+      connection.customerId,
+      await customerConnectionIds(orgId, connection.customerId, connectionId),
+      {
+        period,
+        minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
+        anomalyConnectionIds: [connectionId],
+      },
+    );
     // Surface the enabled destinations so the panel can offer a send target
     // without a second round-trip (customer resolved from the connection).
     const destinations = (await new SecurityNotificationRepository().listDestinations(orgId, connection.customerId))
@@ -84,10 +101,16 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("No enabled notification destination matches"), { code: "NOT_FOUND" });
     }
 
-    const result = await evaluateFinopsAlertsForConnection(orgId, customerId, connectionId, {
-      period: period ?? null,
-      minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
-    });
+    const result = await evaluateFinopsAlertsForCustomer(
+      orgId,
+      customerId,
+      await customerConnectionIds(orgId, customerId, connectionId),
+      {
+        period: period ?? null,
+        minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
+        anomalyConnectionIds: [connectionId],
+      },
+    );
     const recipients = recipientsForDestination(destination);
     const dispatched = await Promise.allSettled(result.evaluation.alerts.map((alert) =>
       enqueueFinopsAlert(notifications, { orgId, customerId, connectionId, destinationId: destination.id, recipients, alert }),

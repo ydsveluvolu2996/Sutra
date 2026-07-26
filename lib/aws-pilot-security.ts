@@ -158,7 +158,18 @@ const EXTERNAL_ID_BYTES = 24;
 const MAX_ENABLED_REGIONS = 32;
 const MAX_SAFE_COUNT = 10_000_000;
 export const DEFAULT_JSON_BODY_LIMIT = 16 * 1024;
-const MAX_CONFIGURABLE_JSON_BODY_LIMIT = 1024 * 1024;
+/**
+ * Ceiling on the per-caller limit, not a per-caller limit itself: each route still
+ * passes its own (usually far smaller) bound, and omitting one keeps the 16 KiB
+ * default. The value is 3 MiB because readBoundedJson buffers the whole body in
+ * memory and the largest legitimate caller is the Kubernetes scan publication
+ * route, whose artifacts embed Trivy findings and SBOMs; its browser upload path
+ * gates files at 2.75 MiB and its agent-facing sibling already streams 10 MiB
+ * through readAgentJson. Raise this only for a caller that genuinely needs more —
+ * bulk ingestion belongs on the agent/CLI paths, not on a session-authenticated
+ * JSON endpoint.
+ */
+export const MAX_CONFIGURABLE_JSON_BODY_LIMIT = 3 * 1024 * 1024;
 
 const PARTITIONS = new Set<AwsPartition>(["aws", "aws-us-gov", "aws-cn"]);
 const FAILURE_CODES = new Set<SafePilotFailureCode>([

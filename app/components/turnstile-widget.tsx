@@ -35,6 +35,36 @@ declare global {
 
 let turnstileLoader: Promise<TurnstileApi> | null = null;
 
+/**
+ * A failed challenge must never be a dead end. The two failure modes need
+ * different guidance: Sutra's own configuration endpoint being unreachable is
+ * an operator problem, while a blocked challenges.cloudflare.com is almost
+ * always a network filter, VPN or extension on the visitor's side.
+ */
+const CONFIGURATION_FAILURE = "configuration" as const;
+const CHALLENGE_FAILURE = "challenge" as const;
+
+type FailureKind = typeof CONFIGURATION_FAILURE | typeof CHALLENGE_FAILURE;
+
+type WidgetStatus = "loading" | "bypassed" | "active" | "error";
+
+class TurnstileClientError extends Error {
+  public readonly kind: FailureKind;
+
+  public constructor(kind: FailureKind, message: string) {
+    super(message);
+    this.name = "TurnstileClientError";
+    this.kind = kind;
+  }
+}
+
+const FAILURE_MESSAGE: Record<FailureKind, string> = {
+  [CONFIGURATION_FAILURE]:
+    "Sutra could not load the security check settings. Try again, or reload the page.",
+  [CHALLENGE_FAILURE]:
+    "The security check could not load. A VPN, network filter or browser extension that blocks challenges.cloudflare.com is the usual cause. Try again, or switch network.",
+};
+
 function loadTurnstile(): Promise<TurnstileApi> {
   if (window.turnstile !== undefined) return Promise.resolve(window.turnstile);
   if (turnstileLoader !== null) return turnstileLoader;
@@ -72,7 +102,10 @@ function loadTurnstile(): Promise<TurnstileApi> {
     }
   }).catch((error: unknown) => {
     turnstileLoader = null;
-    throw error;
+    throw new TurnstileClientError(
+      CHALLENGE_FAILURE,
+      error instanceof Error ? error.message : "Turnstile could not be loaded",
+    );
   });
   return turnstileLoader;
 }
@@ -95,7 +128,8 @@ export default function TurnstileWidget({
   const onChangeRef = useRef(onChange);
   const mounted = useRef(false);
   const [message, setMessage] = useState("Loading security check…");
-  const [failed, setFailed] = useState(false);
+  const [status, setStatus] = useState<WidgetStatus>("loading");
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -114,21 +148,31 @@ export default function TurnstileWidget({
           | TurnstileClientConfiguration
           | null;
         if (!response.ok || body === null) {
-          throw new Error("Security check configuration is unavailable");
+          throw new TurnstileClientError(
+            CONFIGURATION_FAILURE,
+            "Security check configuration is unavailable",
+          );
         }
         return body;
       })
       .then(async (configuration) => {
         if (!active) return;
+        // The server is the only authority on whether the challenge is
+        // active. `enabled: false` means this runtime resolved the
+        // loopback-only local bypass, so Siteverify will not be consulted and
+        // rendering a challenge here would only produce an unsolvable widget.
         if (!configuration.enabled) {
           bypassed.current = true;
-          setMessage("Security check bypassed for this local workspace.");
-          setFailed(false);
+          setMessage("");
+          setStatus("bypassed");
           onChangeRef.current(null, true);
           return;
         }
         if (!configuration.siteKey || container.current === null) {
-          throw new Error("Security check configuration is invalid");
+          throw new TurnstileClientError(
+            CONFIGURATION_FAILURE,
+            "Security check configuration is invalid",
+          );
         }
         const loaded = await loadTurnstile();
         if (!active || container.current === null) return;
@@ -142,28 +186,35 @@ export default function TurnstileWidget({
           callback: (token) => {
             if (!mounted.current) return;
             setMessage("Security check complete.");
-            setFailed(false);
+            setStatus("active");
             onChangeRef.current(token, true);
           },
           "expired-callback": () => {
             if (!mounted.current) return;
             setMessage("Security check expired. Please complete it again.");
-            setFailed(true);
+            setStatus("error");
             onChangeRef.current(null, false);
           },
           "error-callback": () => {
             if (!mounted.current) return;
-            setMessage("Security check failed to load. Please retry.");
-            setFailed(true);
+            setMessage(FAILURE_MESSAGE[CHALLENGE_FAILURE]);
+            setStatus("error");
             onChangeRef.current(null, false);
           },
         });
         setMessage("Security check ready.");
+        setStatus("active");
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) return;
-        setMessage("Security check is unavailable. Please reload this page.");
-        setFailed(true);
+        setMessage(
+          FAILURE_MESSAGE[
+            error instanceof TurnstileClientError
+              ? error.kind
+              : CHALLENGE_FAILURE
+          ],
+        );
+        setStatus("error");
         onChangeRef.current(null, false);
       });
     return () => {
@@ -176,22 +227,27 @@ export default function TurnstileWidget({
       api.current = null;
       bypassed.current = false;
     };
-  }, [action]);
+  }, [action, attempt]);
 
   useEffect(() => {
     if (bypassed.current) {
-      setMessage("Security check bypassed for this local workspace.");
-      setFailed(false);
+      setMessage("");
+      setStatus("bypassed");
       onChangeRef.current(null, true);
       return;
     }
     if (api.current === null || widgetId.current === null) return;
     api.current.reset(widgetId.current);
     setMessage("Complete the refreshed security check.");
-    setFailed(false);
+    setStatus("active");
     onChangeRef.current(null, false);
   }, [resetSignal]);
 
+  // In server-signalled bypass mode there is no challenge to solve, so the
+  // widget contributes no chrome at all.
+  if (status === "bypassed") return null;
+
+  const failed = status === "error";
   return (
     <div
       className={`sutra-turnstile${failed ? " is-error" : ""}`}
@@ -201,6 +257,15 @@ export default function TurnstileWidget({
       <p role={failed ? "alert" : "status"} aria-live="polite">
         {message}
       </p>
+      {failed ? (
+        <button
+          className="button button-secondary sutra-turnstile-retry"
+          onClick={() => setAttempt((current) => current + 1)}
+          type="button"
+        >
+          Retry security check
+        </button>
+      ) : null}
     </div>
   );
 }

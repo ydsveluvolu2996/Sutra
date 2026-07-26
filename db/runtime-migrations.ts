@@ -56,6 +56,7 @@ import finopsCurRegionSchemaSql from "../drizzle/0056_finops_cur_region.sql?raw"
 import finopsCurCommitmentsSchemaSql from "../drizzle/0057_finops_cur_commitments.sql?raw";
 import finopsAllocationRulesSchemaSql from "../drizzle/0058_finops_allocation_rules.sql?raw";
 import finopsCustomerMarginSchemaSql from "../drizzle/0059_finops_customer_margin.sql?raw";
+import finopsBudgetsCustomerScopeSchemaSql from "../drizzle/0060_finops_budgets_customer_scope.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -129,6 +130,7 @@ const migrations = [
   { id: "0057_finops_cur_commitments", statements: statementsFrom(finopsCurCommitmentsSchemaSql) },
   { id: "0058_finops_allocation_rules", statements: statementsFrom(finopsAllocationRulesSchemaSql) },
   { id: "0059_finops_customer_margin", statements: statementsFrom(finopsCustomerMarginSchemaSql) },
+  { id: "0060_finops_budgets_customer_scope", statements: statementsFrom(finopsBudgetsCustomerScopeSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import { postAuth, useSession } from "./use-session";
@@ -82,6 +82,9 @@ function AuthenticatedAppShell({
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [navQuery, setNavQuery] = useState("");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
+  const mobileNavPanelRef = useRef<HTMLDivElement>(null);
   const capabilitySet = new Set(session.capabilities);
   const allVisibleNav = visibleNavigation(capabilitySet);
   // Live nav filter: keep only groups with items whose label matches the query.
@@ -102,6 +105,34 @@ function AuthenticatedAppShell({
     : snapshotOrigin?.kind === "aws_sandbox" ? "live" : health?.mode ?? "offline";
   const scopeLabel = connection?.customerName ?? session.organization.name;
   const initials = userInitials(session);
+
+  // Closing the mobile drawer always returns focus to the toggle that opened
+  // it, so a keyboard or screen-reader user is never dropped at the top of the
+  // document.
+  const closeMobileNav = useCallback((returnFocus: boolean) => {
+    setMobileNavOpen(false);
+    if (returnFocus) mobileNavToggleRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeMobileNav(true);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (mobileNavPanelRef.current?.contains(target) === true) return;
+      if (mobileNavToggleRef.current?.contains(target) === true) return;
+      closeMobileNav(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [closeMobileNav, mobileNavOpen]);
 
   async function signOut(): Promise<void> {
     setSigningOut(true);
@@ -157,22 +188,39 @@ function AuthenticatedAppShell({
       </aside>
       <main className="main-area">
         <header className="topbar">
-          <details className="mobile-nav">
-            <summary aria-label="Open navigation">Menu</summary>
-            <div className="mobile-nav-panel">
-              {visibleNav.map((group) => (
-                <section aria-labelledby={`mobile-nav-${group.key}`} key={group.key}>
-                  <strong id={`mobile-nav-${group.key}`}>{group.label}</strong>
-                  {group.items.map((item) => (
-                    <Link aria-current={active === item.key ? "page" : undefined} href={item.href} key={`${group.key}-${item.href}`}>
-                      {item.label}
-                    </Link>
-                  ))}
-                </section>
-              ))}
+          <div className="mobile-nav">
+            <button
+              aria-controls="mobile-nav-panel"
+              aria-expanded={mobileNavOpen}
+              className="mobile-nav-toggle"
+              onClick={() => (mobileNavOpen ? closeMobileNav(false) : setMobileNavOpen(true))}
+              ref={mobileNavToggleRef}
+              type="button"
+            >
+              <span aria-hidden="true" className="mobile-nav-bars"><i /><i /><i /></span>
+              Menu
+            </button>
+            <div className="mobile-nav-panel" hidden={!mobileNavOpen} id="mobile-nav-panel" ref={mobileNavPanelRef}>
+              <nav aria-label="Primary navigation (mobile)">
+                {visibleNav.map((group) => (
+                  <section aria-labelledby={`mobile-nav-${group.key}`} key={group.key}>
+                    <strong id={`mobile-nav-${group.key}`}>{group.label}</strong>
+                    {group.items.map((item) => (
+                      <Link
+                        aria-current={active === item.key ? "page" : undefined}
+                        href={item.href}
+                        key={`${group.key}-${item.href}`}
+                        onClick={() => closeMobileNav(false)}
+                      >
+                        {item.label}
+                      </Link>
+                    ))}
+                  </section>
+                ))}
+              </nav>
               <button disabled={signingOut} onClick={() => void signOut()} type="button">Sign out</button>
             </div>
-          </details>
+          </div>
           <div className="scope-switcher">
             <span>Workspace</span>
             <strong>{scopeLabel}</strong>

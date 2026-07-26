@@ -45,3 +45,23 @@
 @media (max-width: 1180px) { .createPanel { grid-template-columns: 1fr 1fr; } .createPanel > div:first-child { grid-column: 1 / -1; } .caseCard summary { grid-template-columns: 72px minmax(220px, 1fr) 120px 86px; } .caseCard summary > :nth-child(4), .caseCard summary > :nth-child(5) { display: none; } }
 @media (max-width: 850px) { .kpis { grid-template-columns: repeat(2, 1fr); } .caseBody { grid-template-columns: 1fr; } .controls { border-right: 0; border-bottom: 1px solid var(--line); } .caseCard summary { grid-template-columns: 70px minmax(180px, 1fr) 92px; } .caseCard summary > :nth-child(3), .caseCard summary > :nth-child(4), .caseCard summary > :nth-child(5) { display: none; } }
 @media (max-width: 600px) { .kpis, .createPanel { grid-template-columns: 1fr; } .controls { grid-template-columns: 1fr; } .controls > * { grid-column: 1 !important; } .noteComposer { grid-template-columns: 1fr; } }
+
+/* Phone layer. The 850px case-row tracks still need 70 + 180 + 92 + 24 = 366px,
+   which does not fit the ~303px available inside a case card on a 375px
+   viewport, so the row becomes a two-column labelled card. Owner and Due —
+   dropped at 850px — come back, because a card has the room a row did not. */
+@media screen and (max-width: 860px) {
+  /* `height: 40px` above is a fixed height, so this must set `height`, not
+     `min-height`, to reach a 44px target. */
+  .createPanel select, .controls select, .controls input { height: 44px; font-size: 16px; }
+  .noteComposer textarea { font-size: 16px; }
+}
+
+@media screen and (max-width: 620px) {
+  .caseCard summary { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 12px; align-items: start; padding: 14px; }
+  .caseTitle { grid-column: 1 / -1; order: -1; }
+  .caseCard summary > :nth-child(3), .caseCard summary > :nth-child(4) { display: grid; }
+  .caseCard summary > :nth-child(5) { display: inline-block; }
+  .priority, .sla, .status { justify-self: start; }
+  .noteComposer button { width: 100%; }
+}

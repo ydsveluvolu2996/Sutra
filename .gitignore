@@ -48,3 +48,6 @@ next-env.d.ts
 
 # Vulnerability feed mirror (fetched at runtime)
 data/vuln-feeds/
+
+# Never commit local runtime secrets or any backup/variant of them
+.dev.vars*

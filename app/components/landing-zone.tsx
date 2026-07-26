@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 
 import CookieConsent, { openCookieSettings } from "./cookie-consent";
+import LandingHeroCinematic from "./landing-hero-cinematic";
 import ThemeToggle, { THEME_CHANGED_EVENT } from "./theme-toggle";
 
 /* ================================================================== *
@@ -307,6 +308,73 @@ function Plus() {
   );
 }
 
+/* ==================================================================== *
+ * Suite wheel — the cross-cutting function ring.
+ *
+ * THE LOGIC (mirrored from the reference, not its words): the OUTER ring is
+ * the three *planes* Sutra collects from — cloud, Kubernetes, identity — and
+ * the INNER ring is the five *functions* that apply across all three. Every
+ * one is a shipped capability; nothing here is aspirational.
+ *
+ * GEOMETRY — measured, not eyeballed. The wheel is a 420x440 viewBox with
+ * centre (210,210). The segment band is `stroke-width: 44` on an r=150 arc,
+ * so it occupies r=128..172 and the usable annulus is bounded by the brand
+ * core below and r=128 above. The brand core was r=86, which left only 42px
+ * of annulus — not enough for an 18px icon plus a two-line caption at any
+ * legible size (solved numerically: the best all-single-line arrangement
+ * overran the segment band by 4.6px). So the core is now r=58, which both
+ * matches the reference's proportions (a small brand mark inside a much
+ * larger function ring) and opens the annulus to 70px. Verified against real
+ * rendered `getBBox()` metrics (not estimated advance widths): at r=101.5 with
+ * a 16px icon and a 7.2px caption the ring clears the brand core by 5.5px and
+ * the segment band by 4.7px, leaves 52px between adjacent blocks, and collides
+ * with neither the three segment labels nor the core text.
+ *
+ * Captions sit on the CENTRE-FACING side of every icon — that one rule is
+ * what keeps the lower two blocks from pushing their text out into the band.
+ *
+ * The whole ring is decorative relative to the interaction: `pointer-events:
+ * none`, so the three segments remain the only clickable targets.
+ * ==================================================================== */
+const WHEEL_R = 100.5;
+const WHEEL_ICON = 16;
+const WHEEL_CAP_FS = 7.2;
+const WHEEL_CAP_GAP = 4;
+
+/** Five cross-cutting functions, hand-authored 24x24 thin-stroke line art to
+ *  match the icon language already used by the capability grid. */
+const WHEEL_FNS: Array<{ a: number; l1: string; l2: string; icon: string }> = [
+  // Always-current AWS CMDB / asset graph — a three-layer stack.
+  { a: -90, l1: "INVENTORY", l2: "AWS CMDB", icon: '<path d="M12 3 21 7.5 12 12 3 7.5z"/><path d="M3 12l9 4.5 9-4.5"/><path d="M3 16.5 12 21l9-4.5"/>' },
+  // Risk proven reachable via attack paths — a rising node-and-edge chain.
+  { a: -18, l1: "REACHABLE", l2: "PATHS", icon: '<circle cx="4.6" cy="18" r="2.2"/><circle cx="12" cy="12" r="2.2"/><circle cx="19.4" cy="5.6" r="2.2"/><path d="M6.3 16.5 10.3 13.4M13.7 10.4 17.7 7"/>' },
+  // The unified queue ordered by EPSS / KEV / SLA — sorted, ranked bars.
+  { a: 54, l1: "PRIORITISE", l2: "EPSS · KEV", icon: '<path d="M4 6h16M4 12h10.5M4 18h5.5"/>' },
+  // FinOps spend, waste and per-customer margin — a price tag.
+  { a: 126, l1: "COST", l2: "FINOPS", icon: '<path d="M13.4 3H4.8A1.8 1.8 0 0 0 3 4.8v8.6l7.7 7.7a1.7 1.7 0 0 0 2.4 0l6.9-6.9a1.7 1.7 0 0 0 0-2.4z"/><circle cx="8" cy="8" r="1.5"/>' },
+  // Every finding cited to an observation, auditor-ready — a page + check.
+  { a: 198, l1: "EVIDENCE", l2: "CITED", icon: '<path d="M14 3H6.2A1.8 1.8 0 0 0 4.4 4.8v14.4A1.8 1.8 0 0 0 6.2 21h11.6a1.8 1.8 0 0 0 1.8-1.8V8.8z"/><path d="M14 3v5.8h5.8"/><path d="m8.7 14.3 2.2 2.2 4.5-4.6"/>' },
+];
+
+/**
+ * Resolve one function's placement. `inward` puts the caption on the side of
+ * the icon that faces the centre, which is what keeps every block inside the
+ * r=128 annulus regardless of which quadrant it lands in.
+ */
+function wheelFnGeometry(angleDeg: number, lines: number) {
+  const t = (angleDeg * Math.PI) / 180;
+  const px = 210 + WHEEL_R * Math.cos(t);
+  const py = 210 + WHEEL_R * Math.sin(t);
+  const capH = WHEEL_CAP_FS * 0.72;
+  const lineH = WHEEL_CAP_FS * 1.32;
+  const blockH = capH + (lines - 1) * lineH;
+  const half = WHEEL_ICON / 2;
+  // Above the centre -> caption below the icon; below the centre -> above it.
+  const capTop =
+    Math.sin(t) <= 0 ? py + half + WHEEL_CAP_GAP : py - half - WHEEL_CAP_GAP - blockH;
+  return { px, py, half, lineH, baseline: capTop + capH };
+}
+
 /* Scroll-pinned suite wheel (Prisma-style): the donut stays fixed while the
  * right column scrolls; each story block lights its segment. */
 function SuiteWheel() {
@@ -330,12 +398,43 @@ function SuiteWheel() {
     <div className="wheel-wrap">
       <div className="wheel-pin">
         <svg className="wheel" viewBox="0 0 420 440" aria-hidden="true">
-          <defs><linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient></defs>
+          <defs>
+            <linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient>
+            {/* Soft inner sphere — the thing that makes the reference read as
+                a lit object rather than a flat diagram. Stops are themed from
+                CSS so both grounds work. */}
+            <radialGradient id="wsphere" cx="50%" cy="40%" r="66%">
+              <stop className="wsph-0" offset="0" />
+              <stop className="wsph-1" offset=".58" />
+              <stop className="wsph-2" offset="1" />
+            </radialGradient>
+          </defs>
+          <circle className="wsphere" cx={210} cy={210} r={124} />
           {segs.map((s, i) => <path key={s.label} className="wseg" d={s.d} data-on={i === on} onClick={() => go(i)} />)}
           {segs.map((s, i) => <text key={s.label} className="wlab" x={s.lx} y={s.ly} textAnchor="middle" data-on={i === on}>{s.label}</text>)}
-          <circle className="wcore" cx={210} cy={210} r={86} />
-          <text className="wcore-t" x={210} y={205} textAnchor="middle">Sutra</text>
-          <text className="wcore-s" x={210} y={228} textAnchor="middle">ONE EVIDENCE GRAPH</text>
+
+          {/* Cross-cutting function ring. Decorative: pointer-events are off,
+              so the three segments stay the only clickable targets. */}
+          <g className="wfns" aria-hidden="true">
+            {WHEEL_FNS.map((f) => {
+              const g = wheelFnGeometry(f.a, 2);
+              return (
+                <g key={f.l1}>
+                  <g
+                    className="wico"
+                    transform={`translate(${(g.px - g.half).toFixed(2)} ${(g.py - g.half).toFixed(2)}) scale(${WHEEL_ICON / 24})`}
+                    dangerouslySetInnerHTML={{ __html: f.icon }}
+                  />
+                  <text className="wcap" x={g.px.toFixed(2)} y={g.baseline.toFixed(2)} textAnchor="middle">{f.l1}</text>
+                  <text className="wcap wcap-2" x={g.px.toFixed(2)} y={(g.baseline + g.lineH).toFixed(2)} textAnchor="middle">{f.l2}</text>
+                </g>
+              );
+            })}
+          </g>
+
+          <circle className="wcore" cx={210} cy={210} r={58} />
+          <text className="wcore-t" x={210} y={207} textAnchor="middle">Sutra</text>
+          <text className="wcore-s" x={210} y={224} textAnchor="middle">ONE EVIDENCE GRAPH</text>
         </svg>
       </div>
       <div>
@@ -459,8 +558,109 @@ function FeatureExplorer() {
   );
 }
 
+/* Section nav: label + the id it must resolve to. Every id here is asserted
+   against the DOM at mount (dev-only warning) so a renamed section can never
+   silently leave a dead anchor in the header. */
+const NAV_SECTIONS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "platform", label: "Platform" },
+  { id: "capabilities", label: "Capabilities" },
+  { id: "why", label: "Why Sutra" },
+  { id: "pricing", label: "Pricing" },
+  { id: "trust", label: "Trust model" },
+  { id: "architecture", label: "Architecture" },
+  { id: "proof", label: "FAQ" },
+];
+
 export default function LandingZone() {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const navRef = useRef<HTMLElement | null>(null);
+  const indRef = useRef<HTMLSpanElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [stuck, setStuck] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  /* ---- section scroll-spy: one IntersectionObserver, resolved against a
+     single switch line at 40% of the viewport. The callback only fires when a
+     section crosses a threshold (never per scroll event); it then picks the
+     last section whose top has passed the line, so the shortest trailing
+     section still wins, and a hard bottom-of-document check guarantees the
+     final section activates even if it can never reach the line. ---- */
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const els = NAV_SECTIONS.map((s) => root.querySelector<HTMLElement>("#" + s.id));
+    if (process.env.NODE_ENV !== "production") {
+      NAV_SECTIONS.forEach((s, i) => {
+        if (!els[i]) console.warn("[landing nav] dead anchor: no element with id #" + s.id);
+      });
+    }
+    const resolve = () => {
+      const doc = document.documentElement;
+      const line = window.innerHeight * 0.4;
+      let next: string | null = null;
+      for (let i = 0; i < els.length; i++) {
+        const el = els[i];
+        if (el && el.getBoundingClientRect().top <= line) next = NAV_SECTIONS[i].id;
+      }
+      // Bottom of the document always belongs to the final section.
+      if (window.scrollY + window.innerHeight >= doc.scrollHeight - 2) {
+        for (let i = els.length - 1; i >= 0; i--) if (els[i]) { next = NAV_SECTIONS[i].id; break; }
+      }
+      setActiveId(next);
+    };
+    const spy = new IntersectionObserver(resolve, { threshold: [0, 0.02, 0.25, 0.5, 0.75, 0.98, 1] });
+    els.forEach((el) => { if (el) spy.observe(el); });
+    window.addEventListener("resize", resolve, { passive: true });
+    return () => { spy.disconnect(); window.removeEventListener("resize", resolve); };
+  }, []);
+
+  /* ---- sliding underline: positioned by writing CSS custom properties on
+     the decorative indicator, so no per-link layout thrash. ---- */
+  useEffect(() => {
+    const place = () => {
+      const nav = navRef.current;
+      const ind = indRef.current;
+      if (!nav || !ind) return;
+      const link = activeId ? nav.querySelector<HTMLAnchorElement>('a[data-sec="' + activeId + '"]') : null;
+      if (!link) { ind.style.setProperty("--o", "0"); return; }
+      ind.style.setProperty("--o", "1");
+      ind.style.setProperty("--x", link.offsetLeft + "px");
+      ind.style.setProperty("--w", link.offsetWidth + "px");
+    };
+    place();
+    window.addEventListener("resize", place, { passive: true });
+    return () => window.removeEventListener("resize", place);
+  }, [activeId]);
+
+  /* ---- mobile menu: Escape and outside-click dismiss, focus returned to the
+     toggle so keyboard users never lose their place. ---- */
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => { setMenuOpen(false); toggleRef.current?.focus(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); close(); } };
+    const onDown = (e: MouseEvent) => {
+      const head = rootRef.current?.querySelector(".head");
+      if (head && !head.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("pointerdown", onDown); };
+  }, [menuOpen]);
+
+  /* ---- sticky chrome: the header is bare over the cinematic hero at rest and
+     only earns its blur + hairline once the page has scrolled. Driven by a
+     sentinel observer, not a scroll listener. ---- */
+  useEffect(() => {
+    const el = rootRef.current?.querySelector("#top");
+    if (!el) return;
+    // Make the skip-link target programmatically focusable so "Skip to content"
+    // moves focus, not just the scroll position.
+    if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1");
+    const io = new IntersectionObserver((es) => setStuck(!es[0].isIntersecting), { threshold: 0 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -491,9 +691,11 @@ export default function LandingZone() {
       };
       let spCyan: HTMLCanvasElement, spViolet: HTMLCanvasElement, spBlue: HTMLCanvasElement;
       const resize = () => {
-        DPR = Math.min(2, window.devicePixelRatio || 1);
-        W = cv.width = window.innerWidth * DPR;
-        H = cv.height = window.innerHeight * DPR;
+        // Soft glow sprites only, so phones cap the backing store at 1.5x
+        // (~44% less fill per frame) with no visible loss. Desktop keeps 2x.
+        DPR = Math.min(window.innerWidth <= 560 ? 1.5 : 2, window.devicePixelRatio || 1);
+        W = cv.width = Math.round(window.innerWidth * DPR);
+        H = cv.height = Math.round(window.innerHeight * DPR);
         cv.style.width = window.innerWidth + "px";
         cv.style.height = window.innerHeight + "px";
         // Read the active theme so the field reads right on both grounds:
@@ -583,23 +785,7 @@ export default function LandingZone() {
     );
     root.querySelectorAll(".stats .n").forEach((el) => cio.observe(el));
 
-    /* ---- header section spy (Prisma-style gradient underline) ---- */
-    const navLinks = Array.from(root.querySelectorAll<HTMLAnchorElement>(".head nav a[href^='#']"));
-    const spy = new IntersectionObserver(
-      (es) => es.forEach((e) => {
-        if (!e.isIntersecting) return;
-        const id = "#" + (e.target as HTMLElement).id;
-        navLinks.forEach((a) => a.setAttribute("data-active", String(a.getAttribute("href") === id)));
-      }),
-      { rootMargin: "-35% 0px -55% 0px" }
-    );
-    ["platform", "capabilities", "why", "pricing", "trust", "architecture", "proof"].forEach((id) => {
-      const el = root.querySelector("#" + id);
-      if (el) spy.observe(el);
-    });
-
     return () => {
-      spy.disconnect();
       if (raf) cancelAnimationFrame(raf);
       if (onResize) window.removeEventListener("resize", onResize);
       if (onThemeChange) window.removeEventListener(THEME_CHANGED_EVENT, onThemeChange);
@@ -613,26 +799,66 @@ export default function LandingZone() {
       <div className="bg-glows" />
       <canvas className="bg-canvas" id="lz-bg" aria-hidden="true" />
 
-      <header className="head">
+      <a className="lx-skip" href="#top">Skip to content</a>
+
+      <header className={"head" + (stuck ? " is-stuck" : "") + (menuOpen ? " is-menu" : "")}>
         <Link className="lx-brand" href="/" aria-label="Sutra home">
           <span className="mark" aria-hidden="true"><i /><i /><i /></span>
           <span><b>Sutra</b><small>Cloud security, woven together</small></span>
         </Link>
-        <nav aria-label="Page sections">
-          <a href="#platform">Platform</a><a href="#capabilities">Capabilities</a><a href="#why">Why Sutra</a><a href="#pricing">Pricing</a><a href="#trust">Security model</a><a href="#architecture">Architecture</a><a href="#proof">Trust</a>
-        </nav>
+        <div className="lx-navwrap" id="lz-nav-panel" data-open={menuOpen ? "true" : "false"}>
+          <nav aria-label="Page sections" ref={navRef}>
+            <span className="lx-nav-ind" ref={indRef} aria-hidden="true" />
+            {NAV_SECTIONS.map((s) => (
+              <a
+                key={s.id}
+                href={"#" + s.id}
+                data-sec={s.id}
+                data-active={activeId === s.id ? "true" : "false"}
+                aria-current={activeId === s.id ? "true" : undefined}
+                onClick={() => setMenuOpen(false)}
+              >
+                {s.label}
+              </a>
+            ))}
+          </nav>
+          <div className="lx-nav-extra">
+            <Link className="signin" href="/about" onClick={() => setMenuOpen(false)}>About</Link>
+            <Link className="signin" href="/login" onClick={() => setMenuOpen(false)}>Sign in</Link>
+          </div>
+        </div>
         <div className="head-actions">
           <ThemeToggle />
           <Link className="signin" href="/about">About</Link>
           <Link className="signin" href="/login">Sign in</Link>
           <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
+          <button
+            type="button"
+            className="lx-nav-toggle"
+            ref={toggleRef}
+            aria-expanded={menuOpen}
+            aria-controls="lz-nav-panel"
+            aria-label={menuOpen ? "Close section menu" : "Open section menu"}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span className="lx-burger" aria-hidden="true"><i /><i /><i /></span>
+          </button>
         </div>
       </header>
 
       <span id="top" />
-      <section className="hero">
+      {/* Cinematic opening band. The established hero (headline + live
+          security-graph card) follows immediately below, unchanged. */}
+      <LandingHeroCinematic />
+      <section className="hero" id="lz-hero">
         <div className="lx-hero-copy">
-          <span className="kicker"><i /> The cloud operations platform for AWS MSPs</span>
+          {/* One pill, two lengths: the full positioning line on desktop, a
+              short one on phones so it never wraps to two lines. */}
+          <span className="kicker">
+            <i />
+            <span className="lx-kicker-full">The cloud operations platform for AWS MSPs</span>
+            <span className="lx-kicker-short">Cloud ops for AWS MSPs</span>
+          </span>
           <h1>See every risk.<br /><span className="accent">Prove every path.</span></h1>
           <p>One platform for AWS and Amazon EKS operations — a live CMDB and asset inventory, reachability-proven security, cloud cost (FinOps), compliance readiness, and a tenant-scoped API — woven into a single evidence graph. Sutra surfaces the few risks that are provably reachable and cites the exact observation behind every finding.</p>
           <div className="hero-cta">
@@ -650,6 +876,15 @@ export default function LandingZone() {
                 __html:
                   '<svg viewBox="0 0 440 290" preserveAspectRatio="xMidYMid meet"><defs><linearGradient id="gg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset=".5" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>' +
                   '<path class="gl" d="M50 214 C 124 214 132 150 200 146"/><path class="gl d2" d="M200 146 C 264 142 268 66 344 62"/><path class="gl d3" d="M200 146 C 262 152 276 208 350 214"/><path class="gl rose" d="M200 146 C 226 110 268 100 314 112"/>' +
+                  /* Travelling evidence packets — one per edge, staggered, each
+                     pinned to its own edge via CSS offset-path. Decorative, so
+                     aria-hidden, and stopped dead by prefers-reduced-motion. */
+                  '<g aria-hidden="true">' +
+                  '<circle class="gpk" r="3.1" style="offset-path:path(\'M50 214 C 124 214 132 150 200 146\')"/>' +
+                  '<circle class="gpk k2" r="2.9" style="offset-path:path(\'M200 146 C 264 142 268 66 344 62\')"/>' +
+                  '<circle class="gpk k3" r="2.9" style="offset-path:path(\'M200 146 C 262 152 276 208 350 214\')"/>' +
+                  '<circle class="gpk alert" r="3.4" style="offset-path:path(\'M200 146 C 226 110 268 100 314 112\')"/>' +
+                  "</g>" +
                   '<g class="gn" style="animation-delay:.15s"><circle cx="50" cy="214" r="13"/><text x="50" y="240" text-anchor="middle">internet</text></g>' +
                   '<g class="gn" style="animation-delay:.5s"><circle cx="200" cy="146" r="15"/><text x="200" y="174" text-anchor="middle" fill="#f4f7ff">api-gateway</text></g>' +
                   '<g class="gn acc" style="animation-delay:.85s"><circle cx="344" cy="62" r="13"/><text x="344" y="88" text-anchor="middle">payments-sa</text></g>' +
@@ -662,11 +897,10 @@ export default function LandingZone() {
             />
           </div>
         </div>
-        <a className="scroll-cue" href="#platform" aria-label="Scroll to explore">
-          <span className="mouse" />
-          <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="m6 9 6 6 6-6" /></svg>
-          <small>Scroll</small>
-        </a>
+        {/* The page carries exactly ONE scroll affordance, and it lives at the
+            bottom of the cinematic band above — the first thing a visitor sees,
+            pointing down at this section. A second cue here read as a
+            duplicate. */}
       </section>
 
       <Statements />

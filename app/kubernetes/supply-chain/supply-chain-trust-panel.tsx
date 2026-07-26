@@ -1,12 +1,25 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import type { KubernetesSupplyChainEvidence } from "../../../lib/kubernetes-supply-chain";
-import { evidenceToArtifact } from "../../../lib/supply-chain-trust-inputs";
-import {
-  verifySupplyChainTrust,
-  type SupplyChainVerificationState,
+import { useCallback, useEffect, useState } from "react";
+import type {
+  SupplyChainTrustReport,
+  SupplyChainVerificationState,
 } from "../../../lib/supply-chain-verification";
+
+// The verification engine runs server-side in
+// /api/v1/kubernetes/supply-chain/trust, which loads the same stored evidence
+// for the same (connection, cluster, limit=200) scope, collapses it to one
+// artifact per image digest with the same adapter, and passes the same empty
+// VEX/vulnerability inputs. Only the report *type* is imported here, so there
+// is a single implementation and the engine no longer ships to the browser.
+const EVIDENCE_LIMIT = 200;
+
+interface TrustBody extends SupplyChainTrustReport {
+  readonly connectionId: string;
+  readonly clusterId: string;
+  readonly configured: boolean;
+  readonly error?: { readonly message?: string };
+}
 
 function stateClass(state: SupplyChainVerificationState): string {
   if (state === "verified") return "settings-pill is-good";
@@ -28,23 +41,48 @@ function shortDigest(digest: string): string {
   return digest.startsWith("sha256:") ? `sha256:${digest.slice(7, 19)}…` : digest.slice(0, 19);
 }
 
-export function SupplyChainTrustPanel({ evidence }: { readonly evidence: readonly KubernetesSupplyChainEvidence[] }) {
+export function SupplyChainTrustPanel({
+  connectionId,
+  clusterId,
+}: {
+  readonly connectionId: string | null;
+  readonly clusterId: string | null;
+}) {
   const [open, setOpen] = useState(false);
+  const [report, setReport] = useState<TrustBody | null>(null);
 
-  const report = useMemo(() => {
-    // One artifact per image digest (evidence may carry history for a digest).
-    const byDigest = new Map<string, KubernetesSupplyChainEvidence>();
-    for (const record of evidence) {
-      if (!byDigest.has(record.image.digest)) byDigest.set(record.image.digest, record);
+  const refresh = useCallback(async () => {
+    if (connectionId === null || clusterId === null) {
+      setReport(null);
+      return;
     }
-    return verifySupplyChainTrust({
-      artifacts: [...byDigest.values()].map((record) => evidenceToArtifact(record)),
-      vexStatements: [],
-      vulnerabilities: [],
-    });
-  }, [evidence]);
+    try {
+      const response = await fetch(
+        `/api/v1/kubernetes/supply-chain/trust?connectionId=${encodeURIComponent(connectionId)}` +
+          `&clusterId=${encodeURIComponent(clusterId)}&limit=${EVIDENCE_LIMIT}`,
+        { cache: "no-store", credentials: "same-origin" },
+      );
+      const body = await response.json().catch(() => null) as TrustBody | null;
+      if (!response.ok || body === null || body.schema !== "sutra.supply-chain-verification.v1") {
+        setReport(null);
+        return;
+      }
+      setReport(body);
+    } catch {
+      // The surrounding workspace already reports evidence-load failures; the
+      // derived trust panel simply stays hidden rather than claiming a state.
+      setReport(null);
+    }
+  }, [clusterId, connectionId]);
 
-  if (evidence.length === 0) return null;
+  useEffect(() => {
+    const task = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(task);
+  }, [refresh]);
+
+  // `configured` is the route's report of whether any stored evidence exists in
+  // this scope — the same condition the panel used to check locally.
+  if (report === null || !report.configured) return null;
 
   const { totals } = report;
   const fullyVerified = report.artifacts.filter((a) => a.signatureState === "verified" && a.provenanceState === "verified").length;

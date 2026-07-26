@@ -76,14 +76,20 @@ const SHOWCASE = [
 
 function LoginShowcase() {
   const [index, setIndex] = useState(0);
+  // A timeout keyed on the current slide, rather than a fixed interval, means a
+  // manual selection also restarts the dwell time instead of being replaced a
+  // moment later. Reduced motion keeps the slide fixed until it is chosen.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const timer = window.setInterval(() => setIndex((current) => (current + 1) % SHOWCASE.length), 4600);
-    return () => window.clearInterval(timer);
-  }, []);
+    const timer = window.setTimeout(
+      () => setIndex((current) => (current + 1) % SHOWCASE.length),
+      4600,
+    );
+    return () => window.clearTimeout(timer);
+  }, [index]);
   return (
-    <div className="login-showcase" aria-live="polite">
+    <div className="login-showcase" role="group" aria-roledescription="carousel" aria-label="Sutra capabilities">
       <div className="login-showcase-stage">
         {SHOWCASE.map((feature, position) => (
           <article
@@ -101,14 +107,13 @@ function LoginShowcase() {
           </article>
         ))}
       </div>
-      <div className="login-showcase-dots" role="tablist" aria-label="Sutra capabilities">
+      <div className="login-showcase-dots" role="group" aria-label="Choose a capability to show">
         {SHOWCASE.map((feature, position) => (
           <button
             key={feature.tone}
             type="button"
-            role="tab"
-            aria-selected={position === index}
-            aria-label={feature.title}
+            aria-current={position === index}
+            aria-label={`Show capability ${position + 1} of ${SHOWCASE.length}: ${feature.title}`}
             className={position === index ? "is-active" : undefined}
             onClick={() => setIndex(position)}
           />

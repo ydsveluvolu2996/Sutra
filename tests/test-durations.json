@@ -111,7 +111,6 @@
   "tests/networkpolicy-flow-inputs.test.ts": 164,
   "tests/reachability-latency.test.ts": 164,
   "tests/vulnerability-database.test.ts": 164,
-  "tests/kubernetes-sbom-component-policy.test.ts": 163,
   "tests/kubernetes-posture-trend.test.ts": 162,
   "tests/local-data-backup.test.mjs": 162,
   "tests/patch-posture.test.ts": 162,

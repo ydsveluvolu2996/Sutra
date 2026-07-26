@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import styles from "./costs.module.css";
 
 /* FinOps workspace panels: CUR/FOCUS upload, allocation, budgets, anomaly
  * signals. Money is displayed from integer micro-units; rejected upload rows
@@ -300,6 +301,8 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [budgetDraft, setBudgetDraft] = useState({ name: "", currency: "USD", limit: "" });
   const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [budgetPendingDelete, setBudgetPendingDelete] = useState<string | null>(null);
+  const [budgetDeleting, setBudgetDeleting] = useState<string | null>(null);
   const [unitDraft, setUnitDraft] = useState({ unitLabel: "transactions", count: "" });
   const [unitError, setUnitError] = useState<string | null>(null);
   const [reports, setReports] = useState<readonly ScheduledReport[]>([]);
@@ -363,6 +366,20 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       await load();
     } catch (caught) {
       setBudgetError(caught instanceof Error ? caught.message : "Budget rejected");
+    }
+  }
+
+  async function deleteBudget(id: string) {
+    setBudgetError(null);
+    setBudgetDeleting(id);
+    try {
+      await requestJson(`/api/v1/finops/budgets?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      setBudgetPendingDelete(null);
+      await load();
+    } catch (caught) {
+      setBudgetError(caught instanceof Error ? caught.message : "Delete rejected");
+    } finally {
+      setBudgetDeleting(null);
     }
   }
 
@@ -498,7 +515,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
         </div>
         {budgetError ? <p className="cmdbq-error" role="alert">{budgetError}</p> : null}
         {(insights?.budgets ?? []).length > 0 ? (
-          <table><thead><tr><th>Budget</th><th>Spent</th><th>Limit</th><th>Utilization</th><th>State</th></tr></thead>
+          <table><thead><tr><th>Budget</th><th>Spent</th><th>Limit</th><th>Utilization</th><th>State</th><th>Delete</th></tr></thead>
             <tbody>{insights!.budgets.map((budget) => (
               <tr key={budget.id}>
                 <td>{budget.name}</td>
@@ -506,6 +523,16 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
                 <td>{money(budget.limitMicros, budget.currency)}</td>
                 <td>{budget.utilizationPercent === null ? "—" : `${budget.utilizationPercent.toFixed(1)}%`}</td>
                 <td><span className={`cmdbq-chip ${budget.state === "breached" ? "cmdbq-removed" : budget.state === "warning" ? "cmdbq-changed" : "cmdbq-added"}`}>{budget.state}</span></td>
+                <td>
+                  {budgetPendingDelete === budget.id ? (
+                    <span className={styles.budgetConfirm}>
+                      <button type="button" className="button button-ghost" disabled={budgetDeleting === budget.id} onClick={() => void deleteBudget(budget.id)} aria-label={`Confirm deleting budget ${budget.name}`}>{budgetDeleting === budget.id ? "Deleting…" : "Confirm"}</button>
+                      <button type="button" className="button button-ghost" disabled={budgetDeleting === budget.id} onClick={() => setBudgetPendingDelete(null)} aria-label={`Keep budget ${budget.name}`}>Cancel</button>
+                    </span>
+                  ) : (
+                    <button type="button" className="button button-ghost" disabled={budgetDeleting !== null} onClick={() => { setBudgetError(null); setBudgetPendingDelete(budget.id); }} aria-label={`Delete budget ${budget.name}`}>Delete</button>
+                  )}
+                </td>
               </tr>
             ))}</tbody></table>
         ) : <p className="panel-footnote">No budgets defined yet.</p>}

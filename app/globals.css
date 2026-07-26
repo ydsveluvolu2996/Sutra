@@ -852,9 +852,16 @@ h3 { letter-spacing: -.02em; }
 
 /* Animated feature showcase on the login brand panel */
 .login-showcase { display: flex; flex-direction: column; gap: 26px; }
-.login-showcase-stage { position: relative; min-height: 216px; }
-.login-feature { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 16px; opacity: 0; transform: translateY(14px) scale(.99); transition: opacity .6s ease, transform .6s cubic-bezier(.2,.8,.3,1); pointer-events: none; }
-.login-feature.is-active { opacity: 1; transform: none; pointer-events: auto; }
+/* Every slide occupies the same grid cell, so the stage is always as tall as
+   its tallest slide instead of clipping longer copy at a fixed height. */
+.login-showcase-stage { display: grid; min-height: 216px; }
+/* visibility — not opacity alone — decides which slide exists: exactly one is
+   ever visible, hit-testable and exposed to assistive technology, even if the
+   cross-fade is disabled, interrupted or never runs. */
+/* The enter offset points upwards: a downward one would push the hidden slides
+   past the stage's bottom edge and show up as scrollable overflow. */
+.login-feature { grid-area: 1 / 1; display: flex; flex-direction: column; gap: 16px; opacity: 0; visibility: hidden; transform: translateY(-12px) scale(.99); transition: opacity .6s ease, transform .6s cubic-bezier(.2,.8,.3,1), visibility 0s; pointer-events: none; }
+.login-feature.is-active { opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
 .login-feature-icon { width: 64px; height: 54px; display: grid; place-items: center; border-radius: 15px; border: 1px solid rgba(255,255,255,.12); background: linear-gradient(160deg, rgba(255,255,255,.09), rgba(255,255,255,.02)); box-shadow: 0 14px 34px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.14); }
 .login-feature-icon svg { width: 42px; height: 36px; }
 .login-feature-graph .login-feature-icon { color: #59d3ff; }
@@ -866,10 +873,16 @@ h3 { letter-spacing: -.02em; }
 .login-feature p { margin: 0; max-width: 460px; color: #a9b4d0; font-size: 12.5px; line-height: 1.75; }
 .login-feature-icon svg [stroke] { animation: none; }
 .login-feature.is-active .login-feature-icon svg { animation: auth-draw 1.1s ease forwards; }
-.login-showcase-dots { display: flex; gap: 8px; }
-.login-showcase-dots button { width: 26px; height: 4px; padding: 0; border: 0; border-radius: 999px; background: rgba(255,255,255,.16); cursor: pointer; transition: background .25s ease, width .25s ease; }
-.login-showcase-dots button:hover { background: rgba(255,255,255,.32); }
-.login-showcase-dots button.is-active { width: 40px; background: linear-gradient(90deg, #22d3ee, #8b5cf6); }
+/* The visible dot stays a 4px pill while the button itself is a 44x44 touch
+   target: horizontal padding widens it, and the negative block margin keeps the
+   row exactly as tall as the pill so the panel layout is unchanged. */
+.login-showcase-dots { display: flex; gap: 0; }
+.login-showcase-dots button { box-sizing: content-box; position: relative; width: 26px; height: 4px; padding: 20px 9px; margin: -20px 0; border: 0; background: none; cursor: pointer; transition: width .25s ease; }
+.login-showcase-dots button::before { content: ""; position: absolute; inset: 20px 9px; border-radius: 999px; background: rgba(255,255,255,.16); transition: background .25s ease; }
+.login-showcase-dots button:hover::before { background: rgba(255,255,255,.32); }
+.login-showcase-dots button:focus-visible { outline: 2px solid #7cd6f7; outline-offset: -14px; border-radius: 8px; }
+.login-showcase-dots button.is-active { width: 40px; }
+.login-showcase-dots button.is-active::before { background: linear-gradient(90deg, #22d3ee, #8b5cf6); }
 @keyframes auth-orb { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(24px, -18px); } }
 @keyframes auth-draw { from { stroke-dasharray: 220; stroke-dashoffset: 220; opacity: .3; } to { stroke-dasharray: 220; stroke-dashoffset: 0; opacity: 1; } }
 .auth-form-panel { min-height: 100vh; display: grid; place-items: center; padding: clamp(28px, 6vw, 82px); background: radial-gradient(circle at 100% 0, rgba(59,130,246,.1), transparent 27rem), #f3f5fb; }
@@ -881,7 +894,7 @@ h3 { letter-spacing: -.02em; }
 .auth-heading p { margin: 0; color: var(--ink-soft); font-size: 11px; line-height: 1.55; }
 .auth-form { display: grid; gap: 17px; }
 .auth-form label { display: grid; gap: 7px; color: #333e56; font-size: 10px; font-weight: 700; }
-.auth-form label > small { color: var(--ink-faint); font-size: 9px; font-weight: 450; line-height: 1.45; }
+.auth-form label > small { color: var(--ink-soft); font-size: 9px; font-weight: 450; line-height: 1.45; }
 .auth-form input { width: 100%; min-height: 44px; padding: 0 12px; border: 1px solid #ccd6ea; border-radius: 8px; background: #fbfcff; color: var(--ink); font-size: 12px; transition: border-color .16s ease, box-shadow .16s ease; }
 .auth-form input:hover { border-color: #aab8d4; }
 .auth-form input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.1); outline: 0; }
@@ -890,7 +903,7 @@ h3 { letter-spacing: -.02em; }
 .auth-field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .auth-code-input { font: 700 18px var(--font-geist-mono), monospace !important; letter-spacing: .34em; }
 .auth-error { margin: 0; padding: 10px 12px; border: 1px solid #edc9cd; border-radius: 7px; background: #fff4f5; color: #973743; font-size: 10px; line-height: 1.45; }
-.auth-help { margin: -7px 0 0; color: var(--blue); font-size: 10px; }
+.auth-help { margin: -7px 0 0; color: var(--green); font-size: 10px; }
 .auth-help-right { text-align: right; }
 .auth-help a { color: inherit; font-weight: 700; text-decoration: none; }
 .auth-help a:hover { text-decoration: underline; text-underline-offset: 3px; }
@@ -900,9 +913,10 @@ h3 { letter-spacing: -.02em; }
 .auth-submit { width: 100%; min-height: 44px; }
 .sutra-turnstile { display: grid; gap: 7px; min-width: 0; }
 .sutra-turnstile > div { width: 100%; min-height: 1px; }
-.sutra-turnstile > p { margin: 0; color: var(--ink-faint); font-size: 10px; line-height: 1.45; }
+.sutra-turnstile > p { margin: 0; color: var(--ink-soft); font-size: 10px; line-height: 1.45; }
 .sutra-turnstile.is-error > p { color: #b4233c; }
-.auth-local-note { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 25px 0 -7px; color: var(--ink-faint); font-size: 9px; }
+.sutra-turnstile-retry { justify-self: start; min-height: 44px; }
+.auth-local-note { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 25px 0 -7px; color: var(--ink-soft); font-size: 9px; }
 .auth-local-note span { color: var(--green); font-size: 7px; }
 .auth-loading { min-height: 220px; display: grid; place-items: center; align-content: center; text-align: center; }
 .auth-loading strong { margin-top: 18px; font-size: 15px; }
@@ -1177,7 +1191,7 @@ h3 { letter-spacing: -.02em; }
 .operations-job-header { min-height: 35px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .operations-job-action { min-width: 0; display: grid; justify-items: start; gap: 4px; }
 .operations-job-action small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); font-size: 8px; white-space: nowrap; }
-.mobile-nav button { min-height: 34px; padding: 9px 8px; border: 0; border-top: 1px solid var(--line); background: transparent; color: #9e2e2e; text-align: left; font-size: 11px; cursor: pointer; }
+.mobile-nav-panel > button { min-height: 44px; padding: 11px 10px; border: 0; border-top: 1px solid var(--line); background: transparent; color: #9e2e2e; text-align: left; font-size: 13px; cursor: pointer; }
 
 /* Compliance posture */
 .compliance-overview-grid { display: grid; grid-template-columns: minmax(0,1.45fr) minmax(310px,.7fr); gap: 13px; margin-bottom: 13px; }
@@ -1279,10 +1293,27 @@ h3 { letter-spacing: -.02em; }
 @media (max-width: 860px) {
   .auth-page { grid-template-columns: 1fr; }
   .auth-brand-panel { min-height: auto; padding: 34px; }
-  .auth-brand-copy { max-width: 680px; margin: 0; padding: 70px 0 55px; }
+  /* Keep the decorative orbs inside the panel: off-canvas offsets are what made
+     the panel report 240px of horizontal overflow at phone widths. */
+  .auth-brand-panel::before { width: 300px; height: 300px; right: 0; top: -150px; }
+  .auth-brand-panel::after { width: 260px; height: 260px; left: 0; bottom: -130px; }
+  .auth-brand-copy { max-width: 680px; margin: 0; padding: 44px 0 34px; }
   .auth-brand-copy h1 { max-width: 680px; }
-  .auth-form-panel { min-height: auto; padding: 55px 24px; }
+  .auth-form-panel { min-height: auto; padding: 40px 24px 55px; }
   .auth-page-compact .auth-form-panel { min-height: 100vh; }
+  /* 16px is the threshold below which iOS Safari zooms the viewport on focus. */
+  .auth-form input, .auth-form select { font-size: 16px; }
+  .auth-form label { font-size: 12px; }
+  .auth-form label > small { font-size: 11px; }
+  .auth-heading h2 { font-size: 26px; }
+  .auth-heading p { font-size: 12.5px; }
+  .auth-error { padding: 11px 13px; font-size: 12px; line-height: 1.5; }
+  .auth-help { font-size: 12px; }
+  .auth-help a { display: inline-flex; align-items: center; min-height: 44px; }
+  .auth-local-note { font-size: 11px; }
+  .auth-local-note span { font-size: 9px; }
+  .sutra-turnstile > p { font-size: 11.5px; }
+  .auth-assurances li { font-size: 11.5px; }
   .app-shell { display: block; }
   .assignment-layout { grid-template-columns: 1fr; }
   .kubernetes-resource-detail { grid-template-columns: 1fr; }
@@ -1296,15 +1327,20 @@ h3 { letter-spacing: -.02em; }
   .sidebar { display: none; }
   .topbar { height: 58px; padding: 0 18px; }
   .mobile-nav { display: block; position: relative; }
-  .mobile-nav summary { list-style: none; cursor: pointer; padding: 7px 10px; border: 1px solid rgba(130,155,235,.32); border-radius: 7px; background: rgba(130,155,235,.1); color: #dbe3f7; font-size: 11px; font-weight: 700; }
-  .mobile-nav[open] > div { position: absolute; top: 42px; left: 0; width: min(320px, calc(100vw - 36px)); max-height: calc(100vh - 78px); display: grid; overflow-y: auto; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 18px 45px rgba(20,30,70,.16); }
+  .mobile-nav-toggle { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; padding: 0 13px; border: 1px solid rgba(130,155,235,.32); border-radius: 9px; background: rgba(130,155,235,.1); color: #dbe3f7; font-size: 13px; font-weight: 700; }
+  .mobile-nav-toggle[aria-expanded="true"] { background: rgba(130,155,235,.22); border-color: rgba(130,155,235,.5); }
+  .mobile-nav-bars { width: 15px; display: grid; gap: 3px; }
+  .mobile-nav-bars i { display: block; height: 2px; border-radius: 2px; background: currentcolor; }
+  /* `:not([hidden])` matters: a bare `display: grid` here would out-specify the
+     UA stylesheet's `[hidden] { display: none }` and leave the drawer open. */
+  .mobile-nav-panel:not([hidden]) { position: absolute; top: 52px; left: 0; z-index: 40; width: min(320px, calc(100vw - 36px)); max-height: calc(100vh - 88px); display: grid; align-content: start; overflow-y: auto; overscroll-behavior: contain; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: #fff; box-shadow: 0 18px 45px rgba(20,30,70,.16); }
   .mobile-nav-panel section { display: grid; gap: 1px; padding: 7px 0; border-bottom: 1px solid var(--line); }
   .mobile-nav-panel section:first-child { padding-top: 1px; }
-  .mobile-nav-panel section strong { padding: 3px 8px; color: var(--ink-faint); font-size: 8px; letter-spacing: .12em; text-transform: uppercase; }
-  .mobile-nav a { padding: 9px 8px; border-radius: 6px; font-size: 11px; }
+  .mobile-nav-panel section strong { padding: 3px 8px; color: var(--ink-faint); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; }
+  .mobile-nav a { min-height: 44px; display: flex; align-items: center; padding: 9px 10px; border-radius: 7px; font-size: 13px; }
   .mobile-nav a:hover { background: var(--surface-soft); }
   .mobile-nav a[aria-current="page"] { background: var(--mint); color: #1e40af; font-weight: 750; }
-  .mobile-nav-panel > button { margin-top: 8px; padding: 9px; border: 0; border-radius: 7px; background: #f7e9eb; color: #943640; text-align: left; font-size: 10px; font-weight: 700; cursor: pointer; }
+  .mobile-nav-panel > button { margin-top: 8px; min-height: 44px; padding: 11px; border: 0; border-radius: 8px; background: #f7e9eb; color: #943640; text-align: left; font-size: 13px; font-weight: 700; cursor: pointer; }
   .scope-switcher > span { display: none; }
   .scope-switcher select { min-width: 135px; }
   .content-wrap { padding: 28px 20px 42px; }
@@ -1351,11 +1387,22 @@ h3 { letter-spacing: -.02em; }
 }
 
 @media (max-width: 620px) {
-  .auth-brand-panel { padding: 25px 22px; }
-  .auth-brand-copy { padding: 58px 0 44px; }
+  /* On a phone the brand panel collapses to a compact header: the sign-in form
+     is the job of this page, so it must be reachable without scrolling past a
+     full-height decorative panel. The rotating headline and its dots stay; the
+     glyph and supporting paragraph return above 620px. */
+  .auth-brand-panel { padding: 18px 20px 24px; }
+  .auth-brand-copy { padding: 22px 0 18px; }
   .auth-brand-copy h1 { font-size: 37px; }
+  .auth-eyebrow { margin-bottom: 15px; }
+  .login-showcase { gap: 18px; }
+  .login-showcase-stage { min-height: 0; }
+  .login-feature { gap: 10px; }
+  .login-feature-icon { display: none; }
+  .login-feature h2 { font-size: 21px; line-height: 1.14; letter-spacing: -.03em; }
+  .login-feature p { display: none; }
   .auth-assurances { gap: 9px; }
-  .auth-form-panel { padding: 32px 15px; }
+  .auth-form-panel { padding: 26px 15px 40px; }
   .auth-form-card { padding: 25px 19px; border-radius: 12px; }
   .auth-field-pair { grid-template-columns: 1fr; }
   .mfa-steps { display: grid; grid-template-columns: 1fr; }
@@ -2608,15 +2655,13 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .sec-kicker { font-size: 10px; font-weight: 730; letter-spacing: .13em; text-transform: uppercase; background: var(--grad-ink); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lz .accent { display: inline-block; background: var(--grad-txt); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: lz-shimmer 7s ease-in-out infinite; }
 @keyframes lz-shimmer { 0%,100% { background-position: 0 50%; } 50% { background-position: 100% 50%; } }
-.lz .head { position: sticky; top: 0; z-index: 50; height: 66px; display: flex; align-items: center; justify-content: space-between; padding-inline: max(24px, calc((100vw - var(--wrap)) / 2)); background: var(--head-bg); backdrop-filter: blur(18px) saturate(160%); border-bottom: 1px solid var(--line); }
+.lz .head { position: sticky; top: 0; z-index: 50; min-height: 74px; flex-wrap: nowrap; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-inline: max(24px, calc((100vw - var(--wrap)) / 2)); background: transparent; border-bottom: 1px solid transparent; transition: background .28s ease, border-color .28s ease, backdrop-filter .28s ease; }
+.lz .head.is-stuck { background: var(--head-bg); backdrop-filter: blur(18px) saturate(160%); border-bottom-color: var(--line); }
 .lz .head nav { display: flex; gap: 28px; }
 .lz .head nav a { font-size: 13px; color: var(--body); font-weight: 500; transition: color .16s; }
 .lz .head nav a:hover { color: var(--strong); }
 .lz .head-actions { display: flex; gap: 14px; align-items: center; }
 .lz .head-actions .signin { font-size: 13px; color: var(--text-2); font-weight: 560; }
-@media (max-width: 900px) {
-  .lz .head nav, .lz .head-actions .signin { display: none; }
-}
 .lz .hero { position: relative; min-height: 640px; display: grid; grid-template-columns: minmax(360px,.84fr) minmax(560px,1.2fr); align-items: center; gap: clamp(30px,4vw,64px); padding: clamp(52px,6vw,94px) max(24px, calc((100vw - var(--wrap)) / 2)) clamp(84px,9vw,124px); }
 .lz .lx-hero-copy { max-width: 600px; }
 .lz .lx-hero-copy h1 { margin: 20px 0 22px; font-size: clamp(48px,6vw,84px); line-height: .96; letter-spacing: -.05em; }
@@ -2666,6 +2711,18 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .gchip.c2 b { background: var(--violet); }
 .lz .gchip.c3 { bottom: 13px; left: 13px; }
 .lz .gchip.c3 b { background: var(--cyan); }
+/* --- travelling evidence packets: dots that move node-to-node ALONG the
+   graph edges. Declarative CSS offset-path (no rAF loop, no second canvas);
+   each dot's path is set inline from the very same `d` as its edge. --- */
+.lz .gpk { offset-rotate: 0deg; offset-distance: 0%; opacity: 0; fill: var(--cyan); animation: lz-packet 7.4s cubic-bezier(.42,.05,.58,.98) infinite; }
+.lz .gpk.k2 { animation-duration: 8.6s; animation-delay: 2.1s; fill: var(--blue); }
+.lz .gpk.k3 { animation-duration: 9.4s; animation-delay: 3.8s; }
+/* The CVE edge reads differently on purpose: it creeps, it is rose, and it
+   LANDS on the CVE node instead of sliding past it. */
+.lz .gpk.alert { fill: var(--red); animation-name: lz-packet-alert; animation-duration: 11.5s; animation-delay: 5.6s; animation-timing-function: cubic-bezier(.5,.02,.72,.4); }
+@keyframes lz-packet { 0% { offset-distance: 0%; opacity: 0; } 7% { opacity: .95; } 58% { offset-distance: 100%; opacity: .9; } 66% { offset-distance: 100%; opacity: 0; } 100% { offset-distance: 100%; opacity: 0; } }
+@keyframes lz-packet-alert { 0% { offset-distance: 0%; opacity: 0; } 9% { opacity: .5; } 62% { offset-distance: 100%; opacity: 1; } 74% { offset-distance: 100%; opacity: 1; } 86% { offset-distance: 100%; opacity: 0; } 100% { offset-distance: 100%; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .lz .gpk { animation: none !important; display: none !important; } }
 .lz .stats { border-block: 1px solid var(--line); background: var(--wash); }
 .lz .stats-in { display: grid; grid-template-columns: repeat(4,1fr); }
 .lz .stats-in > div { padding: 28px clamp(14px,2vw,30px); border-left: 1px solid var(--line); }
@@ -2847,7 +2904,8 @@ button.orbit-node { font: inherit; cursor: pointer; }
 }
 
 /* --- lz motion pass: live slides, staggered data, drawn charts --- */
-.lz section[id] { scroll-margin-top: 82px; }
+.lz section[id] { scroll-margin-top: 90px; }
+@media (max-width: 620px) { .lz section[id] { scroll-margin-top: 88px; } }
 .lz .tab { position: relative; overflow: hidden; }
 .lz .tab .tprog { position: absolute; left: 12%; right: 12%; bottom: 2px; height: 2px; border-radius: 2px; background: rgba(34,211,238,.14); overflow: hidden; }
 .lz .tab .tprog i { position: absolute; inset: 0; transform-origin: left; transform: scaleX(0); background: var(--grad); animation: lz-prog 5s linear forwards; }
@@ -2885,11 +2943,66 @@ button.orbit-node { font: inherit; cursor: pointer; }
 }
 
 /* --- lz v3: Prisma-style section nav, statements, suite wheel, typewriter, ribbon, enterprise footer --- */
-.lz .head nav a { font-size: 10.5px; font-weight: 730; letter-spacing: .12em; text-transform: uppercase; color: var(--body-2); position: relative; padding-bottom: 6px; }
+/* Nothing in the header may wrap: one line of text, even spacing, no clipping. */
+.lz .head nav { position: relative; flex: 0 1 auto; min-width: 0; }
+.lz .head-actions { flex: 0 0 auto; white-space: nowrap; }
+.lz .head .lx-brand { flex: 0 0 auto; }
+.lz .lx-brand b, .lz .lx-brand small, .lz .head-actions .signin, .lz .lx-nav-extra .signin, .lz .head .btn { white-space: nowrap; }
+.lz .head nav a { font-size: 10.5px; font-weight: 730; letter-spacing: .12em; text-transform: uppercase; color: var(--body-2); position: relative; padding-bottom: 6px; white-space: nowrap; }
 .lz .head nav a:hover { color: var(--strong); }
-.lz .head nav a::after { content: ""; position: absolute; left: 0; right: 100%; bottom: 0; height: 2px; border-radius: 2px; background: var(--grad); transition: right .35s cubic-bezier(.2,.7,.2,1); }
 .lz .head nav a[data-active="true"] { color: var(--strong); }
-.lz .head nav a[data-active="true"]::after { right: 0; }
+/* Decorative sliding underline. Position is written as --x/--w by the section spy; aria-hidden so it is never announced. */
+.lz .lx-nav-ind { position: absolute; left: 0; bottom: 0; height: 2px; width: var(--w, 0px); border-radius: 2px; background: var(--grad); opacity: var(--o, 0); transform: translate3d(var(--x, 0px), 0, 0); transition: transform .38s cubic-bezier(.2,.7,.2,1), width .38s cubic-bezier(.2,.7,.2,1), opacity .2s ease; pointer-events: none; }
+
+/* Skip link — first focusable element on the page. */
+/* While the collapsed menu is open the header must outrank the cookie bar (z-index 200). */
+.lz .head.is-menu { z-index: 205; }
+.lz .lx-skip { position: fixed; left: 16px; top: 12px; z-index: 220; padding: 10px 16px; border-radius: 10px; font-size: 11px; font-weight: 760; letter-spacing: .1em; text-transform: uppercase; color: #051020; background: var(--grad); box-shadow: 0 12px 28px var(--shadow-c); transform: translateY(-180%); transition: transform .18s ease; }
+.lz .lx-skip:focus { transform: translateY(0); }
+.lz #top { display: block; height: 0; outline: none; }
+
+/* Visible keyboard focus on every header control (the global ring is too faint over the dark ground). */
+.lz .head nav a:focus-visible, .lz .lx-nav-extra .signin:focus-visible, .lz .head-actions .signin:focus-visible, .lz .lx-brand:focus-visible, .lz .lx-nav-toggle:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; border-radius: 5px; color: var(--strong); }
+.lz .head .btn:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+/* Collapsed menu plumbing. On desktop the wrapper dissolves into the header flex row. */
+.lz .lx-navwrap { display: contents; }
+.lz .lx-nav-extra, .lz .lx-nav-toggle { display: none; }
+.lz .lx-nav-toggle { appearance: none; background: var(--surface-1); border: 1px solid var(--line-2); border-radius: 10px; width: 38px; height: 34px; align-items: center; justify-content: center; cursor: pointer; color: var(--text-1); }
+.lz .lx-nav-toggle:hover { border-color: var(--cyan); }
+.lz .lx-burger { display: grid; gap: 4px; width: 16px; }
+.lz .lx-burger i { display: block; height: 2px; border-radius: 2px; background: currentColor; transition: transform .2s ease, opacity .2s ease; }
+.lz .lx-nav-toggle[aria-expanded="true"] .lx-burger i:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+.lz .lx-nav-toggle[aria-expanded="true"] .lx-burger i:nth-child(2) { opacity: 0; }
+.lz .lx-nav-toggle[aria-expanded="true"] .lx-burger i:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* Progressive tightening so the single row fits honestly instead of just refusing to wrap. */
+@media (max-width: 1400px) { .lz .head nav { gap: 22px; } }
+@media (max-width: 1180px) { .lz .head nav { gap: 16px; } .lz .head nav a { letter-spacing: .07em; } .lz .head-actions { gap: 10px; } .lz .lx-brand small { display: none; } }
+@media (max-width: 1080px) {
+  .lz .head-actions .signin { display: none; }
+  .lz .lx-nav-toggle { display: inline-flex; }
+  .lz .lx-navwrap { display: none; position: absolute; left: 0; right: 0; top: 100%; padding: 14px max(20px, calc((100vw - var(--wrap)) / 2)) 20px; background: var(--head-bg); backdrop-filter: blur(20px) saturate(160%); border-bottom: 1px solid var(--line); box-shadow: 0 24px 48px var(--shadow-c); }
+  .lz .lx-navwrap[data-open="true"] { display: block; animation: lz-fade .2s ease both; }
+  .lz .head nav { flex-direction: column; gap: 0; }
+  .lz .head nav a { padding: 12px 2px; font-size: 11.5px; letter-spacing: .1em; border-bottom: 1px solid var(--line); }
+  .lz .head nav a[data-active="true"] { color: var(--strong); box-shadow: inset 3px 0 0 -1px var(--cyan); padding-left: 10px; }
+  .lz .lx-nav-ind { display: none; }
+  .lz .lx-nav-extra { display: flex; gap: 20px; padding-top: 16px; }
+  .lz .lx-nav-extra .signin { font-size: 12px; font-weight: 600; color: var(--text-2); }
+}
+@media (max-width: 620px) {
+  .lz .head { padding-inline: 16px; gap: 10px; }
+  .lz .lx-brand small { display: none; }
+  .lz .head-actions { gap: 8px; }
+  .lz .head .btn-solid { padding: 9px 13px; font-size: 12px; }
+  .lz .head .btn-solid svg { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lz .lx-nav-ind { transition: none !important; }
+  .lz .head { transition: none !important; }
+  .lz .lx-navwrap[data-open="true"] { animation: none !important; }
+}
 
 .lz .stmts { position: relative; height: 260vh; }
 .lz .stmts-pin { position: sticky; top: 0; height: 100vh; display: grid; place-items: center; overflow: hidden; }
@@ -2904,15 +3017,34 @@ button.orbit-node { font: inherit; cursor: pointer; }
 
 .lz .wheel-wrap { display: grid; grid-template-columns: minmax(340px, .9fr) 1.1fr; gap: clamp(28px,4vw,70px); align-items: start; }
 @media (max-width: 940px) { .lz .wheel-wrap { grid-template-columns: 1fr; } .lz .wheel-pin { position: static !important; } }
+/* Below ~560px the wheel is rendered narrower than its 420px viewBox, which
+   scales the 7.2px function captions down to ~6px — unreadable. Drop the
+   captions and keep the icon ring, rather than shipping text that small. */
+@media (max-width: 560px) {
+  .lz .wcap { display: none; }
+  .lz .wico { stroke-width: 2.7; }
+}
 .lz .wheel-pin { position: sticky; top: 110px; }
 .lz .wheel { width: min(420px, 100%); margin-inline: auto; display: block; }
 .lz .wseg { fill: none; stroke: var(--seg); stroke-width: 44; transition: stroke .45s ease, filter .45s ease; cursor: pointer; }
 .lz .wseg[data-on="true"] { stroke: url(#wg); filter: drop-shadow(0 0 18px rgba(34,211,238,.35)); }
 .lz .wlab { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; fill: var(--body-2); text-transform: uppercase; transition: fill .4s; }
 .lz .wlab[data-on="true"] { fill: var(--text-1); }
+/* Soft inner sphere behind the function ring — a lit object, not a flat disc. */
+.lz .wsphere { fill: url(#wsphere); stroke: rgba(120,150,230,.14); stroke-width: 1; }
+.lz .wsph-0 { stop-color: #3b82f6; stop-opacity: .17; }
+.lz .wsph-1 { stop-color: #22d3ee; stop-opacity: .07; }
+.lz .wsph-2 { stop-color: #22d3ee; stop-opacity: 0; }
+/* The five cross-cutting functions. Decorative — never a click target. */
+.lz .wfns { pointer-events: none; }
+.lz .wico { fill: none; stroke: rgba(186,230,253,.72); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: stroke .4s ease; }
+.lz .wcap { fill: var(--body-2); font-family: var(--mono); font-size: 7.2px; font-weight: 600; letter-spacing: .08em; }
+.lz .wcap-2 { fill: var(--faint); }
+/* The brand core: deliberately small, mirroring the reference — a compact mark
+   inside a much larger function ring (see the geometry note in landing-zone). */
 .lz .wcore { fill: var(--night-1); stroke: rgba(120,150,230,.28); stroke-width: 1.4; }
-.lz .wcore-t { fill: var(--title); font-weight: 700; font-size: 21px; letter-spacing: -.02em; }
-.lz .wcore-s { fill: var(--body-2); font-family: var(--mono); font-size: 8.5px; letter-spacing: .12em; }
+.lz .wcore-t { fill: var(--title); font-weight: 700; font-size: 18px; letter-spacing: -.02em; }
+.lz .wcore-s { fill: var(--body-2); font-family: var(--mono); font-size: 8px; letter-spacing: .09em; }
 .lz .wblock { min-height: 72vh; display: grid; align-content: center; gap: 14px; padding: 8vh 0; opacity: .3; transition: opacity .5s ease; }
 .lz .wblock[data-on="true"] { opacity: 1; }
 .lz .wblock h3 { font-size: clamp(24px,2.6vw,34px); }
@@ -3127,11 +3259,9 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .ftbottom nav button.lx-cookie-link, .lz .foot nav button.lx-cookie-link { font-family: var(--sans); font-size: 12px; color: var(--body-2); background: none; border: 0; padding: 0; cursor: pointer; transition: color .16s; }
 .lz .ftbottom nav button.lx-cookie-link:hover, .lz .foot nav button.lx-cookie-link:hover { color: var(--strong); }
 
-@media (max-width: 560px) {
-  .lz .lx-cookie { flex-direction: column; align-items: stretch; }
-  .lz .lx-cookie-actions { justify-content: stretch; }
-  .lz .lx-cookie-actions .lx-cookie-btn { flex: 1; text-align: center; }
-}
+/* Phone layout for the banner lives in one place, after the playful skin,
+   so declaration order can never fight over it — see "compact bottom
+   sheet" further down. */
 
 /* ---- Public marketing: theme toggle, playful cookie banner, About page ---- */
 .lz .lx-theme-toggle { width: 38px; height: 38px; flex: none; display: grid; place-items: center; padding: 0; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-1); color: var(--body); cursor: pointer; transition: color .16s, border-color .16s, background .16s; }
@@ -3149,12 +3279,91 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-cookie-copy span { font-size: 12.5px; line-height: 1.5; color: var(--body-2); }
 .lz .lx-cookie-copy span a { color: var(--cyan); border-bottom: 1px solid rgba(34,211,238,.4); }
 .lz .lx-cookie-copy span a:hover { border-color: var(--cyan); }
-.lz .lx-cookie-manage { display: inline-block; margin-top: 7px; font-family: var(--sans); font-size: 11.5px; color: var(--body-2); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; transition: color .16s; }
+/* `display: block` (not inline-block): as an inline-block it shared a line with
+   the end of the sentence above, rendering as "…our policies.Manage
+   preferences". It is its own tertiary action and belongs on its own line. */
+.lz .lx-cookie-manage { display: block; width: fit-content; margin-top: 7px; font-family: var(--sans); font-size: 11.5px; color: var(--body-2); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; transition: color .16s; }
 .lz .lx-cookie-manage:hover { color: var(--title); }
 .lz .lx-cookie-btn.gold { border: 0; color: #3a2600; font-weight: 680; background: linear-gradient(120deg, #fbbf24, #f0842e); box-shadow: 0 8px 20px rgba(240,132,46,.32); }
 .lz .lx-cookie-btn.gold:hover { filter: brightness(1.05); transform: translateY(-1px); }
+/* ---- Cookie banner: compact bottom sheet on phones -------------------
+ * On a phone this is the first thing a visitor sees, so it has to read as a
+ * system tray, not a takeover: it docks flush to the bottom edge, the
+ * cookie mark shrinks to a 26px glyph beside the heading, the copy tightens,
+ * and the two choices sit side by side. Total height lands near 175px of an
+ * 812px viewport (was 456px), so the hero band is never covered or clipped.
+ */
 @media (max-width: 560px) {
-  .lz .lx-cookie-art { margin-inline: auto; }
+  .lz .lx-cookie { left: 0; right: 0; bottom: 0; width: auto; max-width: none; transform: none; gap: 11px; padding: 13px 15px calc(14px + env(safe-area-inset-bottom, 0px)); border-width: 1px 0 0; border-radius: 16px 16px 0 0; box-shadow: 0 -16px 44px rgba(3,7,18,.5); }
+  .lz .lx-cookie-playful { display: grid; grid-template-columns: 26px minmax(0, 1fr); grid-template-areas: "art copy" "act act"; align-items: start; column-gap: 11px; row-gap: 11px; }
+  .lz .lx-cookie-art { grid-area: art; width: 26px; height: 26px; margin: 2px 0 0; }
+  .lz .lx-cookie-copy { grid-area: copy; flex: none; display: grid; justify-items: start; gap: 1px; }
+  .lz .lx-cookie-copy strong { font-size: 14.5px; margin-bottom: 1px; }
+  .lz .lx-cookie-copy span { font-size: 13px; line-height: 1.4; }
+  .lz .lx-cookie-manage { margin-top: 2px; min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; }
+  .lz .lx-cookie-actions { grid-area: act; display: flex; gap: 9px; flex-wrap: nowrap; }
+  .lz .lx-cookie-actions .lx-cookie-btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 11px 8px; font-size: 13px; text-align: center; white-space: normal; }
+  .lz .lx-cookie-scrim { padding: 14px; }
+  .lz .lx-cookie-modal { padding: 20px 18px; }
+  .lz .lx-cookie-modal h2 { font-size: 19px; }
+  .lz .lx-cookie-modal-actions .lx-cookie-btn { flex: 1 1 0; min-height: 44px; }
+  .lz .lx-cookie-switch { width: 48px; height: 30px; }
+  .lz .lx-cookie-switch i { top: 5px; left: 5px; width: 20px; height: 20px; }
+  .lz .lx-cookie-switch.on i { transform: translateX(18px); }
+}
+
+/* ====================================================================== *
+ * Public marketing pages on phones and small tablets.
+ *
+ * The desktop composition is signed off and must not move, so every rule
+ * below is inside a media query under the desktop breakpoint.
+ * ====================================================================== */
+
+/* The header is transparent AT REST by design so it does not compete with
+ * the cinematic band. Below the desktop breakpoint the collapsed controls
+ * (brand, theme toggle, CTA, burger) otherwise float unreadably over
+ * whatever card happens to be behind them, so they carry their background
+ * from the first pixel instead of waiting for the scroll spy. */
+@media (max-width: 900px) {
+  .lz .head { background: var(--head-bg); backdrop-filter: blur(18px) saturate(160%); -webkit-backdrop-filter: blur(18px) saturate(160%); border-bottom-color: var(--line); }
+}
+
+/* 44px minimum on everything tappable. */
+@media (max-width: 900px) {
+  .lz .lx-theme-toggle, .lz .lx-nav-toggle { width: 44px; height: 44px; }
+  .lz .lx-brand { min-height: 44px; }
+  .lz .head .btn-solid { min-height: 44px; }
+  .lz .head nav a { min-height: 44px; display: flex; align-items: center; }
+  .lz .lx-nav-extra .signin { min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; }
+  .lz .tab { min-height: 44px; }
+  .lz .btn { min-height: 44px; }
+  .lz .lx-skip { min-height: 44px; display: inline-flex; align-items: center; }
+  .lz .soc a { width: 44px; height: 44px; }
+  .lz .ftcol a, .lz .ftcol span.dead { padding: 11px 0; min-height: 44px; display: flex; align-items: center; }
+  .lz .ftbottom nav { gap: 2px 20px; }
+  .lz .ftbottom nav a, .lz .ftbottom nav button.lx-cookie-link, .lz .foot nav button.lx-cookie-link { min-height: 44px; display: inline-flex; align-items: center; font-size: 13px; }
+}
+
+/* Running prose never drops below 13px on a phone. Mono/uppercase micro
+ * labels keep their size on purpose — they are labels, not reading text. */
+@media (max-width: 560px) {
+  .lz .stats .l, .lz .ftbrand p, .lz .lx-tier .tagline, .lz .lx-tier-lead, .lz .lx-compare-note, .lz .lx-price-note, .lz .ftbottom small { font-size: 13px; }
+  .lz .lx-tier li, .lz .layer p, .lz .lx-badge, .lz .wchip, .lz .lx-pv-row .nm b { font-size: 13px; }
+  .lz .lx-price small, .lz .lx-why-card em, .lz .lx-tier-eg { font-size: 12.5px; }
+  .lz .lx-price-note em { font-size: 12px; }
+  .lz .lx-faq-item summary { padding: 16px 16px; }
+  .lz .lx-faq-item p { padding: 0 16px 18px; }
+  .lz .lx-tier { padding: 22px 18px; }
+}
+
+/* The kicker pill: one line, always. The long positioning line wrapped to
+ * two lines and spanned nearly the full width on a 375px screen, so phones
+ * get the short form of the same claim instead of a shrunken pill. */
+.lz .lx-kicker-short { display: none; }
+@media (max-width: 560px) {
+  .lz .kicker { gap: 7px; padding: 7px 12px; letter-spacing: .075em; white-space: nowrap; }
+  .lz .lx-kicker-full { display: none; }
+  .lz .lx-kicker-short { display: inline; }
 }
 
 .lz .lx-about-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
@@ -3196,6 +3405,15 @@ button.orbit-node { font: inherit; cursor: pointer; }
   --grid-dot: rgba(60,90,160,.12); --wash: rgba(255,255,255,.5); --wash-foot: rgba(248,250,255,.7);
   --shadow-c: rgba(35,55,120,.16); --seg: rgba(35,55,120,.18); --scrim: rgba(20,30,60,.35);
 }
+/* The suite-wheel function ring: the pale blue-white icon stroke is tuned for
+   the dark ground and would all but vanish on the pale one, so light theme gets
+   a saturated blue at the same weight, and the sphere wash is lifted to stay
+   visible against white. */
+:root[data-theme="light"] .lz .wico { stroke: rgba(37,99,235,.62); }
+:root[data-theme="light"] .lz .wsph-0 { stop-color: #3b82f6; stop-opacity: .1; }
+:root[data-theme="light"] .lz .wsph-1 { stop-color: #0891b2; stop-opacity: .05; }
+:root[data-theme="light"] .lz .wsphere { stroke: rgba(35,55,120,.12); }
+
 /* Legibility fixes for the few status / graph literals outside the token set. */
 :root[data-theme="light"] .lz .lx-pv-badge.red { color: #c0344d; border-color: rgba(192,52,77,.35); background: rgba(251,113,133,.12); }
 :root[data-theme="light"] .lz .lx-pv-badge.green { color: #0f8a5f; border-color: rgba(15,138,95,.32); background: rgba(52,211,153,.14); }
@@ -3246,3 +3464,214 @@ button.orbit-node { font: inherit; cursor: pointer; }
 /* API token panel */
 .apitok-scope { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--ink-soft); padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; }
 .apitok-secret code { user-select: all; background: #f1f4fb; padding: 3px 7px; border-radius: 6px; }
+
+/* ==========================================================================
+   Authenticated-app phone layer
+   --------------------------------------------------------------------------
+   Everything below is scoped to `.app-shell`, so it can only affect the
+   signed-in workspace — never the marketing site, the legal shell or the auth
+   pages — and every rule lives inside a `max-width` media query, so the
+   desktop workspace is untouched.
+
+   Three tools, applied deliberately per surface:
+     1. `overflow-x: auto` + a persistent scrollbar affordance for read-only
+        data grids that genuinely need more than a phone's width.
+     2. Stacked labelled cards (the `data-label`/`::before` pattern already
+        used by the Access tables) for rows that contain inputs or actions,
+        where sideways scrolling while typing is hostile.
+     3. Column collapses for KPI / panel grids.
+   ========================================================================== */
+
+/* --- 1. Scroll affordance --------------------------------------------------
+   Existing rules already turn these containers into horizontal scrollers at
+   <=860px, but nothing told the user they scroll. Force a persistently visible
+   thin scrollbar (WebKit hides overlay scrollbars until you already scrolled,
+   which is exactly the discoverability problem) plus an inset edge shadow. */
+@media screen and (max-width: 860px) {
+  .app-shell .data-table,
+  .app-shell .control-list,
+  .app-shell .customer-directory-list,
+  .app-shell .account-table,
+  .app-shell .cmdb-table,
+  .app-shell .finding-list,
+  .app-shell .operations-job-table,
+  .app-shell .compliance-result-list,
+  .app-shell .kubernetes-resource-list,
+  .app-shell .kubernetes-enterprise-list,
+  .app-shell .kubernetes-finding-rows,
+  .app-shell .change-event-list,
+  .app-shell .roadmap-matrix,
+  .app-shell .trend-chart,
+  .app-shell .panel table {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(93, 116, 176, .55) rgba(93, 116, 176, .12);
+  }
+  .app-shell .data-table::-webkit-scrollbar,
+  .app-shell .control-list::-webkit-scrollbar,
+  .app-shell .customer-directory-list::-webkit-scrollbar,
+  .app-shell .account-table::-webkit-scrollbar,
+  .app-shell .cmdb-table::-webkit-scrollbar,
+  .app-shell .finding-list::-webkit-scrollbar,
+  .app-shell .operations-job-table::-webkit-scrollbar,
+  .app-shell .compliance-result-list::-webkit-scrollbar,
+  .app-shell .kubernetes-resource-list::-webkit-scrollbar,
+  .app-shell .kubernetes-enterprise-list::-webkit-scrollbar,
+  .app-shell .kubernetes-finding-rows::-webkit-scrollbar,
+  .app-shell .change-event-list::-webkit-scrollbar,
+  .app-shell .roadmap-matrix::-webkit-scrollbar,
+  .app-shell .trend-chart::-webkit-scrollbar,
+  .app-shell .panel table::-webkit-scrollbar {
+    -webkit-appearance: none;
+    height: 9px;
+  }
+  .app-shell .data-table::-webkit-scrollbar-thumb,
+  .app-shell .control-list::-webkit-scrollbar-thumb,
+  .app-shell .customer-directory-list::-webkit-scrollbar-thumb,
+  .app-shell .account-table::-webkit-scrollbar-thumb,
+  .app-shell .cmdb-table::-webkit-scrollbar-thumb,
+  .app-shell .finding-list::-webkit-scrollbar-thumb,
+  .app-shell .operations-job-table::-webkit-scrollbar-thumb,
+  .app-shell .compliance-result-list::-webkit-scrollbar-thumb,
+  .app-shell .kubernetes-resource-list::-webkit-scrollbar-thumb,
+  .app-shell .kubernetes-enterprise-list::-webkit-scrollbar-thumb,
+  .app-shell .kubernetes-finding-rows::-webkit-scrollbar-thumb,
+  .app-shell .change-event-list::-webkit-scrollbar-thumb,
+  .app-shell .roadmap-matrix::-webkit-scrollbar-thumb,
+  .app-shell .trend-chart::-webkit-scrollbar-thumb,
+  .app-shell .panel table::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: rgba(93, 116, 176, .5);
+  }
+  .app-shell .data-table::-webkit-scrollbar-track,
+  .app-shell .panel table::-webkit-scrollbar-track {
+    border-radius: 999px;
+    background: rgba(93, 116, 176, .12);
+  }
+
+  /* Plain <table> panels (FinOps, CMDB, reports, settings, compliance
+     frameworks). Turning the table itself into the scroll container avoids
+     adding a wrapper element to ~40 call sites; `nowrap` keeps each row on one
+     legible line instead of collapsing every column to min-content. */
+  .app-shell .panel table,
+  .app-shell .cmdbq-results table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .app-shell .panel table th,
+  .app-shell .panel table td {
+    white-space: nowrap;
+  }
+
+  /* Deep-indented detail panes used a desktop gutter that lined the detail up
+     under the row's second column. On a phone that gutter is most of the
+     screen. */
+  .app-shell .change-detail { grid-template-columns: 1fr; padding-left: 20px; }
+  .app-shell .change-event-list { overflow-x: auto; }
+  .app-shell .change-event summary { min-width: 640px; }
+  .app-shell .kubernetes-finding-rows > article { min-width: 560px; }
+  .app-shell .main-area,
+  .app-shell .content-wrap { min-width: 0; max-width: 100%; }
+}
+
+/* --- 2. Touch targets -----------------------------------------------------
+   Anything tappable in the workspace gets a >=44px target. Text size is never
+   reduced to buy the space. */
+@media screen and (max-width: 860px) {
+  .app-shell .button { min-height: 44px; padding: 0 16px; font-size: 12px; }
+  .app-shell .button-small { min-height: 44px; padding: 0 13px; font-size: 11.5px; }
+  .app-shell .icon-button { width: 44px; height: 44px; font-size: 12px; }
+  .app-shell .account-menu-trigger { width: 44px; height: 44px; font-size: 12px; }
+  .app-shell .row-action { width: 44px; height: 44px; font-size: 15px; }
+  .app-shell .access-session-toggle button { min-height: 44px; padding: 0 16px; }
+  .app-shell .access-session-control select,
+  .app-shell .access-session-control input,
+  .app-shell .assignment-customer select,
+  .app-shell .assignment-mfa input,
+  .app-shell .kubernetes-context-field input,
+  .app-shell .onboard-form input,
+  .app-shell .onboard-form select,
+  .app-shell .filter-control,
+  .app-shell .offboard-confirmation input,
+  .app-shell .case-routing-form input,
+  .app-shell .vuln-waiver-form input,
+  .app-shell .cmdbq-row select,
+  .app-shell .cmdbq-row input,
+  .app-shell .cmdbq-actions select,
+  .app-shell .cmdbq-actions input { min-height: 44px; }
+  /* `height` (not `min-height`) because these declare a fixed height. */
+  .app-shell .sg-search input { height: 44px; width: 100%; }
+  .app-shell .copy-field { min-height: 48px; }
+  .app-shell .copy-field button { min-height: 40px; padding: 0 13px; font-size: 11px; }
+  /* Checkboxes and radios in the workspace: a 15px box is not a target. */
+  .app-shell input[type="checkbox"],
+  .app-shell input[type="radio"] { width: 21px; height: 21px; }
+  .app-shell .kubernetes-cluster-selector > label,
+  .app-shell .kubernetes-module-selector label,
+  .app-shell .assignment-choice { min-height: 44px; }
+  /* Two-step confirm flows (budget delete, margin clear, offboarding): the
+     destructive and the escape hatch must not sit flush against each other. */
+  .app-shell .access-row-actions,
+  .app-shell .connection-lifecycle-actions,
+  .app-shell .cmdbq-actions,
+  .app-shell .template-actions,
+  .app-shell .heading-actions { gap: 12px; }
+}
+
+/* iOS Safari zooms the whole page when a focused control's text is under 16px.
+   Every workspace form control therefore reaches 16px on phone widths; the
+   controls that gained width from it are the ones that also became full-width
+   or stacked in this layer. */
+@media screen and (max-width: 620px) {
+  .app-shell input,
+  .app-shell select,
+  .app-shell textarea { font-size: 16px; }
+  .app-shell .assignment-mfa input { width: 100%; max-width: 220px; letter-spacing: .18em; }
+  .app-shell .cmdbq-row input,
+  .app-shell .cmdbq-row select,
+  .app-shell .cmdbq-actions input,
+  .app-shell .cmdbq-actions select { flex: 1 1 100%; min-width: 0; width: 100%; }
+  .app-shell .cmdbq-row,
+  .app-shell .cmdbq-actions { display: grid; gap: 10px; }
+  .app-shell .cmdbq-row .button,
+  .app-shell .cmdbq-actions .button { width: 100%; }
+}
+
+/* --- 3. Grid collapses ---------------------------------------------------- */
+@media screen and (max-width: 860px) {
+  .app-shell .dbe-tiles { grid-template-columns: 1fr; }
+  .app-shell .resource-identity-grid,
+  .app-shell .resource-detail-grid { grid-template-columns: 1fr; }
+  .app-shell .kubernetes-tier-grid,
+  .app-shell .kubernetes-verification-grid,
+  .app-shell .kubernetes-lifecycle-summary { grid-template-columns: 1fr; }
+  .app-shell .kubernetes-discovery-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-shell .kubernetes-onboarding-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-shell .security-group-card dl { grid-template-columns: 1fr 1fr; }
+  .app-shell .report-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media screen and (max-width: 620px) {
+  .app-shell .kubernetes-discovery-summary,
+  .app-shell .kubernetes-onboarding-steps,
+  .app-shell .security-group-card dl,
+  .app-shell .customer-live-card dl,
+  .app-shell .compliance-provenance-list > div,
+  .app-shell .summary-band { grid-template-columns: 1fr; }
+  .app-shell .summary-band > div { border-right: 0 !important; }
+  .app-shell .summary-band > div:not(:last-child) { border-bottom: 1px solid var(--line); }
+  .app-shell .finding-detail dl div,
+  .app-shell .kubernetes-configuration-list div,
+  .app-shell .kubernetes-plan-modules article { grid-template-columns: 1fr; }
+  .app-shell .compliance-result-detail { padding-left: 20px; }
+  .app-shell .page-alert { grid-template-columns: auto minmax(0, 1fr); }
+  .app-shell .page-alert > :last-child { grid-column: 1 / -1; justify-self: start; }
+}
+
+@media screen and (max-width: 430px) {
+  .app-shell .content-wrap { padding: 22px 16px 36px; }
+  .app-shell .data-table,
+  .app-shell .operations-job-table,
+  .app-shell .change-event-list { margin-inline: -16px; }
+}

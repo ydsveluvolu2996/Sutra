@@ -15,11 +15,14 @@ import { SecurityNotificationRepository } from "./security-notification-reposito
 import { detectAnomalies } from "../lib/finops-insights.ts";
 import { buildBudgetBurndown } from "../lib/finops-budget-burndown.ts";
 import {
-  evaluateFinopsAlerts,
+  buildAnomalyAlerts,
+  buildBudgetAlerts,
+  combineFinopsAlerts,
   type FinopsAlert,
   type FinopsAlertEvaluation,
   type FinopsAlertSeverity,
 } from "../lib/finops-alerts.ts";
+import type { NormalizedCurLine } from "../lib/finops-cur.ts";
 import {
   buildSecurityNotificationPayloads,
   normalizeSecurityNotificationEvent,
@@ -53,37 +56,88 @@ export interface FinopsAlertPeriodResult {
 }
 
 /**
- * Evaluate current cost/budget alerts for a connection's selected billing
- * period (defaulting to the latest ingested period). Pure engines over the
- * tenant-scoped CUR lines + budgets — no I/O beyond the two repository reads.
+ * Evaluate a CUSTOMER's cost/budget alerts for a billing period.
+ *
+ * The two signal families have different natural scopes, and conflating them was
+ * a real defect:
+ * - Anomalies are per-account: each connection's lines are evaluated on their
+ *   own, and each resulting alert id carries that connection so two AWS accounts
+ *   spiking on the same service/day stay distinct alerts.
+ * - Budgets are customer-wide: every connection's lines for the period are
+ *   COMBINED and the burn-down runs ONCE. Evaluating a customer-wide limit
+ *   against a single connection's slice understates consumption and misses
+ *   breaches.
+ *
+ * Pure engines over tenant-scoped reads; no dispatch here.
  */
-export async function evaluateFinopsAlertsForConnection(
+export async function evaluateFinopsAlertsForCustomer(
   orgId: string,
   customerId: string,
-  connectionId: string,
-  options: { period?: string | null; minSeverity?: FinopsAlertSeverity } = {},
+  /** EVERY connection of this customer — budget spend is combined across all of them. */
+  connectionIds: readonly string[],
+  options: {
+    readonly period?: string | null;
+    readonly minSeverity?: FinopsAlertSeverity;
+    /**
+     * Restrict which connections contribute ANOMALY alerts (budgets always use
+     * the full `connectionIds` set). The costs page passes the one connection the
+     * operator selected; the background sweep leaves this undefined to cover all.
+     */
+    readonly anomalyConnectionIds?: readonly string[];
+  } = {},
   workspace: FinopsWorkspaceRepository = new FinopsWorkspaceRepository(),
 ): Promise<FinopsAlertPeriodResult> {
   const scope = { orgId, customerId };
-  const periods = await workspace.listPeriods(scope, connectionId);
+  // Union the periods present across every connection; line COUNTS may be summed.
+  const periodCounts = new Map<string, number>();
+  for (const connectionId of connectionIds) {
+    for (const entry of await workspace.listPeriods(scope, connectionId)) {
+      periodCounts.set(entry.period, (periodCounts.get(entry.period) ?? 0) + entry.lineCount);
+    }
+  }
+  const periods = [...periodCounts.entries()]
+    .map(([period, lineCount]) => ({ period, lineCount }))
+    .sort((a, b) => b.period.localeCompare(a.period, "en-US"));
   const selected = options.period ?? periods[0]?.period ?? null;
   if (selected === null) {
-    return { periods, period: null, evaluation: evaluateFinopsAlerts({ anomalies: [], budgets: [], minSeverity: options.minSeverity }) };
+    return { periods, period: null, evaluation: combineFinopsAlerts([], { minSeverity: options.minSeverity }) };
   }
-  const lines = await workspace.linesForPeriod(scope, connectionId, selected);
+
+  const anomalyScope = options.anomalyConnectionIds === undefined
+    ? new Set(connectionIds)
+    : new Set(options.anomalyConnectionIds);
+  const alerts: FinopsAlert[] = [];
+  const combinedLines: NormalizedCurLine[] = [];
+  let anomalyCount = 0;
+  for (const connectionId of connectionIds) {
+    const lines = await workspace.linesForPeriod(scope, connectionId, selected);
+    // Every connection's lines feed the customer-wide budget burn-down…
+    combinedLines.push(...lines);
+    // …but anomalies only for the connections the caller asked about.
+    if (!anomalyScope.has(connectionId)) continue;
+    const anomalies = detectAnomalies(lines).anomalies;
+    anomalyCount += anomalies.length;
+    alerts.push(...buildAnomalyAlerts(anomalies, { connectionId, period: selected }));
+  }
+
+  // ONE customer-wide burn-down over every connection's combined spend.
   const budgets = await workspace.listBudgets(scope);
-  const anomalies = detectAnomalies(lines).anomalies;
   const burndown = buildBudgetBurndown({
     budgets,
-    dailyLines: lines,
+    dailyLines: combinedLines,
     period: selected,
-    asOfDayIndex: asOfDayIndex(lines),
+    asOfDayIndex: asOfDayIndex(combinedLines),
     daysInMonth: daysInMonth(selected),
   });
+  alerts.push(...buildBudgetAlerts(burndown.budgets, selected));
+
   return {
     periods,
     period: selected,
-    evaluation: evaluateFinopsAlerts({ anomalies, budgets: burndown.budgets, minSeverity: options.minSeverity }),
+    evaluation: combineFinopsAlerts(alerts, {
+      minSeverity: options.minSeverity,
+      evaluated: { anomalies: anomalyCount, budgets: burndown.budgets.length },
+    }),
   };
 }
 
