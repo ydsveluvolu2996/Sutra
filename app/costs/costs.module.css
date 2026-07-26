@@ -54,5 +54,18 @@
 .provenance dl > div { padding: 9px 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8faf9; }
 .provenance dt { color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
 .provenance dd { margin: 3px 0 0; font-size: 11px; font-weight: 700; }
+.windowTabs { display: inline-flex; gap: 5px; }
+.windowTabs button { font: inherit; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.windowActive { background: #0f766e !important; border-color: transparent !important; color: white !important; }
+.launchedList { display: grid; gap: 2px; margin-top: 10px; }
+.launchedRow { display: grid; grid-template-columns: minmax(0, 2fr) 1.1fr 0.9fr 1.3fr 0.9fr; gap: 12px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.launchedRow > span { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.launchedRow strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launchedRow small { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.launchedHead { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 800; }
+.launchedHead > span { flex-direction: row; }
+.srcAws { font-style: normal; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; background: #ecfdf5; color: #065f46; width: fit-content; }
+.srcObserved { font-style: normal; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 3px 9px; border-radius: 999px; background: #f1f5f9; color: #475569; width: fit-content; }
 @media (max-width: 1050px) { .kpis { grid-template-columns: repeat(2, 1fr); } .overviewGrid, .signalGrid { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .launchedRow { grid-template-columns: minmax(0, 1.4fr) 1fr 0.9fr; } .launchedRow > span:nth-child(4), .launchedRow > span:nth-child(5), .launchedHead > span:nth-child(4), .launchedHead > span:nth-child(5) { display: none; } }
 @media (max-width: 720px) { .firstRun { grid-template-columns: 1fr; } .unavailable { grid-template-columns: 1fr; } .unavailable ol { grid-template-columns: 1fr; } .kpis { grid-template-columns: 1fr; } .breakdownRow { grid-template-columns: minmax(0, 1fr) 70px 38px; } .provenance { display: grid; } .provenance dl { grid-template-columns: 1fr; } }

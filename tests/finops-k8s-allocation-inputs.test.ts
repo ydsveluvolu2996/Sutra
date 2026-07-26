@@ -15,6 +15,7 @@ function curLine(over: Partial<NormalizedCurLine> & { amountMicros: string; tags
     usageStartIso: over.usageStartIso ?? "2026-07-01T00:00:00.000Z",
     amountMicros: over.amountMicros,
     currency: over.currency ?? "USD",
+    region: over.region ?? null,
     tags: over.tags,
   };
 }

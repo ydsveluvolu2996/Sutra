@@ -55,6 +55,7 @@ test("passes collected tags through verbatim and threads curLines + requiredTags
       usageStartIso: "2026-07-01T00:00:00.000Z",
       amountMicros: "1000000",
       currency: "USD",
+      region: null,
       tags: {},
     }],
     requiredTags: ["CostCenter"],

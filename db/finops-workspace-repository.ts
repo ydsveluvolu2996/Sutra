@@ -44,6 +44,7 @@ interface LineRow {
   usage_start: string;
   amount_micros: string;
   currency: string;
+  region: string | null;
   tags_json: string;
 }
 
@@ -132,8 +133,8 @@ export class FinopsWorkspaceRepository {
     ).bind(scope.orgId, scope.customerId, connectionId, billingPeriod).run();
     const insert = db.prepare(
       `INSERT INTO finops_cur_lines
-         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, tags_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, tags_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (let offset = 0; offset < lines.length; offset += BATCH_CHUNK) {
       const chunk = lines.slice(offset, offset + BATCH_CHUNK).map((line) => insert.bind(
@@ -141,6 +142,7 @@ export class FinopsWorkspaceRepository {
         scope.orgId, scope.customerId, connectionId, billingPeriod,
         line.lineItemId.slice(0, 256), line.usageAccountId.slice(0, 64), line.service.slice(0, 128),
         line.chargeCategory.slice(0, 64), line.usageStartIso, line.amountMicros, line.currency,
+        typeof line.region === "string" ? line.region.slice(0, 64) : null,
         JSON.stringify(line.tags), timestamp,
       ));
       await db.batch(chunk);
@@ -173,7 +175,7 @@ export class FinopsWorkspaceRepository {
     if (!BILLING_PERIOD.test(billingPeriod)) invalid();
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, tags_json
+      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, tags_json
          FROM finops_cur_lines
         WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND billing_period = ?
         ORDER BY usage_start ASC, line_item_id ASC LIMIT ?`,
@@ -197,6 +199,7 @@ export class FinopsWorkspaceRepository {
         usageStartIso: row.usage_start,
         amountMicros: row.amount_micros,
         currency: row.currency,
+        region: typeof row.region === "string" && row.region.length > 0 ? row.region : null,
         tags,
       }];
     });

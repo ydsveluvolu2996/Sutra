@@ -26,6 +26,7 @@ function line(overrides) {
     usageStartIso: "2026-07-01T00:00:00.000Z",
     amountMicros: "10000000",
     currency: "USD",
+    region: null,
     tags: { env: "prod" },
     ...overrides,
   };
@@ -59,12 +60,13 @@ test("0028 migration applies; a re-upload replaces the billing period, never dou
   await withDatabase(async (repo) => {
     const first = await repo.replacePeriod(SCOPE_A, CONN_A, "2026-07", [line({}), line({ lineItemId: "li-2", amountMicros: "5000000" })]);
     assert.deepEqual(first, { billingPeriod: "2026-07", inserted: 2, replaced: 0 });
-    const second = await repo.replacePeriod(SCOPE_A, CONN_A, "2026-07", [line({ lineItemId: "li-3", amountMicros: "7000000" })]);
+    const second = await repo.replacePeriod(SCOPE_A, CONN_A, "2026-07", [line({ lineItemId: "li-3", amountMicros: "7000000", region: "ap-south-1" })]);
     assert.deepEqual(second, { billingPeriod: "2026-07", inserted: 1, replaced: 2 });
     const lines = await repo.linesForPeriod(SCOPE_A, CONN_A, "2026-07");
     assert.equal(lines.length, 1);
     assert.equal(lines[0].amountMicros, "7000000");
     assert.deepEqual(lines[0].tags, { env: "prod" });
+    assert.equal(lines[0].region, "ap-south-1"); // region persists through insert + select
     assert.deepEqual(await repo.listPeriods(SCOPE_A, CONN_A), [{ period: "2026-07", lineCount: 1 }]);
     // Cross-tenant reads see nothing; cross-tenant write is rejected loudly.
     assert.deepEqual(await repo.linesForPeriod(SCOPE_B, CONN_A, "2026-07"), []);

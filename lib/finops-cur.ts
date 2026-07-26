@@ -21,6 +21,7 @@ export interface NormalizedCurLine {
   readonly usageStartIso: string;
   readonly amountMicros: string; // integer micro-units as a decimal string (bigint-safe)
   readonly currency: string;
+  readonly region: string | null; // cloud region of the line item; null when the billing file omits it
   readonly tags: Readonly<Record<string, string>>;
 }
 
@@ -95,11 +96,20 @@ interface ColumnMap {
   readonly usageStart: number;
   readonly amount: number;
   readonly currency: number;
+  readonly region: number; // -1 when the billing file has no region column
   readonly tagColumns: readonly { readonly index: number; readonly key: string }[];
 }
 
 function detectColumns(header: readonly string[]): ColumnMap | null {
   const lookup = new Map(header.map((name, index) => [name.trim(), index]));
+  // Optional region column; -1 (absent) when none of the known aliases are present.
+  const firstIndex = (...names: readonly string[]): number => {
+    for (const name of names) {
+      const index = lookup.get(name);
+      if (index !== undefined) return index;
+    }
+    return -1;
+  };
   const focus = ["BillingAccountId", "ServiceName", "ChargeCategory", "ChargePeriodStart", "BilledCost", "BillingCurrency"];
   if (focus.every((column) => lookup.has(column))) {
     return {
@@ -111,6 +121,7 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       usageStart: lookup.get("ChargePeriodStart") as number,
       amount: lookup.get("BilledCost") as number,
       currency: lookup.get("BillingCurrency") as number,
+      region: firstIndex("RegionId", "RegionName"),
       tagColumns: header.flatMap((name, index) => (name.startsWith("Tags/") ? [{ index, key: name.slice(5) }] : [])),
     };
   }
@@ -125,6 +136,7 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       usageStart: lookup.get("line_item_usage_start_date") as number,
       amount: lookup.get("line_item_unblended_cost") as number,
       currency: lookup.get("line_item_currency_code") as number,
+      region: firstIndex("product_region_code", "product region", "region"),
       tagColumns: header.flatMap((name, index) =>
         name.startsWith("resource_tags_user_") ? [{ index, key: name.slice("resource_tags_user_".length) }] : []),
     };
@@ -176,6 +188,7 @@ export function parseCurCsv(text: string): CurParseResult | { readonly error: st
       if (value.length > 0) tags[tag.key] = value;
     }
     const providedId = cell(columns.lineItemId);
+    const region = cell(columns.region);
     lines.push({
       lineItemId: providedId.length > 0 ? providedId : `row-${rowNumber}`,
       usageAccountId: account,
@@ -184,6 +197,7 @@ export function parseCurCsv(text: string): CurParseResult | { readonly error: st
       usageStartIso: new Date(usageStartMs).toISOString(),
       amountMicros,
       currency,
+      region: region.length > 0 ? region : null,
       tags,
     });
     currencies.add(currency);

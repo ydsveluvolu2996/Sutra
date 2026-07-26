@@ -97,6 +97,7 @@ function curLine(over: { amount: number; currency: string; tags: Record<string, 
     usageStartIso: "2026-07-01T00:00:00.000Z",
     amountMicros: units(over.amount),
     currency: over.currency,
+    region: null,
     tags: over.tags,
   };
 }

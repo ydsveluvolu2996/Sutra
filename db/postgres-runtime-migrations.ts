@@ -46,6 +46,7 @@ import postgresBackgroundJobsConnectionScopeSql from "../postgres/migrations/004
 import postgresContactRateLimitsSql from "../postgres/migrations/0047_contact_rate_limits.sql?raw";
 import postgresPasswordResetSql from "../postgres/migrations/0048_password_reset.sql?raw";
 import postgresBackgroundJobsKindIndexSql from "../postgres/migrations/0049_background_jobs_kind_index.sql?raw";
+import postgresFinopsCurRegionSql from "../postgres/migrations/0050_finops_cur_region.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -96,6 +97,7 @@ const migrations = [
   { id: "0047_contact_rate_limits", source: postgresContactRateLimitsSql },
   { id: "0048_password_reset", source: postgresPasswordResetSql },
   { id: "0049_background_jobs_kind_index", source: postgresBackgroundJobsKindIndexSql },
+  { id: "0050_finops_cur_region", source: postgresFinopsCurRegionSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

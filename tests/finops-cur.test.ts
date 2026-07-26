@@ -40,6 +40,25 @@ describe("parseCurCsv", () => {
     assert.deepEqual(result.lines[0].tags, { env: "prod" });
     assert.deepEqual(result.lines[1].tags, {});
     assert.deepEqual(result.currencies, ["USD"]);
+    // The header carries no region column, so region is null (not "").
+    assert.equal(result.lines[0].region, null);
+  });
+
+  it("captures the region column for CUR 2.0 and FOCUS 1.0, null when absent", () => {
+    const cur = parseCurCsv([
+      "line_item_id,line_item_usage_account_id,product_servicecode,line_item_line_item_type,line_item_usage_start_date,line_item_unblended_cost,line_item_currency_code,product_region_code",
+      "li-1,111111111111,AmazonEC2,Usage,2026-07-01T00:00:00Z,10.50,USD,us-east-1",
+      "li-2,111111111111,AmazonS3,Usage,2026-07-01T00:00:00Z,0.25,USD,",
+    ].join("\n"));
+    if ("error" in cur) throw new Error(cur.error);
+    assert.equal(cur.lines[0].region, "us-east-1");
+    assert.equal(cur.lines[1].region, null); // empty region cell -> null, never ""
+    const focus = parseCurCsv([
+      "BillingAccountId,ServiceName,ChargeCategory,ChargePeriodStart,BilledCost,BillingCurrency,RegionId",
+      "1,Amazon EC2,Usage,2026-07-01T00:00:00Z,5.00,USD,eu-west-1",
+    ].join("\n"));
+    if ("error" in focus) throw new Error(focus.error);
+    assert.equal(focus.lines[0].region, "eu-west-1");
   });
 
   it("rejects malformed rows with row numbers and reasons — never silently drops", () => {
@@ -108,9 +127,9 @@ describe("finops insights", () => {
     const spikeLines = [
       ...["01", "02", "03", "04"].map((day, index) => ({
         lineItemId: `d${index}`, usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage",
-        usageStartIso: `2026-07-${day}T00:00:00.000Z`, amountMicros: "2000000", currency: "USD", tags: {},
+        usageStartIso: `2026-07-${day}T00:00:00.000Z`, amountMicros: "2000000", currency: "USD", region: null, tags: {},
       })),
-      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", tags: {} },
+      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", region: null, tags: {} },
     ];
     const result = detectAnomalies(spikeLines);
     assert.equal(result.anomalies.length, 1);

@@ -16,6 +16,7 @@ function curLine(over: Partial<NormalizedCurLine> & { service: string; day: stri
     usageStartIso: `${over.day}T00:00:00.000Z`,
     amountMicros: units(over.amountUnits),
     currency: over.currency ?? "USD",
+    region: over.region ?? null,
     tags: over.tags ?? {},
   };
 }

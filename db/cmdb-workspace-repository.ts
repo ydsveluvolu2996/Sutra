@@ -6,6 +6,8 @@
 // and every read is org+customer scoped so tenants never see each other.
 import { validateCmdbQuery, type CmdbQuery, type CmdbQueryResource } from "../lib/cmdb-query.ts";
 import type { CapturedManagementEvent, SnapshotIdentity } from "../lib/cmdb-event-capture.ts";
+import type { CmdbComparableResource } from "../lib/cmdb-change-history.ts";
+import type { LaunchedAddedEvent } from "../lib/finops-launched.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 
@@ -21,6 +23,7 @@ const MAX_FIELD_KEY = 64;
 const MAX_FIELD_VALUE = 256;
 const MAX_QUERY_RESOURCES = 20_000;
 const MAX_SAVED_QUERIES = 200;
+const MAX_LAUNCHED_EVENTS = 500;
 
 export interface CmdbWorkspaceScope {
   readonly orgId: string;
@@ -68,6 +71,12 @@ interface SavedQueryRow {
   query_json: string;
   created_by: string;
   updated_at: string;
+}
+
+interface AddedEventRow {
+  resource_key: string;
+  after_json: string | null;
+  occurred_at: number;
 }
 
 interface QueryResourceRow {
@@ -124,6 +133,17 @@ function parseRecord(json: string): Record<string, string> {
     return out;
   } catch {
     return {};
+  }
+}
+
+function parseComparable(json: string | null): CmdbComparableResource | null {
+  if (json === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    return parsed as CmdbComparableResource;
+  } catch {
+    return null;
   }
 }
 
@@ -308,6 +328,43 @@ export class CmdbWorkspaceRepository {
       resources: (resourceRows.results ?? []).map((row) => ({ resourceKey: row.resource_key, nativeId: row.native_id, arn: row.arn })),
       events,
     };
+  }
+
+  /**
+   * Read-only feed for the "recently launched / newly observed" tracker: the
+   * `change_type='added'` events for this connection whose first-observed time
+   * (`occurred_at`) falls at or after `windowStartMs`. Tenant-scoped (the
+   * org+customer+connection must all match) and joined to a complete snapshot so
+   * partial in-flight runs are never surfaced. Ordered newest-first and hard
+   * capped at MAX_LAUNCHED_EVENTS. `windowStartMs` is supplied by the caller —
+   * this method reads no clock.
+   */
+  public async listRecentlyAddedResources(
+    scope: CmdbWorkspaceScope,
+    connectionId: string,
+    windowStartMs: number,
+    limit: number = MAX_LAUNCHED_EVENTS,
+  ): Promise<readonly LaunchedAddedEvent[]> {
+    assertScope(scope, connectionId);
+    if (!Number.isSafeInteger(windowStartMs) || windowStartMs < 0) invalid();
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LAUNCHED_EVENTS) invalid();
+    const db = await this.ready();
+    const rows = await db.prepare(
+      `SELECT e.resource_key, e.after_json, e.occurred_at
+         FROM cmdb_change_events e
+         JOIN cmdb_snapshots s ON s.id = e.to_snapshot_id
+          AND s.org_id = e.org_id AND s.customer_id = e.customer_id
+          AND s.connection_id = e.connection_id AND s.status = 'complete'
+        WHERE e.org_id = ? AND e.customer_id = ? AND e.connection_id = ?
+          AND e.change_type = 'added' AND e.occurred_at >= ?
+        ORDER BY e.occurred_at DESC, e.id DESC
+        LIMIT ?`,
+    ).bind(scope.orgId, scope.customerId, connectionId, windowStartMs, limit).all<AddedEventRow>();
+    return (rows.results ?? []).map((row) => ({
+      resourceKey: row.resource_key,
+      occurredAtMs: Number(row.occurred_at),
+      after: parseComparable(row.after_json),
+    }));
   }
 
   public async saveQuery(

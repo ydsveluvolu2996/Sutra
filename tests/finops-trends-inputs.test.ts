@@ -15,6 +15,7 @@ function line(over: Partial<NormalizedCurLine> & { usageStartIso: string; amount
     usageStartIso: over.usageStartIso,
     amountMicros: over.amountMicros ?? units(over.amountUnits),
     currency: over.currency ?? "USD",
+    region: over.region ?? null,
     tags: over.tags ?? {},
   };
 }

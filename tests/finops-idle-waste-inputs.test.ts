@@ -122,6 +122,7 @@ function line(over: { id: string; amount: number; currency?: string }): Normaliz
     usageStartIso: "2026-07-01T00:00:00.000Z",
     amountMicros: units(over.amount),
     currency: over.currency ?? "USD",
+    region: null,
     tags: { resourceId: over.id },
   };
 }

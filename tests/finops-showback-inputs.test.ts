@@ -15,6 +15,7 @@ function line(over: Partial<NormalizedCurLine> & { amountUnits: number }): Norma
     usageStartIso: over.usageStartIso ?? "2026-01-01T00:00:00.000Z",
     amountMicros: over.amountMicros ?? units(over.amountUnits),
     currency: over.currency ?? "USD",
+    region: over.region ?? null,
     tags: over.tags ?? {},
   };
 }

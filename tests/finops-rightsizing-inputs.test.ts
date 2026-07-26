@@ -116,6 +116,7 @@ function line(over: { instanceId: string; day: string; amountUnits: number; curr
     usageStartIso: `${over.day}T00:00:00.000Z`,
     amountMicros: units(over.amountUnits),
     currency: over.currency ?? "USD",
+    region: null,
     tags: { resourceId: over.instanceId },
   };
 }
