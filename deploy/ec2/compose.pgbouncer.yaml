@@ -1,0 +1,84 @@
+# OPT-IN connection-pooling overlay — NOT active by default.
+#
+# Why an overlay and not baked into compose.prod.yaml:
+#   The app runs on the Cloudflare Workers runtime (workerd), which forbids
+#   reusing a TCP socket across requests ("Cannot perform I/O on behalf of a
+#   different request"). An in-process pg.Pool therefore CANNOT be used — the
+#   adapter (db/postgres-d1-adapter.ts) deliberately opens+closes a connection
+#   per query. The workerd-safe way to pool is an EXTERNAL pooler between the
+#   app and Postgres, which absorbs the connect/auth churn without the app ever
+#   holding a cross-request socket.
+#
+# Activate ONLY after the validation pass in PGBOUNCER.md:
+#   docker compose \
+#     -f deploy/ec2/compose.prod.yaml \
+#     -f deploy/ec2/compose.pgbouncer.yaml \
+#     --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env up -d
+#
+# What it does: adds a pgbouncer service on the internal `data` network in
+# transaction-pooling mode and repoints ONLY the app's DATABASE_URL at it. The
+# migrate/notification-worker services keep talking to postgres:5432 directly
+# (they are short-lived / already-pooled-elsewhere and must see a real session).
+
+services:
+  pgbouncer:
+    # TODO before activating: pin a reviewed immutable digest (the rest of this
+    # stack pins every image by @sha256). Example:
+    #   image: edoburu/pgbouncer:1.23.1@sha256:<reviewed-digest>
+    image: edoburu/pgbouncer:1.23.1
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: sutra
+      DB_USER: sutra_app
+      DB_PASSWORD: ${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}
+      # Transaction pooling: a server connection is returned to the pool at the
+      # end of each transaction, which is what collapses the app's per-query
+      # connect churn. node-postgres uses UNNAMED prepared statements, which are
+      # compatible with transaction pooling (named/server-side prepares are not
+      # — the app must not enable them).
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      MAX_CLIENT_CONN: "500"
+      DEFAULT_POOL_SIZE: "20"
+      MIN_POOL_SIZE: "2"
+      RESERVE_POOL_SIZE: "5"
+      SERVER_IDLE_TIMEOUT: "60"
+      # Must NOT exceed Postgres max_connections minus headroom for migrate/psql.
+      SERVER_LIFETIME: "600"
+      QUERY_WAIT_TIMEOUT: "30"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "6432"
+    healthcheck:
+      # A real pooled login+ping proves end-to-end auth, not just a live port.
+      test: ["CMD-SHELL", "PGPASSWORD=$${DB_PASSWORD} psql -h 127.0.0.1 -p 6432 -U sutra_app -d sutra -tAc 'select 1' >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    pids_limit: 128
+    mem_reservation: 64m
+    mem_limit: 256m
+    cpus: "0.5"
+    restart: unless-stopped
+
+  app:
+    environment:
+      # Route the app's DB traffic through the pooler (6432) instead of the
+      # direct postgres:5432 socket. This is the only line that activates pooling.
+      DATABASE_URL: postgresql://sutra_app:${SUTRA_POSTGRES_APP_PASSWORD:?Run deploy/ec2/bootstrap.sh to generate the ignored runtime secret in .sutra/docker.env}@pgbouncer:6432/sutra
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
