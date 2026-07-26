@@ -5,6 +5,7 @@ import { FinopsPanels } from "./finops-panels";
 import { VisibilityPanels } from "./visibility-panels";
 import { FinopsMorePanels } from "./finops-more-panels";
 import { FinopsCommitmentsPanels } from "./finops-commitments-panels";
+import { FinopsWave3Panels } from "./finops-wave3-panels";
 import type { StoredCostSnapshot } from "../../lib/cost-types";
 import { buildCostOptimizations } from "../../lib/aws-cost-optimization";
 import { compactIdentifier, formatTimestamp, usePilotState } from "../components/use-pilot-state";
@@ -263,6 +264,7 @@ export function CostsBrowser() {
       <VisibilityPanels connectionId={connectionId} />
       <FinopsMorePanels connectionId={connectionId} />
       <FinopsCommitmentsPanels connectionId={connectionId} />
+      <FinopsWave3Panels connectionId={connectionId} />
       <FinopsPanels connectionId={connectionId} />
     </>
   );

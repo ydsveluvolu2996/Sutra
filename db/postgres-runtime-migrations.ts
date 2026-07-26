@@ -48,6 +48,8 @@ import postgresPasswordResetSql from "../postgres/migrations/0048_password_reset
 import postgresBackgroundJobsKindIndexSql from "../postgres/migrations/0049_background_jobs_kind_index.sql?raw";
 import postgresFinopsCurRegionSql from "../postgres/migrations/0050_finops_cur_region.sql?raw";
 import postgresFinopsCurCommitmentsSql from "../postgres/migrations/0051_finops_cur_commitments.sql?raw";
+import postgresFinopsAllocationRulesSql from "../postgres/migrations/0052_finops_allocation_rules.sql?raw";
+import postgresFinopsCustomerMarginSql from "../postgres/migrations/0053_finops_customer_margin.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -100,6 +102,8 @@ const migrations = [
   { id: "0049_background_jobs_kind_index", source: postgresBackgroundJobsKindIndexSql },
   { id: "0050_finops_cur_region", source: postgresFinopsCurRegionSql },
   { id: "0051_finops_cur_commitments", source: postgresFinopsCurCommitmentsSql },
+  { id: "0052_finops_allocation_rules", source: postgresFinopsAllocationRulesSql },
+  { id: "0053_finops_customer_margin", source: postgresFinopsCustomerMarginSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
