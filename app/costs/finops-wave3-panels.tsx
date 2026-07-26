@@ -324,24 +324,45 @@ interface AlertItem {
   readonly title: string;
   readonly summary: string;
 }
+interface AlertDestination { readonly id: string; readonly channel: string; readonly displayName: string; }
 interface AlertsResponse {
   readonly alerts: readonly AlertItem[];
   readonly counts: { readonly critical: number; readonly high: number; readonly medium: number; readonly low: number };
+  readonly destinations: readonly AlertDestination[];
 }
 
 function AlertsPanel({ connectionId }: { connectionId: string }) {
   const [data, setData] = useState<AlertsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [destinationId, setDestinationId] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     getJson<AlertsResponse>(`/api/v1/finops/alerts?connectionId=${encodeURIComponent(connectionId)}`)
-      .then((value) => { if (active) { setData(value); setError(null); } })
+      .then((value) => { if (active) { setData(value); setError(null); if (value.destinations[0]) setDestinationId((prev) => prev || value.destinations[0].id); } })
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : "Could not load alerts"); });
     return () => { active = false; };
   }, [connectionId]);
 
+  async function send(): Promise<void> {
+    if (destinationId.length === 0) return;
+    setSending(true);
+    setSent(null);
+    try {
+      const result = await sendJson<{ queued: number; queueFailures: number }>(`/api/v1/finops/alerts`, "POST", { connectionId, destinationId });
+      setSent(`Queued ${result.queued} alert${result.queued === 1 ? "" : "s"}${result.queueFailures > 0 ? ` (${result.queueFailures} failed)` : ""} to the destination.`);
+      setError(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not send alerts");
+    } finally {
+      setSending(false);
+    }
+  }
+
   const total = data ? data.alerts.length : 0;
+  const destinations = data?.destinations ?? [];
 
   return (
     <article className="panel">
@@ -351,16 +372,33 @@ function AlertsPanel({ connectionId }: { connectionId: string }) {
       </div>
       {error ? <p className={styles.emptyNote} role="alert">{error}</p> : null}
       {data === null ? <p className={styles.emptyNote}>Loading alerts…</p>
-        : total === 0 ? <div className={styles.goodState}><b>✓</b><span><strong>No spend anomaly or budget breach detected</strong><small>Alerts fire when a service day exceeds 3× its trailing median, or a budget is projected to breach. They route to your configured notification destinations.</small></span></div>
+        : total === 0 ? <div className={styles.goodState}><b>✓</b><span><strong>No spend anomaly or budget breach detected</strong><small>Alerts fire when a service day exceeds 3× its trailing median, or a budget is projected to breach. Configured destinations are also swept automatically in the background.</small></span></div>
         : (
-          <div className={styles.signalList}>
-            {data.alerts.map((alert) => (
-              <article key={alert.id}>
-                <span className={`${styles.severity} ${styles[alert.severity]}`}>{alert.severity}</span>
-                <div><h3>{alert.title}</h3><p>{alert.summary}</p><small>{alert.kind.replace(/_/g, " ")}</small></div>
-              </article>
-            ))}
-          </div>
+          <>
+            <div className={styles.signalList}>
+              {data.alerts.map((alert) => (
+                <article key={alert.id}>
+                  <span className={`${styles.severity} ${styles[alert.severity]}`}>{alert.severity}</span>
+                  <div><h3>{alert.title}</h3><p>{alert.summary}</p><small>{alert.kind.replace(/_/g, " ")}</small></div>
+                </article>
+              ))}
+            </div>
+            <div className={styles.w3Form}>
+              {destinations.length === 0 ? (
+                <p className={styles.emptyNote}>Configure a notification destination in Settings → Notifications to send these alerts to Slack, PagerDuty, Teams, a webhook, or email.</p>
+              ) : (
+                <div className={styles.w3Grid}>
+                  <select className={styles.w3Input} value={destinationId} onChange={(e) => setDestinationId(e.target.value)} aria-label="Notification destination">
+                    {destinations.map((destination) => (
+                      <option key={destination.id} value={destination.id}>{destination.displayName} ({destination.channel.replace(/_/g, " ")})</option>
+                    ))}
+                  </select>
+                  <button className="button button-secondary" type="button" disabled={sending || destinationId.length === 0} onClick={() => void send()}>{sending ? "Sending…" : "Send now"}</button>
+                </div>
+              )}
+              {sent ? <p className={styles.emptyNote}>{sent}</p> : null}
+            </div>
+          </>
         )}
     </article>
   );

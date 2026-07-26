@@ -2,12 +2,14 @@ import { env } from "cloudflare:workers";
 import {
   buildJobHandlers,
   ensureDueAlertEvaluationsEnqueued,
+  ensureDueFinopsAlertSweepsEnqueued,
   ensureDueScheduledReportsEnqueued,
   ensureRetentionSweepsEnqueued,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
+import { listConnectionsForOrg } from "../../../../../db/pilot-repository";
 import { listActiveOrgIds } from "../../../../../db/organization-directory";
 import {
   buildPlatformUptimeProbeTickDeps,
@@ -44,6 +46,13 @@ export async function POST(request: Request): Promise<Response> {
     await ensureDueScheduledReportsEnqueued(queue, new FinopsScheduledReportRepository());
     // The alert-evaluation tick: enqueue one evaluation per tenant with enabled rules.
     await ensureDueAlertEvaluationsEnqueued(queue, new AlertRuleRepository());
+    // The finops-alert-sweep tick: enqueue one cost/budget alert sweep per tenant
+    // that owns a connection (the handler no-ops without an enabled destination).
+    await ensureDueFinopsAlertSweepsEnqueued(
+      queue,
+      activeOrgIds,
+      async (orgId) => (await listConnectionsForOrg(orgId)).map((connection) => ({ customerId: connection.customerId })),
+    );
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 25 });
     return jsonResponse({ ...result, platformUptime });
   } catch (error) {

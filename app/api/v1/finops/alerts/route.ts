@@ -1,13 +1,11 @@
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
-import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { SecurityNotificationRepository } from "../../../../../db/security-notification-repository";
-import { detectAnomalies } from "../../../../../lib/finops-insights";
-import { buildBudgetBurndown } from "../../../../../lib/finops-budget-burndown";
-import { evaluateFinopsAlerts, type FinopsAlert, type FinopsAlertSeverity } from "../../../../../lib/finops-alerts";
 import {
-  buildSecurityNotificationPayloads,
-  normalizeSecurityNotificationEvent,
-} from "../../../../../lib/security-notifications";
+  enqueueFinopsAlert,
+  evaluateFinopsAlertsForConnection,
+  recipientsForDestination,
+} from "../../../../../db/finops-alert-service";
+import type { FinopsAlertSeverity } from "../../../../../lib/finops-alerts";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -17,59 +15,6 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const BILLING_PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/u;
 const DESTINATION_ID = /^ndest_[a-f0-9]{32}$/u;
 const SEVERITIES = new Set<string>(["critical", "high", "medium", "low"]);
-const PUBLIC_ORIGIN = "https://app.sutracmdb.com";
-const REPORT_URL = "https://app.sutracmdb.com/costs";
-
-async function evidenceHash(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-/** How many days of the billing period the ingested lines actually cover. */
-function daysInMonth(period: string): number {
-  const [year, month] = period.split("-").map((part) => Number(part));
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-function asOfDayIndex(lines: readonly { usageStartIso: string }[]): number {
-  let max = 0;
-  for (const line of lines) {
-    const day = Number(line.usageStartIso.slice(8, 10));
-    if (Number.isFinite(day) && day > max) max = day;
-  }
-  return Math.max(1, max);
-}
-
-/** Evaluate current cost/budget alerts for a connection's selected period. */
-async function evaluateForConnection(
-  orgId: string,
-  connectionId: string,
-  period: string | null,
-  minSeverity: FinopsAlertSeverity | undefined,
-  customerId: string,
-) {
-  const workspace = new FinopsWorkspaceRepository();
-  const scope = { orgId, customerId };
-  const periods = await workspace.listPeriods(scope, connectionId);
-  const selected = period ?? periods[0]?.period ?? null;
-  if (selected === null) {
-    return { periods, period: null, evaluation: evaluateFinopsAlerts({ anomalies: [], budgets: [], minSeverity }) };
-  }
-  const lines = await workspace.linesForPeriod(scope, connectionId, selected);
-  const budgets = await workspace.listBudgets(scope);
-  const anomalies = detectAnomalies(lines).anomalies;
-  const burndown = buildBudgetBurndown({
-    budgets,
-    dailyLines: lines,
-    period: selected,
-    asOfDayIndex: asOfDayIndex(lines),
-    daysInMonth: daysInMonth(selected),
-  });
-  return {
-    periods,
-    period: selected,
-    evaluation: evaluateFinopsAlerts({ anomalies, budgets: burndown.budgets, minSeverity }),
-  };
-}
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -88,11 +33,17 @@ export async function GET(request: Request): Promise<Response> {
     const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
-    const result = await evaluateForConnection(
-      authenticated.subject.orgId, connectionId, period,
-      (minSeverity ?? undefined) as FinopsAlertSeverity | undefined, connection.customerId,
-    );
-    return jsonResponse({ connectionId, period: result.period, periods: result.periods, ...result.evaluation });
+    const orgId = authenticated.subject.orgId;
+    const result = await evaluateFinopsAlertsForConnection(orgId, connection.customerId, connectionId, {
+      period,
+      minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
+    });
+    // Surface the enabled destinations so the panel can offer a send target
+    // without a second round-trip (customer resolved from the connection).
+    const destinations = (await new SecurityNotificationRepository().listDestinations(orgId, connection.customerId))
+      .filter((destination) => destination.enabled)
+      .map((destination) => ({ id: destination.id, channel: destination.channel, displayName: destination.displayName }));
+    return jsonResponse({ connectionId, period: result.period, periods: result.periods, destinations, ...result.evaluation });
   } catch (error) {
     return errorResponse(error);
   }
@@ -133,39 +84,14 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("No enabled notification destination matches"), { code: "NOT_FOUND" });
     }
 
-    const result = await evaluateForConnection(
-      orgId, connectionId, period ?? null,
-      (minSeverity ?? undefined) as FinopsAlertSeverity | undefined, customerId,
-    );
-    const recipients = destination.configuration.channel === "email"
-      ? destination.configuration.recipients
-      : ["notifications@sutracmdb.com"];
-
-    const dispatched = await Promise.allSettled(result.evaluation.alerts.map(async (alert: FinopsAlert) => {
-      const eventId = `notify_${(await evidenceHash(`finops-alert\0${alert.id}`)).slice(0, 48)}`;
-      const notificationEvent = normalizeSecurityNotificationEvent({
-        eventId,
-        orgId,
-        customerId,
-        clusterId: `finops:${connectionId}`,
-        severity: alert.severity,
-        title: alert.title,
-        summary: alert.summary,
-        occurredAt: new Date().toISOString(),
-        findingCount: 1,
-        reportUrl: REPORT_URL,
-        evidenceSha256: await evidenceHash(`finops-alert-evidence\0${alert.id}\0${alert.summary}`),
-      }, PUBLIC_ORIGIN);
-      const payloads = await buildSecurityNotificationPayloads({ event: notificationEvent, emailRecipients: recipients });
-      return notifications.enqueue({
-        orgId,
-        customerId,
-        destinationId: destination.id,
-        idempotencyKey: alert.id,
-        event: notificationEvent,
-        payloads,
-      });
-    }));
+    const result = await evaluateFinopsAlertsForConnection(orgId, customerId, connectionId, {
+      period: period ?? null,
+      minSeverity: (minSeverity ?? undefined) as FinopsAlertSeverity | undefined,
+    });
+    const recipients = recipientsForDestination(destination);
+    const dispatched = await Promise.allSettled(result.evaluation.alerts.map((alert) =>
+      enqueueFinopsAlert(notifications, { orgId, customerId, connectionId, destinationId: destination.id, recipients, alert }),
+    ));
 
     return jsonResponse({
       connectionId,
@@ -175,7 +101,6 @@ export async function POST(request: Request): Promise<Response> {
       queued: dispatched.filter((entry) => entry.status === "fulfilled").length,
       queueFailures: dispatched.filter((entry) => entry.status === "rejected").length,
       counts: result.evaluation.counts,
-      // Preview of what was routed — no secrets, no destination URL.
       alerts: result.evaluation.alerts,
       providerDeliveryAttempted: false,
     });

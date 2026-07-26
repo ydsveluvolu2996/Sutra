@@ -52,6 +52,12 @@ import { HOSTED_BROKER_INGEST_JOB_KIND } from "../lib/hosted-broker-ingest";
 import { runHostedBrokerIngestJob } from "../lib/hosted-broker-ingest-job";
 import { RetentionSweepRepository } from "./retention-sweep-repository";
 import { SecurityNotificationRepository } from "./security-notification-repository";
+import {
+  enqueueFinopsAlert,
+  evaluateFinopsAlertsForConnection,
+  recipientsForDestination,
+} from "./finops-alert-service";
+import type { FinopsAlert } from "../lib/finops-alerts.ts";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -489,6 +495,55 @@ export async function dispatchFiredAlert(input: AlertDispatchInput): Promise<Ale
   return { deliveryState: "queued", destinationCount: enqueued };
 }
 
+export interface FinopsAlertSweepDeps {
+  readonly listConnections: (orgId: string, customerId: string) => Promise<readonly { readonly id: string }[]>;
+  readonly listDestinations: (orgId: string, customerId: string) => Promise<readonly {
+    readonly id: string;
+    readonly enabled: boolean;
+    readonly configuration: { readonly channel: string; readonly recipients?: readonly string[] };
+  }[]>;
+  readonly evaluate: (orgId: string, customerId: string, connectionId: string) => Promise<{ readonly alerts: readonly FinopsAlert[] }>;
+  readonly dispatch: (args: {
+    readonly orgId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly destinationId: string;
+    readonly recipients: readonly string[];
+    readonly alert: FinopsAlert;
+  }) => Promise<void>;
+}
+
+/**
+ * The `finops-alert-sweep` handler: for one tenant (org + customer), evaluate
+ * cost/budget alerts across every connection and route each alert to every
+ * ENABLED notification destination through the durable outbox. Idempotent per
+ * (alert, destination), so repeated sweeps never spam a duplicate. A tenant with
+ * no enabled destination is a no-op — nothing is fabricated or sent.
+ */
+export async function runFinopsAlertSweepJob(job: RunnableJob, deps: FinopsAlertSweepDeps): Promise<void> {
+  if (job.customerId === null) throw new Error("finops-alert-sweep-requires-customer");
+  const orgId = job.orgId;
+  const customerId = job.customerId;
+  const destinations = (await deps.listDestinations(orgId, customerId)).filter((destination) => destination.enabled);
+  if (destinations.length === 0) return;
+  const connections = await deps.listConnections(orgId, customerId);
+  for (const connection of connections) {
+    const { alerts } = await deps.evaluate(orgId, customerId, connection.id);
+    for (const alert of alerts) {
+      for (const destination of destinations) {
+        await deps.dispatch({
+          orgId,
+          customerId,
+          connectionId: connection.id,
+          destinationId: destination.id,
+          recipients: recipientsForDestination(destination),
+          alert,
+        });
+      }
+    }
+  }
+}
+
 /**
  * The app-side registry of durable job handlers. Each handler does real work and
  * throws on failure — nothing is fabricated, and the runner completes a job only
@@ -516,6 +571,14 @@ export function buildJobHandlers(): Record<string, JobHandler> {
         now: Date.now,
       });
     },
+    "finops-alert-sweep": (job) => runFinopsAlertSweepJob(job, {
+      listConnections: async (orgId, customerId) =>
+        (await listConnectionsForOrg(orgId)).filter((connection) => connection.customerId === customerId).map((connection) => ({ id: connection.id })),
+      listDestinations: (orgId, customerId) => new SecurityNotificationRepository().listDestinations(orgId, customerId),
+      evaluate: async (orgId, customerId, connectionId) =>
+        (await evaluateFinopsAlertsForConnection(orgId, customerId, connectionId)).evaluation,
+      dispatch: (args) => enqueueFinopsAlert(new SecurityNotificationRepository(), args),
+    }),
     "uptime-probe": (job) => runUptimeProbeJob(job, buildUptimeProbeDeps()),
     // The hosted broker ingestion job: persist a signed, server-scoped broker
     // collection into its tenant via the SAME path the local collector uses.
@@ -627,6 +690,42 @@ export async function ensureDueAlertEvaluationsEnqueued(
     } catch {
       // A tenant whose customer is no longer active cannot be enqueued; it is
       // simply re-evaluated on the next tick.
+    }
+  }
+  return enqueued;
+}
+
+/**
+ * The finops-alert-sweep tick: ensure every tenant (org + customer that owns at
+ * least one connection) has at most one in-flight `finops-alert-sweep` job.
+ * Mirrors the retention-sweep cadence model — a tenant with an already
+ * queued/leased sweep enqueues nothing. The handler is a no-op when the tenant
+ * has no enabled notification destination, so enqueuing broadly is safe: work is
+ * only ever done where alerts can actually be delivered. Returns the number of
+ * jobs enqueued.
+ */
+export async function ensureDueFinopsAlertSweepsEnqueued(
+  queue: JobQueueRepository,
+  orgIds: readonly string[],
+  connectionsForOrg: (orgId: string) => Promise<readonly { readonly customerId: string }[]>,
+  now = Date.now(),
+): Promise<number> {
+  let enqueued = 0;
+  for (const orgId of orgIds) {
+    const connections = await connectionsForOrg(orgId);
+    const customerIds = [...new Set(connections.map((connection) => connection.customerId))];
+    for (const customerId of customerIds) {
+      const existing = await queue.list(orgId, customerId);
+      const active = existing.some(
+        (job) => job.kind === "finops-alert-sweep" && (job.status === "queued" || job.status === "leased"),
+      );
+      if (active) continue;
+      try {
+        await queue.enqueue({ orgId, customerId, kind: "finops-alert-sweep", payload: {} }, now);
+        enqueued += 1;
+      } catch {
+        // A customer no longer active cannot be enqueued; re-evaluated next tick.
+      }
     }
   }
   return enqueued;
