@@ -22,8 +22,24 @@
 #   docker compose -f deploy/ec2/compose.prod.yaml \
 #     --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env down
 #
-# To also run the AWS notification worker, append `--profile notifications` to
-# the ExecStart/ExecStop compose commands below.
+# NOTIFICATION WORKER: do NOT hand-edit the ExecStart line below to add
+# `--profile notifications` — that edit is lost on the next release bundle swap.
+# Instead set BOTH of these in deploy/ec2/.env.ec2 (see that file's comments and
+# docs/notification-delivery-enablement.md):
+#
+#   SUTRA_NOTIFICATIONS_ENABLED=true
+#   COMPOSE_PROFILES=notifications
+#
+# Compose reads COMPOSE_PROFILES from the --env-file already passed below, so
+# systemd then starts and health-waits the worker with no unit change at all.
+# Leave COMPOSE_PROFILES empty (the shipped default) and this unit behaves
+# exactly as it always has.
+#
+# ExecStop deliberately stops only `app`. The worker, like Postgres, keeps
+# running during a maintenance window; to also quiesce it run
+#   docker compose -f deploy/ec2/compose.prod.yaml --profile '*' \
+#     --env-file deploy/ec2/.env.ec2 --env-file .sutra/docker.env \
+#     stop -t 30 notification-worker
 # -----------------------------------------------------------------------------
 [Unit]
 Description=Sutra Cloud Security CMDB (Docker Compose stack)

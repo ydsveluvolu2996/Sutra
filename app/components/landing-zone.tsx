@@ -394,10 +394,26 @@ function SuiteWheel() {
     { d: "M75.2 275.8 A150 150 0 0 1 199.5 60.4", label: "IDENTITY", lx: 50, ly: 118 },
   ];
   const go = (i: number) => blocksRef.current[i]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  /* Accessible name for a segment, derived from the same `segs` label the SVG
+   * paints ("CLOUD" -> "Cloud") so the two can never drift apart. */
+  const pillar = (label: string) => label.charAt(0) + label.slice(1).toLowerCase();
   return (
     <div className="wheel-wrap">
       <div className="wheel-pin">
-        <svg className="wheel" viewBox="0 0 420 440" aria-hidden="true">
+        {/* The wheel is interactive: the three segments scroll their story block
+            into view, so they are real buttons. Everything else in the SVG —
+            sphere, segment labels, the function ring, the core wordmark — is
+            decoration and is individually aria-hidden, which keeps the tree to
+            exactly the three operable controls. `role="presentation"` drops the
+            <svg> element's own graphic semantics without hiding its children.
+            Deliberately NOT a tablist: all three .wblock panels stay rendered
+            and are read in normal document order (inactive ones are only dimmed,
+            and prefers-reduced-motion shows them at full opacity), and the
+            "selected" segment tracks scroll position rather than activation.
+            Tabs would require hiding the other two panels — i.e. hiding real
+            content from assistive tech — so this is scroll-spy navigation and
+            `aria-current` is the honest state. */}
+        <svg className="wheel" viewBox="0 0 420 440" role="presentation">
           <defs>
             <linearGradient id="wg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient>
             {/* Soft inner sphere — the thing that makes the reference read as
@@ -408,10 +424,47 @@ function SuiteWheel() {
               <stop className="wsph-1" offset=".58" />
               <stop className="wsph-2" offset="1" />
             </radialGradient>
+            {/* One mask per segment, punching the 44px band out of that
+                segment's focus halo so the halo survives only as two thin arcs
+                either side of the band. Without it the halo would show through
+                the segment's translucent stroke and read as a filled arc. */}
+            {segs.map((s, i) => (
+              <mask key={s.label} id={`wsegm${i}`} maskUnits="userSpaceOnUse" x="0" y="0" width="420" height="440">
+                <rect x="0" y="0" width="420" height="440" fill="#fff" />
+                <path d={s.d} fill="none" stroke="#000" strokeWidth={44} />
+              </mask>
+            ))}
           </defs>
-          <circle className="wsphere" cx={210} cy={210} r={124} />
-          {segs.map((s, i) => <path key={s.label} className="wseg" d={s.d} data-on={i === on} onClick={() => go(i)} />)}
-          {segs.map((s, i) => <text key={s.label} className="wlab" x={s.lx} y={s.ly} textAnchor="middle" data-on={i === on}>{s.label}</text>)}
+          <circle className="wsphere" cx={210} cy={210} r={124} aria-hidden="true" />
+          <g role="group" aria-label="Platform pillars">
+            {segs.map((s, i) => (
+              <g key={s.label}>
+                {/* Focus halo: a little wider than the 44px band and masked
+                    back to the band's two edges, so keyboard focus reads as an
+                    outline hugging the arc on either ground. */}
+                <path className="wseg-ring" d={s.d} mask={`url(#wsegm${i})`} aria-hidden="true" />
+                <path
+                  className="wseg"
+                  d={s.d}
+                  data-on={i === on}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={pillar(s.label)}
+                  aria-current={i === on ? "true" : undefined}
+                  onClick={() => go(i)}
+                  onKeyDown={(e) => {
+                    // role="button" on an SVG element gets no implicit key
+                    // activation, so Enter and Space are wired by hand.
+                    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+                      e.preventDefault();
+                      go(i);
+                    }
+                  }}
+                />
+              </g>
+            ))}
+          </g>
+          {segs.map((s, i) => <text key={s.label} className="wlab" x={s.lx} y={s.ly} textAnchor="middle" data-on={i === on} aria-hidden="true">{s.label}</text>)}
 
           {/* Cross-cutting function ring. Decorative: pointer-events are off,
               so the three segments stay the only clickable targets. */}
@@ -432,9 +485,9 @@ function SuiteWheel() {
             })}
           </g>
 
-          <circle className="wcore" cx={210} cy={210} r={58} />
-          <text className="wcore-t" x={210} y={207} textAnchor="middle">Sutra</text>
-          <text className="wcore-s" x={210} y={224} textAnchor="middle">ONE EVIDENCE GRAPH</text>
+          <circle className="wcore" cx={210} cy={210} r={58} aria-hidden="true" />
+          <text className="wcore-t" x={210} y={207} textAnchor="middle" aria-hidden="true">Sutra</text>
+          <text className="wcore-s" x={210} y={224} textAnchor="middle" aria-hidden="true">ONE EVIDENCE GRAPH</text>
         </svg>
       </div>
       <div>

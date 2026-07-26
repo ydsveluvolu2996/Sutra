@@ -3028,6 +3028,19 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .wheel { width: min(420px, 100%); margin-inline: auto; display: block; }
 .lz .wseg { fill: none; stroke: var(--seg); stroke-width: 44; transition: stroke .45s ease, filter .45s ease; cursor: pointer; }
 .lz .wseg[data-on="true"] { stroke: url(#wg); filter: drop-shadow(0 0 18px rgba(34,211,238,.35)); }
+/* Keyboard focus for the three segment buttons. A browser default ring would be
+   drawn around the arc's bounding box, which on a quarter-donut is a huge
+   meaningless rectangle — so a wider arc is painted behind the segment instead
+   and masked back to a 5px edge on each side of the 44px band. `--strong` is
+   near-white on the dark ground and near-black on the light one, so it stays
+   visible on both. The default outline is only suppressed where :has() can
+   deliver the halo. */
+.lz .wseg-ring { fill: none; stroke: none; stroke-width: 54; pointer-events: none; }
+.lz g:has(> .wseg:focus-visible) > .wseg-ring { stroke: var(--strong); }
+/* `:focus`, not just `:focus-visible` — a mouse click also focuses the path, and
+   Chrome paints its default `outline: auto` around the arc's bounding box, which
+   would draw a rectangle across the whole wheel on click. */
+@supports selector(:has(*)) { .lz .wseg:focus { outline: none; } }
 .lz .wlab { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; fill: var(--body-2); text-transform: uppercase; transition: fill .4s; }
 .lz .wlab[data-on="true"] { fill: var(--text-1); }
 /* Soft inner sphere behind the function ring — a lit object, not a flat disc. */

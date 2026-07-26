@@ -26,7 +26,7 @@ ruby -e '
 python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
   "$EC2/release-update.sh" "$EC2/redeploy.sh" "$EC2/Caddyfile" \
   "$EC2/cloudflared-config.yml.example" "$EC2/maintenance/security.txt" \
-  "$EC2/compose.prod.yaml" <<'PY'
+  "$EC2/compose.prod.yaml" "$EC2/.env.ec2.example" "$EC2/sutra.service" <<'PY'
 from pathlib import Path
 import sys
 
@@ -39,6 +39,8 @@ caddy = Path(sys.argv[6]).read_text(encoding="utf-8")
 tunnel = Path(sys.argv[7]).read_text(encoding="utf-8")
 security_text = Path(sys.argv[8]).read_text(encoding="utf-8")
 compose = Path(sys.argv[9]).read_text(encoding="utf-8")
+env_template = Path(sys.argv[10]).read_text(encoding="utf-8")
+unit = Path(sys.argv[11]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -242,6 +244,40 @@ if security_text != expected_security_text:
     raise SystemExit("Caddy fail-open security.txt differs from the reviewed canonical document")
 if "./maintenance:/srv/maintenance:ro" not in compose:
     raise SystemExit("Caddy's version-controlled security.txt directory is not mounted read-only")
+
+# Real notification delivery must never become live merely by deploying the
+# committed template. Both switches ship off, the worker stays profile-gated,
+# and no immutable worker image is baked in.
+env_lines = env_template.splitlines()
+for required in ("SUTRA_NOTIFICATIONS_ENABLED=false", "COMPOSE_PROFILES="):
+    if required not in env_lines:
+        raise SystemExit(
+            f"deploy/ec2/.env.ec2.example must ship the inert notification switch: {required}"
+        )
+for prohibited in (
+    "SUTRA_NOTIFICATIONS_ENABLED=true",
+    "COMPOSE_PROFILES=notifications",
+):
+    if prohibited in env_lines:
+        raise SystemExit(
+            f"deploy/ec2/.env.ec2.example must not enable notification delivery: {prohibited}"
+        )
+if any(line.startswith("SUTRA_NOTIFICATION_WORKER_IMAGE=") for line in env_lines):
+    raise SystemExit(
+        "deploy/ec2/.env.ec2.example must leave SUTRA_NOTIFICATION_WORKER_IMAGE unset"
+    )
+if 'profiles: ["notifications"]' not in compose:
+    raise SystemExit("The notification worker must remain profile-gated")
+if "sutra-notification-worker:unavailable" not in compose:
+    raise SystemExit("The notification worker must fail closed without a published image")
+unit_directives = [
+    line for line in unit.splitlines() if not line.lstrip().startswith("#")
+]
+if any("--profile" in line for line in unit_directives):
+    raise SystemExit(
+        "deploy/ec2/sutra.service must not hardcode a Compose profile; "
+        "operators set COMPOSE_PROFILES in deploy/ec2/.env.ec2 instead"
+    )
 PY
 
 if [[ "${1:-}" == --online ]]; then

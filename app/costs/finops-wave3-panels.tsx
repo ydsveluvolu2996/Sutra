@@ -306,6 +306,12 @@ function MarginPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Record<string, { markup: string; fee: string }>>({});
+  /* Clearing a rate wipes a customer's markup and monthly fee — billing
+   * configuration with no undo — so it is a two-step confirm, the same inline
+   * pattern budget delete uses. A single customerId holds the pending row, so
+   * only one row can be awaiting confirmation at a time. */
+  const [pendingClear, setPendingClear] = useState<string | null>(null);
+  const [clearing, setClearing] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -348,7 +354,9 @@ function MarginPanel() {
   }
 
   async function clearRate(row: MarginRow): Promise<void> {
+    setError(null);
     setBusy(true);
+    setClearing(row.customerId);
     try {
       await sendJson(`/api/v1/finops/margin?customerId=${encodeURIComponent(row.customerId)}`, "DELETE", {});
       setDraft((prev) => {
@@ -356,10 +364,14 @@ function MarginPanel() {
         delete next[row.customerId];
         return next;
       });
+      setPendingClear(null);
       await reload();
     } catch (caught) {
+      // The confirm stays open on failure so the operator can retry; the real
+      // API message is surfaced in the panel's alert.
       setError(caught instanceof Error ? caught.message : "Could not clear rate");
     } finally {
+      setClearing(null);
       setBusy(false);
     }
   }
@@ -391,7 +403,19 @@ function MarginPanel() {
                   <span className={styles.w3RowActions}>
                     <button className="button button-ghost" type="button" disabled={busy} onClick={() => void saveRate(row)} aria-label={`Save rate for ${row.customerName}`}>Save</button>
                     {row.hasRate ? (
-                      <button className="button button-ghost" type="button" disabled={busy} onClick={() => void clearRate(row)} aria-label={`Clear configured rate for ${row.customerName}`}>Clear</button>
+                      pendingClear === row.customerId ? (
+                        <span className={styles.w3ClearConfirm}>
+                          <span className={styles.w3ClearPrompt} role="alert">
+                            {clearing === row.customerId
+                              ? `Clearing the rate for ${row.customerName}…`
+                              : `Clear the markup and monthly fee for ${row.customerName}?`}
+                          </span>
+                          <button className="button button-ghost" type="button" disabled={busy} onClick={() => void clearRate(row)} aria-label={`Confirm clearing the configured rate for ${row.customerName}`}>{clearing === row.customerId ? "Clearing…" : "Confirm"}</button>
+                          <button className="button button-ghost" type="button" disabled={busy} onClick={() => setPendingClear(null)} aria-label={`Keep the configured rate for ${row.customerName}`}>Cancel</button>
+                        </span>
+                      ) : (
+                        <button className="button button-ghost" type="button" disabled={busy} onClick={() => { setError(null); setPendingClear(row.customerId); }} aria-label={`Clear configured rate for ${row.customerName}`}>Clear</button>
+                      )
                     ) : null}
                   </span>
                 </div>

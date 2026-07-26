@@ -9,6 +9,9 @@
 #     stopped/down/unhealthy; the Cloudflare edge fallback covers a stopped EC2.
 #   * `notification-worker` is profile-gated ("notifications"); enable it only when
 #     AWS Secrets Manager + SES are configured, otherwise it flaps to unready.
+#     While that profile is inactive NOTHING delivers notifications: the app
+#     keeps writing `security_notification_outbox` rows with status='pending'.
+#     See docs/notification-delivery-enablement.md before enabling it.
 #
 # Relative paths resolve from this file's directory (deploy/ec2/) because that is
 # the default compose project directory when invoked as
@@ -114,7 +117,11 @@ services:
       SUTRA_BROKER_URL: http://127.0.0.1:8788
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       AWS_DEFAULT_REGION: ${AWS_REGION:-ap-south-1}
-      SUTRA_NOTIFICATION_WORKER_CONFIGURED: ${SUTRA_NOTIFICATION_WORKER_CONFIGURED:-false}
+      # The UI must never claim notification delivery is configured while the
+      # worker profile is off, so this is derived from the single operator switch
+      # instead of being independently settable. It only labels readiness; the
+      # app never delivers, whatever this says.
+      SUTRA_NOTIFICATION_WORKER_CONFIGURED: ${SUTRA_NOTIFICATIONS_ENABLED:-false}
       SUTRA_JOB_RUNNER_TOKEN: ${SUTRA_JOB_RUNNER_TOKEN}
       SUTRA_JOB_RUNNER_INTERVAL_MS: ${SUTRA_JOB_RUNNER_INTERVAL_MS:-15000}
       SUTRA_CONTACT_RECIPIENT: ${SUTRA_CONTACT_RECIPIENT:-}
@@ -260,9 +267,15 @@ services:
     restart: unless-stopped
 
   notification-worker:
+    # Activated either by `--profile notifications` (bootstrap.sh, redeploy.sh,
+    # release-update.sh, which grep SUTRA_NOTIFICATIONS_ENABLED) or by
+    # COMPOSE_PROFILES=notifications in deploy/ec2/.env.ec2, which is what makes
+    # systemd (deploy/ec2/sutra.service) start it across reboots.
     profiles: ["notifications"]
     # The 15 GiB private-beta host must never compile images. Enabling this
-    # profile therefore requires a separately published immutable worker image.
+    # profile therefore requires a separately published immutable worker image;
+    # no release workflow publishes one yet, so the fallback tag below is
+    # deliberately unpullable and this service fails closed.
     image: ${SUTRA_NOTIFICATION_WORKER_IMAGE:-sutra-notification-worker:unavailable}
     pull_policy: always
     environment:

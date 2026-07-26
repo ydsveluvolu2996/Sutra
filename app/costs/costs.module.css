@@ -105,6 +105,13 @@
 .marginRow > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .marginHead { font-size: 9px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; border-bottom: 1px solid var(--line); }
 .w3Mini { width: 100%; min-height: 28px; padding: 0 7px; border: 1px solid var(--line-dark); border-radius: 6px; background: var(--surface-soft); font-size: 11px; color: var(--ink); }
+/* Two-step confirm for "Clear rate". Only rendered while a row is pending, so
+   the resting margin row is untouched. Confirm and Cancel are 44px targets with
+   a 12px gap so neither is hit by mistake; the prompt wraps onto its own line
+   rather than stretching the seventh grid track. */
+.w3ClearConfirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px; }
+.w3ClearPrompt { flex: 1 1 100%; max-width: 200px; text-align: right; font-size: 10px; font-weight: 700; line-height: 1.35; color: var(--muted); white-space: normal; }
+.w3ClearConfirm > button { min-height: 44px; min-width: 44px; }
 @media (max-width: 900px) { .marginRow { grid-template-columns: minmax(80px, 1.2fr) 74px 58px 58px 74px minmax(74px, 1fr) minmax(92px, auto); gap: 6px; } .w3RuleList li { flex-wrap: wrap; } }
 
 /* ---------------------------------------------------------------------------
@@ -145,6 +152,13 @@
   .marginRow > .w3RowActions { display: flex; grid-column: 1 / -1; justify-content: stretch; gap: 12px; margin-top: 2px; }
   .marginRow > .w3RowActions::before { content: none; }
   .w3RowActions > button { flex: 1 1 0; min-height: 44px; }
+  /* On the card layout the confirm takes the full row under Save, and its two
+     buttons split that row evenly. `flex-wrap` is what lets it drop below Save;
+     Save and Clear both flex from a 0 basis, so the resting row is unaffected. */
+  .marginRow > .w3RowActions { flex-wrap: wrap; }
+  .w3ClearConfirm { flex: 1 1 100%; }
+  .w3ClearPrompt { max-width: none; text-align: left; font-size: 11px; }
+  .w3ClearConfirm > button { flex: 1 1 0; }
   .w3RuleList li { display: grid; gap: 11px; padding: 13px; font-size: 12.5px; }
   .w3RuleList li span { overflow: visible; }
   .w3RuleControls { flex-wrap: wrap; justify-content: flex-start; gap: 12px; }
