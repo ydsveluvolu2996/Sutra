@@ -539,13 +539,28 @@ export function nextLoginFailureState(
   return { failedAttempts: nextFailures, lockedUntil: now + lockoutMs * multiplier };
 }
 
-async function recordLoginFailure(db: D1Database, userId: string, failures: number, now: number): Promise<void> {
-  const next = nextLoginFailureState(failures, now);
-  await db.prepare(
+async function recordLoginFailure(db: D1Database, userId: string, now: number): Promise<void> {
+  // Atomic increment. This previously read failed_attempts, computed the next
+  // value in JS, and wrote an ABSOLUTE count — so N wrong-password attempts
+  // fired in parallel (across the ~600k-iteration hash) all read the same
+  // counter and collapsed to a single +1, letting a distributed brute force
+  // sidestep the per-account lockout. Incrementing in SQL makes every attempt
+  // count; the lockout timestamp is then derived from the authoritative new
+  // value.
+  const updated = await db.prepare(
     `UPDATE local_password_credentials
-        SET failed_attempts = ?, locked_until = ?, updated_at = ?
-      WHERE user_id = ?`,
-  ).bind(next.failedAttempts, next.lockedUntil, now, userId).run();
+        SET failed_attempts = failed_attempts + 1, updated_at = ?
+      WHERE user_id = ?
+      RETURNING failed_attempts`,
+  ).bind(now, userId).first<{ failed_attempts: number }>();
+  if (updated === null) return;
+  const { lockedUntil } = nextLoginFailureState(updated.failed_attempts - 1, now);
+  if (lockedUntil !== null) {
+    await db.prepare(
+      `UPDATE local_password_credentials SET locked_until = ?, updated_at = ?
+        WHERE user_id = ?`,
+    ).bind(lockedUntil, now, userId).run();
+  }
 }
 
 function invalidCredentials(): never {
@@ -575,11 +590,11 @@ export async function loginLocalUser(
             t.last_used_step
        FROM users u
        JOIN local_password_credentials p ON p.user_id = u.id
-       JOIN memberships m ON m.user_id = u.id
-       JOIN organizations o ON o.id = m.org_id
+       JOIN memberships m ON m.user_id = u.id AND m.status = 'active'
+       JOIN organizations o ON o.id = m.org_id AND o.status = 'active'
        LEFT JOIN totp_credentials t ON t.user_id = u.id
       WHERE u.issuer = ? AND u.email = ?
-      ORDER BY m.created_at
+      ORDER BY m.created_at, m.id
       LIMIT 1`,
   ).bind(LOCAL_IDENTITY_ISSUER, email).first<LoginRow>();
 
@@ -592,22 +607,29 @@ export async function loginLocalUser(
     });
     invalidCredentials();
   }
-  if (
-    row.status !== "active" ||
-    row.org_status !== "active" ||
-    row.membership_status !== "active" ||
-    (row.locked_until !== null && row.locked_until > now)
-  ) {
-    invalidCredentials();
-  }
   const passwordDigest: PasswordDigest = {
     algorithm: row.algorithm,
     iterations: row.iterations,
     salt: row.salt,
     hash: row.password_hash,
   };
+  // Membership/org active-status is now enforced in the JOIN above, so a user
+  // whose EARLIEST membership is suspended but who holds another active
+  // membership can still sign in (previously the earliest row was picked and
+  // rejected). Only a suspended user account or an engaged lockout remains.
+  if (
+    row.status !== "active" ||
+    (row.locked_until !== null && row.locked_until > now)
+  ) {
+    // Equalize response time with the active-account path: a locked or
+    // suspended account previously returned BEFORE any password hash, so it
+    // answered measurably faster and leaked account existence / lockout state.
+    // Run the same verification before rejecting.
+    await verifyPassword(input.password, passwordDigest);
+    invalidCredentials();
+  }
   if (!(await verifyPassword(input.password, passwordDigest))) {
-    await recordLoginFailure(db, row.user_id, row.failed_attempts, now);
+    await recordLoginFailure(db, row.user_id, now);
     invalidCredentials();
   }
 
@@ -626,7 +648,7 @@ export async function loginLocalUser(
     );
     const step = await matchTotpCode(secret, input.totpCode, now, row.last_used_step);
     if (step === null) {
-      await recordLoginFailure(db, row.user_id, row.failed_attempts, now);
+      await recordLoginFailure(db, row.user_id, now);
       throw new LocalAuthError(401, "MFA_CODE_INVALID", "The authenticator code is invalid or was already used");
     }
     const claimed = await db.prepare(

@@ -54,7 +54,13 @@ export async function POST(request: Request): Promise<Response> {
       label: "email address",
       maximum: 254,
     });
-    const minimumResponseAt = Date.now() + 400;
+    // Constant-ish response time so an existing account (which additionally
+    // sends an email below) cannot be distinguished by latency from a
+    // nonexistent one. The floor is set to comfortably exceed typical provider
+    // send time so both paths return at the same moment in the common case.
+    // (A fully constant-time guarantee would move delivery to a background job;
+    // tracked as a follow-up.)
+    const minimumResponseAt = Date.now() + 900;
     const created = await createPasswordResetRequest(email);
     if (created !== null) {
       const origin = (env as unknown as InvitationDeliveryEnv)
