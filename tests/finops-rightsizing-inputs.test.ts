@@ -117,6 +117,10 @@ function line(over: { instanceId: string; day: string; amountUnits: number; curr
     amountMicros: units(over.amountUnits),
     currency: over.currency ?? "USD",
     region: null,
+    amortizedMicros: null,
+    commitmentType: null,
+    commitmentId: null,
+    commitmentExpiry: null,
     tags: { resourceId: over.instanceId },
   };
 }

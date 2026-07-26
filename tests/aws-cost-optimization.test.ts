@@ -17,6 +17,10 @@ function curLine(over: Partial<NormalizedCurLine> & { service: string; day: stri
     amountMicros: units(over.amountUnits),
     currency: over.currency ?? "USD",
     region: over.region ?? null,
+    amortizedMicros: over.amortizedMicros ?? null,
+    commitmentType: over.commitmentType ?? null,
+    commitmentId: over.commitmentId ?? null,
+    commitmentExpiry: over.commitmentExpiry ?? null,
     tags: over.tags ?? {},
   };
 }

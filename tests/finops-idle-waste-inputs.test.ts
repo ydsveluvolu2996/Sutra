@@ -123,6 +123,10 @@ function line(over: { id: string; amount: number; currency?: string }): Normaliz
     amountMicros: units(over.amount),
     currency: over.currency ?? "USD",
     region: null,
+    amortizedMicros: null,
+    commitmentType: null,
+    commitmentId: null,
+    commitmentExpiry: null,
     tags: { resourceId: over.id },
   };
 }

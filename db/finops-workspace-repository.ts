@@ -45,6 +45,12 @@ interface LineRow {
   amount_micros: string;
   currency: string;
   region: string | null;
+  // amortized_micros is a bigint/integer column: postgres returns it as a
+  // string, SQLite as a number — coerced back to a bigint-safe micro string.
+  amortized_micros: string | number | null;
+  commitment_type: string | null;
+  commitment_id: string | null;
+  commitment_expiry: string | null;
   tags_json: string;
 }
 
@@ -75,6 +81,22 @@ function invalid(): never {
 function assertScope(scope: FinopsScope, connectionId?: string): void {
   if (!IDENTIFIER.test(scope.orgId) || !IDENTIFIER.test(scope.customerId)) invalid();
   if (connectionId !== undefined && !CONNECTION_ID.test(connectionId)) invalid();
+}
+
+/**
+ * Coerce a bigint/integer micros column back to a bigint-safe decimal string.
+ * Postgres returns bigint as a string, SQLite as a number; a null or malformed
+ * value normalizes to null so amortized cost is never fabricated.
+ */
+function optionalMicros(value: string | number | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const text = typeof value === "number" ? String(value) : value;
+  return MICROS.test(text) ? text : null;
+}
+
+/** Trim optional text columns to a non-empty string, else null. */
+function nonEmptyText(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
 }
 
 function parseFilter(json: string | null): BudgetDefinition["filter"] {
@@ -133,8 +155,8 @@ export class FinopsWorkspaceRepository {
     ).bind(scope.orgId, scope.customerId, connectionId, billingPeriod).run();
     const insert = db.prepare(
       `INSERT INTO finops_cur_lines
-         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, tags_json, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, org_id, customer_id, connection_id, billing_period, line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, tags_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     for (let offset = 0; offset < lines.length; offset += BATCH_CHUNK) {
       const chunk = lines.slice(offset, offset + BATCH_CHUNK).map((line) => insert.bind(
@@ -143,6 +165,10 @@ export class FinopsWorkspaceRepository {
         line.lineItemId.slice(0, 256), line.usageAccountId.slice(0, 64), line.service.slice(0, 128),
         line.chargeCategory.slice(0, 64), line.usageStartIso, line.amountMicros, line.currency,
         typeof line.region === "string" ? line.region.slice(0, 64) : null,
+        typeof line.amortizedMicros === "string" && MICROS.test(line.amortizedMicros) ? line.amortizedMicros : null,
+        typeof line.commitmentType === "string" ? line.commitmentType.slice(0, 64) : null,
+        typeof line.commitmentId === "string" ? line.commitmentId.slice(0, 256) : null,
+        typeof line.commitmentExpiry === "string" ? line.commitmentExpiry.slice(0, 64) : null,
         JSON.stringify(line.tags), timestamp,
       ));
       await db.batch(chunk);
@@ -175,7 +201,7 @@ export class FinopsWorkspaceRepository {
     if (!BILLING_PERIOD.test(billingPeriod)) invalid();
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, tags_json
+      `SELECT line_item_id, usage_account_id, service, charge_category, usage_start, amount_micros, currency, region, amortized_micros, commitment_type, commitment_id, commitment_expiry, tags_json
          FROM finops_cur_lines
         WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND billing_period = ?
         ORDER BY usage_start ASC, line_item_id ASC LIMIT ?`,
@@ -200,6 +226,10 @@ export class FinopsWorkspaceRepository {
         amountMicros: row.amount_micros,
         currency: row.currency,
         region: typeof row.region === "string" && row.region.length > 0 ? row.region : null,
+        amortizedMicros: optionalMicros(row.amortized_micros),
+        commitmentType: nonEmptyText(row.commitment_type),
+        commitmentId: nonEmptyText(row.commitment_id),
+        commitmentExpiry: nonEmptyText(row.commitment_expiry),
         tags,
       }];
     });

@@ -61,6 +61,47 @@ describe("parseCurCsv", () => {
     assert.equal(focus.lines[0].region, "eu-west-1");
   });
 
+  it("captures amortized cost + commitment attribution for CUR 2.0 (inferred) and FOCUS (verbatim)", () => {
+    // CUR 2.0: net_amortized_cost + a savings-plan ARN => inferred savings_plan
+    // classification, the ARN as the commitment id, and end-time as expiry.
+    const cur = parseCurCsv([
+      "line_item_id,line_item_usage_account_id,product_servicecode,line_item_line_item_type,line_item_usage_start_date,line_item_unblended_cost,line_item_currency_code,line_item_net_amortized_cost,savings_plan_savings_plan_a_r_n,savings_plan_end_time",
+      "li-1,111111111111,AmazonEC2,SavingsPlanCoveredUsage,2026-07-01T00:00:00Z,10.00,USD,6.00,arn:aws:savingsplans::sp/abc,2027-01-01T00:00:00Z",
+      "li-2,111111111111,AmazonS3,Usage,2026-07-01T00:00:00Z,0.25,USD,,,",
+    ].join("\n"));
+    if ("error" in cur) throw new Error(cur.error);
+    assert.equal(cur.lines[0].amortizedMicros, "6000000");
+    assert.equal(cur.lines[0].commitmentType, "savings_plan");
+    assert.equal(cur.lines[0].commitmentId, "arn:aws:savingsplans::sp/abc");
+    assert.equal(cur.lines[0].commitmentExpiry, "2027-01-01T00:00:00.000Z");
+    // Plain usage row: on_demand inferred, no amortized/commitment id/expiry.
+    assert.equal(cur.lines[1].amortizedMicros, null);
+    assert.equal(cur.lines[1].commitmentType, "on_demand");
+    assert.equal(cur.lines[1].commitmentId, null);
+    assert.equal(cur.lines[1].commitmentExpiry, null);
+
+    // FOCUS 1.0: EffectiveCost + CommitmentDiscount* columns are read verbatim.
+    const focus = parseCurCsv([
+      "BillingAccountId,ServiceName,ChargeCategory,ChargePeriodStart,BilledCost,BillingCurrency,EffectiveCost,CommitmentDiscountType,CommitmentDiscountId,CommitmentDiscountExpirationDate",
+      "1,Amazon EC2,Usage,2026-07-01T00:00:00Z,0.00,USD,4.00,Reserved,ri-9,2026-12-31T00:00:00Z",
+    ].join("\n"));
+    if ("error" in focus) throw new Error(focus.error);
+    assert.equal(focus.lines[0].amortizedMicros, "4000000");
+    assert.equal(focus.lines[0].commitmentType, "Reserved");
+    assert.equal(focus.lines[0].commitmentId, "ri-9");
+    assert.equal(focus.lines[0].commitmentExpiry, "2026-12-31T00:00:00.000Z");
+  });
+
+  it("sums CUR reservation + savings-plan effective cost when there is no single amortized column", () => {
+    const cur = parseCurCsv([
+      "line_item_id,line_item_usage_account_id,product_servicecode,line_item_line_item_type,line_item_usage_start_date,line_item_unblended_cost,line_item_currency_code,reservation_effective_cost,savings_plan_effective_cost",
+      "li-1,111111111111,AmazonEC2,DiscountedUsage,2026-07-01T00:00:00Z,0.00,USD,7.00,",
+    ].join("\n"));
+    if ("error" in cur) throw new Error(cur.error);
+    assert.equal(cur.lines[0].amortizedMicros, "7000000");
+    assert.equal(cur.lines[0].commitmentType, "reserved"); // DiscountedUsage => RI
+  });
+
   it("rejects malformed rows with row numbers and reasons — never silently drops", () => {
     const result = parseCurCsv(curFile([
       "li-1,111111111111,AmazonEC2,Usage,2026-07-01T00:00:00Z,not-a-number,USD,",
@@ -127,9 +168,10 @@ describe("finops insights", () => {
     const spikeLines = [
       ...["01", "02", "03", "04"].map((day, index) => ({
         lineItemId: `d${index}`, usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage",
-        usageStartIso: `2026-07-${day}T00:00:00.000Z`, amountMicros: "2000000", currency: "USD", region: null, tags: {},
+        usageStartIso: `2026-07-${day}T00:00:00.000Z`, amountMicros: "2000000", currency: "USD", region: null,
+        amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, tags: {},
       })),
-      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", region: null, tags: {} },
+      { lineItemId: "spike", usageAccountId: "1", service: "AmazonEC2", chargeCategory: "Usage", usageStartIso: "2026-07-05T00:00:00.000Z", amountMicros: "9000000", currency: "USD", region: null, amortizedMicros: null, commitmentType: null, commitmentId: null, commitmentExpiry: null, tags: {} },
     ];
     const result = detectAnomalies(spikeLines);
     assert.equal(result.anomalies.length, 1);

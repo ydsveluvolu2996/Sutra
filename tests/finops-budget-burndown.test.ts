@@ -19,6 +19,10 @@ function line(dayOfMonth: number, amountMicros: string): NormalizedCurLine {
     amountMicros,
     currency: "USD",
     region: null,
+    amortizedMicros: null,
+    commitmentType: null,
+    commitmentId: null,
+    commitmentExpiry: null,
     tags: {},
   };
 }

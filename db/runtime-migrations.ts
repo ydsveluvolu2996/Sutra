@@ -53,6 +53,7 @@ import contactRateLimitsSchemaSql from "../drizzle/0053_contact_rate_limits.sql?
 import passwordResetSchemaSql from "../drizzle/0054_password_reset.sql?raw";
 import backgroundJobsKindIndexSchemaSql from "../drizzle/0055_background_jobs_kind_index.sql?raw";
 import finopsCurRegionSchemaSql from "../drizzle/0056_finops_cur_region.sql?raw";
+import finopsCurCommitmentsSchemaSql from "../drizzle/0057_finops_cur_commitments.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -123,6 +124,7 @@ const migrations = [
   { id: "0054_password_reset", statements: statementsFrom(passwordResetSchemaSql) },
   { id: "0055_background_jobs_kind_index", statements: statementsFrom(backgroundJobsKindIndexSchemaSql) },
   { id: "0056_finops_cur_region", statements: statementsFrom(finopsCurRegionSchemaSql) },
+  { id: "0057_finops_cur_commitments", statements: statementsFrom(finopsCurCommitmentsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

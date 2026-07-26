@@ -15,6 +15,10 @@ function line(
     amountMicros: overrides.amountMicros,
     currency: overrides.currency ?? "USD",
     region: overrides.region ?? null,
+    amortizedMicros: overrides.amortizedMicros ?? null,
+    commitmentType: overrides.commitmentType ?? null,
+    commitmentId: overrides.commitmentId ?? null,
+    commitmentExpiry: overrides.commitmentExpiry ?? null,
     tags: overrides.tags ?? {},
   };
 }

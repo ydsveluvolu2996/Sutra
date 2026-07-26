@@ -113,6 +113,10 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
           amountMicros: dollarsToMicros(jitter(profile.dailyUsd, day)),
           currency: USD,
           region: null,
+          amortizedMicros: null,
+          commitmentType: null,
+          commitmentId: null,
+          commitmentExpiry: null,
           tags: profile.tags,
         });
       }
@@ -126,6 +130,10 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
           amountMicros: dollarsToMicros(jitter(covered.dailyUsd, day)),
           currency: USD,
           region: null,
+          amortizedMicros: null,
+          commitmentType: null,
+          commitmentId: null,
+          commitmentExpiry: null,
           tags: covered.tags,
         });
       }
@@ -140,6 +148,10 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
       amountMicros: dollarsToMicros(MONTHLY_COMMITMENT_FEE_USD),
       currency: USD,
       region: null,
+      amortizedMicros: null,
+      commitmentType: null,
+      commitmentId: null,
+      commitmentExpiry: null,
       tags: { commitment: "compute-sp-1yr" },
     });
     // One deliberate anomaly day in the latest period.
@@ -153,6 +165,10 @@ export function buildDemoCurPeriods(): readonly { period: string; lines: readonl
         amountMicros: dollarsToMicros(890),
         currency: USD,
         region: null,
+        amortizedMicros: null,
+        commitmentType: null,
+        commitmentId: null,
+        commitmentExpiry: null,
         tags: { env: "prod", team: "storefront", app: "web", incident: "load-test" },
       });
     }

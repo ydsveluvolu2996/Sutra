@@ -16,6 +16,10 @@ function line(over: Partial<NormalizedCurLine> & { amountUnits: number }): Norma
     amountMicros: over.amountMicros ?? units(over.amountUnits),
     currency: over.currency ?? "USD",
     region: over.region ?? null,
+    amortizedMicros: over.amortizedMicros ?? null,
+    commitmentType: over.commitmentType ?? null,
+    commitmentId: over.commitmentId ?? null,
+    commitmentExpiry: over.commitmentExpiry ?? null,
     tags: over.tags ?? {},
   };
 }

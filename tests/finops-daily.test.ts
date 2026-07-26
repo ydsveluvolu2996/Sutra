@@ -14,6 +14,10 @@ function line(usageStartIso: string, amountMicros: string): NormalizedCurLine {
     amountMicros,
     currency: "USD",
     region: null,
+    amortizedMicros: null,
+    commitmentType: null,
+    commitmentId: null,
+    commitmentExpiry: null,
     tags: {},
   };
 }

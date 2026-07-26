@@ -98,6 +98,10 @@ function curLine(over: { amount: number; currency: string; tags: Record<string, 
     amountMicros: units(over.amount),
     currency: over.currency,
     region: null,
+    amortizedMicros: null,
+    commitmentType: null,
+    commitmentId: null,
+    commitmentExpiry: null,
     tags: over.tags,
   };
 }
