@@ -14,14 +14,30 @@ export interface AgentlessScanFinding {
   readonly title: string;
 }
 
-/** The real implementation (EC2 + KMS) lives in services/aws-collector. */
+/**
+ * The real implementation (EC2 + KMS) lives in services/agentless-scanner.
+ *
+ * Note what is deliberately absent: there is no method that deletes anything in
+ * the CUSTOMER's account. Sutra's customer role holds an explicit
+ * `NeverDeleteAnything` deny (see infrastructure/customer-role.yaml), so the
+ * source snapshot it creates is reaped by the customer-owned Data Lifecycle
+ * Manager policy that same template installs — on the account owner's schedule,
+ * under the account owner's role, pausable from their own console.
+ *
+ * Teardown here therefore covers only resources inside SUTRA's scan account
+ * (the re-encrypted copy and the scan volume), which Sutra owns outright. The
+ * customer-side snapshot is reported as a cleanup handoff instead, so the spend
+ * it represents is visible rather than silently assumed away.
+ */
 export interface AgentlessExecutor {
   createSnapshot(input: { readonly volumeId: string; readonly region: string; readonly ttlHours: number }): Promise<{ readonly snapshotId: string }>;
   copySnapshotKms(input: { readonly snapshotId: string; readonly region: string }): Promise<{ readonly snapshotId: string }>;
   createScanVolume(input: { readonly snapshotId: string; readonly region: string }): Promise<{ readonly volumeId: string }>;
   runScan(input: { readonly scanVolumeId: string; readonly scanners: readonly string[] }): Promise<readonly AgentlessScanFinding[]>;
+  /** Scan-account volume. Sutra's own resource. */
   deleteVolume(input: { readonly volumeId: string }): Promise<void>;
-  deleteSnapshot(input: { readonly snapshotId: string }): Promise<void>;
+  /** Scan-account snapshot copy ONLY — never the customer's source snapshot. */
+  deleteScanAccountSnapshot(input: { readonly snapshotId: string }): Promise<void>;
 }
 
 export interface AgentlessVolumeResult {
@@ -31,8 +47,13 @@ export interface AgentlessVolumeResult {
   readonly error: string | null;
   /** Every resource created for this volume that was successfully deleted. */
   readonly toreDown: readonly string[];
-  /** Resources whose teardown failed — must be reconciled by the TTL sweeper. */
+  /** Scan-account resources whose teardown failed — reconciled by the sweeper. */
   readonly teardownFailures: readonly string[];
+  /**
+   * The customer-account snapshot Sutra created and is NOT permitted to delete.
+   * Handed to the customer's lifecycle policy; surfaced as cost until reaped.
+   */
+  readonly cleanupHandoff: readonly string[];
 }
 
 export interface AgentlessScanExecution {
@@ -44,6 +65,8 @@ export interface AgentlessScanExecution {
     readonly findings: number;
     readonly resourcesToreDown: number;
     readonly teardownFailures: number;
+    /** Customer-account snapshots awaiting the customer's own lifecycle policy. */
+    readonly cleanupHandoffs: number;
   };
 }
 
@@ -70,11 +93,12 @@ async function scanOneVolume(
   } catch (caught) {
     error = caught instanceof Error ? caught.message : String(caught);
   } finally {
-    // Guaranteed teardown, even on scan failure — bounds cost and blast radius.
+    // Guaranteed teardown of SUTRA-OWNED resources, even on scan failure. The
+    // customer's source snapshot is not in this list by design — Sutra has no
+    // delete permission for it — so it is handed off below instead.
     const teardowns: readonly { readonly id: string | null; readonly run: () => Promise<void> }[] = [
       { id: scanVolumeId, run: () => executor.deleteVolume({ volumeId: scanVolumeId as string }) },
-      { id: copiedSnapshotId, run: () => executor.deleteSnapshot({ snapshotId: copiedSnapshotId as string }) },
-      { id: sourceSnapshotId, run: () => executor.deleteSnapshot({ snapshotId: sourceSnapshotId as string }) },
+      { id: copiedSnapshotId, run: () => executor.deleteScanAccountSnapshot({ snapshotId: copiedSnapshotId as string }) },
     ];
     for (const teardown of teardowns) {
       if (teardown.id === null) continue;
@@ -94,6 +118,9 @@ async function scanOneVolume(
     error,
     toreDown,
     teardownFailures,
+    // Present whenever a source snapshot was created — including on failure,
+    // because a failed scan still leaves a billable snapshot behind.
+    cleanupHandoff: sourceSnapshotId === null ? [] : [sourceSnapshotId],
   };
 }
 
@@ -113,6 +140,7 @@ export async function executeAgentlessScan(
     findings: results.reduce((sum, result) => sum + result.findings.length, 0),
     resourcesToreDown: results.reduce((sum, result) => sum + result.toreDown.length, 0),
     teardownFailures: results.reduce((sum, result) => sum + result.teardownFailures.length, 0),
+    cleanupHandoffs: results.reduce((sum, result) => sum + result.cleanupHandoff.length, 0),
   };
   return { schema: "sutra.aws-agentless-scan-execution.v1", results, summary };
 }

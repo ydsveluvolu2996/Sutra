@@ -31,7 +31,11 @@ export interface AgentlessScanPolicy {
 
 export type AgentlessStepKind =
   | "create-snapshot" | "copy-snapshot-kms" | "create-scan-volume"
-  | "scan" | "delete-scan-volume" | "delete-copied-snapshot" | "delete-source-snapshot";
+  | "scan" | "delete-scan-volume" | "delete-copied-snapshot"
+  // Sutra cannot delete in the customer account; the source snapshot is handed
+  // to the customer-owned lifecycle policy. Kept as an explicit, reviewable step
+  // so the plan never looks like the snapshot simply vanishes.
+  | "handoff-source-snapshot-cleanup";
 
 export interface AgentlessStep {
   readonly kind: AgentlessStepKind;
@@ -73,9 +77,12 @@ export interface AgentlessScanPlan {
 
 const PLAN_DISCLAIMER =
   "Agentless scan PLAN only — no AWS API is called and no snapshot is created. " +
-  "Every plan is reviewed before apply. Snapshots/volumes are TTL-bounded and " +
-  "torn down unconditionally (even on scan failure); scan findings are ingested " +
-  "metadata-only and no customer file contents transit the control plane.";
+  "Every plan is reviewed before apply. Sutra deletes NOTHING in the customer " +
+  "account: resources it creates in its own scan account are torn down " +
+  "unconditionally (even on scan failure), and the source snapshot is reaped by " +
+  "the customer-owned lifecycle policy on the account owner's schedule. Scan " +
+  "findings are ingested metadata-only; no customer file contents transit the " +
+  "control plane.";
 
 const DEFAULT_SCANNERS: readonly NonNullable<AgentlessScanPolicy["scanners"]>[number][] = ["vuln", "secret", "sbom"];
 
@@ -125,7 +132,11 @@ export function buildAgentlessScanPlan(input: {
       { kind: "scan", detail: `Run ${scanners.join(", ")} against the mounted read-only volume; emit metadata-only findings`, teardown: false },
       { kind: "delete-scan-volume", detail: "Delete the scan volume", teardown: true },
       ...(kmsReencrypt ? [{ kind: "delete-copied-snapshot" as const, detail: "Delete the re-encrypted copied snapshot", teardown: true }] : []),
-      { kind: "delete-source-snapshot", detail: `Delete the source snapshot of ${volume.volumeId}`, teardown: true },
+      {
+        kind: "handoff-source-snapshot-cleanup",
+        detail: `Hand the source snapshot of ${volume.volumeId} to the customer-owned lifecycle policy — Sutra holds no delete permission in this account`,
+        teardown: false,
+      },
     );
     return { volumeId: volume.volumeId, region: volume.region, sizeGiB: volume.sizeGiB, steps };
   });

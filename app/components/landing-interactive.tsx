@@ -508,7 +508,7 @@ const TRUST_NEVER = [
   "s3:GetObject — never reads object payloads",
   "secretsmanager:GetSecretValue — never reads secrets",
   "rds / dynamodb data APIs — never reads database rows",
-  "any Create / Update / Delete — never mutates a resource",
+  "any Delete — explicitly denied, including snapshots Sutra made itself",
   "long-lived keys — sessions expire in one hour",
 ];
 

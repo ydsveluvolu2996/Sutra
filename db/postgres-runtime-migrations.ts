@@ -55,6 +55,7 @@ import postgresFinopsResourceSchedulesSql from "../postgres/migrations/0055_fino
 import postgresFinopsCurUsageTypeSql from "../postgres/migrations/0056_finops_cur_usage_type.sql?raw";
 import postgresFinopsExternalCostsSql from "../postgres/migrations/0057_finops_external_costs.sql?raw";
 import postgresGovernancePoliciesSql from "../postgres/migrations/0058_governance_policies.sql?raw";
+import postgresAgentlessScansSql from "../postgres/migrations/0059_agentless_scans.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -114,6 +115,7 @@ const migrations = [
   { id: "0056_finops_cur_usage_type", source: postgresFinopsCurUsageTypeSql },
   { id: "0057_finops_external_costs", source: postgresFinopsExternalCostsSql },
   { id: "0058_governance_policies", source: postgresGovernancePoliciesSql },
+  { id: "0059_agentless_scans", source: postgresAgentlessScansSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

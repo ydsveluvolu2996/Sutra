@@ -29,7 +29,7 @@ const PRINCIPLES: Array<{ n: string; h: string; p: string }> = [
   {
     n: "02",
     h: "Read-only by construction",
-    p: "Access is a customer-owned IAM role assumed with temporary STS credentials. There are no write permissions and no customer access keys ever enter the browser or the control plane.",
+    p: "Access is a customer-owned IAM role assumed with temporary STS credentials, and no customer access keys ever enter the browser or the control plane. The role is read-only apart from one opt-in you control: agentless disk scanning, which may create snapshots it tags itself and can never delete anything.",
   },
   {
     n: "03",

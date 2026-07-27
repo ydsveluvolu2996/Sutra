@@ -132,6 +132,44 @@ Parameters:
       Permit AWS Organizations account and OU discovery. Effective only in a
       management account or appropriately delegated administrator account.
 
+  EnableAgentlessSnapshotScanning:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: >-
+      THE ONLY SETTING IN THIS STACK THAT GRANTS WRITE ACCESS. Permits Sutra to
+      create, tag, share, and delete EBS snapshots so it can scan a volume's
+      contents for vulnerabilities, secrets, and malware without installing an
+      agent on the workload. Every grant is scoped so Sutra can only ever touch
+      snapshots it created and tagged itself: it cannot read, modify, or delete
+      your own snapshots or backups, cannot touch volumes or instances, and
+      cannot detach or delete storage. Leave 'false' for a strictly read-only
+      role. Snapshots incur AWS storage cost while they exist and are deleted
+      immediately after each scan.
+
+  AgentlessSnapshotRetentionCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 30
+    Description: >-
+      How many Sutra scan snapshots per volume the customer-owned lifecycle policy
+      keeps before deleting the oldest. Sutra itself can never delete a snapshot;
+      this policy runs in your account, under your own role, and you may pause or
+      remove it at any time.
+
+  AgentlessScanAccountId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[0-9]{12}$'
+    Description: >-
+      Sutra's isolated scanning account ID, which snapshots are shared with when
+      agentless scanning is enabled. Required only when
+      EnableAgentlessSnapshotScanning is 'true'. Sharing is restricted to this
+      one account; snapshots are never made public.
+
 Conditions:
   HasPermissionsBoundary:
     Fn::Not:
@@ -157,6 +195,10 @@ Conditions:
   OrganizationDiscoveryEnabled:
     Fn::Equals:
       - Ref: EnableOrganizationDiscovery
+      - 'true'
+  AgentlessScanningEnabled:
+    Fn::Equals:
+      - Ref: EnableAgentlessSnapshotScanning
       - 'true'
 
 Resources:
@@ -193,8 +235,14 @@ Resources:
         - Key: sutra:tenant-id
           Value:
             Ref: CustomerTenantId
+        # Reflects what the stack actually granted, so an auditor reading the
+        # role's tags is never told "read-only" by a role that can snapshot.
         - Key: sutra:access-mode
-          Value: read-only
+          Value:
+            Fn::If:
+              - AgentlessScanningEnabled
+              - read-plus-own-snapshots
+              - read-only
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -640,6 +688,217 @@ Resources:
               - organizations:ListTagsForResource
             Resource: '*'
 
+  # The only write grant in this template, and only when explicitly opted in.
+  #
+  # Safety rests entirely on the tag conditions below, so read them carefully:
+  #
+  #  * CreateSnapshot is allowed ONLY when the request tags the new snapshot
+  #    sutra-agentless=true (aws:RequestTag), so Sutra cannot create an untagged
+  #    snapshot that would then fall outside its own delete scope.
+  #  * Delete / share / copy are allowed ONLY on snapshots ALREADY carrying that
+  #    tag (aws:ResourceTag). This is the property that matters: Sutra cannot
+  #    read, share, or delete a snapshot it did not create — your AWS Backup and
+  #    DLM snapshots are outside the grant entirely.
+  #  * No action here touches a volume, an instance, or an AMI. Sutra cannot
+  #    detach, modify, or delete storage, and cannot stop or start anything.
+  #  * Sharing is pinned to the single scan account passed in as a parameter,
+  #    so a snapshot can never be shared publicly or to a third party.
+  AgentlessSnapshotScanPolicy:
+    Condition: AgentlessScanningEnabled
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: >-
+        Create, tag, share, and delete ONLY Sutra's own sutra-agentless-tagged EBS
+        snapshots, for agentless content scanning. Cannot touch customer-owned
+        snapshots, volumes, or instances.
+      Roles:
+        - Ref: CustomerReadRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DiscoverSnapshotTargets
+            Effect: Allow
+            Action:
+              - ec2:DescribeSnapshots
+              - ec2:DescribeSnapshotAttribute
+              - ec2:DescribeVolumes
+              - ec2:DescribeVolumeStatus
+            Resource: '*'
+
+          # Tag-on-create is mandatory: without the RequestTag condition the
+          # snapshot would be untagged and therefore undeletable by the grant
+          # below, stranding customer spend forever.
+          - Sid: CreateOnlyTaggedAgentlessSnapshots
+            Effect: Allow
+            Action:
+              - ec2:CreateSnapshot
+              - ec2:CreateTags
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:RequestTag/sutra-agentless: 'true'
+
+          # Share for reading — and NOTHING else. Sutra deliberately holds no
+          # delete permission of any kind: it cannot remove a snapshot, not even
+          # one it created itself. Cleanup is performed by the customer-owned
+          # Data Lifecycle Manager policy below, which runs under the customer's
+          # own service role on the customer's own schedule. Sutra reports which
+          # snapshots are due for cleanup; the account owner's automation acts.
+          #
+          # The cost of this choice is stated plainly: if the lifecycle policy is
+          # not deployed, snapshots accumulate and bill. Sutra surfaces that as an
+          # explicit, per-snapshot liability rather than quietly deleting.
+          - Sid: ShareOwnAgentlessSnapshotsForReading
+            Effect: Allow
+            Action:
+              - ec2:ModifySnapshotAttribute
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/sutra-agentless: 'true'
+
+          # Belt and braces: an explicit deny so no future edit to this template,
+          # and no other policy attached to this role, can ever grant Sutra the
+          # ability to destroy data in the customer's account.
+          - Sid: NeverDeleteAnything
+            Effect: Deny
+            Action:
+              - ec2:DeleteSnapshot
+              - ec2:DeleteVolume
+              - ec2:DetachVolume
+              - ec2:ModifyVolume
+              - ec2:TerminateInstances
+              - ec2:StopInstances
+              - ec2:RebootInstances
+              - ec2:DeregisterImage
+              - ec2:DeleteTags
+            Resource: '*'
+
+          # Sharing target is pinned to the one scan account.
+          - Sid: ShareOnlyWithSutraScanAccount
+            Effect: Deny
+            Action:
+              - ec2:ModifySnapshotAttribute
+            Resource: '*'
+            Condition:
+              'ForAnyValue:StringNotEquals':
+                ec2:Add/userId:
+                  - Ref: AgentlessScanAccountId
+
+          # Reading the blocks of an already-tagged snapshot. Read-only.
+          - Sid: ReadOwnSnapshotBlocks
+            Effect: Allow
+            Action:
+              - ebs:ListSnapshotBlocks
+              - ebs:ListChangedBlocks
+              - ebs:GetSnapshotBlock
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:ResourceTag/sutra-agentless: 'true'
+
+          # Encrypted volumes cannot be snapshotted or copied without use of the
+          # key. Scoped to EC2/EBS via the service condition so the grant cannot
+          # be replayed to decrypt unrelated ciphertext such as S3 objects.
+          - Sid: UseKeysOnlyForEbsSnapshotOperations
+            Effect: Allow
+            Action:
+              - kms:CreateGrant
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+            Resource: '*'
+            Condition:
+              StringLike:
+                kms:ViaService:
+                  - ec2.*.amazonaws.com
+                  - ebs.*.amazonaws.com
+
+  # Cleanup, owned and executed by the CUSTOMER — not by Sutra.
+  #
+  # Sutra has no delete permission (see the NeverDeleteAnything deny above), so
+  # something must reap the scan snapshots or they bill forever. That something is
+  # this Data Lifecycle Manager policy, which lives in the customer's account,
+  # runs under the customer's own service role, and deletes only snapshots tagged
+  # sutra-agentless=true after the retention window below.
+  #
+  # The account owner can inspect it, pause it, change the retention, or delete it
+  # from their own console at any time, and Sutra keeps working — it just starts
+  # reporting uncleaned snapshots as cost liability instead.
+  AgentlessSnapshotLifecycleRole:
+    Condition: AgentlessScanningEnabled
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Lets the customer's own Data Lifecycle Manager reap Sutra scan snapshots.
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReapTaggedAgentlessSnapshots
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:CreateTags
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                Resource: '*'
+              - Sid: DeleteOnlySutraAgentlessSnapshots
+                Effect: Allow
+                Action:
+                  - ec2:DeleteSnapshot
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/sutra-agentless: 'true'
+      Tags:
+        - Key: sutra:tenant
+          Value:
+            Ref: CustomerTenantId
+        - Key: sutra:purpose
+          Value: agentless-snapshot-cleanup
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+  AgentlessSnapshotCleanupPolicy:
+    Condition: AgentlessScanningEnabled
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: Deletes Sutra agentless scan snapshots after the retention window.
+      State: ENABLED
+      ExecutionRoleArn:
+        Fn::GetAtt:
+          - AgentlessSnapshotLifecycleRole
+          - Arn
+      PolicyDetails:
+        PolicyType: EBS_SNAPSHOT_MANAGEMENT
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          - Key: sutra-agentless-source
+            Value: 'true'
+        Schedules:
+          - Name: SutraAgentlessRetention
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - '03:00'
+            RetainRule:
+              Count:
+                Ref: AgentlessSnapshotRetentionCount
+            TagsToAdd:
+              - Key: sutra-agentless
+                Value: 'true'
+            CopyTags: false
+
 Outputs:
   CustomerReadRoleArn:
     Description: Register this ARN against the matching tenant connection in the MSP platform.
@@ -648,7 +907,18 @@ Outputs:
         - CustomerReadRole
         - Arn
   AccessMode:
-    Description: This template grants metadata and finding reads only.
-    Value: READ_ONLY
+    Description: >-
+      READ_ONLY unless agentless snapshot scanning was enabled, in which case the
+      role may additionally create, tag, share, and delete its OWN
+      sutra-agentless-tagged snapshots — and nothing else.
+    Value:
+      Fn::If:
+        - AgentlessScanningEnabled
+        - READ_PLUS_OWN_SNAPSHOTS
+        - READ_ONLY
+  AgentlessScanningEnabled:
+    Description: Whether this role can create and delete its own EBS snapshots.
+    Value:
+      Ref: EnableAgentlessSnapshotScanning
   TemplateVersion:
-    Value: 0.2.0-local-pilot
+    Value: 0.3.0-agentless
