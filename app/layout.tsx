@@ -42,9 +42,18 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   const requestHeaders = await headers();
   const nonce = scriptNonce(requestHeaders.get("content-security-policy"));
   return (
-    <html lang="en">
+    // The two attributes React would diff on this element are both set outside
+    // its control, so the mismatch is expected and must be suppressed here —
+    // otherwise every route logs an unpatchable hydration error that buries the
+    // real ones. `data-theme` is stamped by THEME_BOOTSTRAP below before React
+    // hydrates (that is the point: it prevents a light-mode flash), and the CSP
+    // `nonce` is hidden from the client by the browser's nonce-hiding rule, so
+    // the client always reads a different value than the server rendered.
+    <html lang="en" suppressHydrationWarning>
       <head>
-        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
+        {/* suppressHydrationWarning does not inherit to child elements, so the
+            nonce diff has to be suppressed on the script itself as well. */}
+        <script nonce={nonce} suppressHydrationWarning dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP }} />
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable}`}>{children}</body>
     </html>
