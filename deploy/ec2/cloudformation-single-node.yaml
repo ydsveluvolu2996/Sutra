@@ -15,9 +15,13 @@ Metadata:
         Parameters: [SutraAppImage, SutraDomain]
       - Label: { default: Cloudflare Tunnel }
         Parameters: [CloudflareTunnelCredentialsParameterName]
+      - Label: { default: Notification delivery (inert until deliberately enabled) }
+        Parameters: [NotificationSesIdentityArn]
     ParameterLabels:
       CloudflareTunnelCredentialsParameterName:
         default: Existing SecureString parameter containing named-tunnel credentials JSON
+      NotificationSesIdentityArn:
+        default: Empty grants no SES permission at all; set only when an email destination goes live
 
 Parameters:
   VpcId:
@@ -90,11 +94,30 @@ Parameters:
     Description: >-
       Existing SSM SecureString parameter containing Cloudflare named-tunnel
       credentials JSON. Compose owns the only cloudflared connector.
+  NotificationSesIdentityArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^arn:aws(?:-[a-z]+)*:ses:[a-z0-9-]+:[0-9]{12}:identity/[A-Za-z0-9@._+-]{1,320}$"
+    Description: >-
+      Exactly one already-verified SES identity ARN that the notification worker
+      may send from, for example
+      arn:aws:ses:ap-south-1:000000000000:identity/alerts@example.com. The
+      default empty string grants the instance role no SES permission
+      whatsoever; a full identity ARN is required because the worker builds its
+      endpoint from each destination's ses_region, which need not be the stack
+      region. Never a wildcard.
 Conditions:
   CreateDailyStop:
     Fn::Equals:
       - Ref: EnableDailyAutoStop
       - "true"
+  # Email delivery permission exists only when an operator has named one exact
+  # verified identity. Until then no SES statement is attached to the role at all.
+  GrantNotificationEmailSending:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: NotificationSesIdentityArn
+          - ""
 
 Resources:
   # This is an egress-only host with no inbound rules. Its six explicit,
@@ -192,11 +215,30 @@ Resources:
                 Effect: Allow
                 Action: ecr:GetAuthorizationToken
                 Resource: "*"
-              - Sid: PullOnlySutraAppRepository
+              # Two exact repositories, both pull-only: the application, and the
+              # profile-gated notification worker. Enumerated rather than
+              # prefixed so a future sutra/* repository is not reachable.
+              - Sid: PullOnlySutraReleaseRepositories
                 Effect: Allow
                 Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/app
+                  - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/app
+                  - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/notification-worker
+        - PolicyName: ReadOnlyNotificationDestinationSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The notification worker resolves one document per destination,
+              # named sutra/notifications/<org>/<customer>/<channel>/<name>
+              # (services/notification-worker/runtime-adapters.ts). Read only,
+              # that prefix only: no List, no Describe, no write, no delete, and
+              # nothing outside sutra/notifications/ is reachable. Credentials
+              # come from IMDS; the template never carries a static key.
+              - Sid: ReadOnlySutraNotificationSecretPrefix
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/notifications/*
         - PolicyName: AssumeOnlyDedicatedSutraCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"
@@ -221,6 +263,23 @@ Resources:
                   Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${CloudflareTunnelCredentialsParameterName}
       Tags:
         - { Key: "sutra:component", Value: host }
+
+  # Attached only when NotificationSesIdentityArn names one verified identity,
+  # so the shipped default stack grants no ses action at all. SendRawEmail is
+  # included because SESv2 SendEmail with a raw/MIME body authorizes against it.
+  NotificationEmailSendingPolicy:
+    Type: AWS::IAM::Policy
+    Condition: GrantNotificationEmailSending
+    Properties:
+      PolicyName: SendOnlyFromOneVerifiedSutraNotificationIdentity
+      Roles: [{ Ref: InstanceRole }]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SendNotificationEmailFromExactVerifiedIdentity
+            Effect: Allow
+            Action: ["ses:SendEmail", "ses:SendRawEmail"]
+            Resource: { Ref: NotificationSesIdentityArn }
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile

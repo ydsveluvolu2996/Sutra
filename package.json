@@ -50,6 +50,7 @@
     "db:postgres:restore": "node scripts/postgres-restore.mjs",
     "db:postgres:recovery-drill": "node scripts/postgres-recovery-drill.mjs",
     "db:postgres:reset": "node scripts/postgres-reset.mjs",
+    "notifications:backlog": "node scripts/retire-notification-outbox-backlog.mjs",
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "security:secrets": "node scripts/check-repository-secrets.mjs",

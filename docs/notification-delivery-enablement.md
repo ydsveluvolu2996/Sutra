@@ -54,7 +54,22 @@ One operational caveat, not a blocker: the adapter opens and closes a fresh
 per claim. On a `t3a.large` single node that is needless connection churn — set
 `SUTRA_NOTIFICATION_POLL_INTERVAL_MS=5000` when enabling.
 
-### 2.2 A published worker image — BLOCKING, does not exist yet
+### 2.2 A published worker image — pipeline now exists, never yet run
+
+**Update.** The release path described below is now committed as
+`.github/workflows/notification-worker-release.yml`, and
+`infrastructure/github-ec2-release-role.yaml` creates the
+`sutra/notification-worker` repository (IMMUTABLE, scan-on-push, AES256, the
+same lifecycle policy text as `deploy/ec2/ecr-lifecycle-policy.json`) and adds
+that one repository ARN to the release role's push statement. It is a
+**separate** workflow from the application release because it has no deployment
+half: `Sutra-DeployImmutableRelease` stays regex-pinned to `sutra/app`, so a
+worker image can only ever reach the host through a deliberate hand edit of
+`SUTRA_NOTIFICATION_WORKER_IMAGE` in `.env.ec2`. Publishing an image still
+delivers nothing; the profile and the switch remain off.
+
+The original analysis follows, unchanged, because it is the contract the
+workflow implements.
 
 `deploy/ec2/compose.prod.yaml:279` reads
 `${SUTRA_NOTIFICATION_WORKER_IMAGE:-sutra-notification-worker:unavailable}`, and
@@ -155,7 +170,32 @@ sutra/notifications/<org>/<customer>/<channel>/<name>` returns a secret, and
 Never paste a webhook URL or routing key into a shell history, this repo, a
 Compose file, `.env.ec2`, or the Sutra database.
 
-### 2.4 IAM — BLOCKING, three separate gaps in the instance role
+### 2.4 IAM — template updated, still needs a deliberate stack update
+
+**Update.** All three additions are now in
+`deploy/ec2/cloudformation-single-node.yaml`, and
+`deploy/ec2/validate-ops.sh` fails the build if any of them is ever widened to
+a wildcard:
+
+1. `PullOnlySutraAppRepository` became `PullOnlySutraReleaseRepositories`, with
+   the worker repository ARN enumerated alongside the app's — two exact ARNs,
+   not `repository/sutra/*`.
+2. A new `ReadOnlyNotificationDestinationSecrets` policy grants exactly
+   `secretsmanager:GetSecretValue` on
+   `secret:sutra/notifications/*`. No list, no describe, no write.
+3. A new `NotificationEmailSendingPolicy` resource grants `ses:SendEmail` and
+   `ses:SendRawEmail` on the single ARN in the new `NotificationSesIdentityArn`
+   parameter. That parameter **defaults to the empty string**, and the policy
+   carries `Condition: GrantNotificationEmailSending`, so the shipped template
+   attaches no SES statement at all until an owner names one verified identity.
+
+`kms:Decrypt` is still not granted; add it on the exact key ARN only if the
+notification secrets end up on a customer-managed key.
+
+The stack update itself is still an owner action. The original analysis
+follows.
+
+#### Original analysis: three separate gaps in the instance role
 
 `deploy/ec2/cloudformation-single-node.yaml` gives the instance role **no**
 Secrets Manager and **no** SES permission today, and scopes ECR pull to
@@ -404,7 +444,23 @@ impression that teaches a customer to mute the channel.
 
 ### Do this before step 6 of the rollout
 
-Measure first (read-only):
+`scripts/retire-notification-outbox-backlog.mjs` (`pnpm notifications:backlog`)
+implements exactly the measurement and the retirement below. It is read-only
+unless given **both** `--retire` and an explicit `--older-than` cutoff of at
+least an hour; it prints counts by status with the oldest and newest row, and
+what is claimable right now per destination channel; it previews the exact row
+count a cutoff would retire before it will write anything; and it contains no
+`DELETE`. The retirement statement writes `delivered_at = NULL` explicitly and
+takes its status and error code from module constants, so no invocation can
+fabricate a delivery. `--include-expired-leases` adds the §7 `processing` sweep.
+
+```
+DATABASE_URL=… node scripts/retire-notification-outbox-backlog.mjs
+DATABASE_URL=… node scripts/retire-notification-outbox-backlog.mjs --older-than 24h
+DATABASE_URL=… node scripts/retire-notification-outbox-backlog.mjs --older-than 24h --retire
+```
+
+The equivalent raw SQL, which the script mirrors, measure first (read-only):
 
 ```sql
 SELECT status, count(*), min(to_timestamp(created_at/1000)) AS oldest,
@@ -496,15 +552,22 @@ be reverted afterwards.
 
 ## 8. Strictly owner actions (not doable in this repository)
 
-- Create the `sutra/notification-worker` ECR repository, its lifecycle policy,
-  and a release workflow (or one-off approved release) that builds, scans,
-  promotes, and publishes the worker image by digest.
-- Apply the CloudFormation IAM change in §2.4 to the live instance role.
+The ECR repository, the release workflow and the IAM statements are now
+committed (§2.2, §2.4); what remains is running them against the owner's AWS
+account.
+
+- Deploy `infrastructure/github-ec2-release-role.yaml` so the
+  `sutra/notification-worker` repository exists and the release role may push
+  to it, then run the **Publish Sutra notification worker image** workflow and
+  record the digest it prints. (The digest is never deployed automatically.)
+- Apply the CloudFormation stack update in §2.4 to the live instance role, and
+  set `NotificationSesIdentityArn` only when an email destination goes live.
 - Create the Secrets Manager documents, and verify the SES identity / request
   production access.
 - Set `SUTRA_NOTIFICATIONS_ENABLED`, `COMPOSE_PROFILES`, and
   `SUTRA_NOTIFICATION_WORKER_IMAGE` in `/opt/sutra/deploy/ec2/.env.ec2` on the
   box, and restart the unit.
-- Measure and retire the outbox backlog (§6) — the one step no code change can
-  make safe on the owner's behalf.
+- Measure and retire the outbox backlog (§6) — the tool now exists
+  (`scripts/retire-notification-outbox-backlog.mjs`), but choosing the cutoff
+  and running it against live customer history stays a deliberate owner action.
 - Decide and communicate to customers when alerting starts arriving.

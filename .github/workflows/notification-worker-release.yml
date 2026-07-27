@@ -1,0 +1,295 @@
+# Publish, but never deploy, the notification delivery worker image.
+#
+# This is deliberately a SEPARATE workflow from
+# .github/workflows/ec2-private-beta-release.yml, for four reasons:
+#
+#   1. It has no deployment half. The SSM release document
+#      (Sutra-DeployImmutableRelease) is regex-pinned to sutra/app and stays
+#      that way; the worker digest is pasted once into
+#      deploy/ec2/.env.ec2 on the host, which release-update.sh preserves.
+#      Publishing and deploying are different blast radiuses, so they are
+#      different workflows.
+#   2. Coupling the two would let an unrelated worker CVE block a customer-
+#      facing application release, and would rebuild and re-scan the worker on
+#      every app release that did not touch it.
+#   3. The two artefacts have genuinely different cadences: the worker changes
+#      only when services/notification-worker, db or lib change.
+#   4. The release-gate tests assert an exact build -> scan -> promote -> deploy
+#      ordering by searching the app workflow's text for step titles; a second
+#      job repeating those titles in the same file would make that gate
+#      ambiguous.
+#
+# Running this workflow enables nothing. The worker service stays behind the
+# `notifications` Compose profile with SUTRA_NOTIFICATIONS_ENABLED=false and an
+# empty COMPOSE_PROFILES until an operator changes both on the box.
+name: Publish Sutra notification worker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseReason:
+        description: Approved reason for publishing a new notification worker image
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sutra-notification-worker-release
+  cancel-in-progress: false
+
+env:
+  WORKER_ECR_REPOSITORY: sutra/notification-worker
+
+jobs:
+  publish:
+    name: Build, scan and promote the notification worker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact release revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate publication configuration
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
+          [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${WORKER_ECR_REPOSITORY}" == "sutra/notification-worker" ]]
+          # RELEASE_REASON is recorded on the dispatch for audit only; it is
+          # bounded and single-line so no shell below can ever see a payload.
+          [[ "${#RELEASE_REASON}" -ge 10 && "${#RELEASE_REASON}" -le 100 ]]
+          [[ "${RELEASE_REASON}" != *$'\n'* && "${RELEASE_REASON}" != *$'\r'* ]]
+          test -f services/notification-worker/Dockerfile
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run bounded source and inertness gates
+        run: |
+          set -euo pipefail
+          pnpm security:secrets
+          pnpm typecheck
+          pnpm lint
+          pnpm test:templates
+          node --test tests/github-workflow-security.test.mjs
+          # Asserts the delivery switches still ship off and the worker service
+          # is still profile-gated, so publishing an image cannot enable it.
+          bash deploy/ec2/validate-ops.sh
+
+      - name: Configure short-lived AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-worker-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Verify account and immutable repository boundary
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          [[ "${account}" == "${AWS_ACCOUNT_ID}" ]]
+          read -r repository_uri tag_mutability scan_on_push encryption_type < <(
+            aws ecr describe-repositories \
+              --region "${AWS_REGION}" \
+              --repository-names "${WORKER_ECR_REPOSITORY}" \
+              --query 'repositories[0].[repositoryUri,imageTagMutability,imageScanningConfiguration.scanOnPush,encryptionConfiguration.encryptionType]' \
+              --output text
+          )
+          [[ "${repository_uri}" == "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${WORKER_ECR_REPOSITORY}" ]]
+          [[ "${tag_mutability}" == "IMMUTABLE" ]]
+          [[ "${scan_on_push}" == "True" || "${scan_on_push}" == "False" ]]
+          [[ "${encryption_type}" == "AES256" || "${encryption_type}" == "KMS" ]]
+          expected_lifecycle="$(jq -cS . deploy/ec2/ecr-lifecycle-policy.json)"
+          actual_lifecycle_text="$(aws ecr get-lifecycle-policy \
+            --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" \
+            --query lifecyclePolicyText --output text)"
+          actual_lifecycle="$(jq -cS . <<< "${actual_lifecycle_text}")"
+          [[ "${actual_lifecycle}" == "${expected_lifecycle}" ]] || {
+            echo "The live worker ECR lifecycle policy has drifted from the reviewed release contract." >&2
+            exit 1
+          }
+
+      - name: Install Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate Docker to the approved ECR registry
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecr get-login-password --region "${AWS_REGION}" |
+            docker login --username AWS --password-stdin "${registry}"
+
+      - name: Build and push an immutable worker scan candidate
+        id: image
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate_tag="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          [[ "${candidate_tag}" =~ ^candidate-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${release_tag}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          candidate_image="${registry}/${WORKER_ECR_REPOSITORY}:${candidate_tag}"
+          # The Dockerfile copies package.json, pnpm-lock.yaml, pnpm-workspace.yaml,
+          # db/, lib/ and services/notification-worker/, so the build context is
+          # the repository root, exactly as for the application image.
+          docker buildx build \
+            --file services/notification-worker/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-notification-worker \
+            --cache-to type=gha,mode=max,scope=sutra-notification-worker \
+            --push \
+            --tag "${candidate_image}" \
+            .
+          digest="$(aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${candidate_tag}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          image_ref="${registry}/${WORKER_ECR_REPOSITORY}@${digest}"
+          [[ "${image_ref}" =~ ^${AWS_ACCOUNT_ID}\.dkr\.ecr\.${AWS_REGION}\.amazonaws\.com/sutra/notification-worker@sha256:[a-f0-9]{64}$ ]]
+          echo "candidate_tag=${candidate_tag}" >> "${GITHUB_OUTPUT}"
+          echo "release_tag=${release_tag}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan the exact worker digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Promote the scanned worker digest to a retained release tag
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          CANDIDATE_TAG: ${{ steps.image.outputs.candidate_tag }}
+          RELEASE_TAG: ${{ steps.image.outputs.release_tag }}
+          DIGEST: ${{ steps.image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "${CANDIDATE_TAG}" =~ ^candidate-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${RELEASE_TAG}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${DIGEST}" =~ ^sha256:[a-f0-9]{64}$ ]]
+
+          candidate="$(aws ecr batch-get-image \
+            --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${CANDIDATE_TAG}" \
+            --output json)"
+          jq -e '(.images | length) == 1 and ((.failures // []) | length) == 0' \
+            <<< "${candidate}" >/dev/null
+          source_digest="$(jq -r '.images[0].imageId.imageDigest' <<< "${candidate}")"
+          source_tag="$(jq -r '.images[0].imageId.imageTag' <<< "${candidate}")"
+          media_type="$(jq -r '.images[0].imageManifestMediaType' <<< "${candidate}")"
+          manifest="$(jq -r '.images[0].imageManifest' <<< "${candidate}")"
+          [[ "${source_digest}" == "${DIGEST}" ]]
+          [[ "${source_tag}" == "${CANDIDATE_TAG}" ]]
+          [[ "${media_type}" == "application/vnd.oci.image.index.v1+json" ]]
+          printf '%s' "${manifest}" | jq -e '
+            .schemaVersion == 2
+            and .mediaType == "application/vnd.oci.image.index.v1+json"
+            and any(.manifests[];
+              .platform.os == "linux" and .platform.architecture == "amd64")
+            and any(.manifests[];
+              .annotations["vnd.docker.reference.type"] == "attestation-manifest")
+          ' >/dev/null
+          manifest_digest="sha256:$(printf '%s' "${manifest}" | sha256sum | awk '{print $1}')"
+          [[ "${manifest_digest}" == "${DIGEST}" ]]
+
+          promoted_digest="$(aws ecr put-image \
+            --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" \
+            --image-manifest "${manifest}" \
+            --image-manifest-media-type "${media_type}" \
+            --image-tag "${RELEASE_TAG}" \
+            --image-digest "${DIGEST}" \
+            --query 'image.imageId.imageDigest' \
+            --output text)"
+          [[ "${promoted_digest}" == "${DIGEST}" ]]
+          retained_digest="$(aws ecr describe-images \
+            --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" \
+            --image-ids "imageTag=${RELEASE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text)"
+          [[ "${retained_digest}" == "${DIGEST}" ]]
+
+      - name: Record the published digest without deploying it
+        env:
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+          RELEASE_TAG: ${{ steps.image.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "${RELEASE_TAG}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
+          [[ "${IMAGE_REF}" =~ ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/notification-worker@sha256:[a-f0-9]{64}$ ]]
+          {
+            echo "### Sutra notification worker image published"
+            echo
+            echo "- Image: \`${IMAGE_REF}\`"
+            echo "- Retained release tag: \`${RELEASE_TAG}\`"
+            echo
+            echo "Nothing was deployed. This workflow never contacts the host and"
+            echo "never sends an SSM command; Sutra-DeployImmutableRelease remains"
+            echo "pinned to sutra/app."
+            echo
+            echo "To make the worker runnable, an operator sets in"
+            echo "\`/opt/sutra/deploy/ec2/.env.ec2\` on the box, deliberately:"
+            echo
+            echo '```'
+            echo "SUTRA_NOTIFICATION_WORKER_IMAGE=${IMAGE_REF}"
+            echo "SUTRA_NOTIFICATIONS_ENABLED=true"
+            echo "COMPOSE_PROFILES=notifications"
+            echo '```'
+            echo
+            echo "Retire the outbox backlog first — see docs/notification-delivery-enablement.md §6"
+            echo "and \`node scripts/retire-notification-outbox-backlog.mjs\`."
+          } >> "${GITHUB_STEP_SUMMARY}"

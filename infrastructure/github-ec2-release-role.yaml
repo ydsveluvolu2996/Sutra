@@ -1,7 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   Least-privilege GitHub Actions OIDC role for immutable Sutra application
-  releases to one existing ECR repository and one exact SSM-managed EC2 host.
+  releases to one existing ECR repository and one exact SSM-managed EC2 host,
+  plus the immutable publish-only repository for the notification worker, which
+  the SSM release document deliberately cannot deploy.
 
 Parameters:
   GitHubOidcProviderArn:
@@ -13,12 +15,62 @@ Parameters:
     Default: sutra/app
     AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
     Description: Existing immutable ECR repository used only for Sutra application releases.
+  NotificationWorkerRepositoryName:
+    Type: String
+    Default: sutra/notification-worker
+    AllowedPattern: ^[a-z0-9]+(?:[._/-][a-z0-9]+)*$
+    Description: >-
+      Immutable ECR repository for the profile-gated notification delivery
+      worker. This template creates it; the worker image is published by
+      .github/workflows/notification-worker-release.yml and is never deployed
+      through the SSM release document, which stays pinned to sutra/app.
   TargetInstanceId:
     Type: String
     AllowedPattern: ^i-[0-9a-f]{17}$
     Description: Exact SSM-managed Sutra EC2 instance that this role may update.
 
+Rules:
+  DistinctReleaseRepositories:
+    Assertions:
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: AppRepositoryName
+                - Ref: NotificationWorkerRepositoryName
+        AssertDescription: AppRepositoryName and NotificationWorkerRepositoryName must be different.
+
 Resources:
+  # Mirrors the reviewed sutra/app release contract exactly: immutable tags,
+  # scan on push, AES256, and the lifecycle policy that keeps three sha-
+  # releases, expires candidate- after a day and untagged after fourteen.
+  # The literal text below must stay equivalent to
+  # deploy/ec2/ecr-lifecycle-policy.json, which the release workflow compares
+  # the live policy against.
+  NotificationWorkerRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref NotificationWorkerRepositoryName
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: >-
+          {"rules":[{"rulePriority":1,"description":"Keep three security-validated immutable releases","selection":{"tagStatus":"tagged","tagPrefixList":["sha-"],"countType":"imageCountMoreThan","countNumber":3},"action":{"type":"expire"}},{"rulePriority":2,"description":"Expire unpromoted scan candidates after one day","selection":{"tagStatus":"tagged","tagPrefixList":["candidate-"],"countType":"sinceImagePushed","countUnit":"days","countNumber":1},"action":{"type":"expire"}},{"rulePriority":3,"description":"Clean unreferenced build artifacts after fourteen days","selection":{"tagStatus":"untagged","countType":"sinceImagePushed","countUnit":"days","countNumber":14},"action":{"type":"expire"}}]}
+      Tags:
+        - Key: sutra:component
+          Value: notification-worker
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+  # DELIBERATELY NOT WIDENED. The notification worker image is never shipped
+  # through this document: SUTRA_NOTIFICATION_WORKER_IMAGE is set once by hand
+  # in deploy/ec2/.env.ec2, which release-update.sh preserves verbatim. Keeping
+  # ImageRef pinned to a single repository means a compromised release job can
+  # still only replace the application container.
   ImmutableReleaseDocument:
     Type: AWS::SSM::Document
     Properties:
@@ -85,7 +137,11 @@ Resources:
                 Effect: Allow
                 Action: ecr:GetAuthorizationToken
                 Resource: "*"
-              - Sid: PushAndVerifyOnlySutraAppRepository
+              # Two enumerated repositories, never a prefix or wildcard. The
+              # worker is publish-only: widening this push boundary does not
+              # widen the deployment boundary, because ImmutableReleaseDocument
+              # above still rejects any ImageRef that is not sutra/app.
+              - Sid: PushAndVerifyOnlySutraReleaseRepositories
                 Effect: Allow
                 Action:
                   - ecr:BatchCheckLayerAvailability
@@ -99,7 +155,8 @@ Resources:
                   - ecr:PutImage
                   - ecr:UploadLayerPart
                 Resource:
-                  Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+                  - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+                  - !GetAtt NotificationWorkerRepository.Arn
         - PolicyName: DeployOnlyToExactSutraManagedNode
           PolicyDocument:
             Version: "2012-10-17"
@@ -128,6 +185,17 @@ Outputs:
     Description: Repository boundary enforced by the role.
     Value:
       Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+  NotificationWorkerEcrRepositoryName:
+    Description: >-
+      Repository the notification-worker publish workflow pushes to; it pins the
+      same name in its WORKER_ECR_REPOSITORY environment value.
+    Value: !Ref NotificationWorkerRepository
+  NotificationWorkerEcrRepositoryUri:
+    Description: >-
+      Immutable notification-worker repository URI without a tag or digest. The
+      published digest is pasted into SUTRA_NOTIFICATION_WORKER_IMAGE on the
+      host; it is never deployed by the SSM release document.
+    Value: !GetAtt NotificationWorkerRepository.RepositoryUri
   TargetInstanceId:
     Description: Managed-node boundary enforced by the role.
     Value: !Ref TargetInstanceId

@@ -49,6 +49,14 @@ required_template = [
     "SutraAppImage:",
     "/sutra/production/cloudflare-tunnel-credentials",
     "repository/sutra/app",
+    # Notification delivery IAM: exactly two pull-only repositories, one
+    # read-only secret prefix, and SES only behind an explicit identity ARN.
+    "repository/sutra/notification-worker",
+    "Action: secretsmanager:GetSecretValue",
+    "secret:sutra/notifications/*",
+    "Condition: GrantNotificationEmailSending",
+    'Action: ["ses:SendEmail", "ses:SendRawEmail"]',
+    "Resource: { Ref: NotificationSesIdentityArn }",
     "HttpTokens: required",
     "HttpPutResponseHopLimit: 2",
     "CPUCredits: standard",
@@ -81,6 +89,13 @@ prohibited_template = [
     "AmazonSSMManagedInstanceCore",
     "arn:${AWS::Partition}:iam::*:role/*",
     "resolve:ssm:/aws/service/canonical/ubuntu",
+    # Notification delivery must never be granted through a wildcard.
+    "secretsmanager:*",
+    "secretsmanager:GetSecretValue*",
+    "secret:*",
+    "ses:*",
+    "identity/*",
+    "repository/sutra/*",
 ]
 for fragment in prohibited_template:
     if fragment in template:
@@ -270,6 +285,11 @@ if 'profiles: ["notifications"]' not in compose:
     raise SystemExit("The notification worker must remain profile-gated")
 if "sutra-notification-worker:unavailable" not in compose:
     raise SystemExit("The notification worker must fail closed without a published image")
+ses_parameter = template.index("  NotificationSesIdentityArn:\n    Type: String")
+if 'Default: ""' not in template[ses_parameter:ses_parameter + 200]:
+    raise SystemExit(
+        "NotificationSesIdentityArn must ship empty so the committed template grants no SES permission"
+    )
 unit_directives = [
     line for line in unit.splitlines() if not line.lstrip().startswith("#")
 ]
