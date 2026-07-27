@@ -1,8 +1,27 @@
 # Agentless snapshot scanning — design
 
-**Status:** design only. Not implemented. This closes the *design* gap for the
-"agentless snapshot scanning" benchmark row; execution needs AWS infrastructure
-and is deliberately out of scope until explicitly authorized (it incurs cost).
+**Status:** partially implemented — planner, orchestrator, persistence, IAM and
+the AWS executor exist and are unit-tested; **no call has ever run against AWS**.
+The executor refuses to act unless constructed with `liveValidated: true`, which
+an operator may set only after validating each EC2 call live. Still missing: the
+scanner container that mounts the volume and runs Trivy, the API/UI surface, the
+sweeper, and Sutra's scan-account infrastructure.
+
+**Trust decision (2026-07-28, changed from the original proposal below).** Sutra
+may CREATE snapshots but may DELETE NOTHING in a customer account — not even a
+snapshot it created. The customer role carries an explicit IAM deny on
+`DeleteSnapshot`, `DeleteVolume`, `DetachVolume`, `ModifyVolume`,
+`TerminateInstances`, `StopInstances`, `RebootInstances`, `DeregisterImage` and
+`DeleteTags`. Cleanup is performed by a customer-owned Data Lifecycle Manager
+policy that the same CloudFormation stack installs, running under the customer's
+own service role on a retention window they choose and can pause from their own
+console. The consequence is stated rather than hidden: if that policy is removed,
+snapshots accumulate and bill, and Sutra reports them as an explicit liability.
+
+The `## Architecture (proposed)` and `## Trust & cost boundary` sections below are
+kept for provenance but are SUPERSEDED on two points: step 6 ("Guaranteed
+teardown ... the source snapshot") and the customer-role action list, which no
+longer includes any delete.
 
 ## Why
 Today Sutra collects Kubernetes/EKS evidence via an in-cluster agent (read-only
@@ -62,6 +81,22 @@ contents/samples retained, absence of a scan is `unknown` not `clean`.
 **Needs AWS (authorize + cost):** steps 2–4 and any real snapshot/scan.
 
 ## Built so far (code, no AWS, tested)
+- `postgres/migrations/0059_agentless_scans.sql` + `drizzle/0065_…` — run ledger,
+  metadata-only findings, and outstanding-resource rows covering BOTH Sutra's own
+  failed teardowns and customer-side cleanup handoffs.
+- `db/agentless-scan-repository.ts` — tenant-scoped persistence (`org_id` AND
+  `customer_id` on every read; a run id is not a capability), terminal states that
+  cannot be re-opened, findings capped and the cap reflected in the stored count.
+- `services/agentless-scanner/` — its own package, because
+  `tests/collector-permission-coverage` proves every `aws-collector` command is
+  read-only and `CreateSnapshot` would break that. Contains
+  `Ec2AgentlessExecutor`: all six executor methods, tag-at-creation (required by
+  the `aws:RequestTag` grant), share→copy→revoke, bounded snapshot-ready polling,
+  and no method capable of deleting a customer snapshot. 10 unit tests.
+- `infrastructure/customer-role.yaml` — opt-in `EnableAgentlessSnapshotScanning`
+  (default `false`), tag-conditioned grants, the explicit no-delete deny, the
+  customer-owned DLM cleanup policy, and an `AccessMode` output that reports
+  `READ_PLUS_OWN_SNAPSHOTS` instead of falsely claiming `READ_ONLY`.
 - `lib/aws-agentless-discovery.ts` — `normalizeDescribedVolumes` (EC2
   DescribeVolumes → `AgentlessVolume[]`, region from AZ).
 - `lib/aws-agentless-scan-plan.ts` — `buildAgentlessScanPlan` (deterministic
