@@ -184,7 +184,35 @@ false negative, not a bad release, and it happened on 2026-07-28.
 - `User-Agent: sutra-release-verifier/1 (+deploy/ec2/release-update.sh)`
 - `X-Sutra-Release-Verifier: 1`
 
-Cloudflare needs one WAF custom rule with action **Skip** (Bot Fight Mode, Super
+### Current decision: Bot Fight Mode is OFF, deliberately
+
+**Do not re-enable Bot Fight Mode without reading this.** It is off by choice as of
+2026-07-28, and turning it back on will fail the next release at verification with a
+`403` — the failure this whole section describes.
+
+The zone is on Cloudflare's **Free** plan, and Free cannot exempt a source IP from
+Bot Fight Mode: it is applied independently of custom rules, and there are no managed
+rulesets to skip. So on Free the only levers are "Bot Fight Mode off" or "releases
+fail".
+
+Off was chosen over the alternatives because it costs nothing and keeps the release
+gate whole. The rejected options, for the record:
+
+- **Cloudflare Pro (~$20/month)** would provide WAF custom rules with the Skip
+  action, letting Bot Fight Mode stay on with an IP-scoped exemption. This is the
+  right answer if the zone is ever upgraded — apply the rule below and re-enable.
+- **Verifying through the local Caddy instead of the public origin** was rejected
+  because it would silently remove a guarantee: the `security.txt` byte comparison
+  below exists specifically to catch *a healthy app behind a stale edge*, and a
+  local check structurally cannot see that. Trading a real safety property for a
+  bot filter of marginal value is the wrong direction.
+
+What actually protects mutations is Turnstile, the session layer and tenant
+isolation — none of which depend on Bot Fight Mode.
+
+### If the zone is ever upgraded to Pro or above
+
+Add one WAF custom rule with action **Skip** (Bot Fight Mode, Super
 Bot Fight Mode and the managed rulesets).
 
 **The first such rule must NOT match on User-Agent.** The SSM command runs
