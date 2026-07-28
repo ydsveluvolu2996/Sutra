@@ -18,6 +18,15 @@ Description: >-
   touches no existing resource. `aws cloudformation delete-stack` removes all of
   it.
 
+  PREREQUISITE in an account that has never used ECS: run
+  `aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com`
+  first. Otherwise CreateCluster fails with "Unable to assume the service linked
+  role" — the failed call provisions AWSServiceRoleForECS asynchronously, so a
+  second deploy succeeds, but the first leaves a ROLLBACK_COMPLETE stack to
+  delete. This is not in the template because AWS::IAM::ServiceLinkedRole errors
+  when the role already exists, which would break every account that has used
+  ECS before.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
