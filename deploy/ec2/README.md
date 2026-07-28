@@ -34,6 +34,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `validate-ops.sh` | CloudFormation and backup/restore static checks; optional AWS validation |
 | `backup-prod.sh`, `restore-prod.sh` | Optional encrypted coordinated backup/restore; disabled by default |
 | `sutra-backup.*` | Optional backup unit/timer; do not enable until configured and drilled |
+| `sutra-vuln-feeds.*` | CVE mirror EPSS refresh unit/timer. Installed into `/etc/systemd/system` by every release and **not** enabled, same as `sutra-backup.*`. The release also writes `/etc/sutra/vuln-feeds.conf` (0600) with `DATABASE_URL` so the password never reaches the process list. Until you run `systemctl enable --now sutra-vuln-feeds.timer`, the EPSS half of the mirror only updates when someone runs `pnpm vuln:feeds:refresh` by hand — KEV and a bounded NVD window are already refreshed in-app every 6h |
 | `configure-invitation-email.sh` | Hidden-prompt invitation-email setup; keeps API keys out of CloudFormation and shell history |
 
 ## Fixed pilot defaults

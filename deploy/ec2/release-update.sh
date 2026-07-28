@@ -178,6 +178,53 @@ docs/ec2-continuous-delivery.md. The release has been rolled back regardless."
   die "$PUBLIC_ORIGIN$path did not return HTTP 200 during the release transaction (last status: $PUBLIC_STATUS)."
 }
 
+# Place the optional timer units where systemctl can find them, and materialise the
+# environment file the vuln-feeds unit needs.
+#
+# These are INSTALLED BUT NOT ENABLED, matching the sutra-backup convention in
+# deploy/ec2/README.md ("do not enable until configured and drilled"). Shipping a
+# unit file into the bundle is not enough: `systemctl enable sutra-vuln-feeds.timer`
+# fails with "Unit not found" unless the file is under /etc/systemd/system, which is
+# exactly what blocked enabling the CVE feed refresh on 2026-07-28.
+#
+# Auto-enabling would also be wrong here: the unit reads DATABASE_URL from an
+# EnvironmentFile, and a timer enabled before that file exists fails silently every
+# night — the precise failure mode the refresh exists to prevent.
+install_optional_units() {
+  local unit
+  for unit in sutra-backup.service sutra-backup.timer \
+              sutra-vuln-feeds.service sutra-vuln-feeds.timer; do
+    [[ -f "$ROOT/deploy/ec2/$unit" ]] || continue
+    install -m 0644 "$ROOT/deploy/ec2/$unit" "/etc/systemd/system/$unit"
+  done
+
+  # The vuln-feeds unit passes DATABASE_URL via EnvironmentFile specifically so the
+  # password never appears in the process list. Derive it from the secret bootstrap
+  # already generated rather than asking an operator to handle the password by hand.
+  local app_password
+  if [[ ! -f /etc/sutra/vuln-feeds.conf && -f "$ROOT/.sutra/docker.env" ]]; then
+    app_password="$(awk -F= '$1 == "SUTRA_POSTGRES_APP_PASSWORD" { sub(/^[^=]*=/, ""); print; exit }' \
+      "$ROOT/.sutra/docker.env")"
+    if [[ -n "$app_password" ]]; then
+      install -d -m 0700 /etc/sutra
+      # Written with a restrictive umask and never echoed. 0600 root-only: this is a
+      # second copy of a live database credential and is treated as one.
+      ( umask 0177
+        printf 'DATABASE_URL=postgresql://sutra_app:%s@postgres:5432/sutra\n' "$app_password" \
+          > /etc/sutra/vuln-feeds.conf )
+      chmod 0600 /etc/sutra/vuln-feeds.conf
+      log "Wrote /etc/sutra/vuln-feeds.conf for the CVE feed refresh timer."
+    fi
+  fi
+
+  # Never enabled automatically — say so, with the exact command, so the capability
+  # is discoverable instead of quietly dormant.
+  if [[ -f /etc/sutra/vuln-feeds.conf ]] \
+    && ! systemctl is-enabled --quiet sutra-vuln-feeds.timer 2>/dev/null; then
+    log "The CVE feed refresh timer is installed but NOT enabled. Until it is, the EPSS mirror only updates when someone runs it by hand: systemctl enable --now sutra-vuln-feeds.timer"
+  fi
+}
+
 require_indexable_response() {
   local label="$1"
   if tr -d '\r' < "$PUBLIC_HEADERS" | grep -Eiq '^x-robots-tag:.*noindex'; then
@@ -294,6 +341,9 @@ cleanup() {
         fi
         install -m 0644 "$ROOT/deploy/ec2/sutra.service" /etc/systemd/system/sutra.service
         install -m 0755 "$ROOT/deploy/ec2/release-update.sh" /usr/local/sbin/sutra-release-update
+        # Restore the prior bundle's optional units too, so a rolled-back release
+        # never leaves the next release's unit files behind on the host.
+        install_optional_units
         systemctl daemon-reload
       else
         log "Prior host bundle is missing from $ROLLBACK_DIR; manual recovery is required."
@@ -391,6 +441,7 @@ mv "$STAGE_ROOT/deploy/ec2" "$ROOT/deploy/ec2"
 install -m 0755 "$STAGE_ROOT/docker/postgres-init.sh" "$ROOT/docker/postgres-init.sh"
 install -m 0644 "$ROOT/deploy/ec2/sutra.service" /etc/systemd/system/sutra.service
 install -m 0755 "$ROOT/deploy/ec2/release-update.sh" /usr/local/sbin/sutra-release-update
+install_optional_units
 systemctl daemon-reload
 
 log "Applying the new bundle and database migration."
