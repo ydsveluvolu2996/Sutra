@@ -73,6 +73,23 @@ test("the application runtime contains only deployed runtime dependencies and bu
   assert.match(rootDockerfile, /\/app\/services\/aws-collector\/dist \/app\/services\/aws-collector\/dist/u);
   assert.match(rootDockerfile, /\/app\/docker\/postgres-init\.sh \/app\/docker\/postgres-init\.sh/u);
   assert.match(rootDockerfile, /\/app\/lib\/release-identity\.ts \/app\/lib\/release-identity\.ts/u);
+  // The host EPSS timer runs `docker exec sutra-prod-app-1 node
+  // scripts/vuln-feed-refresh.mjs`, so the script AND its whole import closure must
+  // be in the image. Shipping the unit without these made the timer fail on first
+  // fire with "Cannot find module" and left the CVE mirror silently un-refreshed.
+  // Assert the closure, not just the entrypoint: a missing leaf fails identically.
+  for (const shipped of [
+    "scripts/vuln-feed-refresh.mjs",
+    "lib/vulnerability-feed-ingest.ts",
+    "lib/exploitability-feed.ts",
+    "lib/vulnerability-database.ts",
+  ]) {
+    assert.match(
+      rootDockerfile,
+      new RegExp(`/app/${shipped.replaceAll("/", "\\/").replaceAll(".", "\\.")} /app/${shipped.replaceAll("/", "\\/").replaceAll(".", "\\.")}`, "u"),
+      `${shipped} must be copied into the runtime image`,
+    );
+  }
   assert.match(rootDockerfile, /\/app\/deploy\/ec2 \/app\/deploy\/ec2/u);
   assert.doesNotMatch(rootDockerfile, /COPY --from=builder[^\n]*\/app \/app/u);
   // What matters here is the DEPENDENCY CLASS, not the version: the runtime image

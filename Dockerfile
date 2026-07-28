@@ -60,6 +60,22 @@ COPY --from=builder --chown=node:node /app/scripts/start-pilot.mjs /app/scripts/
 COPY --from=builder --chown=node:node /app/scripts/internal-job-request.mjs /app/scripts/internal-job-request.mjs
 COPY --from=builder --chown=node:node /app/scripts/setup-local-pilot.mjs /app/scripts/setup-local-pilot.mjs
 COPY --from=builder --chown=node:node /app/scripts/postgres-migrate.mjs /app/scripts/postgres-migrate.mjs
+# The EPSS bulk refresh, invoked from the host by deploy/ec2/refresh-vuln-feeds.sh
+# via `docker exec sutra-prod-app-1 node scripts/vuln-feed-refresh.mjs`. It runs in
+# the container so the host needs no Node of its own, which means the script AND its
+# import closure have to be in the image — omitting them made the systemd timer fail
+# on first fire with "Cannot find module", and the CVE mirror silently never
+# refreshed. The closure is exactly these three: vulnerability-feed-ingest imports
+# exploitability-feed and vulnerability-database, and nothing further.
+#
+# Plain `node` resolves these .ts files: the image is Node >= 22.18, which strips
+# types by default, and setup-local-pilot.mjs already relies on that for
+# lib/release-identity.ts below. No flag is needed; if that ever changes, the script
+# fails loudly rather than reporting an empty refresh.
+COPY --from=builder --chown=node:node /app/scripts/vuln-feed-refresh.mjs /app/scripts/vuln-feed-refresh.mjs
+COPY --from=builder --chown=node:node /app/lib/vulnerability-feed-ingest.ts /app/lib/vulnerability-feed-ingest.ts
+COPY --from=builder --chown=node:node /app/lib/exploitability-feed.ts /app/lib/exploitability-feed.ts
+COPY --from=builder --chown=node:node /app/lib/vulnerability-database.ts /app/lib/vulnerability-database.ts
 COPY --from=builder --chown=node:node /app/lib/release-identity.ts /app/lib/release-identity.ts
 COPY --from=builder --chown=node:node /app/postgres/migrations /app/postgres/migrations
 COPY --from=builder --chown=node:node /app/docker/entrypoint.sh /app/docker/entrypoint.sh
