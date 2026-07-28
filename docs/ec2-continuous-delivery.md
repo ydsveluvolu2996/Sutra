@@ -185,13 +185,37 @@ false negative, not a bad release, and it happened on 2026-07-28.
 - `X-Sutra-Release-Verifier: 1`
 
 Cloudflare needs one WAF custom rule with action **Skip** (Bot Fight Mode, Super
-Bot Fight Mode and the managed rulesets), scoped as tightly as possible:
+Bot Fight Mode and the managed rulesets).
+
+**The first such rule must NOT match on User-Agent.** The SSM command runs
+`/usr/local/sbin/sutra-release-update`, and the copy at that path is whatever the
+last *successful* release (or the original CloudFormation bootstrap) installed. A
+release installs the new script at the bundle switch, but the already-executing
+process keeps running the old code, and a failed release restores the previous
+script from the rollback directory. So a host that has never completed a release
+with this change still sends curl's default `curl/8.x`, and a UA-matched rule can
+never fire — it would only become correct after the success it is needed to enable.
+
+Start with the source IP and paths only:
 
 ```
-(http.user_agent eq "sutra-release-verifier/1 (+deploy/ec2/release-update.sh)")
-and (ip.src eq <release host egress IP>)
+(ip.src eq <release host egress IP>)
 and (http.request.uri.path in {"/api/healthz" "/api/status" "/login" "/api/turnstile/config"})
 ```
+
+After one release succeeds, `/usr/local/sbin/sutra-release-update` is the new
+script and every subsequent verification carries the User-Agent above. At that
+point tighten the rule by adding:
+
+```
+and (http.user_agent eq "sutra-release-verifier/1 (+deploy/ec2/release-update.sh)")
+```
+
+The alternative to the two-step is to install the new script on the host once by
+hand, extracting it from the release image the same way the CloudFormation
+UserData does (`docker create` the digest, `docker cp` the file, `install -m 0755
+… /usr/local/sbin/sutra-release-update`). Either path breaks the deadlock; the
+two-step rule needs no host access.
 
 Get the host's egress IP from the host itself:
 
