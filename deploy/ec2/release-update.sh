@@ -132,6 +132,18 @@ RELEASE_COMMITTED=false
 PUBLIC_HEADERS=""
 PUBLIC_BODY=""
 PUBLIC_STATUS="000"
+# Identifies this verifier to the CDN edge. These requests originate from the
+# release host — an AWS datacenter address with a non-browser client — which is
+# exactly the profile Cloudflare Bot Fight Mode and the managed WAF rules block.
+# A blocked verification returns 403 and rolls back a release that had already
+# deployed and gone healthy, so the edge must be able to recognise and skip these
+# requests specifically.
+#
+# Deliberately NOT a shared secret: a header token that grants a WAF bypass is a
+# credential to leak and rotate. The edge rule instead matches this User-Agent
+# together with the release host's own egress IP, which is not forgeable by a
+# third party and needs nothing kept secret. See docs/ec2-continuous-delivery.md.
+RELEASE_VERIFIER_UA="sutra-release-verifier/1 (+deploy/ec2/release-update.sh)"
 fetch_public() {
   local path="$1" label="$2" attempts="$3" attempt
   PUBLIC_HEADERS="$STAGE_ROOT/public-$label.headers"
@@ -140,6 +152,8 @@ fetch_public() {
   for ((attempt = 1; attempt <= attempts; attempt += 1)); do
     if PUBLIC_STATUS="$(curl --silent --show-error \
       --connect-timeout 10 --max-time 15 \
+      --user-agent "$RELEASE_VERIFIER_UA" \
+      --header 'X-Sutra-Release-Verifier: 1' \
       --dump-header "$PUBLIC_HEADERS" --output "$PUBLIC_BODY" \
       --write-out '%{http_code}' "$PUBLIC_ORIGIN$path")" \
       && [[ "$PUBLIC_STATUS" == 200 ]]; then
@@ -147,6 +161,20 @@ fetch_public() {
     fi
     (( attempt == attempts )) || sleep 5
   done
+  # Name the two very different causes of a non-200 here. Without this, an edge
+  # block and a broken release produce the same one-line message, and the
+  # operator's first instinct is to suspect the release — which is the wrong
+  # place to look and costs an hour.
+  if [[ "$PUBLIC_STATUS" == 403 || "$PUBLIC_STATUS" == 429 || "$PUBLIC_STATUS" == 503 ]]; then
+    die "$PUBLIC_ORIGIN$path returned $PUBLIC_STATUS during the release transaction. \
+The application container reported healthy before this check ran, so a $PUBLIC_STATUS \
+here is far more likely to be the CDN edge blocking this verifier (Bot Fight Mode, a \
+managed WAF rule, or rate limiting) than a bad release: the request comes from an AWS \
+address with a non-browser client. Confirm with 'curl -sD - $PUBLIC_ORIGIN$path' from \
+this host and look for cf-mitigated / an 'Attention Required' body. The edge must skip \
+requests carrying User-Agent '$RELEASE_VERIFIER_UA' from this host's egress IP; see \
+docs/ec2-continuous-delivery.md. The release has been rolled back regardless."
+  fi
   die "$PUBLIC_ORIGIN$path did not return HTTP 200 during the release transaction (last status: $PUBLIC_STATUS)."
 }
 

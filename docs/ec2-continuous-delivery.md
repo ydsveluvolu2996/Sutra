@@ -170,6 +170,42 @@ automatically restores the prior bundle/image/application state if the release
 fails. The workflow then checks `/api/healthz`, `/login` and `/status` through the
 real Cloudflare public origin.
 
+### The edge must not block the release verifier
+
+Those public checks run **from the release host**, so they reach Cloudflare from an
+AWS datacenter address with a non-browser client — the exact profile Bot Fight Mode
+and the managed WAF rules are built to block. When the edge blocks them the
+verification sees `403`, and because the check runs inside the release transaction
+it **rolls back a release that had already deployed and gone healthy**. That is a
+false negative, not a bad release, and it happened on 2026-07-28.
+
+`release-update.sh` therefore sends a stable identity on every public check:
+
+- `User-Agent: sutra-release-verifier/1 (+deploy/ec2/release-update.sh)`
+- `X-Sutra-Release-Verifier: 1`
+
+Cloudflare needs one WAF custom rule with action **Skip** (Bot Fight Mode, Super
+Bot Fight Mode and the managed rulesets), scoped as tightly as possible:
+
+```
+(http.user_agent eq "sutra-release-verifier/1 (+deploy/ec2/release-update.sh)")
+and (ip.src eq <release host egress IP>)
+and (http.request.uri.path in {"/api/healthz" "/api/status" "/login" "/api/turnstile/config"})
+```
+
+Get the host's egress IP from the host itself:
+
+```bash
+curl -s https://checkip.amazonaws.com
+```
+
+The rule deliberately requires the source IP as well as the User-Agent, and is
+limited to those four public GET paths. A header-token bypass was rejected on
+purpose: a token that skips the WAF is a credential to leak and rotate, whereas an
+egress IP is not forgeable by a third party and needs nothing kept secret. Re-point
+the rule if the host is replaced or its Elastic IP changes — a stale IP in this rule
+fails the next release, with the reason named in the error message.
+
 If a healthy release has a later functional regression, select one of the three
 retained ECR digests and run the existing SSM rollback command documented in
 `deploy/ec2/README.md`. An older application image must be compatible with the
