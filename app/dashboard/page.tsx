@@ -338,10 +338,10 @@ export default function Home() {
           <div className="dbe-copy">
             <span className="dbe-kicker">Get started</span>
             <h2>Connect your first customer account</h2>
-            <p>Sutra validates a customer-owned IAM role, collects selected AWS metadata with temporary STS credentials, builds the asset graph, and evaluates deterministic posture checks — read-only from the first minute.</p>
+            <p>Sutra validates a customer-owned IAM role, collects selected AWS metadata with temporary STS credentials, builds the asset graph, and evaluates deterministic posture checks — read-only from the first minute, with nothing in your account changed.</p>
             <ol className="dbe-steps">
               <li><span>01</span><div><strong>Create the customer workspace</strong><em>Name the customer and choose a collector pack</em></div></li>
-              <li><span>02</span><div><strong>Deploy the CloudFormation role</strong><em>Customer-owned, read-only, unique ExternalId</em></div></li>
+              <li><span>02</span><div><strong>Deploy the CloudFormation role</strong><em>Customer-owned, read-only by default, unique ExternalId</em></div></li>
               <li><span>03</span><div><strong>Run the first collection</strong><em>Assets, relationships and findings appear right here</em></div></li>
             </ol>
             <div className="dbe-actions">

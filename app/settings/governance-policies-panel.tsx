@@ -158,8 +158,9 @@ export default function GovernancePoliciesPanel() {
           <h2>Governance policies and approvals</h2>
           <p>
             A policy is a condition over cost and security state Sutra already computes, plus a governed action.
-            Sutra&apos;s access to customer accounts is read-only: no policy can stop, patch, resize or delete a
-            customer resource. Every action below names who performs it.
+            Sutra&apos;s access to customer accounts cannot change your infrastructure: no policy can stop, patch,
+            resize or delete a customer resource, and the one optional write grant (agentless snapshot creation)
+            is not reachable from a policy at all. Every action below names who performs it.
           </p>
         </div>
       </div>

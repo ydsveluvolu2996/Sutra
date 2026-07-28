@@ -169,7 +169,7 @@ const MARQUEE = ["Amazon EKS", "AWS IAM & IRSA", "EKS Pod Identity", "Trivy Oper
 type Panel = { name: string; icon: string; h3: string; lead: string; points: string[]; mini: string; chips: string[] };
 const PLATFORM: Panel[] = [
   { name: "cloud", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>', h3: "Cloud CMDB & reachability", lead: "Twenty-two collectors per region build a normalized asset graph, then trace which resources are provably internet-reachable — gateway route, NACL port filter, load-balancer target, DNS entry point.", points: ["Open vs NACL-filtered ports, per resource", "Every hop cited; unknowns disclosed, never guessed"], chips: ["CSPM & CMDB", "Route tables · IGW · NACLs", "ELB target membership", "DNS entry points", "Universal CMDB · blast-radius", "Cloud cost · FinOps allocation", "Report builder · CSV / PDF", "Public API v1 & typed SDKs"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M42 176 C 110 176 122 118 192 116 M192 116 C 262 114 282 64 352 62" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="42" cy="176" r="12"/><text x="42" y="200" text-anchor="middle">igw</text></g><g class="gn" style="opacity:1"><circle cx="192" cy="116" r="13"/><text x="192" y="140" text-anchor="middle" fill="#f4f7ff">subnet</text></g><g class="gn acc" style="opacity:1"><circle cx="352" cy="62" r="12"/><text x="352" y="86" text-anchor="middle">sg :443</text></g></svg>' },
-  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "KSPM over admitted specs, workload & image drift, SBOM findings and signed Falco runtime events — correlated onto the same workloads, not a separate console.", points: ["Live spec vs admitted-spec drift", "Runtime-informed prioritization (KEV · EPSS · reachable)"], chips: ["KSPM over admitted specs", "Workload & image drift", "SBOM & new-CVE delta", "Signed Falco runtime", "Unified vuln mgmt · EPSS · KEV", "Patch plans · read-only", "Metric alerting · Jira / ServiceNow"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">drift</text></g></svg>' },
+  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "KSPM over admitted specs, workload & image drift, SBOM findings and signed Falco runtime events — correlated onto the same workloads, not a separate console.", points: ["Live spec vs admitted-spec drift", "Runtime-informed prioritization (KEV · EPSS · reachable)"], chips: ["KSPM over admitted specs", "Workload & image drift", "SBOM & new-CVE delta", "Signed Falco runtime", "Unified vuln mgmt · EPSS · KEV", "Patch plans · generate-only", "Metric alerting · Jira / ServiceNow"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">drift</text></g></svg>' },
   { name: "id", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/></svg>', h3: "Cross-plane effective permissions", lead: "Kubernetes RBAC unioned with IRSA and EKS Pod Identity into one answer: what can this pod actually do — in the cluster and in the AWS account?", points: ["RBAC ∪ IRSA ∪ Pod Identity → AWS reach", "Unused & default-ServiceAccount flags"], chips: ["In-cluster RBAC solver", "IRSA & EKS Pod Identity", "AWS-reach verdicts", "Unused-SA flags"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M68 116 H 184 M216 116 H 332" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="55" cy="116" r="13"/><text x="55" y="140" text-anchor="middle">pod</text></g><g class="gn acc" style="opacity:1"><circle cx="200" cy="116" r="13"/><text x="200" y="140" text-anchor="middle">SA</text></g><g class="gn" style="opacity:1"><circle cx="345" cy="116" r="13"/><text x="345" y="140" text-anchor="middle">IAM</text></g></svg>' },
 ];
 
@@ -272,7 +272,7 @@ function annualTotal(monthly: number): number {
  * row and FAQ state only what is truthfully accurate about the product today. */
 const TRUST_BADGES = [
   "SOC 2 readiness mapping — not a certification",
-  "Read-only, customer-owned access",
+  "Read-only by default, customer-owned access",
   "Every finding cited to collected evidence",
   "No customer access keys stored",
   "Data-minimizing by design",
@@ -919,7 +919,7 @@ export default function LandingZone() {
             <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
             <a className="btn" href="#trust">Review the trust model</a>
           </div>
-          <div className="assur"><span><b>✓</b> Read-only access, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
+          <div className="assur"><span><b>✓</b> Read-only by default, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
         </div>
         <div className="lx-hero-stage">
           <div className="card">
@@ -1044,7 +1044,7 @@ export default function LandingZone() {
           <div className="lx-trust-panel rise">
             <div className="row"><b>role principal</b><span>arn:aws:iam::…:role/sutra-collector</span></div>
             <div className="row"><b>credential type</b><span className="ok">STS · temporary</span></div>
-            <div className="row"><b>permission pack</b><span>read-only · metadata</span></div>
+            <div className="row"><b>permission pack</b><span>read-only · metadata · no deletes ever</span></div>
             <div className="row"><b>external id</b><span>platform-generated</span></div>
             <div className="row"><b>keys stored</b><span className="ok">none</span></div>
           </div>
@@ -1110,7 +1110,7 @@ export default function LandingZone() {
         <div className="wrap"><div className="inner rise">
           <span className="sec-kicker">Start in minutes</span>
           <h2>See the MSP experience before connecting an account.</h2>
-          <p className="lead">Book a walkthrough of the product, see the control library and the evidence graph, then review the customer-owned IAM role — read-only from the first minute.</p>
+          <p className="lead">Book a walkthrough of the product, see the control library and the evidence graph, then review the customer-owned IAM role — read-only from the first minute, and never able to delete anything.</p>
           <div className="hero-cta"><Link className="btn btn-solid" href="/contact">Book a walkthrough</Link><a className="btn" href="#platform">Explore the platform</a></div>
         </div></div>
       </section>

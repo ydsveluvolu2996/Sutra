@@ -75,6 +75,15 @@ test("the application runtime contains only deployed runtime dependencies and bu
   assert.match(rootDockerfile, /\/app\/lib\/release-identity\.ts \/app\/lib\/release-identity\.ts/u);
   assert.match(rootDockerfile, /\/app\/deploy\/ec2 \/app\/deploy\/ec2/u);
   assert.doesNotMatch(rootDockerfile, /COPY --from=builder[^\n]*\/app \/app/u);
-  assert.equal(packageManifest.dependencies.wrangler, "4.102.0");
+  // What matters here is the DEPENDENCY CLASS, not the version: the runtime image
+  // is built from `pnpm deploy --prod`, so wrangler has to be a real dependency
+  // or it is absent from the deployed closure and the container cannot serve.
+  // Asserting the exact version instead made every routine wrangler bump fail an
+  // unrelated Docker-isolation test, which trains people to edit the number
+  // rather than read the check.
+  assert.equal(typeof packageManifest.dependencies.wrangler, "string");
   assert.equal(packageManifest.devDependencies.wrangler, undefined);
+  // Still exact-pinned, though — a range would let the image drift between
+  // builds and make a release non-reproducible.
+  assert.match(packageManifest.dependencies.wrangler, /^\d+\.\d+\.\d+$/u);
 });

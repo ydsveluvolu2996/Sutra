@@ -551,7 +551,14 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
   if (!/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(prefix)) throw new RegistryIntegrityError();
   const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
   const expectedRolePath = input.expectedRolePath ?? "/sutra/";
-  const expectedRoleName = input.expectedRoleName ?? "SutraCollectorRole";
+  // Derived from the supplied ARN, not from the current template's role name.
+  // A registry document written before the SutraReadOnlyRole → SutraCollectorRole
+  // rename carries no expectedRoleName, and defaulting it to the new name would
+  // rewrite the record to describe a role the customer never created — after
+  // which every attestation for that connection fails. `role[3]` is the ARN's
+  // path-and-name, so the segment after the last slash is what actually exists in
+  // the account. The allowlist below still constrains the result.
+  const expectedRoleName = input.expectedRoleName ?? role[3].slice(role[3].lastIndexOf("/") + 1);
   if (
     (roleProvisioningMode !== "sutra_template" && roleProvisioningMode !== "customer_managed") ||
     !ROLE_PATH.test(expectedRolePath) ||

@@ -6,7 +6,7 @@ import LegalShell from "../components/legal-shell";
 export const metadata: Metadata = publicPageMetadata({
   path: "/privacy",
   title: "Privacy Policy",
-  description: "How Sutra collects, uses and protects data — data-minimizing by design, with read-only, customer-owned AWS access and no stored access keys.",
+  description: "How Sutra collects, uses and protects data — data-minimizing by design, with read-only-by-default, customer-owned AWS access and no stored access keys.",
 });
 
 export default function PrivacyPage() {
@@ -15,7 +15,7 @@ export default function PrivacyPage() {
       kicker="Privacy Policy"
       title={<>Privacy, <span className="accent">by design.</span></>}
       updated="Last updated: 21 July 2026"
-      lead="Sutra is a business-to-business cloud-operations platform for managed service providers. We collect the least data needed to run the service, we never store your AWS access keys, and every finding we produce is derived from read-only metadata you explicitly authorize us to observe."
+      lead="Sutra is a business-to-business cloud-operations platform for managed service providers. We collect the least data needed to run the service, we never store your AWS access keys, and every finding we produce is derived from metadata you explicitly authorize us to observe through a read-only-by-default, customer-owned role."
     >
       <p className="lx-legal-note">
         <em>
@@ -41,10 +41,24 @@ export default function PrivacyPage() {
             the web control plane. We collect resource inventory, relationships and evidence — not the contents
             of your workloads or data stores.
           </li>
+          <li>
+            <b>Agentless disk scan results — only if you enable it.</b> Agentless disk scanning is off unless you
+            turn it on. When enabled, Sutra creates an EBS snapshot of a volume in your account, copies it into a
+            Sutra-operated scan account, and inspects the filesystem there to find installed packages, known
+            vulnerabilities, and exposed credential material. The scan therefore <b>does</b> read file contents
+            inside that copy — that is the only way to see a CVE without installing an agent.
+            <br />
+            What Sutra keeps from it is deliberately narrow: the package name and version, the CVE, and the
+            <em> path</em> at which something was found. We do not retain the file contents, and for a detected
+            secret we record its location and type, never its value. The snapshot copy in the scan account is
+            deleted when the scan finishes; the source snapshot in your account is removed by a lifecycle policy
+            you own, because Sutra is denied the ability to delete it.
+          </li>
         </ul>
         <p>
           Data minimization is a design principle, not an afterthought: collector permission packs are
-          metadata-only, and evidence is normalized and scoped before it is promoted into the platform.
+          metadata-only, agentless scan results are reduced to findings rather than contents, and evidence is
+          normalized and scoped before it is promoted into the platform.
         </p>
       </section>
 
@@ -109,7 +123,7 @@ export default function PrivacyPage() {
       <section className="lx-legal-section">
         <h2>7. Security</h2>
         <p>
-          Access is read-only and customer-owned, scoped with a unique platform-generated ExternalId, and
+          Access is read-only by default and customer-owned, scoped with a unique platform-generated ExternalId, and
           validated with positive and negative trust checks. Tenant data is isolated so each customer sees only
           the workspaces explicitly granted to them. See our <a href="/security">Security</a> page for the full
           model.

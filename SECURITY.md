@@ -74,6 +74,8 @@ Do not onboard a production AWS account until the P0 gates in `README.md` and
 - The customer role trusts one exact vendor workload-role principal, not an account
   root or wildcard, and requires the connection's ExternalId.
 - The base customer role is read-only and does not grant secret/payload reads,
+  and the one opt-in write grant (agentless snapshot creation) is denied every
+  destructive action, so no configuration can let Sutra delete customer data,
   mutation, credential creation, `iam:PassRole`, role chaining, command execution,
   invocation, or KMS decryption.
 - Only the isolated AWS broker may call `AssumeRole`. It resolves a registered role

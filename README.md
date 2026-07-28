@@ -51,7 +51,7 @@ general-availability gates are documented in
 
 ## Bounded first-release scope
 
-The first production slice is intentionally read-only.
+The first production slice is intentionally read-only by default. The single exception is agentless disk scanning, which is off unless a customer enables it and, even then, can only create snapshots it tags itself — an explicit IAM deny blocks every delete.
 
 Included in the target slice:
 

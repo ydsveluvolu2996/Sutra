@@ -1052,3 +1052,128 @@ export async function ensureDueAgentlessTeardownSweepsEnqueued(
   }
   return enqueued;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// vuln-feed-refresh
+//
+// Keeps the CVE feed mirror current. Before this, `pnpm vuln:feeds:refresh` was
+// the ONLY path and nothing scheduled it — so new CVEs, EPSS scores and CISA KEV
+// entries reached production only when a human remembered. That degrades
+// silently: the enrichment join still returns rows, they are just ranked against
+// a stale world.
+//
+// Org-independent by nature — the mirror is global, not tenant-scoped — but the
+// job queue is keyed by tenant, so one org carries it and the handler writes
+// nothing tenant-specific.
+//
+// The feed split (KEV + bounded NVD here; EPSS bulk on the host) is decided by
+// lib/vuln-feed-refresh-schedule.ts and explained there. The short version: the
+// Postgres adapter opens a connection per query because workerd forbids socket
+// reuse, so a 349k-row EPSS load belongs on the host, not in a request.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Every 6h. Upstreams publish daily; this bounds staleness to a quarter-day. */
+export const VULN_FEED_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+export interface VulnFeedRefreshDeps {
+  /** Current per-feed asOf + row count, for the staleness decision. */
+  readFeedState: () => Promise<readonly {
+    readonly feed: "kev" | "nvd" | "epss";
+    readonly asOfMs: number | null;
+    readonly rowCount: number;
+  }[]>;
+  /** Plan which feeds to pull. Injected so the decision stays unit-testable. */
+  plan: (states: readonly { readonly feed: "kev" | "nvd" | "epss"; readonly asOfMs: number | null; readonly rowCount: number }[], nowMs: number) => {
+    readonly decisions: readonly { readonly feed: string; readonly action: string; readonly reason: string }[];
+    readonly summary: { readonly refreshing: number; readonly deferredToHost: number; readonly needsHostRun: boolean };
+    readonly disclaimer: string;
+  };
+  /** Fetch + upsert ONE feed. Returns rows written. Must be bounded by the caller. */
+  refreshFeed: (feed: "kev" | "nvd", options: { readonly nvdWindowDays?: number }) => Promise<number>;
+  audit?: (event: Record<string, unknown>) => Promise<void>;
+}
+
+export async function runVulnFeedRefreshJob(
+  job: RunnableJob,
+  deps: VulnFeedRefreshDeps,
+  now = Date.now(),
+): Promise<void> {
+  const states = await deps.readFeedState();
+  const plan = deps.plan(states, now);
+
+  let rowsWritten = 0;
+  let refreshed = 0;
+  const failures: string[] = [];
+
+  for (const decision of plan.decisions) {
+    if (decision.action !== "refresh") continue;
+    if (decision.feed !== "kev" && decision.feed !== "nvd") continue;
+    const windowDays = (decision as { readonly nvdWindowDays?: number }).nvdWindowDays;
+    try {
+      // Per-feed isolation: an upstream outage on one feed must not block the
+      // other. KEV going down should never stop an NVD refresh.
+      rowsWritten += await deps.refreshFeed(decision.feed, windowDays === undefined ? {} : { nvdWindowDays: windowDays });
+      refreshed += 1;
+    } catch (error) {
+      failures.push(`${decision.feed}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const summary = {
+    kind: "vuln-feed-refresh",
+    orgId: job.orgId,
+    jobId: job.id,
+    refreshed,
+    rowsWritten,
+    deferredToHost: plan.summary.deferredToHost,
+    // Recorded on every run so "EPSS is stale" is discoverable from the audit
+    // trail rather than from rankings quietly looking wrong.
+    needsHostRun: plan.summary.needsHostRun,
+    failures,
+    disclaimer: plan.disclaimer,
+  };
+  console.info(`vuln-feed-refresh ${JSON.stringify(summary)}`);
+  if (deps.audit !== undefined) {
+    try {
+      await deps.audit(summary);
+    } catch (error) {
+      console.warn(`vuln-feed-refresh audit write failed: ${String(error)}`);
+    }
+  }
+
+  // Throw only when EVERY attempted feed failed, so one dead upstream does not
+  // dead-letter a run that partially succeeded.
+  if (refreshed === 0 && failures.length > 0) {
+    throw new Error(`vuln-feed-refresh-all-feeds-failed (${failures.length}): ${failures.join("; ")}`);
+  }
+}
+
+export async function ensureDueVulnFeedRefreshEnqueued(
+  queue: JobQueueRepository,
+  orgIds: readonly string[],
+  connectionsForOrg: (orgId: string) => Promise<readonly { readonly customerId: string }[]>,
+  now = Date.now(),
+  intervalMs = VULN_FEED_REFRESH_INTERVAL_MS,
+): Promise<number> {
+  // The mirror is GLOBAL. Refreshing it once per org would multiply identical
+  // upstream fetches by tenant count, so the first readable org carries it and
+  // the rest are skipped entirely.
+  for (const orgId of orgIds) {
+    const connections = await connectionsForOrg(orgId);
+    const carrier = connections[0]?.customerId;
+    if (carrier === undefined) continue;
+    const existing = await queue.list(orgId, carrier);
+    const runs = existing.filter((entry) => entry.kind === "vuln-feed-refresh");
+    if (runs.some((entry) => entry.status === "queued" || entry.status === "leased")) return 0;
+    const newest = runs[0];
+    if (newest !== undefined && now - newest.createdAt < intervalMs) return 0;
+    try {
+      await queue.enqueue({ orgId, customerId: carrier, kind: "vuln-feed-refresh", payload: {} }, now);
+      return 1;
+    } catch {
+      // Inactive customer; try the next org rather than giving up on the mirror.
+      continue;
+    }
+  }
+  return 0;
+}

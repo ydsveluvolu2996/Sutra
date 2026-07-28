@@ -1,0 +1,41 @@
+[Unit]
+# The EPSS half of the CVE feed refresh.
+#
+# The in-app `vuln-feed-refresh` job already handles CISA KEV and a bounded NVD
+# window every 6h. It deliberately does NOT handle EPSS: that feed is ~349k rows,
+# and db/postgres-d1-adapter.ts opens one connection per query because workerd
+# forbids reusing a socket across requests. A bulk load there would exhaust the
+# invocation and leave the mirror partially written while appearing fresh.
+#
+# So EPSS is loaded here, on the host, where a single long-lived `pg` connection
+# can batch it. Without this unit the EPSS column of the mirror only updates when
+# a human runs `pnpm vuln:feeds:refresh` by hand.
+Description=Sutra CVE feed mirror refresh (EPSS bulk load)
+Documentation=https://github.com/ydsveluvolu2996/Sutra
+Requires=docker.service
+After=docker.service network-online.target sutra.service sutra-backup.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/sutra
+# DATABASE_URL is read from the same permission-restricted env file the app uses;
+# it is never passed on the command line where it would reach the process list.
+EnvironmentFile=/etc/sutra/vuln-feeds.conf
+ExecStart=/opt/sutra/deploy/ec2/refresh-vuln-feeds.sh
+Nice=15
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sutra/.sutra /run /var/run
+# Upstream feeds are large and NVD rate-limits; generous but bounded.
+TimeoutStartSec=2700
+
+[Install]
+WantedBy=multi-user.target

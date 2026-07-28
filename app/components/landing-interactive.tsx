@@ -523,7 +523,7 @@ export function TrustPanel(): ReactNode {
       </div>
       {tab === "policy" ? (
         <div className="trust-policy-card" role="tabpanel">
-          <div><span>customer-role.yaml</span><b>READ ONLY</b></div>
+          <div><span>customer-role.yaml</span><b>READ ONLY BY DEFAULT</b></div>
           <pre><code>{TRUST_POLICY}</code></pre>
           <p><span>✓</span> Customer can revoke access by deleting the role.</p>
         </div>

@@ -27,7 +27,15 @@ test("server-renders the Sutra public product site", async () => {
   assert.match(html, /<link rel="canonical" href="https:\/\/www\.sutracmdb\.com\/"\/>/i);
   assert.match(html, /type="application\/ld\+json"[^>]*>[^<]*"SoftwareApplication"/i);
   assert.match(html, /See every risk/i);
-  assert.match(html, /Read-only access/i);
+  // The access posture is a product claim, not decoration, so the landing page has
+  // to state it and state it accurately. "By default" is load-bearing: agentless
+  // disk scanning is an opt-in that can create snapshots, so an unqualified
+  // "read-only" would be false for any customer who enables it.
+  assert.match(html, /Read-only by default/i);
+  // The stronger promise, and the one a prospect actually cares about: enabling
+  // that opt-in still cannot cost them a resource. If this disappears from the
+  // page, the page is no longer making the commitment the IAM template enforces.
+  assert.match(html, /never able to delete anything|explicit deny on all deletes/i);
   assert.match(html, /Cloud security, woven together/i);
   assert.match(html, /Runtime-informed issues/i);
   assert.match(html, /Book a walkthrough/i);

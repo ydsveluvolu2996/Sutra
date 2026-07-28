@@ -6,7 +6,7 @@
 
 ## 1. Executive decision
 
-Build the first sellable slice as a **read-only, multi-tenant AWS asset inventory and cloud security posture product**, not as a drop-in replacement for Amazon Inspector, GuardDuty, or Security Hub.
+Build the first sellable slice as a **read-only-by-default, multi-tenant AWS asset inventory and cloud security posture product**, not as a drop-in replacement for Amazon Inspector, GuardDuty, or Security Hub.
 
 The product has two planes:
 

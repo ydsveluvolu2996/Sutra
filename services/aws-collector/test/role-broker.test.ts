@@ -17,6 +17,7 @@ import {
   TRUST_ATTESTATION_ACTIONS,
   accountIdFromRoleArn,
   parseIamRoleArn,
+  agentlessSnapshotSessionPolicy,
   readonlyMetadataSessionPolicy,
   sanitizeRoleSessionName,
   workloadIdentityAwsClientConfig,
@@ -936,3 +937,93 @@ function brokerWithIdentity(
     now: () => new Date("2026-07-15T00:00:00.000Z"),
   });
 }
+
+// ─── AGENTLESS SESSION CEILING ───────────────────────────────────────────────
+// The product promises Sutra can never delete anything in a customer account.
+// These tests are the code-side half of that promise: the read-only collector cap
+// must stay read-only, and the agentless cap must stay narrow.
+
+const AGENTLESS_ROLE_ARN = "arn:aws:iam::123456789012:role/sutra/SutraCollectorRole";
+
+function agentlessPolicy(): {
+  Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
+} {
+  return JSON.parse(agentlessSnapshotSessionPolicy(AGENTLESS_ROLE_ARN)) as {
+    Statement: Array<{ Effect: string; Action?: string[]; Resource?: string }>;
+  };
+}
+
+function agentlessAllowed(): string[] {
+  return agentlessPolicy().Statement
+    .filter((statement) => statement.Effect === "Allow")
+    .flatMap((statement) => statement.Action ?? []);
+}
+
+test("the agentless session cap allows exactly three writes and nothing more", () => {
+  const writes = agentlessAllowed().filter((action) => !/^sts:|:Describe\*$/u.test(action));
+  // Any fourth write action here is a privilege expansion and must be a
+  // deliberate, reviewed change — not something a refactor can add quietly.
+  assert.deepEqual(writes.sort(), [
+    "ec2:CreateSnapshot",
+    "ec2:CreateTags",
+    "ec2:ModifySnapshotAttribute",
+  ]);
+});
+
+test("the agentless session cap denies every destructive verb explicitly", () => {
+  const denies = agentlessPolicy().Statement
+    .filter((statement) => statement.Effect === "Deny")
+    .flatMap((statement) => statement.Action ?? []);
+  for (const verb of ["ec2:Delete*", "ec2:Detach*", "ec2:Terminate*", "ec2:Stop*", "ec2:Reboot*"]) {
+    assert.ok(denies.includes(verb), verb);
+  }
+  // A wildcard Deny on Modify* would also kill the share the scan depends on, so
+  // the volume/instance verbs are named. Assert the names, not a pattern.
+  assert.ok(denies.includes("ec2:ModifyVolume"));
+  assert.ok(denies.includes("ec2:ModifyInstanceAttribute"));
+  assert.ok(!denies.includes("ec2:Modify*"), "a Modify* deny would break snapshot sharing");
+});
+
+test("no deny pattern in the agentless cap can swallow an action it must allow", () => {
+  // Matches how IAM evaluates a policy wildcard: `*` only, no character classes.
+  const matches = (pattern: string, action: string): boolean =>
+    new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")).join(".*")}$`, "u")
+      .test(action);
+  const denies = agentlessPolicy().Statement
+    .filter((statement) => statement.Effect === "Deny")
+    .flatMap((statement) => statement.Action ?? []);
+  for (const allowed of agentlessAllowed()) {
+    for (const deny of denies) {
+      assert.equal(matches(deny, allowed), false, `${deny} would deny ${allowed}`);
+    }
+  }
+});
+
+test("every deny pattern is a real IAM wildcard — no character classes", () => {
+  const denies = agentlessPolicy().Statement
+    .filter((statement) => statement.Effect === "Deny")
+    .flatMap((statement) => statement.Action ?? []);
+  for (const pattern of denies) {
+    // IAM supports only `*` and `?`. A `[!S]`-style class is silently literal,
+    // so the deny it was meant to express would match nothing at all.
+    assert.match(pattern, /^[a-z0-9]+:[A-Za-z0-9*?]+$/u, pattern);
+  }
+});
+
+test("the agentless cap stays inside the packed-policy limit and is separate from the read cap", () => {
+  const serialized = agentlessSnapshotSessionPolicy(AGENTLESS_ROLE_ARN);
+  assert.ok(serialized.length <= 900, `${serialized.length} bytes`);
+  // The two ceilings must never converge: every scheduled collection uses the
+  // read cap, and it must not gain snapshot-creation because one opt-in feature
+  // needs it.
+  const readCap = readonlyMetadataSessionPolicy(AGENTLESS_ROLE_ARN);
+  assert.notEqual(serialized, readCap);
+  for (const write of ["CreateSnapshot", "CreateTags", "ModifySnapshotAttribute"]) {
+    assert.equal(readCap.includes(write), false, `the read-only cap must not grant ${write}`);
+  }
+});
+
+test("the agentless cap validates the role ARN like every other broker entry point", () => {
+  assert.throws(() => agentlessSnapshotSessionPolicy("not-an-arn"));
+  assert.throws(() => agentlessSnapshotSessionPolicy("arn:aws:iam::123456789012:user/someone"));
+});

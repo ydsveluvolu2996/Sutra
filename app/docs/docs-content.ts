@@ -30,8 +30,10 @@ export const docsIntro = {
   title: "Sutra documentation",
   lede:
     "Everything you need to connect an account, understand what Sutra collects, " +
-    "and get value from each workspace. Sutra is a read-only CNAPP for managed " +
-    "service providers: it observes your AWS and Kubernetes estate, never changes it.",
+    "and get value from each workspace. Sutra is a read-only-by-default CNAPP for " +
+    "managed service providers: it observes your AWS and Kubernetes estate and never " +
+    "changes it, apart from one opt-in scan that can only create snapshots it tags " +
+    "itself and can never delete anything.",
 } as const;
 
 export const docsSections: readonly DocSection[] = [
@@ -49,9 +51,10 @@ export const docsSections: readonly DocSection[] = [
         "and only from the expected identity.",
     ],
     trust:
-      "Read-only by design. Onboarding provisions a customer-owned IAM role scoped to " +
+      "Read-only by default. Onboarding provisions a customer-owned IAM role scoped to " +
       "read/describe/list permissions. Sutra assumes it to collect metadata and never " +
-      "holds long-lived credentials.",
+      "holds long-lived credentials. Agentless disk scanning is a separate stack " +
+      "parameter, off unless you enable it.",
     links: [
       {
         label: "Onboard a client",
@@ -121,19 +124,33 @@ export const docsSections: readonly DocSection[] = [
   {
     id: "trust-read-only",
     eyebrow: "Trust",
-    title: "How Sutra keeps your environment read-only",
+    title: "What Sutra can and cannot do in your account",
     intro: [
       "Sutra is built to observe, not to act. Collection uses read/describe/list AWS " +
-        "APIs and cluster-bound read paths only. There is no code path that mutates a " +
-        "customer resource, and access is always through a role you own and can revoke.",
+        "APIs and cluster-bound read paths only, and access is always through a role " +
+        "you own and can revoke.",
+      "There is exactly one exception, and it is off unless you turn it on. Agentless " +
+        "disk scanning needs an EBS snapshot to read a volume without installing an " +
+        "agent, so enabling it grants CreateSnapshot and CreateTags — nothing else. " +
+        "Snapshots must carry the sutra-agentless tag at creation, can only be shared " +
+        "with Sutra's own scan account, and cannot touch your existing snapshots or " +
+        "backups.",
+      "Sutra can never delete anything. The role carries an explicit IAM deny on " +
+        "DeleteSnapshot, DeleteVolume, DetachVolume, ModifyVolume, TerminateInstances, " +
+        "StopInstances, RebootInstances, DeregisterImage and DeleteTags — a deny that " +
+        "cannot be overridden by any later grant. Because Sutra cannot reap the " +
+        "snapshots it creates, the same template installs a Data Lifecycle Manager " +
+        "policy in your account to do it. Sutra reports what is still outstanding so " +
+        "the cost is visible; you own the cleanup.",
       "Where Sutra helps you remediate — for example patch management — it generates a " +
         "runbook for you to run yourself in your own change process. It never executes " +
         "the command for you.",
     ],
     trust:
-      "You stay in control: the trust role is scoped to read-only permissions, uses a " +
-      "unique ExternalId, and can be revoked instantly. Lambda function listing is " +
-      "intentionally excluded because it can expose environment-variable values.",
+      "You stay in control: the trust role is read-only unless you opt into agentless " +
+      "scanning, uses a unique ExternalId, and can be revoked instantly. Even with " +
+      "agentless enabled, no destructive action is reachable. Lambda function listing " +
+      "is intentionally excluded because it can expose environment-variable values.",
     links: [
       {
         label: "Add an AWS account",
@@ -143,7 +160,7 @@ export const docsSections: readonly DocSection[] = [
       {
         label: "Patch management",
         href: "/patch",
-        description: "The clearest example of read-only + generate-only: Sutra reports and generates, never runs.",
+        description: "The clearest example of report-and-generate-only: Sutra reports and generates, never runs.",
       },
     ],
   },
@@ -417,7 +434,7 @@ export const docsSections: readonly DocSection[] = [
   {
     id: "patch",
     eyebrow: "Patch",
-    title: "Patch management (read-only & generate-only)",
+    title: "Patch management (read-only, generate-only)",
     intro: [
       "Patch management reports patch-compliance posture for SSM-managed EC2 instances " +
         "from the read-only Systems Manager patch state Sutra collects. For any " +

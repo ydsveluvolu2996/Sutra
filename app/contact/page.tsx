@@ -56,7 +56,7 @@ export default function ContactPage() {
             Sutra is the evidence-backed cloud operations platform for AWS MSPs — a live CMDB,
             reachability-proven security, cloud cost and compliance readiness in one graph.
             Send us a note and we&rsquo;ll set up a walkthrough of the product, then help you plan a
-            read-only, customer-owned onboarding.
+            read-only-by-default, customer-owned onboarding.
           </p>
         </section>
 

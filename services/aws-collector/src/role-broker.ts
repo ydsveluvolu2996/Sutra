@@ -65,7 +65,6 @@ const EXPECTED_ROLE_PATH = "/sutra/";
 // this service sets `rootDir: "."` and cannot reach the root lib. The pairing is
 // held by tests/aws-customer-role-artifacts, which compares the two lists.
 const EXPECTED_ROLE_NAMES = ["SutraCollectorRole", "SutraReadOnlyRole"] as const;
-const EXPECTED_ROLE_NAME: string = EXPECTED_ROLE_NAMES[0];
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_SHARED_ROLE_NAME =
@@ -296,6 +295,79 @@ export function readonlyMetadataSessionPolicy(roleArn: string): string {
   // 107% of AWS's packed limit in live validation despite the 2,048-byte limit.
   if (policy.length > 900) {
     throw new ConnectionIntegrityError("The fixed STS session policy exceeds its safe limit");
+  }
+  return policy;
+}
+
+/**
+ * The exact-action set an agentless snapshot scan needs on the CUSTOMER role.
+ *
+ * `ec2:CreateSnapshot` and `ec2:CreateTags` create the snapshot with its
+ * `sutra-agentless` tag in one call — the tag has to be applied AT creation
+ * because the customer role's own grant is conditioned on
+ * `aws:RequestTag/sutra-agentless`. An untagged snapshot would be both
+ * un-shareable and un-reapable. `ModifySnapshotAttribute` shares that snapshot
+ * with the Sutra scan account so it can be copied and read.
+ *
+ * Reads come from the shared `ec2:Describe*` family below; nothing else is here.
+ */
+const SESSION_AGENTLESS_WRITE_ACTIONS = [
+  "ec2:CreateSnapshot",
+  "ec2:CreateTags",
+  "ec2:ModifySnapshotAttribute",
+] as const;
+
+/**
+ * Destructive verbs named in an explicit session-level Deny.
+ *
+ * Strictly speaking this is redundant: a session policy is an Allow-intersection,
+ * so anything absent from the Allow list is already denied, and the customer role
+ * carries its own `NeverDeleteAnything` deny. It is written out anyway because
+ * the product makes a hard promise — Sutra can never delete anything in a
+ * customer account — and a promise that rests only on an omission is one edit
+ * away from being false. A Deny cannot be widened by a later Allow.
+ */
+const SESSION_AGENTLESS_DENY_ACTIONS = [
+  "ec2:Delete*",
+  "ec2:Detach*",
+  "ec2:Terminate*",
+  "ec2:Stop*",
+  "ec2:Reboot*",
+  // NOT a `ec2:Modify*` wildcard: that would also deny ModifySnapshotAttribute,
+  // which the Allow above needs to share the snapshot. IAM wildcards are only
+  // `*` and `?` — there is no character-class negation — so the volume verbs are
+  // named explicitly rather than expressed as "Modify except Snapshot".
+  "ec2:ModifyVolume",
+  "ec2:ModifyVolumeAttribute",
+  "ec2:ModifyInstanceAttribute",
+  "ec2:Deregister*",
+] as const;
+
+/**
+ * Session ceiling for the agentless snapshot path ONLY.
+ *
+ * Deliberately a separate function rather than extra entries in
+ * `SESSION_READ_ACTIONS`: the collector runs on every schedule, and giving every
+ * collector session the ability to create snapshots to serve one opt-in feature
+ * is exactly the privilege creep the read-only session cap exists to prevent.
+ * Call this only from the agentless executor's credential path, and only for a
+ * connection whose customer role was deployed with agentless scanning enabled —
+ * otherwise the customer role denies the write anyway and the scan fails with a
+ * confusing AccessDenied instead of a readiness error.
+ */
+export function agentlessSnapshotSessionPolicy(roleArn: string): string {
+  parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      // Reads: the scan has to resolve volumes and poll snapshot progress.
+      { Effect: "Allow", Action: ["sts:GetCallerIdentity", "ec2:Describe*"], Resource: "*" },
+      { Effect: "Allow", Action: SESSION_AGENTLESS_WRITE_ACTIONS, Resource: "*" },
+      { Effect: "Deny", Action: SESSION_AGENTLESS_DENY_ACTIONS, Resource: "*" },
+    ],
+  });
+  if (policy.length > 900) {
+    throw new ConnectionIntegrityError("The agentless STS session policy exceeds its safe limit");
   }
   return policy;
 }
@@ -654,8 +726,16 @@ export class AwsRoleBroker {
         resolved.connection.roleArn,
         resolved.roleProvisioningMode,
       );
-    } catch {
-      throw new UnsafeTrustPolicyError("ROLE_CONTRACT");
+    } catch (reason) {
+      const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
+      // The specific mismatch stays OUT of the error code on purpose: the code is
+      // surfaced to API callers, and naming which statement failed would describe
+      // the customer's policy shape back to whoever asked. But discarding the
+      // reason entirely makes an attestation regression undiagnosable — the whole
+      // contract check collapses to one opaque string. Keep it as a cause, which
+      // reaches server logs and test output and never the response body.
+      (failure as { cause?: unknown }).cause = reason;
+      throw failure;
     }
   }
 
@@ -702,7 +782,23 @@ export class AwsRoleBroker {
 
     const roleProvisioningMode = connection.roleProvisioningMode ?? "sutra_template";
     const expectedRolePath = connection.expectedRolePath ?? EXPECTED_ROLE_PATH;
-    const expectedRoleName = connection.expectedRoleName ?? EXPECTED_ROLE_NAME;
+    // Fall back to the role name in the connection's OWN stored ARN, not to the
+    // current template's role name.
+    //
+    // Connection records written before the SutraReadOnlyRole → SutraCollectorRole
+    // rename have no `expectedRoleName` field. Defaulting those to the current
+    // constant attests them against a role name the customer never deployed, so
+    // assertExpectedRole rejects the identity and every collection for that
+    // customer fails — a rename in our repo silently breaking accounts that were
+    // never touched. The stored ARN is the authoritative record of what the
+    // customer actually created, and it is the same value assertExpectedRole
+    // compares against, so deriving from it is correct for legacy and current
+    // records alike.
+    //
+    // This is not a hole: the allowlist and unsafe-name checks below still run on
+    // the derived name, so a tampered stored ARN cannot smuggle an unexpected role
+    // past the sutra_template allowlist.
+    const expectedRoleName = connection.expectedRoleName ?? parsedRoleArn.roleName;
     if (
       (roleProvisioningMode !== "sutra_template" &&
         roleProvisioningMode !== "customer_managed") ||

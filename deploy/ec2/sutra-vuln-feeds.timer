@@ -1,0 +1,17 @@
+[Unit]
+Description=Refresh the Sutra CVE feed mirror (EPSS bulk + KEV + NVD) daily
+Documentation=https://github.com/ydsveluvolu2996/Sutra
+
+[Timer]
+# 03:40 UTC: after the 02:15 backup so the two never contend for the database,
+# and after EPSS publishes its daily scores.
+OnCalendar=*-*-* 03:40:00 UTC
+# Catches up after a host reboot — a missed day of CVE data is exactly what this
+# unit exists to prevent.
+Persistent=true
+RandomizedDelaySec=20m
+AccuracySec=1m
+Unit=sutra-vuln-feeds.service
+
+[Install]
+WantedBy=timers.target

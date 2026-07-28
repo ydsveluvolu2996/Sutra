@@ -37,7 +37,7 @@ export default function TermsPage() {
       <section className="lx-legal-section">
         <h2>2. Description of the service</h2>
         <p>
-          Sutra provides read-only cloud-operations, security-posture, cost and compliance-readiness tooling for
+          Sutra provides read-only-by-default cloud-operations, security-posture, cost and compliance-readiness tooling for
           AWS and Amazon EKS environments. Findings are derived from collected metadata and are provided for
           informational and operational purposes; they do not guarantee that an environment is secure,
           compliant or free of risk. We may improve, change or discontinue features of the service, and will use
@@ -72,8 +72,17 @@ export default function TermsPage() {
         <p>
           You are responsible for the AWS accounts, IAM role and permissions you grant to Sutra, for maintaining
           the confidentiality of user credentials, and for the actions taken by users under your account.
-          Because Sutra is read-only, remediation and configuration changes in your environment remain your
+          Because Sutra does not remediate, configuration changes in your environment remain your
           responsibility — Sutra generates reviewed suggestions, never automatic changes.
+        </p>
+        <p>
+          One optional capability is an exception to read-only access and is disabled unless you enable it:
+          agentless disk scanning, which may create EBS snapshots in your account tagged{" "}
+          <code>sutra-agentless</code> in order to read volume contents without an agent. If you enable it, you
+          are responsible for the AWS storage charges those snapshots incur. Sutra holds an explicit IAM deny on
+          every destructive action, including snapshot deletion, so it <b>cannot</b> delete the snapshots it
+          creates; cleanup is performed by a Data Lifecycle Manager policy in your own account. Sutra reports
+          outstanding snapshots but does not remove them.
         </p>
       </section>
 

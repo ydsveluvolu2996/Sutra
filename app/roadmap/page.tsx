@@ -60,7 +60,7 @@ const capabilityRows = [
   ["CSPM", "8 configuration controls + 3 service-coverage controls", "Reviewed packs, exceptions and compliance mappings", "Gate → expand"],
   ["Native findings", "Bounded read-only imports from enabled Inspector, GuardDuty and Security Hub services", "Deeper correlation, ownership, lifecycle and workflow", "Gate → expand"],
   ["SIEM", "Not implemented; no event/log ingestion, normalization or correlation", "Tenant-safe telemetry ingestion, detection and retention", "Expand"],
-  ["Resource changes", "None; collector has zero write permissions", "Separate approved remediation plane", "Expand"],
+  ["Resource changes", "None by default. One opt-in grant (agentless disk scanning) may create tagged EBS snapshots and can never delete anything — an explicit IAM deny covers every destructive verb", "Separate approved remediation plane", "Gate → expand"],
   ["FinOps", "Read-only Cost Explorer trends, breakdowns, forecast provenance and evidence-derived signals", "CUR 2.0, allocation, budgets, commitments, utilization-aware optimization and billing reconciliation", "Gate → expand"],
   ["Integrations", "JSON/CSV export only", "ITSM, SIEM, PSA, chat, webhooks and public API", "Expand"],
   ["Multi-cloud", "Not implemented", "Azure, GCP and Kubernetes collectors", "Horizon"],

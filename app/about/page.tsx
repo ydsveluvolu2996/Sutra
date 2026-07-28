@@ -17,7 +17,7 @@ export const metadata: Metadata = publicPageMetadata({
   path: "/about",
   title: "About us",
   description:
-    "Sutra is the evidence-honest cloud operations and security platform for AWS MSPs — read-only, reachability-backed, and citing the observation behind every finding.",
+    "Sutra is the evidence-honest cloud operations and security platform for AWS MSPs — read-only by default, reachability-backed, and citing the observation behind every finding.",
 });
 
 const PRINCIPLES: Array<{ n: string; h: string; p: string }> = [
@@ -47,14 +47,14 @@ export default function AboutPage() {
           No black boxes. <span className="accent">Just cited evidence.</span>
         </>
       }
-      lead="Sutra is a read-only cloud operations and security platform for AWS and Amazon EKS, built for managed service providers. We started it because security tools ask you to trust a score — and we wanted a platform that shows the observation, the path, and the verdict behind every finding."
+      lead="Sutra is a read-only-by-default cloud operations and security platform for AWS and Amazon EKS, built for managed service providers. We started it because security tools ask you to trust a score — and we wanted a platform that shows the observation, the path, and the verdict behind every finding."
     >
       <div className="lx-about-cards">
         <section className="lx-about-card">
           <span className="lx-about-tag">Our Mission</span>
           <h2>Give MSPs a platform that proves every finding.</h2>
           <p>
-            Our mission is to give managed service providers an evidence-honest, read-only cloud-operations and
+            Our mission is to give managed service providers an evidence-honest, read-only-by-default cloud-operations and
             security platform for AWS and Amazon EKS — one that unifies inventory, reachability-backed security,
             cost and compliance readiness, and cites the exact observation behind every result. No agents on your
             workloads, no stored access keys, no verdict you have to take on faith.
