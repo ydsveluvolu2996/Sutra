@@ -85,6 +85,10 @@ export const IMPLEMENTED_READ_ACTIONS = [
   "ec2:DescribeInternetGateways",
   "ec2:DescribeAddresses",
   "ec2:DescribeSnapshots",
+  // Flow-log CONFIGURATION only. It reports whether a VPC is observable; the
+  // records themselves live in CloudWatch Logs or S3 and need permissions this
+  // role deliberately does not hold.
+  "ec2:DescribeFlowLogs",
   "elasticloadbalancing:DescribeLoadBalancers",
   "elasticloadbalancing:DescribeListeners",
   "elasticloadbalancing:DescribeTargetGroups",

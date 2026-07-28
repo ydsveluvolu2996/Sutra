@@ -112,7 +112,7 @@ account root.
 
 The reviewed operator permission-set inline policy for this pilot is checked in as
 `infrastructure/sutra-operator-permission-set-policy.json` (SHA-256
-`391fbfb39bba1237e054e9131c923065ae3ea448fcdbf0409862f60649ce57dc`). It is
+`07bb29c0c1edf17d9b7747229983f3e41f05970e6a7cb5f33abbc9b33daf39d3`). It is
 deliberately fixed to account `111122223333`, Region `us-east-1`, stack
 `sutra-local-collector`, the current Identity Center role suffix, the exact source
 role and boundary, the deterministic template bucket, and both reviewed template
@@ -227,7 +227,7 @@ in the generated runtime file:
 ```bash
 AWS_PROFILE=sutra-demo-collector \
 SUTRA_COLLECTOR_PRINCIPAL_ARN='arn:aws:iam::111122223333:role/sutra/SutraLocalCollectorRole' \
-SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/standard-2026-07.2/8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml?versionId=publisher-output' \
+SUTRA_CUSTOMER_ROLE_TEMPLATE_URL='https://your-reviewed-artifacts.s3.us-east-1.amazonaws.com/templates/standard-2026-07.3/8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml?versionId=publisher-output' \
 SUTRA_LIVE_AWS_ACK='I_ACKNOWLEDGE_THIS_WILL_CONTACT_AWS' \
 pnpm live:aws:host
 ```

@@ -62,7 +62,7 @@ test("registry stages verified trust until the control plane explicitly activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07.2" as const,
+      permissionPackVersion: "standard-2026-07.3" as const,
       capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(
@@ -82,7 +82,7 @@ test("registry stages verified trust until the control plane explicitly activate
         { tenantId: "org_local_sutra" },
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.permissionPackVersion,
-      "standard-2026-07.2",
+      "standard-2026-07.3",
     );
     await registry.activateOnboarding(
       { tenantId: "org_local_sutra" },
@@ -257,13 +257,13 @@ test("v1 and v2 registry documents preserve the previous pack and migrate in pla
           trustPolicyAttested: true,
           permissionPolicyAttested: true,
           sessionPolicyApplied: true,
-          permissionPackVersion: "standard-2026-07.2",
+          permissionPackVersion: "standard-2026-07.3",
           capabilityAssessment: { grantedActions: [], missingActions: [] },
         },
       );
       const after = await registry.resolve({ tenantId: candidate.tenantId }, connectionId);
       assert.equal(after?.status, "ACTIVE");
-      assert.equal(after?.permissionPackVersion, "standard-2026-07.2");
+      assert.equal(after?.permissionPackVersion, "standard-2026-07.3");
 
       const migrated = await readEncryptedDocument(path, keyBytes) as {
         version: number;
@@ -272,7 +272,7 @@ test("v1 and v2 registry documents preserve the previous pack and migrate in pla
       assert.equal(migrated.version, 3);
       assert.equal(
         migrated.connections[`org_local_sutra\u001f${connectionId}`]?.permissionPackVersion,
-        "standard-2026-07.2",
+        "standard-2026-07.3",
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -352,7 +352,7 @@ test("staged activation is role-bound and cannot remove an active connection", a
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07.2" as const,
+      permissionPackVersion: "standard-2026-07.3" as const,
       capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(

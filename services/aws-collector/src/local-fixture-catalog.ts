@@ -309,7 +309,7 @@ function fixtureDefinition(input: {
     roleArn: `arn:aws:iam::${input.accountId}:role/sutra-fixture/SutraReadOnlyRole`,
     externalId: `local-fixture-${input.fixtureId}-external-id`,
       status: "ACTIVE",
-      permissionPackVersion: "standard-2026-07.2",
+      permissionPackVersion: "standard-2026-07.3",
     sessionNamePrefix: "sutra-fixture-",
     enabledRegions: [...input.enabledRegions],
     createdAt: "2026-07-01T00:00:00.000Z",

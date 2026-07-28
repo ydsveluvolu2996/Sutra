@@ -26,6 +26,7 @@ import {
   CURRENT_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
+  PRIOR_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   isValidAwsRegionSelection,
@@ -746,6 +747,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   if (
     permissionPackVersion !== LEGACY_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== PRIOR_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();

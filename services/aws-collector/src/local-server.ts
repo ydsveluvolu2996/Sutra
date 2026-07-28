@@ -1038,7 +1038,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07.2",
+        permissionPackVersion: "standard-2026-07.3",
         capabilityAssessment: {
           grantedActions: [...IMPLEMENTED_READ_ACTIONS],
           missingActions: [],

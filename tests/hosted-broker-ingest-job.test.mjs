@@ -22,7 +22,7 @@ const CONN_A = `conn_${"a".repeat(32)}`;
 const CONN_B = `conn_${"b".repeat(32)}`;
 const ACCOUNT_A = "111111111111";
 const ACCOUNT_B = "222222222222";
-const PERMISSION_PACK = "standard-2026-07.2";
+const PERMISSION_PACK = "standard-2026-07.3";
 
 // Real repository deps: this is the exact wiring buildJobHandlers registers, so
 // a passing test exercises the true createSyncRun -> persistSnapshot path.

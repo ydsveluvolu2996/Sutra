@@ -112,6 +112,7 @@ Resources:
                   - ec2:DescribeInternetGateways
                   - ec2:DescribeAddresses
                   - ec2:DescribeSnapshots
+                  - ec2:DescribeFlowLogs
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:DescribeTargetGroups
@@ -168,6 +169,7 @@ Resources:
                   - ec2:DescribeInternetGateways
                   - ec2:DescribeAddresses
                   - ec2:DescribeSnapshots
+                  - ec2:DescribeFlowLogs
                   - elasticloadbalancing:DescribeLoadBalancers
                   - elasticloadbalancing:DescribeListeners
                   - elasticloadbalancing:DescribeTargetGroups
@@ -220,7 +222,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: standard-2026-07.2
+          Value: standard-2026-07.3
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -234,4 +236,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: standard-2026-07.2
+    Value: standard-2026-07.3

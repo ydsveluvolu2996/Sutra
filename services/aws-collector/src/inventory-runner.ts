@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/client-cloudtrail";
 import {
   DescribeAddressesCommand,
+  DescribeFlowLogsCommand,
   DescribeNetworkAclsCommand,
   DescribeNetworkInterfacesCommand,
   DescribeInstancesCommand,
@@ -25,6 +26,8 @@ import {
   EC2Client,
   type DescribeAddressesCommandInput,
   type DescribeAddressesCommandOutput,
+  type DescribeFlowLogsCommandInput,
+  type DescribeFlowLogsCommandOutput,
   type DescribeNetworkAclsCommandInput,
   type DescribeNetworkAclsCommandOutput,
   type DescribeNetworkInterfacesCommandInput,
@@ -390,6 +393,10 @@ export interface Ec2InventoryClient {
     input: DescribeInternetGatewaysCommandInput,
     abortSignal?: AbortSignal,
   ): Promise<DescribeInternetGatewaysCommandOutput>;
+  describeFlowLogs?(
+    input: DescribeFlowLogsCommandInput,
+    signal?: AbortSignal,
+  ): Promise<DescribeFlowLogsCommandOutput>;
   describeNetworkAcls(
     input: DescribeNetworkAclsCommandInput,
     abortSignal?: AbortSignal,
@@ -669,6 +676,8 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
         sendSdkCommand(client, new DescribeRouteTablesCommand(input), signal),
       describeInternetGateways: (input, signal) =>
         sendSdkCommand(client, new DescribeInternetGatewaysCommand(input), signal),
+      describeFlowLogs: (input, signal) =>
+        sendSdkCommand(client, new DescribeFlowLogsCommand(input), signal),
       describeNetworkAcls: (input, signal) =>
         sendSdkCommand(client, new DescribeNetworkAclsCommand(input), signal),
       describeAddresses: (input, signal) =>
@@ -867,6 +876,7 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
 
   public ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient {
     const client = this.delegate.ec2(region, credentials);
+    const describeFlowLogs = client.describeFlowLogs;
     const describeAddresses = client.describeAddresses;
     const describeSnapshots = client.describeSnapshots;
     return {
@@ -884,6 +894,9 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
       describeNetworkAcls: (input) => this.run((signal) => client.describeNetworkAcls(input, signal)),
       // Forwarded only when the delegate provides them, so pre-existing test
       // factories that omit these optional read-only cost collectors stay intact.
+      ...(describeFlowLogs === undefined
+        ? {}
+        : { describeFlowLogs: (input) => this.run((signal) => describeFlowLogs(input, signal)) }),
       ...(describeAddresses === undefined
         ? {}
         : { describeAddresses: (input) => this.run((signal) => describeAddresses(input, signal)) }),
@@ -1231,6 +1244,15 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         task("ec2.network-acls", "ec2", "network-acls", region, (state) =>
           collectNetworkAcls(context, region, ec2, observedAt, state),
         ),
+        // Flow-log configuration. Optional on the client for the same reason as
+        // describeAddresses below: making it required would break every existing
+        // test factory, and a factory that omits it simply collects no flow logs,
+        // which the coverage engine reports as absent rather than as "no gaps".
+        ...(ec2.describeFlowLogs === undefined ? [] : [
+          task("ec2.flow-logs", "ec2", "flow-logs", region, (state) =>
+            collectFlowLogs(context, region, ec2, observedAt, state),
+          ),
+        ]),
         // Read-only cost-waste evidence. Registered only when the ec2 client
         // exposes the (optional) call, mirroring the optional `eks` collector so
         // pre-existing test factories are unaffected.
@@ -1704,6 +1726,69 @@ async function collectInternetGateways(
     if (token === undefined) return;
   }
   throw new InventoryProtocolError("EC2 DescribeInternetGateways exceeded pagination limit");
+}
+
+/**
+ * Collects VPC flow log CONFIGURATION (ec2:DescribeFlowLogs).
+ *
+ * This records whether a VPC is observable, NOT what traffic occurred. The flow
+ * records live in a CloudWatch Logs group or an S3 bucket and reading them needs
+ * logs:FilterLogEvents / s3:GetObject, which the customer role deliberately does
+ * not grant. lib/aws-flow-log-coverage.ts turns these rows into a coverage
+ * verdict and states that boundary rather than letting "covered" read as
+ * "analysed".
+ *
+ * A VPC with no flow log is the actionable finding: when something happens
+ * there, the evidence does not exist and cannot be recovered retroactively.
+ */
+async function collectFlowLogs(
+  context: InventoryCollectionContext,
+  region: string,
+  client: Ec2InventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const describe = client.describeFlowLogs;
+  if (describe === undefined) return; // task is only registered when present
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await describe(
+      token === undefined ? { MaxResults: 100 } : { MaxResults: 100, NextToken: token },
+    );
+    const resources = (output.FlowLogs ?? []).flatMap((log) => {
+      if (log.FlowLogId === undefined) return [];
+      return [resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "ec2",
+        "aws.ec2.flow-log",
+        log.FlowLogId,
+        `arn:${context.partition}:ec2:${region}:${context.accountId}:vpc-flow-log/${log.FlowLogId}`,
+        "ec2:DescribeFlowLogs",
+        compact({
+          // ResourceId is the VPC, subnet or ENI this log covers — the join key
+          // the coverage engine needs.
+          resourceId: log.ResourceId,
+          // Only ACTIVE produces records; anything else is configuration that
+          // looks like coverage and delivers none.
+          flowLogStatus: log.FlowLogStatus,
+          deliverLogsStatus: log.DeliverLogsStatus,
+          // REJECT-only logging cannot answer "what did the attacker reach",
+          // so the traffic type is load-bearing, not cosmetic.
+          trafficType: log.TrafficType,
+          logDestinationType: log.LogDestinationType,
+        }),
+        log.Tags,
+      )];
+    });
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.NextToken, seen, "EC2 DescribeFlowLogs");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("EC2 DescribeFlowLogs exceeded pagination limit");
 }
 
 async function collectNetworkAcls(

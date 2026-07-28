@@ -43,6 +43,7 @@ const COLLECTOR_COMMANDS = {
   DescribeRouteTablesCommand: { action: "ec2:DescribeRouteTables", scope: "customer" },
   DescribeInternetGatewaysCommand: { action: "ec2:DescribeInternetGateways", scope: "customer" },
   DescribeAddressesCommand: { action: "ec2:DescribeAddresses", scope: "customer" },
+  DescribeFlowLogsCommand: { action: "ec2:DescribeFlowLogs", scope: "customer" },
   DescribeSnapshotsCommand: { action: "ec2:DescribeSnapshots", scope: "customer" },
   DescribeLoadBalancersCommand: { action: "elasticloadbalancing:DescribeLoadBalancers", scope: "customer" },
   DescribeListenersCommand: { action: "elasticloadbalancing:DescribeListeners", scope: "customer" },

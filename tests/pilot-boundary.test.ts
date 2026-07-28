@@ -213,7 +213,7 @@ describe("collector boundary validation", () => {
       trustPolicyAttested: true,
       permissionPolicyAttested: true,
       sessionPolicyApplied: true,
-      permissionPackVersion: "standard-2026-07.2",
+      permissionPackVersion: "standard-2026-07.3",
       capabilityAssessment: {
         grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
         missingActions: [],

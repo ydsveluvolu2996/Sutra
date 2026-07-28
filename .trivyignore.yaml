@@ -2,11 +2,45 @@ misconfigurations:
   - id: AWS-0104
     paths:
       - deploy/ec2/cloudformation-single-node.yaml
+      - infrastructure/agentless-scan-account.yaml
     statement: >-
       The private-beta host has no inbound security-group rules. Its explicit,
       port-bounded egress rules must reach dynamic AWS APIs, Cloudflare Tunnel,
       DNS and signed package endpoints, for which stable destination CIDRs are
       not available. Runtime validation separately asserts the empty ingress.
+      The agentless scan-account security group is the same shape and the same
+      trade-off: no inbound rules at all, and a single egress rule bounded to tcp
+      443 so the scanner task can reach ECR, S3, the EBS direct APIs and CloudWatch
+      Logs, none of which publish stable CIDRs. This is a KNOWN, ACCEPTED CRITICAL
+      rather than a clean result, and the correct hardening is named so it is not
+      quietly forgotten: replace the internet egress with interface VPC endpoints
+      for ECR/logs/ebs plus a free S3 gateway endpoint, which removes 0.0.0.0/0
+      entirely. That was deferred because the scan VPC deliberately has no NAT (a
+      NAT idles at more than this feature costs in use) and four interface
+      endpoints carry their own standing hourly charge. Until then the blast radius
+      is bounded by the scanner task holding no AWS credentials and
+      SutraAgentlessScannerRole denying rds, secretsmanager, ssm:GetParameter*,
+      dynamodb, iam, sts:AssumeRole and organizations.
+  - id: DS-0002
+    paths:
+      - services/agentless-scanner/Dockerfile
+    statement: >-
+      The only image here without a non-root USER, and the exception is deliberate:
+      this container's entire job is to mount a block device derived from a customer
+      EBS snapshot, and mount(2) requires CAP_SYS_ADMIN. A USER directive would make
+      the mount fail, so the real question is not root-vs-non-root but where the
+      privileged mount lives. Compensating controls: the container holds no AWS
+      credentials and never creates, shares or deletes a snapshot (the executor owns
+      that lifecycle); it runs only in Sutra's isolated scan account against a
+      throwaway snapshot copy, never in a customer account;
+      SutraAgentlessScannerRole explicitly denies rds, secretsmanager,
+      ssm:GetParameter*, dynamodb, iam, sts:AssumeRole and organizations, so root
+      here reaches no control-plane data; and the filesystem is mounted
+      ro,noexec,nosuid,nodev so nothing on a hostile disk can be executed. Task
+      definitions must grant SYS_ADMIN only, never privileged:true. Revisit when the
+      scanner is live-validated: the stronger design moves the mount to the task
+      host so the Trivy parsing - the step that actually reads untrusted content -
+      runs unprivileged.
   - id: KSV-0109
     paths:
       - deploy/charts/sutra-visibility/charts/trivy-operator/templates/configmaps/trivy-operator-config.yaml

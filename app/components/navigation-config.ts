@@ -11,6 +11,7 @@ export type NavKey =
   | "vulnerabilities"
   | "vulnerabilities_exploitability"
   | "network_exposure"
+  | "flow_log_coverage"
   | "registry_inventory"
   | "iac_scan"
   | "agentless_scans"
@@ -161,6 +162,7 @@ export const navGroups: readonly NavGroup[] = [
       { key: "vulnerabilities", label: "Vulnerability & exposure", href: "/vulnerabilities", capabilities: readConnection },
       { key: "vulnerabilities_exploitability", label: "Exploitability ranking", href: "/vulnerabilities/exploitability", capabilities: readConnection },
       { key: "network_exposure", label: "Network exposure", href: "/network-exposure", capabilities: readConnection },
+      { key: "flow_log_coverage", label: "Flow-log coverage", href: "/flow-log-coverage", capabilities: readConnection },
       { key: "registry_inventory", label: "Registry inventory", href: "/registry/inventory", capabilities: readConnection },
       { key: "iac_scan", label: "IaC scan", href: "/iac-scan", capabilities: readWorkspace },
       { key: "agentless_scans", label: "Agentless scanning", href: "/agentless-scans", capabilities: readConnection },

@@ -142,7 +142,7 @@ the session policy as a substitute for a dedicated least-privilege role.
 
 ### Permission-pack upgrade order
 
-`standard-2026-07.2` adds live attached-policy attestation. It is intentionally
+`standard-2026-07.3` adds live attached-policy attestation. It is intentionally
 distinct from `standard-2026-07`: a role deployed from the earlier template does
 not authorize that self-inspection call. Upgrade in two phases—publish and apply
 the immutable `.2` customer-role template, revalidate the unchanged role ARN until

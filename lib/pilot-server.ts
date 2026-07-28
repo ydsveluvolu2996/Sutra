@@ -411,7 +411,7 @@ export async function verifyCollectorConnection(input: {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07.2";
+  readonly permissionPackVersion: "standard-2026-07.3";
   readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };

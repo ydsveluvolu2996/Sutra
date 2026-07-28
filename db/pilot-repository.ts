@@ -34,7 +34,7 @@ import { isExactDeclaredAwsCapabilityPartition } from "../lib/aws-permission-cap
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "standard-2026-07.2";
+const PILOT_PERMISSION_PACK = "standard-2026-07.3";
 export const CURRENT_PILOT_PERMISSION_PACK = PILOT_PERMISSION_PACK;
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
@@ -104,7 +104,7 @@ export interface VerifiedRoleEvidence {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07.2";
+  readonly permissionPackVersion: "standard-2026-07.3";
   readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 }
 

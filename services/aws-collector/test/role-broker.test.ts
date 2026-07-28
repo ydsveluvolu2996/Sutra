@@ -91,7 +91,7 @@ function connection(
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status: "ACTIVE",
-    permissionPackVersion: "standard-2026-07.2",
+    permissionPackVersion: "standard-2026-07.3",
     sessionNamePrefix: "mspcmdb-",
     ...overrides,
   };
@@ -182,7 +182,7 @@ function expectedRoleContractClient(
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "standard-2026-07.2" },
+        { key: "sutra:permission-pack", value: "standard-2026-07.3" },
         {
           key: "sutra:managed-by",
           value: stored.roleProvisioningMode === "customer_managed" ? "customer" : "cloudformation",

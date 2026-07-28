@@ -52,6 +52,7 @@ export const CUSTOMER_ROLE_METADATA_ACTIONS = [
   "ec2:DescribeInternetGateways",
   "ec2:DescribeAddresses",
   "ec2:DescribeSnapshots",
+  "ec2:DescribeFlowLogs",
   "elasticloadbalancing:DescribeLoadBalancers",
   "elasticloadbalancing:DescribeListeners",
   "elasticloadbalancing:DescribeTargetGroups",

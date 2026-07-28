@@ -33,7 +33,7 @@ The customer role carries an explicit Deny with the exact implemented-action exc
   `3121960e5786beede40cca12eea8a34e3e3a047e1856501d3122561fc11a904f`
 - Historical artifact note: that digest identifies the superseded activation
   artifact. It must not be compared with the mutable working-tree path below.
-- Current successor permission pack: `standard-2026-07.2`
+- Current successor permission pack: `standard-2026-07.3`
 - Current canonical template: `public/sutra-customer-onboarding-role.yaml`
 - Current canonical template SHA-256:
   `8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98`

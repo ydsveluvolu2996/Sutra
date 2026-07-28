@@ -46,7 +46,7 @@ function verifiedRoleEvidence(accountId = LIVE_ACCOUNT_ID, partition = "aws") {
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "standard-2026-07.2",
+    permissionPackVersion: "standard-2026-07.3",
     capabilityAssessment: {
       grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
       missingActions: [],
@@ -83,7 +83,7 @@ async function provisionValidatedLiveConnection(database, roleArn = DEDICATED_LI
          role_arn, external_id_ciphertext, external_id_key_version,
          permission_pack_version, status, enabled_regions_json, last_validated_at)
        VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, 'test-ciphertext',
-               'test-key-v1', 'standard-2026-07.2', 'active', '["us-east-1"]', ?)`,
+               'test-key-v1', 'standard-2026-07.3', 'active', '["us-east-1"]', ?)`,
     ).bind(
       LIVE_CONNECTION_ID,
       FIXTURE.tenantId,
@@ -331,7 +331,7 @@ describe("recoverable initial AWS connection handoff", () => {
           trustPolicyAttested: true,
           permissionPolicyAttested: true,
           sessionPolicyApplied: true,
-          permissionPackVersion: "standard-2026-07.2",
+          permissionPackVersion: "standard-2026-07.3",
           capabilityAssessment: {
             grantedActions,
             missingActions: [missingAction],
@@ -374,7 +374,7 @@ describe("recoverable initial AWS connection handoff", () => {
           trustPolicyAttested: true,
           permissionPolicyAttested: true,
           sessionPolicyApplied: true,
-          permissionPackVersion: "standard-2026-07.2",
+          permissionPackVersion: "standard-2026-07.3",
           capabilityAssessment: completeCapabilities,
         },
       };
@@ -838,7 +838,7 @@ describe("AWS trust health remains separate from collection health", () => {
       assert.equal(
         (await database.prepare("SELECT permission_pack_version FROM aws_connections WHERE id = ?")
           .bind(LIVE_CONNECTION_ID).first())?.permission_pack_version,
-        "standard-2026-07.2",
+        "standard-2026-07.3",
       );
       await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
       await assert.rejects(
@@ -901,7 +901,7 @@ describe("AWS trust connection lifecycle", () => {
         exactTrustPolicyAttested: true,
         expectedCallerIdentityMatched: true,
         missingExternalIdDenied: true,
-        permissionPackVersion: "standard-2026-07.2",
+        permissionPackVersion: "standard-2026-07.3",
         sessionPolicyApplied: true,
         wrongExternalIdDenied: true,
       });

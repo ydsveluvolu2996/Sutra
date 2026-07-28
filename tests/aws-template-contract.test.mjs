@@ -35,7 +35,7 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.2");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.3");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -49,6 +49,8 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     "ec2:DescribeInternetGateways",
     "ec2:DescribeAddresses",
     "ec2:DescribeSnapshots",
+    // Flow-log configuration, added in permission pack standard-2026-07.3.
+    "ec2:DescribeFlowLogs",
     "elasticloadbalancing:DescribeLoadBalancers",
     "elasticloadbalancing:DescribeListeners",
     "elasticloadbalancing:DescribeTargetGroups",
@@ -108,8 +110,8 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.2/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.2/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.3/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.3/u);
 
   const implemented = statementActions(infrastructure, "ImplementedMetadataApis");
   const trust = statementActions(infrastructure, "TrustContractAttestation");
@@ -215,7 +217,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "391fbfb39bba1237e054e9131c923065ae3ea448fcdbf0409862f60649ce57dc",
+    "07bb29c0c1edf17d9b7747229983f3e41f05970e6a7cb5f33abbc9b33daf39d3",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));
@@ -244,8 +246,13 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   );
   assert.equal(
     statements.get("PublishExactReviewedTemplateObject")?.Resource,
-    "arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/standard-2026-07.2/" +
-      "8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98.yaml",
+    // DERIVED from the contract constants, not duplicated. This key was hardcoded
+    // and had already drifted to a hash matching no template in the repo, which
+    // scoped the operator role to publish an object name the build never produces
+    // — the reason the published template URLs 404. Deriving it makes the operator
+    // policy and the artifact it is allowed to publish impossible to desync.
+    `arn:aws:s3:::sutra-onboarding-505060607080-us-east-1/templates/`
+      + `${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}/${AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}.yaml`,
   );
   assert.equal(
     statements.get("CreateReviewedCollectorChangeSet")?.Condition?.StringEquals?.[

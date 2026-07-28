@@ -6,11 +6,33 @@ import type {
 } from "@aws-sdk/client-sts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
-export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.2" as const;
+/**
+ * The pack a freshly deployed template grants. Bumped whenever the exact action
+ * set changes, because attestation compares the role's granted actions to
+ * IMPLEMENTED_READ_ACTIONS as an EXACT set for sutra_template roles.
+ *
+ * .3 adds ec2:DescribeFlowLogs (VPC flow-log coverage).
+ *
+ * A connection still recorded against an older pack is rejected by
+ * assumeValidatedSession BEFORE attestation runs, so the customer sees a clear
+ * "redeploy your role" state rather than an opaque role-contract failure. That
+ * ordering is the whole point of this constant: without the bump, an old role
+ * would fail the action-set comparison with no actionable explanation.
+ */
+export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.3" as const;
+/**
+ * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
+ * records stay readable and can report "needs upgrade". They are deliberately not
+ * rotated out of the union: dropping one would make an existing record fail
+ * integrity parsing outright, which is strictly worse than a clear upgrade
+ * prompt.
+ */
+export const PRIOR_PERMISSION_PACK_VERSION = "standard-2026-07.2" as const;
 export const PREVIOUS_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
 export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof LEGACY_PERMISSION_PACK_VERSION;
 

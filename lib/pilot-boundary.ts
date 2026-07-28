@@ -371,7 +371,7 @@ export function parseVerificationResponse(
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07.2";
+  readonly permissionPackVersion: "standard-2026-07.3";
   readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 } {
   const record = exactRecord(value, [
@@ -386,7 +386,7 @@ export function parseVerificationResponse(
     record.trustPolicyAttested !== true ||
     record.permissionPolicyAttested !== true ||
     record.sessionPolicyApplied !== true ||
-    record.permissionPackVersion !== "standard-2026-07.2"
+    record.permissionPackVersion !== "standard-2026-07.3"
   ) invalid();
   const accountId = awsAccountId(record.accountId);
   const roleArn = string(record.roleArn, 2_048);
@@ -435,7 +435,7 @@ export function parseVerificationResponse(
     trustPolicyAttested: true,
     permissionPolicyAttested: true,
     sessionPolicyApplied: true,
-    permissionPackVersion: "standard-2026-07.2",
+    permissionPackVersion: "standard-2026-07.3",
     capabilityAssessment: { grantedActions, missingActions },
   };
 }

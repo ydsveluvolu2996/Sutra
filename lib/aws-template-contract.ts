@@ -23,8 +23,8 @@
 // VERSION is deliberately NOT bumped: the permission contract itself is
 // unchanged (same actions, same deny), only the default role name moved. The
 // version labels the reviewed permission pack, not the file bytes.
-export const AWS_CUSTOMER_ROLE_TEMPLATE_VERSION = "standard-2026-07.2" as const;
+export const AWS_CUSTOMER_ROLE_TEMPLATE_VERSION = "standard-2026-07.3" as const;
 export const AWS_CUSTOMER_ROLE_TEMPLATE_SHA256 =
-  "3ef5afb2bc587febd459a3d186eb82f52c91ad6612b75b515f4d14c97b739989" as const;
+  "ca3ac48892789106beaab73acea225555ee3190e6d8cad581c7be0ad89a07d77" as const;
 export const AWS_CUSTOMER_ROLE_TEMPLATE_PATH =
   "/sutra-customer-onboarding-role.yaml" as const;
