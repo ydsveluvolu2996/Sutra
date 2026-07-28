@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import {
   buildJobHandlers,
+  ensureDueAgentlessTeardownSweepsEnqueued,
   ensureDueAlertEvaluationsEnqueued,
   ensureDueFinopsAlertSweepsEnqueued,
   ensureDueScheduledReportsEnqueued,
+  ensureDueVulnFeedRefreshEnqueued,
   ensureRetentionSweepsEnqueued,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
@@ -53,6 +55,18 @@ export async function POST(request: Request): Promise<Response> {
       activeOrgIds,
       async (orgId) => (await listConnectionsForOrg(orgId)).map((connection) => ({ customerId: connection.customerId })),
     );
+    // Reuse one customer lister for the remaining per-tenant ticks.
+    const customersForOrg = async (orgId: string) =>
+      (await listConnectionsForOrg(orgId)).map((connection) => ({ customerId: connection.customerId }));
+    // The agentless-teardown tick: outstanding snapshots bill until a lifecycle
+    // policy reaps them, so the sweep has to run on a cadence rather than only
+    // when someone opens the page.
+    await ensureDueAgentlessTeardownSweepsEnqueued(queue, activeOrgIds, customersForOrg);
+    // The vuln-feed-refresh tick. Without this the CVE mirror never updates after
+    // its initial seed: new CVEs, EPSS scores and KEV additions simply never reach
+    // the ranking, and the queue keeps reporting stale risk as current. Enqueues
+    // exactly ONE job across all orgs because the mirror is global.
+    await ensureDueVulnFeedRefreshEnqueued(queue, activeOrgIds, customersForOrg);
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 25 });
     return jsonResponse({ ...result, platformUptime });
   } catch (error) {
