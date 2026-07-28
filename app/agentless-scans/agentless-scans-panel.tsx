@@ -77,6 +77,8 @@ export function AgentlessScansPanel(): React.JSX.Element {
   const [data, setData] = useState<ScanListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState<string | null>(null);
+  const [applyOutcome, setApplyOutcome] = useState<string | null>(null);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -127,6 +129,49 @@ export function AgentlessScansPanel(): React.JSX.Element {
 
   const readiness = data?.readiness;
   const outstanding = data?.outstanding ?? [];
+
+  /**
+   * Applies a planned run.
+   *
+   * Today this is expected to return 409 with the readiness and configuration gaps,
+   * and that outcome is surfaced verbatim rather than flattened into a generic
+   * error. "Here is exactly which settings are unset" is the message that lets an
+   * operator close a gap; "could not apply" is the message that makes them guess.
+   * The response's own `interpretation` is shown too, because the one reading that
+   * must never happen is treating a refused apply as a completed clean scan.
+   */
+  async function apply(runId: string, connectionId: string | null): Promise<void> {
+    if (connectionId === null) return;
+    setApplying(runId);
+    setApplyOutcome(null);
+    try {
+      const response = await fetch(`/api/v1/agentless-scans/${encodeURIComponent(runId)}/execute`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ connectionId }),
+      });
+      const payload = await response.json() as {
+        applied?: boolean;
+        configuration?: { available?: boolean; summary?: string };
+        interpretation?: string;
+        error?: { code?: string; message?: string };
+      };
+      if (payload.applied === true) {
+        setApplyOutcome("Scan applied.");
+        return;
+      }
+      setApplyOutcome([
+        payload.configuration?.summary,
+        payload.interpretation,
+        payload.error?.message,
+      ].filter((part): part is string => typeof part === "string" && part.length > 0).join(" "));
+    } catch (cause) {
+      setApplyOutcome(cause instanceof Error ? cause.message : "The apply request failed.");
+    } finally {
+      setApplying(null);
+    }
+  }
 
   return (
     <div className="stack-lg">
@@ -184,6 +229,17 @@ export function AgentlessScansPanel(): React.JSX.Element {
           </p>
         ) : null}
 
+        {/* The apply outcome, stated in full. While execution is gated this is the
+            403/409 explanation naming the unset settings — the most useful thing on
+            the page for whoever has to close those gaps. role="status" so it is
+            announced rather than silently appearing below the fold. */}
+        {applyOutcome !== null ? (
+          <p className="inline-warning" role="status">
+            <strong>Apply result</strong>
+            <span>{applyOutcome}</span>
+          </p>
+        ) : null}
+
         {data !== null && data.runs.length > 0 ? (
           <div className="table-scroll">
             <table>
@@ -196,6 +252,7 @@ export function AgentlessScansPanel(): React.JSX.Element {
                   <th scope="col">Scanned</th>
                   <th scope="col">Findings</th>
                   <th scope="col">Scanners</th>
+                  <th scope="col">Apply</th>
                 </tr>
               </thead>
               <tbody>
@@ -213,6 +270,15 @@ export function AgentlessScansPanel(): React.JSX.Element {
                     <td>{run.volumesScanned}</td>
                     <td>{run.findingsCount}</td>
                     <td>{run.scanners.join(", ")}</td>
+                    <td>
+                      {run.status === "planned" ? (
+                        <button className="button button-secondary" type="button"
+                          disabled={applying !== null || data.connectionId === null}
+                          onClick={() => { void apply(run.id, data.connectionId); }}>
+                          {applying === run.id ? "Applying…" : "Apply"}
+                        </button>
+                      ) : <span className="muted">—</span>}
+                    </td>
                   </tr>
                 ))}
               </tbody>
