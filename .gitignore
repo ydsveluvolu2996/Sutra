@@ -51,3 +51,6 @@ data/vuln-feeds/
 
 # Never commit local runtime secrets or any backup/variant of them
 .dev.vars*
+
+# Local Claude Code working dir (cherry-picked from agent/sutra-benchmark-superiority)
+.claude/

@@ -23,7 +23,10 @@ test("plans snapshot -> scan -> guaranteed teardown per in-scope volume", () => 
     "create-snapshot", "create-scan-volume", "scan",
     "delete-scan-volume", "handoff-source-snapshot-cleanup",
   ]);
-  assert.ok(!kinds?.includes("delete-source-snapshot"));
+  // Compared as strings on purpose: "delete-source-snapshot" is no longer a
+  // member of AgentlessStepKind, so a typed includes() would not compile —
+  // which is itself the guarantee, but the runtime check documents it.
+  assert.ok(!(kinds as readonly string[] | undefined)?.includes("delete-source-snapshot"));
   // Only Sutra-owned resources are teardown steps — one per volume here (the
   // scan volume). The handoff is deliberately NOT marked teardown, because Sutra
   // does not perform it.
@@ -46,7 +49,10 @@ test("inserts a KMS re-encryption + copied-snapshot teardown when a scan-account
   // Two Sutra-owned teardowns now (scan volume + the re-encrypted copy), and
   // still no delete against the customer's source snapshot.
   assert.equal(plan.summary.teardownSteps, 2);
-  assert.ok(!kinds?.includes("delete-source-snapshot"));
+  // Compared as strings on purpose: "delete-source-snapshot" is no longer a
+  // member of AgentlessStepKind, so a typed includes() would not compile —
+  // which is itself the guarantee, but the runtime check documents it.
+  assert.ok(!(kinds as readonly string[] | undefined)?.includes("delete-source-snapshot"));
   assert.ok(kinds?.includes("handoff-source-snapshot-cleanup"));
 });
 
