@@ -1847,7 +1847,9 @@ function parseRegistration(body: string, pathConnectionId: string) {
     (hasRoleContract &&
       (typeof record.expectedRoleName !== "string" || !ROLE_NAME.test(record.expectedRoleName))) ||
     (record.roleProvisioningMode === "sutra_template" &&
-      (record.expectedRolePath !== "/sutra/" || record.expectedRoleName !== "SutraReadOnlyRole")) ||
+      (record.expectedRolePath !== "/sutra/" ||
+        (record.expectedRoleName !== "SutraCollectorRole" &&
+          record.expectedRoleName !== "SutraReadOnlyRole"))) ||
     (record.roleProvisioningMode === "customer_managed" &&
       typeof record.expectedRoleName === "string" &&
       (UNSAFE_ROLE_NAME.test(record.expectedRoleName) ||

@@ -1,7 +1,34 @@
 export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
 
 export const SUTRA_ROLE_NAMESPACE = "/sutra/";
-export const SUTRA_TEMPLATE_ROLE_NAME = "SutraReadOnlyRole";
+
+/**
+ * The role name new stacks are created with.
+ *
+ * Renamed from `SutraReadOnlyRole` on 2026-07-28. That name became misleading
+ * once agentless snapshot scanning shipped: with that opt-in enabled the role
+ * can create and share its own EBS snapshots, so an auditor reading the IAM
+ * console would have been told "read only" by a role that can write. The name is
+ * now mode-neutral and the stack's own `AccessMode` output states which mode was
+ * actually granted.
+ */
+export const SUTRA_TEMPLATE_ROLE_NAME = "SutraCollectorRole";
+
+/**
+ * The pre-rename name. Still fully supported and NOT deprecated in behaviour:
+ * every customer who deployed before the rename has this role, and renaming it
+ * in CloudFormation would replace the role, change its ARN and break their
+ * connection. Both names are accepted forever; only the default for new stacks
+ * changed.
+ */
+export const SUTRA_TEMPLATE_ROLE_NAME_LEGACY = "SutraReadOnlyRole";
+
+/** Every role name a Sutra-templated connection may legitimately present. */
+export const SUTRA_TEMPLATE_ROLE_NAMES: readonly string[] = [
+  SUTRA_TEMPLATE_ROLE_NAME,
+  SUTRA_TEMPLATE_ROLE_NAME_LEGACY,
+];
+
 export const SUTRA_CUSTOM_ROLE_DEFAULT_NAME = "SutraCustomerReadOnlyRole";
 export const SUTRA_ROLE_POLICY_NAME = "SutraImplementedMetadataCollectors";
 

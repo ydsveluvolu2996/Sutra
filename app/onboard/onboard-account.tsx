@@ -634,7 +634,7 @@ export function OnboardAccount() {
               <div className="deployment-parameters" aria-label="CloudFormation trust parameters">
                 <div><small>SessionNamePrefix</small><code>{createdRoleSessionName}</code></div>
                 <div><small>CustomerTenantId</small><code>{created?.trust.customerTenantId ?? connection.customerId}</code></div>
-                <div><small>RoleName</small><code>{created?.trust.roleName ?? "SutraReadOnlyRole"}</code></div>
+                <div><small>RoleName</small><code>{created?.trust.roleName ?? "SutraCollectorRole"}</code></div>
               </div>
 
               <label className="contract-field"><span>Exact collector principal</span><div className="copy-field"><code>{principalArn ?? "Collector principal unavailable"}</code><button type="button" disabled={!principalArn} onClick={() => principalArn && void navigator.clipboard?.writeText(principalArn)}>Copy</button></div></label>

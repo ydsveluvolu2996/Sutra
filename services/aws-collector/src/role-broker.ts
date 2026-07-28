@@ -55,7 +55,17 @@ const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const SESSION_PREFIX = /^[A-Za-z0-9_+=,.@-]{3,32}$/;
 const SESSION_NAME = /^[A-Za-z0-9_+=,.@-]{2,64}$/;
 const EXPECTED_ROLE_PATH = "/sutra/";
-const EXPECTED_ROLE_NAME = "SutraReadOnlyRole";
+// Both names are valid Sutra-template roles. `SutraCollectorRole` is what new
+// stacks create; `SutraReadOnlyRole` is the pre-2026-07-28 name that every
+// earlier customer still has deployed. Renaming their role in CloudFormation
+// would replace it and change its ARN, breaking the connection, so the legacy
+// name is accepted permanently rather than deprecated.
+//
+// Kept as a literal rather than imported from lib/aws-customer-role-artifacts:
+// this service sets `rootDir: "."` and cannot reach the root lib. The pairing is
+// held by tests/aws-customer-role-artifacts, which compares the two lists.
+const EXPECTED_ROLE_NAMES = ["SutraCollectorRole", "SutraReadOnlyRole"] as const;
+const EXPECTED_ROLE_NAME: string = EXPECTED_ROLE_NAMES[0];
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_SHARED_ROLE_NAME =
@@ -700,7 +710,8 @@ export class AwsRoleBroker {
       expectedRolePath.length > 512 ||
       !ROLE_NAME.test(expectedRoleName) ||
       (roleProvisioningMode === "sutra_template" &&
-        (expectedRolePath !== EXPECTED_ROLE_PATH || expectedRoleName !== EXPECTED_ROLE_NAME)) ||
+        (expectedRolePath !== EXPECTED_ROLE_PATH ||
+          !(EXPECTED_ROLE_NAMES as readonly string[]).includes(expectedRoleName))) ||
       (roleProvisioningMode === "customer_managed" &&
         (UNSAFE_SHARED_ROLE_NAME.test(expectedRoleName) ||
           expectedRoleName.toLowerCase() === "organizationaccountaccessrole"))

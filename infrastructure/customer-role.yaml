@@ -67,8 +67,13 @@ Parameters:
 
   RoleName:
     Type: String
-    Default: SutraReadOnlyRole
-    Description: IAM role name. Changing it changes the ARN registered with the MSP.
+    Default: SutraCollectorRole
+    Description: >-
+      IAM role name. Changing it changes the ARN registered with the MSP.
+      Renamed from SutraReadOnlyRole on 2026-07-28, because that name would be
+      misleading once agentless snapshot scanning is enabled. Existing stacks may
+      keep the old name — it stays valid; do NOT rename an already-deployed role,
+      as CloudFormation would replace it, change its ARN and break the connection.
     MinLength: 1
     MaxLength: 64
     AllowedPattern: '^[A-Za-z0-9+=,.@_-]+$'
@@ -140,14 +145,15 @@ Parameters:
       - 'false'
     Description: >-
       THE ONLY SETTING IN THIS STACK THAT GRANTS WRITE ACCESS. Permits Sutra to
-      create, tag, share, and delete EBS snapshots so it can scan a volume's
-      contents for vulnerabilities, secrets, and malware without installing an
-      agent on the workload. Every grant is scoped so Sutra can only ever touch
-      snapshots it created and tagged itself: it cannot read, modify, or delete
-      your own snapshots or backups, cannot touch volumes or instances, and
-      cannot detach or delete storage. Leave 'false' for a strictly read-only
-      role. Snapshots incur AWS storage cost while they exist and are deleted
-      immediately after each scan.
+      create, tag, and share EBS snapshots so it can scan a volume's contents for
+      vulnerabilities, secrets, and malware without installing an agent on the
+      workload. Sutra CANNOT DELETE ANYTHING: this stack attaches an explicit IAM
+      deny on DeleteSnapshot, DeleteVolume, DetachVolume, TerminateInstances and
+      StopInstances, so it cannot remove even a snapshot it created itself, and it
+      can never read, share or delete your own snapshots or backups. Cleanup is
+      done by the Data Lifecycle Manager policy this stack installs in YOUR
+      account, under YOUR own role, which you can inspect, pause or delete at any
+      time. Scan snapshots incur AWS storage cost until that policy reaps them.
 
   AgentlessSnapshotRetentionCount:
     Type: Number

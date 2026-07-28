@@ -551,14 +551,15 @@ function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsC
   if (!/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(prefix)) throw new RegistryIntegrityError();
   const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
   const expectedRolePath = input.expectedRolePath ?? "/sutra/";
-  const expectedRoleName = input.expectedRoleName ?? "SutraReadOnlyRole";
+  const expectedRoleName = input.expectedRoleName ?? "SutraCollectorRole";
   if (
     (roleProvisioningMode !== "sutra_template" && roleProvisioningMode !== "customer_managed") ||
     !ROLE_PATH.test(expectedRolePath) ||
     expectedRolePath.length > 512 ||
     !ROLE_NAME.test(expectedRoleName) ||
     (roleProvisioningMode === "sutra_template" &&
-      (expectedRolePath !== "/sutra/" || expectedRoleName !== "SutraReadOnlyRole")) ||
+      (expectedRolePath !== "/sutra/" ||
+        (expectedRoleName !== "SutraCollectorRole" && expectedRoleName !== "SutraReadOnlyRole"))) ||
     (roleProvisioningMode === "customer_managed" &&
       (UNSAFE_ROLE_NAME.test(expectedRoleName) ||
         expectedRoleName.toLowerCase() === "organizationaccountaccessrole"))

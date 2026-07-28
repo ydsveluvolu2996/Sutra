@@ -5,7 +5,7 @@ Sutra never substitutes sample spend for AWS billing evidence. The Cost workspac
 ## Upgrade the already-onboarded account
 
 1. In the AWS billing or payer/management account, open **Billing and Cost Management → Cost Explorer** and choose **Launch Cost Explorer** if AWS shows the activation page. This is an AWS account setting; Sutra does not enable it automatically.
-2. In **CloudFormation → Stacks**, open the stack that created `SutraReadOnlyRole`.
+2. In **CloudFormation → Stacks**, open the stack that created `SutraCollectorRole` (or `SutraReadOnlyRole` on stacks deployed before 2026-07-28).
 3. Choose **Update → Replace current template → Upload a template file**.
 4. Upload the checked-in `public/sutra-customer-onboarding-role.yaml` file from this repository.
 5. Keep the existing `VendorCollectorRoleArn`, `ExternalId`, `CustomerTenantId`, and optional boundary parameters unchanged. Review and submit the change set.

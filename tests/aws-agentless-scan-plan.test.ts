@@ -15,10 +15,22 @@ test("plans snapshot -> scan -> guaranteed teardown per in-scope volume", () => 
   assert.equal(plan.mode, "plan");
   assert.equal(plan.summary.inScope, 2);
   const kinds = plan.volumes[0]?.steps.map((step) => step.kind);
-  assert.deepEqual(kinds, ["create-snapshot", "create-scan-volume", "scan", "delete-scan-volume", "delete-source-snapshot"]);
-  // Every plan tears its resources down, and teardown steps are marked.
-  assert.ok(plan.summary.teardownSteps >= 2 * 2);
-  assert.ok(plan.volumes.every((v) => v.steps.filter((s) => s.teardown).length >= 2));
+  // The final step is a HANDOFF, not a delete: Sutra holds no delete permission
+  // in the customer account, so the source snapshot is reaped by the customer's
+  // own lifecycle policy. Keeping it as an explicit step means the plan never
+  // reads as though the snapshot simply disappears.
+  assert.deepEqual(kinds, [
+    "create-snapshot", "create-scan-volume", "scan",
+    "delete-scan-volume", "handoff-source-snapshot-cleanup",
+  ]);
+  assert.ok(!kinds?.includes("delete-source-snapshot"));
+  // Only Sutra-owned resources are teardown steps — one per volume here (the
+  // scan volume). The handoff is deliberately NOT marked teardown, because Sutra
+  // does not perform it.
+  assert.equal(plan.summary.teardownSteps, 2);
+  assert.ok(plan.volumes.every((v) => v.steps.filter((s) => s.teardown).length === 1));
+  assert.ok(plan.volumes.every((v) =>
+    v.steps.filter((s) => s.kind === "handoff-source-snapshot-cleanup").every((s) => !s.teardown)));
 });
 
 test("inserts a KMS re-encryption + copied-snapshot teardown when a scan-account key is given", () => {
@@ -31,6 +43,11 @@ test("inserts a KMS re-encryption + copied-snapshot teardown when a scan-account
   const kinds = plan.volumes[0]?.steps.map((step) => step.kind);
   assert.ok(kinds?.includes("copy-snapshot-kms"));
   assert.ok(kinds?.includes("delete-copied-snapshot"));
+  // Two Sutra-owned teardowns now (scan volume + the re-encrypted copy), and
+  // still no delete against the customer's source snapshot.
+  assert.equal(plan.summary.teardownSteps, 2);
+  assert.ok(!kinds?.includes("delete-source-snapshot"));
+  assert.ok(kinds?.includes("handoff-source-snapshot-cleanup"));
 });
 
 test("skips volumes honestly (never silently) by required tag and unattached policy", () => {

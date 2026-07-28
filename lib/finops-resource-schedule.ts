@@ -10,7 +10,7 @@
  *
  * WHAT SUTRA DOES AND DOES NOT DO (honesty preamble — never soften this):
  * - Sutra's access to a customer account is READ-ONLY by construction: the
- *   trust role (`SutraReadOnlyRole`) grants no `ec2:Start`/`ec2:Stop` and no
+ *   trust role (`SutraCollectorRole`) grants no `ec2:Start`/`ec2:Stop` and no
  *   `rds:Start`/`rds:Stop` action. Sutra therefore NEVER starts or stops any
  *   resource. This engine is advisory: it says what WOULD be stopped and what
  *   that WOULD save. Enforcement is the generated artefact, applied by the

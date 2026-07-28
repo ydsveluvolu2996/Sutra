@@ -396,7 +396,7 @@ test("the artefact is customer-applied, tag-scoped, and grants start/stop only i
     assert.match(document, /cron\(0 20 \? \* MON,TUE,WED,THU,FRI \*\)/u);
     assert.match(document, /Environment/u);
     // No Sutra principal, role, or endpoint is referenced anywhere.
-    assert.equal(/SutraReadOnlyRole|sts:AssumeRole"\s*,?\s*Principal.*sutra/iu.test(document), false);
+    assert.equal(/Sutra(ReadOnly|Collector)Role|sts:AssumeRole"\s*,?\s*Principal.*sutra/iu.test(document), false);
     assert.equal(document.includes("sutracmdb.com"), false);
   }
   assert.deepEqual(artifacts.grantedActions, [

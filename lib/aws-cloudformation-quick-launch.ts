@@ -297,7 +297,12 @@ export function buildOneTimeCloudFormationQuickCreateUrl(
   assertLaunchValue(EXTERNAL_ID.test(input.externalId), "ExternalId");
   assertLaunchValue(SESSION_NAME_PREFIX.test(input.sessionNamePrefix), "session prefix");
   assertLaunchValue(CUSTOMER_TENANT_ID.test(input.customerTenantId), "customer tenant ID");
-  assertLaunchValue(input.roleName === "SutraReadOnlyRole", "role name");
+    // Both the current name and the pre-2026-07-28 SutraReadOnlyRole are valid;
+  // renaming a deployed role would change its ARN and break the connection.
+  assertLaunchValue(
+    input.roleName === "SutraCollectorRole" || input.roleName === "SutraReadOnlyRole",
+    "role name",
+  );
 
   const fragment = new URLSearchParams();
   fragment.set("templateURL", templateUrl);

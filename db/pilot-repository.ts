@@ -323,7 +323,7 @@ async function createConnectionDraftWithAtomicAudit(
   const connectionId = input.connectionId;
   const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
   const expectedRolePath = input.expectedRolePath ?? "/sutra/";
-  const expectedRoleName = input.expectedRoleName ?? "SutraReadOnlyRole";
+  const expectedRoleName = input.expectedRoleName ?? "SutraCollectorRole";
   const expectedIdentity = await deriveLocalAwsConnectionIdentity(input.accountId, input.partition);
   if (
     !/^onb_[a-f0-9]{32}$/u.test(input.operationId) ||
@@ -346,7 +346,8 @@ async function createConnectionDraftWithAtomicAudit(
   if (
     (roleProvisioningMode !== "sutra_template" && roleProvisioningMode !== "customer_managed") ||
     (roleProvisioningMode === "sutra_template" &&
-      (expectedRolePath !== "/sutra/" || expectedRoleName !== "SutraReadOnlyRole")) ||
+      (expectedRolePath !== "/sutra/" ||
+        (expectedRoleName !== "SutraCollectorRole" && expectedRoleName !== "SutraReadOnlyRole"))) ||
     (roleProvisioningMode === "customer_managed" &&
       (expectedRolePath.length > 512 ||
         !/^\/sutra\/(?:[A-Za-z0-9+=,.@_-]+\/)*$/u.test(expectedRolePath) ||
@@ -474,7 +475,8 @@ async function recoverPendingConnectionHandoff(
     const isCanonicalLegacyTemplateRequest =
       (input.roleProvisioningMode ?? "sutra_template") === "sutra_template" &&
       (input.expectedRolePath ?? "/sutra/") === "/sutra/" &&
-      (input.expectedRoleName ?? "SutraReadOnlyRole") === "SutraReadOnlyRole";
+      ((input.expectedRoleName ?? "SutraCollectorRole") === "SutraCollectorRole" ||
+        input.expectedRoleName === "SutraReadOnlyRole");
     if (!isCanonicalLegacyTemplateRequest) throw error;
     // Permission-pack .2 added an explicit role contract to the audit payload.
     // Recover only the exact v1 canonical-template request so a browser retry

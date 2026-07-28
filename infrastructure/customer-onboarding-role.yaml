@@ -38,10 +38,15 @@ Parameters:
 
   RoleName:
     Type: String
-    Default: SutraReadOnlyRole
+    Default: SutraCollectorRole
     AllowedValues:
+      - SutraCollectorRole
       - SutraReadOnlyRole
-    Description: Fixed reviewed role name used by Sutra contract attestation.
+    Description: >-
+      Reviewed role name used by Sutra contract attestation. Both values are
+      accepted permanently: SutraCollectorRole for new stacks, and the pre-rename
+      SutraReadOnlyRole so customers who onboarded before 2026-07-28 are never
+      forced to replace their role and change its ARN.
 
   PermissionsBoundaryArn:
     Type: String

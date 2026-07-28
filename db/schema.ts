@@ -224,7 +224,7 @@ export const awsConnections = sqliteTable("aws_connections", {
   permissionPackVersion: text("permission_pack_version").notNull(),
   roleProvisioningMode: text("role_provisioning_mode", { enum: ["sutra_template", "customer_managed"] }).notNull().default("sutra_template"),
   expectedRolePath: text("expected_role_path").notNull().default("/sutra/"),
-  expectedRoleName: text("expected_role_name").notNull().default("SutraReadOnlyRole"),
+  expectedRoleName: text("expected_role_name").notNull().default("SutraCollectorRole"),
   permissionCapabilitiesJson: text("permission_capabilities_json"),
   status: text("status", { enum: ["pending", "validating", "active", "needs_attention", "disabled"] }).notNull().default("pending"),
   enabledRegionsJson: text("enabled_regions_json").notNull().default("[]"),

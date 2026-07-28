@@ -16,7 +16,13 @@ export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
 
 export const SUTRA_ROLE_PATH = "/sutra/" as const;
-export const SUTRA_TEMPLATE_ROLE_NAME = "SutraReadOnlyRole" as const;
+export const SUTRA_TEMPLATE_ROLE_NAME = "SutraCollectorRole" as const;
+/** Pre-2026-07-28 name. Still valid: renaming a deployed role changes its ARN. */
+export const SUTRA_TEMPLATE_ROLE_NAME_LEGACY = "SutraReadOnlyRole" as const;
+export const SUTRA_TEMPLATE_ROLE_NAMES: readonly string[] = [
+  SUTRA_TEMPLATE_ROLE_NAME,
+  SUTRA_TEMPLATE_ROLE_NAME_LEGACY,
+];
 
 export type PilotConnectionStatus =
   | "pending"
@@ -293,7 +299,7 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
   }
   if (roleProvisioningMode === "sutra_template") {
     if (rolePath !== SUTRA_ROLE_PATH || roleName !== SUTRA_TEMPLATE_ROLE_NAME) {
-      invalidInput("The Sutra template uses the reviewed /sutra/SutraReadOnlyRole contract");
+      invalidInput("The Sutra template uses the reviewed /sutra/SutraCollectorRole contract (the legacy SutraReadOnlyRole name is also accepted)");
     }
   } else {
     if (

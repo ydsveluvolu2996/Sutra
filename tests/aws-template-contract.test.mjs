@@ -101,7 +101,10 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.match(infrastructure, /sts:ExternalId:/);
   assert.doesNotMatch(infrastructure, /NoEcho:\s*true/u);
   assert.match(infrastructure, /sts:RoleSessionName:/);
-  assert.match(infrastructure, /AllowedValues:\s*\n\s*- SutraReadOnlyRole/u);
+  // Both names stay permitted: new stacks default to SutraCollectorRole, and the
+  // pre-rename SutraReadOnlyRole must remain valid so existing customers are
+  // never forced to replace a role and change its ARN.
+  assert.match(infrastructure, /AllowedValues:\s*\n\s*- SutraCollectorRole\s*\n\s*- SutraReadOnlyRole/u);
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);

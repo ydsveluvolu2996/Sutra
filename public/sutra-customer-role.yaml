@@ -67,8 +67,13 @@ Parameters:
 
   RoleName:
     Type: String
-    Default: SutraReadOnlyRole
-    Description: IAM role name. Changing it changes the ARN registered with the MSP.
+    Default: SutraCollectorRole
+    Description: >-
+      IAM role name. Changing it changes the ARN registered with the MSP.
+      Renamed from SutraReadOnlyRole on 2026-07-28, because that name would be
+      misleading once agentless snapshot scanning is enabled. Existing stacks may
+      keep the old name — it stays valid; do NOT rename an already-deployed role,
+      as CloudFormation would replace it, change its ARN and break the connection.
     MinLength: 1
     MaxLength: 64
     AllowedPattern: '^[A-Za-z0-9+=,.@_-]+$'

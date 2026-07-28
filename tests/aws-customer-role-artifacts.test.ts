@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   buildCustomerManagedRoleArtifacts,
   CUSTOMER_ROLE_ATTESTATION_ACTIONS,
   CUSTOMER_ROLE_METADATA_ACTIONS,
   SUTRA_ROLE_POLICY_NAME,
+  SUTRA_TEMPLATE_ROLE_NAME,
+  SUTRA_TEMPLATE_ROLE_NAMES,
   validateCustomerManagedRoleSelection,
   type CustomerManagedRoleArtifactInput,
 } from "../lib/aws-customer-role-artifacts.ts";
+
+const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 
 const input: CustomerManagedRoleArtifactInput = {
   partition: "aws",
@@ -119,4 +126,22 @@ test("artifact generation fails closed for roots, wildcards, partition mismatch,
     () => buildCustomerManagedRoleArtifacts({ ...input, roleName: "shared-admin" }),
     /not accepted/u,
   );
+});
+
+test("the collector's role-name allow-list matches the shared artifact constants", async () => {
+  // services/aws-collector sets rootDir "." and cannot import lib/, so it
+  // re-declares the accepted role names as a literal. If these two ever drift, a
+  // customer whose role carries one name would be rejected by the other layer —
+  // so the duplication is held in step here rather than by the type system.
+  const broker = await readFile(
+    resolve(root, "services/aws-collector/src/role-broker.ts"),
+    "utf8",
+  );
+  const declared = /const EXPECTED_ROLE_NAMES = \[([^\]]+)\]/u.exec(broker)?.[1] ?? "";
+  const brokerNames = [...declared.matchAll(/"([A-Za-z]+)"/gu)].map((match) => match[1]);
+  assert.deepEqual(brokerNames, [...SUTRA_TEMPLATE_ROLE_NAMES]);
+  // The legacy name must never be dropped: removing it would lock out every
+  // customer who onboarded before the 2026-07-28 rename.
+  assert.ok(brokerNames.includes("SutraReadOnlyRole"));
+  assert.equal(brokerNames[0], SUTRA_TEMPLATE_ROLE_NAME);
 });

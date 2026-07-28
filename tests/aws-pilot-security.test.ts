@@ -102,7 +102,7 @@ test("onboarding accepts only the sole all-enabled Region selection marker", () 
       enabledRegions: [ALL_ENABLED_AWS_REGIONS],
       roleProvisioningMode: "sutra_template",
       rolePath: "/sutra/",
-      roleName: "SutraReadOnlyRole",
+      roleName: "SutraCollectorRole",
     },
   );
   assert.throws(
@@ -166,7 +166,7 @@ test("initial connection route boundary requires an opaque retry operation and c
     enabledRegions: ["us-east-1", "us-west-2"],
     roleProvisioningMode: "sutra_template",
     rolePath: "/sutra/",
-    roleName: "SutraReadOnlyRole",
+    roleName: "SutraCollectorRole",
   });
 
   for (const invalid of [

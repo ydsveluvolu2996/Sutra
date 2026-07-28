@@ -51,7 +51,7 @@ function validLaunch(
     vendorCollectorRoleArn: "arn:aws:iam::999988887777:role/sutra/SutraLocalCollectorRole",
     sessionNamePrefix: "sutra-",
     customerTenantId: "cus_0123456789abcdef",
-    roleName: "SutraReadOnlyRole",
+    roleName: "SutraCollectorRole",
     ...overrides,
   };
 }
@@ -74,7 +74,7 @@ test("quick-create puts reviewed trust parameters only in the AWS Console fragme
   assert.equal(parameters.get("param_ExternalId"), EXTERNAL_ID);
   assert.equal(parameters.get("param_SessionNamePrefix"), "sutra-");
   assert.equal(parameters.get("param_CustomerTenantId"), "cus_0123456789abcdef");
-  assert.equal(parameters.get("param_RoleName"), "SutraReadOnlyRole");
+  assert.equal(parameters.get("param_RoleName"), "SutraCollectorRole");
 
   const requestTarget = `${parsed.origin}${parsed.pathname}${parsed.search}`;
   assert.equal(requestTarget.includes(EXTERNAL_ID), false);
