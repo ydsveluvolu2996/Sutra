@@ -924,3 +924,131 @@ export async function ensureDueFinopsAlertSweepsEnqueued(
   }
   return enqueued;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// agentless-teardown-sweep
+//
+// Reconciles resources an agentless scan left behind. Wired as its own job kind
+// rather than folded into an existing sweep because its failure mode is
+// financial, not informational: an unreaped snapshot bills the customer every
+// hour, so it must retry on its own cadence and must not be starved by an
+// unrelated sweep failing.
+//
+// Sutra can only delete in its OWN scan account — the customer role carries an
+// explicit deny — so the sweep decides per resource whether to act or merely
+// observe. That decision lives in lib/aws-agentless-teardown-sweep.ts and is
+// tested there; this handler only supplies the tenant scope and persists what
+// the sweep concluded.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Hourly. Matches finops-alert-sweep: frequent enough to bound cost, rare enough to be cheap. */
+export const AGENTLESS_TEARDOWN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
+export interface AgentlessTeardownSweepDeps {
+  /** Open debt for the org. Org-scoped on purpose — see the repository comment. */
+  listOutstanding: (orgId: string) => Promise<readonly {
+    readonly resourceId: string;
+    readonly resourceKind: "snapshot" | "volume";
+    readonly region: string;
+    readonly accountScope: string;
+    readonly attempts: number;
+    readonly firstSeenAt: string;
+  }[]>;
+  sweep: (resources: readonly {
+    readonly resourceId: string;
+    readonly resourceKind: "snapshot" | "volume";
+    readonly region: string;
+    readonly accountScope: string;
+    readonly attempts: number;
+    readonly firstSeenAt: string;
+  }[]) => Promise<{
+    readonly outcomes: readonly { readonly resourceId: string; readonly disposition: string; readonly detail: string }[];
+    readonly summary: { readonly considered: number; readonly stillOutstanding: number };
+  }>;
+  /** Close a debt row. Called only for resources proven gone. */
+  settle: (orgId: string, resourceId: string) => Promise<boolean>;
+  /** Record a failed attempt without closing the row. */
+  recordAttempt: (orgId: string, resourceId: string, detail: string) => Promise<void>;
+  audit?: (event: Record<string, unknown>) => Promise<void>;
+}
+
+export async function runAgentlessTeardownSweepJob(
+  job: RunnableJob,
+  deps: AgentlessTeardownSweepDeps,
+): Promise<void> {
+  const orgId = job.orgId;
+  const outstanding = await deps.listOutstanding(orgId);
+  if (outstanding.length === 0) return;
+
+  const result = await deps.sweep(outstanding);
+
+  let settled = 0;
+  let stillBilling = 0;
+  for (const outcome of result.outcomes) {
+    if (outcome.disposition === "settled" || outcome.disposition === "deleted") {
+      // Per-resource isolation: one failed settle must not abandon the rest.
+      try {
+        if (await deps.settle(orgId, outcome.resourceId)) settled += 1;
+      } catch {
+        // The resource is gone but the row survives; the next sweep settles it.
+      }
+      continue;
+    }
+    stillBilling += 1;
+    try {
+      await deps.recordAttempt(orgId, outcome.resourceId, outcome.detail);
+    } catch {
+      // Attempt bookkeeping is best-effort; losing it must not lose the sweep.
+    }
+  }
+
+  // Audited because it is spend, and because "awaiting-customer" is a state an
+  // operator may need to explain to the customer paying for it.
+  const summary = {
+    kind: "agentless-teardown-sweep",
+    orgId,
+    jobId: job.id,
+    considered: result.summary.considered,
+    settled,
+    stillBilling,
+  };
+  console.info(`agentless-teardown-sweep ${JSON.stringify(summary)}`);
+  if (deps.audit !== undefined) {
+    try {
+      await deps.audit(summary);
+    } catch (error) {
+      console.warn(`agentless-teardown-sweep audit write failed for ${orgId}: ${String(error)}`);
+    }
+  }
+}
+
+export async function ensureDueAgentlessTeardownSweepsEnqueued(
+  queue: JobQueueRepository,
+  orgIds: readonly string[],
+  connectionsForOrg: (orgId: string) => Promise<readonly { readonly customerId: string }[]>,
+  now = Date.now(),
+  intervalMs = AGENTLESS_TEARDOWN_SWEEP_INTERVAL_MS,
+): Promise<number> {
+  let enqueued = 0;
+  for (const orgId of orgIds) {
+    const connections = await connectionsForOrg(orgId);
+    const customerIds = [...new Set(connections.map((connection) => connection.customerId))];
+    // One sweep per org is enough — the debt query is org-scoped — but the queue
+    // is keyed by customer, so the first readable customer carries it.
+    const carrier = customerIds[0];
+    if (carrier === undefined) continue;
+    const existing = await queue.list(orgId, carrier);
+    const sweeps = existing.filter((entry) => entry.kind === "agentless-teardown-sweep");
+    if (sweeps.some((entry) => entry.status === "queued" || entry.status === "leased")) continue;
+    const newest = sweeps[0];
+    // Same cadence-as-dead-letter-cooldown reasoning as finops-alert-sweep.
+    if (newest !== undefined && now - newest.createdAt < intervalMs) continue;
+    try {
+      await queue.enqueue({ orgId, customerId: carrier, kind: "agentless-teardown-sweep", payload: {} }, now);
+      enqueued += 1;
+    } catch {
+      // Inactive customer; re-evaluated next tick.
+    }
+  }
+  return enqueued;
+}

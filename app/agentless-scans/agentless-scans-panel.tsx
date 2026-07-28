@@ -97,7 +97,33 @@ export function AgentlessScansPanel(): React.JSX.Element {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  // Deliberately NOT `void load()`: load() calls setLoading(true) synchronously,
+  // which react-hooks/set-state-in-effect correctly flags as a cascading render.
+  // `loading` already initialises to true, so the first fetch needs no spinner
+  // prelude. The cancelled guard also stops a state write after unmount — a
+  // latent bug the lint rule happened to surface.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/agentless-scans", { credentials: "same-origin" });
+        if (cancelled) return;
+        if (!response.ok) {
+          setError(`The agentless scan list could not be loaded (${response.status}).`);
+          return;
+        }
+        const payload = (await response.json()) as ScanListResponse;
+        if (cancelled) return;
+        setData(payload);
+        setError(null);
+      } catch {
+        if (!cancelled) setError("The agentless scan list could not be loaded.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const readiness = data?.readiness;
   const outstanding = data?.outstanding ?? [];

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { EC2Client } from "@aws-sdk/client-ec2";
 import { AGENTLESS_TAG_KEY, AgentlessExecutorError, Ec2AgentlessExecutor } from "../src/executor.js";
 
 interface SentCommand { readonly name: string; readonly input: Record<string, unknown> }
@@ -25,10 +26,8 @@ function fakeClient(log: SentCommand[], label: string, responses: Record<string,
 
 function build(log: SentCommand[], over: Record<string, unknown> = {}, responses: Record<string, unknown> = {}) {
   return new Ec2AgentlessExecutor({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    customerClientFor: async () => fakeClient(log, "customer", responses) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    scanClientFor: async () => fakeClient(log, "scan", responses) as any,
+    customerClientFor: async () => fakeClient(log, "customer", responses) as unknown as EC2Client,
+    scanClientFor: async () => fakeClient(log, "scan", responses) as unknown as EC2Client,
     scanAccountId: "111122223333",
     scanAvailabilityZone: "ap-south-1a",
     kmsKeyArn: "arn:aws:kms:ap-south-1:111122223333:key/abc",
@@ -116,10 +115,8 @@ test("a failed share-revoke does not fail the scan, because the copy already exi
         if (name === "DescribeSnapshotsCommand") return { Snapshots: [{ State: "completed" }] };
         return {};
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    }) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    scanClientFor: async () => fakeClient(log, "scan", { CopySnapshotCommand: { SnapshotId: "snap-9999ffff" } }) as any,
+    }) as unknown as EC2Client,
+    scanClientFor: async () => fakeClient(log, "scan", { CopySnapshotCommand: { SnapshotId: "snap-9999ffff" } }) as unknown as EC2Client,
     scanAccountId: "111122223333",
     scanAvailabilityZone: "ap-south-1a",
     kmsKeyArn: "arn:aws:kms:ap-south-1:111122223333:key/abc",
