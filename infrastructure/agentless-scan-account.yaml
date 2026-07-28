@@ -1,0 +1,645 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Sutra agentless snapshot scanning infrastructure. Creates an isolated VPC, a
+  KMS key, an ECR repository, an ECS/Fargate cluster and three scoped IAM roles
+  used to scan a copied EBS snapshot's contents without an agent.
+
+  DEPLOYED INTO THE CONTROL-PLANE ACCOUNT BY DELIBERATE CHOICE. A separate AWS
+  account would give a hard blast-radius boundary; a single account was chosen
+  for cost visibility and operational simplicity while there are no live
+  customers. The boundary is therefore reconstructed at the IAM layer: the
+  scanner role carries an explicit deny on the control plane's database,
+  secrets, parameters and IAM, and an explicit deny cannot be overridden by any
+  policy attached later. That is weaker than account separation — a root-level
+  compromise ignores it — and moving to a dedicated account later is a parameter
+  change, not a redesign.
+
+  Everything here is additive and self-contained: it creates its own VPC and
+  touches no existing resource. `aws cloudformation delete-stack` removes all of
+  it.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Cost controls
+        Parameters:
+          - MonthlyBudgetUsd
+          - BudgetNotificationEmail
+          - LogRetentionDays
+      - Label:
+          default: Control-plane wiring
+        Parameters:
+          - OrchestratorPrincipalArn
+      - Label:
+          default: Network
+        Parameters:
+          - VpcCidr
+
+Parameters:
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 100000
+    Description: >-
+      Monthly spend on agentless-scan-tagged resources that triggers an alert.
+      In normal operation this never fires; it exists to catch a runaway loop
+      that creates snapshots or tasks without tearing them down.
+
+  BudgetNotificationEmail:
+    Type: String
+    AllowedPattern: '^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: Where the budget alarm is sent. Confirm the SNS/e-mail subscription after deploy.
+
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365]
+    Description: >-
+      Scanner task log retention. Logs are operational only — the scanner emits
+      metadata findings, never file contents — but they are still bounded.
+
+  OrchestratorPrincipalArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:(role|user)/[A-Za-z0-9+=,.@_/-]+$'
+    Description: >-
+      The control-plane principal permitted to assume the orchestrator role and
+      launch scans (for example the EC2 instance role the Sutra app runs under).
+      Leave empty to create the role with no trust yet and fill it in later —
+      that is the safe default, because a role nobody can assume cannot be
+      misused.
+
+  VpcCidr:
+    Type: String
+    Default: '10.90.0.0/16'
+    AllowedPattern: '^10\.[0-9]{1,3}\.0\.0/16$'
+    Description: >-
+      CIDR for the scan VPC. It is standalone and unpeered, so overlap with an
+      existing VPC is harmless today — but pick a free range if you ever intend
+      to peer it.
+
+Conditions:
+  HasOrchestratorPrincipal:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: OrchestratorPrincipalArn
+          - ''
+
+Resources:
+
+  # ─── Network ──────────────────────────────────────────────────────────────
+  # Public subnets with no NAT Gateway. A NAT would add a standing monthly cost
+  # before a single scan runs; instead the task gets a public IP behind a
+  # security group that permits ZERO inbound. Reachability is identical for
+  # egress to ECR/S3/EBS, and nothing can reach the task.
+  ScanVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock:
+        Ref: VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: sutra-agentless-scan
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: ScanVpc
+      InternetGatewayId:
+        Ref: ScanInternetGateway
+
+  # Two AZs: Fargate capacity in a single AZ can be unavailable transiently, and
+  # a scan that cannot place a task is a scan that silently does not happen.
+  ScanSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ScanVpc
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      CidrBlock:
+        Fn::Select:
+          - 0
+          - Fn::Cidr:
+              - Ref: VpcCidr
+              - 2
+              - 8
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: ScanVpc
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      CidrBlock:
+        Fn::Select:
+          - 1
+          - Fn::Cidr:
+              - Ref: VpcCidr
+              - 2
+              - 8
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: ScanVpc
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ScanGatewayAttachment
+    Properties:
+      RouteTableId:
+        Ref: ScanRouteTable
+      DestinationCidrBlock: '0.0.0.0/0'
+      GatewayId:
+        Ref: ScanInternetGateway
+
+  ScanSubnetARouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: ScanSubnetA
+      RouteTableId:
+        Ref: ScanRouteTable
+
+  ScanSubnetBRouteAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: ScanSubnetB
+      RouteTableId:
+        Ref: ScanRouteTable
+
+  # No SecurityGroupIngress block at all — an empty ingress list means nothing
+  # can open a connection to the scanner, which is the point. It only talks out,
+  # over TLS, to pull its image and read snapshot blocks.
+  ScannerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sutra agentless scanner - egress 443 only, no inbound.
+      VpcId:
+        Ref: ScanVpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: '0.0.0.0/0'
+          Description: ECR, S3, EBS direct APIs and CloudWatch Logs.
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # ─── Encryption ───────────────────────────────────────────────────────────
+  ScanKmsKey:
+    Type: AWS::KMS::Key
+    # Retained on stack delete: a key that still encrypts a snapshot must not
+    # vanish with the stack, or that snapshot becomes permanently unreadable.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Re-encrypts customer EBS snapshot copies for Sutra agentless scanning.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          # Without an account-root administrative statement a KMS key can become
+          # unmanageable. This is the documented AWS guard, not a broad grant.
+          - Sid: AccountRootAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: ScannerAndOrchestratorEbsUse
+            Effect: Allow
+            Principal:
+              AWS:
+                - Fn::GetAtt: [ScannerTaskRole, Arn]
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+              - kms:ReEncryptFrom
+              - kms:ReEncryptTo
+              - kms:CreateGrant
+            Resource: '*'
+            Condition:
+              StringLike:
+                kms:ViaService:
+                  - Fn::Sub: 'ec2.${AWS::Region}.amazonaws.com'
+                  - Fn::Sub: 'ebs.${AWS::Region}.amazonaws.com'
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScanKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/sutra-agentless-scan
+      TargetKeyId:
+        Ref: ScanKmsKey
+
+  # ─── Scanner image ────────────────────────────────────────────────────────
+  ScannerEcrRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: sutra/agentless-scanner
+      ImageTagMutability: IMMUTABLE
+      ImageScanningConfiguration:
+        ScanOnPush: true
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep the 10 most recent scanner images.",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": { "type": "expire" }
+              }
+            ]
+          }
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # ─── Compute ──────────────────────────────────────────────────────────────
+  ScanCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: sutra-agentless-scan
+      CapacityProviders:
+        - FARGATE
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScannerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /sutra/agentless-scanner
+      RetentionInDays:
+        Ref: LogRetentionDays
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # ─── IAM ──────────────────────────────────────────────────────────────────
+  # Pulls the image and writes logs. Nothing else — it is not the role the
+  # scanner code runs under.
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SutraAgentlessTaskExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # The role the scanner container actually runs as. This is the one that has to
+  # be tight: it parses hostile customer filesystems, so it is the most likely
+  # thing in the account to be exploited.
+  ScannerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SutraAgentlessScannerRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+      Policies:
+        - PolicyName: ScanOwnVolumesAndSnapshots
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InspectOwnScanResources
+                Effect: Allow
+                Action:
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeVolumeStatus
+                  - ec2:DescribeTags
+                Resource: '*'
+
+              - Sid: ReadSnapshotBlocks
+                Effect: Allow
+                Action:
+                  - ebs:ListSnapshotBlocks
+                  - ebs:ListChangedBlocks
+                  - ebs:GetSnapshotBlock
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:ResourceTag/sutra-agentless: 'true'
+
+              - Sid: WriteOwnLogs
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  Fn::Sub: 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/sutra/agentless-scanner:*'
+
+        # THE ISOLATION BOUNDARY.
+        #
+        # Because this runs in the same account as the control plane, these
+        # denies are what stop a compromised scanner from reaching tenant data.
+        # An explicit deny beats any Allow, including one attached later or
+        # inherited from a managed policy, so this cannot be widened by
+        # accident.
+        - PolicyName: NeverTouchTheControlPlane
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DenyDatabaseAndSecrets
+                Effect: Deny
+                Action:
+                  - rds:*
+                  - rds-data:*
+                  - secretsmanager:*
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                  - dynamodb:*
+                Resource: '*'
+
+              - Sid: DenyPrivilegeEscalation
+                Effect: Deny
+                Action:
+                  - iam:*
+                  - sts:AssumeRole
+                  - organizations:*
+                Resource: '*'
+
+              - Sid: DenyControlPlaneStorageAndImages
+                Effect: Deny
+                Action:
+                  - s3:*
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:CompleteLayerUpload
+                  - ecr:BatchDeleteImage
+                Resource: '*'
+
+              # The scanner reads. It must never be able to destroy evidence or
+              # infrastructure, including its own.
+              - Sid: DenyAllDestruction
+                Effect: Deny
+                Action:
+                  - ec2:DeleteSnapshot
+                  - ec2:DeleteVolume
+                  - ec2:TerminateInstances
+                  - ec2:StopInstances
+                  - ecs:DeleteCluster
+                  - ecs:StopTask
+                  - logs:DeleteLogGroup
+                  - logs:DeleteLogStream
+                  - kms:ScheduleKeyDeletion
+                  - kms:DisableKey
+                Resource: '*'
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # Assumed by the control plane to drive a scan: copy the shared snapshot,
+  # create and tear down the scan volume, and run the task. Separate from the
+  # scanner role so the component that HAS lifecycle permissions is not the same
+  # component that parses hostile input.
+  OrchestratorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: SutraAgentlessOrchestratorRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          Fn::If:
+            - HasOrchestratorPrincipal
+            - - Effect: Allow
+                Principal:
+                  AWS:
+                    Ref: OrchestratorPrincipalArn
+                Action: sts:AssumeRole
+            # No principal supplied: trust the account root, which grants nothing
+            # on its own — an IAM principal still needs an explicit sts:AssumeRole
+            # permission. This keeps the stack deployable before the app's role
+            # ARN is known, without creating an assumable-by-anyone role.
+            - - Effect: Allow
+                Principal:
+                  AWS:
+                    Fn::Sub: 'arn:aws:iam::${AWS::AccountId}:root'
+                Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DriveAgentlessScans
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: SnapshotAndVolumeLifecycleInThisAccount
+                Effect: Allow
+                Action:
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVolumes
+                  - ec2:DescribeAvailabilityZones
+                  - ec2:CopySnapshot
+                  - ec2:CreateVolume
+                  - ec2:CreateTags
+                  - ec2:DeleteVolume
+                  - ec2:DeleteSnapshot
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion:
+                      Ref: AWS::Region
+
+              - Sid: UseTheScanKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                  - kms:ReEncryptFrom
+                  - kms:ReEncryptTo
+                  - kms:CreateGrant
+                Resource:
+                  Fn::GetAtt: [ScanKmsKey, Arn]
+
+              - Sid: RunScannerTasks
+                Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                Resource: '*'
+                Condition:
+                  ArnEquals:
+                    ecs:cluster:
+                      Fn::GetAtt: [ScanCluster, Arn]
+
+              # Scoped to exactly the two task roles — an unscoped PassRole is a
+              # standard privilege-escalation path.
+              - Sid: PassOnlyTheScannerRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - Fn::GetAtt: [ScannerTaskRole, Arn]
+                  - Fn::GetAtt: [TaskExecutionRole, Arn]
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+              - Sid: DenyControlPlaneData
+                Effect: Deny
+                Action:
+                  - rds:*
+                  - secretsmanager:*
+                  - dynamodb:*
+                Resource: '*'
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  # ─── Cost guard ───────────────────────────────────────────────────────────
+  # NOTE: the sutra:component cost-allocation tag must be ACTIVATED in
+  # Billing -> Cost allocation tags before this filter matches anything. Until
+  # then the budget tracks the whole account, which still catches a runaway.
+  AgentlessScanBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: sutra-agentless-scan
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount:
+            Ref: MonthlyBudgetUsd
+          Unit: USD
+        CostFilters:
+          TagKeyValue:
+            - 'user:sutra:component$agentless-scan'
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address:
+                Ref: BudgetNotificationEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address:
+                Ref: BudgetNotificationEmail
+
+Outputs:
+  ScanAccountId:
+    Description: Pass this as AgentlessScanAccountId in the customer role stack.
+    Value:
+      Ref: AWS::AccountId
+
+  ScanKmsKeyArn:
+    Description: KMS key ARN for snapshot re-encryption (executor kmsKeyArn).
+    Value:
+      Fn::GetAtt: [ScanKmsKey, Arn]
+
+  ScannerRepositoryUri:
+    Description: Push the scanner image here.
+    Value:
+      Fn::GetAtt: [ScannerEcrRepository, RepositoryUri]
+
+  ScanClusterArn:
+    Value:
+      Fn::GetAtt: [ScanCluster, Arn]
+
+  ScanSubnetIds:
+    Description: Comma-separated subnets for RunTask network configuration.
+    Value:
+      Fn::Join:
+        - ','
+        - - Ref: ScanSubnetA
+          - Ref: ScanSubnetB
+
+  ScannerSecurityGroupId:
+    Value:
+      Ref: ScannerSecurityGroup
+
+  ScannerTaskRoleArn:
+    Value:
+      Fn::GetAtt: [ScannerTaskRole, Arn]
+
+  TaskExecutionRoleArn:
+    Value:
+      Fn::GetAtt: [TaskExecutionRole, Arn]
+
+  OrchestratorRoleArn:
+    Description: The control plane assumes this to launch scans.
+    Value:
+      Fn::GetAtt: [OrchestratorRole, Arn]
+
+  ScannerLogGroupName:
+    Value:
+      Ref: ScannerLogGroup
