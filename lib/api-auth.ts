@@ -107,6 +107,22 @@ export function assertAuthenticationRequest(request: Request): void {
   }
 }
 
+/**
+ * The deployment's canonical public origin, for callers that must compare against a
+ * CONFIGURED value rather than one derived from the request.
+ *
+ * Lives here because this module already holds the Worker env binding. It exists
+ * because effectiveRequestOrigin cannot see the public host under wrangler 4.114 /
+ * miniflare 4.20260722 — the runtime rewrites Host to the listening socket, so every
+ * request appears to originate from https://127.0.0.1:3000 regardless of what the
+ * reverse proxy sets. Anything that needs to know "what origin do browsers use for
+ * this deployment" has to read it from configuration.
+ */
+export function configuredPublicOrigin(): string | undefined {
+  const value = runtimeEnv().SUTRA_PUBLIC_ORIGIN?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
+}
+
 export function localAuthSecrets(): LocalAuthSecrets {
   const config = runtimeEnv();
   const encryptionKey = config.SUTRA_AUTH_ENCRYPTION_KEY?.trim();

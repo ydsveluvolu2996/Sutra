@@ -1,6 +1,6 @@
 import { LocalAuthError } from "../db/auth-repository";
 import { assertSameOrigin, readBoundedJson } from "./aws-pilot-security";
-import { assertAuthenticationRequest, assertLocalAuthRequest } from "./api-auth";
+import { assertAuthenticationRequest, assertLocalAuthRequest, configuredPublicOrigin } from "./api-auth";
 import { jsonResponse } from "./pilot-server";
 
 const PUBLIC_AUTH_CODES = new Set([
@@ -43,14 +43,52 @@ export function clientSourceKey(request: Request): string | null {
   return null;
 }
 
-export function assertLocalAuthMutation(request: Request): void {
+/**
+ * Same-origin enforcement for auth mutations, anchored to the CONFIGURED origin.
+ *
+ * WHY THE EXPECTED ORIGIN IS NOT DERIVED FROM THE REQUEST. `assertSameOrigin(request)` with no
+ * second argument compares the browser's Origin against an origin it computes from
+ * the request itself. Under wrangler 4.114 / miniflare 4.20260722 that computed
+ * value is the LISTENING SOCKET (https://127.0.0.1:3000) no matter what the reverse
+ * proxy sets, because the runtime rewrites Host on the way in — verified through the
+ * real Caddy chain, where only an Origin of the socket address matched. Every browser
+ * write therefore failed with "The request origin is invalid".
+ *
+ * Reading the Host header instead does NOT fix it; the header is already rewritten by
+ * then. The only value that survives the runtime is the one we configured ourselves,
+ * so the comparison is anchored to SUTRA_PUBLIC_ORIGIN and no longer depends on how a
+ * runtime version reconstructs a URL.
+ *
+ * Absent stays permissive-to-self (local dev has no canonical origin), and the
+ * cross-origin rejection is unaffected either way: a foreign Origin never equals the
+ * configured one.
+ */
+export function assertLocalAuthMutation(
+  request: Request,
+  publicOrigin: string | undefined = configuredPublicOrigin(),
+): void {
   assertLocalAuthRequest(request);
-  assertSameOrigin(request);
+  assertSameOrigin(request, normalizedPublicOrigin(publicOrigin));
 }
 
-export function assertAuthMutation(request: Request): void {
+export function assertAuthMutation(
+  request: Request,
+  publicOrigin: string | undefined = configuredPublicOrigin(),
+): void {
   assertAuthenticationRequest(request);
-  assertSameOrigin(request);
+  assertSameOrigin(request, normalizedPublicOrigin(publicOrigin));
+}
+
+/**
+ * Blank is treated as absent so an unset-but-present binding (compose renders
+ * `SUTRA_PUBLIC_ORIGIN: ""` when the variable is empty) does not reach
+ * canonicalOrigin as the empty string and get reported as an invalid origin —
+ * which would turn a missing configuration into the same opaque rejection this
+ * whole change exists to remove.
+ */
+function normalizedPublicOrigin(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed === undefined || trimmed.length === 0 ? undefined : trimmed;
 }
 
 export function exactInputObject(
