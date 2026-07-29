@@ -572,6 +572,25 @@ export function assertSameOrigin(request: Request, configuredOrigin?: string): v
     expectedOrigin = canonicalOrigin(configuredOrigin);
   }
   const suppliedOrigin = request.headers.get("origin");
+  // TEMPORARY DIAGNOSTIC — remove once the login origin rejection is resolved.
+  // Three fixes reasoned from source failed to clear it, so this prints the actual
+  // values instead. stdout only (docker logs), never the response body: an origin
+  // rejection must not become an information-disclosure endpoint. No credentials,
+  // tokens or body content are touched.
+  console.error("[origin-diagnostic]", JSON.stringify({
+    url: request.url,
+    hostHeader: request.headers.get("host"),
+    xForwardedProto: request.headers.get("x-forwarded-proto"),
+    xForwardedHost: request.headers.get("x-forwarded-host"),
+    suppliedOrigin,
+    configuredOriginArg: configuredOrigin ?? null,
+    expectedOrigin,
+    secFetchSite: request.headers.get("sec-fetch-site"),
+    suppliedCanonical: (() => {
+      try { return suppliedOrigin === null ? null : canonicalOrigin(suppliedOrigin); }
+      catch { return "THREW"; }
+    })(),
+  }));
   if (suppliedOrigin === null || canonicalOrigin(suppliedOrigin) !== expectedOrigin) {
     invalidInput("The request origin is invalid");
   }
