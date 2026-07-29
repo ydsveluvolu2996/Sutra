@@ -86,9 +86,40 @@ const exit = await Promise.race([
   new Promise((resolvePromise) => collector.once("exit", (code, signal) => resolvePromise({ name: "collector", code, signal }))),
   new Promise((resolvePromise) => web.once("exit", (code, signal) => resolvePromise({ name: "web", code, signal }))),
 ]);
+// Captured BEFORE stop(), which sets `closing` itself: this distinguishes "an
+// operator or orchestrator signalled us" from "a child died on its own".
+const shutdownWasRequested = closing;
 stop();
 await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
-if (exit.code !== 0 && exit.signal === null) {
-  process.stderr.write(`${exit.name} stopped unexpectedly (${exit.code}).\n`);
+
+// ALWAYS SAY WHICH CHILD WENT, AND FAIL WHEN NOBODY ASKED US TO STOP.
+//
+// This block used to log only when the exit code was non-zero, so a child that
+// exited CLEANLY took the whole container down in silence and reported success.
+// Production showed exactly that: RestartCount=3, State.ExitCode=0,
+// OOMKilled=false, no error anywhere in the logs, and `restart: unless-stopped`
+// quietly bringing it back. From outside it looked like random 500 "Network
+// connection lost" and 503s on any endpoint unlucky enough to be mid-request —
+// with nothing to point at a restart at all.
+//
+// Neither child may exit while the service is meant to be serving, whatever its
+// code. Exiting non-zero is what makes Docker's restart legible as a failure
+// rather than a normal stop, and the structured line names the child so the next
+// occurrence is one log read instead of an investigation.
+if (!shutdownWasRequested) {
+  process.stderr.write(`${JSON.stringify({
+    event: "sutra.supervisor.child-exited",
+    child: exit.name,
+    code: exit.code,
+    signal: exit.signal,
+    detail: "no shutdown was requested; neither child may exit while serving",
+  })}\n`);
+  process.exitCode = 1;
+} else if (exit.code !== 0 && exit.signal === null) {
+  process.stderr.write(`${JSON.stringify({
+    event: "sutra.supervisor.child-failed-during-shutdown",
+    child: exit.name,
+    code: exit.code,
+  })}\n`);
   process.exitCode = 1;
 }
