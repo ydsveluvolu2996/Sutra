@@ -51,7 +51,18 @@ if [[ "$RUNNER" == "docker" ]]; then
     || die "/app/$REFRESH_SCRIPT is missing from the $APP_CONTAINER image. The release image must ship it and its import closure; see the COPY lines in the root Dockerfile."
   # DATABASE_URL is passed as an env var rather than an argument so it never
   # appears in the container's process list.
-  docker exec -e DATABASE_URL="$DATABASE_URL" "$APP_CONTAINER" \
+  #
+  # The two artifact paths are redirected into /app/.sutra, which the image creates
+  # owned by the `node` user. Their defaults sit under ./data, and /app is NOT
+  # writable by that user — `mkdir /app/data` raised EACCES and killed a run that had
+  # already fetched KEV, 10.7 MB of EPSS and the NVD window. The script now writes the
+  # database first and treats these as best-effort, so a bad path can no longer lose a
+  # refresh; pointing them somewhere writable means they succeed rather than warn.
+  docker exec \
+    -e DATABASE_URL="$DATABASE_URL" \
+    -e VULN_MIRROR_PATH=/app/.sutra/vuln-feeds/mirror.json \
+    -e KEV_SNAPSHOT_PATH=/app/.sutra/kev-snapshot.json \
+    "$APP_CONTAINER" \
     node "$REFRESH_SCRIPT" \
     || die "refresh failed inside the app container."
 else

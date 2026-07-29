@@ -150,22 +150,45 @@ async function main() {
   const mirror = ingestVulnerabilityFeeds({ kevJson, epssCsv, nvdItems, asOf, source: "kev+epss+nvd" });
   const serialized = serializeMirror(mirror, "kev+epss+nvd");
 
-  const path = outputPath();
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, JSON.stringify(serialized), "utf8");
+  // THE DATABASE WRITE COMES FIRST, and nothing optional may precede it.
+  //
+  // It used to run last, after the two file writes below. In the production
+  // container /app is not writable by the `node` user, so `mkdir /app/data` threw
+  // EACCES and the process died — discarding a completed KEV + 10.7 MB EPSS + NVD
+  // fetch and ingest that had already succeeded, and leaving the mirror in Postgres
+  // untouched while the logs showed three feeds downloading happily. The mirror in
+  // the database IS the product; the JSON files below are developer conveniences
+  // that nothing in production reads.
+  await writeMirrorToDatabase(serialized, asOf);
   console.log(
-    `Wrote mirror as of ${asOf}: ${mirror.report.kevCount} KEV, ${mirror.report.epssCount} EPSS, ${mirror.report.recordCount} DB records -> ${path}`,
+    `Mirror as of ${asOf}: ${mirror.report.kevCount} KEV, ${mirror.report.epssCount} EPSS, `
+    + `${mirror.report.recordCount} records written to the database.`,
   );
 
-  // Also emit the compact, committed KEV snapshot the app bundles for enrichment.
-  // KEV is small (~1.6k entries) and slow-changing, so a refreshable snapshot is a
-  // reasonable, honest (asOf-stamped) home; the large EPSS set stays in the mirror.
-  const snapshotPath = resolve(process.env.KEV_SNAPSHOT_PATH ?? "./data/kev-snapshot.json");
-  await mkdir(dirname(snapshotPath), { recursive: true });
-  await writeFile(snapshotPath, `${JSON.stringify({ asOf, source: "cisa-kev", entries: serialized.kev }, null, 0)}\n`, "utf8");
-  console.log(`Wrote KEV snapshot: ${mirror.report.kevCount} entries -> ${snapshotPath}`);
+  // Best-effort artifacts. A read-only or non-writable output directory must not
+  // fail a refresh that already landed, so these warn instead of throwing — but they
+  // warn with the path and the reason, because silently skipping a file someone is
+  // waiting for is its own kind of lie.
+  const path = outputPath();
+  try {
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, JSON.stringify(serialized), "utf8");
+    console.log(`Wrote file mirror -> ${path}`);
+  } catch (error) {
+    console.warn(`File mirror skipped (${path}): ${error.message}`);
+  }
 
-  await writeMirrorToDatabase(serialized, asOf);
+  // The compact KEV snapshot the app bundles for enrichment. KEV is small (~1.6k
+  // entries) and slow-changing, so a refreshable, asOf-stamped snapshot is a
+  // reasonable home; the large EPSS set stays in the mirror.
+  const snapshotPath = resolve(process.env.KEV_SNAPSHOT_PATH ?? "./data/kev-snapshot.json");
+  try {
+    await mkdir(dirname(snapshotPath), { recursive: true });
+    await writeFile(snapshotPath, `${JSON.stringify({ asOf, source: "cisa-kev", entries: serialized.kev }, null, 0)}\n`, "utf8");
+    console.log(`Wrote KEV snapshot: ${mirror.report.kevCount} entries -> ${snapshotPath}`);
+  } catch (error) {
+    console.warn(`KEV snapshot skipped (${snapshotPath}): ${error.message}`);
+  }
 }
 
 main().catch((error) => {
