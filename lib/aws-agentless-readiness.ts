@@ -16,14 +16,23 @@
  * decrypt-on-create-volume). See docs/agentless-snapshot-scanning-design.md for the
  * evidence. That closed the executor-not-live-validated gap and nothing more.
  *
- * Also 2026-07-29, and the reason canExecute is still false: the scanner image was
- * built and pushed to ECR, and the orchestrator role was given a real trust policy
- * — so the two gaps listed here previously are genuinely closed. Verifying them end
- * to end then surfaced a harder one. The scanner mounts a block device, mounting
- * needs CAP_SYS_ADMIN, and Fargate refuses that capability, so the compute this
- * stack provisions cannot host a scan at all. Two closed gaps and one larger open
- * one is a worse position than it looks on a count, which is exactly why these are
- * data rather than a number.
+ * Also 2026-07-29: the scanner image was built and pushed to ECR, the orchestrator
+ * role was given a real trust policy AND moved to the /sutra/ path (the control-plane
+ * instance role explicitly denies assuming anything outside it, so the trust policy
+ * alone left the assume at explicitDeny), and execution was wired through the
+ * collector — the only process that holds an AWS SDK. Along the way AWS settled the
+ * compute question by refusing CAP_SYS_ADMIN on Fargate, which mounting requires, so
+ * the model is one short-lived EC2 instance per scan.
+ *
+ * canExecute is therefore true: the CODE path is complete. That is a narrower claim
+ * than it sounds and must not be read as more:
+ *   * Whether a scan can run is a CONFIGURATION question, answered separately by
+ *     resolveAgentlessExecutorConfig, which names every unset setting.
+ *   * SUTRA_AGENTLESS_LIVE_VALIDATED is an OPERATOR attestation. No code here may set
+ *     it, and it is not set today.
+ *   * NOTHING has executed end to end against a live account. The individual EC2 call
+ *     shapes were validated as an admin identity; the assembled path has not run.
+ * An empty findings list still means NO SCAN HAS RUN.
  */
 
 export interface AgentlessReadinessGap {
@@ -47,38 +56,23 @@ export interface AgentlessScanReadiness {
 
 export const AGENTLESS_SCAN_EXECUTION_READINESS: AgentlessScanReadiness = {
   schema: "sutra.aws-agentless-readiness.v1",
-  canExecute: false,
+  canExecute: true,
   canPlan: true,
-  gaps: [
-    {
-      id: "scanner-compute-model-unresolved",
-      summary:
-        "The scan compute model does not exist yet, and the one the stack provisions cannot "
-        + "work. Mounting a block device requires CAP_SYS_ADMIN, and AWS rejects that outright "
-        + "on Fargate — RegisterTaskDefinition with FARGATE plus SYS_ADMIN fails with "
-        + "'SYS_ADMIN is not allowed on Fargate' (checked 2026-07-29; the same definition under "
-        + "the EC2 launch type registers fine). ScanCluster is Fargate-only and there is no task "
-        + "definition at all, so a scan has no host. Closing this is a decision about compute "
-        + "(ECS on EC2 capacity, a per-scan EC2 instance, or reading snapshot blocks via the EBS "
-        + "direct APIs and never mounting), not a missing line of glue.",
-      owner: "engineering",
-    },
-    {
-      id: "no-orchestrator-client-factory",
-      summary:
-        "Nothing constructs an Ec2AgentlessExecutor. customerClientFor and scanClientFor are "
-        + "injected seams with no production implementation, so the apply path throws "
-        + "NOT_CONFIGURED after the readiness gate rather than driving a scan.",
-      owner: "engineering",
-    },
-  ],
+  // Both code gaps are closed: the compute model is an EC2 instance per scan (Fargate
+  // rejects the CAP_SYS_ADMIN that mounting needs), and execution is wired through the
+  // collector, which is the only process holding an AWS SDK. What remains is operator
+  // configuration, and that is reported separately by resolveAgentlessExecutorConfig
+  // with the exact list of unset names — so it does not belong here as prose.
+  gaps: [],
   summary:
-    "Plans can be computed and reviewed today; nothing can be executed. The AWS response "
-    + "shapes are validated against a live account (2026-07-29), the scanner image is built and "
-    + "in ECR, and the orchestrator role now trusts the control-plane principal — but there is "
-    + "still no compute that can host a scan, because mounting needs CAP_SYS_ADMIN and Fargate "
-    + "refuses it. A plan creates no snapshot and costs nothing. An empty findings list "
-    + "therefore means NO SCAN HAS RUN — it is not evidence that a volume is clean.",
+    "The execution path is complete in code: an EC2 instance per scan, driven by the "
+    + "collector, with the customer session ceilinged by agentlessSnapshotSessionPolicy. "
+    + "Whether a scan can actually run is now a CONFIGURATION question, answered by "
+    + "resolveAgentlessExecutorConfig, which names every unset setting — and by the operator "
+    + "attestation SUTRA_AGENTLESS_LIVE_VALIDATED, which no code may set for itself. NOTHING "
+    + "here has executed against a live account end to end. A plan creates no snapshot and "
+    + "costs nothing, and an empty findings list still means NO SCAN HAS RUN — it is never "
+    + "evidence that a volume is clean.",
 };
 
 /** True when every listed gap is closed. Kept as a function so callers cannot forget one. */

@@ -13,7 +13,7 @@ import {
   isAgentlessExecutionReady,
 } from "../../../../../../lib/aws-agentless-readiness";
 import { assertSameOrigin, readBoundedJson } from "../../../../../../lib/aws-pilot-security";
-import { errorResponse, jsonResponse } from "../../../../../../lib/pilot-server";
+import { errorResponse, jsonResponse, startAgentlessScan } from "../../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
@@ -123,19 +123,60 @@ export async function POST(
       }, { status: 409 });
     }
 
-    /* c8 ignore start — unreachable until the readiness gaps close. Not unit-tested
-       on purpose: every statement past this point makes a real AWS call that creates
-       billable resources, so it is validated by the live runbook instead. */
-    throw Object.assign(
-      new Error(
-        "Agentless execution is configured and attested, but this deployment has no "
-        + "orchestrator client factory. Constructing an Ec2AgentlessExecutor needs STS "
-        + "clients for both the customer role (under agentlessSnapshotSessionPolicy) and "
-        + "the Sutra scan account; see docs/agentless-snapshot-scanning-design.md.",
-      ),
-      { code: "NOT_CONFIGURED", status: 503 },
-    );
-    /* c8 ignore stop */
+    // The APPROVED plan, not one re-derived now: applying must replay exactly what a
+    // human reviewed, or scope could widen silently between review and apply.
+    const plan = await repository.getRunPlan(scope, runId);
+    if (plan === null) {
+      throw Object.assign(new Error("Agentless scan run not found"), { code: "NOT_FOUND", status: 404 });
+    }
+
+    // The scan region comes from the configured AZ, which the resolver already
+    // validated — EBS attach is AZ-bound, so these cannot disagree.
+    const scanRegion = configuration.settings.scanAvailabilityZone.slice(0, -1);
+
+    // planned -> running BEFORE handing over, so a failure between here and the
+    // collector leaves a run that is visibly in flight rather than one that still
+    // looks applicable and could be started a second time.
+    await repository.markRunning(scope, runId);
+
+    let started;
+    try {
+      started = await startAgentlessScan({
+        runId,
+        tenantId: orgId,
+        connectionId,
+        region: scanRegion,
+        plan,
+        settings: configuration.settings,
+      });
+    } catch (error) {
+      // The collector refused or is unreachable. Say so, and say what it means:
+      // nothing was snapshotted, so this is NOT a scan that found nothing.
+      return jsonResponse({
+        applied: false,
+        runId,
+        status: "running",
+        error: {
+          code: (error as { code?: unknown }).code ?? "COLLECTOR_UNAVAILABLE",
+          message: error instanceof Error ? error.message : "the collector could not start the scan",
+        },
+        interpretation:
+          "The scan was not started by the collector. Nothing was snapshotted and nothing is "
+          + "billing. This run is marked running and must be reconciled; do NOT read an empty "
+          + "findings list for it as evidence that any volume is clean.",
+      }, { status: 502 });
+    }
+
+    // 202: the scan outlives this request, so a result is never implied here.
+    return jsonResponse({
+      applied: true,
+      runId,
+      status: started.phase,
+      startedAt: started.startedAt,
+      interpretation:
+        "The scan is running in the collector. Poll this run for its outcome — no findings have "
+        + "been recorded yet, and their absence right now means nothing.",
+    }, { status: 202 });
   } catch (error) {
     return errorResponse(error);
   }

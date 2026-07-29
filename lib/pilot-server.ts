@@ -301,6 +301,49 @@ function publicBrokerMessage(code: string): string {
   return messages[code] ?? messages.BROKER_REQUEST_FAILED;
 }
 
+/**
+ * Starts an agentless scan in the collector.
+ *
+ * The Worker cannot execute one itself: workerd holds no AWS SDK and no AWS
+ * credentials, by design. The collector owns the SDK, the role broker and the
+ * workload identity, so this hands over the approved plan and the resolved settings
+ * and gets back a 202 — the scan outlives any HTTP request, so the poll below is how
+ * its outcome is learned.
+ */
+export async function startAgentlessScan(input: {
+  readonly runId: string;
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly region: string;
+  readonly plan: unknown;
+  readonly settings: unknown;
+}): Promise<{ readonly runId: string; readonly phase: string; readonly startedAt: string }> {
+  return brokerFetch(
+    `/v1/agentless/scans/${input.runId}/execute`,
+    "POST",
+    {
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      region: input.region,
+      plan: input.plan,
+      settings: input.settings,
+    },
+  );
+}
+
+/** Polls a scan. An untracked run is a 404 from the collector, which is NOT "clean". */
+export async function readAgentlessRun(input: {
+  readonly runId: string;
+  readonly tenantId: string;
+  readonly connectionId: string;
+}): Promise<unknown> {
+  const query = new URLSearchParams({
+    tenantId: input.tenantId,
+    connectionId: input.connectionId,
+  });
+  return brokerFetch(`/v1/agentless/scans/${input.runId}?${query.toString()}`, "GET");
+}
+
 export async function getCollectorHealth(expectedPartition?: AwsPartition): Promise<CollectorHealth> {
   return parseCollectorHealth(await brokerFetch<unknown>("/v1/health", "GET"), expectedPartition);
 }

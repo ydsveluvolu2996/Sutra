@@ -94,7 +94,7 @@ interface RunRow {
 }
 
 export class AgentlessScanRepositoryError extends Error {
-  public readonly code: "INVALID_INPUT" | "SCOPE_NOT_FOUND" | "RUN_NOT_FOUND" | "ILLEGAL_TRANSITION";
+  public readonly code: "INVALID_INPUT" | "SCOPE_NOT_FOUND" | "RUN_NOT_FOUND" | "ILLEGAL_TRANSITION" | "PLAN_UNREADABLE";
   public constructor(code: AgentlessScanRepositoryError["code"]) {
     super("Agentless-scan operation rejected");
     this.name = "AgentlessScanRepositoryError";
@@ -218,6 +218,29 @@ export class AgentlessScanRepository {
     const created = await this.getRun(scope, id);
     if (created === null) throw new AgentlessScanRepositoryError("RUN_NOT_FOUND");
     return created;
+  }
+
+  /**
+   * The EXACT plan that was approved for this run.
+   *
+   * Applying must replay what a human reviewed, never a plan re-derived at apply time
+   * from inventory that may have changed — that would silently widen scope. Scoped by
+   * org AND customer like every other read: a run id is not a capability.
+   */
+  public async getRunPlan(scope: AgentlessScope, runId: string): Promise<AgentlessScanPlan | null> {
+    this.assertScope(scope);
+    if (!RUN_ID.test(runId)) invalid();
+    const db = await this.ready();
+    const row = await db.prepare(
+      `SELECT plan_json FROM agentless_scan_runs WHERE id = ? AND org_id = ? AND customer_id = ?`,
+    ).bind(runId, scope.orgId, scope.customerId).first<{ plan_json: string }>();
+    if (row === null || row === undefined) return null;
+    try {
+      return JSON.parse(row.plan_json) as AgentlessScanPlan;
+    } catch {
+      // A stored plan that will not parse must never be silently replaced by a guess.
+      throw new AgentlessScanRepositoryError("PLAN_UNREADABLE");
+    }
   }
 
   /** planned -> running. Refuses any other source state so a completed run is never re-opened. */
