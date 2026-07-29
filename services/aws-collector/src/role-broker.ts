@@ -616,8 +616,15 @@ export function sanitizeRoleSessionName(
 
 export class AwsRoleBroker {
   private readonly now: () => Date;
+  // Assigned explicitly rather than as a constructor parameter property. Node's
+  // strip-only TypeScript mode rejects parameter properties, so the shorthand made
+  // this module unimportable from any root-level `node --test` file — which is why
+  // nothing outside the collector could reuse the broker even though it owns the
+  // external-id decryption every AWS path needs.
+  private readonly dependencies: AwsRoleBrokerDependencies;
 
-  public constructor(private readonly dependencies: AwsRoleBrokerDependencies) {
+  public constructor(dependencies: AwsRoleBrokerDependencies) {
+    this.dependencies = dependencies;
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -634,6 +641,41 @@ export class AwsRoleBroker {
     const validated = await this.assumeAndValidateIdentity(resolved, jobId);
     // Re-attest on every collection so customer-side role drift cannot silently
     // expand the compact read-family session cap.
+    await this.attestRoleContract(resolved, validated.credentials);
+    return validated;
+  }
+
+  /**
+   * A customer session for AGENTLESS SNAPSHOT SCANNING.
+   *
+   * Identical to assumeValidatedSession — same connection resolution, same identity
+   * check, same re-attestation on every use — except for the STS ceiling. Agentless
+   * needs snapshot verbs (CreateSnapshot, ModifySnapshotAttribute) that the
+   * read-only metadata policy deliberately withholds, and it carries explicit
+   * Denies on every destructive verb so a compromised control plane still cannot
+   * delete a customer's data.
+   *
+   * THIS LIVES ON THE BROKER, not beside it. The external id is stored encrypted
+   * (externalIdCiphertext + externalIdKeyVersion) and the broker is what holds the
+   * key; a second path that decrypted credentials itself would be a second thing to
+   * audit, and the first place a mistake would go unnoticed.
+   */
+  public async assumeAgentlessSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== PERMISSION_PACK_VERSION) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      jobId,
+      agentlessSnapshotSessionPolicy,
+    );
+    // Re-attested here for the same reason as a collection: customer-side role
+    // drift must not silently widen what a scan can do.
     await this.attestRoleContract(resolved, validated.credentials);
     return validated;
   }
@@ -832,9 +874,17 @@ export class AwsRoleBroker {
   private async assumeAndValidateIdentity(
     resolved: ResolvedConnection,
     jobId: string,
+    /**
+     * The STS session ceiling. Defaults to the read-only metadata policy every
+     * collection uses; agentless scanning passes its own because it needs snapshot
+     * verbs the read policy does not grant. Injected rather than branched on a flag
+     * so a caller cannot accidentally get a WIDER ceiling than it asked for — the
+     * default stays the narrow one.
+     */
+    sessionPolicy: (roleArn: string) => string = readonlyMetadataSessionPolicy,
   ): Promise<ValidatedRoleSession> {
     const roleSessionName = sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix);
-    const policy = readonlyMetadataSessionPolicy(resolved.connection.roleArn);
+    const policy = sessionPolicy(resolved.connection.roleArn);
     let output;
 
     try {
