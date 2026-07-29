@@ -69,7 +69,8 @@
     "verify": "pnpm security:secrets && pnpm typecheck && pnpm typecheck:collector && pnpm lint && pnpm test && pnpm test:kubernetes && pnpm test:enterprise-security && pnpm test:phase2 && pnpm test:collector && pnpm db:postgres:test && pnpm build && pnpm test:rendered",
     "backup": "node scripts/backup.mjs",
     "registry:validate": "node scripts/validate-registry-scan.mjs",
-    "registry:cve:validate": "node scripts/validate-registry-cve.mjs"
+    "registry:cve:validate": "node scripts/validate-registry-cve.mjs",
+    "build:agentless-scanner": "pnpm --dir services/agentless-scanner build"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
