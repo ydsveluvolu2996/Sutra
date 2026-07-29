@@ -6,7 +6,24 @@
 // volume creates (scan volume, copied snapshot, source snapshot) is torn down
 // unconditionally, even when the scan itself throws. Nothing here imports the
 // AWS SDK; nothing runs until a real executor is supplied.
-import type { AgentlessScanPlan } from "./aws-agentless-scan-plan.ts";
+/**
+ * The slice of a plan this runner reads. Declared structurally rather than imported
+ * from the Worker's planning engine: this package must not depend on `lib/`, and the
+ * Worker's AgentlessScanPlan satisfies this shape without either side importing the
+ * other. If the runner ever needs another field, add it here — that is the point of
+ * spelling out exactly what execution consumes.
+ */
+export interface AgentlessScanPlan {
+  readonly scanners: readonly string[];
+  readonly kmsReencrypt: boolean;
+  /** Only the TTL is read here; the rest of the planner's summary is not this
+   *  runner's business, so it is not restated and cannot drift out of step. */
+  readonly summary: { readonly snapshotTtlHours: number };
+  readonly volumes: readonly {
+    readonly volumeId: string;
+    readonly region: string;
+  }[];
+}
 
 export interface AgentlessScanFinding {
   readonly source: string;

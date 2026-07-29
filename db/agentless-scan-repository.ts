@@ -13,7 +13,7 @@
 //    forgets to look at teardownFailures, the debt still exists.
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
-import type { AgentlessScanExecution } from "../lib/aws-agentless-scan-runner";
+import type { AgentlessScanExecution } from "../services/agentless-scanner/src/scan-runner.ts";
 import type { AgentlessScanPlan } from "../lib/aws-agentless-scan-plan";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;

@@ -49,6 +49,19 @@ import {
   type LocalJobStateStore,
 } from "./local-job-state.js";
 import {
+  executeAgentlessScan,
+  type AgentlessScanPlan as AgentlessExecutePlan,
+} from "@msp/agentless-scanner/scan-runner";
+
+import {
+  createAgentlessExecutor,
+  type AgentlessExecutionSettings,
+} from "./agentless-execution.js";
+import {
+  AgentlessRunAlreadyRunningError,
+  AgentlessRunRegistry,
+} from "./agentless-run-registry.js";
+import {
   createWorkloadIdentityRoleBroker,
   IMPLEMENTED_READ_ACTIONS,
   parseIamRoleArn,
@@ -142,6 +155,8 @@ interface ServerContext {
   readonly activeConnectionOperations: Set<string>;
   readonly lifecycleMutations: Set<string>;
   readonly localJobs: LocalJobsContext | null;
+  /** In-flight agentless scans. Memory-only; see agentless-run-registry.ts. */
+  readonly agentlessRuns: AgentlessRunRegistry;
 }
 
 interface LocalJobsContext {
@@ -229,6 +244,7 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     activeConnectionOperations: new Set(),
     lifecycleMutations: new Set(),
     localJobs,
+    agentlessRuns: new AgentlessRunRegistry(options.now ?? (() => new Date())),
   };
 
   const server = createServer((request, response) => {
@@ -472,12 +488,216 @@ async function dispatch(
   }
 }
 
+/** POST to start, GET to poll. A run id is opaque and never a capability. */
+const AGENTLESS_RUN_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})$/u;
+const AGENTLESS_EXECUTE_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})\/execute$/u;
+
+/**
+ * Parses an agentless execute request. Every field is required and validated: this is
+ * the request that spends money, so a malformed one is refused before a claim is made
+ * rather than discovered after a snapshot exists.
+ *
+ * The SETTINGS come from the Worker, which resolves them through
+ * resolveAgentlessExecutorConfig — the single place that owns the no-defaults contract
+ * and the operator-facing list of unset names. They are re-validated for SHAPE here
+ * because this process is the one that would act on them.
+ */
+function parseAgentlessExecuteRequest(body: string): {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly region: string;
+  readonly plan: AgentlessExecutePlan;
+  readonly settings: AgentlessExecutionSettings;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw invalidRequest();
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalidRequest();
+  const record = parsed as Record<string, unknown>;
+
+  const tenantId = record.tenantId;
+  const connectionId = record.connectionId;
+  const region = record.region;
+  if (
+    typeof tenantId !== "string" || tenantId.length === 0 || tenantId.length > 128 ||
+    typeof connectionId !== "string" || connectionId.length === 0 || connectionId.length > 128 ||
+    typeof region !== "string" || !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(region)
+  ) throw invalidRequest();
+
+  const plan = record.plan;
+  if (typeof plan !== "object" || plan === null || Array.isArray(plan)) throw invalidRequest();
+  const planRecord = plan as Record<string, unknown>;
+  if (
+    !Array.isArray(planRecord.volumes) ||
+    !Array.isArray(planRecord.scanners) ||
+    typeof planRecord.kmsReencrypt !== "boolean" ||
+    typeof planRecord.summary !== "object" || planRecord.summary === null
+  ) throw invalidRequest();
+  // An empty scanner list would run a scan that cannot find anything and then report
+  // an empty result, which is indistinguishable from a clean disk.
+  if (planRecord.scanners.length === 0) throw invalidRequest();
+
+  const settings = record.settings;
+  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) throw invalidRequest();
+  const settingsRecord = settings as Record<string, unknown>;
+  const instance = settingsRecord.instance;
+  if (typeof instance !== "object" || instance === null || Array.isArray(instance)) throw invalidRequest();
+  const instanceRecord = instance as Record<string, unknown>;
+  const requiredStrings: readonly [unknown, RegExp][] = [
+    [settingsRecord.scanAccountId, /^\d{12}$/u],
+    [settingsRecord.scanAvailabilityZone, /^[a-z]{2}(-gov)?-[a-z]+-\d[a-z]$/u],
+    [settingsRecord.scannerImage, /^[a-z0-9.\-_/:]+@sha256:[0-9a-f]{64}$/u],
+    [settingsRecord.orchestratorRoleArn, /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/u],
+    [instanceRecord.amiId, /^ami-[0-9a-f]{8,17}$/u],
+    [instanceRecord.instanceType, /^[a-z0-9]+\.[a-z0-9]+$/u],
+    [instanceRecord.subnetId, /^subnet-[0-9a-f]{8,17}$/u],
+    [instanceRecord.securityGroupId, /^sg-[0-9a-f]{8,17}$/u],
+    [instanceRecord.instanceProfileArn, /^arn:aws:iam::\d{12}:instance-profile\/[A-Za-z0-9+=,.@_/-]+$/u],
+    [instanceRecord.findingsBucket, /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u],
+  ];
+  for (const [value, pattern] of requiredStrings) {
+    if (typeof value !== "string" || !pattern.test(value)) throw invalidRequest();
+  }
+  // Absent is legal and means the source volume is unencrypted; malformed is not.
+  const kmsKeyArn = settingsRecord.kmsKeyArn;
+  if (
+    kmsKeyArn !== null && kmsKeyArn !== undefined &&
+    (typeof kmsKeyArn !== "string" ||
+      !/^arn:aws(-us-gov|-cn)?:kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/u.test(kmsKeyArn))
+  ) throw invalidRequest();
+  // Only the exact boolean true. This records an operator attestation, so a near-miss
+  // must never be read as the claim.
+  if (settingsRecord.liveValidated !== true) throw invalidRequest();
+
+  return {
+    tenantId,
+    connectionId,
+    region,
+    plan: plan as AgentlessExecutePlan,
+    settings: settings as unknown as AgentlessExecutionSettings,
+  };
+}
+
+/** Scope for a poll. Checked by the registry, so a foreign run reads as absent. */
+function parseAgentlessRunQuery(path: string): {
+  readonly tenantId: string;
+  readonly connectionId: string;
+} {
+  const query = new URL(path, "http://collector.invalid").searchParams;
+  const tenantId = query.get("tenantId");
+  const connectionId = query.get("connectionId");
+  if (
+    tenantId === null || tenantId.length === 0 || tenantId.length > 128 ||
+    connectionId === null || connectionId.length === 0 || connectionId.length > 128
+  ) throw invalidRequest();
+  return { tenantId, connectionId };
+}
+
 async function route(
   context: ServerContext,
   method: string,
   path: string,
   body: string,
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  const agentlessExecuteMatch = AGENTLESS_EXECUTE_PATH.exec(requestPathname(path));
+  if (method === "POST" && agentlessExecuteMatch !== null) {
+    const runId = agentlessExecuteMatch[1];
+    if (runId === undefined) throw invalidRequest();
+    const input = parseAgentlessExecuteRequest(body);
+
+    // Claimed BEFORE anything starts, so a retried POST cannot begin a second scan of
+    // the same run — which would double the snapshots, the instances and the bill, and
+    // let one teardown delete resources the other is still using.
+    let claimed;
+    try {
+      claimed = context.agentlessRuns.claim({
+        runId,
+        tenantId: input.tenantId,
+        connectionId: input.connectionId,
+      });
+    } catch (error) {
+      if (error instanceof AgentlessRunAlreadyRunningError) {
+        return { status: 409, body: { code: "ALREADY_RUNNING", message: error.message } };
+      }
+      throw error;
+    }
+
+    // Built here so a misconfiguration — a denied assume, a malformed ARN — surfaces
+    // in THIS response instead of minutes later in a poll. Building creates no AWS
+    // resource, so nothing is billing if it fails.
+    let executor;
+    try {
+      executor = await createAgentlessExecutor(
+        {
+          tenantId: input.tenantId,
+          connectionId: input.connectionId,
+          runId,
+          region: input.region,
+          settings: input.settings,
+        },
+        { registry: context.registry, principalArn: context.principalArn },
+      );
+    } catch (error) {
+      const rawCode = (error as { code?: unknown }).code;
+      const code = typeof rawCode === "string" ? rawCode : "EXECUTOR_UNAVAILABLE";
+      const message = error instanceof Error ? error.message : "the executor could not be built";
+      context.agentlessRuns.fail(runId, { code, message });
+      return {
+        status: 503,
+        body: {
+          code,
+          message,
+          interpretation:
+            "No scan started. Nothing was snapshotted and nothing is billing. This run is "
+            + "unchanged; do NOT read this as a clean scan.",
+        },
+      };
+    }
+
+    // Deliberately NOT awaited. A scan outlives the 190s requestTimeout, and timing out
+    // mid-scan would leave a snapshot AND an instance billing with no caller left to
+    // reap them. Every terminal state is recorded, so the poll route is the truth.
+    void executeAgentlessScan(input.plan, executor)
+      .then((execution) => context.agentlessRuns.complete(runId, execution))
+      .catch((error: unknown) => {
+        const rawCode = (error as { code?: unknown }).code;
+        context.agentlessRuns.fail(runId, {
+          code: typeof rawCode === "string" ? rawCode : "SCAN_FAILED",
+          message: error instanceof Error ? error.message : "the scan failed",
+        });
+      });
+
+    return { status: 202, body: { runId, phase: claimed.phase, startedAt: claimed.startedAt } };
+  }
+
+  const agentlessRunMatch = AGENTLESS_RUN_PATH.exec(requestPathname(path));
+  if (method === "GET" && agentlessRunMatch !== null) {
+    const runId = agentlessRunMatch[1];
+    if (runId === undefined) throw invalidRequest();
+    requireEmptyBody(body);
+    const query = parseAgentlessRunQuery(path);
+    const state = context.agentlessRuns.read(runId, query);
+    if (state === null) {
+      // Unknown to THIS process. Not "failed", and certainly not "clean": the collector
+      // may have restarted mid-scan while the AWS resources still exist.
+      return {
+        status: 404,
+        body: {
+          code: "RUN_NOT_TRACKED",
+          message: `run ${runId} is not tracked by this collector`,
+          interpretation:
+            "This collector has no record of the run. If it started before a collector "
+            + "restart the scan may still be running, or its resources may still exist — "
+            + "check AWS. Do NOT read this as a completed or clean scan.",
+        },
+      };
+    }
+    return { status: 200, body: state };
+  }
+
   if (method === "GET" && path === "/v1/health") {
     if (body.length !== 0) throw invalidRequest();
     return {

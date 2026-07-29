@@ -24,6 +24,7 @@
     "./ec2-scan-worker": "./dist/src/ec2-scan-worker.js",
     "./scan-instance-operations": "./dist/src/scan-instance-operations.js",
     "./executor": "./dist/src/executor.js",
-    "./trivy-report": "./dist/src/trivy-report.js"
+    "./trivy-report": "./dist/src/trivy-report.js",
+    "./scan-runner": "./dist/src/scan-runner.js"
   }
 }
