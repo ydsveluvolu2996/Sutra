@@ -572,26 +572,7 @@ export function assertSameOrigin(request: Request, configuredOrigin?: string): v
     expectedOrigin = canonicalOrigin(configuredOrigin);
   }
   const suppliedOrigin = request.headers.get("origin");
-  // TEMPORARY DIAGNOSTIC — remove once the login origin rejection is resolved.
-  // Three fixes reasoned from source failed to clear it, so this prints the actual
-  // values instead. stdout only (docker logs), never the response body: an origin
-  // rejection must not become an information-disclosure endpoint. No credentials,
-  // tokens or body content are touched.
-  console.error("[origin-diagnostic]", JSON.stringify({
-    url: request.url,
-    hostHeader: request.headers.get("host"),
-    xForwardedProto: request.headers.get("x-forwarded-proto"),
-    xForwardedHost: request.headers.get("x-forwarded-host"),
-    suppliedOrigin,
-    configuredOriginArg: configuredOrigin ?? null,
-    expectedOrigin,
-    secFetchSite: request.headers.get("sec-fetch-site"),
-    suppliedCanonical: (() => {
-      try { return suppliedOrigin === null ? null : canonicalOrigin(suppliedOrigin); }
-      catch { return "THREW"; }
-    })(),
-  }));
-  if (suppliedOrigin === null || canonicalOrigin(suppliedOrigin) !== expectedOrigin) {
+  if (suppliedOrigin === null || suppliedOriginCanonical(request, suppliedOrigin) !== expectedOrigin) {
     invalidInput("The request origin is invalid");
   }
 
@@ -957,6 +938,45 @@ function decodeConfiguredAesKey(value: string): Uint8Array {
   } catch {
     secretUnavailable();
   }
+}
+
+/**
+ * Canonicalizes the browser-supplied `Origin`, restoring the scheme that TLS
+ * termination stripped.
+ *
+ * THIS IS THE THING THAT BROKE SIGN-IN. TLS terminates at the edge and the internal
+ * hop is plain HTTP, so the runtime rewrites `Origin` to match the request URL's
+ * scheme: a browser that sent `https://www.sutracmdb.com` arrives as
+ * `http://www.sutracmdb.com`. canonicalOrigin rejects a non-HTTPS origin for a
+ * non-loopback host, so it THREW on every write — and because it throws the same
+ * "The request origin is invalid" message the comparison uses, the failure looked
+ * like a mismatch rather than a scheme problem. Confirmed from production:
+ * suppliedOrigin `http://www.sutracmdb.com`, expectedOrigin
+ * `https://www.sutracmdb.com`, suppliedCanonical THREW.
+ *
+ * `X-Forwarded-Proto` is the only trustworthy statement of the real client scheme
+ * here, and it is safe to trust: the unexposed Caddy front door sets it to a single
+ * literal `https` and strips the competing client-supplied headers, so a caller
+ * cannot forge an upgrade. Anything other than exactly `https` leaves the supplied
+ * origin untouched, so a genuine plaintext request is still rejected.
+ */
+function suppliedOriginCanonical(request: Request, suppliedOrigin: string): string {
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.trim().toLowerCase();
+  if (forwardedProto === "https") {
+    let host: string | null = null;
+    try {
+      const parsed = new URL(suppliedOrigin);
+      // Only an http->https upgrade of the SAME host. The host is never rewritten,
+      // so this cannot turn a foreign origin into the expected one.
+      if (parsed.protocol === "http:" && parsed.pathname === "/" && parsed.search === "" && parsed.hash === "") {
+        host = parsed.host;
+      }
+    } catch {
+      // Malformed origins fall through to canonicalOrigin, which refuses them.
+    }
+    if (host !== null) return canonicalOrigin(`https://${host}`);
+  }
+  return canonicalOrigin(suppliedOrigin);
 }
 
 function canonicalOrigin(value: string): string {

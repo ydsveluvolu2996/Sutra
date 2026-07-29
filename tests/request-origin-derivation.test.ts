@@ -87,3 +87,50 @@ test("a malformed or multi-valued forwarded protocol fails closed", () => {
 test("a string input keeps working for callers that have only a URL", () => {
   assert.equal(effectiveRequestOrigin("https://www.sutracmdb.com/anything"), "https://www.sutracmdb.com");
 });
+
+/**
+ * The production shape that actually broke sign-in: TLS terminates upstream, so the
+ * runtime rewrites Origin to the internal http scheme. The check must accept the
+ * http->https upgrade attested by X-Forwarded-Proto, and must NOT accept a foreign
+ * host or an unattested plaintext request.
+ */
+test("a scheme-downgraded Origin is accepted when X-Forwarded-Proto attests https", () => {
+  assert.doesNotThrow(() => {
+    assertSameOrigin(
+      request("http://www.sutracmdb.com/api/auth/login", {
+        host: "www.sutracmdb.com",
+        "x-forwarded-proto": "https",
+        origin: "http://www.sutracmdb.com",
+        "sec-fetch-site": "same-origin",
+      }),
+      "https://www.sutracmdb.com",
+    );
+  });
+});
+
+test("the host is never rewritten, only the scheme", () => {
+  assert.throws(() => {
+    assertSameOrigin(
+      request("http://www.sutracmdb.com/api/auth/login", {
+        host: "www.sutracmdb.com",
+        "x-forwarded-proto": "https",
+        origin: "http://attacker.example",
+        "sec-fetch-site": "same-origin",
+      }),
+      "https://www.sutracmdb.com",
+    );
+  });
+});
+
+test("without an https attestation a plaintext Origin is still refused", () => {
+  assert.throws(() => {
+    assertSameOrigin(
+      request("http://www.sutracmdb.com/api/auth/login", {
+        host: "www.sutracmdb.com",
+        origin: "http://www.sutracmdb.com",
+        "sec-fetch-site": "same-origin",
+      }),
+      "https://www.sutracmdb.com",
+    );
+  });
+});
