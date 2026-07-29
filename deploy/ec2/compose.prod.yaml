@@ -134,6 +134,19 @@ services:
       SUTRA_INVITATION_EMAIL_PROVIDER: ${SUTRA_INVITATION_EMAIL_PROVIDER:-}
       SUTRA_INVITATION_EMAIL_API_URL: ${SUTRA_INVITATION_EMAIL_API_URL:-}
       SUTRA_INVITATION_EMAIL_API_KEY: ${SUTRA_INVITATION_EMAIL_API_KEY:-}
+      # Agentless disk scanning. All five are optional and default to empty: the
+      # resolver in lib/aws-agentless-executor-config.ts has NO defaults by design
+      # and refuses with the exact list of unset names, so an unconfigured host
+      # reports "not configured" rather than snapshotting into a guessed account.
+      # Setting them in .sutra/docker.env alone is NOT enough — that file is only
+      # an --env-file for YAML interpolation, so a variable that is not named here
+      # never reaches the container, and one not listed in AGENTLESS_VARS in
+      # scripts/setup-local-pilot.mjs never reaches the Worker runtime that reads it.
+      SUTRA_AGENTLESS_SCAN_ACCOUNT_ID: ${SUTRA_AGENTLESS_SCAN_ACCOUNT_ID:-}
+      SUTRA_AGENTLESS_SCAN_AZ: ${SUTRA_AGENTLESS_SCAN_AZ:-}
+      SUTRA_AGENTLESS_KMS_KEY_ARN: ${SUTRA_AGENTLESS_KMS_KEY_ARN:-}
+      SUTRA_AGENTLESS_SCANNER_IMAGE: ${SUTRA_AGENTLESS_SCANNER_IMAGE:-}
+      SUTRA_AGENTLESS_LIVE_VALIDATED: ${SUTRA_AGENTLESS_LIVE_VALIDATED:-}
     depends_on:
       postgres:
         condition: service_healthy

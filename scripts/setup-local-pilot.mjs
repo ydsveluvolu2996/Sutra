@@ -84,7 +84,21 @@ const INVITATION_VARS = [
   "SUTRA_INVITATION_EMAIL_API_URL",
   "SUTRA_INVITATION_EMAIL_API_KEY",
 ];
-const contactVars = [...CONTACT_VARS, ...INVITATION_VARS].map((name) => {
+// Agentless disk scanning reads its configuration from the Worker `env` via
+// resolveAgentlessExecutorConfig, so these must reach .dev.vars and not merely the
+// container process env. Every one is optional and only written when present:
+// absent is the configured refusal path (the resolver has NO defaults on purpose,
+// because a default scan-account id or KMS key could snapshot into the wrong
+// account), so a partially-set deployment reports which names are missing rather
+// than silently acting on a guess.
+const AGENTLESS_VARS = [
+  "SUTRA_AGENTLESS_SCAN_ACCOUNT_ID",
+  "SUTRA_AGENTLESS_SCAN_AZ",
+  "SUTRA_AGENTLESS_KMS_KEY_ARN",
+  "SUTRA_AGENTLESS_SCANNER_IMAGE",
+  "SUTRA_AGENTLESS_LIVE_VALIDATED",
+];
+const optionalPassthroughVars = [...CONTACT_VARS, ...INVITATION_VARS, ...AGENTLESS_VARS].map((name) => {
   const value = process.env[name]?.trim();
   if (value !== undefined && /[\r\n]/u.test(value)) {
     throw new Error(`${name} must be a single line`);
@@ -242,7 +256,7 @@ if (existingContents === null) {
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",
     ...(databaseUrl ? [`DATABASE_URL=${databaseUrl}`] : []),
     ...(jobRunnerToken ? [`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`] : []),
-    ...contactVars.map(({ name, value }) => `${name}=${value}`),
+    ...optionalPassthroughVars.map(({ name, value }) => `${name}=${value}`),
     "",
   ];
   await writeFile(variablesPath, values.join("\n"), { encoding: "utf8", mode: 0o600, flag: "wx" });
@@ -298,7 +312,7 @@ if (existingContents === null) {
       additions.push(`SUTRA_JOB_RUNNER_TOKEN=${jobRunnerToken}`);
     }
   }
-  for (const { name, value } of contactVars) {
+  for (const { name, value } of optionalPassthroughVars) {
     updatedContents = upsertVariable(updatedContents, additions, name, value);
   }
   if (additions.length > 0 || updatedContents !== existingContents) {
