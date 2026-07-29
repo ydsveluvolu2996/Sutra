@@ -25,6 +25,10 @@ const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml
  */
 const COLLECTOR_COMMANDS = {
   AssumeRoleCommand: { action: "sts:AssumeRole", scope: "vendor" },
+  // Reads an agentless scan's published findings from SUTRA's OWN bucket. Vendor
+  // scope, deliberately: this is never a customer permission, and putting it in the
+  // onboarding template would misrepresent what Sutra asks customers to grant.
+  GetObjectCommand: { action: "s3:GetObject", scope: "vendor" },
   GetCallerIdentityCommand: { action: "sts:GetCallerIdentity", scope: "customer" },
   GetRoleCommand: { action: "iam:GetRole", scope: "customer" },
   GetRolePolicyCommand: { action: "iam:GetRolePolicy", scope: "customer" },
