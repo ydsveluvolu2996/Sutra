@@ -169,3 +169,54 @@ test("a copy without a scan-account key is refused rather than silently unencryp
   );
   assert.deepEqual(log, []);
 });
+
+// ─── SINGLE-ACCOUNT TOPOLOGY ────────────────────────────────────────────────
+// Sutra's deployed setup puts the scan account and the volume owner in the SAME
+// account, chosen so all agentless spend lands in one place. AWS refuses to grant
+// createVolumePermission to a snapshot's own owner, so an unconditional share fails
+// before the copy is attempted and the scan dies on a step unrelated to reading the
+// disk. These cover both topologies because only one of them is what production runs.
+
+test("SAME account: no share is attempted, and the copy still happens", async () => {
+  const log: SentCommand[] = [];
+  const executor = build(log, {}, {
+    DescribeSnapshotsCommand: { Snapshots: [{ State: "completed", OwnerId: "111122223333" }] },
+    CopySnapshotCommand: { SnapshotId: "snap-c0ffee00" },
+  });
+  const result = await executor.copySnapshotKms({ snapshotId: "snap-0123abcd", region: "ap-south-1" });
+  assert.equal(result.snapshotId, "snap-c0ffee00");
+  // The whole point: AWS would reject sharing with the owner, so it must not be sent.
+  assert.equal(log.some((entry) => entry.name.endsWith("ModifySnapshotAttributeCommand")), false);
+  // And the copy is still issued by the SCAN client, preserving the trust boundary.
+  assert.ok(log.some((entry) => entry.name === "scan:CopySnapshotCommand"));
+});
+
+test("CROSS account: the share is added before the copy and revoked after", async () => {
+  const log: SentCommand[] = [];
+  const executor = build(log, {}, {
+    DescribeSnapshotsCommand: { Snapshots: [{ State: "completed", OwnerId: "999988887777" }] },
+    CopySnapshotCommand: { SnapshotId: "snap-c0ffee01" },
+  });
+  await executor.copySnapshotKms({ snapshotId: "snap-0123abcd", region: "ap-south-1" });
+  const shares = log.filter((entry) => entry.name === "customer:ModifySnapshotAttributeCommand");
+  assert.equal(shares.length, 2, "one add and one remove");
+  assert.equal(shares[0]?.input.OperationType, "add");
+  assert.equal(shares[1]?.input.OperationType, "remove");
+  // Ordering matters: the copy cannot succeed before the share exists, and the share
+  // must not outlive it.
+  const names = log.map((entry) => entry.name);
+  assert.ok(names.indexOf("customer:ModifySnapshotAttributeCommand") < names.indexOf("scan:CopySnapshotCommand"));
+  assert.ok(names.lastIndexOf("customer:ModifySnapshotAttributeCommand") > names.indexOf("scan:CopySnapshotCommand"));
+});
+
+test("an ABSENT OwnerId is treated as cross-account, i.e. the share is attempted", async () => {
+  // Failing the other way would silently skip the share a cross-account copy needs,
+  // and the copy would fail with a confusing permission error instead.
+  const log: SentCommand[] = [];
+  const executor = build(log, {}, {
+    DescribeSnapshotsCommand: { Snapshots: [{ State: "completed" }] },
+    CopySnapshotCommand: { SnapshotId: "snap-c0ffee02" },
+  });
+  await executor.copySnapshotKms({ snapshotId: "snap-0123abcd", region: "ap-south-1" });
+  assert.ok(log.some((entry) => entry.name === "customer:ModifySnapshotAttributeCommand"));
+});

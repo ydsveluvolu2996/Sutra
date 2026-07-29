@@ -226,12 +226,32 @@ export class Ec2AgentlessExecutor {
     await this.waitForSnapshot({ snapshotId: input.snapshotId, region: input.region, customerOwned: true });
 
     const customer = await this.config.customerClientFor(input.region);
-    await customer.send(new ModifySnapshotAttributeCommand({
-      SnapshotId: input.snapshotId,
-      Attribute: "createVolumePermission",
-      OperationType: "add",
-      UserIds: [this.config.scanAccountId],
-    }));
+
+    // Whether a share is needed at all depends on the topology.
+    //
+    // Sutra's deployed setup is deliberately SINGLE-ACCOUNT: the scan account is the
+    // same account that owns the volume, chosen so all agentless cost lands in one
+    // place and stays visible. In that shape the share is not merely unnecessary, it
+    // is REJECTED — AWS refuses createVolumePermission granted to a snapshot's own
+    // owner — so an unconditional share fails before the copy is ever attempted, and
+    // the whole scan dies on a step that had nothing to do with reading the disk.
+    //
+    // The owner comes from DescribeSnapshots rather than configuration: it is the
+    // account AWS itself attributes the snapshot to, so a mis-set config value
+    // cannot make this branch wrong.
+    const owner = await customer.send(new DescribeSnapshotsCommand({ SnapshotIds: [input.snapshotId] }));
+    // UNVALIDATED: DescribeSnapshots returns OwnerId as the 12-digit account id.
+    const ownerId = owner.Snapshots?.[0]?.OwnerId;
+    const sameAccount = typeof ownerId === "string" && ownerId === this.config.scanAccountId;
+
+    if (!sameAccount) {
+      await customer.send(new ModifySnapshotAttributeCommand({
+        SnapshotId: input.snapshotId,
+        Attribute: "createVolumePermission",
+        OperationType: "add",
+        UserIds: [this.config.scanAccountId],
+      }));
+    }
 
     const scan = await this.config.scanClientFor(input.region);
     const copied = await scan.send(new CopySnapshotCommand({
@@ -250,13 +270,19 @@ export class Ec2AgentlessExecutor {
 
     // Revoke the share immediately. The copy is independent, so leaving the
     // customer's snapshot shared would widen exposure for no benefit.
+    //
+    // Skipped when no share was added: removing a permission that was never granted
+    // is at best a no-op and at worst an error, and either way it would make the
+    // logs claim a revoke that did not correspond to anything.
     try {
-      await customer.send(new ModifySnapshotAttributeCommand({
-        SnapshotId: input.snapshotId,
-        Attribute: "createVolumePermission",
-        OperationType: "remove",
-        UserIds: [this.config.scanAccountId],
-      }));
+      if (!sameAccount) {
+        await customer.send(new ModifySnapshotAttributeCommand({
+          SnapshotId: input.snapshotId,
+          Attribute: "createVolumePermission",
+          OperationType: "remove",
+          UserIds: [this.config.scanAccountId],
+        }));
+      }
     } catch {
       // Non-fatal: the copy already exists and the scan must proceed. The share
       // is reported rather than retried here; the sweeper re-checks it.
