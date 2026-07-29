@@ -30,18 +30,47 @@ const collector = spawn(process.execPath, [resolve(root, "services/aws-collector
   env: environment,
   stdio: "inherit",
 });
-const web = spawn(resolve(root, "node_modules/.bin/wrangler"), [
-  "dev",
-  "--config", resolve(root, "dist/server/wrangler.json"),
-  "--env-file", variablesPath,
-  "--ip", webHost,
-  "--port", webPort,
-  "--show-interactive-dev-session", "false",
-], {
-  cwd: root,
-  env: { ...environment, WRANGLER_LOG_PATH: ".wrangler/wrangler.log" },
-  stdio: "inherit",
-});
+function spawnWeb() {
+  return spawn(resolve(root, "node_modules/.bin/wrangler"), [
+    "dev",
+    "--config", resolve(root, "dist/server/wrangler.json"),
+    "--env-file", variablesPath,
+    "--ip", webHost,
+    "--port", webPort,
+    "--show-interactive-dev-session", "false",
+  ], {
+    cwd: root,
+    env: { ...environment, WRANGLER_LOG_PATH: ".wrangler/wrangler.log" },
+    stdio: "inherit",
+  });
+}
+let web = spawnWeb();
+
+/**
+ * RESTART THE WORKER RUNTIME RATHER THAN THE WHOLE CONTAINER.
+ *
+ * Observed in production 2026-07-29: wrangler 4.114.0 exits 1 roughly hourly from
+ * `ProxyController.emitErrorEvent` with "Network connection lost." Taking the
+ * container down with it meant Postgres-adjacent state, the collector and the job
+ * ticker were all cycled too, and every request in flight failed — which is what
+ * made a healthy /api/v1/cases look broken.
+ *
+ * Restarting just this child is seconds instead of a full container start, so the
+ * blast radius of a runtime hiccup is a few requests rather than the whole app.
+ *
+ * BOUNDED AND LOUD on purpose. Silent infinite respawning would turn a permanent
+ * fault (a bad build, a missing binding) into a hot loop that looks like uptime.
+ * Past the budget the supervisor gives up and exits non-zero, which is the signal
+ * Docker and an operator can both act on.
+ */
+const WEB_RESTART_BUDGET = 5;
+const WEB_RESTART_WINDOW_MS = 60 * 60 * 1000;
+const webRestarts = [];
+
+function webRestartsInWindow(nowMs) {
+  while (webRestarts.length > 0 && nowMs - webRestarts[0] > WEB_RESTART_WINDOW_MS) webRestarts.shift();
+  return webRestarts.length;
+}
 
 // Durable background-job ticker. When a runner token is configured, poll the
 // system-internal drain endpoint on an interval. Failures are logged and never
@@ -82,10 +111,40 @@ function stop(signal = "SIGTERM") {
 }
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => stop(signal));
 
-const exit = await Promise.race([
-  new Promise((resolvePromise) => collector.once("exit", (code, signal) => resolvePromise({ name: "collector", code, signal }))),
-  new Promise((resolvePromise) => web.once("exit", (code, signal) => resolvePromise({ name: "web", code, signal }))),
-]);
+async function nextChildExit() {
+  return Promise.race([
+    new Promise((resolvePromise) => collector.once("exit", (code, signal) => resolvePromise({ name: "collector", code, signal }))),
+    new Promise((resolvePromise) => web.once("exit", (code, signal) => resolvePromise({ name: "web", code, signal }))),
+  ]);
+}
+
+let exit = await nextChildExit();
+// Re-arm around a web restart. The collector is deliberately NOT restarted: it is
+// a small local process that has never done this, and inventing a second recovery
+// path for a fault that has not happened is how untested code reaches production.
+while (exit.name === "web" && !closing) {
+  const attempts = webRestartsInWindow(Date.now()) + 1;
+  if (attempts > WEB_RESTART_BUDGET) {
+    process.stderr.write(`${JSON.stringify({
+      event: "sutra.supervisor.web-restart-budget-exhausted",
+      attempts: attempts - 1,
+      windowMinutes: WEB_RESTART_WINDOW_MS / 60000,
+      detail: "the Worker runtime keeps dying; giving up rather than hiding a permanent fault in a restart loop",
+    })}\n`);
+    break;
+  }
+  webRestarts.push(Date.now());
+  process.stderr.write(`${JSON.stringify({
+    event: "sutra.supervisor.web-restarting",
+    code: exit.code,
+    signal: exit.signal,
+    attempt: attempts,
+    budget: WEB_RESTART_BUDGET,
+    detail: "restarting the Worker runtime in place; the container and the collector keep running",
+  })}\n`);
+  web = spawnWeb();
+  exit = await nextChildExit();
+}
 // Captured BEFORE stop(), which sets `closing` itself: this distinguishes "an
 // operator or orchestrator signalled us" from "a child died on its own".
 const shutdownWasRequested = closing;
