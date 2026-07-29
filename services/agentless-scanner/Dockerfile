@@ -38,6 +38,17 @@ RUN apt-get update \
 
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 
+# Remove the bundled package managers. This container runs as root, holds
+# CAP_SYS_ADMIN, and has an untrusted customer filesystem mounted at /mnt/scan —
+# a package manager is the last thing that should be reachable in that position,
+# and nothing here uses one (the entrypoint is plain `node`, and the production
+# closure is copied in at build time). It is also the only *fixable* CRITICAL the
+# image carried: Trivy flagged CVE-2026-59873 against npm's bundled tar 7.5.11.
+# The root Dockerfile strips these for the same reason.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/pnpm /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 WORKDIR /opt/scanner
 
 # Only the built JS and the production closure. No source, no dev toolchain.
