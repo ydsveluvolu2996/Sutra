@@ -7,6 +7,9 @@ import {
   responseSecurityHeaders,
   type DeploymentSecurityEnvironment,
 } from "../lib/deployment-security";
+// Draining an unread request body is what keeps a rejected POST from killing the
+// runtime — see lib/request-body-drain.ts for the measurement behind it.
+import { discardUnreadRequestBody } from "../lib/request-body-drain";
 
 interface Env extends DeploymentSecurityEnvironment {
   ASSETS: Fetcher;
@@ -42,6 +45,10 @@ const worker = {
       );
       for (const [name, value] of Object.entries(responseSecurityHeaders(request, boundary.environment))) response.headers.set(name, value);
       response.headers.set("Cache-Control", "no-store");
+      // Rejected before any route ran, so nothing has read the body. Same fault as
+      // the main path below, and this branch is reachable by an unauthenticated
+      // caller — draining here is what keeps a rejected POST from killing the runtime.
+      await discardUnreadRequestBody(request);
       return response;
     }
 
@@ -67,6 +74,7 @@ const worker = {
     const renderRequest = new Request(request, { headers: new Headers(request.headers) });
     renderRequest.headers.set("content-security-policy", `script-src 'self' 'nonce-${scriptNonce}'`);
     const applicationResponse = await handler.fetch(renderRequest, env, ctx);
+    await discardUnreadRequestBody(renderRequest);
     const response = new Response(applicationResponse.body, applicationResponse);
     for (const [name, value] of Object.entries(responseSecurityHeaders(request, boundary.environment, scriptNonce))) response.headers.set(name, value);
     response.headers.delete("X-Powered-By");
