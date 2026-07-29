@@ -262,24 +262,6 @@ Resources:
                 Fn::Sub: 'arn:aws:iam::${AWS::AccountId}:root'
             Action: 'kms:*'
             Resource: '*'
-          - Sid: ScannerAndOrchestratorEbsUse
-            Effect: Allow
-            Principal:
-              AWS:
-                - Fn::GetAtt: [ScannerTaskRole, Arn]
-            Action:
-              - kms:Decrypt
-              - kms:DescribeKey
-              - kms:GenerateDataKeyWithoutPlaintext
-              - kms:ReEncryptFrom
-              - kms:ReEncryptTo
-              - kms:CreateGrant
-            Resource: '*'
-            Condition:
-              StringLike:
-                kms:ViaService:
-                  - Fn::Sub: 'ec2.${AWS::Region}.amazonaws.com'
-                  - Fn::Sub: 'ebs.${AWS::Region}.amazonaws.com'
       Tags:
         - Key: sutra:component
           Value: agentless-scan
@@ -322,19 +304,6 @@ Resources:
           Value: agentless-scan
 
   # ─── Compute ──────────────────────────────────────────────────────────────
-  ScanCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: sutra-agentless-scan
-      CapacityProviders:
-        - FARGATE
-      ClusterSettings:
-        - Name: containerInsights
-          Value: disabled
-      Tags:
-        - Key: sutra:component
-          Value: agentless-scan
-
   ScannerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -348,143 +317,6 @@ Resources:
   # ─── IAM ──────────────────────────────────────────────────────────────────
   # Pulls the image and writes logs. Nothing else — it is not the role the
   # scanner code runs under.
-  TaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: SutraAgentlessTaskExecutionRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount:
-                  Ref: AWS::AccountId
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-      Tags:
-        - Key: sutra:component
-          Value: agentless-scan
-
-  # The role the scanner container actually runs as. This is the one that has to
-  # be tight: it parses hostile customer filesystems, so it is the most likely
-  # thing in the account to be exploited.
-  ScannerTaskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: SutraAgentlessScannerRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount:
-                  Ref: AWS::AccountId
-      Policies:
-        - PolicyName: ScanOwnVolumesAndSnapshots
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: InspectOwnScanResources
-                Effect: Allow
-                Action:
-                  - ec2:DescribeSnapshots
-                  - ec2:DescribeVolumes
-                  - ec2:DescribeVolumeStatus
-                  - ec2:DescribeTags
-                Resource: '*'
-
-              - Sid: ReadSnapshotBlocks
-                Effect: Allow
-                Action:
-                  - ebs:ListSnapshotBlocks
-                  - ebs:ListChangedBlocks
-                  - ebs:GetSnapshotBlock
-                Resource: '*'
-                Condition:
-                  StringEquals:
-                    aws:ResourceTag/sutra-agentless: 'true'
-
-              - Sid: WriteOwnLogs
-                Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource:
-                  Fn::Sub: 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/sutra/agentless-scanner:*'
-
-        # THE ISOLATION BOUNDARY.
-        #
-        # Because this runs in the same account as the control plane, these
-        # denies are what stop a compromised scanner from reaching tenant data.
-        # An explicit deny beats any Allow, including one attached later or
-        # inherited from a managed policy, so this cannot be widened by
-        # accident.
-        - PolicyName: NeverTouchTheControlPlane
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Sid: DenyDatabaseAndSecrets
-                Effect: Deny
-                Action:
-                  - rds:*
-                  - rds-data:*
-                  - secretsmanager:*
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                  - ssm:GetParametersByPath
-                  - dynamodb:*
-                Resource: '*'
-
-              - Sid: DenyPrivilegeEscalation
-                Effect: Deny
-                Action:
-                  - iam:*
-                  - sts:AssumeRole
-                  - organizations:*
-                Resource: '*'
-
-              - Sid: DenyControlPlaneStorageAndImages
-                Effect: Deny
-                Action:
-                  - s3:*
-                  - ecr:PutImage
-                  - ecr:InitiateLayerUpload
-                  - ecr:CompleteLayerUpload
-                  - ecr:BatchDeleteImage
-                Resource: '*'
-
-              # The scanner reads. It must never be able to destroy evidence or
-              # infrastructure, including its own.
-              - Sid: DenyAllDestruction
-                Effect: Deny
-                Action:
-                  - ec2:DeleteSnapshot
-                  - ec2:DeleteVolume
-                  - ec2:TerminateInstances
-                  - ec2:StopInstances
-                  - ecs:DeleteCluster
-                  - ecs:StopTask
-                  - logs:DeleteLogGroup
-                  - logs:DeleteLogStream
-                  - kms:ScheduleKeyDeletion
-                  - kms:DisableKey
-                Resource: '*'
-      Tags:
-        - Key: sutra:component
-          Value: agentless-scan
-
-  # Assumed by the control plane to drive a scan: copy the shared snapshot,
-  # create and tear down the scan volume, and run the task. Separate from the
-  # scanner role so the component that HAS lifecycle permissions is not the same
-  # component that parses hostile input.
   OrchestratorRole:
     Type: AWS::IAM::Role
     Properties:
@@ -704,8 +536,24 @@ Resources:
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchCheckLayerAvailability
                 Resource: '*'
+              - Sid: UseTheScanKeyForVolumeAndFindings
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  # GenerateDataKey, not only WithoutPlaintext: S3 SSE-KMS needs the
+                  # plaintext form to encrypt an object. FindingsBucket is encrypted
+                  # with this key, so without it the scanner's PutObject fails with
+                  # AccessDenied AFTER the scan ran and the disk was already read.
+                  - kms:GenerateDataKey
+                  - kms:GenerateDataKeyWithoutPlaintext
+                Resource:
+                  Fn::GetAtt: [ScanKmsKey, Arn]
               # Write-only, and only under its own instance prefix: the scanner
               # can publish its result and cannot read another scan's findings.
+              # Granted from the ROLE rather than the key policy on purpose: naming this
+              # role inside the key would close a cycle (key -> role -> bucket -> key),
+              # which CloudFormation rejects outright.
               - Sid: PublishOwnFindingsOnly
                 Effect: Allow
                 Action: s3:PutObject
@@ -783,10 +631,6 @@ Outputs:
     Value:
       Fn::GetAtt: [ScannerEcrRepository, RepositoryUri]
 
-  ScanClusterArn:
-    Value:
-      Fn::GetAtt: [ScanCluster, Arn]
-
   ScanSubnetIds:
     Description: Comma-separated subnets for RunTask network configuration.
     Value:
@@ -798,14 +642,6 @@ Outputs:
   ScannerSecurityGroupId:
     Value:
       Ref: ScannerSecurityGroup
-
-  ScannerTaskRoleArn:
-    Value:
-      Fn::GetAtt: [ScannerTaskRole, Arn]
-
-  TaskExecutionRoleArn:
-    Value:
-      Fn::GetAtt: [TaskExecutionRole, Arn]
 
   OrchestratorRoleArn:
     Description: The control plane assumes this to launch scans.
