@@ -11,7 +11,8 @@
     "clean": "rm -rf dist",
     "preflight:live": "pnpm run build && node dist/src/aws-sandbox-preflight.js",
     "test": "pnpm run clean && pnpm run build && node --test dist/test/**/*.test.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prebuild": "pnpm --dir ../agentless-scanner build"
   },
   "dependencies": {
     "@aws-sdk/client-cloudtrail": "3.1087.0",
