@@ -199,14 +199,30 @@ export default function LoginPage() {
       });
       redirectFor(result.session, safeReturnTo(window.location.search));
     } catch (caught) {
-      if (caught instanceof AuthRequestError && caught.code === "MFA_REQUIRED") {
+      // MFA_REQUIRED is the NEXT STEP, not a failure. It arrives as a thrown
+      // AuthRequestError because the transport models any non-2xx that way, but the
+      // credentials were accepted — so it must not paint the red alert box. Doing so
+      // told a person who had just typed their password correctly that something had
+      // gone wrong, while the authenticator field they actually needed appeared above
+      // it. The field carries its own instructions; the step needs no banner.
+      const mfaStepRequested =
+        caught instanceof AuthRequestError && caught.code === "MFA_REQUIRED";
+      if (mfaStepRequested) {
         setMfaRequired(true);
         setTotpCode("");
       }
       turnstileErrorVisible.current =
         caught instanceof AuthRequestError &&
         caught.code.startsWith("TURNSTILE_");
-      setError(caught instanceof Error ? caught.message : "Sutra could not sign in");
+      // A wrong or replayed code (MFA_CODE_INVALID) is still a real failure and still
+      // shows as one; only the transition into the step is silent.
+      setError(
+        mfaStepRequested
+          ? null
+          : caught instanceof Error
+            ? caught.message
+            : "Sutra could not sign in",
+      );
       setTurnstileToken(null);
       setTurnstileReady(false);
       setTurnstileReset((current) => current + 1);
