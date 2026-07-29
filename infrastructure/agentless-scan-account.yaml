@@ -488,7 +488,20 @@ Resources:
   OrchestratorRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: SutraAgentlessOrchestratorRole
+      # PATH, NOT DECORATION. The control-plane EC2 instance role carries an
+      # explicit Deny on sts:AssumeRole for every resource outside
+      # `arn:aws:iam::*:role/sutra/*`, so a role at the default `/` path cannot be
+      # assumed by the app no matter what this role's trust policy says — an
+      # explicit Deny is never overridden. Setting OrchestratorPrincipalArn alone
+      # produced `explicitDeny` from the IAM policy simulator; the `/sutra/` path
+      # is what actually makes the assume possible, and it keeps the boundary a
+      # rule about a namespace rather than a growing list of carve-outs.
+      Path: /sutra/
+      # Renamed with the path change because IAM role names are unique per
+      # ACCOUNT regardless of path: CloudFormation replaces a role when its path
+      # changes, creating the new one before deleting the old, so reusing
+      # `SutraAgentlessOrchestratorRole` would collide with itself mid-update.
+      RoleName: SutraAgentlessOrchestrator
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:

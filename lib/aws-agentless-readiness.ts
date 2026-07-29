@@ -14,8 +14,16 @@
  * present on both CreateSnapshot and DescribeSnapshots; tag-on-create satisfies the
  * aws:RequestTag condition; the scan CMK works for both encrypt-on-copy and
  * decrypt-on-create-volume). See docs/agentless-snapshot-scanning-design.md for the
- * evidence. That closed the executor-not-live-validated gap and nothing more — the
- * remaining gaps are still open, so canExecute stays false.
+ * evidence. That closed the executor-not-live-validated gap and nothing more.
+ *
+ * Also 2026-07-29, and the reason canExecute is still false: the scanner image was
+ * built and pushed to ECR, and the orchestrator role was given a real trust policy
+ * — so the two gaps listed here previously are genuinely closed. Verifying them end
+ * to end then surfaced a harder one. The scanner mounts a block device, mounting
+ * needs CAP_SYS_ADMIN, and Fargate refuses that capability, so the compute this
+ * stack provisions cannot host a scan at all. Two closed gaps and one larger open
+ * one is a worse position than it looks on a count, which is exactly why these are
+ * data rather than a number.
  */
 
 export interface AgentlessReadinessGap {
@@ -43,30 +51,34 @@ export const AGENTLESS_SCAN_EXECUTION_READINESS: AgentlessScanReadiness = {
   canPlan: true,
   gaps: [
     {
-      id: "scanner-container",
+      id: "scanner-compute-model-unresolved",
       summary:
-        "No scanner container image exists. The ECR repository is provisioned but empty, "
-        + "so there is nothing to mount a volume and run the scanners.",
+        "The scan compute model does not exist yet, and the one the stack provisions cannot "
+        + "work. Mounting a block device requires CAP_SYS_ADMIN, and AWS rejects that outright "
+        + "on Fargate — RegisterTaskDefinition with FARGATE plus SYS_ADMIN fails with "
+        + "'SYS_ADMIN is not allowed on Fargate' (checked 2026-07-29; the same definition under "
+        + "the EC2 launch type registers fine). ScanCluster is Fargate-only and there is no task "
+        + "definition at all, so a scan has no host. Closing this is a decision about compute "
+        + "(ECS on EC2 capacity, a per-scan EC2 instance, or reading snapshot blocks via the EBS "
+        + "direct APIs and never mounting), not a missing line of glue.",
       owner: "engineering",
     },
     {
-      id: "orchestrator-principal-unset",
+      id: "no-orchestrator-client-factory",
       summary:
-        "SutraAgentlessOrchestratorRole trusts only the account root, which grants nothing on "
-        + "its own. Until a control-plane principal is given explicit sts:AssumeRole, nothing "
-        + "can drive a scan. NOTE: the 2026-07-29 live validation ran as an ADMIN identity, so "
-        + "it proves the AWS response shapes but NOT that this far narrower role plus "
-        + "agentlessSnapshotSessionPolicy can make the same calls. Re-run the validation as the "
-        + "orchestrator role once the principal is set.",
-      owner: "operator",
+        "Nothing constructs an Ec2AgentlessExecutor. customerClientFor and scanClientFor are "
+        + "injected seams with no production implementation, so the apply path throws "
+        + "NOT_CONFIGURED after the readiness gate rather than driving a scan.",
+      owner: "engineering",
     },
   ],
   summary:
-    "Plans can be computed and reviewed today; nothing can be executed. The AWS calls "
-    + "themselves are now validated against a live account (2026-07-29), so what remains is a "
-    + "scanner image and an orchestrator principal — not unknown API behaviour. A plan creates "
-    + "no snapshot and costs nothing. An empty findings list therefore means NO SCAN HAS RUN — "
-    + "it is not evidence that a volume is clean.",
+    "Plans can be computed and reviewed today; nothing can be executed. The AWS response "
+    + "shapes are validated against a live account (2026-07-29), the scanner image is built and "
+    + "in ECR, and the orchestrator role now trusts the control-plane principal — but there is "
+    + "still no compute that can host a scan, because mounting needs CAP_SYS_ADMIN and Fargate "
+    + "refuses it. A plan creates no snapshot and costs nothing. An empty findings list "
+    + "therefore means NO SCAN HAS RUN — it is not evidence that a volume is clean.",
 };
 
 /** True when every listed gap is closed. Kept as a function so callers cannot forget one. */
