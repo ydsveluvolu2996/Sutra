@@ -537,6 +537,14 @@ Resources:
                   - ec2:CreateTags
                   - ec2:DeleteVolume
                   - ec2:DeleteSnapshot
+                  # The scan volume is attached to an instance we launched
+                  # ourselves, so its id is known before the attach — there is no
+                  # scheduler to race, which is why this is safe to hold.
+                  - ec2:AttachVolume
+                  - ec2:DetachVolume
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ec2:DescribeImages
                 Resource: '*'
                 Condition:
                   StringEquals:
@@ -555,29 +563,68 @@ Resources:
                 Resource:
                   Fn::GetAtt: [ScanKmsKey, Arn]
 
-              - Sid: RunScannerTasks
+              # ─── Launch the scanner on EC2, NOT Fargate ─────────────────
+              # Mounting a block device needs CAP_SYS_ADMIN and AWS refuses it on
+              # Fargate: RegisterTaskDefinition with FARGATE plus SYS_ADMIN fails
+              # with "SYS_ADMIN is not allowed on Fargate" (checked 2026-07-29;
+              # the same definition under the EC2 launch type registers fine). The
+              # ECS permissions that used to be here could never have run a scan.
+              - Sid: LaunchScannerInstances
                 Effect: Allow
-                Action:
-                  - ecs:RunTask
-                  - ecs:DescribeTasks
-                  - ecs:ListTasks
+                Action: ec2:RunInstances
                 Resource: '*'
                 Condition:
-                  ArnEquals:
-                    ecs:cluster:
-                      Fn::GetAtt: [ScanCluster, Arn]
+                  StringEquals:
+                    aws:RequestedRegion:
+                      Ref: AWS::Region
+                    # Tag-on-create is enforced so every instance this role can
+                    # launch is also one it can find and terminate. An untagged
+                    # instance would be invisible to the reaper and bill forever.
+                    aws:RequestTag/sutra:component: agentless-scan
+              - Sid: TagOnLaunchOnly
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction: RunInstances
 
-              # Scoped to exactly the two task roles — an unscoped PassRole is a
+              # Terminate is scoped BY TAG, not by '*'. Reliable reaping of a
+              # billing resource in Sutra's own account is worth this verb; the
+              # customer-side no-delete boundary is a separate STS session policy
+              # and is untouched by anything here.
+              - Sid: TerminateOnlyOwnScanInstances
+                Effect: Allow
+                Action:
+                  - ec2:TerminateInstances
+                  - ec2:StopInstances
+                Resource: '*'
+                Condition:
+                  StringEquals:
+                    ec2:ResourceTag/sutra:component: agentless-scan
+
+              # Exactly the scanner instance role. An unscoped PassRole is a
               # standard privilege-escalation path.
-              - Sid: PassOnlyTheScannerRoles
+              - Sid: PassOnlyTheScannerInstanceRole
                 Effect: Allow
                 Action: iam:PassRole
                 Resource:
-                  - Fn::GetAtt: [ScannerTaskRole, Arn]
-                  - Fn::GetAtt: [TaskExecutionRole, Arn]
+                  Fn::GetAtt: [ScannerInstanceRole, Arn]
                 Condition:
                   StringEquals:
-                    iam:PassedToService: ecs-tasks.amazonaws.com
+                    iam:PassedToService: ec2.amazonaws.com
+
+              # The scanner publishes findings to object storage instead of
+              # calling back, so it needs no inbound path and no control-plane
+              # credential. The orchestrator only ever READS them.
+              - Sid: ReadPublishedFindings
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::GetAtt: [FindingsBucket, Arn]
+                  - Fn::Sub: '${FindingsBucket.Arn}/*'
 
               - Sid: DenyControlPlaneData
                 Effect: Deny
@@ -628,6 +675,98 @@ Resources:
               Address:
                 Ref: BudgetNotificationEmail
 
+  # ─── Scanner compute identity ───────────────────────────────────────────────
+  # The instance that mounts a customer's disk. It can pull the pinned scanner
+  # image and publish findings, and NOTHING else: the explicit denies below mean
+  # root inside that container still cannot reach anything that matters, which is
+  # the compensating control for running privileged at all.
+  ScannerInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /sutra/
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ScanAndPublish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: PullThePinnedScannerImage
+                Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Resource: '*'
+              # Write-only, and only under its own instance prefix: the scanner
+              # can publish its result and cannot read another scan's findings.
+              - Sid: PublishOwnFindingsOnly
+                Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  Fn::Sub: '${FindingsBucket.Arn}/scans/${!aws:userid}/*'
+              - Sid: DenyControlPlaneAndCredentials
+                Effect: Deny
+                Action:
+                  - rds:*
+                  - secretsmanager:*
+                  - ssm:*
+                  - dynamodb:*
+                  - iam:*
+                  - sts:AssumeRole
+                  - ec2:*
+                Resource: '*'
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  ScannerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /sutra/
+      Roles:
+        - Ref: ScannerInstanceRole
+
+  # ─── Findings transport ─────────────────────────────────────────────────────
+  # Deliberately not a callback: object storage means the scan instance needs no
+  # inbound reachability and holds no control-plane credential. Findings are
+  # metadata only — never file contents — and expire, because a scan result is
+  # ingested within minutes and keeping it afterwards is only risk.
+  FindingsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt: [ScanKmsKey, Arn]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Suspended
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-ingested-findings
+            Status: Enabled
+            ExpirationInDays: 7
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+
 Outputs:
   ScanAccountId:
     Description: Pass this as AgentlessScanAccountId in the customer role stack.
@@ -676,3 +815,13 @@ Outputs:
   ScannerLogGroupName:
     Value:
       Ref: ScannerLogGroup
+
+  ScannerInstanceProfileArn:
+    Description: Passed to RunInstances as the scanner instance profile.
+    Value:
+      Fn::GetAtt: [ScannerInstanceProfile, Arn]
+
+  FindingsBucketName:
+    Description: Where a scan publishes its findings for the orchestrator to read.
+    Value:
+      Ref: FindingsBucket
