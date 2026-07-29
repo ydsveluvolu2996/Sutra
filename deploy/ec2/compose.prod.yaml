@@ -134,7 +134,7 @@ services:
       SUTRA_INVITATION_EMAIL_PROVIDER: ${SUTRA_INVITATION_EMAIL_PROVIDER:-}
       SUTRA_INVITATION_EMAIL_API_URL: ${SUTRA_INVITATION_EMAIL_API_URL:-}
       SUTRA_INVITATION_EMAIL_API_KEY: ${SUTRA_INVITATION_EMAIL_API_KEY:-}
-      # Agentless disk scanning. All five are optional and default to empty: the
+      # Agentless disk scanning. All twelve default to empty: the
       # resolver in lib/aws-agentless-executor-config.ts has NO defaults by design
       # and refuses with the exact list of unset names, so an unconfigured host
       # reports "not configured" rather than snapshotting into a guessed account.
@@ -147,6 +147,13 @@ services:
       SUTRA_AGENTLESS_KMS_KEY_ARN: ${SUTRA_AGENTLESS_KMS_KEY_ARN:-}
       SUTRA_AGENTLESS_SCANNER_IMAGE: ${SUTRA_AGENTLESS_SCANNER_IMAGE:-}
       SUTRA_AGENTLESS_LIVE_VALIDATED: ${SUTRA_AGENTLESS_LIVE_VALIDATED:-}
+      SUTRA_AGENTLESS_ORCHESTRATOR_ROLE_ARN: ${SUTRA_AGENTLESS_ORCHESTRATOR_ROLE_ARN:-}
+      SUTRA_AGENTLESS_AMI_ID: ${SUTRA_AGENTLESS_AMI_ID:-}
+      SUTRA_AGENTLESS_INSTANCE_TYPE: ${SUTRA_AGENTLESS_INSTANCE_TYPE:-}
+      SUTRA_AGENTLESS_SUBNET_ID: ${SUTRA_AGENTLESS_SUBNET_ID:-}
+      SUTRA_AGENTLESS_SECURITY_GROUP_ID: ${SUTRA_AGENTLESS_SECURITY_GROUP_ID:-}
+      SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN: ${SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN:-}
+      SUTRA_AGENTLESS_FINDINGS_BUCKET: ${SUTRA_AGENTLESS_FINDINGS_BUCKET:-}
     depends_on:
       postgres:
         condition: service_healthy
