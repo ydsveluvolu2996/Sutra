@@ -129,3 +129,48 @@ Role assumption reuses `services/aws-collector` `AwsRoleBroker` (STS AssumeRole 
 ExternalId). A TTL sweeper reconciles any `teardownFailures` the runner reports.
 This module is deliberately built + tested **on AWS, service by service**, so
 its SDK calls are validated against real responses rather than guessed.
+
+## Live validation evidence — 2026-07-29
+
+Run in `738663485493` / `ap-south-1` on a throwaway 8 GB gp3 volume, as an **admin**
+identity (`AWSReservedSSO_SutraAdministrator`). Total cost well under $1. All four
+resources were deleted immediately afterwards; Sutra itself holds an explicit deny on
+those deletes, so the teardown was operator-run by design.
+
+| Assumption in `services/agentless-scanner/src/executor.ts` | Result | Evidence |
+|---|---|---|
+| `CreateSnapshot` returns `SnapshotId` top-level | confirmed | `snap-0aafd7703cbec4f56` |
+| Snapshot `State` is lowercase `pending`/`completed` | confirmed | `"pending"` then `"completed"`, `Progress: "100%"` |
+| `CopySnapshot` returns `SnapshotId` of the copy | confirmed | `snap-021fa8910b8ca1980` |
+| `CreateVolume` returns `VolumeId` top-level | confirmed | `vol-02d6623b781a3d114` |
+| `DescribeSnapshots` returns `OwnerId` | confirmed | `738663485493`, also on `CreateSnapshot` |
+
+Three things the run established that were not on the original list:
+
+1. **Tag-on-create works.** All three `TagSpecifications` tags were applied at
+   creation, which is what makes the customer grant's
+   `aws:RequestTag/sutra-agentless` condition satisfiable. An untagged snapshot would
+   be both un-shareable and un-reapable.
+2. **The same-account copy needs no share.** `CopySnapshot` succeeded with no
+   `ModifySnapshotAttribute` at all, confirming the guard added in `cd2cf99`. The
+   unconditional share it replaced would have failed every scan in this topology,
+   because AWS refuses `createVolumePermission` granted to a snapshot's own owner.
+3. **The scan CMK is correctly scoped.** Its `kms:ViaService` fence to `ec2.*`/`ebs.*`
+   permitted both encrypt-on-copy and decrypt-on-create-volume. A CMK policy that
+   looks right and rejects EBS is a classic silent failure, and this rules it out.
+
+### What this run does NOT prove
+
+* **Least privilege.** It used an admin identity. `SutraAgentlessOrchestratorRole`
+  under `agentlessSnapshotSessionPolicy` is far narrower and is untested. Re-run this
+  procedure as that role once `OrchestratorPrincipalArn` is set — a pass here does not
+  transfer.
+* **The cross-account share/revoke path.** The single-account topology cannot
+  exercise it. Validate before moving the scan account out.
+* **Snapshot `error` / `recovering` states.** Never triggered; they need a
+  deliberately broken snapshot.
+* **Anything about the scanner container.** ECR is still empty.
+
+Accordingly this closed exactly one readiness gap (`executor-not-live-validated`).
+`scanner-container` and `orchestrator-principal-unset` remain open and `canExecute`
+stays `false`, so the apply route still returns 409 naming them.

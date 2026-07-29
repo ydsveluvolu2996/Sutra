@@ -8,8 +8,14 @@
  * Every response carries this object so the distinction is never left to
  * inference.
  *
- * When the scanner container ships and its SDK calls are validated against a
- * live account, flip the two false flags here and the whole surface updates.
+ * Live validation status, 2026-07-29: every EC2 response shape the executor depends
+ * on was confirmed against a real account (CreateSnapshot/CopySnapshot/CreateVolume
+ * all return their id at the top level; snapshot State is lowercase; OwnerId is
+ * present on both CreateSnapshot and DescribeSnapshots; tag-on-create satisfies the
+ * aws:RequestTag condition; the scan CMK works for both encrypt-on-copy and
+ * decrypt-on-create-volume). See docs/agentless-snapshot-scanning-design.md for the
+ * evidence. That closed the executor-not-live-validated gap and nothing more — the
+ * remaining gaps are still open, so canExecute stays false.
  */
 
 export interface AgentlessReadinessGap {
@@ -44,25 +50,22 @@ export const AGENTLESS_SCAN_EXECUTION_READINESS: AgentlessScanReadiness = {
       owner: "engineering",
     },
     {
-      id: "executor-not-live-validated",
-      summary:
-        "The AWS executor was written without ever calling AWS. It refuses to act until an "
-        + "operator validates each EC2 call against a live account and constructs it with "
-        + "liveValidated: true.",
-      owner: "operator",
-    },
-    {
       id: "orchestrator-principal-unset",
       summary:
         "SutraAgentlessOrchestratorRole trusts only the account root, which grants nothing on "
         + "its own. Until a control-plane principal is given explicit sts:AssumeRole, nothing "
-        + "can drive a scan.",
+        + "can drive a scan. NOTE: the 2026-07-29 live validation ran as an ADMIN identity, so "
+        + "it proves the AWS response shapes but NOT that this far narrower role plus "
+        + "agentlessSnapshotSessionPolicy can make the same calls. Re-run the validation as the "
+        + "orchestrator role once the principal is set.",
       owner: "operator",
     },
   ],
   summary:
-    "Plans can be computed and reviewed today; nothing can be executed. A plan creates no "
-    + "snapshot and costs nothing. An empty findings list therefore means NO SCAN HAS RUN — "
+    "Plans can be computed and reviewed today; nothing can be executed. The AWS calls "
+    + "themselves are now validated against a live account (2026-07-29), so what remains is a "
+    + "scanner image and an orchestrator principal — not unknown API behaviour. A plan creates "
+    + "no snapshot and costs nothing. An empty findings list therefore means NO SCAN HAS RUN — "
     + "it is not evidence that a volume is clean.",
 };
 

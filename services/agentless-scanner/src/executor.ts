@@ -8,12 +8,28 @@
  * putting it there would either break that guarantee or force it to be weakened.
  * Keeping it separate means the collector's read-only property stays provable.
  *
- * ── VALIDATION STATUS ───────────────────────────────────────────────────────
- * NOT ONE CALL IN THIS FILE HAS BEEN EXECUTED AGAINST AWS. The shapes are
- * written from the SDK's types; the response-field assumptions marked
- * `UNVALIDATED:` below are the specific things most likely to be wrong and must
- * be confirmed service-by-service against a live account before this is trusted.
- * `assertLiveValidated()` exists so nothing can quietly promote it to production.
+ * ── VALIDATION STATUS: 2026-07-29 ───────────────────────────────────────────
+ * The response-field assumptions in this file WERE confirmed against a live AWS
+ * account on 2026-07-29, on a throwaway 8 GB volume in 738663485493/ap-south-1.
+ * Confirmed: CreateSnapshot, CopySnapshot and CreateVolume each return their id at
+ * the top level; snapshot State is lowercase ('pending' then 'completed');
+ * DescribeSnapshots and CreateSnapshot both return OwnerId; tag-on-create satisfies
+ * the aws:RequestTag/sutra-agentless condition the customer grant depends on; and
+ * the scan CMK works both for encrypt-on-copy and decrypt-on-create-volume. The
+ * same-account no-share path was exercised end to end. Individual results are
+ * recorded at each call site; evidence is in
+ * docs/agentless-snapshot-scanning-design.md.
+ *
+ * What that run did NOT establish, and must not be read as covering:
+ *   * LEAST PRIVILEGE. It ran as an admin identity. Whether
+ *     SutraAgentlessOrchestratorRole under agentlessSnapshotSessionPolicy can make
+ *     the same calls is untested, and that role is far narrower.
+ *   * The CROSS-ACCOUNT share/revoke path, which the single-account topology
+ *     cannot exercise.
+ *   * Snapshot error/recovering states, which need a deliberately broken snapshot.
+ *
+ * `assertLiveValidated()` therefore stays: it is set by an operator asserting the
+ * above for THEIR topology, not a flag this file may set for itself.
  *
  * ── THE TRUST BOUNDARY THIS FILE MUST NOT BREAK ─────────────────────────────
  * There is deliberately no method here that deletes anything in the CUSTOMER's
@@ -168,7 +184,8 @@ export class Ec2AgentlessExecutor {
         ],
       }],
     }));
-    // UNVALIDATED: CreateSnapshot returns SnapshotId at the top level.
+    // VALIDATED 2026-07-29 against a live account: CreateSnapshot returns SnapshotId at
+    // the top level, and the three TagSpecifications tags are applied at creation.
     return { snapshotId: assertSnapshotId(response.SnapshotId) };
   }
 
@@ -189,7 +206,9 @@ export class Ec2AgentlessExecutor {
     const startedAt = Date.now();
     for (;;) {
       const described = await client.send(new DescribeSnapshotsCommand({ SnapshotIds: [input.snapshotId] }));
-      // UNVALIDATED: State is 'pending' | 'completed' | 'error' | 'recoverable' | 'recovering'.
+      // VALIDATED 2026-07-29: State is lowercase; a finished snapshot reports 'completed'
+      // and Progress '100%'. Only 'pending' and 'completed' were observed; the error states
+      // remain untriggered, which is expected — they need a deliberately broken snapshot.
       const state = described.Snapshots?.[0]?.State;
       if (state === "completed") return;
       if (state === "error") {
@@ -240,7 +259,8 @@ export class Ec2AgentlessExecutor {
     // account AWS itself attributes the snapshot to, so a mis-set config value
     // cannot make this branch wrong.
     const owner = await customer.send(new DescribeSnapshotsCommand({ SnapshotIds: [input.snapshotId] }));
-    // UNVALIDATED: DescribeSnapshots returns OwnerId as the 12-digit account id.
+    // VALIDATED 2026-07-29: DescribeSnapshots returns OwnerId as the 12-digit account id,
+    // and CreateSnapshot does too. The same-account branch below was exercised for real.
     const ownerId = owner.Snapshots?.[0]?.OwnerId;
     const sameAccount = typeof ownerId === "string" && ownerId === this.config.scanAccountId;
 
@@ -265,7 +285,13 @@ export class Ec2AgentlessExecutor {
         Tags: [{ Key: AGENTLESS_TAG_KEY, Value: AGENTLESS_TAG_VALUE }],
       }],
     }));
-    // UNVALIDATED: CopySnapshot returns SnapshotId of the new copy.
+    // VALIDATED 2026-07-29: CopySnapshot returns SnapshotId of the copy at the top level,
+    // and succeeded SAME-ACCOUNT with no share at all — confirming the guard above. The
+    // scan CMK encrypted the copy without a KMS policy change.
+    //
+    // STILL UNVALIDATED: the CROSS-ACCOUNT share/revoke path. Sutra's deployed topology is
+    // single-account, so it structurally cannot exercise it; validate before moving the scan
+    // account out.
     const copiedId = assertSnapshotId(copied.SnapshotId);
 
     // Revoke the share immediately. The copy is independent, so leaving the
@@ -307,7 +333,9 @@ export class Ec2AgentlessExecutor {
         Tags: [{ Key: AGENTLESS_TAG_KEY, Value: AGENTLESS_TAG_VALUE }],
       }],
     }));
-    // UNVALIDATED: CreateVolume returns VolumeId at the top level.
+    // VALIDATED 2026-07-29: CreateVolume returns VolumeId at the top level, and creating
+    // from the encrypted copy decrypts under the scan CMK — a different grant path from the
+    // copy, and it worked too.
     return { volumeId: assertVolumeId(created.VolumeId) };
   }
 
