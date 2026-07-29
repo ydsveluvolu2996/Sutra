@@ -555,12 +555,22 @@ export async function decryptExternalId(
  * authentication path instead of bypassing this check.
  */
 export function assertSameOrigin(request: Request, configuredOrigin?: string): void {
-  const effectiveOrigin = effectiveRequestOrigin(request);
-  if (effectiveOrigin === null) invalidInput("The request origin is invalid");
-  const requestOrigin = canonicalOrigin(effectiveOrigin);
-  const expectedOrigin = configuredOrigin === undefined
-    ? requestOrigin
-    : canonicalOrigin(configuredOrigin);
+  // The derived origin is only needed when nothing was configured. Requiring it
+  // unconditionally is what kept this failing: under wrangler 4.114 / miniflare
+  // 4.20260722 the request cannot be made to yield the public origin — Host is
+  // rewritten to the listening socket, and a Host carrying an explicit :443 does not
+  // survive a URL round-trip because the default port is normalized away, so the
+  // derivation returns null and threw here BEFORE the configured value was ever
+  // compared. When we have been told the canonical origin, that is the authority and
+  // whatever the runtime reconstructs is irrelevant.
+  let expectedOrigin: string;
+  if (configuredOrigin === undefined) {
+    const effectiveOrigin = effectiveRequestOrigin(request);
+    if (effectiveOrigin === null) invalidInput("The request origin is invalid");
+    expectedOrigin = canonicalOrigin(effectiveOrigin);
+  } else {
+    expectedOrigin = canonicalOrigin(configuredOrigin);
+  }
   const suppliedOrigin = request.headers.get("origin");
   if (suppliedOrigin === null || canonicalOrigin(suppliedOrigin) !== expectedOrigin) {
     invalidInput("The request origin is invalid");
