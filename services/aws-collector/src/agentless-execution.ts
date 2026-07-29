@@ -30,9 +30,9 @@ import { EC2Client } from "@aws-sdk/client-ec2";
 import { AssumeRoleCommand, STSClient } from "@aws-sdk/client-sts";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
-import { Ec2ScanWorker } from "@msp/agentless-scanner/ec2-scan-worker";
-import { AwsScanInstanceOperations } from "@msp/agentless-scanner/scan-instance-operations";
-import { Ec2AgentlessExecutor } from "@msp/agentless-scanner/executor";
+import { Ec2ScanWorker } from "./ec2-scan-worker.js";
+import { AwsScanInstanceOperations } from "./scan-instance-operations.js";
+import { Ec2AgentlessExecutor } from "./executor.js";
 
 import {
   createWorkloadIdentityRoleBroker,

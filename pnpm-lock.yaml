@@ -155,9 +155,6 @@ importers:
       '@aws-sdk/client-sts':
         specifier: 3.1087.0
         version: 3.1087.0
-      '@msp/agentless-scanner':
-        specifier: workspace:*
-        version: link:../agentless-scanner
     devDependencies:
       '@types/node':
         specifier: 22.19.19

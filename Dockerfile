@@ -11,11 +11,6 @@ FROM base AS dependencies
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY services/aws-collector/package.json services/aws-collector/package.json
 COPY services/notification-worker/package.json services/notification-worker/package.json
-# The scanner is a workspace package the collector depends on. Without its manifest
-# this stage sees 3 projects while the lockfile describes 4, and the install fails
-# with ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY — which is exactly how the first release
-# after adding that dependency broke.
-COPY services/agentless-scanner/package.json services/agentless-scanner/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS builder
@@ -23,13 +18,7 @@ COPY . .
 RUN chmod 0755 docker/entrypoint.sh docker/postgres-init.sh
 RUN pnpm --dir services/aws-collector build && pnpm build
 
-# Built FROM builder, not from `dependencies`: the collector's production closure now
-# includes @msp/agentless-scanner, whose exports resolve to its BUILT output. The
-# `dependencies` stage holds manifests only, so `pnpm deploy` there would produce a
-# closure whose entry points point at files that do not exist. The isolation property
-# this Dockerfile cares about is preserved — the final `runtime` stage still copies
-# only the deployed closures, never the build workspace.
-FROM builder AS runtime-dependencies
+FROM dependencies AS runtime-dependencies
 RUN pnpm --filter sutra deploy --prod /app/.runtime/root \
     && pnpm --filter @msp/aws-collector deploy --prod /app/.runtime/collector
 

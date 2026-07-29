@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { normalizeDescribedVolumes } from "../lib/aws-agentless-discovery.ts";
 import { buildAgentlessScanPlan } from "../lib/aws-agentless-scan-plan.ts";
-import { executeAgentlessScan, type AgentlessExecutor, type AgentlessScanFinding } from "../services/agentless-scanner/src/scan-runner.ts";
+import { executeAgentlessScan, type AgentlessExecutor, type AgentlessScanFinding } from "../services/aws-collector/src/scan-runner.ts";
 
 test("discovery normalizes DescribeVolumes into planner input, deriving region from AZ", () => {
   const volumes = normalizeDescribedVolumes({

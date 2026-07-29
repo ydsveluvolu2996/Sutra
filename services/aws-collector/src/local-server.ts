@@ -51,7 +51,7 @@ import {
 import {
   executeAgentlessScan,
   type AgentlessScanPlan as AgentlessExecutePlan,
-} from "@msp/agentless-scanner/scan-runner";
+} from "./scan-runner.js";
 
 import {
   createAgentlessExecutor,

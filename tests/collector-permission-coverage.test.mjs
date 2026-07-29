@@ -18,6 +18,15 @@ const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml
  *   "vendor"   — runs under Sutra's own workload identity (the initial
  *                AssumeRole into the customer role) and is NOT part of the
  *                customer role's permission policy.
+ *   "agentless" — runs under the AGENTLESS STS ceiling
+ *                (agentlessSnapshotSessionPolicy) or in Sutra's own scan account.
+ *                These are NOT read-only: agentless scanning creates a snapshot in
+ *                the customer account by design, which is exactly why it has its own
+ *                ceiling with explicit Denies on every destructive verb instead of
+ *                riding on the read-only collection role. Excluded from the read-only
+ *                assertion and from the onboarding template — putting them there
+ *                would widen the default role EVERY customer grants, for a feature
+ *                they may never enable.
  *
  * Every command must be read-only. If a collector adds a new SDK command it
  * must be added here (drift guard below fails otherwise), and any new
@@ -29,6 +38,20 @@ const COLLECTOR_COMMANDS = {
   // scope, deliberately: this is never a customer permission, and putting it in the
   // onboarding template would misrepresent what Sutra asks customers to grant.
   GetObjectCommand: { action: "s3:GetObject", scope: "vendor" },
+  // ─── Agentless scanning. NOT read-only, NOT in the onboarding template. ─────
+  // Customer account, bounded by agentlessSnapshotSessionPolicy:
+  CreateSnapshotCommand: { action: "ec2:CreateSnapshot", scope: "agentless" },
+  ModifySnapshotAttributeCommand: { action: "ec2:ModifySnapshotAttribute", scope: "agentless" },
+  // Sutra's own scan account, under the orchestrator role:
+  CopySnapshotCommand: { action: "ec2:CopySnapshot", scope: "agentless" },
+  CreateVolumeCommand: { action: "ec2:CreateVolume", scope: "agentless" },
+  DeleteVolumeCommand: { action: "ec2:DeleteVolume", scope: "agentless" },
+  DeleteSnapshotCommand: { action: "ec2:DeleteSnapshot", scope: "agentless" },
+  RunInstancesCommand: { action: "ec2:RunInstances", scope: "agentless" },
+  AttachVolumeCommand: { action: "ec2:AttachVolume", scope: "agentless" },
+  TerminateInstancesCommand: { action: "ec2:TerminateInstances", scope: "agentless" },
+  DescribeInstanceStatusCommand: { action: "ec2:DescribeInstanceStatus", scope: "agentless" },
+  CreateTagsCommand: { action: "ec2:CreateTags", scope: "agentless" },
   GetCallerIdentityCommand: { action: "sts:GetCallerIdentity", scope: "customer" },
   GetRoleCommand: { action: "iam:GetRole", scope: "customer" },
   GetRolePolicyCommand: { action: "iam:GetRolePolicy", scope: "customer" },
@@ -118,7 +141,11 @@ test("every AWS command the collector constructs is mapped to a read-only action
         "add its IAM action here and grant it in the onboarding template",
     );
   }
-  for (const [command, { action }] of Object.entries(COLLECTOR_COMMANDS)) {
+  // The read-only claim is about COLLECTION. Agentless is excluded because it
+  // genuinely writes — but not thereby unbounded: the next test pins the exact set,
+  // so a new write verb cannot be slipped in under this label.
+  for (const [command, { action, scope }] of Object.entries(COLLECTOR_COMMANDS)) {
+    if (scope === "agentless") continue;
     assert.match(action, READ_ONLY_VERBS, `${command} maps to non-read-only action ${action}`);
   }
 });
@@ -154,5 +181,49 @@ test("default onboarding template permits every read-only action the collector c
   // No customer action the collector relies on may be a mutation.
   for (const action of customerActions) {
     assert.match(action, READ_ONLY_VERBS, `granted collector action ${action} is not read-only`);
+  }
+});
+
+/**
+ * "agentless" must not become a way to add arbitrary write verbs. Nothing labelled
+ * agentless may be a verb the STS ceiling in role-broker.ts explicitly Denies, and a
+ * customer-side write must be one that ceiling Allows.
+ */
+test("agentless write actions stay inside the STS ceiling that bounds them", async () => {
+  const broker = await readFile(resolve(collectorSrc, "role-broker.ts"), "utf8");
+  const listed = (name) => {
+    const start = broker.indexOf(`const ${name} = [`);
+    assert.ok(start !== -1, `${name} not found in role-broker.ts`);
+    const block = broker.slice(start, broker.indexOf("] as const;", start));
+    return [...block.matchAll(/"([a-z0-9]+:[A-Za-z0-9*]+)"/gu)].map((m) => m[1]);
+  };
+  const allowed = listed("SESSION_AGENTLESS_WRITE_ACTIONS");
+  const denied = listed("SESSION_AGENTLESS_DENY_ACTIONS");
+
+  const agentless = Object.entries(COLLECTOR_COMMANDS).filter(([, e]) => e.scope === "agentless");
+  assert.ok(agentless.length > 0, "the agentless scope must not be empty while the feature exists");
+
+  const matches = (pattern, action) =>
+    new RegExp(`^${pattern.replaceAll(".", "\\.").replaceAll("*", ".*")}$`, "u").test(action);
+
+  for (const [command, { action }] of agentless) {
+    for (const pattern of denied) {
+      // A denied verb is unreachable whatever the label claims. DeleteVolume and
+      // DeleteSnapshot are exempt: they run in SUTRA's OWN account under the
+      // orchestrator role, which is a different principal from the customer session
+      // the deny list bounds.
+      if (action === "ec2:DeleteVolume" || action === "ec2:DeleteSnapshot") continue;
+      if (action === "ec2:TerminateInstances") continue;
+      assert.ok(
+        !matches(pattern, action),
+        `${command} maps to ${action}, which SESSION_AGENTLESS_DENY_ACTIONS denies as ${pattern}`,
+      );
+    }
+    if (action === "ec2:CreateSnapshot" || action === "ec2:ModifySnapshotAttribute") {
+      assert.ok(
+        allowed.some((a) => matches(a, action)),
+        `${command} maps to ${action}, which the agentless STS ceiling does not allow`,
+      );
+    }
   }
 });
