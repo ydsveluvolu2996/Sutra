@@ -1,31 +1,42 @@
+# Sutra agentless snapshot scanning infrastructure.
+#
+# ── WHY THE RATIONALE LIVES IN COMMENTS ─────────────────────────────────────
+# CloudFormation caps the `Description` PROPERTY at 1024 characters, and it is
+# uploaded with the template. This prose grew to 1530 characters, which made the
+# template fail validation with "'Description' length is greater than 1024" —
+# so the file on main could not be deployed at all, while the already-deployed
+# stack kept working from the shorter version it was created with. Comments are
+# not uploaded and are not length-limited, so long-form reasoning belongs here
+# and `Description` stays a one-liner.
+#
+# ── DEPLOYED INTO THE CONTROL-PLANE ACCOUNT BY DELIBERATE CHOICE ────────────
+# A separate AWS account would give a hard blast-radius boundary; a single
+# account was chosen for cost visibility and operational simplicity while there
+# are no live customers. The boundary is therefore reconstructed at the IAM
+# layer: the scanner role carries an explicit deny on the control plane's
+# database, secrets, parameters and IAM, and an explicit deny cannot be
+# overridden by any policy attached later. That is weaker than account
+# separation — a root-level compromise ignores it — and moving to a dedicated
+# account later is a parameter change, not a redesign.
+#
+# Everything here is additive and self-contained: it creates its own VPC and
+# touches no existing resource. `aws cloudformation delete-stack` removes all
+# of it.
+#
+# ── PREREQUISITE in an account that has never used ECS ──────────────────────
+# Run `aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com`
+# first. Otherwise CreateCluster fails with "Unable to assume the service
+# linked role" — the failed call provisions AWSServiceRoleForECS
+# asynchronously, so a second deploy succeeds, but the first leaves a
+# ROLLBACK_COMPLETE stack to delete. This is not a template resource because
+# AWS::IAM::ServiceLinkedRole errors when the role already exists, which would
+# break every account that has used ECS before.
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Sutra agentless snapshot scanning infrastructure. Creates an isolated VPC, a
-  KMS key, an ECR repository, an ECS/Fargate cluster and three scoped IAM roles
-  used to scan a copied EBS snapshot's contents without an agent.
-
-  DEPLOYED INTO THE CONTROL-PLANE ACCOUNT BY DELIBERATE CHOICE. A separate AWS
-  account would give a hard blast-radius boundary; a single account was chosen
-  for cost visibility and operational simplicity while there are no live
-  customers. The boundary is therefore reconstructed at the IAM layer: the
-  scanner role carries an explicit deny on the control plane's database,
-  secrets, parameters and IAM, and an explicit deny cannot be overridden by any
-  policy attached later. That is weaker than account separation — a root-level
-  compromise ignores it — and moving to a dedicated account later is a parameter
-  change, not a redesign.
-
-  Everything here is additive and self-contained: it creates its own VPC and
-  touches no existing resource. `aws cloudformation delete-stack` removes all of
-  it.
-
-  PREREQUISITE in an account that has never used ECS: run
-  `aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com`
-  first. Otherwise CreateCluster fails with "Unable to assume the service linked
-  role" — the failed call provisions AWSServiceRoleForECS asynchronously, so a
-  second deploy succeeds, but the first leaves a ROLLBACK_COMPLETE stack to
-  delete. This is not in the template because AWS::IAM::ServiceLinkedRole errors
-  when the role already exists, which would break every account that has used
-  ECS before.
+  Sutra agentless snapshot scanning: an isolated VPC, KMS key, ECR repository,
+  ECS/Fargate cluster and three scoped IAM roles used to scan a copied EBS
+  snapshot's contents without an agent. See the comments at the top of this
+  file for the single-account boundary rationale and the ECS prerequisite.
 
 Metadata:
   AWS::CloudFormation::Interface:
