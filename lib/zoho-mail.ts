@@ -201,7 +201,10 @@ export async function sendZohoMail(
   try {
     const tokenResponse = await fetchImpl(configuration.tokenEndpoint, {
       method: "POST",
-      redirect: "error",
+      // Workerd rejects redirect mode "error" before issuing the request.
+      // "manual" still prevents redirect following because every 3xx response
+      // is non-ok and is classified as a provider rejection below.
+      redirect: "manual",
       headers: {
         accept: "application/json",
         "content-type": "application/x-www-form-urlencoded",
@@ -220,7 +223,7 @@ export async function sendZohoMail(
 
     const response = await fetchImpl(configuration.sendEndpoint, {
       method: "POST",
-      redirect: "error",
+      redirect: "manual",
       headers: {
         accept: "application/json",
         authorization: `Zoho-oauthtoken ${token}`,

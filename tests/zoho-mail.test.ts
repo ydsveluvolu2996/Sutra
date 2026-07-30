@@ -45,6 +45,7 @@ describe("Zoho Mail REST delivery", () => {
     assert.deepEqual(result, { status: "accepted", errorCode: null, httpStatus: 200 });
     assert.equal(calls.length, 2);
     assert.equal(calls[0]?.url, "https://accounts.zoho.in/oauth/v2/token");
+    assert.equal(calls[0]?.init.redirect, "manual");
     const tokenBody = new URLSearchParams(String(calls[0]?.init.body));
     assert.equal(tokenBody.get("grant_type"), "refresh_token");
     assert.equal(tokenBody.get("client_id"), ENV.SUTRA_ZOHO_CLIENT_ID);
@@ -52,6 +53,7 @@ describe("Zoho Mail REST delivery", () => {
     assert.equal(tokenBody.get("refresh_token"), ENV.SUTRA_ZOHO_REFRESH_TOKEN);
 
     assert.equal(calls[1]?.url, "https://mail.zoho.in/api/accounts/60080685470/messages");
+    assert.equal(calls[1]?.init.redirect, "manual");
     const headers = calls[1]?.init.headers as Record<string, string>;
     assert.match(headers.authorization, /^Zoho-oauthtoken 1000\./u);
     const body = JSON.parse(String(calls[1]?.init.body));
