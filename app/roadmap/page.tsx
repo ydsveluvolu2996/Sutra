@@ -2,116 +2,115 @@ import type { Metadata } from "next";
 import { AppShell } from "../components/app-shell";
 
 export const metadata: Metadata = {
-  title: "Product roadmap",
-  description: "An honest delivered-versus-future roadmap for the Sutra MSP cloud operations platform.",
+  title: "Platform coverage",
+  description: "Current live coverage, configuration-dependent integrations, and planned provider expansion for Sutra.",
 };
 
 const phases = [
   {
     number: "01",
-    state: "Production gate",
+    state: "Live",
     tone: "gate",
-    title: "Hosted security, tenancy, and jobs",
-    summary: "Turn the local vertical slice into a defensible hosted control plane before onboarding production customers.",
-    items: ["OIDC, MFA and tenant-scoped authorization", "Deployed AWS broker and managed keys", "Durable jobs, ingestion, retries and DLQ", "Isolation tests, backups, SLOs and incident response"],
-    evidence: "P0 gates independently tested and approved",
+    title: "Hosted identity and tenant isolation",
+    summary: "Invitation-only access, Zoho OIDC, mandatory authorization checks, customer assignments, and tenant-scoped repositories form the hosted control-plane boundary.",
+    items: ["Owner-created profiles and invitations", "Zoho OIDC with signed ID-token verification", "Organization and assigned-customer authorization", "MFA-protected sensitive workflows and audit records"],
+    evidence: "Identity, invitation, session, authorization, and cross-tenant isolation gates",
   },
   {
     number: "02",
-    state: "Planned expansion",
-    tone: "planned",
-    title: "AWS CMDB and posture depth",
-    summary: "Broaden AWS inventory, change context, control coverage, compliance evidence, and the lifecycle around imported native security findings.",
-    items: ["More AWS resource and relationship types", "Change history, diffs, ownership and custom fields", "Reviewed controls, exceptions and standards mappings", "Deeper native-finding correlation, ownership and workflow"],
-    evidence: "Coverage, quality and lifecycle tests per adapter",
+    state: "Live",
+    tone: "gate",
+    title: "AWS CMDB, posture, and collection",
+    summary: "Customer-owned trust roles provide temporary read-only access for inventory, graph, change, coverage, native finding, and compliance evidence.",
+    items: ["CloudFormation or customer-managed trust role", "Immutable complete snapshots and last-good projection", "Resource inventory, relationships, findings and changes", "Collector coverage and explicit partial/failure states"],
+    evidence: "Template lint, permission coverage, STS trust validation, and collector contracts",
   },
   {
     number: "03",
-    state: "Planned expansion",
-    tone: "planned",
-    title: "FinOps",
-    summary: "Build a reconciled cost foundation before presenting allocation, anomaly, commitment, or savings recommendations.",
-    items: ["CUR or Data Exports ingestion", "Allocation, budgets and customer reporting", "Commitment coverage and utilization", "Measured anomaly and rightsizing recommendations"],
-    evidence: "Invoice traceability and recommendation-quality metrics",
+    state: "Live when connected",
+    tone: "gate",
+    title: "Security, Kubernetes, and FinOps verticals",
+    summary: "Each vertical reads its own persisted evidence and reports an empty or unavailable state until the required source is connected.",
+    items: ["Cloud and Kubernetes vulnerability workflows", "Exposure, detections, cases, exceptions and reports", "Kubernetes inventory, identity, runtime and supply-chain views", "Cost Explorer, CUR-backed allocation, showback and optimization"],
+    evidence: "Per-source route, repository, normalization, and input-boundary tests",
   },
   {
     number: "04",
-    state: "Planned expansion",
+    state: "Operator configured",
     tone: "planned",
-    title: "ITSM, SIEM, PSA, and collaboration",
-    summary: "Create a reliable connector platform, then add the integrations MSP teams operate every day.",
-    items: ["Versioned webhooks and public API", "ServiceNow, Jira and PSA workflows", "Splunk, Sentinel and Elastic exports", "Slack, Teams and email notifications"],
-    evidence: "Tenant-safe delivery, retry, audit and redaction tests",
+    title: "Delivery and optional engines",
+    summary: "These capabilities are live only after an administrator supplies their required destination, worker, scanner, or cluster configuration.",
+    items: ["Zoho invitation and contact email delivery", "Email, Slack, Teams, webhook and PagerDuty destinations", "Agentless disk scanning infrastructure", "Kubernetes agents, runtime events, registries and external scanner imports"],
+    evidence: "Readiness is shown from persisted configuration; missing integrations never report success",
   },
   {
     number: "05",
-    state: "Research horizon",
+    state: "Planned",
     tone: "horizon",
-    title: "Azure, GCP, and Kubernetes",
-    summary: "Add providers as independent security and data-quality programs—not shallow tag-only discovery.",
-    items: ["Provider-neutral CMDB contracts", "Azure resource and Defender context", "GCP asset and SCC context", "Kubernetes workload and posture inventory"],
-    evidence: "Provider-specific identity, hierarchy and coverage preserved",
+    title: "Additional cloud providers",
+    summary: "Azure and Google Cloud require provider-specific identity, hierarchy, collection, and evidence contracts before they can be presented as available.",
+    items: ["Provider-neutral CMDB interfaces", "Azure resource and security context", "Google Cloud asset and security context", "Cross-provider portfolio reporting"],
+    evidence: "Provider-specific access, tenant, data-quality, and coverage acceptance gates",
   },
 ] as const;
 
 const capabilityRows = [
-  ["AWS onboarding", "One account; behavioral trust validation", "Organization-scale lifecycle and partitions", "Gate → expand"],
-  ["CMDB", "Selected AWS inventory, graph, snapshots, exports", "Broad CI coverage, changes, history and query API", "Gate → expand"],
-  ["CSPM", "8 configuration controls + 3 service-coverage controls", "Reviewed packs, exceptions and compliance mappings", "Gate → expand"],
-  ["Native findings", "Bounded read-only imports from enabled Inspector, GuardDuty and Security Hub services", "Deeper correlation, ownership, lifecycle and workflow", "Gate → expand"],
-  ["SIEM", "Not implemented; no event/log ingestion, normalization or correlation", "Tenant-safe telemetry ingestion, detection and retention", "Expand"],
-  ["Resource changes", "None by default. One opt-in grant (agentless disk scanning) may create tagged EBS snapshots and can never delete anything — an explicit IAM deny covers every destructive verb", "Separate approved remediation plane", "Gate → expand"],
-  ["FinOps", "Read-only Cost Explorer trends, breakdowns, forecast provenance and evidence-derived signals", "CUR 2.0, allocation, budgets, commitments, utilization-aware optimization and billing reconciliation", "Gate → expand"],
-  ["Integrations", "JSON/CSV export only", "ITSM, SIEM, PSA, chat, webhooks and public API", "Expand"],
-  ["Multi-cloud", "Not implemented", "Azure, GCP and Kubernetes collectors", "Horizon"],
+  ["AWS onboarding", "Live", "Customer-owned role, External ID, validation, rotation and offboarding"],
+  ["CMDB and CSPM", "Live after collection", "Persisted resources, graph, findings, changes, coverage and exports"],
+  ["Vulnerability and exposure", "Live when evidence exists", "Native AWS, Kubernetes, registry and approved scanner inputs"],
+  ["Kubernetes", "Live after enrollment", "Inventory, RBAC/CIEM, drift, runtime, supply chain and compliance"],
+  ["FinOps", "Live when billing is enabled", "Cost Explorer plus optional CUR-backed allocation and showback"],
+  ["Cases and governance", "Live", "Cases, routing, exceptions, approvals, reports and audit records"],
+  ["Notifications and ITSM", "Configuration dependent", "Readiness and delivery reflect configured workers and destinations"],
+  ["Azure and Google Cloud", "Planned", "No provider evidence is displayed until dedicated collectors pass release gates"],
 ] as const;
 
 export default function RoadmapPage() {
   return (
     <AppShell active="roadmap">
       <section className="page-heading roadmap-heading">
-        <div><p className="eyebrow">Product direction</p><h1>From working AWS pilot to MSP operations platform</h1><p className="page-subtitle">A sequenced, evidence-gated roadmap toward broad cloud-operations capability—without presenting future work as delivered.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href="/controls">Inspect current controls</a><a className="button button-primary" href="/cmdb">Open working CMDB</a></div>
+        <div><p className="eyebrow">Release coverage</p><h1>Live capabilities and integration readiness</h1><p className="page-subtitle">A factual view of what is live, what requires operator configuration, and what remains planned. Runtime dashboards continue to show only persisted evidence.</p></div>
+        <div className="heading-actions"><a className="button button-secondary" href="/controls">Review control coverage</a><a className="button button-primary" href="/operations">Open collection runs</a></div>
       </section>
 
-      <div className="trust-strip roadmap-trust" role="note"><span className="trust-icon">i</span><span><strong>This is not a Cloudaware parity claim.</strong> It distinguishes the local one-account implementation from production gates, planned expansion, and research horizons. No dates are implied.</span><a href="#capability-matrix">Compare scope</a></div>
+      <div className="trust-strip roadmap-trust" role="note"><span className="trust-icon">✓</span><span><strong>No screen is treated as proof of integration.</strong> A capability is labelled live only when its identity, authorization, source, persistence, and failure boundaries are wired. Unconfigured sources show unavailable or empty states rather than sample data.</span><a href="#capability-matrix">View matrix</a></div>
 
       <section className="roadmap-now" aria-labelledby="roadmap-now-title">
         <div className="roadmap-now-copy">
-          <span className="roadmap-phase-label"><i /> Delivered locally · Phase 0</span>
-          <h2 id="roadmap-now-title">One complete, honest AWS vertical slice.</h2>
-          <p>Sutra can create a scoped connection, hand off an ExternalId, prove the IAM trust behavior, collect selected metadata and existing AWS-native findings, publish a complete snapshot, browse assets and relationships, evaluate deterministic checks, update finding workflow, and export evidence.</p>
-          <div className="roadmap-facts"><span><strong>1</strong> customer / account</span><span><strong>8</strong> AWS service families</span><span><strong>11</strong> versioned baseline controls</span><span><strong>0</strong> mutation permissions</span></div>
+          <span className="roadmap-phase-label"><i /> Hosted release boundary</span>
+          <h2 id="roadmap-now-title">Read-only collection with customer-scoped evidence.</h2>
+          <p>Sutra validates a dedicated customer role, obtains temporary AWS credentials, records each collection attempt, promotes only complete snapshots, and applies the authenticated membership&apos;s customer scope before returning resources, findings, costs, cases, or reports.</p>
+          <div className="roadmap-facts"><span><strong>OIDC</strong> invited identities</span><span><strong>STS</strong> temporary access</span><span><strong>SQL</strong> tenant scope</span><span><strong>0</strong> sample metrics in live dashboards</span></div>
         </div>
         <div className="roadmap-now-boundary">
-          <div><p className="eyebrow">Delivered</p><ul><li>Fixture and disposable-sandbox live modes</li><li>Signed broker boundary and encrypted local registry</li><li>Immutable complete snapshots and last-good projection</li><li>CMDB, findings, workflows, coverage, JSON and CSV</li></ul></div>
-          <div><p className="eyebrow">Not yet production</p><ul><li>Hosted identity or proven multi-tenant isolation</li><li>Durable distributed jobs and managed key service</li><li>Production SLOs, backup drills and incident operations</li><li>Broad AWS, FinOps, integrations or multi-cloud parity</li></ul></div>
+          <div><p className="eyebrow">Live boundary</p><ul><li>Invitation-only Zoho identity</li><li>Customer-owned AWS trust roles</li><li>Immutable evidence snapshots</li><li>Tenant-scoped APIs and repositories</li></ul></div>
+          <div><p className="eyebrow">Fail-closed behavior</p><ul><li>Missing sources remain unknown</li><li>Partial collections do not replace CMDB state</li><li>Unconfigured integrations do not claim readiness</li><li>Cross-customer access is denied server-side</li></ul></div>
         </div>
       </section>
 
       <section className="roadmap-section">
-        <div className="roadmap-section-heading"><div><p className="eyebrow">Evidence before breadth</p><h2>Sequenced expansion</h2></div><p>Each phase earns its claims through acceptance evidence. The production foundation comes before additional product surface.</p></div>
+        <div className="roadmap-section-heading"><div><p className="eyebrow">Release layers</p><h2>Capability readiness</h2></div><p>Every layer has an evidence gate; enabled UI alone never changes its status.</p></div>
         <div className="roadmap-phase-grid">
           {phases.map((phase) => <article className="roadmap-phase-card" key={phase.number}>
             <div className="roadmap-card-top"><span>{phase.number}</span><b className={`roadmap-state roadmap-state-${phase.tone}`}>{phase.state}</b></div>
             <h3>{phase.title}</h3><p>{phase.summary}</p>
             <ul>{phase.items.map((item) => <li key={item}>{item}</li>)}</ul>
-            <div className="roadmap-exit"><small>Exit evidence</small><strong>{phase.evidence}</strong></div>
+            <div className="roadmap-exit"><small>Release evidence</small><strong>{phase.evidence}</strong></div>
           </article>)}
         </div>
       </section>
 
       <section className="panel roadmap-matrix-panel" id="capability-matrix">
-        <div className="panel-heading"><div><p className="eyebrow">Delivered versus future</p><h2>Capability matrix</h2></div><span className="status-pill status-medium">No hidden parity claims</span></div>
-        <div className="roadmap-matrix" role="table" aria-label="Sutra capability roadmap">
-          <div className="roadmap-matrix-row roadmap-matrix-header" role="row"><span>Area</span><span>Available today</span><span>Broader target</span><span>Stage</span></div>
-          {capabilityRows.map(([area, today, target, stage]) => <div className="roadmap-matrix-row" role="row" key={area}><strong>{area}</strong><span>{today}</span><span>{target}</span><b>{stage}</b></div>)}
+        <div className="panel-heading"><div><p className="eyebrow">Current contract</p><h2>Capability matrix</h2></div><span className="status-pill status-positive">Evidence labelled</span></div>
+        <div className="roadmap-matrix" role="table" aria-label="Sutra capability coverage">
+          <div className="roadmap-matrix-row roadmap-matrix-header" role="row"><span>Area</span><span>Status</span><span>Evidence boundary</span><span /></div>
+          {capabilityRows.map(([area, status, boundary]) => <div className="roadmap-matrix-row" role="row" key={area}><strong>{area}</strong><span>{status}</span><span>{boundary}</span><b>{status}</b></div>)}
         </div>
       </section>
 
       <section className="roadmap-guardrails">
-        <div><p className="eyebrow">Release rule</p><h2>A schema, screen, permission, or fixture is not a delivered capability.</h2><p>Every collector must expose coverage, preserve the last complete good snapshot, and treat missing evidence as unknown—not a silent pass. Native AWS findings keep their provider identity and are never relabeled as Sutra detections.</p></div>
-        <div><a className="button button-secondary" href="/controls#architecture">Review product boundaries</a><a className="button button-primary" href="/onboard">Test the local pilot</a></div>
+        <div><p className="eyebrow">Release rule</p><h2>Missing evidence is unknown, never a pass.</h2><p>Collectors expose coverage, preserve the last complete snapshot, and keep source identity. Optional engines and destinations remain visibly unconfigured until their own readiness checks succeed.</p></div>
+        <div><a className="button button-secondary" href="/settings">Review integrations</a><a className="button button-primary" href="/onboard">Onboard AWS account</a></div>
       </section>
     </AppShell>
   );

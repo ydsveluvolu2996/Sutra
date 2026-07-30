@@ -32,7 +32,7 @@ function ageDetail(hours: number): string {
 }
 
 /**
- * A small, explicit demo policy—not a posture score. Freshness is evaluated
+ * An explicit operating policy—not a posture score. Freshness is evaluated
  * against the server-provided portfolio measurement time so every operator
  * sees the same classification for the same response.
  */

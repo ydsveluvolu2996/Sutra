@@ -102,7 +102,7 @@ export function ChangesBrowser() {
                   </div>
                 </details>
               ))}
-              {result.changes.length === 0 ? <div className="empty-state"><strong>No differences recorded yet</strong><span>Run a later complete fixture version or complete inventory scan to produce a deterministic comparison.</span></div> : null}
+              {result.changes.length === 0 ? <div className="empty-state"><strong>No differences recorded yet</strong><span>Run a later complete AWS inventory collection to produce a deterministic comparison.</span></div> : null}
             </div>
           </section>
         </>

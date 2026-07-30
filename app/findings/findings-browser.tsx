@@ -60,7 +60,7 @@ export function FindingsBrowser() {
         connectionId: connection.id,
         fingerprint: finding.fingerprint,
         status: nextStatus,
-        note: nextStatus === "acknowledged" ? "Acknowledged by the local pilot operator" : "Reopened by the local pilot operator",
+        note: nextStatus === "acknowledged" ? "Acknowledged by the workspace operator" : "Reopened by the workspace operator",
       });
       await refresh();
     } catch (caught) {
@@ -74,7 +74,7 @@ export function FindingsBrowser() {
     <>
       <section className="page-heading">
         <div><p className="eyebrow">Evidence-backed posture</p><h1>Security findings</h1><p className="page-subtitle">Explainable configuration checks, affected resources, evidence, and suggested remediation from the active snapshot.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href="/controls">Control library</a>{canRunAwsSync ? <button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button> : connection ? <a className="button button-primary" href="/operations">Run simulation</a> : null}</div>
+        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href="/controls">Control library</a>{canRunAwsSync ? <button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button> : null}</div>
       </section>
       <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready; no finding snapshot selected." : health?.mode === "fixture" ? "Fixture collector ready; no finding snapshot selected." : "Stored finding evidence."}</strong> These findings are deterministic posture observations—not proof of compromise, behavior analytics, package vulnerability scanning, or an AWS Inspector/GuardDuty replacement.</span><a href="/controls#architecture">See limitations</a></div>
 

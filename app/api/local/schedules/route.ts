@@ -12,6 +12,7 @@ import {
   reconcileLocalScheduleMutations,
 } from "../../../../lib/local-schedule-api";
 import {
+  assertLocalSimulationRuntime,
   errorResponse,
   getLocalFixtureCatalog,
   getLocalFixtureSchedules,
@@ -67,6 +68,7 @@ function visibleFixtures(
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "workspace:read");
     const url = new URL(request.url);
@@ -94,6 +96,7 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function PUT(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "workspace:read");
     assertSameOrigin(request);

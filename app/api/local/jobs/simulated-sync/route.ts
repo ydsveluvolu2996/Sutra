@@ -4,6 +4,7 @@ import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-
 import type { LocalFixtureVersion } from "../../../../../lib/local-ops-types";
 import {
   enqueueLocalFixtureJob,
+  assertLocalSimulationRuntime,
   errorResponse,
   getLocalFixtureCatalog,
   jsonResponse,
@@ -32,6 +33,7 @@ function parseBody(value: unknown): { fixtureId: string; version: LocalFixtureVe
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const idempotencyKey = request.headers.get("idempotency-key") ?? "";

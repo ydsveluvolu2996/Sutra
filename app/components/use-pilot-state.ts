@@ -166,6 +166,6 @@ export function snapshotOriginLabel(origin: SnapshotOrigin | null | undefined): 
   if (origin?.kind === "simulated_fixture") {
     return `Simulated fixture evidence${origin.fixtureVersion ? ` · ${origin.fixtureVersion}` : ""}`;
   }
-  if (origin?.kind === "aws_sandbox") return "AWS sandbox evidence";
+  if (origin?.kind === "aws_sandbox") return "Live AWS evidence";
   return "Stored snapshot evidence";
 }

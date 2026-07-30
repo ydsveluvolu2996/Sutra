@@ -24,7 +24,6 @@ export function CustomersBrowser() {
   const connections = customers.flatMap((customer) => customer.connections.map((connection) => ({ customer, connection })));
   const measuredAt = portfolio?.measuredAt ?? new Date(0).toISOString();
   const liveAccountCount = connections.filter(({ connection }) => connection.sourceKind === "aws_trust_role").length;
-  const simulatedAccountCount = connections.length - liveAccountCount;
   const healthyAccountCount = connections.filter(({ connection }) => connectionHealth(connection, measuredAt).state === "active").length;
   const attentionAccountCount = connections.length - healthyAccountCount;
 
@@ -40,13 +39,13 @@ export function CustomersBrowser() {
       {error ? <div className="page-alert page-alert-error" role="alert"><strong>Customer portfolio is unavailable</strong><span>{error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading authorized customer scope…</div> : null}
 
-      {!loading && customers.length === 0 ? <section className="panel empty-workspace"><span className="empty-workspace-icon">MSP</span><h2>No customer workspaces in your scope</h2><p>{canOnboard ? "Onboard a customer-owned AWS account, or run a simulation to create the first scoped workspace." : "Ask an organization owner to assign a customer workspace to this membership."}</p>{canOnboard ? <div className="heading-actions"><a className="button button-primary" href="/onboard">Start onboarding</a><a className="button button-secondary" href="/operations">Run a simulation</a></div> : null}</section> : null}
+      {!loading && customers.length === 0 ? <section className="panel empty-workspace"><span className="empty-workspace-icon">MSP</span><h2>No customer workspaces in your scope</h2><p>{canOnboard ? "Onboard a customer-owned AWS account to create the first scoped workspace." : "Ask an organization owner to assign a customer workspace to this membership."}</p>{canOnboard ? <div className="heading-actions"><a className="button button-primary" href="/onboard">Start onboarding</a></div> : null}</section> : null}
 
       {portfolio && customers.length > 0 ? (
         <>
           <section className="summary-band">
             <div><small>Customer workspaces</small><strong>{portfolio.totals.customers}</strong><span>{portfolio.scopeMode === "all_customers" ? "Organization-wide access" : "Explicitly assigned scope"}</span></div>
-            <div><small>Cloud accounts</small><strong>{portfolio.totals.connections}</strong><span>{liveAccountCount} live AWS · {simulatedAccountCount} simulated</span></div>
+            <div><small>Cloud accounts</small><strong>{portfolio.totals.connections}</strong><span>{liveAccountCount} live AWS connections</span></div>
             <div><small>CMDB resources</small><strong>{portfolio.totals.resources.toLocaleString()}</strong><span>Latest complete projections</span></div>
             <div><small>Open findings</small><strong>{portfolio.totals.openFindings.toLocaleString()}</strong><span>Workflow-adjusted current findings</span></div>
           </section>
@@ -55,7 +54,7 @@ export function CustomersBrowser() {
             <article><span className="severity-dot severity-info" /><small>Healthy accounts</small><strong>{healthyAccountCount}</strong></article>
             <article><span className="severity-dot severity-high" /><small>Need operator attention</small><strong>{attentionAccountCount}</strong></article>
             <article><span className="severity-dot severity-info" /><small>Live AWS accounts</small><strong>{liveAccountCount}</strong></article>
-            <article><span className="severity-dot severity-medium" /><small>Simulated accounts</small><strong>{simulatedAccountCount}</strong></article>
+            <article><span className="severity-dot severity-info" /><small>Complete snapshots</small><strong>{connections.filter(({ connection }) => connection.latestSnapshotAt !== null).length}</strong></article>
             <article><span className="severity-dot severity-info" /><small>Scope measured</small><strong>{customers.length}</strong></article>
           </section>
 

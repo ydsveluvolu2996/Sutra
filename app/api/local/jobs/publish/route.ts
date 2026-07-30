@@ -4,6 +4,7 @@ import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { authorize } from "../../../../../lib/auth-policy";
 import {
+  assertLocalSimulationRuntime,
   acknowledgeLocalFixtureJobPublication,
   errorResponse,
   getLocalFixtureCatalog,
@@ -29,6 +30,7 @@ function jobId(value: unknown): string {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     const requestedJobId = jobId(await readBoundedJson(request));

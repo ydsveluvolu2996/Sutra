@@ -82,6 +82,18 @@ export function requirePilotActor(
   return authorizePilotRequest(request, capability, customerId);
 }
 
+/**
+ * Fixture catalogs, queues, schedules, and publication controls are developer
+ * tooling. Keep the boundary on the server as well as in the UI so a hosted
+ * session cannot reach sample evidence by calling an `/api/local/*` URL
+ * directly.
+ */
+export function assertLocalSimulationRuntime(): void {
+  if (runtimeEnv().SUTRA_LOCAL_MODE !== "true") {
+    throw new PilotServerError(404, "NOT_FOUND", "The requested resource was not found");
+  }
+}
+
 export function getPilotSecrets(): PilotSecrets {
   const config = runtimeEnv();
   const connectionEncryptionKey = config.SUTRA_CONNECTION_ENCRYPTION_KEY?.trim();

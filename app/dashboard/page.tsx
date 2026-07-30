@@ -314,12 +314,11 @@ export default function Home() {
       <section className="page-heading dashboard-hero">
         <div>
           <p className="eyebrow">MSP operations</p>
-          <h1>{connection ? `${connection.customerName} cloud overview` : "Your AWS pilot workspace"}</h1>
+          <h1>{connection ? `${connection.customerName} cloud overview` : "Your AWS cloud workspace"}</h1>
           <p className="page-subtitle">AWS trust health, collection outcomes, active inventory coverage, asset context, and explainable security priorities.</p>
         </div>
         <div className="heading-actions">
           {connection && canRunAwsSync ? <button className="button button-secondary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync now"}</button> : null}
-          {connection && !canRunAwsSync ? <a className="button button-secondary" href="/operations">Run another simulation</a> : null}
           <a className="button button-primary" href={cmdbHref}>{connection ? "Open CMDB" : "Onboard AWS account"}</a>
         </div>
       </section>
@@ -331,7 +330,7 @@ export default function Home() {
       </div>
 
       {error || actionError ? <div className="page-alert page-alert-error" role="alert"><strong>Workspace needs attention</strong><span>{actionError ?? error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
-      {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading the pilot workspace…</div> : null}
+      {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading the cloud workspace…</div> : null}
 
       {!loading && !connection ? (
         <section className="panel dbe" aria-label="Connect your first customer account">
@@ -350,14 +349,14 @@ export default function Home() {
             </div>
           </div>
           <div className="dbe-preview" aria-hidden="true">
-            <div className="dbe-preview-bar"><i /><i /><i /><span>after your first collection</span></div>
-            <div className="dbe-tiles">
-              <div className="dbe-tile"><small>Open issues</small><b>3</b><em>1 critical · reachable</em></div>
-              <div className="dbe-tile"><small>Internet-exposed</small><b>1</b><em>of 208 resources</em></div>
-              <div className="dbe-tile"><small>Posture score</small><b>82</b><em>▲ +6 this month</em></div>
-              <div className="dbe-tile"><small>Coverage</small><b>22</b><em>collectors per region</em></div>
+            <div className="dbe-preview-bar"><i /><i /><i /><span>live evidence pipeline</span></div>
+            <div className="dbe-steps">
+              <div className="dbe-tile"><small>01</small><b>Validate</b><em>Customer role and External ID</em></div>
+              <div className="dbe-tile"><small>02</small><b>Collect</b><em>Read-only AWS API evidence</em></div>
+              <div className="dbe-tile"><small>03</small><b>Publish</b><em>Only complete immutable snapshots</em></div>
+              <div className="dbe-tile"><small>04</small><b>Analyze</b><em>Tenant-scoped posture and CMDB</em></div>
             </div>
-            <div className="dbe-note">Preview — populated by your customer&apos;s real evidence</div>
+            <div className="dbe-note">No sample metrics — values appear only after collection</div>
           </div>
         </section>
       ) : null}
@@ -378,7 +377,7 @@ export default function Home() {
             <p className="panel-footnote">Each tile queries its vertical directly for the active connection and degrades to &ldquo;no data&rdquo; on an empty or unavailable source — never a fabricated number. Cloud detections are single-source (collected CloudTrail management events only) and do not claim full-coverage CDR.</p>
           </section>
 
-          <section className="metrics-grid" aria-label="Pilot summary">
+          <section className="metrics-grid" aria-label="Cloud workspace summary">
             <article className="metric-card metric-card-featured">
               <div className="metric-topline"><span>Trust health</span><span className={`status-pill ${connection.status === "active" ? "status-positive" : "status-medium"}`}>{connection.status.replace("_", " ")}</span></div>
               <strong className="connection-account">{connection.awsAccountId}</strong>
@@ -442,7 +441,7 @@ export default function Home() {
             </article>
 
             <article className="panel signal-panel">
-              <div className="panel-heading"><div><p className="eyebrow">Current capabilities</p><h2>What this pilot checks</h2></div></div>
+              <div className="panel-heading"><div><p className="eyebrow">Current capabilities</p><h2>What this collection checks</h2></div></div>
               <div className="signal-list">
                 <div><span className="signal-icon signal-green">01</span><p><strong>Configuration posture</strong><small>Exposure, encryption, logging, IAM and native-service coverage</small></p><b>Included</b></div>
                 <div><span className="signal-icon signal-blue">02</span><p><strong>Asset relationships</strong><small>Account, region, network, identity and service context</small></p><b>Included</b></div>

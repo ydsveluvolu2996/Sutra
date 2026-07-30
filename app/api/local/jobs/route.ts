@@ -3,6 +3,7 @@ import { assertSessionCapability, requireApiSession } from "../../../../lib/api-
 import { authorize } from "../../../../lib/auth-policy";
 import {
   acknowledgeLocalFixtureJobPublication,
+  assertLocalSimulationRuntime,
   errorResponse,
   getLocalFixtureCatalog,
   jsonResponse,
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const url = new URL(request.url);
     const rawLimit = url.searchParams.get("limit") ?? "30";
     if (
