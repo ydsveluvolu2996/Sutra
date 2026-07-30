@@ -1,6 +1,7 @@
 import { createOidcAuthorization, sealOidcTransaction } from "../../../../../lib/oidc-pkce";
 import {
   oidcTransactionCookie,
+  resolveDefaultHostedOidcProvider,
   resolveHostedOidcProvider,
 } from "../../../../../lib/hosted-oidc-runtime";
 
@@ -15,11 +16,13 @@ const PROVIDER_PARAM = /^[a-z][a-z0-9_-]{1,31}$/u;
 export async function GET(request: Request): Promise<Response> {
   try {
     const parameters = new URL(request.url).searchParams;
-    const providerParam = parameters.get("provider") ?? "";
-    if (!PROVIDER_PARAM.test(providerParam)) {
+    const providerParam = parameters.get("provider");
+    if (providerParam !== null && !PROVIDER_PARAM.test(providerParam)) {
       throw new Error("A supported sign-in provider must be selected");
     }
-    const runtime = resolveHostedOidcProvider(request, providerParam);
+    const runtime = providerParam === null
+      ? resolveDefaultHostedOidcProvider(request)
+      : resolveHostedOidcProvider(request, providerParam);
     const authorization = await createOidcAuthorization(
       runtime.client,
       runtime.providerId,

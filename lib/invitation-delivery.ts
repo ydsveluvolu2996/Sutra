@@ -1,14 +1,18 @@
 import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
+import {
+  sendZohoMail,
+  type ZohoMailEnvironment,
+} from "./zoho-mail.ts";
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 const MAXIMUM_FROM_LENGTH = 320;
 const MAXIMUM_SUBJECT_LENGTH = 180;
 const DELIVERY_TIMEOUT_MS = 10_000;
 
-export type InvitationDeliveryProvider = "none" | "resend" | "sendgrid" | "generic";
+export type InvitationDeliveryProvider = "none" | "zoho" | "resend" | "sendgrid" | "generic";
 export type InvitationDeliveryTransport = "none" | "email-api";
 
-export interface InvitationDeliveryEnv {
+export interface InvitationDeliveryEnv extends ZohoMailEnvironment {
   readonly SUTRA_INVITATION_FROM?: string;
   readonly SUTRA_INVITATION_EMAIL_PROVIDER?: string;
   readonly SUTRA_INVITATION_EMAIL_API_URL?: string;
@@ -53,7 +57,10 @@ function safeHeader(value: string, maximum: number): string {
     .slice(0, maximum);
 }
 
-function provider(env: InvitationDeliveryEnv, url: URL): Exclude<InvitationDeliveryProvider, "none"> {
+function provider(
+  env: InvitationDeliveryEnv,
+  url: URL,
+): Exclude<InvitationDeliveryProvider, "none" | "zoho"> {
   const configured = env.SUTRA_INVITATION_EMAIL_PROVIDER?.trim().toLocaleLowerCase("en-US");
   if (configured === "resend" || configured === "sendgrid" || configured === "generic") return configured;
   if (configured !== undefined && configured.length > 0) throw new Error("Unsupported invitation email provider");
@@ -85,6 +92,9 @@ export function buildInvitationProviderRequest(
   input: InvitationEmailInput,
   env: InvitationDeliveryEnv,
 ): InvitationProviderRequest | null {
+  if (env.SUTRA_INVITATION_EMAIL_PROVIDER?.trim().toLocaleLowerCase("en-US") === "zoho") {
+    return null;
+  }
   const endpoint = env.SUTRA_INVITATION_EMAIL_API_URL?.trim();
   const apiKey = env.SUTRA_INVITATION_EMAIL_API_KEY?.trim();
   const configuredFrom = env.SUTRA_INVITATION_FROM?.trim();
@@ -153,6 +163,59 @@ export async function deliverInvitationEmail(
   env: InvitationDeliveryEnv,
   fetchImpl: typeof fetch = fetch,
 ): Promise<InvitationDeliveryResult> {
+  if (env.SUTRA_INVITATION_EMAIL_PROVIDER?.trim().toLocaleLowerCase("en-US") === "zoho") {
+    const configuredFrom = env.SUTRA_INVITATION_FROM?.trim();
+    const configuredOrigin = env.SUTRA_PUBLIC_ORIGIN?.trim();
+    try {
+      if (!configuredFrom || !configuredOrigin) throw new Error("missing Zoho invitation sender");
+      const fromAddress = bareEmail(configuredFrom);
+      const activation = new URL(input.activationUrl);
+      const publicOrigin = new URL(configuredOrigin);
+      if (
+        fromAddress === null ||
+        configuredFrom.length > MAXIMUM_FROM_LENGTH ||
+        /[\r\n]/u.test(configuredFrom) ||
+        !EMAIL.test(input.recipient) ||
+        /[\r\n]/u.test(input.recipient) ||
+        activation.protocol !== "https:" ||
+        publicOrigin.protocol !== "https:" ||
+        publicOrigin.username !== "" ||
+        publicOrigin.password !== "" ||
+        publicOrigin.pathname !== "/" ||
+        publicOrigin.search !== "" ||
+        publicOrigin.hash !== "" ||
+        activation.origin !== publicOrigin.origin
+      ) {
+        throw new Error("invalid Zoho invitation delivery configuration");
+      }
+      const outcome = await sendZohoMail(env, {
+        fromAddress,
+        toAddress: input.recipient,
+        subject: safeHeader("You're invited to Sutra CMDB", MAXIMUM_SUBJECT_LENGTH),
+        content: textBody(input),
+      }, fetchImpl);
+      return {
+        status: outcome.status,
+        transport:
+          outcome.errorCode === "EMAIL_NOT_CONFIGURED" ||
+          outcome.errorCode === "EMAIL_CONFIGURATION_INVALID"
+            ? "none"
+            : "email-api",
+        provider: outcome.errorCode === "EMAIL_NOT_CONFIGURED" ? "none" : "zoho",
+        errorCode: outcome.errorCode,
+        httpStatus: outcome.httpStatus,
+      };
+    } catch {
+      return {
+        status: "failed",
+        transport: "none",
+        provider: "none",
+        errorCode: "EMAIL_CONFIGURATION_INVALID",
+        httpStatus: null,
+      };
+    }
+  }
+
   let request: InvitationProviderRequest | null;
   try {
     request = buildInvitationProviderRequest(input, env);

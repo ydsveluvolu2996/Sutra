@@ -114,4 +114,33 @@ describe("deliverScheduledReport — email (reuses the contact transactional tra
     assert.deepEqual(result, { delivered: false, transport: "none" });
     assert.equal(calls.length, 0);
   });
+
+  it("sends scheduled reports through the regional Zoho Mail API", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const result = await deliverScheduledReport({
+      kind: "email",
+      target: "finance@example.test",
+      envelope: ENVELOPE,
+      env: {
+        SUTRA_CONTACT_PROVIDER: "zoho",
+        SUTRA_CONTACT_FROM: "Sutra Reports <billing@sutracmdb.com>",
+        SUTRA_ZOHO_DATACENTER: "in",
+        SUTRA_ZOHO_MAIL_ACCOUNT_ID: "60080685470",
+        SUTRA_ZOHO_CLIENT_ID: "1000.SUTRA_TEST_CLIENT",
+        SUTRA_ZOHO_CLIENT_SECRET: "test-client-secret-not-real",
+        SUTRA_ZOHO_REFRESH_TOKEN: `1000.${"r".repeat(48)}`,
+      },
+      fetchImpl: (async (url: string | URL, init: RequestInit = {}) => {
+        calls.push({ url: String(url), init });
+        return calls.length === 1
+          ? Response.json({ access_token: `1000.${"a".repeat(48)}` })
+          : Response.json({ status: { code: 200 } });
+      }) as typeof fetch,
+    });
+    assert.deepEqual(result, { delivered: true, transport: "email-api" });
+    const body = JSON.parse(String(calls[1]?.init.body));
+    assert.equal(body.fromAddress, "billing@sutracmdb.com");
+    assert.equal(body.toAddress, "finance@example.test");
+    assert.match(body.subject, /Sutra cost report/u);
+  });
 });

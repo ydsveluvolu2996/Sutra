@@ -294,7 +294,7 @@ export default function LoginPage() {
                 className="button button-primary auth-submit"
                 href={`/api/auth/oidc/start?returnTo=${encodeURIComponent(returnTo)}`}
               >
-                Continue with secure sign-in
+                Continue with Zoho SSO
               </a>
             </>
           ) : mode === "bootstrap" ? (

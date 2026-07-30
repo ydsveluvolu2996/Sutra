@@ -134,6 +134,11 @@ services:
       SUTRA_INVITATION_EMAIL_PROVIDER: ${SUTRA_INVITATION_EMAIL_PROVIDER:-}
       SUTRA_INVITATION_EMAIL_API_URL: ${SUTRA_INVITATION_EMAIL_API_URL:-}
       SUTRA_INVITATION_EMAIL_API_KEY: ${SUTRA_INVITATION_EMAIL_API_KEY:-}
+      SUTRA_ZOHO_DATACENTER: ${SUTRA_ZOHO_DATACENTER:-}
+      SUTRA_ZOHO_MAIL_ACCOUNT_ID: ${SUTRA_ZOHO_MAIL_ACCOUNT_ID:-}
+      SUTRA_ZOHO_CLIENT_ID: ${SUTRA_ZOHO_CLIENT_ID:-}
+      SUTRA_ZOHO_CLIENT_SECRET: ${SUTRA_ZOHO_CLIENT_SECRET:-}
+      SUTRA_ZOHO_REFRESH_TOKEN: ${SUTRA_ZOHO_REFRESH_TOKEN:-}
       # Agentless disk scanning. All twelve default to empty: the
       # resolver in lib/aws-agentless-executor-config.ts has NO defaults by design
       # and refuses with the exact list of unset names, so an unconfigured host

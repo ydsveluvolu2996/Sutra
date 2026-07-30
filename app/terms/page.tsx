@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SUTRA_EMAIL } from "../../lib/public-email";
 import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
@@ -207,7 +208,10 @@ export default function TermsPage() {
       <section className="lx-legal-section">
         <h2>17. Contact</h2>
         <p>
-          Questions about these terms? Reach the Sutra team through our <a href="/contact">contact page</a>.
+          Questions about these terms or billing? Email{" "}
+          <a href={`mailto:${SUTRA_EMAIL.billing}`}>{SUTRA_EMAIL.billing}</a>, contact{" "}
+          <a href={`mailto:${SUTRA_EMAIL.support}`}>{SUTRA_EMAIL.support}</a>, or use our{" "}
+          <a href="/contact">contact page</a>.
         </p>
       </section>
     </LegalShell>

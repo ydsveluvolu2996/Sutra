@@ -8,6 +8,7 @@ export interface OidcClientConfiguration {
   readonly authorizationEndpoint: string;
   readonly tokenEndpoint: string;
   readonly clientId: string;
+  readonly clientSecret?: string;
   readonly redirectUri: string;
 }
 
@@ -74,6 +75,16 @@ export function validateOidcClientConfiguration(configuration: OidcClientConfigu
   const redirect = boundedHttpsUrl(configuration.redirectUri, "OIDC redirect URI");
   if (redirect.search) throw new Error("OIDC redirect URI must not contain a query");
   if (!/^[A-Za-z0-9._:-]{3,256}$/u.test(configuration.clientId)) throw new Error("OIDC client identifier is invalid");
+  if (
+    configuration.clientSecret !== undefined &&
+    (
+      configuration.clientSecret.length < 8 ||
+      configuration.clientSecret.length > 512 ||
+      /[\u0000-\u001f\u007f]/u.test(configuration.clientSecret)
+    )
+  ) {
+    throw new Error("OIDC client secret is invalid");
+  }
 }
 
 export function safeOidcReturnTo(value: string | null | undefined): string {
@@ -214,6 +225,7 @@ export function oidcTokenRequestBody(
   return new URLSearchParams({
     grant_type: "authorization_code",
     client_id: configuration.clientId,
+    ...(configuration.clientSecret === undefined ? {} : { client_secret: configuration.clientSecret }),
     code,
     redirect_uri: configuration.redirectUri,
     code_verifier: codeVerifier,

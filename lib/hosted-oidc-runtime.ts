@@ -59,6 +59,7 @@ function toClientConfiguration(provider: HostedOidcProviderConfig, origin: strin
     authorizationEndpoint: provider.authorizationEndpoint,
     tokenEndpoint: provider.tokenEndpoint,
     clientId: provider.clientId,
+    ...(provider.clientSecret === undefined ? {} : { clientSecret: provider.clientSecret }),
     redirectUri: `${origin}/api/auth/oidc/callback`,
     jwksUrl: provider.jwksUri,
   };
@@ -95,6 +96,26 @@ export function resolveHostedOidcProvider(request: Request, providerId: string):
     throw new LocalAuthError(404, "AUTHENTICATION_REQUIRED", "The requested sign-in provider is unavailable");
   }
   return { client: toClientConfiguration(provider, origin), transactionKey, providerId: provider.id };
+}
+
+/**
+ * Preserve the one-button login and invitation URLs when exactly one provider
+ * is configured. Multi-provider deployments must still select an explicit id.
+ */
+export function resolveDefaultHostedOidcProvider(request: Request): {
+  readonly client: HostedOidcConfiguration;
+  readonly transactionKey: string;
+  readonly providerId: string;
+} {
+  const { origin, transactionKey, providers } = hostedOidcBase(request);
+  if (providers.length !== 1 || providers[0] === undefined) {
+    throw new LocalAuthError(400, "INVALID_INPUT", "Choose a sign-in provider");
+  }
+  return {
+    client: toClientConfiguration(providers[0], origin),
+    transactionKey,
+    providerId: providers[0].id,
+  };
 }
 
 /**

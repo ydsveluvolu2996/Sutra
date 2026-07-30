@@ -45,6 +45,11 @@ boundary and an MFA-protected, single-use organization invitation lifecycle.
 Hosted release remains blocked on the remaining tenant-isolation, recovery,
 rate-limit and broker gates documented below.
 
+The verified `sutracmdb.com` Zoho mail aliases, Workers-compatible Zoho Mail
+REST delivery, and optional Zoho OIDC configuration are documented in
+[`docs/zoho-mail-and-sso.md`](docs/zoho-mail-and-sso.md). The live private-beta
+password login is not automatically replaced during mail setup.
+
 The Kubernetes private-beta capability matrix, validation sequence and remaining
 general-availability gates are documented in
 [`docs/enterprise-kubernetes-private-beta.md`](docs/enterprise-kubernetes-private-beta.md).

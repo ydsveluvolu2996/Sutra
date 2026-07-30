@@ -20,8 +20,8 @@
 //                             Defaults to a placeholder; configure this in prod.
 //   SUTRA_CONTACT_FROM        Sender identity. Accepts "Name <email>" or a bare
 //                             address. Defaults to "Sutra <onboarding@resend.dev>".
-//   SUTRA_CONTACT_PROVIDER    Optional explicit transport: "resend" | "sendgrid"
-//                             | "webhook". When unset the provider is inferred
+//   SUTRA_CONTACT_PROVIDER    Optional explicit transport: "zoho" | "resend" |
+//                             "sendgrid" | "webhook". When unset the provider is inferred
 //                             from the email-API URL host.
 //
 //   Transport selection (first match wins):
@@ -31,7 +31,12 @@
 //      POSTs the stable envelope { recipient, submission: { name, email,
 //      company, message, sourceIp, submittedAt } } unchanged.
 //
-//   2. Transactional email API:
+//   2. Zoho Mail API (provider=zoho):
+//        Uses SUTRA_ZOHO_* OAuth configuration to mint a short-lived access token
+//        and sends through the regional Zoho Mail REST API. No SMTP socket or
+//        mailbox password enters the Worker.
+//
+//   3. Transactional email API:
 //        SUTRA_CONTACT_EMAIL_API_URL   Provider send endpoint (HTTPS).
 //        SUTRA_CONTACT_EMAIL_API_KEY   Bearer token for that endpoint.
 //      The provider is detected from SUTRA_CONTACT_PROVIDER or the URL host:
@@ -60,19 +65,23 @@
 //          Falls back to the { recipient, submission } envelope with the Bearer
 //          header — for a self-hosted forwarder that speaks that shape.
 //
-//   3. Nothing configured -> { delivered: false, transport: "none" }. The lead
+//   4. Nothing configured -> { delivered: false, transport: "none" }. The lead
 //      is still persisted by the caller; we never claim an email was sent.
 //
 // delivered = 1 is recorded only when the transport returns a 2xx response.
 
 import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
+import {
+  sendZohoMail,
+  type ZohoMailEnvironment,
+} from "./zoho-mail.ts";
 
 // Placeholder default only. Set SUTRA_CONTACT_RECIPIENT to your own destination
 // in production; leads are still persisted even when no email transport is
 // configured (see the contact route), so this address is never silently used
 // unless an operator has also wired up a delivery provider.
-export const DEFAULT_CONTACT_RECIPIENT = "contact@example.com";
-export const DEFAULT_CONTACT_FROM = "Sutra <onboarding@resend.dev>";
+export const DEFAULT_CONTACT_RECIPIENT = "contact@sutracmdb.com";
+export const DEFAULT_CONTACT_FROM = "Sutra Contact <contact@sutracmdb.com>";
 
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 
@@ -82,7 +91,7 @@ const SUBJECT_MAX = 200;
 const FROM_MAX = 320;
 const DELIVERY_TIMEOUT_MS = 10_000;
 
-export interface ContactDeliveryEnv {
+export interface ContactDeliveryEnv extends ZohoMailEnvironment {
   readonly SUTRA_CONTACT_RECIPIENT?: string;
   readonly SUTRA_CONTACT_FROM?: string;
   readonly SUTRA_CONTACT_PROVIDER?: string;
@@ -194,6 +203,10 @@ export function detectEmailProvider(env: ContactDeliveryEnv, url: string): Conta
   return "generic";
 }
 
+export function usesZohoContactDelivery(env: ContactDeliveryEnv): boolean {
+  return env.SUTRA_CONTACT_PROVIDER?.trim().toLowerCase() === "zoho";
+}
+
 /** Subject line, header-safe. */
 function buildSubject(payload: ContactDeliveryPayload): string {
   const base = `New Sutra contact — ${payload.name}${payload.company ? ` (${payload.company})` : ""}`;
@@ -229,6 +242,10 @@ export function buildProviderRequest(
   if (webhookUrl !== null) {
     return { url: webhookUrl, headers: {}, body: { recipient, submission: payload }, transport: "webhook" };
   }
+
+  // Zoho needs a refresh-token exchange before the send request, so the async
+  // delivery function handles it instead of representing it as one static POST.
+  if (usesZohoContactDelivery(env)) return null;
 
   // 2) Transactional email API. Requires both a URL and a key.
   const emailApiUrl = safeOutboundUrl(env.SUTRA_CONTACT_EMAIL_API_URL);
@@ -279,6 +296,26 @@ export async function deliverContactSubmission(
   fetchImpl: typeof fetch = fetch,
 ): Promise<ContactDeliveryResult> {
   const request = buildProviderRequest(env, recipient, payload);
+
+  // A webhook remains the explicit first-priority transport. When there is no
+  // webhook and provider=zoho, use the Workers-compatible Zoho Mail REST API.
+  if (request === null && usesZohoContactDelivery(env)) {
+    const from = resolveContactFrom(env);
+    const outcome = await sendZohoMail(env, {
+      fromAddress: from.email,
+      toAddress: recipient,
+      subject: buildSubject(payload),
+      content: buildText(payload),
+    }, fetchImpl);
+    return {
+      delivered: outcome.status === "accepted",
+      transport:
+        outcome.errorCode === "EMAIL_NOT_CONFIGURED" ||
+        outcome.errorCode === "EMAIL_CONFIGURATION_INVALID"
+          ? "none"
+          : "email-api",
+    };
+  }
 
   // No transport configured: honest non-delivery. The lead is still persisted.
   if (request === null) return { delivered: false, transport: "none" };

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SUTRA_EMAIL } from "../../lib/public-email";
 import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
@@ -133,7 +134,7 @@ export default function SecurityPage() {
         <h2>Responsible disclosure</h2>
         <p>
           If you believe you have found a security vulnerability in Sutra, we want to hear from you. Please
-          report it through our <a href="/contact">contact page</a> with enough detail to reproduce the issue,
+          report it to <a href={`mailto:${SUTRA_EMAIL.security}`}>{SUTRA_EMAIL.security}</a> with enough detail to reproduce the issue,
           and give us a reasonable opportunity to investigate and remediate before any public disclosure. We
           will not pursue action against good-faith research that respects user privacy and avoids service
           disruption or data destruction.

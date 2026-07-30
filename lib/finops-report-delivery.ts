@@ -21,9 +21,11 @@
 import {
   detectEmailProvider,
   resolveContactFrom,
+  usesZohoContactDelivery,
   type ContactDeliveryEnv,
 } from "./contact-delivery.ts";
 import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
+import { sendZohoMail } from "./zoho-mail.ts";
 
 export type ReportDeliveryKind = "webhook" | "email";
 export type ReportDeliveryTransport = "webhook" | "email-api" | "none";
@@ -152,18 +154,37 @@ export async function deliverScheduledReport(input: {
   // Email: reuse the contact transactional-email transport (env-provided URL +
   // key). The recipient is the per-schedule target; the transport is shared.
   const recipient = input.target.trim();
+  if (!EMAIL.test(recipient) || hasControl(recipient)) {
+    return { delivered: false, transport: "none" };
+  }
+  const from = resolveContactFrom(input.env);
+  const subject = buildSubject(input.envelope);
+  const text = buildText(input.envelope);
+  if (usesZohoContactDelivery(input.env)) {
+    const outcome = await sendZohoMail(input.env, {
+      fromAddress: from.email,
+      toAddress: recipient,
+      subject,
+      content: text,
+    }, fetchImpl);
+    return {
+      delivered: outcome.status === "accepted",
+      transport:
+        outcome.errorCode === "EMAIL_NOT_CONFIGURED" ||
+        outcome.errorCode === "EMAIL_CONFIGURATION_INVALID"
+          ? "none"
+          : "email-api",
+    };
+  }
+
   const emailApiUrl = httpsUrl(input.env.SUTRA_CONTACT_EMAIL_API_URL);
   const emailApiKey = input.env.SUTRA_CONTACT_EMAIL_API_KEY?.trim();
   if (
-    !EMAIL.test(recipient) || hasControl(recipient) ||
     emailApiUrl === null || emailApiKey === undefined || emailApiKey.length === 0
   ) {
     return { delivered: false, transport: "none" };
   }
   const provider = detectEmailProvider(input.env, emailApiUrl);
-  const from = resolveContactFrom(input.env);
-  const subject = buildSubject(input.envelope);
-  const text = buildText(input.envelope);
 
   let body: unknown;
   if (provider === "resend") {

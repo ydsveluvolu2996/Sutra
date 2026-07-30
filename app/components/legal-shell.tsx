@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 
+import { SUTRA_EMAIL } from "../../lib/public-email";
 import CookieConsent, { openCookieSettings } from "./cookie-consent";
 import ThemeToggle from "./theme-toggle";
 
@@ -78,6 +79,7 @@ export default function LegalShell({
             <Link href="/privacy">Privacy Policy</Link>
             <Link href="/terms">Terms of Use</Link>
             <Link href="/security">Security</Link>
+            <a href={`mailto:${SUTRA_EMAIL.support}`}>Support</a>
             <button type="button" className="lx-cookie-link" onClick={openCookieSettings}>
               Cookie Preferences
             </button>

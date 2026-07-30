@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { SUTRA_EMAIL, SUTRA_EMAIL_CHANNELS } from "../../lib/public-email";
 import { publicPageMetadata } from "../../lib/site-seo";
 import CookieConsent from "../components/cookie-consent";
 import ContactForm from "./contact-form";
@@ -62,6 +63,23 @@ export default function ContactPage() {
 
         <section className="lx-contact-grid" aria-label="Send a message">
           <ContactForm />
+          <aside className="lx-contact-card lx-contact-channels" aria-label="Direct email channels">
+            <span className="lx-contact-tag">direct email</span>
+            <h2>Reach the right team</h2>
+            <p>
+              Prefer email? Every address below is hosted on our verified{" "}
+              <code>sutracmdb.com</code> domain.
+            </p>
+            <div className="lx-email-channel-list">
+              {SUTRA_EMAIL_CHANNELS.map((channel) => (
+                <a key={channel.address} href={`mailto:${channel.address}`}>
+                  <span>{channel.label}</span>
+                  <strong>{channel.address}</strong>
+                  <small>{channel.description}</small>
+                </a>
+              ))}
+            </div>
+          </aside>
         </section>
       </main>
 
@@ -75,6 +93,7 @@ export default function ContactPage() {
             <Link href="/">Back to home</Link>
             <Link href="/privacy">Privacy Policy</Link>
             <Link href="/terms">Terms of Use</Link>
+            <a href={`mailto:${SUTRA_EMAIL.contact}`}>Email us</a>
             <Link href="/login">Sign in</Link>
           </nav>
         </div>

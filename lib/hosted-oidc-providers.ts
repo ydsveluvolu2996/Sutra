@@ -39,6 +39,8 @@ export interface HostedOidcProviderConfig {
   readonly tokenEndpoint: string;
   readonly jwksUri: string;
   readonly clientId: string;
+  /** Confidential web clients (including Zoho) require this at code exchange. */
+  readonly clientSecret?: string;
 }
 
 export interface HostedOidcProvidersResult {
@@ -51,6 +53,7 @@ const CLIENT_ID = /^[A-Za-z0-9._:-]{3,256}$/u;
 const MAX_PROVIDERS = 8;
 const MAX_RAW_BYTES = 8 * 1024;
 const REQUIRED_KEYS = ["authorizationEndpoint", "clientId", "id", "issuer", "jwksUri", "tokenEndpoint"] as const;
+const OPTIONAL_KEYS = ["clientSecret"] as const;
 const REQUIRED_KEY_SIGNATURE = [...REQUIRED_KEYS].sort().join("\0");
 
 function isLoopbackHost(hostname: string): boolean {
@@ -96,10 +99,15 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
     return { config: null, issues: [`${label} must be a JSON object`] };
   }
   const candidate = entry as Record<string, unknown>;
-  if (Object.keys(candidate).sort().join("\0") !== REQUIRED_KEY_SIGNATURE) {
+  const keys = Object.keys(candidate);
+  const requiredSignature = keys.filter((key) => !OPTIONAL_KEYS.includes(key as "clientSecret")).sort().join("\0");
+  if (
+    requiredSignature !== REQUIRED_KEY_SIGNATURE ||
+    keys.some((key) => !REQUIRED_KEYS.includes(key as (typeof REQUIRED_KEYS)[number]) && !OPTIONAL_KEYS.includes(key as "clientSecret"))
+  ) {
     return {
       config: null,
-      issues: [`${label} must define exactly id, issuer, authorizationEndpoint, tokenEndpoint, jwksUri, and clientId`],
+      issues: [`${label} must define id, issuer, authorizationEndpoint, tokenEndpoint, jwksUri, and clientId, with only optional clientSecret`],
     };
   }
   const issues: string[] = [];
@@ -121,6 +129,17 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
   if (typeof candidate.clientId !== "string" || !CLIENT_ID.test(candidate.clientId)) {
     issues.push(`${label} client id is invalid`);
   }
+  if (
+    candidate.clientSecret !== undefined &&
+    (
+      typeof candidate.clientSecret !== "string" ||
+      candidate.clientSecret.length < 8 ||
+      candidate.clientSecret.length > 512 ||
+      /[\u0000-\u001f\u007f]/u.test(candidate.clientSecret)
+    )
+  ) {
+    issues.push(`${label} client secret is invalid`);
+  }
   if (issues.length > 0) return { config: null, issues };
   return {
     config: {
@@ -130,6 +149,7 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
       tokenEndpoint: candidate.tokenEndpoint as string,
       jwksUri: candidate.jwksUri as string,
       clientId: candidate.clientId as string,
+      ...(candidate.clientSecret === undefined ? {} : { clientSecret: candidate.clientSecret as string }),
     },
     issues: [],
   };

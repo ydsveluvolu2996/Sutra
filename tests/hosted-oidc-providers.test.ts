@@ -22,14 +22,24 @@ const entra = {
   jwksUri: "https://login.microsoftonline.com/11111111-1111-1111-1111-111111111111/discovery/v2.0/keys",
   clientId: "00000000-0000-0000-0000-000000000000",
 };
+const zoho = {
+  id: "zoho",
+  issuer: "https://accounts.zoho.in",
+  authorizationEndpoint: "https://accounts.zoho.in/oauth/v2/auth",
+  tokenEndpoint: "https://accounts.zoho.in/oauth/v2/token",
+  jwksUri: "https://accounts.zoho.in/oauth/v2/keys",
+  clientId: "1000.SUTRA_TEST_CLIENT",
+  clientSecret: "test-client-secret-not-real",
+};
 
 test("a well-formed multi-provider list validates and preserves every provider", () => {
-  const result = parseHostedOidcProviders(JSON.stringify([google, entra]));
+  const result = parseHostedOidcProviders(JSON.stringify([google, entra, zoho]));
   assert.deepEqual(result.issues, []);
-  assert.deepEqual(result.providers.map((provider) => provider.id), ["google", "entra"]);
+  assert.deepEqual(result.providers.map((provider) => provider.id), ["google", "entra", "zoho"]);
   // The Entra tenant-scoped issuer path is preserved exactly.
   assert.equal(result.providers[1]?.issuer, entra.issuer);
-  assert.deepEqual(hostedOidcProviderIssues(JSON.stringify([google, entra])), []);
+  assert.equal(result.providers[2]?.clientSecret, zoho.clientSecret);
+  assert.deepEqual(hostedOidcProviderIssues(JSON.stringify([google, entra, zoho])), []);
 });
 
 test("an absent, non-JSON, or empty provider list is refused", () => {
@@ -48,6 +58,7 @@ test("each provider is validated independently and a single bad entry fails clos
     { ...google, clientId: "" }, // empty client id
     { ...google, id: "Google" }, // non-slug id
     { ...google, extra: "nope" }, // unexpected key
+    { ...zoho, clientSecret: "short" }, // malformed confidential-client secret
   ];
   for (const bad of cases) {
     const result = parseHostedOidcProviders(JSON.stringify([bad]));

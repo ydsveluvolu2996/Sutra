@@ -170,7 +170,7 @@ describe("buildProviderRequest — webhook + generic + none", () => {
 
 describe("resolveContactFrom", () => {
   it("defaults when unset and parses display/bare forms", () => {
-    assert.deepEqual(resolveContactFrom({}), { display: DEFAULT_CONTACT_FROM, email: "onboarding@resend.dev" });
+    assert.deepEqual(resolveContactFrom({}), { display: DEFAULT_CONTACT_FROM, email: "contact@sutracmdb.com" });
     assert.deepEqual(resolveContactFrom({ SUTRA_CONTACT_FROM: "leads@sutra.dev" }), {
       display: "leads@sutra.dev",
       email: "leads@sutra.dev",
@@ -180,7 +180,7 @@ describe("resolveContactFrom", () => {
   it("falls back to default when the sender has no valid email", () => {
     assert.deepEqual(resolveContactFrom({ SUTRA_CONTACT_FROM: "not-an-email" }), {
       display: DEFAULT_CONTACT_FROM,
-      email: "onboarding@resend.dev",
+      email: "contact@sutracmdb.com",
     });
   });
 });
@@ -260,5 +260,34 @@ describe("deliverContactSubmission — honest, never-throwing", () => {
       throwing,
     );
     assert.deepEqual(result, { delivered: false, transport: "webhook" });
+  });
+
+  it("uses Zoho OAuth + Mail API when provider=zoho", async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const result = await deliverContactSubmission(
+      RECIPIENT,
+      PAYLOAD,
+      {
+        SUTRA_CONTACT_PROVIDER: "zoho",
+        SUTRA_CONTACT_FROM: "Sutra Contact <contact@sutracmdb.com>",
+        SUTRA_ZOHO_DATACENTER: "in",
+        SUTRA_ZOHO_MAIL_ACCOUNT_ID: "60080685470",
+        SUTRA_ZOHO_CLIENT_ID: "1000.SUTRA_TEST_CLIENT",
+        SUTRA_ZOHO_CLIENT_SECRET: "test-client-secret-not-real",
+        SUTRA_ZOHO_REFRESH_TOKEN: `1000.${"r".repeat(48)}`,
+      },
+      async (input, init = {}) => {
+        calls.push({ url: String(input), init });
+        return calls.length === 1
+          ? Response.json({ access_token: `1000.${"a".repeat(48)}` })
+          : Response.json({ status: { code: 200 } });
+      },
+    );
+    assert.deepEqual(result, { delivered: true, transport: "email-api" });
+    assert.equal(calls.length, 2);
+    const body = JSON.parse(String(calls[1]?.init.body));
+    assert.equal(body.fromAddress, "contact@sutracmdb.com");
+    assert.equal(body.toAddress, RECIPIENT);
+    assert.match(body.content, /ada@example\.com/u);
   });
 });

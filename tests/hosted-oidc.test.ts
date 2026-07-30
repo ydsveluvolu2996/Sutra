@@ -61,6 +61,21 @@ test("code exchange uses PKCE form data and returns only the bounded ID token", 
   assert.equal(body.get("code_verifier"), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
 });
 
+test("confidential OIDC clients send the secret only to the pinned token endpoint", async () => {
+  const confidential = { ...configuration, clientSecret: "test-client-secret-not-real" };
+  const bodies: URLSearchParams[] = [];
+  await exchangeOidcAuthorizationCode(
+    confidential,
+    "valid-code-value",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    async (_input, init) => {
+      bodies.push(new URLSearchParams(String(init?.body)));
+      return Response.json({ id_token: "header.payload.signature-value-that-is-long-enough" });
+    },
+  );
+  assert.equal(bodies[0]?.get("client_secret"), confidential.clientSecret);
+});
+
 test("token and signing-key responses fail closed on status, content type, shape, and size", async () => {
   await assert.rejects(exchangeOidcAuthorizationCode(
     configuration,

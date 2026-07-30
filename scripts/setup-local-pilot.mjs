@@ -84,6 +84,16 @@ const INVITATION_VARS = [
   "SUTRA_INVITATION_EMAIL_API_URL",
   "SUTRA_INVITATION_EMAIL_API_KEY",
 ];
+// Zoho's Workers-compatible REST transport is shared by contact, invitation,
+// password-reset, and scheduled-report delivery. Secrets remain in the ignored
+// operator environment and are copied into the generated Worker runtime file.
+const ZOHO_VARS = [
+  "SUTRA_ZOHO_DATACENTER",
+  "SUTRA_ZOHO_MAIL_ACCOUNT_ID",
+  "SUTRA_ZOHO_CLIENT_ID",
+  "SUTRA_ZOHO_CLIENT_SECRET",
+  "SUTRA_ZOHO_REFRESH_TOKEN",
+];
 // Agentless disk scanning reads its configuration from the Worker `env` via
 // resolveAgentlessExecutorConfig, so these must reach .dev.vars and not merely the
 // container process env. Every one is optional and only written when present:
@@ -105,7 +115,7 @@ const AGENTLESS_VARS = [
   "SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN",
   "SUTRA_AGENTLESS_FINDINGS_BUCKET",
 ];
-const optionalPassthroughVars = [...CONTACT_VARS, ...INVITATION_VARS, ...AGENTLESS_VARS].map((name) => {
+const optionalPassthroughVars = [...CONTACT_VARS, ...INVITATION_VARS, ...ZOHO_VARS, ...AGENTLESS_VARS].map((name) => {
   const value = process.env[name]?.trim();
   if (value !== undefined && /[\r\n]/u.test(value)) {
     throw new Error(`${name} must be a single line`);

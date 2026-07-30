@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { SUTRA_EMAIL } from "../../lib/public-email";
 import { publicPageMetadata } from "../../lib/site-seo";
 import LegalShell from "../components/legal-shell";
 
@@ -180,7 +181,8 @@ export default function PrivacyPage() {
       <section className="lx-legal-section">
         <h2>13. Contact</h2>
         <p>
-          Questions about this policy or your data? Reach the Sutra team through our{" "}
+          Questions about this policy or your data? Email{" "}
+          <a href={`mailto:${SUTRA_EMAIL.privacy}`}>{SUTRA_EMAIL.privacy}</a> or use our{" "}
           <a href="/contact">contact page</a>.
         </p>
       </section>

@@ -3169,6 +3169,27 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .lz .lx-contact-card:hover { border-color: var(--cyan); transform: translateY(-2px); box-shadow: 0 16px 40px rgba(34,211,238,.14); }
 .lz .lx-contact-card h2 { font-size: clamp(20px, 2vw, 26px); }
 .lz .lx-contact-card p { font-size: 13.5px; line-height: 1.6; color: var(--body); }
+.lz .lx-contact-channels { align-self: start; }
+.lz .lx-contact-channels code { color: var(--cyan); }
+.lz .lx-email-channel-list { display: grid; gap: 10px; margin-top: 6px; }
+.lz .lx-email-channel-list a {
+  display: grid;
+  gap: 4px;
+  padding: 14px 15px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--glass) 72%, transparent);
+  text-decoration: none;
+  transition: border-color .18s, background .18s, transform .18s;
+}
+.lz .lx-email-channel-list a:hover {
+  border-color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 8%, var(--glass));
+  transform: translateX(2px);
+}
+.lz .lx-email-channel-list span { color: var(--ink-soft); font-size: 10px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+.lz .lx-email-channel-list strong { color: var(--cyan); font-size: 14px; overflow-wrap: anywhere; }
+.lz .lx-email-channel-list small { color: var(--body); font-size: 12px; line-height: 1.45; }
 .lz .lx-contact-tag { align-self: flex-start; font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--body-2); border: 1px solid var(--line-2); border-radius: 20px; padding: 5px 11px; }
 .lz .lx-contact-link { margin-top: auto; display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 13px; font-weight: 600; background: var(--grad-ink); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .lz .lx-contact-link svg { stroke: var(--cyan); }
