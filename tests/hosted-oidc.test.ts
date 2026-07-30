@@ -55,7 +55,7 @@ test("code exchange uses PKCE form data and returns only the bounded ID token", 
   assert.equal(result, token);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.input, configuration.tokenEndpoint);
-  assert.equal(calls[0]?.init?.redirect, "error");
+  assert.equal(calls[0]?.init?.redirect, "manual");
   const body = new URLSearchParams(String(calls[0]?.init?.body));
   assert.equal(body.get("grant_type"), "authorization_code");
   assert.equal(body.get("code_verifier"), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
@@ -106,15 +106,31 @@ test("token and signing-key responses fail closed on status, content type, shape
       },
     }),
   ));
+  await assert.rejects(exchangeOidcAuthorizationCode(
+    configuration,
+    "valid-code-value",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    async (_input, init) => {
+      assert.equal(init?.redirect, "manual");
+      return Response.redirect("https://attacker.example/token", 302);
+    },
+  ));
+  await assert.rejects(fetchOidcJwks(
+    configuration,
+    async (_input, init) => {
+      assert.equal(init?.redirect, "manual");
+      return Response.redirect("https://attacker.example/keys", 302);
+    },
+  ));
 });
 
-test("JWKS fetch disables redirects and preserves only a bounded key set", async () => {
+test("JWKS fetch uses fail-closed manual redirects and preserves only a bounded key set", async () => {
   let redirect: RequestRedirect | undefined;
   const result = await fetchOidcJwks(configuration, async (_input, init) => {
     redirect = init?.redirect;
     return Response.json({ keys: [{ kty: "RSA", kid: "key-1", use: "sig", alg: "RS256", n: "abc", e: "AQAB" }] });
   });
-  assert.equal(redirect, "error");
+  assert.equal(redirect, "manual");
   assert.equal(result.keys.length, 1);
   assert.equal(result.keys[0]?.kid, "key-1");
 });

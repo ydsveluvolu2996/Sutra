@@ -72,7 +72,11 @@ export async function exchangeOidcAuthorizationCode(
       "content-type": "application/x-www-form-urlencoded",
     },
     body: oidcTokenRequestBody(configuration, code, codeVerifier).toString(),
-    redirect: "error",
+    // Workerd rejects the Fetch API's "error" redirect mode before completing
+    // otherwise valid Zoho requests. "manual" preserves the fail-closed
+    // boundary because every 3xx remains a non-ok response below and is never
+    // followed to a different origin.
+    redirect: "manual",
   });
   if (!response.ok) throw new Error("OIDC code exchange was rejected");
   const value = await boundedJson(response, MAX_TOKEN_RESPONSE_BYTES);
@@ -93,7 +97,9 @@ export async function fetchOidcJwks(
   validateHostedOidcConfiguration(configuration);
   const response = await fetcher(configuration.jwksUrl, {
     headers: { accept: "application/json" },
-    redirect: "error",
+    // See the token exchange above: manual is the Workerd-compatible mode, and
+    // the explicit response.ok check still refuses every redirect response.
+    redirect: "manual",
   });
   if (!response.ok) throw new Error("OIDC signing keys are unavailable");
   const value = await boundedJson(response, MAX_JWKS_BYTES);
