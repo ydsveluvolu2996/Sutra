@@ -79,6 +79,7 @@ COPY --from=builder --chown=node:node /app/lib/vulnerability-feed-ingest.ts /app
 COPY --from=builder --chown=node:node /app/lib/exploitability-feed.ts /app/lib/exploitability-feed.ts
 COPY --from=builder --chown=node:node /app/lib/vulnerability-database.ts /app/lib/vulnerability-database.ts
 COPY --from=builder --chown=node:node /app/lib/release-identity.ts /app/lib/release-identity.ts
+COPY --from=builder --chown=node:node /app/lib/hosted-oidc-providers.ts /app/lib/hosted-oidc-providers.ts
 COPY --from=builder --chown=node:node /app/postgres/migrations /app/postgres/migrations
 COPY --from=builder --chown=node:node /app/docker/entrypoint.sh /app/docker/entrypoint.sh
 COPY --from=builder --chown=node:node /app/docker/postgres-init.sh /app/docker/postgres-init.sh

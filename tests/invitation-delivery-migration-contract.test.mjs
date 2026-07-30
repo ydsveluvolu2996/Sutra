@@ -4,11 +4,13 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const root = resolve(import.meta.dirname, "..");
-const [sqlite, postgres, sqliteLedger, postgresLedger, sqliteRuntime, postgresRuntime, migrator, schema, compose, setup] = await Promise.all([
+const [sqlite, postgres, sqliteLedger, postgresLedger, sqliteZoho, postgresZoho, sqliteRuntime, postgresRuntime, migrator, schema, compose, setup] = await Promise.all([
   readFile(resolve(root, "drizzle/0050_invitation_delivery.sql"), "utf8"),
   readFile(resolve(root, "postgres/migrations/0044_invitation_delivery.sql"), "utf8"),
   readFile(resolve(root, "drizzle/0051_invitation_operation_ledger.sql"), "utf8"),
   readFile(resolve(root, "postgres/migrations/0045_invitation_operation_ledger.sql"), "utf8"),
+  readFile(resolve(root, "drizzle/0066_invitation_zoho_provider.sql"), "utf8"),
+  readFile(resolve(root, "postgres/migrations/0060_invitation_zoho_provider.sql"), "utf8"),
   readFile(resolve(root, "db/runtime-migrations.ts"), "utf8"),
   readFile(resolve(root, "db/postgres-runtime-migrations.ts"), "utf8"),
   readFile(resolve(root, "scripts/postgres-migrate.mjs"), "utf8"),
@@ -48,6 +50,19 @@ test("invitation operation ledger is durable, replay-safe, and registered in eve
   assert.match(migrator, /0045_invitation_operation_ledger\.sql/u);
   assert.match(schema, /identityInvitationOperations/u);
   assert.match(schema, /identity_invitation_events_previous_hash_uq/u);
+});
+
+test("Zoho invitation outcomes are accepted by both durable ledgers and every migration path", () => {
+  for (const source of [sqliteZoho, postgresZoho]) {
+    assert.match(source, /delivery_provider[\s\S]*'zoho'/u);
+    assert.match(source, /identity_invitations/u);
+    assert.match(source, /identity_invitation_operations/u);
+    assert.doesNotMatch(source, /token_plaintext|activation_url/u);
+  }
+  assert.match(sqliteRuntime, /0066_invitation_zoho_provider/u);
+  assert.match(postgresRuntime, /0060_invitation_zoho_provider/u);
+  assert.match(migrator, /0060_invitation_zoho_provider\.sql/u);
+  assert.match(schema, /deliveryProvider:[^\n]*"zoho"/u);
 });
 
 test("hosted and generated Worker runtime receive the dedicated invitation transport", () => {

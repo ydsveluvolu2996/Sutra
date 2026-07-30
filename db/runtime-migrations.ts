@@ -62,6 +62,7 @@ import finopsCurUsageTypeSchemaSql from "../drizzle/0062_finops_cur_usage_type.s
 import finopsExternalCostsSchemaSql from "../drizzle/0063_finops_external_costs.sql?raw";
 import governancePoliciesSchemaSql from "../drizzle/0064_governance_policies.sql?raw";
 import agentlessScansSchemaSql from "../drizzle/0065_agentless_scans.sql?raw";
+import invitationZohoProviderSchemaSql from "../drizzle/0066_invitation_zoho_provider.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -141,6 +142,7 @@ const migrations = [
   { id: "0063_finops_external_costs", statements: statementsFrom(finopsExternalCostsSchemaSql) },
   { id: "0064_governance_policies", statements: statementsFrom(governancePoliciesSchemaSql) },
   { id: "0065_agentless_scans", statements: statementsFrom(agentlessScansSchemaSql) },
+  { id: "0066_invitation_zoho_provider", statements: statementsFrom(invitationZohoProviderSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

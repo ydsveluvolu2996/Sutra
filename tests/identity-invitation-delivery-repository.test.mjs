@@ -56,13 +56,13 @@ test("invitation delivery status is durable and never stores the plaintext URL t
       scope,
       created.invitation.id,
       key,
-      { status: "accepted", transport: "email-api", provider: "resend", errorCode: null, httpStatus: 202 },
+      { status: "accepted", transport: "email-api", provider: "zoho", errorCode: null, httpStatus: 202 },
       3100,
     );
     assert.deepEqual(completed.delivery, {
       status: "accepted",
       transport: "email-api",
-      provider: "resend",
+      provider: "zoho",
       attempts: 1,
       lastAttemptedAt: new Date(3000).toISOString(),
       completedAt: new Date(3100).toISOString(),
@@ -95,7 +95,7 @@ test("invitation delivery status is durable and never stores the plaintext URL t
       kind: "initial_delivery",
       state: "completed",
       outcome: "accepted",
-      provider: "resend",
+      provider: "zoho",
     });
     assert.match(operation.request_fingerprint, /^[a-f0-9]{64}$/u);
     assert.match(operation.idempotency_digest, /^[a-f0-9]{64}$/u);

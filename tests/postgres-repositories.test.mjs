@@ -89,7 +89,7 @@ test("real PostgreSQL repositories persist auth, CMDB publication, and concurren
       { mode: "org" },
       invitation.invitation.id,
       firstInviteKey,
-      { status: "accepted", transport: "email-api", provider: "resend", errorCode: null, httpStatus: 202 },
+      { status: "accepted", transport: "email-api", provider: "zoho", errorCode: null, httpStatus: 202 },
       inviteNow + 2,
     );
     await invitationRepository.beginIdentityInvitationDelivery(

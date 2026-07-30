@@ -71,6 +71,7 @@ const migrationFiles = [
   "0057_finops_external_costs.sql",
   "0058_governance_policies.sql",
   "0059_agentless_scans.sql",
+  "0060_invitation_zoho_provider.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

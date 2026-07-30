@@ -27,7 +27,7 @@ interface Invitation {
 interface InvitationDelivery {
   readonly status: "not_attempted" | "sending" | "accepted" | "failed" | "unknown";
   readonly transport: "none" | "email-api";
-  readonly provider: "none" | "resend" | "sendgrid" | "generic";
+  readonly provider: "none" | "zoho" | "resend" | "sendgrid" | "generic";
   readonly attempts: number;
   readonly lastAttemptedAt: string | null;
   readonly completedAt: string | null;
