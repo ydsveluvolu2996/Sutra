@@ -7,7 +7,9 @@ import { parseHostedOidcProviders, type HostedOidcProviderConfig } from "./hoste
 export const OIDC_TRANSACTION_COOKIE = "sutra_oidc_transaction";
 
 interface HostedOidcRuntimeEnvironment {
+  readonly SUTRA_DEPLOYMENT_ENV?: string;
   readonly SUTRA_HOSTED_ENABLED?: string;
+  readonly SUTRA_PRIVATE_BETA_OIDC_ENABLED?: string;
   readonly SUTRA_PUBLIC_ORIGIN?: string;
   readonly SUTRA_OIDC_PROVIDERS?: string;
   readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
@@ -36,15 +38,16 @@ function hostedOidcBase(request: Request): {
 } {
   assertAuthenticationRequest(request);
   const config = runtime();
-  // Defense in depth (INFO-1): re-check the SUTRA_HOSTED_ENABLED master switch
-  // here — exactly as lib/hosted-broker-ingest-runtime.ts already re-checks it —
-  // so the OIDC start/callback AND the self-serve provisioning path (reached only
-  // through this base) fail CLOSED even if the deployment boundary in
-  // lib/deployment-security.ts is ever bypassed. Off by default: anything other
-  // than the exact string "true" keeps the whole hosted OIDC surface inert (503),
-  // never open. This never affects local mode, which resolves above via
-  // assertAuthenticationRequest → assertLocalAuthRequest and never reaches here.
-  if (config.SUTRA_HOSTED_ENABLED !== "true") notConfigured();
+  // Defense in depth (INFO-1): re-check the identity-mode release gate selected
+  // by the deployment environment, matching lib/deployment-security.ts. The
+  // reviewed single-host staging pilot is enabled only by its exact private-beta
+  // switch; production is enabled only by the separate hosted master switch.
+  // Neither switch can cross-enable the other environment.
+  const releaseGateEnabled = config.SUTRA_DEPLOYMENT_ENV === "staging"
+    ? config.SUTRA_PRIVATE_BETA_OIDC_ENABLED === "true"
+    : config.SUTRA_DEPLOYMENT_ENV === "production"
+      && config.SUTRA_HOSTED_ENABLED === "true";
+  if (!releaseGateEnabled) notConfigured();
   const origin = config.SUTRA_PUBLIC_ORIGIN?.trim() ?? "";
   const transactionKey = config.SUTRA_OIDC_TRANSACTION_KEY?.trim() ?? "";
   if (!/^[A-Za-z0-9_-]{43}$/u.test(transactionKey)) notConfigured();

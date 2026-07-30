@@ -10,6 +10,7 @@ const {
   hostedOidcTransactionKey,
   resolveHostedOidcProvider,
 } = await import("../lib/hosted-oidc-runtime.ts");
+const { GET: startHostedOidc } = await import("../app/api/auth/oidc/start/route.ts");
 
 // INFO-1 (defense in depth): the hosted OIDC runtime gate must re-check the
 // SUTRA_HOSTED_ENABLED master switch, mirroring lib/hosted-broker-ingest-runtime.
@@ -40,7 +41,11 @@ const HOSTED_CONFIG_WITHOUT_SWITCH = {
   SUTRA_OIDC_TRANSACTION_KEY: TRANSACTION_KEY,
 };
 
-const KEYS = [...Object.keys(HOSTED_CONFIG_WITHOUT_SWITCH), "SUTRA_HOSTED_ENABLED"];
+const KEYS = [
+  ...Object.keys(HOSTED_CONFIG_WITHOUT_SWITCH),
+  "SUTRA_HOSTED_ENABLED",
+  "SUTRA_PRIVATE_BETA_OIDC_ENABLED",
+];
 
 function applyEnv(overrides) {
   for (const key of KEYS) delete cloudflare.env[key];
@@ -75,5 +80,53 @@ test("the OIDC path resolves only when the master switch is exactly \"true\"", (
   const resolved = resolveHostedOidcProvider(request(), "google");
   assert.equal(resolved.providerId, "google");
   assert.equal(resolved.client.issuer, "https://accounts.google.com");
+  applyEnv({}); // leave the shared env clean for other files
+});
+
+test("staging resolves and starts OIDC only through its exact private-beta switch", async () => {
+  const staging = {
+    ...HOSTED_CONFIG_WITHOUT_SWITCH,
+    SUTRA_DEPLOYMENT_ENV: "staging",
+  };
+  for (const value of [undefined, "", "false", "TRUE", "1", "yes", " true", "true "]) {
+    applyEnv({
+      ...staging,
+      SUTRA_HOSTED_ENABLED: "true",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: value,
+    });
+    assert.throws(
+      () => hostedOidcProviderIds(request()),
+      /not configured/iu,
+      `the production switch must not cross-enable staging (${JSON.stringify(value)})`,
+    );
+  }
+
+  applyEnv({
+    ...staging,
+    SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+  });
+  assert.deepEqual(hostedOidcProviderIds(request()), ["google"]);
+  assert.equal(hostedOidcTransactionKey(request()), TRANSACTION_KEY);
+  const startResponse = await startHostedOidc(new Request(
+    `${ORIGIN}/api/auth/oidc/start?invitation=${"I".repeat(43)}&returnTo=%2Fdashboard`,
+  ));
+  assert.equal(startResponse.status, 302);
+  const authorization = new URL(startResponse.headers.get("location"));
+  assert.equal(authorization.origin, "https://accounts.google.com");
+  assert.equal(authorization.pathname, "/o/oauth2/v2/auth");
+  assert.match(
+    startResponse.headers.get("set-cookie") ?? "",
+    /^sutra_oidc_transaction=.+; Path=\/api\/auth\/oidc; HttpOnly; Secure; SameSite=Lax; Max-Age=300$/u,
+  );
+
+  applyEnv({
+    ...HOSTED_CONFIG_WITHOUT_SWITCH,
+    SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+  });
+  assert.throws(
+    () => hostedOidcProviderIds(request()),
+    /not configured/iu,
+    "the staging switch must not cross-enable production",
+  );
   applyEnv({}); // leave the shared env clean for other files
 });
