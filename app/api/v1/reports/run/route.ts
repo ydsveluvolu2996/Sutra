@@ -1,10 +1,10 @@
-import { getLatestConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
+import { getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { CmdbWorkspaceRepository } from "../../../../../db/cmdb-workspace-repository";
 import { CmdbCustomAssetRepository } from "../../../../../db/cmdb-custom-asset-repository";
 import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { buildReport, toCsv, validateReportDefinition } from "../../../../../lib/report-builder";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 import type { CmdbQueryResource } from "../../../../../lib/cmdb-query";
 
@@ -13,17 +13,13 @@ export const dynamic = "force-dynamic";
 const MAX_BODY_BYTES = 32 * 1024;
 
 /**
- * Resolve the tenant scope AND the active connection from the SESSION, never the
- * caller. Rows are always loaded live and tenant-scoped at run time, so a report
+ * Resolve the tenant scope from the explicitly selected connection. Rows are
+ * always loaded live and tenant-scoped at run time, so a report
  * definition can never surface stale or cross-tenant data. Running a report is a
  * read; it is gated on connection:read.
  */
 async function resolveContext(request: Request) {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, "connection:read", connection.customerId);
-  return { authenticated, connection, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, "connection:read");
 }
 
 function wantsCsv(request: Request, body: Record<string, unknown>): boolean {

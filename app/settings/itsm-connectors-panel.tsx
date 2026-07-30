@@ -24,7 +24,7 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export function ItsmConnectorsPanel() {
+export function ItsmConnectorsPanel({ connectionId }: { readonly connectionId: string | null }) {
   const [connectors, setConnectors] = useState<ConnectorSummary[]>([]);
   const [name, setName] = useState("");
   const [connectorType, setConnectorType] = useState<"jira" | "servicenow">("jira");
@@ -35,13 +35,19 @@ export function ItsmConnectorsPanel() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
+    if (connectionId === null) {
+      setConnectors([]);
+      return;
+    }
     try {
-      const payload = await requestJson<{ connectors: ConnectorSummary[] }>("/api/v1/itsm/connectors");
+      const payload = await requestJson<{ connectors: ConnectorSummary[] }>(
+        `/api/v1/itsm/connectors?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setConnectors(payload.connectors);
     } catch {
       setConnectors([]);
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => {
     void (async () => {
@@ -50,17 +56,21 @@ export function ItsmConnectorsPanel() {
   }, [load]);
 
   async function save(): Promise<void> {
+    if (connectionId === null) return;
     setBusy(true);
     setError(null);
     try {
-      const payload = await requestJson<{ connectors: ConnectorSummary[] }>("/api/v1/itsm/connectors", {
+      const payload = await requestJson<{ connectors: ConnectorSummary[] }>(
+        `/api/v1/itsm/connectors?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           name: name.trim(), connectorType, baseUrl: baseUrl.trim(),
           projectKey: projectKey.trim() || null, sharedSecret,
         }),
-      });
+        },
+      );
       setConnectors(payload.connectors);
       setName("");
       setBaseUrl("");
@@ -74,9 +84,11 @@ export function ItsmConnectorsPanel() {
   }
 
   async function remove(id: string): Promise<void> {
+    if (connectionId === null) return;
     try {
       const payload = await requestJson<{ connectors: ConnectorSummary[] }>(
-        `/api/v1/itsm/connectors?id=${encodeURIComponent(id)}`, { method: "DELETE" },
+        `/api/v1/itsm/connectors?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
       );
       setConnectors(payload.connectors);
     } catch {
@@ -98,7 +110,7 @@ export function ItsmConnectorsPanel() {
       <div className="cmdbq-row">
         <input aria-label="Project key" placeholder="project key (Jira only)" value={projectKey} onChange={(event) => setProjectKey(event.target.value)} />
         <input aria-label="Shared HMAC secret" type="password" autoComplete="new-password" placeholder="shared HMAC secret (16+ characters)" value={sharedSecret} onChange={(event) => setSharedSecret(event.target.value)} />
-        <button type="button" className="button button-primary" disabled={busy || !name.trim() || !baseUrl.trim() || sharedSecret.length < 16} onClick={() => void save()}>
+        <button type="button" className="button button-primary" disabled={connectionId === null || busy || !name.trim() || !baseUrl.trim() || sharedSecret.length < 16} onClick={() => void save()}>
           {busy ? "Saving…" : "Save connector"}
         </button>
       </div>

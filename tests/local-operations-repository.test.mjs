@@ -744,7 +744,7 @@ describe("AWS trust health remains separate from collection health", () => {
         runId,
         await partialLiveSnapshot(runId),
         "usr_local_operations_test",
-        { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+        { kind: "aws_live", fixtureId: null, fixtureVersion: null },
       );
       const connection = await database.prepare(
         "SELECT status, last_successful_sync_at FROM aws_connections WHERE id = ? LIMIT 1",
@@ -781,7 +781,7 @@ describe("AWS trust health remains separate from collection health", () => {
         completeRunId,
         await completeLiveSnapshot(completeRunId),
         "usr_local_operations_test",
-        { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+        { kind: "aws_live", fixtureId: null, fixtureVersion: null },
       );
       // Make ordering deterministic even if both runs are created in the same
       // millisecond on a fast local database.
@@ -794,7 +794,7 @@ describe("AWS trust health remains separate from collection health", () => {
         partialRunId,
         await partialLiveSnapshot(partialRunId),
         "usr_local_operations_test",
-        { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+        { kind: "aws_live", fixtureId: null, fixtureVersion: null },
       );
 
       const state = await pilotRepository.getPilotState(LIVE_CONNECTION_ID);
@@ -964,7 +964,7 @@ describe("AWS trust connection lifecycle", () => {
              collected_at, completed_at, coverage_json, summary_json,
              snapshot_sha256, origin_kind)
            VALUES ('snap_retained', ?, ?, ?, 'sync_retained', 'complete', ?, ?,
-                   '[]', '{}', ?, 'aws_sandbox')`,
+                   '[]', '{}', ?, 'aws_live')`,
         ).bind(
           FIXTURE.tenantId,
           LIVE_CUSTOMER_ID,

@@ -1496,7 +1496,7 @@ export async function persistSnapshot(
   const now = Date.now();
   const snapshotStatus = payload.coverageState === "complete" ? "complete" : "partial";
   if (
-    (origin.kind !== "unknown" && origin.kind !== "simulated_fixture" && origin.kind !== "aws_sandbox") ||
+    (origin.kind !== "unknown" && origin.kind !== "simulated_fixture" && origin.kind !== "aws_live") ||
     (origin.kind === "simulated_fixture" && (!origin.fixtureId || !origin.fixtureVersion)) ||
     (origin.kind !== "simulated_fixture" && (origin.fixtureId !== null || origin.fixtureVersion !== null)) ||
     (origin.kind === "simulated_fixture" && origin.fixtureVersion !== "2026.07.0" && origin.fixtureVersion !== "2026.07.1") ||

@@ -46,7 +46,7 @@ export const HOSTED_BROKER_INGEST_ACTOR_ID = "system-hosted-broker-ingest";
 
 /** Origin stamped on a hosted broker collection (a real AWS account, no fixture). */
 const HOSTED_BROKER_SNAPSHOT_ORIGIN: SnapshotOrigin = {
-  kind: "aws_sandbox",
+  kind: "aws_live",
   fixtureId: null,
   fixtureVersion: null,
 };

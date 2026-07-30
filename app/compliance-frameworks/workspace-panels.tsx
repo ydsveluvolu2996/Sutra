@@ -74,7 +74,9 @@ export function ComplianceWorkspacePanels({ connectionId, reportSha256 }: { conn
     if (!connectionId) return;
     const results = await Promise.allSettled([
       requestJson<{ frameworks: CustomFrameworkEntry[] }>(`/api/v1/compliance/custom-frameworks?connectionId=${encodeURIComponent(connectionId)}`),
-      requestJson<{ assignments: Assignment[] }>("/api/v1/compliance/control-assignments"),
+      requestJson<{ assignments: Assignment[] }>(
+        `/api/v1/compliance/control-assignments?connectionId=${encodeURIComponent(connectionId)}`,
+      ),
       requestJson<{ signoffs: Signoff[] }>(`/api/v1/compliance/signoffs?connectionId=${encodeURIComponent(connectionId)}`),
       Promise.all(FRAMEWORK_IDS.map(async (frameworkId) => {
         const payload = await requestJson<{ trend: { direction: string; delta: number | null; current: { score: number | null } | null; series: readonly unknown[] } }>(
@@ -137,9 +139,12 @@ export function ComplianceWorkspacePanels({ connectionId, reportSha256 }: { conn
   }
 
   async function saveAssignment() {
+    if (!connectionId) return;
     setAssignError(null);
     try {
-      await requestJson("/api/v1/compliance/control-assignments", {
+      await requestJson(
+        `/api/v1/compliance/control-assignments?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -147,7 +152,8 @@ export function ComplianceWorkspacePanels({ connectionId, reportSha256 }: { conn
           ownerTeam: assignDraft.ownerTeam.trim() || null,
           ownerEmail: assignDraft.ownerEmail.trim() || null,
         }),
-      });
+        },
+      );
       setAssignDraft({ controlId: "", ownerTeam: "", ownerEmail: "" });
       await loadAll();
     } catch (caught) {

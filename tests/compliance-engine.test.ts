@@ -135,7 +135,7 @@ function state(overrides: Partial<PilotState> = {}): PilotState {
       collectedAt: COLLECTED_AT,
       coverageState: "complete",
       snapshotSha256: "a".repeat(64),
-      origin: { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+      origin: { kind: "aws_live", fixtureId: null, fixtureVersion: null },
     },
     ...overrides,
   };
@@ -287,7 +287,7 @@ test("known active failures win over incomplete coverage", () => {
         collectedAt: COLLECTED_AT,
         coverageState: "partial",
         snapshotSha256: "b".repeat(64),
-        origin: { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+        origin: { kind: "aws_live", fixtureId: null, fixtureVersion: null },
       },
     }),
   );

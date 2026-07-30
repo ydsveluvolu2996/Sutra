@@ -91,7 +91,7 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
     try {
       const [alloc, ruleList] = await Promise.all([
         getJson<AllocationResponse>(`/api/v1/finops/allocation?connectionId=${encodeURIComponent(connectionId)}`),
-        getJson<{ rules: readonly StoredRule[] }>(`/api/v1/finops/allocation-rules`),
+        getJson<{ rules: readonly StoredRule[] }>(`/api/v1/finops/allocation-rules?connectionId=${encodeURIComponent(connectionId)}`),
       ]);
       setData(alloc);
       setRules(ruleList.rules);
@@ -105,7 +105,7 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
     let active = true;
     Promise.all([
       getJson<AllocationResponse>(`/api/v1/finops/allocation?connectionId=${encodeURIComponent(connectionId)}`),
-      getJson<{ rules: readonly StoredRule[] }>(`/api/v1/finops/allocation-rules`),
+      getJson<{ rules: readonly StoredRule[] }>(`/api/v1/finops/allocation-rules?connectionId=${encodeURIComponent(connectionId)}`),
     ])
       .then(([alloc, ruleList]) => { if (active) { setData(alloc); setRules(ruleList.rules); setError(null); } })
       .catch((caught: unknown) => { if (active) setError(caught instanceof Error ? caught.message : "Could not load allocation"); });
@@ -122,7 +122,7 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
       const match: Json = {};
       if (form.dimension === "tag") { match.tagKey = form.value; if (form.tagValue.trim().length > 0) match.tagValue = form.tagValue; }
       else match[form.dimension] = form.value;
-      await sendJson(`/api/v1/finops/allocation-rules`, "POST", {
+      await sendJson(`/api/v1/finops/allocation-rules?connectionId=${encodeURIComponent(connectionId)}`, "POST", {
         name: form.name, match, targetKind: form.targetKind, targetValue: form.targetValue,
       });
       setForm({ name: "", dimension: "service", value: "", tagValue: "", targetKind: "customer", targetValue: "" });
@@ -137,7 +137,11 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
   async function patchRule(rule: StoredRule, patch: Json, failure: string): Promise<boolean> {
     setBusy(true);
     try {
-      await sendJson(`/api/v1/finops/allocation-rules?id=${encodeURIComponent(rule.id)}`, "PATCH", patch);
+      await sendJson(
+        `/api/v1/finops/allocation-rules?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(rule.id)}`,
+        "PATCH",
+        patch,
+      );
       await reload();
       return true;
     } catch (caught) {
@@ -171,7 +175,11 @@ function AllocationPanel({ connectionId }: { connectionId: string }) {
   async function removeRule(id: string): Promise<void> {
     setBusy(true);
     try {
-      await sendJson(`/api/v1/finops/allocation-rules?id=${encodeURIComponent(id)}`, "DELETE", {});
+      await sendJson(
+        `/api/v1/finops/allocation-rules?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        "DELETE",
+        {},
+      );
       await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not delete rule");

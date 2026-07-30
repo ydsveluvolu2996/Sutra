@@ -125,7 +125,7 @@ export interface PilotRunCoverage {
 }
 
 export interface SnapshotOrigin {
-  readonly kind: "unknown" | "simulated_fixture" | "aws_sandbox";
+  readonly kind: "unknown" | "simulated_fixture" | "aws_live";
   readonly fixtureId: string | null;
   readonly fixtureVersion: string | null;
 }

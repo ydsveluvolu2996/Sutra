@@ -301,7 +301,7 @@ export const cmdbSnapshots = sqliteTable("cmdb_snapshots", {
   coverageJson: text("coverage_json").notNull().default("{}"),
   summaryJson: text("summary_json").notNull().default("{}"),
   snapshotSha256: text("snapshot_sha256"),
-  originKind: text("origin_kind", { enum: ["unknown", "simulated_fixture", "aws_sandbox"] }).notNull().default("unknown"),
+  originKind: text("origin_kind", { enum: ["unknown", "simulated_fixture", "aws_live"] }).notNull().default("unknown"),
   fixtureId: text("fixture_id"),
   fixtureVersion: text("fixture_version"),
 }, (table) => [

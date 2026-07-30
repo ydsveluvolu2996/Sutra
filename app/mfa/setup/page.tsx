@@ -161,7 +161,7 @@ export default function MfaSetupPage() {
               </button>
             </form>
           )}
-          <p className="auth-local-note"><span aria-hidden="true">●</span> Your MFA secret is encrypted at rest on this machine</p>
+          <p className="auth-local-note"><span aria-hidden="true">●</span> Your MFA secret is encrypted at rest</p>
         </div>
       </section>
     </main>

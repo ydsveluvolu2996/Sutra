@@ -15,7 +15,7 @@ export interface PortfolioConnectionSummary {
   readonly permissionPackVersion: string;
   readonly lastSuccessfulSyncAt: string | null;
   readonly latestSnapshotAt: string | null;
-  readonly latestSnapshotOrigin: "unknown" | "simulated_fixture" | "aws_sandbox" | null;
+  readonly latestSnapshotOrigin: "unknown" | "simulated_fixture" | "aws_live" | null;
   readonly resourceCount: number;
   readonly openFindingCount: number;
 }

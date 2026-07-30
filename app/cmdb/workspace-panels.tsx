@@ -114,13 +114,19 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
   const [savingAnnotation, setSavingAnnotation] = useState(false);
 
   const loadSaved = useCallback(async () => {
+    if (!connectionId) {
+      setSaved([]);
+      return;
+    }
     try {
-      const payload = await requestJson<{ queries: SavedQuery[] }>("/api/v1/cmdb/saved-queries");
+      const payload = await requestJson<{ queries: SavedQuery[] }>(
+        `/api/v1/cmdb/saved-queries?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setSaved(payload.queries);
     } catch {
       setSaved([]);
     }
-  }, []);
+  }, [connectionId]);
 
   const loadAnnotations = useCallback(async () => {
     if (!connectionId) return;
@@ -181,9 +187,9 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
   }
 
   async function saveCurrentQuery() {
-    if (saveName.trim().length === 0) return;
+    if (!connectionId || saveName.trim().length === 0) return;
     try {
-      await requestJson("/api/v1/cmdb/saved-queries", {
+      await requestJson(`/api/v1/cmdb/saved-queries?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: saveName.trim(), description: null, query: { combine, predicates: predicates.map(toEnginePredicate) } }),
@@ -196,8 +202,12 @@ export function CmdbWorkspacePanels({ connectionId }: { connectionId: string | n
   }
 
   async function deleteSaved(id: string) {
+    if (!connectionId) return;
     try {
-      await requestJson(`/api/v1/cmdb/saved-queries?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await requestJson(
+        `/api/v1/cmdb/saved-queries?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
       await loadSaved();
     } catch {
       /* listing refresh below will show the truth */

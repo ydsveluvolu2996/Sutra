@@ -357,7 +357,8 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
         ? String(Math.round(Number(budgetDraft.limit.trim()) * 1_000_000))
         : null;
       if (limitMicros === null) throw new Error("Limit must be a positive amount, e.g. 1500 or 1500.50");
-      await requestJson("/api/v1/finops/budgets", {
+      if (!connectionId) throw new Error("No connection selected.");
+      await requestJson(`/api/v1/finops/budgets?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: budgetDraft.name.trim(), currency: budgetDraft.currency.trim().toUpperCase(), limitMicros }),
@@ -370,10 +371,14 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   }
 
   async function deleteBudget(id: string) {
+    if (!connectionId) return;
     setBudgetError(null);
     setBudgetDeleting(id);
     try {
-      await requestJson(`/api/v1/finops/budgets?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await requestJson(
+        `/api/v1/finops/budgets?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
       setBudgetPendingDelete(null);
       await load();
     } catch (caught) {
@@ -390,7 +395,8 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       if (effectivePeriod === null) throw new Error("Select or upload a billing period first.");
       const count = Number(unitDraft.count.trim());
       if (!Number.isInteger(count) || count < 0) throw new Error("Count must be a whole number (0 or more).");
-      await requestJson("/api/v1/finops/unit-counts", {
+      if (!connectionId) throw new Error("No connection selected.");
+      await requestJson(`/api/v1/finops/unit-counts?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ period: effectivePeriod, unitLabel: unitDraft.unitLabel.trim(), count }),
@@ -405,7 +411,9 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   const loadReports = useCallback(async () => {
     if (!connectionId) return;
     try {
-      const payload = await requestJson<{ reports: readonly ScheduledReport[] }>("/api/v1/finops/reports");
+      const payload = await requestJson<{ reports: readonly ScheduledReport[] }>(
+        `/api/v1/finops/reports?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setReports(payload.reports);
     } catch {
       setReports([]);
@@ -426,7 +434,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       if (reportDraft.deliveryTarget.trim().length === 0) {
         throw new Error(reportDraft.deliveryKind === "email" ? "Enter a recipient email." : "Enter an HTTPS webhook URL.");
       }
-      await requestJson("/api/v1/finops/reports", {
+      await requestJson(`/api/v1/finops/reports?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -447,7 +455,8 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   async function toggleReport(id: string, enabled: boolean) {
     setReportError(null);
     try {
-      await requestJson("/api/v1/finops/reports", {
+      if (!connectionId) throw new Error("No connection selected.");
+      await requestJson(`/api/v1/finops/reports?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "setEnabled", id, enabled }),
@@ -459,9 +468,13 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
   }
 
   async function deleteReport(id: string) {
+    if (!connectionId) return;
     setReportError(null);
     try {
-      await requestJson(`/api/v1/finops/reports?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await requestJson(
+        `/api/v1/finops/reports?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
       await loadReports();
     } catch (caught) {
       setReportError(caught instanceof Error ? caught.message : "Delete rejected");

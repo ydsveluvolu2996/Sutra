@@ -27,7 +27,7 @@ function connection(
     permissionPackVersion: "2026.07",
     lastSuccessfulSyncAt: "2026-07-16T11:00:00.000Z",
     latestSnapshotAt: "2026-07-16T11:00:00.000Z",
-    latestSnapshotOrigin: "aws_sandbox",
+    latestSnapshotOrigin: "aws_live",
     resourceCount: 94,
     openFindingCount: 55,
     ...overrides,

@@ -16,10 +16,9 @@
 //     account that raised a request can never decide it, following the
 //     self-targeting refusal in db/recovery-administration-repository.ts. The
 //     decision ledger is append-only, so a decision can never be rewritten.
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { governancePublicError, GovernancePolicyRepository } from "../../../../../db/governance-policy-repository";
 import { isGovernanceActionKind } from "../../../../../lib/governance-policy-engine";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 import type { Capability } from "../../../../../lib/auth-policy";
@@ -31,13 +30,7 @@ const REQUEST_ID = /^greq_[a-f0-9]{32}$/u;
 const BODY_BYTES = 8192;
 
 async function resolveScope(request: Request, capabilities: readonly Capability[]) {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  for (const capability of capabilities) {
-    assertSessionCapability(authenticated, capability, connection.customerId);
-  }
-  return { authenticated, connection, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capabilities);
 }
 
 function badRequest(): never {

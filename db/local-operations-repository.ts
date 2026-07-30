@@ -51,7 +51,7 @@ interface SnapshotRow {
   connection_id: string;
   sync_run_id: string;
   status: "staging" | "complete" | "partial" | "failed";
-  origin_kind: "unknown" | "simulated_fixture" | "aws_sandbox";
+  origin_kind: "unknown" | "simulated_fixture" | "aws_live";
   fixture_id: string | null;
   fixture_version: string | null;
 }

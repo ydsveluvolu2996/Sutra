@@ -1,7 +1,6 @@
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { SavedReportRepository } from "../../../../../db/saved-report-repository";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -12,18 +11,10 @@ const MAX_BODY_BYTES = 32 * 1024;
 const SAVED_REPORT_ID = /^rpt_[a-f0-9]{32}$/u;
 
 /**
- * Resolve the tenant scope from the SESSION, never the caller. The customer is
- * derived from the org's latest cloud connection (mirroring the saved-queries
- * and unit-counts routes), and the capability is checked against that resolved
- * customer so scoping is enforced server-side rather than trusted from the
- * request.
+ * Resolve the tenant scope from the explicitly selected connection.
  */
 async function resolveScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 export async function GET(request: Request): Promise<Response> {

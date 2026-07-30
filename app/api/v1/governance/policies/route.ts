@@ -9,7 +9,6 @@
 // cost anomalies, allocation coverage). Signals that need collector inputs this
 // route does not load are simply absent — the engine discloses them as
 // unavailable and never treats a missing signal as zero.
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { AllocationRuleRepository } from "../../../../../db/allocation-rules-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { governancePublicError, GovernancePolicyRepository } from "../../../../../db/governance-policy-repository";
@@ -28,7 +27,7 @@ import {
 import { buildBudgetBurndown } from "../../../../../lib/finops-budget-burndown";
 import { detectAnomalies } from "../../../../../lib/finops-insights";
 import { applyAllocationRules } from "../../../../../lib/finops-allocation-rules";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
@@ -38,11 +37,7 @@ const POLICY_ID = /^gpol_[a-f0-9]{32}$/u;
 const BODY_BYTES = 16384;
 
 async function resolveScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, connection, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 function badRequest(): never {

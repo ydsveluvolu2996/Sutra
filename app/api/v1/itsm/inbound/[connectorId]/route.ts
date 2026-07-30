@@ -1,6 +1,6 @@
 import { addCaseNote, listFindingCases, transitionFindingCase } from "../../../../../../db/case-repository";
 import { ItsmConnectorRepository } from "../../../../../../db/itsm-connector-repository";
-import { getLatestConnectionForOrg } from "../../../../../../db/pilot-repository";
+import { listConnectionsForOrg } from "../../../../../../db/pilot-repository";
 import { decideInboundTransition, verifyInboundSignature } from "../../../../../../lib/itsm-sync";
 import { errorResponse, jsonResponse } from "../../../../../../lib/pilot-server";
 
@@ -97,16 +97,30 @@ export async function POST(
     if (!Number.isFinite(remoteUpdatedAtMs) || new Date(remoteUpdatedAtMs).toISOString() !== record.remoteUpdatedAt) {
       throw Object.assign(new Error("The remote timestamp is invalid"), { code: "INVALID_INPUT" });
     }
-    const connection = await getLatestConnectionForOrg(connector.orgId);
-    if (connection === null || connection.customerId !== connector.customerId) {
+    const customerConnections = (await listConnectionsForOrg(connector.orgId))
+      .filter((candidate) => candidate.customerId === connector.customerId);
+    if (customerConnections.length === 0) {
       throw Object.assign(new Error("The connector scope is not available"), { code: "NOT_FOUND" });
     }
-    const current = (await listFindingCases({
-      orgId: connector.orgId,
-      customerId: connector.customerId,
-      connectionId: connection.id,
-    })).find((candidate) => candidate.id === record.caseId);
-    if (current === undefined) throw Object.assign(new Error("The case was not found"), { code: "NOT_FOUND" });
+    let matched:
+      | {
+          readonly connection: (typeof customerConnections)[number];
+          readonly current: Awaited<ReturnType<typeof listFindingCases>>[number];
+        }
+      | undefined;
+    for (const connection of customerConnections) {
+      const current = (await listFindingCases({
+        orgId: connector.orgId,
+        customerId: connector.customerId,
+        connectionId: connection.id,
+      })).find((candidate) => candidate.id === record.caseId);
+      if (current !== undefined) {
+        matched = { connection, current };
+        break;
+      }
+    }
+    if (matched === undefined) throw Object.assign(new Error("The case was not found"), { code: "NOT_FOUND" });
+    const { connection, current } = matched;
     const externalCurrent = current.status === "closed" ? "accepted_risk" : current.status;
     const decision = decideInboundTransition({
       connectorType: connector.connectorType,

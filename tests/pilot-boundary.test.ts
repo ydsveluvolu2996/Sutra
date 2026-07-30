@@ -127,7 +127,7 @@ function stateWith(run?: PilotSyncRun, hasActiveSnapshot = false): PilotState {
         collectedAt: "2026-07-16T09:30:00.000Z",
         coverageState: "complete",
         snapshotSha256: "a".repeat(64),
-        origin: { kind: "aws_sandbox", fixtureId: null, fixtureVersion: null },
+        origin: { kind: "aws_live", fixtureId: null, fixtureVersion: null },
       }
       : null,
   };

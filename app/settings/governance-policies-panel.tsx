@@ -101,7 +101,7 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export default function GovernancePoliciesPanel() {
+export default function GovernancePoliciesPanel({ connectionId }: { readonly connectionId: string | null }) {
   const [payload, setPayload] = useState<PoliciesPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -111,15 +111,21 @@ export default function GovernancePoliciesPanel() {
   const [decisionReason, setDecisionReason] = useState("");
 
   const load = useCallback(async () => {
+    if (connectionId === null) {
+      setPayload(null);
+      return;
+    }
     try {
-      const next = await requestJson<PoliciesPayload>("/api/v1/governance/policies");
+      const next = await requestJson<PoliciesPayload>(
+        `/api/v1/governance/policies?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setPayload(next);
       setLoadError(null);
     } catch (caught) {
       setPayload(null);
       setLoadError(caught instanceof Error ? caught.message : "Governance policies could not be loaded");
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => {
     void (async () => {
@@ -128,15 +134,18 @@ export default function GovernancePoliciesPanel() {
   }, [load]);
 
   async function decide(): Promise<void> {
-    if (armed === null) return;
+    if (armed === null || connectionId === null) return;
     setBusy(true);
     setError(null);
     try {
-      await requestJson<{ pending: readonly PendingApproval[] }>("/api/v1/governance/approvals", {
+      await requestJson<{ pending: readonly PendingApproval[] }>(
+        `/api/v1/governance/approvals?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ intent: armed.intent, requestId: armed.requestId, reason: decisionReason.trim() }),
-      });
+        },
+      );
       setArmed(null);
       setDecisionReason("");
       await load();

@@ -270,7 +270,7 @@ export default function FinopsSchedulePanel({ connectionId }: { connectionId: st
     const zone = ZONES.find((entry) => entry.zone === form.zone) ?? ZONES[0];
     setBusy(true);
     try {
-      await sendJson(ENDPOINT, "POST", {
+      await sendJson(query, "POST", {
         name: form.name.trim(),
         selector: form.tagValue.trim().length > 0
           ? { tagKey: form.tagKey.trim(), tagValue: form.tagValue.trim() }
@@ -295,7 +295,7 @@ export default function FinopsSchedulePanel({ connectionId }: { connectionId: st
   async function setEnabled(schedule: StoredSchedule, enabled: boolean): Promise<void> {
     setBusy(true);
     try {
-      await sendJson(`${ENDPOINT}?id=${encodeURIComponent(schedule.id)}`, "PATCH", { enabled });
+      await sendJson(`${query}&id=${encodeURIComponent(schedule.id)}`, "PATCH", { enabled });
       await reload();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not change the schedule");
@@ -307,7 +307,7 @@ export default function FinopsSchedulePanel({ connectionId }: { connectionId: st
   async function remove(id: string): Promise<void> {
     setBusy(true);
     try {
-      await sendJson(`${ENDPOINT}?id=${encodeURIComponent(id)}`, "DELETE", {});
+      await sendJson(`${query}&id=${encodeURIComponent(id)}`, "DELETE", {});
       if (openId === id) setOpenId(null);
       await reload();
     } catch (caught) {
