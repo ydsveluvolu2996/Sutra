@@ -34,6 +34,15 @@ CLOUDFLARED_CONFIG_TEMPLATE="deploy/ec2/cloudflared-config.yml.example"
 [ -f "$CLOUDFLARED_CREDENTIAL" ] || die "$CLOUDFLARED_CREDENTIAL not found. Restore the named-tunnel credential; never generate an unrelated replacement."
 [ -f "$CLOUDFLARED_CONFIG_TEMPLATE" ] || die "$CLOUDFLARED_CONFIG_TEMPLATE is missing from the selected release bundle."
 
+if [[ -x "$SCRIPT_DIR/sync-zoho-runtime.sh" ]]; then
+  if (( EUID == 0 )); then
+    "$SCRIPT_DIR/sync-zoho-runtime.sh" --optional
+  else
+    command -v sudo >/dev/null 2>&1 || die "Root privileges are required to install the protected Zoho runtime."
+    sudo "$SCRIPT_DIR/sync-zoho-runtime.sh" --optional
+  fi
+fi
+
 DOCKER="docker"
 docker info >/dev/null 2>&1 || { sudo docker info >/dev/null 2>&1 && DOCKER="sudo docker"; } || die "Docker daemon unreachable."
 ROOT_RUN=()

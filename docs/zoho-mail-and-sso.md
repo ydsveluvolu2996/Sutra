@@ -41,8 +41,8 @@ regional HTTPS Mail API. It never stores or uses the mailbox password.
    `ZohoMail.accounts.READ` grant is used for this one-time lookup, revoke that
    temporary refresh token immediately; the delivery token should retain only
    `ZohoMail.messages.CREATE`.
-4. Put the following values in the ignored operator environment
-   (`deploy/ec2/.env.ec2`), never in Git:
+4. Store the following values in the macOS Keychain integration bundle, never
+   in Git or a shell-history command:
 
 ```dotenv
 SUTRA_CONTACT_RECIPIENT=contact@sutracmdb.com
@@ -88,10 +88,36 @@ OIDC until the Zoho client has been created, the existing owner has a matching
 invitation or membership, and all hosted release gates pass. This prevents an
 authentication cutover from locking the administrator out.
 
-## Local credential custody
+## Production credential delivery
 
 The workstation setup stores the completed mail and OIDC runtime bundle in the
 macOS Keychain service `com.sutracmdb.zoho.integration`, under the primary Zoho
 mailbox account. No real client secret, refresh token, or transaction key belongs
-in this repository. Copy the values from the secure store to the deployment's
-managed/ignored environment only during an approved release.
+in this repository.
+
+The approved release path copies only the whitelisted values directly from
+Keychain to the exact account-local AWS Secrets Manager document
+`sutra/runtime/zoho`. The helper refuses any AWS account other than the
+production host account and sends the JSON to the AWS CLI over standard input,
+so secret material is not placed in process arguments, terminal output, or a
+temporary file:
+
+```sh
+pnpm zoho:publish-runtime --identity-mode=password
+```
+
+The EC2 role can read only that exact secret. During a release,
+`sync-zoho-runtime.sh` validates the aliases, providers, India-region endpoints,
+credential shapes, and allowed key set before atomically merging the values
+into the existing mode-0600 runtime environment.
+
+Use a two-phase activation:
+
+1. Publish `password` mode and deploy so Zoho Mail is active while the existing
+   owner login remains available.
+2. Invite the primary Zoho mailbox as an organization administrator and verify
+   delivery.
+3. Publish `oidc` mode, redeploy the same approved release, and complete the
+   invitation using **Continue with Zoho**.
+4. Verify the new Zoho administrator can reach the dashboard before ending the
+   existing owner session.

@@ -31,6 +31,7 @@ import {
 } from "../../lib/aws-customer-role-artifacts";
 import type { CollectorHealth, PilotConnection, PilotState } from "../../lib/pilot-types";
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
+import { useSession } from "../components/use-session";
 
 interface CreateConnectionResponse {
   readonly connection: PilotConnection;
@@ -165,6 +166,10 @@ function forgetHandoffDraft(operationId: string): void {
 
 export function OnboardAccount() {
   const { state, health, loading, refresh } = usePilotState();
+  const { session } = useSession();
+  const capabilities = new Set(session?.capabilities ?? []);
+  const canCreateConnection = capabilities.has("customer:create")
+    && capabilities.has("connection:manage");
   const [customerName, setCustomerName] = useState("Pilot Customer");
   const [accountId, setAccountId] = useState("123456789012");
   const [partition, setPartition] = useState("aws");
@@ -186,7 +191,7 @@ export function OnboardAccount() {
   const [offboardStepUpCode, setOffboardStepUpCode] = useState("");
   const [confirmingOffboard, setConfirmingOffboard] = useState(false);
   const [busy, setBusy] = useState<
-    "create" | "role" | "validate" | "sync" | "disable" | "offboard" | null
+    "create" | "handoff" | "role" | "validate" | "sync" | "disable" | "offboard" | null
   >(null);
   const [notice, setNotice] = useState<ActionNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -356,6 +361,33 @@ export function OnboardAccount() {
         tone: "success",
         title: "Trust handoff recovered",
         message: "Sutra returned the same actor-bound pending ExternalId. It closes only after AWS proves the role contract and registration commits.",
+      });
+      await refresh();
+    } catch (caught) {
+      setError(messageFrom(caught));
+      await refresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function claimAssignedConnectionHandoff() {
+    if (!connection || connection.roleArn || connection.status !== "pending") return;
+    setBusy("handoff");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await postPilot<CreateConnectionResponse>(
+        "/api/pilot/connections/handoff",
+        { connectionId: connection.id },
+      );
+      setCreated(response);
+      setOneTimeExternalId(response.trust.externalId);
+      setRoleArn(expectedRoleArn(response));
+      setNotice({
+        tone: "success",
+        title: "Assigned AWS onboarding handoff opened",
+        message: "This MFA-verified customer administrator can now deploy the customer-owned role. The disclosure was audited and closes when role registration succeeds.",
       });
       await refresh();
     } catch (caught) {
@@ -582,7 +614,7 @@ export function OnboardAccount() {
             <div className="onboard-copy"><p className="eyebrow">Local-only safety boundary</p><h2>AWS trust onboarding is disabled</h2><p>The collector is running in deterministic fixture mode, so Sutra will not create a trust-role connection or contact AWS. Use Simulation runs to exercise the durable queue, CMDB, change history, findings, and exports with clearly labelled local evidence.</p><a className="button button-primary" href="/operations">Open Simulation runs</a></div>
           ) : null}
 
-          {!loading && !connection && collectorMode === "live" ? (
+          {!loading && !connection && collectorMode === "live" && canCreateConnection ? (
             <>
               <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. A lost response can recover the same actor-bound value only until the customer role is registered.</p></div>
               <form className="onboard-form" onSubmit={createConnection}>
@@ -611,6 +643,15 @@ export function OnboardAccount() {
             </>
           ) : null}
 
+          {!loading && !connection && collectorMode === "live" && !canCreateConnection ? (
+            <div className="onboard-copy">
+              <p className="eyebrow">Approval required</p>
+              <h2>No assigned company account is ready</h2>
+              <p>An organization owner must first create your customer workspace and pending AWS connection, then assign your approved customer-administrator profile to it. You cannot create or discover another client&apos;s account.</p>
+              <a className="button button-secondary" href="/access">Review your access</a>
+            </div>
+          ) : null}
+
           {connection ? (
             <>
               <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below with the selected deployment method. Sutra never creates or stores long-lived customer access keys.</p></div>
@@ -629,7 +670,7 @@ export function OnboardAccount() {
 
               {connection.permissionCapabilities && connection.permissionCapabilities.missingActions.length === 0 ? <div className="validation-result" role="status"><span>✓</span><div><strong>All reviewed inline-policy capabilities declared</strong><p>{connection.permissionCapabilities.grantedActions.length} actions are declared by the attested inline policy for permission pack <code>{connection.permissionPackVersion}</code>. Effective access is confirmed separately by collection results.</p></div></div> : connection.permissionCapabilities ? <div className="inline-warning" role="status"><strong>{connection.permissionCapabilities.missingActions.length} inline-policy capabilities omitted</strong><span>Not declared in the role policy: <code>{connection.permissionCapabilities.missingActions.slice(0, 8).join(", ")}</code>{connection.permissionCapabilities.missingActions.length > 8 ? ` and ${connection.permissionCapabilities.missingActions.length - 8} more` : ""}. Effective access can also be limited by permission boundaries, SCPs, or resource policies; collection coverage remains explicit.</span></div> : null}
 
-              {canDisplayInitialExternalId && oneTimeExternalId ? <label className="contract-field"><span>Pending-handoff ExternalId</span><div className="copy-field"><code>{oneTimeExternalId}</code><button type="button" onClick={() => void navigator.clipboard?.writeText(oneTimeExternalId)}>Copy</button></div><small>This actor-bound value is recoverable only while the initial connection is pending. Role registration closes the handoff permanently.</small></label> : recoverableDraft && connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>The pending ExternalId handoff can be recovered.</strong><span>The previous response may have been lost. Retry the same stored operation to retrieve the original value; Sutra will not rotate or create a second contract.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void recoverConnectionHandoff()}>{busy === "create" ? "Recovering handoff…" : "Recover pending handoff"}</button></div> : <div className="inline-warning"><strong>ExternalId handoff is closed.</strong><span>{connectionOffboarded ? "This connection has been offboarded and no trust secret remains in Sutra's control plane." : connection.roleArn ? "The customer role has been registered, so Sutra will never display the initial ExternalId again." : "No matching actor-bound pending creation operation is available in this browser session."}</span></div>}
+              {canDisplayInitialExternalId && oneTimeExternalId ? <label className="contract-field"><span>Pending-handoff ExternalId</span><div className="copy-field"><code>{oneTimeExternalId}</code><button type="button" onClick={() => void navigator.clipboard?.writeText(oneTimeExternalId)}>Copy</button></div><small>This value is visible only while the customer role is pending. Role registration closes the handoff permanently, and each delegated disclosure is audited.</small></label> : recoverableDraft && connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>The pending ExternalId handoff can be recovered.</strong><span>The previous response may have been lost. Retry the same stored operation to retrieve the original value; Sutra will not rotate or create a second contract.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void recoverConnectionHandoff()}>{busy === "create" ? "Recovering handoff…" : "Recover pending handoff"}</button></div> : connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>Your assigned onboarding handoff is ready.</strong><span>Only an MFA-verified customer administrator assigned to this exact customer can disclose it. The event is written to the audit chain before the value is returned.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void claimAssignedConnectionHandoff()}>{busy === "handoff" ? "Opening handoff…" : "Open assigned onboarding handoff"}</button></div> : <div className="inline-warning"><strong>ExternalId handoff is closed.</strong><span>{connectionOffboarded ? "This connection has been offboarded and no trust secret remains in Sutra's control plane." : connection.roleArn ? "The customer role has been registered, so Sutra will never display the initial ExternalId again." : "No pending onboarding handoff is available for this connection."}</span></div>}
 
               <div className="deployment-parameters" aria-label="CloudFormation trust parameters">
                 <div><small>SessionNamePrefix</small><code>{createdRoleSessionName}</code></div>

@@ -380,7 +380,8 @@ RELEASE_CONTAINER=""
 
 for required in \
   compose.prod.yaml .env.ec2.example Caddyfile cloudflared-config.yml.example \
-  maintenance/security.txt bootstrap.sh redeploy.sh release-update.sh sutra.service; do
+  maintenance/security.txt bootstrap.sh redeploy.sh release-update.sh \
+  sync-zoho-runtime.sh sutra.service; do
   [[ -f "$STAGE_ROOT/deploy/ec2/$required" ]] || die "Release bundle is missing deploy/ec2/$required."
 done
 [[ -f "$STAGE_ROOT/docker/postgres-init.sh" ]] || die "Release bundle is missing docker/postgres-init.sh."
@@ -388,6 +389,7 @@ bash -n \
   "$STAGE_ROOT/deploy/ec2/bootstrap.sh" \
   "$STAGE_ROOT/deploy/ec2/redeploy.sh" \
   "$STAGE_ROOT/deploy/ec2/release-update.sh" \
+  "$STAGE_ROOT/deploy/ec2/sync-zoho-runtime.sh" \
   "$STAGE_ROOT/docker/postgres-init.sh"
 
 # Preserve all operator settings while replacing only the immutable digest.

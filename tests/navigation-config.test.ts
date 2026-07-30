@@ -94,13 +94,22 @@ describe("grouped workspace navigation", () => {
     );
   });
 
-  it("requires both customer creation and connection management for account onboarding", () => {
+  it("lets customer managers finish assigned onboarding but reserves new client creation for org operators", () => {
     const readerCapabilities = new Set<Capability>(["workspace:read", "connection:read", "export:read"]);
     const readerItems = visibleNavigation(readerCapabilities).flatMap((group) => group.items);
+    const customerAdminCapabilities = new Set<Capability>([
+      "workspace:read",
+      "connection:read",
+      "connection:manage",
+      "membership:manage:customer",
+    ]);
+    const customerAdminItems = visibleNavigation(customerAdminCapabilities).flatMap((group) => group.items);
 
     assert.equal(readerItems.some((item) => item.href === "/onboard"), false);
     assert.equal(readerItems.some((item) => item.href === "/onboard#connection-lifecycle"), true);
     assert.equal(readerItems.some((item) => item.href === "/operations"), false);
+    assert.equal(customerAdminItems.some((item) => item.href === "/onboard"), true);
+    assert.equal(customerAdminItems.some((item) => item.href === "/onboard/client"), false);
   });
 
   it("identifies the active group without broadening route access", () => {

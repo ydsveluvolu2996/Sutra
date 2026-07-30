@@ -98,7 +98,7 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "onboard_client", label: "Onboard a client", href: "/onboard/client", capabilities: ["customer:create", "connection:manage"] },
       { key: "customers", label: "Customers & accounts", href: "/customers", capabilities: readWorkspace },
-      { key: "onboard", label: "Add AWS account", href: "/onboard", capabilities: ["customer:create", "connection:manage"] },
+      { key: "onboard", label: "Manage AWS account", href: "/onboard", capabilities: ["connection:manage"] },
       { key: "connection_health", label: "Connection health", href: "/onboard#connection-lifecycle", capabilities: readConnection },
     ],
   },

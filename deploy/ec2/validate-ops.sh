@@ -54,6 +54,8 @@ required_template = [
     "repository/sutra/notification-worker",
     "Action: secretsmanager:GetSecretValue",
     "secret:sutra/notifications/*",
+    "PolicyName: ReadOnlyExactZohoRuntimeSecret",
+    "secret:sutra/runtime/zoho-*",
     "Condition: GrantNotificationEmailSending",
     'Action: ["ses:SendEmail", "ses:SendRawEmail"]',
     "Resource: { Ref: NotificationSesIdentityArn }",

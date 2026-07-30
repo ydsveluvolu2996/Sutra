@@ -239,6 +239,18 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/notifications/*
+        - PolicyName: ReadOnlyExactZohoRuntimeSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # One account-local document, read only. The random suffix is
+              # added by Secrets Manager; the path cannot match notification
+              # destinations or any future general-purpose secret.
+              - Sid: ReadOnlyExactZohoRuntimeSecret
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/runtime/zoho-*
         - PolicyName: AssumeOnlyDedicatedSutraCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"
