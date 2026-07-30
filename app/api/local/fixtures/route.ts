@@ -1,12 +1,13 @@
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { authorize } from "../../../../lib/auth-policy";
 import { getConnection } from "../../../../db/pilot-repository";
-import { errorResponse, getLocalFixtureCatalog, jsonResponse } from "../../../../lib/pilot-server";
+import { assertLocalSimulationRuntime, errorResponse, getLocalFixtureCatalog, jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "workspace:read");
     const catalog = await getLocalFixtureCatalog();

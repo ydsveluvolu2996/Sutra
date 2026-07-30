@@ -56,7 +56,7 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
 };
 
-const KEY_ICON: Partial<Record<NavKey, IconName>> = {
+const KEY_ICON: Record<NavKey, IconName> = {
   overview: "dashboard",
   customers: "users",
   onboard: "plus",
@@ -91,7 +91,9 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   findings: "alert",
   vulnerabilities: "bug",
   network_exposure: "network",
+  flow_log_coverage: "scan",
   iac_scan: "scan",
+  agentless_scans: "scan",
   security_events: "siren",
   cases_routing: "network",
   cases: "wrench",
@@ -105,6 +107,7 @@ const KEY_ICON: Partial<Record<NavKey, IconName>> = {
   access: "userPlus",
   settings: "gear",
   notification_settings: "bell",
+  docs: "fileText",
   onboard_client: "userPlus",
   cmdb_dependencies: "network",
   cmdb_assets: "cube",
@@ -184,7 +187,7 @@ export function navTone(navKey: NavKey): NavTone {
 }
 
 export function NavIcon({ navKey }: { readonly navKey: NavKey }) {
-  return <GlyphIcon name={KEY_ICON[navKey] ?? "dot"} />;
+  return <GlyphIcon name={KEY_ICON[navKey]} />;
 }
 
 /**

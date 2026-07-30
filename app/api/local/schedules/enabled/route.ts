@@ -1,6 +1,7 @@
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import {
+  assertLocalSimulationRuntime,
   errorResponse,
   getLocalFixtureCatalog,
   getLocalFixtureSchedules,
@@ -34,6 +35,7 @@ function invalid(): never {
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    assertLocalSimulationRuntime();
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "workspace:read");
     assertSameOrigin(request);

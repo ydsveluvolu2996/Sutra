@@ -229,7 +229,7 @@ export function ComplianceBrowser() {
               {syncing ? "Assessing…" : "Run live assessment"}
             </button>
           ) : connection ? (
-            <a className="button button-primary" href="/operations">Run simulation</a>
+            <a className="button button-primary" href="/onboard">Connect AWS account</a>
           ) : null}
         </div>
       </section>
