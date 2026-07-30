@@ -120,3 +120,50 @@ test("a client cannot read the other client's connection or trust secret", async
     assert.equal(alphaConnectionIds.includes(beta.connectionId), false);
   });
 });
+
+test("public API connection selection stays on the token customer when another client is newer", async () => {
+  await withDatabase(async () => {
+    const [alpha, beta] = CLIENTS;
+    const alphaConnection = await pilotRepository.getLatestConnectionForCustomer(
+      ORG_ID,
+      alpha.customerId,
+    );
+    const betaConnection = await pilotRepository.getLatestConnectionForCustomer(
+      ORG_ID,
+      beta.customerId,
+    );
+    assert.equal(alphaConnection?.id, alpha.connectionId);
+    assert.equal(alphaConnection?.awsAccountId, alpha.accountId);
+    assert.equal(betaConnection?.id, beta.connectionId);
+    assert.equal(betaConnection?.awsAccountId, beta.accountId);
+    assert.equal(
+      await pilotRepository.getLatestConnectionForCustomer(
+        ORG_ID,
+        "cust_unassigned000000000000000000000",
+      ),
+      null,
+    );
+  });
+});
+
+test("every public API route resolves a connection by authenticated token customer", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const routePaths = [
+    "app/api/public/v1/resources/route.ts",
+    "app/api/public/v1/findings/route.ts",
+    "app/api/public/v1/cases/route.ts",
+    "app/api/public/v1/cases/[caseId]/route.ts",
+    "app/api/public/v1/vulnerabilities/route.ts",
+    "app/api/public/v1/compliance/route.ts",
+    "app/api/public/v1/snapshots/route.ts",
+  ];
+  for (const path of routePaths) {
+    const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+    assert.match(
+      source,
+      /getLatestConnectionForCustomer\(token\.orgId, token\.customerId\)/u,
+      path,
+    );
+    assert.doesNotMatch(source, /getLatestConnectionForOrg/u, path);
+  }
+});

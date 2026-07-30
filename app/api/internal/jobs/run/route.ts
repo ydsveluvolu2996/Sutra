@@ -67,7 +67,10 @@ export async function POST(request: Request): Promise<Response> {
     // the ranking, and the queue keeps reporting stale risk as current. Enqueues
     // exactly ONE job across all orgs because the mirror is global.
     await ensureDueVulnFeedRefreshEnqueued(queue, activeOrgIds, customersForOrg);
-    const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 25 });
+    // A hosted inventory job can legitimately use most of the broker's
+    // five-minute bound. Process at most one job of each kind per 15-second
+    // sidecar tick so the loopback request itself remains bounded.
+    const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 1 });
     return jsonResponse({ ...result, platformUptime });
   } catch (error) {
     return errorResponse(error);

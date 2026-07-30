@@ -91,13 +91,19 @@ function connectionStatement(database, { orgId, customerId, connectionId, accoun
   ).bind(connectionId, orgId, customerId, accountId, `arn:aws:iam::${accountId}:role/SutraReadOnlyRole`);
 }
 
-async function seedTenant(database, { orgId, slug, customerId, connectionId }) {
+async function seedTenant(database, {
+  orgId,
+  slug,
+  customerId,
+  connectionId,
+  accountId = "111122223333",
+}) {
   await database.batch([
     database.prepare("INSERT INTO organizations (id, slug, name, status) VALUES (?, ?, ?, 'active')")
       .bind(orgId, slug, `Org ${slug}`),
     database.prepare("INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, ?, ?, 'active')")
       .bind(customerId, orgId, `${slug}-cust`, `Customer ${slug}`),
-    connectionStatement(database, { orgId, customerId, connectionId }),
+    connectionStatement(database, { orgId, customerId, connectionId, accountId }),
   ]);
 }
 
@@ -126,7 +132,16 @@ async function withDatabase(run) {
       accountId: "444455556666",
     }).run();
     // The quiet tenant: identical cost data, but NO notification destination.
-    await seedTenant(database, { orgId: ORG_QUIET, slug: "finops-quiet", customerId: CUSTOMER_QUIET, connectionId: CONNECTION_QUIET });
+    await seedTenant(database, {
+      orgId: ORG_QUIET,
+      slug: "finops-quiet",
+      customerId: CUSTOMER_QUIET,
+      connectionId: CONNECTION_QUIET,
+      // AT-11 makes live AWS account/role ownership global. This independent
+      // tenant therefore needs its own account instead of reusing the alerting
+      // tenant's trust role in a fixture.
+      accountId: "777788889999",
+    });
     // upsertDestination gates on an active user row (the recorded creator).
     await database.prepare(
       "INSERT INTO users (id, issuer, subject, email, display_name, status) VALUES (?, 'https://issuer.test', 'sub-finops', 'admin@sutra.test', 'FinOps Admin', 'active')",

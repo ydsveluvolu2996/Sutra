@@ -40,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("Simulation connections use the simulation controls"), { code: "INVALID_STATE" });
     }
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
-      transitionControlPlane: () => disableAwsConnection(connectionId, actor.id),
+      transitionControlPlane: () => disableAwsConnection(connectionId, actor.id, actor.orgId),
       reconcileCollector: () => disableCollectorConnection({ tenantId: actor.orgId, connectionId }),
     });
     return jsonResponse({

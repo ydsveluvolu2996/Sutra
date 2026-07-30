@@ -24,12 +24,20 @@ const variables = parseVariables(await readFile(variablesPath, "utf8"));
 const environment = { ...process.env, ...variables };
 const webHost = environment.SUTRA_WEB_HOST ?? "127.0.0.1";
 const webPort = "3000";
-
-const collector = spawn(process.execPath, [resolve(root, "services/aws-collector/dist/src/local-server.js")], {
-  cwd: root,
-  env: environment,
-  stdio: "inherit",
-});
+const localCollectorEnabled = environment.SUTRA_LOCAL_MODE === "true";
+if (!localCollectorEnabled && environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") {
+  throw new Error("Hosted runtime requires SUTRA_BROKER_AUTH_MODE=asymmetric");
+}
+// The loopback HMAC collector is developer fixture infrastructure only. Hosted
+// replicas use the separately scaled broker service and must never create a
+// task-local connection registry or replay cache.
+const collector = localCollectorEnabled
+  ? spawn(process.execPath, [resolve(root, "services/aws-collector/dist/src/local-server.js")], {
+      cwd: root,
+      env: environment,
+      stdio: "inherit",
+    })
+  : null;
 /**
  * Serves on miniflare directly — NOT `wrangler dev`.
  *
@@ -87,7 +95,11 @@ function webRestartsInWindow(nowMs) {
 // crash the pilot — the endpoint is idempotent and the next tick simply retries.
 const jobRunnerToken = environment.SUTRA_JOB_RUNNER_TOKEN;
 let jobRunnerTimer;
-if (typeof jobRunnerToken === "string" && jobRunnerToken.length > 0) {
+if (
+  environment.SUTRA_JOB_RUNNER_SELF_TICK !== "false" &&
+  typeof jobRunnerToken === "string" &&
+  jobRunnerToken.length > 0
+) {
   const requestedInterval = Number(environment.SUTRA_JOB_RUNNER_INTERVAL_MS ?? "15000");
   const intervalMs = Number.isFinite(requestedInterval)
     ? Math.min(300_000, Math.max(5_000, requestedInterval))
@@ -116,22 +128,25 @@ function stop(signal = "SIGTERM") {
   if (closing) return;
   closing = true;
   if (jobRunnerTimer !== undefined) clearInterval(jobRunnerTimer);
-  collector.kill(signal);
+  collector?.kill(signal);
   web.kill(signal);
 }
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(signal, () => stop(signal));
 
 async function nextChildExit() {
-  return Promise.race([
-    new Promise((resolvePromise) => collector.once("exit", (code, signal) => resolvePromise({ name: "collector", code, signal }))),
+  const exits = [
     new Promise((resolvePromise) => web.once("exit", (code, signal) => resolvePromise({ name: "web", code, signal }))),
-  ]);
+  ];
+  if (collector !== null) {
+    exits.push(new Promise((resolvePromise) =>
+      collector.once("exit", (code, signal) => resolvePromise({ name: "collector", code, signal }))));
+  }
+  return Promise.race(exits);
 }
 
 let exit = await nextChildExit();
-// Re-arm around a web restart. The collector is deliberately NOT restarted: it is
-// a small local process that has never done this, and inventing a second recovery
-// path for a fault that has not happened is how untested code reaches production.
+// Re-arm around a web restart. In local fixture mode the loopback collector is
+// deliberately NOT restarted. Hosted mode has no task-local collector child.
 while (exit.name === "web" && !closing) {
   const attempts = webRestartsInWindow(Date.now()) + 1;
   if (attempts > WEB_RESTART_BUDGET) {

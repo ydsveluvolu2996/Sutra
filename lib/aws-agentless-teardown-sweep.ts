@@ -24,7 +24,7 @@ export type DebtAccountScope = "sutra-scan-account" | "customer";
 
 export interface OutstandingResource {
   readonly resourceId: string;
-  readonly resourceKind: "snapshot" | "volume";
+  readonly resourceKind: "snapshot" | "volume" | "instance";
   readonly region: string;
   readonly accountScope: string;
   readonly attempts: number;
@@ -40,14 +40,14 @@ export interface OutstandingResource {
 export interface TeardownProber {
   stillExists(input: {
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
     readonly accountScope: string;
   }): Promise<boolean | "unknown">;
   /** Delete a SCAN-ACCOUNT resource. Never called for customer-scoped rows. */
   deleteScanAccountResource(input: {
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
   }): Promise<void>;
 }

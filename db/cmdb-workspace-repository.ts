@@ -90,6 +90,11 @@ interface QueryResourceRow {
   native_id: string;
   tags_json: string | null;
   configuration_json: string | null;
+  lifecycle_state: "active" | "retirement_pending" | "retired";
+  consecutive_complete_misses: number;
+  evidence_snapshot_id: string;
+  evidence_snapshot_sha256: string;
+  content_sha256: string;
 }
 
 export class CmdbWorkspaceRepositoryError extends Error {
@@ -223,7 +228,12 @@ export class CmdbWorkspaceRepository {
     }));
   }
 
-  /** Resources from the connection's published head snapshot, shaped for the query engine. */
+  /**
+   * Resources from the current lifecycle projection, shaped for the query
+   * engine. A retirement-pending row resolves to its last observed immutable
+   * snapshot evidence; retired rows are intentionally absent from the live
+   * dataset.
+   */
   public async resourcesForQuery(
     scope: CmdbWorkspaceScope,
     connectionId: string,
@@ -231,13 +241,68 @@ export class CmdbWorkspaceRepository {
     assertScope(scope, connectionId);
     const db = await this.ready();
     const rows = await db.prepare(
-      `SELECT r.resource_key, r.service, r.resource_type, r.region_key, r.name, r.state,
-              r.arn, r.native_id, r.tags_json, r.configuration_json
-         FROM cmdb_resources r
-         JOIN connection_heads h ON h.snapshot_id = r.snapshot_id
-        WHERE h.connection_id = ? AND r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
-        ORDER BY r.resource_key ASC LIMIT ?`,
-    ).bind(connectionId, scope.orgId, scope.customerId, connectionId, MAX_QUERY_RESOURCES).all<QueryResourceRow>();
+      `SELECT resource_key, service, resource_type, region_key, name, state,
+              arn, native_id, tags_json, configuration_json, lifecycle_state,
+              consecutive_complete_misses, evidence_snapshot_id,
+              evidence_snapshot_sha256, content_sha256
+         FROM (
+           SELECT r.resource_key, r.service, r.resource_type, r.region_key,
+                  r.name, r.state, r.arn, r.native_id, r.tags_json,
+                  r.configuration_json, p.lifecycle_state,
+                  p.consecutive_complete_misses,
+                  s.id AS evidence_snapshot_id,
+                  s.snapshot_sha256 AS evidence_snapshot_sha256,
+                  r.content_sha256
+             FROM cmdb_resource_projection_states p
+             JOIN cmdb_resources r
+               ON r.id = p.last_observed_resource_id
+              AND r.org_id = p.org_id AND r.customer_id = p.customer_id
+              AND r.connection_id = p.connection_id
+              AND r.snapshot_id = p.last_observed_snapshot_id
+              AND r.resource_key = p.resource_key
+             JOIN cmdb_snapshots s
+               ON s.id = p.last_observed_snapshot_id
+              AND s.org_id = p.org_id AND s.customer_id = p.customer_id
+              AND s.connection_id = p.connection_id AND s.status = 'complete'
+            WHERE p.org_id = ? AND p.customer_id = ? AND p.connection_id = ?
+              AND p.lifecycle_state <> 'retired'
+           UNION ALL
+           SELECT r.resource_key, r.service, r.resource_type, r.region_key,
+                  r.name, r.state, r.arn, r.native_id, r.tags_json,
+                  r.configuration_json, 'active' AS lifecycle_state,
+                  0 AS consecutive_complete_misses,
+                  s.id AS evidence_snapshot_id,
+                  s.snapshot_sha256 AS evidence_snapshot_sha256,
+                  r.content_sha256
+             FROM cmdb_resources r
+             JOIN connection_heads h
+               ON h.snapshot_id = r.snapshot_id AND h.org_id = r.org_id
+              AND h.customer_id = r.customer_id
+              AND h.connection_id = r.connection_id
+             JOIN cmdb_snapshots s
+               ON s.id = r.snapshot_id AND s.org_id = r.org_id
+              AND s.customer_id = r.customer_id
+              AND s.connection_id = r.connection_id AND s.status = 'complete'
+            WHERE h.connection_id = ? AND r.org_id = ? AND r.customer_id = ?
+              AND r.connection_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM cmdb_resource_projection_states p
+                 WHERE p.org_id = r.org_id AND p.customer_id = r.customer_id
+                   AND p.connection_id = r.connection_id
+                   AND p.resource_key = r.resource_key
+              )
+         ) projected_resources
+        ORDER BY resource_key ASC LIMIT ?`,
+    ).bind(
+      scope.orgId,
+      scope.customerId,
+      connectionId,
+      connectionId,
+      scope.orgId,
+      scope.customerId,
+      connectionId,
+      MAX_QUERY_RESOURCES,
+    ).all<QueryResourceRow>();
     return (rows.results ?? []).map((row) => {
       let configuration: CmdbQueryResource["configuration"] = null;
       try {
@@ -256,6 +321,11 @@ export class CmdbWorkspaceRepository {
         nativeId: row.native_id,
         tags: parseRecord(row.tags_json ?? "{}"),
         configuration,
+        lifecycleState: row.lifecycle_state,
+        consecutiveCompleteMisses: Number(row.consecutive_complete_misses),
+        evidenceSnapshotId: row.evidence_snapshot_id,
+        evidenceSnapshotSha256: row.evidence_snapshot_sha256,
+        contentSha256: row.content_sha256,
       };
     });
   }

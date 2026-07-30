@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { safeCsvCell } from "../../../lib/safe-csv";
 import type { MspScorecard, ScoredTrendPoint, TrendDirection } from "../../../lib/kubernetes-posture-trend";
 import { formatTimestamp, usePilotState } from "../../components/use-pilot-state";
 
@@ -74,7 +75,7 @@ export function TrendsWorkspace() {
     const body = ["cluster,score,delta,direction,open_findings,critical_high,scans,last_scan",
       ...scorecard.clusters.map((row) => [
         row.clusterName, row.score ?? "", row.delta ?? "", row.direction, row.openFindings, row.criticalHigh, row.scanCount, row.lastScanAt ?? "",
-      ].map((cell) => { const t = String(cell); return /[",\r\n]/u.test(t) ? `"${t.replaceAll('"', '""')}"` : t; }).join(","))].join("\r\n");
+      ].map(safeCsvCell).join(","))].join("\r\n");
     const blob = new Blob([body], { type: "text/csv" });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");

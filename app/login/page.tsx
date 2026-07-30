@@ -20,6 +20,24 @@ interface LoginResult {
   readonly mfaEnrollmentRequired: boolean;
 }
 
+interface FederationProvider {
+  readonly id: string;
+  readonly kind: "oidc" | "saml";
+  readonly label: string;
+  readonly startUrl: string;
+}
+
+interface FederationStatus {
+  readonly identityMode: "oidc" | "federated";
+  readonly invitationOnly: boolean;
+  readonly providers: readonly FederationProvider[];
+  readonly saml?: {
+    readonly metadataUrl: string;
+    readonly assertionConsumerServiceUrl: string;
+    readonly assertionsSigned: true;
+  };
+}
+
 const SHOWCASE = [
   {
     tone: "graph",
@@ -142,6 +160,7 @@ export default function LoginPage() {
   const [organizationName, setOrganizationName] = useState("Sutra MSP");
   const [bootstrapToken, setBootstrapToken] = useState("");
   const [identityMode, setIdentityMode] = useState<"local" | "password">("local");
+  const [federation, setFederation] = useState<FederationStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
@@ -151,6 +170,11 @@ export default function LoginPage() {
   const [returnTo] = useState(() =>
     typeof window === "undefined" ? "/dashboard" : safeReturnTo(window.location.search),
   );
+  const [invitationToken] = useState(() => {
+    if (typeof window === "undefined") return null;
+    const candidate = new URLSearchParams(window.location.search).get("invitation");
+    return candidate !== null && /^[A-Za-z0-9_-]{43}$/u.test(candidate) ? candidate : null;
+  });
 
   useEffect(() => {
     let active = true;
@@ -161,11 +185,24 @@ export default function LoginPage() {
         setIdentityMode(body.identityMode === "password" ? "password" : "local");
         setMode(body.bootstrapRequired ? "bootstrap" : "login");
       })
-      .catch((caught: unknown) => {
+      .catch(async (caught: unknown) => {
         if (!active) return;
         if (caught instanceof AuthRequestError && caught.status === 404) {
-          setMode("hosted");
-          setError(null);
+          try {
+            const response = await fetch("/api/auth/federation", {
+              cache: "no-store",
+              credentials: "same-origin",
+            });
+            const configured = await readAuthResponse<FederationStatus>(response);
+            if (!active) return;
+            setFederation(configured);
+            setMode("hosted");
+            setError(null);
+          } catch (federationError) {
+            if (!active) return;
+            setMode("hosted");
+            setError(federationError instanceof Error ? federationError.message : "Enterprise identity is unavailable");
+          }
           return;
         }
         setError(caught instanceof Error ? caught.message : "Sutra could not check the workspace");
@@ -250,6 +287,12 @@ export default function LoginPage() {
   }
 
   const waiting = mode === "checking" || currentSession.loading;
+  function federationHref(provider: FederationProvider): string {
+    const target = new URL(provider.startUrl, "https://sutra.invalid");
+    target.searchParams.set("returnTo", returnTo);
+    if (invitationToken !== null) target.searchParams.set("invitation", invitationToken);
+    return `${target.pathname}${target.search}`;
+  }
 
   return (
     <main className="auth-page">
@@ -288,14 +331,21 @@ export default function LoginPage() {
               <div className="auth-heading">
                 <span>Enterprise identity</span>
                 <h2>Sign in to Sutra</h2>
-                <p>Continue through the organization identity service. Sutra accepts only verified, pre-provisioned memberships.</p>
+                <p>Continue through an identity provider configured by your organization. Sutra accepts only verified, pre-provisioned memberships.</p>
               </div>
-              <a
-                className="button button-primary auth-submit"
-                href={`/api/auth/oidc/start?returnTo=${encodeURIComponent(returnTo)}`}
-              >
-                Continue with Zoho SSO
-              </a>
+              {federation?.providers.map((provider, index) => (
+                <a
+                  className={`button ${index === 0 ? "button-primary" : "button-secondary"} auth-submit`}
+                  href={federationHref(provider)}
+                  key={`${provider.kind}:${provider.id}`}
+                >
+                  Continue with {provider.label}
+                </a>
+              ))}
+              {error ? <p className="auth-error" role="alert">{error}</p> : null}
+              {federation?.saml ? (
+                <p className="auth-help">Enterprise SAML requires a signed, tenant-bound assertion from the configured IdP.</p>
+              ) : null}
             </>
           ) : mode === "bootstrap" ? (
             <>
@@ -400,7 +450,7 @@ export default function LoginPage() {
           <p className="auth-local-note">
             <span aria-hidden="true">●</span>
             {mode === "hosted"
-              ? " Hosted identity · server-side membership required"
+              ? ` Enterprise identity · ${federation?.invitationOnly === false ? "administrator or policy provisioned" : "administrator-provisioned membership required"}`
               : identityMode === "password"
                 ? " Managed sign-in · password + mandatory MFA, membership provisioned by your operator"
                 : " Organization-managed access · external sign-in is disabled"}

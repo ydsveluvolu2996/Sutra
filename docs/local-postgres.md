@@ -1,9 +1,9 @@
 # Local Docker and PostgreSQL walkthrough stack
 
 Sutra can run as a self-contained local stack with PostgreSQL 18, the web control
-plane, and the signed fixture/live collector. Cloudflare D1 remains the hosted
-Sites storage path; setting `DATABASE_URL` selects the PostgreSQL compatibility
-adapter for local processes.
+plane, and the signed fixture/live collector. Cloudflare D1 remains available for
+the local/Sites compatibility path; managed production uses Multi-AZ PostgreSQL.
+Setting `DATABASE_URL` selects the PostgreSQL adapter for local processes.
 
 ## Start from a normal Terminal
 

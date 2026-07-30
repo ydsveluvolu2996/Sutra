@@ -33,6 +33,7 @@ import {
 
 import type { AgentlessScanFinding } from "./executor.js";
 import type { LaunchScanInstanceInput, ScanInstanceOperations } from "./ec2-scan-worker.js";
+import type { AgentlessResourceTracker } from "./agentless-execution.js";
 
 const AMI_ID = /^ami-[0-9a-f]{8,17}$/u;
 const SUBNET_ID = /^subnet-[0-9a-f]{8,17}$/u;
@@ -159,6 +160,7 @@ export interface AwsScanInstanceOperationsConfig {
   readonly settings: ScanInstanceSettings;
   readonly ec2: (region: string) => EC2Client;
   readonly readObject: ReadFindingsObject;
+  readonly resourceTracker?: AgentlessResourceTracker;
 }
 
 export class AwsScanInstanceOperations implements ScanInstanceOperations {
@@ -221,6 +223,13 @@ export class AwsScanInstanceOperations implements ScanInstanceOperations {
         "RunInstances reported success without an instance id; an instance may be running and MUST be checked by hand",
       );
     }
+    await this.config.resourceTracker?.created({
+      sourceVolumeId: input.scanVolumeId,
+      resourceId: instanceId,
+      resourceKind: "scan_instance",
+      accountScope: "sutra-scan-account",
+      region: input.region,
+    });
     return instanceId;
   }
 
@@ -304,5 +313,10 @@ export class AwsScanInstanceOperations implements ScanInstanceOperations {
 
   public async terminate(instanceId: string, region: string): Promise<void> {
     await this.config.ec2(region).send(new TerminateInstancesCommand({ InstanceIds: [instanceId] }));
+    await this.config.resourceTracker?.deleted({
+      resourceId: instanceId,
+      resourceKind: "scan_instance",
+      region,
+    });
   }
 }

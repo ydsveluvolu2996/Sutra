@@ -1,19 +1,15 @@
-import { env } from "cloudflare:workers";
-
 import { AgentlessScanRepository } from "../../../../../../db/agentless-scan-repository";
 import { getConnectionForOrg } from "../../../../../../db/pilot-repository";
+import { reconcileAgentlessBrokerRun } from "../../../../../../lib/agentless-broker-reconciliation";
 import { assertSessionCapability, requireApiSession } from "../../../../../../lib/api-auth";
-import {
-  describeAgentlessConfigGap,
-  resolveAgentlessExecutorConfig,
-  type AgentlessConfigSource,
-} from "../../../../../../lib/aws-agentless-executor-config";
-import {
-  AGENTLESS_SCAN_EXECUTION_READINESS,
-  isAgentlessExecutionReady,
-} from "../../../../../../lib/aws-agentless-readiness";
 import { assertSameOrigin, readBoundedJson } from "../../../../../../lib/aws-pilot-security";
-import { errorResponse, jsonResponse, startAgentlessScan } from "../../../../../../lib/pilot-server";
+import {
+  errorResponse,
+  getAgentlessExecutionReadiness,
+  jsonResponse,
+  readAgentlessRun,
+  startAgentlessScan,
+} from "../../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +43,8 @@ function badRequest(): never {
  * vulnerability queue. Refusing loudly keeps "nothing looked" and "nothing is wrong"
  * separate facts.
  *
- * When the gaps close this route works without a code change: the readiness gate and
- * the config resolver are the only things between it and a real scan.
+ * When the gaps close this route works without a code change: signed broker
+ * readiness is the gate, and only the broker knows its scan-account settings.
  */
 export async function POST(
   request: Request,
@@ -94,10 +90,8 @@ export async function POST(
       );
     }
 
-    const configuration = resolveAgentlessExecutorConfig(env as unknown as AgentlessConfigSource);
-    const ready = isAgentlessExecutionReady() && configuration.available;
-
-    if (!ready) {
+    const readiness = await getAgentlessExecutionReadiness();
+    if (!readiness.canExecute) {
       // 409, not 200-with-a-flag and not 500. The request was well formed and
       // authorized; the system is not in a state where it may act. Nothing has been
       // mutated: the run stays 'planned' and remains applicable later.
@@ -105,15 +99,7 @@ export async function POST(
         applied: false,
         runId,
         status: run.status,
-        readiness: AGENTLESS_SCAN_EXECUTION_READINESS,
-        configuration: configuration.available
-          ? { available: true as const }
-          : {
-            available: false as const,
-            missing: configuration.missing,
-            invalid: configuration.invalid,
-            summary: describeAgentlessConfigGap(configuration),
-          },
+        readiness,
         // Stated so no caller can read this response as a completed clean scan.
         interpretation:
           "No scan ran. No snapshot was created, nothing was billed, and no findings were "
@@ -130,10 +116,6 @@ export async function POST(
       throw Object.assign(new Error("Agentless scan run not found"), { code: "NOT_FOUND", status: 404 });
     }
 
-    // The scan region comes from the configured AZ, which the resolver already
-    // validated — EBS attach is AZ-bound, so these cannot disagree.
-    const scanRegion = configuration.settings.scanAvailabilityZone.slice(0, -1);
-
     // planned -> running BEFORE handing over, so a failure between here and the
     // collector leaves a run that is visibly in flight rather than one that still
     // looks applicable and could be started a second time.
@@ -145,13 +127,37 @@ export async function POST(
         runId,
         tenantId: orgId,
         connectionId,
-        region: scanRegion,
         plan,
-        settings: configuration.settings,
       });
     } catch (error) {
-      // The collector refused or is unreachable. Say so, and say what it means:
-      // nothing was snapshotted, so this is NOT a scan that found nothing.
+      // Re-read durable broker state before deciding. The execute response may
+      // have been lost after the broker accepted the run.
+      try {
+        const broker = await readAgentlessRun({ runId, tenantId: orgId, connectionId });
+        const status = await reconcileAgentlessBrokerRun({
+          repository,
+          scope,
+          run: { ...run, status: "running" },
+          connectionId,
+          plan,
+          broker,
+        });
+        if (status !== "running") {
+          return jsonResponse({
+            applied: false,
+            runId,
+            status,
+            reconciled: true,
+            error: broker.error,
+            interpretation:
+              "The broker's durable terminal state and teardown ownership were persisted. "
+              + "This is a failed scan, not a clean result.",
+          }, { status: 502 });
+        }
+      } catch {
+        // Both execute and signed poll were unavailable. Keep the row running:
+        // the broker may already own billable resources.
+      }
       return jsonResponse({
         applied: false,
         runId,
@@ -161,10 +167,31 @@ export async function POST(
           message: error instanceof Error ? error.message : "the collector could not start the scan",
         },
         interpretation:
-          "The scan was not started by the collector. Nothing was snapshotted and nothing is "
-          + "billing. This run is marked running and must be reconciled; do NOT read an empty "
+          "The collector outcome and billing state could not be proven. This run remains "
+          + "running and must be reconciled; do NOT read an empty "
           + "findings list for it as evidence that any volume is clean.",
       }, { status: 502 });
+    }
+
+    if (started.phase !== "running") {
+      const broker = await readAgentlessRun({ runId, tenantId: orgId, connectionId });
+      const status = await reconcileAgentlessBrokerRun({
+        repository,
+        scope,
+        run: { ...run, status: "running" },
+        connectionId,
+        plan,
+        broker,
+      });
+      return jsonResponse({
+        applied: status === "completed",
+        runId,
+        status,
+        reconciled: true,
+        interpretation: status === "completed"
+          ? "The broker's prior terminal result, findings, and teardown ownership were persisted."
+          : "The broker's prior failure and teardown ownership were persisted; this is not a clean result.",
+      }, { status: status === "completed" ? 200 : 502 });
     }
 
     // 202: the scan outlives this request, so a result is never implied here.

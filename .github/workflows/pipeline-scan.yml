@@ -50,27 +50,7 @@ jobs:
         with:
           version: v0.72.0
 
-      - name: Trivy dependency and configuration scans
-        env:
-          INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
-        run: |
-          set -euo pipefail
-          case "$INPUT_FAIL_ON" in
-            critical) severities="CRITICAL" ;;
-            high) severities="HIGH,CRITICAL" ;;
-            medium) severities="MEDIUM,HIGH,CRITICAL" ;;
-            low) severities="LOW,MEDIUM,HIGH,CRITICAL" ;;
-            *)
-              echo "Invalid fail-on value. Expected critical, high, medium, or low." >&2
-              exit 2
-              ;;
-          esac
-          trivy fs --quiet --severity "$severities" \
-            --ignore-unfixed --exit-code 1 .
-          trivy config --quiet --severity "$severities" \
-            --exit-code 1 --ignorefile .trivyignore.yaml .
-
-      - name: Sutra repository gate and normalized stage report
+      - name: Fail-closed repository security gate
         env:
           INPUT_FAIL_ON: ${{ inputs.fail-on || 'high' }}
         run: |

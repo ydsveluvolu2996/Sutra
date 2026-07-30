@@ -1,4 +1,4 @@
-import { getLatestConnectionForOrg } from "../../../../../../db/pilot-repository";
+import { getLatestConnectionForCustomer } from "../../../../../../db/pilot-repository";
 import { transitionFindingCase } from "../../../../../../db/case-repository";
 import { ApiTokenRepository } from "../../../../../../db/api-token-repository";
 import { authenticatePublicRequest, publicError, PublicApiError, sha256HexOf } from "../../../../../../lib/public-api";
@@ -39,8 +39,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ caseI
         headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "idempotency-replayed": "true" },
       });
     }
-    const connection = await getLatestConnectionForOrg(token.orgId);
-    if (connection === null || connection.customerId !== token.customerId) {
+    const connection = await getLatestConnectionForCustomer(token.orgId, token.customerId);
+    if (connection === null) {
       throw new PublicApiError(404, "NOT_FOUND", "No cloud connection is available to this token");
     }
     let updated;

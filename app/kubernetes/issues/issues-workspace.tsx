@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { safeCsvCell } from "../../../lib/safe-csv";
 import {
   buildKubernetesIssues,
   type IssueExposureInput,
@@ -226,10 +227,7 @@ export function IssuesWorkspace() {
       : ["priority,severity,reachability,runtime_observed,title,workload,recommendation",
         ...report.issues.map((issue) => [
           issue.priority, issue.severity, issue.reachability, issue.runtimeObserved, issue.title, issue.workload, issue.recommendation,
-        ].map((cell) => {
-          const text = String(cell);
-          return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-        }).join(","))].join("\r\n");
+        ].map(safeCsvCell).join(","))].join("\r\n");
     const blob = new Blob([body], { type: format === "csv" ? "text/csv" : "application/json" });
     const href = URL.createObjectURL(blob);
     const anchor = document.createElement("a");

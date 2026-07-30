@@ -105,9 +105,14 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /lookup unavailable; full gate required/u);
   assert.match(ci, /node scripts\/ci-test-shard\.mjs\s*$/mu);
   assert.doesNotMatch(ci, /node scripts\/ci-test-shard\.mjs --shard/u);
-  assert.match(ci, /trivy fs .*--severity HIGH,CRITICAL/u);
-  assert.match(ci, /trivy config .*--severity HIGH,CRITICAL/u);
   assert.match(ci, /node scripts\/pipeline-scan\.mjs --fail-on high/u);
+  const pipelineScan = readFileSync(
+    new URL("../scripts/pipeline-scan.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(pipelineScan, /"fs", "--quiet", "--scanners", "vuln"/u);
+  assert.match(pipelineScan, /"config", "--quiet", "--severity"/u);
+  assert.match(pipelineScan, /required scanner unavailable: trivy/u);
   assert.match(ci, /pnpm build/u);
   assert.match(ci, /pnpm test:rendered/u);
   assert.match(ci, /if: \$\{\{ always\(\) \}\}/u);

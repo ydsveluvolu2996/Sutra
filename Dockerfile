@@ -60,6 +60,7 @@ COPY --from=builder --chown=node:node /app/scripts/start-pilot.mjs /app/scripts/
 COPY --from=builder --chown=node:node /app/scripts/serve-worker.mjs /app/scripts/serve-worker.mjs
 COPY --from=builder --chown=node:node /app/scripts/worker-serve-config.mjs /app/scripts/worker-serve-config.mjs
 COPY --from=builder --chown=node:node /app/scripts/internal-job-request.mjs /app/scripts/internal-job-request.mjs
+COPY --from=builder --chown=node:node /app/scripts/production-job-runner.mjs /app/scripts/production-job-runner.mjs
 COPY --from=builder --chown=node:node /app/scripts/setup-local-pilot.mjs /app/scripts/setup-local-pilot.mjs
 COPY --from=builder --chown=node:node /app/scripts/postgres-migrate.mjs /app/scripts/postgres-migrate.mjs
 # The EPSS bulk refresh, invoked from the host by deploy/ec2/refresh-vuln-feeds.sh
@@ -84,6 +85,9 @@ COPY --from=builder --chown=node:node /app/postgres/migrations /app/postgres/mig
 COPY --from=builder --chown=node:node /app/docker/entrypoint.sh /app/docker/entrypoint.sh
 COPY --from=builder --chown=node:node /app/docker/postgres-init.sh /app/docker/postgres-init.sh
 COPY --from=builder --chown=node:node /app/deploy/ec2 /app/deploy/ec2
+COPY --from=builder --chown=node:node /app/deploy/production /app/deploy/production
+
+RUN chmod 0755 /app/deploy/production/entrypoint.sh /app/deploy/production/broker-entrypoint.sh
 
 RUN mkdir -p /app/runtime /app/.sutra /app/.wrangler \
     && ln -sfn /app/runtime/.dev.vars /app/.dev.vars \

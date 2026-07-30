@@ -40,7 +40,7 @@ function activationBase(requestUrl: string, configuredOrigin: string | undefined
 function activationUrl(request: Request, token: string, deliveryEnv: InvitationDeliveryEnv): URL {
   const base = activationBase(request.url, deliveryEnv.SUTRA_PUBLIC_ORIGIN);
   if (isHostedOidcRuntime()) {
-    const url = new URL("/api/auth/oidc/start", base);
+    const url = new URL("/login", base);
     url.searchParams.set("invitation", token);
     url.searchParams.set("returnTo", "/dashboard");
     return url;

@@ -9,6 +9,7 @@ interface ConnectorSummary {
   readonly baseUrl: string;
   readonly projectKey: string | null;
   readonly secretPreview: string;
+  readonly secretStorage: "local" | "managed";
   readonly enabled: boolean;
 }
 
@@ -114,17 +115,17 @@ export function ItsmConnectorsPanel({ connectionId }: { readonly connectionId: s
           {busy ? "Saving…" : "Save connector"}
         </button>
       </div>
-      <p className="panel-footnote">Private-beta secrets are stored locally. Hosted production requires migration to the managed secret service.</p>
+      <p className="panel-footnote">Hosted credentials are tenant-bound in the managed secret service. Local storage is identified below and is never reported as production-ready.</p>
       {error ? <p className="cmdbq-error" role="alert">{error}</p> : null}
       {connectors.length === 0 ? <p className="panel-footnote">No ITSM connectors configured.</p> : (
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Secret</th><th>Inbound webhook</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Credential storage</th><th>Inbound webhook</th><th>Status</th><th /></tr></thead>
           <tbody>{connectors.map((connector) => (
             <tr key={connector.id}>
               <td>{connector.name}{connector.projectKey ? ` · ${connector.projectKey}` : ""}</td>
               <td>{connector.connectorType === "jira" ? "Jira" : "ServiceNow"}</td>
               <td><code>{connector.baseUrl}</code></td>
-              <td><code>{connector.secretPreview}</code></td>
+              <td>{connector.secretStorage === "managed" ? "Managed" : "Local development"}</td>
               <td><code>/api/v1/itsm/inbound/{connector.id}</code></td>
               <td>{connector.enabled ? "Enabled" : "Disabled"}</td>
               <td><button type="button" className="button button-secondary" onClick={() => void remove(connector.id)}>Delete</button></td>

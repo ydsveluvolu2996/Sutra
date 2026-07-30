@@ -8,7 +8,10 @@ const JOB_KIND = /^[a-z][a-z0-9.-]{0,63}$/u;
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_ERROR_LENGTH = 2_000;
 const BASE_RETRY_DELAY_MS = 5_000;
-const LEASE_MS = 60_000;
+// A live AWS inventory request is bounded at 330 seconds. Keep the durable
+// queue lease beyond that boundary so a healthy collection cannot be reclaimed
+// by another replica while the authenticated broker request is still running.
+const LEASE_MS = 7 * 60_000;
 
 export type BackgroundJobStatus = "queued" | "leased" | "succeeded" | "failed" | "dead_letter";
 

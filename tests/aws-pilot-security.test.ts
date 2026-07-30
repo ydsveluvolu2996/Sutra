@@ -10,6 +10,7 @@ import {
   assertSyncTransition,
   decryptExternalId,
   deriveLocalAwsConnectionIdentity,
+  deriveScopedAwsConnectionIdentity,
   encryptExternalId,
   generateExternalId,
   mayAdvanceSuccessfulSync,
@@ -223,6 +224,34 @@ test("local one-account identity is stable and partition-bound", async () => {
   assert.match(first.connectionId, /^conn_[a-f0-9]{32}$/u);
   assert.notDeepEqual(otherPartition, first);
   assert.notDeepEqual(otherAccount, first);
+});
+
+test("hosted AWS identities are stable within one org and isolated across orgs", async () => {
+  const first = await deriveScopedAwsConnectionIdentity(
+    "org_hosted_alpha",
+    "123456789012",
+    "aws",
+  );
+  const replay = await deriveScopedAwsConnectionIdentity(
+    "org_hosted_alpha",
+    "123456789012",
+    "aws",
+  );
+  const otherTenant = await deriveScopedAwsConnectionIdentity(
+    "org_hosted_beta",
+    "123456789012",
+    "aws",
+  );
+  assert.deepEqual(replay, first);
+  assert.notDeepEqual(otherTenant, first);
+  assert.deepEqual(
+    await deriveScopedAwsConnectionIdentity("org_local_sutra", "123456789012", "aws"),
+    await deriveLocalAwsConnectionIdentity("123456789012", "aws"),
+  );
+  await assert.rejects(
+    deriveScopedAwsConnectionIdentity("../foreign", "123456789012", "aws"),
+    isPilotError("INVALID_INPUT"),
+  );
 });
 
 test("local onboarding handoff and role registration serialize per AWS account", async () => {

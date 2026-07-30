@@ -65,6 +65,9 @@ export async function POST(request: Request): Promise<Response> {
     } catch (caught) {
       deliveryError = caught instanceof Error ? caught.name : "dispatch-error";
     }
+    if (delivered) {
+      await repository.recordOutboundSuccess(scope, connector.id, connector.updatedAt);
+    }
     // Deliberately one attempt: durable retries are owned by background_jobs.
     const outcome = delivered ? `delivered (${statusCode})` : statusCode === undefined ? `failed (${deliveryError})` : `rejected (${statusCode})`;
     await addCaseNote({

@@ -3,7 +3,7 @@ import { isHostedOidcRuntime } from "./api-auth";
 import type { HostedBrokerPublicKeyResolver } from "./hosted-broker-request-security";
 
 interface HostedBrokerIngestEnvironment {
-  readonly SUTRA_HOSTED_ENABLED?: string;
+  readonly SUTRA_BROKER_PUSH_INGEST_ENABLED?: string;
   readonly SUTRA_BROKER_PUBLIC_KEYS?: string;
 }
 
@@ -17,12 +17,13 @@ function runtime(): HostedBrokerIngestEnvironment {
 
 /**
  * The hosted broker ingestion endpoint is INERT unless the deployment is a
- * hosted OIDC runtime AND the SUTRA_HOSTED_ENABLED master switch is the exact
- * string "true". Off by default: any other value keeps the route returning a
- * flat 404 as if it did not exist.
+ * hosted OIDC runtime AND the legacy push-ingest switch is the exact string
+ * "true". The production hosted broker uses authenticated app-to-broker
+ * request/response calls and does not enable this superseded callback surface.
  */
 export function isHostedBrokerIngestEnabled(): boolean {
-  return isHostedOidcRuntime() && runtime().SUTRA_HOSTED_ENABLED === "true";
+  return isHostedOidcRuntime() &&
+    runtime().SUTRA_BROKER_PUSH_INGEST_ENABLED === "true";
 }
 
 /**

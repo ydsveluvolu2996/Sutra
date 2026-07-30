@@ -21,6 +21,52 @@ misconfigurations:
       is bounded by the scanner task holding no AWS credentials and
       SutraAgentlessScannerRole denying rds, secretsmanager, ssm:GetParameter*,
       dynamodb, iam, sts:AssumeRole and organizations.
+  - id: AWS-0035
+    paths:
+      - infrastructure/production-ha.yaml
+    statement: >-
+      The scanner treats every ECS task volume as EFS and therefore requests
+      TransitEncryption. AppTaskDefinition uses only three task-ephemeral
+      Fargate bind volumes for runtime configuration and process scratch; it has
+      no EFSVolumeConfiguration, no NFS endpoint, and no persistence across task
+      replacement. CloudFormation has no in-transit-encryption property for this
+      volume type. Durable production state is in TLS RDS, Secrets Manager, S3,
+      and the separately reviewed hosted broker.
+  - id: AWS-0036
+    paths:
+      - infrastructure/production-ha.yaml
+    statement: >-
+      The three flagged AppTaskDefinition environment values are not credential
+      material: SUTRA_ITSM_SECRET_BACKEND is the fixed literal
+      aws-secrets-manager, SUTRA_ITSM_SECRET_PREFIX is a namespace, and
+      SUTRA_ITSM_SECRET_KMS_KEY_ARN is the public identifier of the customer
+      managed KMS key. The scanner matches the word SECRET in their variable
+      names. Actual ITSM provider credentials are never placed in the task
+      environment or database; the application resolves a tenant/customer/
+      connector-bound Secrets Manager object at dispatch time, and its task role
+      is limited to that namespace and KMS key.
+  - id: AWS-0053
+    paths:
+      - infrastructure/production-ha.yaml
+    statement: >-
+      PublicLoadBalancer is intentionally internet-facing because it is the
+      customer HTTPS entrypoint. It has no HTTP listener, deletion protection is
+      enabled, the only ingress rule is TCP 443 from the required
+      AlbIngressPrefixListId, TLS uses the reviewed policy/certificate, WAF is an
+      explicit deployment decision, and backend tasks have no public IPs. An
+      internal ALB would make the public product unreachable and is not a valid
+      remediation for this specific resource.
+  - id: AWS-0132
+    paths:
+      - infrastructure/production-ha.yaml
+    statement: >-
+      This path contains two scanner false positives with distinct AWS
+      constraints. EvidenceBucket explicitly uses aws:kms and the supplied
+      customer-managed KmsKeyArn, but the scanner cannot resolve the
+      CloudFormation intrinsic. AccessLogBucket is exclusively the ALB access-log
+      destination; ALB log delivery requires SSE-S3 and does not support SSE-KMS
+      for that destination. Both buckets block public access, enforce TLS,
+      version objects, and retain data under explicit lifecycle policies.
   - id: DS-0002
     paths:
       - services/agentless-scanner/Dockerfile

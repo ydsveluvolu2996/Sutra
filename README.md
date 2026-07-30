@@ -6,10 +6,16 @@ configuration management database (CMDB) and cloud security posture management
 read-only inventory, resource relationships, evidence-backed configuration checks,
 and scoped access to findings.
 
-> **Deploying?** See [`DEPLOY.md`](DEPLOY.md) for a one-command single-box EC2
-> deployment (Docker Compose + Caddy TLS + automatic maintenance page), and
-> [`deploy/ec2/README.md`](deploy/ec2/README.md) for the full runbook including the
-> operator/client account lifecycle.
+> **Managed production:** see
+> [`deploy/production/README.md`](deploy/production/README.md) for the
+> high-availability application, worker, broker, PostgreSQL, evidence-storage and
+> protected-release design. The checked-in stack and workflow are deployable source;
+> repository validation is not evidence that they have been deployed or accepted in
+> a live AWS account.
+>
+> **Legacy/private-beta paths:** [`DEPLOY.md`](DEPLOY.md) and
+> [`deploy/ec2/README.md`](deploy/ec2/README.md) retain the single-host EC2 path for
+> staging and private-beta use. They are not the managed-production topology.
 
 > **Local pilot boundary:** the application supports one persistent local MSP
 > workspace, local identities with enforced MFA/RBAC, and multiple deterministic
@@ -37,13 +43,15 @@ normalization/detections, and expanded metadata collectors for EBS, ENI, ALB/NLB
 KMS, DynamoDB, and ECR are also implemented. Lambda inventory remains off because
 `ListFunctions` can expose environment-variable values. These local capabilities
 do not clear the hosted production gates below and are not presented as a
-Cloudaware, GuardDuty, Inspector, Security Hub, SIEM, billing-reconciliation, or
+CloudAware, GuardDuty, Inspector, Security Hub, SIEM, billing-reconciliation, or
 vendor-certified ITSM replacement.
 
-The hosted identity foundation now includes the real Cognito/OIDC PKCE callback
-boundary and an MFA-protected, single-use organization invitation lifecycle.
-Hosted release remains blocked on the remaining tenant-isolation, recovery,
-rate-limit and broker gates documented below.
+The hosted identity foundation includes OIDC PKCE, SAML 2.0 service-provider
+federation, SCIM 2.0 user/group provisioning, passwordless invite-only membership,
+MFA-sensitive administration, session revocation and tenant/customer authorization.
+These are implemented and contract-tested in source. A hosted release still requires
+the selected IdP and SCIM client to be configured and exercised, plus live
+multi-tenant, recovery, rate-limit and broker acceptance evidence.
 
 The verified `sutracmdb.com` Zoho mail aliases, Workers-compatible Zoho Mail
 REST delivery, and optional Zoho OIDC configuration are documented in
@@ -76,9 +84,9 @@ Included in the target slice:
 - Optional read-only import of findings from native AWS security services that the
   customer has already enabled. Sutra does not enable or configure those
   billable services.
-- Tenant-scoped public API access and Jira/ServiceNow case synchronization, after
-  hosted gateway, managed-secret, delivery-worker and vendor-sandbox gates are
-  cleared.
+- Tenant-scoped public API access and Jira/ServiceNow case synchronization. The
+  hosted managed-secret paths are implemented; live vendor-sandbox delivery,
+  inbound-signature and operational recovery tests remain activation gates.
 
 Explicitly outside the first slice:
 
@@ -92,12 +100,12 @@ Explicitly outside the first slice:
   evidence sources, not GuardDuty parity.
 - Security Hub-equivalent standards coverage, delegated administration, ASFF
   federation, or cross-product normalization.
-- Customer invoicing, marketplace metering, SAML/SCIM, PSA integrations, data
-  residency selection, or customer-managed keys. Local FinOps analytics and
-  Jira/ServiceNow synchronization are implemented, but they are not billing-grade
-  reconciliation or vendor-certified production integrations. Email, Slack and
-  Teams notification configuration/outbox support exists, but provider delivery
-  requires hosted managed-secret and workload-identity adapters.
+- Customer invoicing, marketplace metering, PSA integrations beyond the documented
+  Jira/ServiceNow scope, data-residency selection, or per-customer managed keys.
+  Local FinOps analytics and Jira/ServiceNow synchronization are implemented, but
+  they are not billing-grade reconciliation or vendor-certified production
+  integrations. Email, Slack and Teams notification configuration/outbox support
+  exists; provider credentials and live delivery still require operator activation.
 
 Future resource management must be a separate remediation plane with a different
 customer role, narrowly scoped per-action permissions, dry-run/diff, approval,
@@ -106,42 +114,42 @@ audit evidence. Write permissions must never be added to the CMDB collector role
 
 ## Architecture
 
-The production design deliberately separates the internet-facing control plane
-from AWS credentials and STS access:
+The managed-production design deliberately separates the internet-facing
+application from AWS credentials and STS access:
 
 ```mermaid
 flowchart LR
-  U["MSP and customer users"] --> C["Cloudflare control plane<br/>UI, API, tenant authorization"]
-  C --> D["D1<br/>hot scoped state"]
-  C --> Q["Durable queue / workflow"]
-  Q -->|"signed, scoped job with opaque IDs"| B["AWS-hosted broker and collectors<br/>workload IAM role"]
+  U["MSP and customer users"] --> E["Approved edge / DNS"]
+  E --> A["Public TLS ALB"]
+  A --> C["HA application tasks<br/>UI, API, tenant authorization"]
+  C --> D["Multi-AZ PostgreSQL<br/>tenant state, jobs and leases"]
+  D --> W["HA notification and job workers"]
+  C -->|"Ed25519 signed, scoped request"| B["HA private broker tasks<br/>workload IAM role"]
   B -->|"STS AssumeRole + unique ExternalId"| R["Customer-owned read-only IAM role"]
-  R --> A["AWS metadata APIs"]
-  B -->|"signed manifests and normalized evidence"| I["Authenticated ingestion"]
-  I --> D
-  I --> O["R2<br/>bounded raw evidence"]
+  R --> AWSAPI["AWS metadata APIs"]
+  B -->|"signed manifests and normalized evidence"| C
+  C --> O["Private KMS-encrypted S3<br/>immutable evidence"]
+  C --> S["AWS Secrets Manager<br/>runtime and integration secrets"]
 ```
 
-The Cloudflare control plane owns user interaction, tenant authorization, CMDB
-queries, finding views, and job coordination. D1 is the hot relational index; R2 is
-the planned store for compressed raw snapshots and large evidence. Durable jobs
-handle collection and evaluation outside web requests.
+The application owns user interaction, tenant authorization, CMDB queries,
+finding views and durable job coordination. PostgreSQL shares sessions, replay
+state, broker operation leases, jobs and tenant state across replicas. Private
+S3 objects are addressed through tenant/actor-bound, expiring, single-use grants;
+checksums are verified on write and read. Managed ITSM and notification credentials
+are referenced from the database and resolved from AWS Secrets Manager.
 
-The AWS broker is a separate AWS-hosted service (for example Lambda, ECS, and/or
-Step Functions) with its own workload IAM role. It resolves a registered connection
+The private AWS broker uses a workload IAM role, resolves registered connections
 server-side, obtains short-lived STS credentials, collects only allowlisted metadata,
-and never returns credentials to the control plane or browser. The broker endpoint
-must authenticate the control plane, reject replay, enforce tenant/connection scope,
-and rate-limit work. A browser, generic web handler, D1 row, or Cloudflare variable
-must never contain a durable vendor AWS access key.
+and never returns credentials to the application or browser. Requests and responses
+use separate Ed25519 keys with replay and scope enforcement. The repository also
+contains a durable job-runner sidecar and the hosted agentless execution/reconciliation
+path. Agentless execution has not completed a live end-to-end account test and must
+remain disabled until its exact operator configuration and attestation pass.
 
-The diagram is the hosted target architecture. The repository implements its local
-equivalent: a tenant-scoped control-plane API, D1 snapshots, a signed replay-resistant
-loopback broker boundary, encrypted connection material, behavioral trust probes,
-selected service-specific inventory adapters, and tenant-scoped durable job,
-retry/backoff, lease and DLQ primitives. It does not yet contain the deployed hosted
-queue/workflow workers, managed secret service, R2 evidence path, deployed AWS
-worker fleet, or production multi-tenant identity and authorization plane.
+This is the checked-in managed-production architecture, not a claim that it is
+currently deployed. The D1/Cloudflare and single-host PostgreSQL paths remain useful
+for local development and legacy private-beta operation.
 
 ## Trust-role onboarding
 
@@ -162,9 +170,10 @@ The intended onboarding contract is:
 6. Only a complete, authenticated, checksummed collection can replace the current
    CMDB snapshot. Partial or failed runs cannot retire unseen resources.
 
-The template in `infrastructure/customer-role.yaml` is a design artifact for review
-and controlled sandbox testing. It is not evidence that the vendor broker, tenant
-isolation, validation probes, or operational controls exist.
+The templates in `infrastructure/customer-role.yaml` and
+`infrastructure/customer-onboarding-role.yaml` are versioned, contract-tested source
+artifacts. They are not evidence that a customer's role was deployed correctly or
+that the live broker, negative ExternalId probes and offboarding workflow passed.
 
 ## Production hold: P0 gates
 
@@ -177,7 +186,7 @@ The minimum P0 exit gates are:
 
 | Area | Required evidence before production AWS access |
 | --- | --- |
-| Identity | Production OIDC/session lifecycle, MFA/step-up policy, CSRF protection, invitation expiry and revocation |
+| Identity | Selected OIDC/SAML provider and SCIM client configured; session lifecycle, MFA/step-up, CSRF, invitation expiry/revocation, provisioning and deprovisioning accepted live |
 | Tenant isolation | Central server authorization plus negative tests across at least two organizations and customers for every route, job, cache, object, and export |
 | AWS broker | Deployed AWS workload identity, authenticated/replay-resistant broker protocol, fixed action/role allowlists, short STS sessions, and no long-lived AWS keys |
 | Trust validation | Canonical ARN/account/partition checks, restrictive STS session policy, fetched role/trust-policy attestation, `GetCallerIdentity`, identical-field correct/missing/wrong ExternalId probes, disable, and truthful local offboarding tests. Rotation is rejected until a two-phase AWS-side workflow is implemented. |
@@ -245,8 +254,9 @@ screenshots, logs, issues, or pull requests.
 | `app/` | vinext/React control plane, real local onboarding, dashboard, CMDB, findings, cases, security events, compliance, FinOps and exports |
 | `lib/` | Domain types, cryptographic/request boundaries, payload validation, and control definitions |
 | `db/` | Drizzle/D1/PostgreSQL connection, sync, immutable snapshot, relationship, finding, case, exception, security-event, cost and audit repositories |
-| `infrastructure/` | Customer read-only IAM role template for controlled sandbox use |
-| `services/aws-collector/` | Signed loopback broker, encrypted registry, fixture/live runners, STS trust validation, and AWS adapters |
+| `infrastructure/` | Customer role artifacts plus the managed-production HA CloudFormation design |
+| `deploy/production/` | Managed-production validation and one-release operating contract |
+| `services/aws-collector/` | Local and hosted brokers, PostgreSQL-backed replay/lease state, fixture/live runners, STS trust validation, agentless execution and AWS adapters |
 | `docs/` | Production architecture, AWS integration, threat model, quality gates, and acceptance criteria |
 | `tests/` | Deterministic domain, API, repository, tenant-isolation, collector, Kubernetes and rendered-route tests; targeted negative isolation tests exist, but production isolation-under-load and independent assurance remain gates |
 | `public/` | Static assets and a downloadable copy of the customer-role template |
@@ -281,12 +291,19 @@ production P0 gates above.
 ## Deployment posture
 
 `pnpm build` creates a deployable web artifact; it does not authorize a production
-release. This repository intentionally has no automatic production deployment in
-CI. Development, staging, and production must use separate Cloudflare resources,
-AWS accounts/principals, broker identities, encryption/signing keys, queues, and data
-stores. Deployment automation must use short-lived OIDC federation rather than
-stored cloud access keys, pin the reviewed artifact digest, run forward-only
-migrations, and require environment approval for production.
+release. The protected
+`.github/workflows/production-ha-release.yml` workflow builds, scans and promotes
+the application, notification-worker and broker images as one release, runs the
+migration task, verifies the deployed application digest and rolls services back
+together on failure. It uses short-lived GitHub OIDC and a protected production
+environment. Its presence—and a passing repository test—does not prove that an AWS
+environment, IdP, customer trust role, evidence bucket or vendor integration has
+passed live acceptance.
+
+Development, staging and production must use separate AWS accounts/principals,
+broker identities, encryption/signing keys, secrets and data stores. Infrastructure
+change sets remain separately reviewed; migrations must be backward compatible with
+the previous service revision.
 
 Until the P0 hold is cleared, use fixture mode or an isolated sandbox AWS account.
 A polished dashboard, successful role validation, or one-account scan is not proof
@@ -294,32 +311,12 @@ of multi-tenant production readiness.
 
 ## Roadmap
 
-See the detailed [Cloud operations parity roadmap](docs/cloudaware-parity-roadmap.md)
-for a delivered-versus-future capability matrix covering the current local pilot,
-the locally delivered CMDB, compliance, FinOps, public API and ITSM slices, their
-hosted production gates, broader AWS CSPM and native finding imports, remediation,
-SIEM/PSA integrations, and the Azure/GCP/Kubernetes research horizon. It is a
-sequencing document, not a Cloudaware parity claim or release-date commitment.
-
-1. **P0 security foundation:** production identity, memberships and customer grants,
-   centralized authorization, tenant-safe repositories, audit/outbox primitives,
-   migrations, and multi-tenant negative tests.
-2. **P0 AWS connection:** deploy the isolated broker, authenticated job protocol,
-   STS trust probes, connection lifecycle, and one production-quality VPC/security
-   group collector in sandbox accounts.
-3. **CMDB and controls:** durable sync/reconciliation, inventory provenance and
-   relationships, control-version/evaluation/finding lifecycle, coverage reporting,
-   and initial reviewed CSPM pack.
-4. **Operational readiness:** quotas, observability, backups/restores, retention and
-   deletion, incident/offboarding runbooks, staging load/failure tests, and security
-   assessment closure.
-5. **Controlled expansion:** additional collectors and native AWS finding imports,
-   then integrations and enterprise identity only after the core isolation and
-   reliability envelope is measured.
-6. **Separate future products:** opt-in remediation with a distinct write role;
-   package vulnerability coverage only with a real inventory/SBOM/CVE pipeline; and
-   behavioral detection only with the required event telemetry and response
-   operations.
+See the detailed [cloud operations capability roadmap](docs/cloudaware-parity-roadmap.md)
+for a delivered-source, external-activation and product-gap matrix covering identity,
+CMDB, CSPM, compliance, FinOps, Kubernetes evidence, DSPM normalization, public API,
+ITSM, evidence storage, agentless scanning and managed production. It is a sequencing
+document, not a CloudAware-parity, certification, production-acceptance or
+release-date claim.
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing tenant, IAM, collector,
 control, or deployment boundaries. Report security issues through the private

@@ -822,6 +822,24 @@ test("onboarded customer can exercise every app section without a crash", async 
     const { clusterId } = await seedKubernetes(db);
     await seedVulnAndCloud(db);
     await seedComplianceAndOps(db, userId);
+    // The route sweep below includes the internal scheduler/drain endpoint. Seed
+    // a fresh completed refresh so that API wiring test cannot make uncontrolled
+    // calls to CISA/NVD; upstream IO is covered with explicit fetch doubles in
+    // vuln-feed-runtime.test.mjs.
+    const refreshNow = Date.now();
+    await db.prepare(
+      `INSERT INTO background_jobs
+         (id, org_id, customer_id, kind, payload_json, status, attempt,
+          max_attempts, run_after, created_at, updated_at)
+       VALUES (?, ?, ?, 'vuln-feed-refresh', '{}', 'succeeded', 1, 3, ?, ?, ?)`,
+    ).bind(
+      `job_${"f".repeat(32)}`,
+      ORG_ID,
+      CUSTOMER_ID,
+      refreshNow,
+      refreshNow,
+      refreshNow,
+    ).run();
 
     const conn = { connectionId: CONNECTION_ID };
     const connCluster = clusterId === null ? conn : { connectionId: CONNECTION_ID, clusterId };

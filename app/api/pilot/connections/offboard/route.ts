@@ -38,7 +38,7 @@ export async function POST(request: Request): Promise<Response> {
     const alreadyOffboarded = current.status === "disabled" && current.roleArn === null;
     if (!alreadyOffboarded) requireRecentMfa(actor.authenticated);
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
-      transitionControlPlane: () => offboardAwsConnection(connectionId, actor.id),
+      transitionControlPlane: () => offboardAwsConnection(connectionId, actor.id, actor.orgId),
       reconcileCollector: () => offboardCollectorConnection({ tenantId: actor.orgId, connectionId }),
     });
     return jsonResponse({

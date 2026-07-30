@@ -119,6 +119,9 @@ export interface LocalAwsConnectionIdentity {
   readonly connectionId: string;
 }
 
+const LOCAL_PILOT_ORG_ID = "org_local_sutra";
+const TENANT_SCOPE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+
 export interface PilotSyncRequest {
   readonly connectionId: string;
   readonly idempotencyKey: string;
@@ -353,6 +356,44 @@ export async function deriveLocalAwsConnectionIdentity(
   return {
     customerId: `cust_${await digest("sutra-local-customer-v1")}`,
     connectionId: `conn_${await digest("sutra-local-aws-connection-v1")}`,
+  };
+}
+
+/**
+ * Derive stable connection identities inside an authenticated organization.
+ *
+ * Local identities intentionally retain their original byte-for-byte
+ * derivation so existing fixture and pilot data remains addressable. Hosted
+ * identities bind the organization into both domains, preventing the same AWS
+ * account in two Sutra tenants from sharing a customer or connection primary
+ * key.
+ */
+export async function deriveScopedAwsConnectionIdentity(
+  orgIdValue: unknown,
+  accountIdValue: unknown,
+  partitionValue: unknown,
+): Promise<LocalAwsConnectionIdentity> {
+  if (typeof orgIdValue !== "string" || !TENANT_SCOPE_ID.test(orgIdValue)) {
+    throw new PilotSecurityError("INVALID_INPUT", "The organization scope is invalid");
+  }
+  if (orgIdValue === LOCAL_PILOT_ORG_ID) {
+    return deriveLocalAwsConnectionIdentity(accountIdValue, partitionValue);
+  }
+  const accountId = parseAwsAccountId(accountIdValue);
+  const partition = parseAwsPartition(partitionValue);
+  const digest = async (domain: string): Promise<string> => {
+    const bytes = new TextEncoder().encode(
+      `${domain}\u0000${orgIdValue}\u0000${partition}\u0000${accountId}`,
+    );
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    return [...new Uint8Array(hash)]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 32);
+  };
+  return {
+    customerId: `cust_${await digest("sutra-hosted-customer-v1")}`,
+    connectionId: `conn_${await digest("sutra-hosted-aws-connection-v1")}`,
   };
 }
 

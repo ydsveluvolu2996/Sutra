@@ -15,6 +15,12 @@ importers:
 
   .:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1087.0
+        version: 3.1087.0
+      '@aws-sdk/client-secrets-manager':
+        specifier: 3.1087.0
+        version: 3.1087.0
       drizzle-orm:
         specifier: 0.45.2
         version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
@@ -104,6 +110,9 @@ importers:
 
   services/aws-collector:
     dependencies:
+      '@aws-sdk/client-bedrock':
+        specifier: 3.1087.0
+        version: 3.1087.0
       '@aws-sdk/client-cloudtrail':
         specifier: 3.1087.0
         version: 3.1087.0
@@ -155,10 +164,16 @@ importers:
       '@aws-sdk/client-sts':
         specifier: 3.1087.0
         version: 3.1087.0
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: 22.19.19
         version: 22.19.19
+      '@types/pg':
+        specifier: 8.20.0
+        version: 8.20.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -190,6 +205,10 @@ packages:
 
   '@aws-sdk/checksums@3.1000.17':
     resolution: {integrity: sha512-k45iXM7w8Pyknnz/vTXSS/IkLDNFdgnBQI7Hmq+uhsrW7NGT/BiUJGlv20QSKzihmH1XDvSCRILICaKi57/35w==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-bedrock@3.1087.0':
+    resolution: {integrity: sha512-tgJW8BP3TZWUMg05dwzplgja6STCSkj+A7vF2Wb72xvKP9lxS00Gr/FqnAp0GowBgm3kkcheEp0x9tZRchcPaA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-cloudtrail@3.1087.0':
@@ -3713,7 +3732,19 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-bedrock@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/token-providers': 3.1087.0
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.5
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 
@@ -3873,7 +3904,7 @@ snapshots:
       '@aws-sdk/middleware-sdk-s3': 3.972.63
       '@aws-sdk/signature-v4-multi-region': 3.996.40
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/fetch-http-handler': 5.6.5
       '@smithy/node-http-handler': 4.9.5
       '@smithy/types': 4.16.1
@@ -3884,7 +3915,7 @@ snapshots:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/credential-provider-node': 3.972.68
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/fetch-http-handler': 5.6.5
       '@smithy/node-http-handler': 4.9.5
       '@smithy/types': 4.16.1
@@ -4034,7 +4065,7 @@ snapshots:
   '@aws-sdk/dynamodb-codec@3.973.32':
     dependencies:
       '@aws-sdk/core': 3.975.2
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 
@@ -4047,7 +4078,7 @@ snapshots:
     dependencies:
       '@aws-sdk/endpoint-cache': 3.972.9
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 
@@ -4064,7 +4095,7 @@ snapshots:
     dependencies:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/signature-v4': 5.6.4
       '@smithy/types': 4.16.1
       tslib: 2.8.1
@@ -4074,7 +4105,7 @@ snapshots:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/signature-v4-multi-region': 3.996.40
       '@aws-sdk/types': 3.974.1
-      '@smithy/core': 3.29.3
+      '@smithy/core': 3.29.5
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 

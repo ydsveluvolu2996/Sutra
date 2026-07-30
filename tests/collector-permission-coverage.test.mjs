@@ -90,6 +90,13 @@ const COLLECTOR_COMMANDS = {
   GetGuardDutyFindingsCommand: { action: "guardduty:GetFindings", scope: "customer" },
   BatchGetAccountStatusCommand: { action: "inspector2:BatchGetAccountStatus", scope: "customer" },
   ListInspectorFindingsCommand: { action: "inspector2:ListFindings", scope: "customer" },
+  ListGuardrailsCommand: { action: "bedrock:ListGuardrails", scope: "customer" },
+  GetGuardrailCommand: { action: "bedrock:GetGuardrail", scope: "customer" },
+  GetModelInvocationLoggingConfigurationCommand: {
+    action: "bedrock:GetModelInvocationLoggingConfiguration",
+    scope: "customer",
+  },
+  GetAccountDataRetentionCommand: { action: "bedrock:GetAccountDataRetention", scope: "customer" },
   DescribeDBInstancesCommand: { action: "rds:DescribeDBInstances", scope: "customer" },
   ListBucketsCommand: { action: "s3:ListAllMyBuckets", scope: "customer" },
   GetPublicAccessBlockCommand: { action: "s3:GetBucketPublicAccessBlock", scope: "customer" },

@@ -77,6 +77,7 @@ export interface HostedBrokerIngestJobDependencies {
     readonly actorId: string;
     readonly origin: SnapshotOrigin;
     readonly orgId: string;
+    readonly rawEvidenceBytes: Uint8Array;
   }) => Promise<string>;
   readonly maximumBodyBytes?: number;
 }
@@ -192,5 +193,8 @@ export async function runHostedBrokerIngestJob(
     actorId: HOSTED_BROKER_INGEST_ACTOR_ID,
     origin: HOSTED_BROKER_SNAPSHOT_ORIGIN,
     orgId,
+    // Preserve the exact bytes authenticated by the broker signature. The
+    // repository archives them before any CMDB staging/promotion write.
+    rawEvidenceBytes: body,
   });
 }

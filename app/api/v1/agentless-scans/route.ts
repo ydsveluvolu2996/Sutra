@@ -1,18 +1,20 @@
 import { getConnectionForOrg, getPilotStateForOrg, listConnectionsForOrg } from "../../../../db/pilot-repository";
 import { AgentlessScanRepository } from "../../../../db/agentless-scan-repository";
 import { buildAgentlessScanPlan, type AgentlessVolume } from "../../../../lib/aws-agentless-scan-plan";
-import { AGENTLESS_SCAN_EXECUTION_READINESS } from "../../../../lib/aws-agentless-readiness";
 import type { PilotResource } from "../../../../lib/pilot-types";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
-import { errorResponse, jsonResponse } from "../../../../lib/pilot-server";
+import {
+  errorResponse,
+  getAgentlessExecutionReadiness,
+  getAgentlessPlanProfile,
+  jsonResponse,
+} from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const RUN_ID = /^ags_[a-f0-9]{32}$/u;
-const AWS_ACCOUNT = /^\d{12}$/u;
-const KMS_KEY_ARN = /^arn:aws:kms:[a-z0-9-]+:\d{12}:key\/[a-f0-9-]{36}$/u;
 const TAG_KEY = /^[A-Za-z0-9 +=._:/@-]{1,128}$/u;
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -22,6 +24,26 @@ const VOLUME_TYPES = new Set(["aws.ec2.volume", "ec2.volume"]);
 
 function badRequest(): never {
   throw Object.assign(new Error("The agentless scan request is invalid"), { code: "INVALID_INPUT" });
+}
+
+async function runtimeReadiness() {
+  try {
+    return await getAgentlessExecutionReadiness();
+  } catch {
+    return {
+      schema: "sutra.aws-agentless-readiness.v1" as const,
+      canPlan: true,
+      canExecute: false,
+      gaps: [{
+        id: "broker-readiness",
+        summary: "The authenticated hosted broker readiness could not be verified.",
+        owner: "operator" as const,
+      }],
+      summary:
+        "Agentless plans remain reviewable, but execution is fail-closed while "
+        + "the signed broker readiness response is unavailable.",
+    };
+  }
 }
 
 /**
@@ -85,7 +107,7 @@ export async function GET(request: Request): Promise<Response> {
       return jsonResponse({
         connectionId: null,
         runs: [],
-        readiness: AGENTLESS_SCAN_EXECUTION_READINESS,
+        readiness: await runtimeReadiness(),
         available: false,
         reason: "No AWS connection is readable for this organization.",
       });
@@ -103,7 +125,7 @@ export async function GET(request: Request): Promise<Response> {
         run,
         findings: await repository.listFindings(scope, runId),
         outstanding: await repository.listOpenTeardownDebt(orgId),
-        readiness: AGENTLESS_SCAN_EXECUTION_READINESS,
+        readiness: await runtimeReadiness(),
       });
     }
 
@@ -116,7 +138,7 @@ export async function GET(request: Request): Promise<Response> {
       // Snapshots Sutra created and cannot delete. Surfaced on the list view
       // because it is spend, and spend nobody looks at is spend that persists.
       outstanding: await repository.listOpenTeardownDebt(orgId),
-      readiness: AGENTLESS_SCAN_EXECUTION_READINESS,
+      readiness: await runtimeReadiness(),
       neverScanned: runs.length === 0,
     });
   } catch (error) {
@@ -138,14 +160,17 @@ export async function POST(request: Request): Promise<Response> {
     assertSameOrigin(request);
     const body = await readBoundedJson(request, MAX_BODY_BYTES);
     if (typeof body !== "object" || body === null || Array.isArray(body)) badRequest();
-    const { connectionId, scanAccountId, kmsKeyArn, requiredTagKey, requiredTagValue, includeUnattached, maxConcurrentScans, snapshotTtlHours, scanners } = body as {
-      connectionId?: unknown; scanAccountId?: unknown; kmsKeyArn?: unknown;
+    const allowedKeys = new Set([
+      "connectionId", "requiredTagKey", "requiredTagValue", "includeUnattached",
+      "maxConcurrentScans", "snapshotTtlHours", "scanners",
+    ]);
+    if (Object.keys(body as Record<string, unknown>).some((key) => !allowedKeys.has(key))) badRequest();
+    const { connectionId, requiredTagKey, requiredTagValue, includeUnattached, maxConcurrentScans, snapshotTtlHours, scanners } = body as {
+      connectionId?: unknown;
       requiredTagKey?: unknown; requiredTagValue?: unknown; includeUnattached?: unknown;
       maxConcurrentScans?: unknown; snapshotTtlHours?: unknown; scanners?: unknown;
     };
     if (typeof connectionId !== "string" || !CONNECTION_ID.test(connectionId)) badRequest();
-    if (typeof scanAccountId !== "string" || !AWS_ACCOUNT.test(scanAccountId)) badRequest();
-    if (kmsKeyArn !== undefined && kmsKeyArn !== null && (typeof kmsKeyArn !== "string" || !KMS_KEY_ARN.test(kmsKeyArn))) badRequest();
     if (includeUnattached !== undefined && typeof includeUnattached !== "boolean") badRequest();
     if (maxConcurrentScans !== undefined && (typeof maxConcurrentScans !== "number" || !Number.isInteger(maxConcurrentScans))) badRequest();
     if (snapshotTtlHours !== undefined && (typeof snapshotTtlHours !== "number" || !Number.isInteger(snapshotTtlHours))) badRequest();
@@ -169,11 +194,13 @@ export async function POST(request: Request): Promise<Response> {
 
     const state = await getPilotStateForOrg(authenticated.subject.orgId, connectionId);
     const volumes = volumesFromSnapshot(state?.resources ?? []);
+    const profile = await getAgentlessPlanProfile();
 
     const plan = buildAgentlessScanPlan({
       volumes,
-      scanAccountId,
-      kmsKeyArn: typeof kmsKeyArn === "string" ? kmsKeyArn : null,
+      scanAccountId: profile.scanAccountId,
+      // The app receives only the non-secret planning property, never a KMS ARN.
+      kmsKeyArn: profile.kmsReencrypt ? "broker-pinned" : null,
       policy: {
         ...(requiredTagKey !== undefined
           ? { requiredTags: { [requiredTagKey]: typeof requiredTagValue === "string" ? requiredTagValue : "true" } }
@@ -197,7 +224,7 @@ export async function POST(request: Request): Promise<Response> {
       plan,
       // No snapshot exists yet and none will until an apply path exists.
       applied: false,
-      readiness: AGENTLESS_SCAN_EXECUTION_READINESS,
+      readiness: await runtimeReadiness(),
       volumesConsidered: volumes.length,
       snapshotSourcedFrom: state === null ? "none" : "collected-cmdb-snapshot",
     });

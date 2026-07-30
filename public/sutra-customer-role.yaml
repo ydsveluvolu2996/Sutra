@@ -578,6 +578,10 @@ Resources:
               - inspector2:ListCoverageStatistics
               - inspector2:ListDelegatedAdminAccounts
               - inspector2:ListFindings
+              - bedrock:ListGuardrails
+              - bedrock:GetGuardrail
+              - bedrock:GetModelInvocationLoggingConfiguration
+              - bedrock:GetAccountDataRetention
               - inspector2:ListMembers
             Resource: '*'
 
@@ -656,4 +660,4 @@ Outputs:
     Description: This template grants metadata and finding reads only.
     Value: READ_ONLY
   TemplateVersion:
-    Value: standard-2026-07.3
+    Value: standard-2026-07.4

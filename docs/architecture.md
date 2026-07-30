@@ -1,8 +1,30 @@
 # Production first-slice architecture: MSP CMDB and AWS security posture platform
 
-**Status:** proposed architecture baseline  
-**Date:** 2026-07-15  
-**Applies to:** the current Cloudflare Worker/vinext/D1 prototype and the production services that must be added around it
+**Status:** logical security/domain baseline with a managed-production addendum
+
+**Original baseline:** 2026-07-15
+
+**Managed-production reconciliation:** 2026-07-30
+
+This document retains the detailed domain model, invariants and acceptance criteria
+that were written against the original Worker/D1/R2 prototype. The selected
+managed-production implementation now maps those logical components as follows:
+
+| Logical component in this document | Managed-production implementation |
+| --- | --- |
+| Web/API control plane | At least two ECS Fargate application tasks behind a public TLS ALB |
+| D1 hot relational state | Encrypted deletion-protected Multi-AZ RDS PostgreSQL |
+| Queue/workflow | PostgreSQL-backed durable jobs, leases, retries/dead-letter state and a job-runner sidecar |
+| R2 raw evidence/export storage | Private versioned KMS-encrypted S3 with immutable writes and application-streamed grants |
+| AWS collector/broker | At least two private ECS Fargate broker tasks behind an internal TLS ALB |
+| Control-plane/broker trust | Separate Ed25519 request and response keys with replay and tenant/connection/job binding |
+| Integration secrets | AWS Secrets Manager references; secret values are not stored in tenant rows |
+
+The deployable source and remaining live gates are documented in
+[`../deploy/production/README.md`](../deploy/production/README.md) and
+[`hosted-production-foundation.md`](hosted-production-foundation.md). References
+below to D1, R2 or Cloudflare describe the original logical/prototype boundary and
+must not be read as the selected managed-production topology.
 
 ## 1. Executive decision
 
@@ -10,26 +32,37 @@ Build the first sellable slice as a **read-only-by-default, multi-tenant AWS ass
 
 The product has two planes:
 
-1. A Cloudflare-hosted **control plane** provides the UI, authenticated API, tenant/RBAC enforcement, CMDB queries, findings, audit views, and job coordination. D1 stores hot relational state; R2 stores compressed raw snapshots and large evidence; asynchronous queues/workflows perform all non-trivial work.
-2. A vendor-owned **AWS collector plane** runs on AWS under a workload IAM role. It assumes a narrowly scoped read-only role in each customer account with `sts:AssumeRole` and a unique, high-entropy `ExternalId`. It never stores customer access keys. This plane is required because a Cloudflare Worker does not inherently have an AWS workload identity that a customer's trust policy can safely name.
+1. A managed **application plane** provides the UI, authenticated API,
+   tenant/RBAC enforcement, CMDB queries, findings, audit views and durable job
+   coordination on HA Fargate plus Multi-AZ PostgreSQL. Private evidence is stored
+   in KMS-encrypted S3.
+2. A vendor-owned **AWS collector plane** runs as a private HA broker under a
+   workload IAM role. It assumes a narrowly scoped read-only role in each customer
+   account with `sts:AssumeRole` and a unique, high-entropy `ExternalId`. It never
+   stores customer access keys.
 
-The first release discovers supported AWS resources, builds their relationships, evaluates deterministic configuration controls, and produces evidence-backed recommendations. Any resource mutation, agent/package vulnerability scanning, behavioral threat detection, or automated response is outside v1.
+The first release discovers supported AWS resources, builds their relationships,
+evaluates deterministic configuration controls and produces evidence-backed
+recommendations. Collection is read-only by default. The only bounded write
+exception is explicitly enabled agentless snapshot scanning with a separate STS
+ceiling and delete denies; general resource mutation and automated response remain
+outside the slice.
 
 ```mermaid
 flowchart LR
-  U["MSP and customer users"] -->|OIDC session| API["Control-plane API / UI"]
+  U["MSP and customer users"] -->|"OIDC or SAML session"| API["HA application API / UI"]
   API --> AUTH["Tenant and RBAC policy layer"]
-  AUTH --> D1["D1: hot tenant state"]
-  API --> Q["Queue / workflow coordinator"]
-  Q -->|signed service request| B["AWS collector broker"]
+  AUTH --> DB["Multi-AZ PostgreSQL"]
+  API --> Q["Durable jobs and leases"]
+  Q -->|"Ed25519 signed request"| B["Private HA AWS collector broker"]
   B -->|workload IAM + STS AssumeRole + ExternalId| C["Customer read-only IAM role"]
   C --> AWS["Supported AWS APIs"]
   B -->|signed, idempotent batches| ING["Ingestion worker"]
-  ING --> R2["R2: raw snapshots / large evidence"]
-  ING --> D1
-  D1 --> RULES["Versioned control engine"]
-  RULES --> D1
-  D1 --> OUT["Transactional outbox"]
+  ING --> S3["Private KMS-encrypted S3 evidence"]
+  ING --> DB
+  DB --> RULES["Versioned control engine"]
+  RULES --> DB
+  DB --> OUT["Transactional outbox"]
   OUT --> AUDIT["Alerts, audit export, integrations"]
 ```
 
@@ -66,13 +99,23 @@ flowchart LR
 ### 2.3 Explicit v1 exclusions
 
 - Resource creation, modification, deletion, quarantine, or auto-remediation.
-- Agents, host package inventories, ECR image scanning, SBOM generation, CVE feed correlation, exploitability analysis, or reachability-based package vulnerability analysis.
+- General-purpose endpoint agents, host/serverless package inventory or
+  Inspector-equivalent vulnerability coverage. Bounded Kubernetes
+  Trivy/SBOM/configuration evidence, registry CVE workflows and opt-in agentless
+  disk evidence are narrower inputs, not equivalent coverage.
 - GuardDuty-equivalent behavioral detection over CloudTrail, VPC Flow Logs, DNS logs, Kubernetes audit logs, or threat-intelligence/ML pipelines.
-- Security Hub-equivalent standards coverage, cross-product normalization, delegated-admin setup, or ASFF federation. Importing AWS findings is a later integration.
-- Azure/GCP/Kubernetes/on-prem discovery.
+- Security Hub-equivalent standards coverage, delegated-admin setup or general ASFF
+  federation. Bounded imports from customer-enabled AWS security services do not
+  make Sutra an aggregator equivalent.
+- Azure, GCP or on-prem discovery. Enrolled Kubernetes clusters can submit bounded
+  evidence, but that is not general multi-cloud discovery.
 - Real-time event-driven inventory; v1 is scheduled/manual snapshot collection.
 - Custom executable rules or tenant-supplied code.
-- Write-capable IAM roles, break-glass actions, approval workflows, ticketing/chat integrations, billing, marketplace metering, SAML/SCIM, or data residency selection.
+- General-purpose remediation roles, break-glass cloud actions, billing,
+  marketplace metering, PSA breadth beyond the documented Jira/ServiceNow scope,
+  or customer-selected data residency. SAML, SCIM, approval-controlled application
+  workflows and the bounded ticket/notification paths are implemented in source
+  but still require live provider acceptance.
 
 These exclusions are important commercial claims boundaries: the product is a cost-conscious AWS CMDB and CSPM foundation, not an emulation of AWS-native vulnerability or threat-detection services.
 
@@ -394,37 +437,45 @@ Write the hot audit event transactionally with the mutation. Chain event hashes 
 - Use deployment environments and AWS accounts separated by identity and keys. Production data never enters previews/test fixtures.
 - Pin collector/control pack versions to each run so rollback and reproducibility are possible.
 
-## 11. From prototype to production first slice
+## 11. Source completion versus live production acceptance
 
-A visual prototype may show workflows with seeded data, but it is not production-complete until all P0 gates below are implemented and independently tested.
+A source path or polished UI is not production-complete until its environment and
+failure behavior are independently exercised.
 
-| Capability | Prototype can show | Required before production customer data |
+| Capability | Implemented and tested in source | Remaining live or external acceptance |
 |---|---|---|
-| Identity | mock/header identity | production OIDC, session lifecycle, MFA policy, CSRF, invitations |
-| Tenant/RBAC | UI roles and filters | centralized server authorization, composite tenant predicates, two-tenant negative test suite |
-| AWS onboarding | wizard and template preview | vendor AWS collector workload identity, real least-privilege CloudFormation template, ExternalId encryption/rotation, exact-account validation |
-| Inventory | seeded/sample assets | real paginated collectors, schema validation, checkpoints, quotas, partial coverage, tombstone safety |
-| Async jobs | in-process/sample state | durable queue/workflow, leases, retries/backoff, DLQ/replay, idempotency, cancellation semantics |
-| CMDB | current resource cards | normalized resources/relations/tags, provenance, change model, retention, tested indexes and scale envelope |
-| Rules/findings | sample checks | immutable versioned AST, fixtures, unknown/error semantics, stable fingerprints, suppression expiry, reconciliation |
-| Inspector-like claims | configuration suggestions | must remain explicitly CSPM-only unless real package/SBOM/CVE evidence pipeline is added |
-| GuardDuty-like claims | sample alerts | not supported without the required telemetry, detection engineering, threat intel, and operations |
-| Secrets | local/sample values | managed KMS/envelope encryption, rotation, environment separation, redaction tests |
-| Audit | activity feed | transactional append, denied actions, hash/export integrity, restricted access, retention |
-| Storage | local D1 | backups/restore drill, migration rehearsal, R2 lifecycle/deletion, cell capacity limits |
-| Operations | happy-path status | metrics/traces/alerts, on-call and incident runbooks, SLOs, security review, dependency/image scanning |
-| Exports | browser-generated CSV | async bounded export, tenant-authorized object record, spreadsheet-injection protection, expiry/deletion |
-| Resource management | recommendation button | stays read-only; any remediation requires a separate role, approvals, dry-run, rollback, and new threat model |
+| Identity | OIDC PKCE, SAML, SCIM, sessions, invitation-only membership and revocation | Configure the selected IdP/SCIM client; pass MFA/step-up, recovery and lifecycle tests |
+| Tenant/RBAC | Central authorization, composite scope predicates and adversarial repository/route tests | Run the generated two-organization/two-customer matrix against the deployed stack |
+| AWS onboarding | Versioned roles, encrypted ExternalId, hosted workload-identity broker and trust probes | Pass correct/omitted/wrong ExternalId, collection and offboarding from the deployed workload role |
+| Inventory/CMDB | Paginated collectors, normalized resources/relationships, provenance, partial coverage and multi-miss retirement | Exercise a production-sized sandbox, permission drift, interruption and reverse-completion races |
+| Durable work | PostgreSQL jobs, leases, retries/dead-letter behavior, hosted collection and a drain sidecar | Prove concurrent redelivery, stale lease, disablement, backlog scaling and audited replay |
+| Rules/findings | Versioned deterministic controls, unknown/error semantics, stable findings and expiring exceptions | Complete control review, scale/false-positive measurement and customer acceptance |
+| Vulnerability/threat inputs | Bounded native AWS, Kubernetes, registry/SBOM and agentless evidence paths | Keep claims bounded; no Inspector, GuardDuty, Security Hub or MDR equivalence |
+| Secrets | KMS-backed infrastructure and AWS Secrets Manager runtime/integration paths | Exercise rotation, revocation, canary scans and environment separation live |
+| Audit | Transactional hash-linked events and integrity-checked export | Replicate to approved WORM storage and test privileged access/recovery |
+| Evidence/storage | Private immutable SSE-KMS S3 path and scoped single-use application downloads | Verify deployed bucket/KMS policies, retention/deletion, tamper and restore behavior |
+| Operations | HA IaC, backup/log/alert resources and coordinated digest release/rollback | Complete AZ/load/backlog, restore, rotation, alert and failed-release drills |
+| Exports | Bounded tenant-scoped managed exports and spreadsheet-injection protection | Exercise maximum size, expiry/deletion and cross-tenant denial live |
+| Resource management | Read-only-by-default collector plus bounded opt-in snapshot scanning | General remediation stays separate; agentless still requires a retained live scan/teardown attestation |
 
-Additional items that are **not production-complete merely because the prototype has UI for them** include billing, contractual retention, regional data residency, high availability across control-plane failure domains, SSO/SCIM, customer-managed keys, support impersonation, compliance certification, legal/privacy terms, SLA reporting, pentest closure, and enterprise-scale rule/resource volumes.
+Billing, contractual retention, selected data residency, per-customer keys, support
+impersonation, certifications, legal/privacy terms, measured SLA history, penetration
+test closure and enterprise-scale rule/resource volumes remain external decisions,
+operational gates or product gaps.
 
-## 12. Recommended implementation order
+## 12. Recommended activation and expansion order
 
-1. Establish production identity, organization/customer/membership schema, centralized authorization helpers, audit/outbox primitives, and two-tenant isolation tests.
-2. Implement AWS connection bootstrap metadata and the vendor AWS collector broker with one narrow collector (security groups/VPC networking), real STS validation, durable job delivery, and safe ingestion.
-3. Add normalized CMDB resources/relationships, provenance/freshness, full-scope tombstone behavior, and indexed resource APIs.
-4. Add the immutable control engine and a small high-quality security-group control pack with pass/fail/unknown fixtures and finding reconciliation.
-5. Expand collectors one service at a time, each gated by permission contract, pagination/partial-failure tests, schema fixtures, quotas, and controls.
-6. Complete operational gates: backups/restore, DLQ replay, key rotation, audit archive, deletion/offboarding, alerts/runbooks, load envelope, security review, and external penetration testing.
+1. Deploy the reviewed HA change set with separate production keys, identities,
+   secrets, data and an independently approved release SHA.
+2. Configure hosted identity and provisioning, then run the complete live
+   tenant/customer authorization matrix.
+3. Onboard only a disposable AWS sandbox and retain broker/STS, inventory,
+   agentless, evidence and offboarding acceptance results.
+4. Exercise queue redelivery, AZ/capacity failure, backup restore, key/secret
+   rotation, rollback, alert response, deletion and incident runbooks.
+5. Close load, privacy, legal, support and independent security-assessment gates.
+6. Expand collectors and integrations one at a time, each with permission,
+   pagination, partial-failure, quota, false-positive and vendor recovery evidence.
 
-The end of step 6—not the presence of a polished dashboard—is the minimum boundary for calling the bounded first slice production-ready.
+The end of step 5—not the presence of deployable source—is the minimum boundary for
+calling the bounded first slice production-ready.

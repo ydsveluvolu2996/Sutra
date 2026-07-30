@@ -65,6 +65,7 @@
     "typecheck": "tsc --noEmit",
     "typecheck:collector": "pnpm --dir services/aws-collector typecheck",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint:cloudformation": "node scripts/cfn-lint.mjs infrastructure/local-collector-role.yaml infrastructure/customer-onboarding-role.yaml infrastructure/hosted-identity.yaml infrastructure/github-ec2-release-role.yaml infrastructure/production-ha.yaml public/sutra-customer-onboarding-role.yaml",
     "db:generate": "drizzle-kit generate",
     "verify": "pnpm security:secrets && pnpm typecheck && pnpm typecheck:collector && pnpm lint && pnpm test && pnpm test:kubernetes && pnpm test:enterprise-security && pnpm test:phase2 && pnpm test:collector && pnpm db:postgres:test && pnpm build && pnpm test:rendered",
     "backup": "node scripts/backup.mjs",
@@ -74,6 +75,8 @@
     "build:agentless-scanner": "pnpm --dir services/agentless-scanner build"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1087.0",
+    "@aws-sdk/client-secrets-manager": "3.1087.0",
     "drizzle-orm": "0.45.2",
     "miniflare": "4.20260722.0",
     "next": "16.2.12",

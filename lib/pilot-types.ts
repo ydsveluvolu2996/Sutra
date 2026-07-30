@@ -10,6 +10,7 @@ export type ConnectionStatus = "pending" | "validating" | "active" | "needs_atte
 export type SyncStatus = "queued" | "running" | "partial" | "succeeded" | "failed" | "cancelled";
 export type CoverageStatus = "succeeded" | "partial" | "failed" | "skipped";
 export type FindingSeverity = "critical" | "high" | "medium" | "low" | "informational";
+export type ResourceLifecycleState = "active" | "retirement_pending" | "retired";
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
@@ -54,6 +55,16 @@ export interface PilotResource {
     readonly collectedAt: string;
   };
   readonly contentSha256: string;
+  /**
+   * Present for persisted CMDB projections. Collector payloads omit these
+   * fields because lifecycle is derived server-side from complete-run history.
+   */
+  readonly lifecycleState?: ResourceLifecycleState;
+  readonly consecutiveCompleteMisses?: number;
+  readonly evidenceSnapshot?: {
+    readonly id: string;
+    readonly snapshotSha256: string;
+  };
 }
 
 export interface PilotRelationship {

@@ -50,7 +50,10 @@ export function readNotificationWorkerRuntimeConfig(
 ): NotificationWorkerRuntimeConfig {
   const poll = env.SUTRA_NOTIFICATION_POLL_INTERVAL_MS ?? "1000";
   const port = env.SUTRA_NOTIFICATION_HEALTH_PORT ?? "8081";
-  const secretPrefix = env.SUTRA_NOTIFICATION_SECRET_PREFIX ?? "sutra/notifications/";
+  const secretPrefix =
+    env.SUTRA_NOTIFICATION_CONFIG_PREFIX ??
+    env.SUTRA_NOTIFICATION_SECRET_PREFIX ??
+    "sutra/notifications/";
   if (
     !INTEGER.test(poll) ||
     Number(poll) < 100 ||

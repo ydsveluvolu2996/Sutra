@@ -6,6 +6,7 @@ import {
   type CmdbQueryPredicate,
   type CmdbQueryResource,
 } from "./cmdb-query.ts";
+import { safeCsvCell } from "./safe-csv.ts";
 
 /**
  * Pure, deterministic custom-report engine for the report builder.
@@ -103,6 +104,11 @@ export const CMDB_RESOURCE_COLUMNS: readonly ReportColumn[] = [
   { key: "state", label: "State" },
   { key: "arn", label: "ARN" },
   { key: "nativeId", label: "Native ID" },
+  { key: "lifecycleState", label: "Lifecycle state" },
+  { key: "consecutiveCompleteMisses", label: "Consecutive complete misses" },
+  { key: "evidenceSnapshotId", label: "Evidence snapshot ID" },
+  { key: "evidenceSnapshotSha256", label: "Evidence snapshot SHA-256" },
+  { key: "contentSha256", label: "Resource content SHA-256" },
 ];
 
 export const FINDINGS_COLUMNS: readonly ReportColumn[] = [
@@ -216,7 +222,7 @@ function disclaimer(
   truncated: boolean,
 ): string {
   const base = dataset === "cmdb-resources"
-    ? "Rows are resources from the active CMDB snapshot for this tenant."
+    ? "Rows are resources from the current tenant CMDB projection. Retirement-pending rows retain and identify their last observed immutable snapshot evidence."
     : "Rows are configuration findings from the active snapshot for this tenant.";
   if (evaluated === 0) {
     const noun = dataset === "cmdb-resources" ? "resources" : "findings";
@@ -407,15 +413,9 @@ function validateFindingsFilters(value: unknown, catalog: ReadonlySet<string>, e
  * the compliance CSV exports.
  */
 export function toCsv(columns: readonly ReportColumn[], rows: readonly Record<string, string>[]): string {
-  const neutralizeFormula = (value: string): string =>
-    /^[=+\-@\t\r]/u.test(value) ? `'${value}` : value;
-  const escape = (raw: string): string => {
-    const value = neutralizeFormula(raw);
-    return /[",\r\n]/u.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
-  };
-  const lines: string[] = [columns.map((column) => escape(column.label)).join(",")];
+  const lines: string[] = [columns.map((column) => safeCsvCell(column.label)).join(",")];
   for (const row of rows) {
-    lines.push(columns.map((column) => escape(row[column.key] ?? "")).join(","));
+    lines.push(columns.map((column) => safeCsvCell(row[column.key] ?? "")).join(","));
   }
   return lines.join("\r\n");
 }

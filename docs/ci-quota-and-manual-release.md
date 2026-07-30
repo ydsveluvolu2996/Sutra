@@ -1,5 +1,11 @@
 # CI quota controls and the manual EC2 release path
 
+**Scope:** legacy/private-beta single-host EC2 only. This is not the
+managed-production HA release process. For the protected app/worker/broker release
+contract, see
+[`../deploy/production/README.md`](../deploy/production/README.md). There is no
+quota-independent manual bypass for that managed-production workflow.
+
 ## What an exhausted quota changes
 
 An exhausted GitHub Actions allowance stops new hosted-runner jobs. It does not
@@ -68,7 +74,10 @@ arbitrary-command mode. It requires:
 1. the exact clean `main` commit already pushed to the canonical GitHub
    repository;
 2. a local Docker/Buildx runtime;
-3. Node 22, pnpm 11.13.1, Trivy 0.72.0, cfn-lint 1.46.0, AWS CLI v2, `jq`,
+3. Node 22, pnpm 11.13.1, Trivy 0.72.0, cfn-lint 1.46.0, AWS CLI v2, `jq`.
+   Run `pnpm lint:cloudformation`; its wrapper suppresses only the exact
+   `bedrock:GetAccountDataRetention` W3037 catalog lag that AWS documents,
+   while every other cfn-lint finding remains release-blocking.
    `curl` and OpenSSL;
 4. an interactive IAM Identity Center session for the
    `sutra-administrator` profile; and

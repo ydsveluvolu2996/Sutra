@@ -36,9 +36,11 @@ export async function POST(request: Request): Promise<Response> {
   let runId: string | null = null;
   let connectionId: string | null = null;
   let actorId: string | null = null;
+  let orgId: string | null = null;
   try {
     const actor = await requirePilotActor(request, "workspace:read");
     actorId = actor.id;
+    orgId = actor.orgId;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
@@ -53,32 +55,32 @@ export async function POST(request: Request): Promise<Response> {
         { code: "INVALID_STATE" },
       );
     }
-    runId = await createSyncRun(connectionId);
-    const snapshot = await runCollectorSync({
+    runId = await createSyncRun(connectionId, { orgId: actor.orgId });
+    const collected = await runCollectorSync({
       tenantId: actor.orgId,
       connectionId,
       jobId: runId,
       accountId: stored.accountId,
       partition: stored.partition,
     });
-    await persistSnapshot(runId, snapshot, actor.id, {
+    await persistSnapshot(runId, collected.snapshot, actor.id, {
       kind: "aws_live",
       fixtureId: null,
       fixtureVersion: null,
-    });
+    }, null, null, actor.orgId, collected.rawEvidenceBytes);
     return jsonResponse({ runId, state: await getPilotStateForOrg(actor.orgId, connectionId) });
   } catch (error) {
-    if (runId !== null && connectionId !== null && actorId !== null) {
+    if (runId !== null && connectionId !== null && actorId !== null && orgId !== null) {
       try {
         const safeReason = safeCollectionFailureCode(error);
-        await failSyncRun(runId, connectionId, actorId, safeReason);
+        await failSyncRun(runId, connectionId, actorId, safeReason, orgId);
         if (
           safeReason === "ASSUME_ROLE_DENIED" ||
           safeReason === "TRUST_POLICY_UNSAFE" ||
           safeReason === "CALLER_IDENTITY_MISMATCH" ||
           safeReason === "NEGATIVE_PROBE_INCONCLUSIVE"
         ) {
-          await markConnectionNeedsAttention(connectionId, actorId, safeReason);
+          await markConnectionNeedsAttention(connectionId, actorId, safeReason, orgId);
         }
       } catch {
         // Preserve the original collection error; a stale failure transition

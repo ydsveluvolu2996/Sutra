@@ -208,6 +208,8 @@ test("customer-facing API routes resolve connection state through organization-s
     }
   }
   const onboarding = await readFile(new URL("../app/api/pilot/connections/route.ts", import.meta.url), "utf8");
-  assert.match(onboarding, /actor\.orgId !== LOCAL_ORG_ID/u);
-  assert.match(onboarding, /Hosted AWS onboarding remains disabled/u);
+  assert.match(onboarding, /deriveScopedAwsConnectionIdentity\(\s*actor\.orgId/u);
+  assert.match(onboarding, /createConnectionDraft\(\{[\s\S]*orgId: actor\.orgId/u);
+  assert.match(onboarding, /\{ orgId: actor\.orgId, customerId, connectionId \}/u);
+  assert.doesNotMatch(onboarding, /Hosted AWS onboarding remains disabled/u);
 });

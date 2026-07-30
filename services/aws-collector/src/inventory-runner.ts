@@ -1,6 +1,19 @@
 import { createHash } from "node:crypto";
 
 import {
+  BedrockClient,
+  GetAccountDataRetentionCommand,
+  GetGuardrailCommand,
+  GetModelInvocationLoggingConfigurationCommand,
+  ListGuardrailsCommand,
+  type GetAccountDataRetentionCommandOutput,
+  type GetGuardrailCommandInput,
+  type GetGuardrailCommandOutput,
+  type GetModelInvocationLoggingConfigurationCommandOutput,
+  type ListGuardrailsCommandInput,
+  type ListGuardrailsCommandOutput,
+} from "@aws-sdk/client-bedrock";
+import {
   CloudTrailClient,
   DescribeTrailsCommand,
   GetTrailStatusCommand,
@@ -570,6 +583,28 @@ export interface SsmInventoryClient {
   ): Promise<DescribeInstancePatchesCommandOutput>;
 }
 
+/**
+ * Read-only Amazon Bedrock control-plane posture. Prompt/response payloads,
+ * denied-topic examples, regex patterns, blocked messages, and model invocation
+ * log objects are deliberately outside this interface.
+ */
+export interface BedrockInventoryClient {
+  listGuardrails(
+    input: ListGuardrailsCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<ListGuardrailsCommandOutput>;
+  getGuardrail(
+    input: GetGuardrailCommandInput,
+    abortSignal?: AbortSignal,
+  ): Promise<GetGuardrailCommandOutput>;
+  getModelInvocationLoggingConfiguration(
+    abortSignal?: AbortSignal,
+  ): Promise<GetModelInvocationLoggingConfigurationCommandOutput>;
+  getAccountDataRetention(
+    abortSignal?: AbortSignal,
+  ): Promise<GetAccountDataRetentionCommandOutput>;
+}
+
 export interface AwsInventoryClientFactory {
   ec2(region: string, credentials: AwsTemporaryCredentials): Ec2InventoryClient;
   elbv2(region: string, credentials: AwsTemporaryCredentials): Elbv2InventoryClient;
@@ -599,6 +634,8 @@ export interface AwsInventoryClientFactory {
   ): InspectorInventoryClient;
   /** Optional only so existing isolated test factories remain source-compatible. */
   ssm?(region: string, credentials: AwsTemporaryCredentials): SsmInventoryClient;
+  /** Optional so older custom factories fail closed as unassessed, not as clean. */
+  bedrock?(region: string, credentials: AwsTemporaryCredentials): BedrockInventoryClient;
 }
 
 export interface AwsSdkInventoryClientFactoryOptions {
@@ -823,6 +860,20 @@ export class AwsSdkInventoryClientFactory implements AwsInventoryClientFactory {
     };
   }
 
+  public bedrock(region: string, credentials: AwsTemporaryCredentials): BedrockInventoryClient {
+    const client = new BedrockClient(this.clientConfig(region, credentials));
+    return {
+      listGuardrails: (input, signal) =>
+        sendSdkCommand(client, new ListGuardrailsCommand(input), signal),
+      getGuardrail: (input, signal) =>
+        sendSdkCommand(client, new GetGuardrailCommand(input), signal),
+      getModelInvocationLoggingConfiguration: (signal) =>
+        sendSdkCommand(client, new GetModelInvocationLoggingConfigurationCommand({}), signal),
+      getAccountDataRetention: (signal) =>
+        sendSdkCommand(client, new GetAccountDataRetentionCommand({}), signal),
+    };
+  }
+
   private clientConfig(region: string, credentials: AwsTemporaryCredentials) {
     return awsInventorySdkClientConfig(region, credentials, this.maxAttempts);
   }
@@ -838,6 +889,11 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
     region: string,
     credentials: AwsTemporaryCredentials,
   ) => SsmInventoryClient;
+
+  public readonly bedrock?: (
+    region: string,
+    credentials: AwsTemporaryCredentials,
+  ) => BedrockInventoryClient;
 
   public constructor(
     private readonly delegate: AwsInventoryClientFactory,
@@ -869,6 +925,22 @@ class DeadlineAwsInventoryClientFactory implements AwsInventoryClientFactory {
             this.run((signal) => client.describeInstancePatchStates(input, signal)),
           describeInstancePatches: (input) =>
             this.run((signal) => client.describeInstancePatches(input, signal)),
+        };
+      };
+    }
+    if (delegate.bedrock !== undefined) {
+      this.bedrock = (region, credentials) => {
+        const client = delegate.bedrock?.(region, credentials);
+        if (client === undefined) {
+          throw new InventoryConfigurationError("The Bedrock inventory client is unavailable");
+        }
+        return {
+          listGuardrails: (input) => this.run((signal) => client.listGuardrails(input, signal)),
+          getGuardrail: (input) => this.run((signal) => client.getGuardrail(input, signal)),
+          getModelInvocationLoggingConfiguration: () =>
+            this.run((signal) => client.getModelInvocationLoggingConfiguration(signal)),
+          getAccountDataRetention: () =>
+            this.run((signal) => client.getAccountDataRetention(signal)),
         };
       };
     }
@@ -1212,6 +1284,7 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
       const ecr = clients.ecr(region, credentials);
       const eks = clients.eks?.(region, credentials);
       const ssm = clients.ssm?.(region, credentials);
+      const bedrock = clients.bedrock?.(region, credentials);
 
       tasks.push(
         task("s3.buckets", "s3", "buckets", region, (state) =>
@@ -1294,6 +1367,14 @@ export class SingleAccountAwsInventoryRunner implements InventoryRunner {
         ...(ssm === undefined ? [] : [
           task("ssm.patch-states", "ssm", "patch-states", region, (state) =>
             collectSsmPatchStates(context, region, ssm, observedAt, state),
+          ),
+        ]),
+        ...(bedrock === undefined ? [] : [
+          task("bedrock.guardrails", "bedrock", "guardrails", region, (state) =>
+            collectBedrockGuardrails(context, region, bedrock, observedAt, state),
+          ),
+          task("bedrock.account-posture", "bedrock", "account-posture", region, (state) =>
+            collectBedrockAccountPosture(context, region, bedrock, observedAt, state),
           ),
         ]),
         task("rds.db-instances", "rds", "db-instances", region, (state) =>
@@ -2609,6 +2690,173 @@ async function collectS3(
     if (continuationToken === undefined) return;
   }
   throw new InventoryProtocolError("S3 ListBuckets exceeded pagination limit");
+}
+
+async function collectBedrockGuardrails(
+  context: InventoryCollectionContext,
+  region: string,
+  client: BedrockInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  let token: string | undefined;
+  const seen = new Set<string>();
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const output = await client.listGuardrails(
+      token === undefined ? { maxResults: 100 } : { maxResults: 100, nextToken: token },
+    );
+    const resources: NormalizedAwsResource[] = [];
+    for (const summary of output.guardrails ?? []) {
+      if (summary.id === undefined || summary.version === undefined) continue;
+      const detail = await client.getGuardrail({
+        guardrailIdentifier: summary.id,
+        guardrailVersion: summary.version,
+      });
+      if (
+        detail.guardrailId !== undefined &&
+        detail.guardrailId !== summary.id
+      ) {
+        throw new InventoryProtocolError("Bedrock GetGuardrail returned a different guardrail id");
+      }
+      if (
+        detail.version !== undefined &&
+        detail.version !== summary.version
+      ) {
+        throw new InventoryProtocolError("Bedrock GetGuardrail returned a different guardrail version");
+      }
+
+      const contentFilters = detail.contentPolicy?.filters ?? [];
+      const piiEntities = detail.sensitiveInformationPolicy?.piiEntities ?? [];
+      const groundingFilters = detail.contextualGroundingPolicy?.filters ?? [];
+      resources.push(resourceFromApi(
+        context,
+        observedAt,
+        region,
+        "bedrock",
+        "aws.bedrock.guardrail",
+        `${summary.id}:${summary.version}`,
+        summary.arn ?? detail.guardrailArn,
+        "bedrock:ListGuardrails+GetGuardrail",
+        compact({
+          name: summary.name ?? detail.name,
+          guardrailId: summary.id,
+          version: summary.version,
+          status: summary.status ?? detail.status,
+          createdAt: iso(summary.createdAt),
+          updatedAt: iso(summary.updatedAt),
+          kmsKeyId: detail.kmsKeyArn,
+          crossRegionProfileConfigured:
+            detail.crossRegionDetails?.guardrailProfileArn !== undefined ||
+            detail.crossRegionDetails?.guardrailProfileId !== undefined,
+          contentPolicy: {
+            filterCount: contentFilters.length,
+            standardTier: detail.contentPolicy?.tier?.tierName === "STANDARD",
+            filters: contentFilters.map((filter) => compact({
+              type: filter.type,
+              inputStrength: filter.inputStrength,
+              outputStrength: filter.outputStrength,
+              inputAction: filter.inputAction,
+              outputAction: filter.outputAction,
+              inputEnabled: filter.inputEnabled,
+              outputEnabled: filter.outputEnabled,
+            })),
+          },
+          sensitiveInformationPolicy: {
+            piiEntityCount: piiEntities.length,
+            piiEntities: piiEntities.map((entity) => compact({
+              type: entity.type,
+              inputAction: entity.inputAction ?? entity.action,
+              outputAction: entity.outputAction ?? entity.action,
+              inputEnabled: entity.inputEnabled,
+              outputEnabled: entity.outputEnabled,
+            })),
+            // Regex names, descriptions, and patterns can disclose customer
+            // secrets or identifiers; only the count crosses the boundary.
+            regexCount: detail.sensitiveInformationPolicy?.regexes?.length ?? 0,
+          },
+          deniedTopicCount: detail.topicPolicy?.topics?.length ?? 0,
+          wordFilterCount: detail.wordPolicy?.words?.length ?? 0,
+          managedWordListCount: detail.wordPolicy?.managedWordLists?.length ?? 0,
+          contextualGroundingPolicy: {
+            filterCount: groundingFilters.length,
+            filters: groundingFilters.map((filter) => compact({
+              type: filter.type,
+              threshold: finiteNumber(filter.threshold),
+              action: filter.action,
+              enabled: filter.enabled,
+            })),
+          },
+          automatedReasoningPolicyCount:
+            detail.automatedReasoningPolicy?.policies?.length ?? 0,
+          automatedReasoningConfidenceThreshold:
+            finiteNumber(detail.automatedReasoningPolicy?.confidenceThreshold),
+        }),
+      ));
+    }
+    await state.emit({ resources, evidence: [] });
+    state.observePage(resources.length);
+    token = nextToken(output.nextToken, seen, "Bedrock ListGuardrails");
+    if (token === undefined) return;
+  }
+  throw new InventoryProtocolError("Bedrock ListGuardrails exceeded pagination limit");
+}
+
+async function collectBedrockAccountPosture(
+  context: InventoryCollectionContext,
+  region: string,
+  client: BedrockInventoryClient,
+  observedAt: string,
+  state: TaskCollectionState,
+): Promise<void> {
+  const [logging, retention] = await Promise.all([
+    client.getModelInvocationLoggingConfiguration(),
+    client.getAccountDataRetention(),
+  ]);
+  if (retention.mode === undefined) {
+    throw new InventoryProtocolError("Bedrock account data retention response omitted mode");
+  }
+  const config = logging.loggingConfig;
+  await state.emit({
+    resources: [],
+    evidence: [
+      evidence(
+        context,
+        observedAt,
+        region,
+        "bedrock",
+        "BEDROCK_MODEL_INVOCATION_LOGGING",
+        context.accountId,
+        config === undefined ? "NOT_CONFIGURED" : "CONFIGURED",
+        config === undefined
+          ? {}
+          : compact({
+            cloudWatchDestinationConfigured: config.cloudWatchConfig !== undefined,
+            s3DestinationConfigured: config.s3Config !== undefined,
+            largeDataS3DestinationConfigured:
+              config.cloudWatchConfig?.largeDataDeliveryS3Config !== undefined,
+            textDataDeliveryEnabled: config.textDataDeliveryEnabled,
+            imageDataDeliveryEnabled: config.imageDataDeliveryEnabled,
+            embeddingDataDeliveryEnabled: config.embeddingDataDeliveryEnabled,
+            videoDataDeliveryEnabled: config.videoDataDeliveryEnabled,
+            audioDataDeliveryEnabled: config.audioDataDeliveryEnabled,
+          }),
+      ),
+      evidence(
+        context,
+        observedAt,
+        region,
+        "bedrock",
+        "BEDROCK_ACCOUNT_DATA_RETENTION",
+        context.accountId,
+        "CONFIGURED",
+        compact({
+          mode: retention.mode,
+          updatedAt: iso(retention.updatedAt),
+        }),
+      ),
+    ],
+  });
+  state.observePage(2);
 }
 
 async function collectRds(

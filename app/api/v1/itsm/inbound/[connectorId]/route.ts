@@ -130,6 +130,11 @@ export async function POST(
       remoteUpdatedAtMs,
       lastLocalChangeMs: Date.parse(current.updatedAt),
     });
+    await repository.recordAuthenticatedInboundSuccess(
+      { orgId: connector.orgId, customerId: connector.customerId },
+      connector.id,
+      connector.updatedAt,
+    );
     if (decision.kind !== "apply") {
       return jsonResponse({ decision: decision.kind, ...(decision.kind === "skip-unmapped" ? { remoteStatus: decision.remoteStatus } : {}) });
     }

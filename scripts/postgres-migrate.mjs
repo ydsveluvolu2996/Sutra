@@ -73,6 +73,16 @@ const migrationFiles = [
   "0059_agentless_scans.sql",
   "0060_invitation_zoho_provider.sql",
   "0061_aws_live_snapshot_origin.sql",
+  "0062_saml_assertion_replays.sql",
+  "0063_dspm_workspace.sql",
+  "0064_scim_identity_lifecycle.sql",
+  "0065_hosted_broker_runtime.sql",
+  "0066_itsm_managed_secrets.sql",
+  "0067_audit_hash_version.sql",
+  "0068_aws_global_ownership.sql",
+  "0069_cmdb_resource_retirement.sql",
+  "0070_managed_evidence_objects.sql",
+  "0071_itsm_delivery_evidence.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

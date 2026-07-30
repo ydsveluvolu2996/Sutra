@@ -10,6 +10,7 @@ interface HostedOidcRuntimeEnvironment {
   readonly SUTRA_DEPLOYMENT_ENV?: string;
   readonly SUTRA_HOSTED_ENABLED?: string;
   readonly SUTRA_PRIVATE_BETA_OIDC_ENABLED?: string;
+  readonly SUTRA_IDENTITY_MODE?: string;
   readonly SUTRA_PUBLIC_ORIGIN?: string;
   readonly SUTRA_OIDC_PROVIDERS?: string;
   readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
@@ -44,8 +45,10 @@ function hostedOidcBase(request: Request): {
   // switch; production is enabled only by the separate hosted master switch.
   // Neither switch can cross-enable the other environment.
   const releaseGateEnabled = config.SUTRA_DEPLOYMENT_ENV === "staging"
-    ? config.SUTRA_PRIVATE_BETA_OIDC_ENABLED === "true"
+    ? config.SUTRA_IDENTITY_MODE === "oidc"
+      && config.SUTRA_PRIVATE_BETA_OIDC_ENABLED === "true"
     : config.SUTRA_DEPLOYMENT_ENV === "production"
+      && (config.SUTRA_IDENTITY_MODE === "oidc" || config.SUTRA_IDENTITY_MODE === "federated")
       && config.SUTRA_HOSTED_ENABLED === "true";
   if (!releaseGateEnabled) notConfigured();
   const origin = config.SUTRA_PUBLIC_ORIGIN?.trim() ?? "";

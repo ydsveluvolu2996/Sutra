@@ -156,6 +156,16 @@ test("a valid signed broker request enqueues a collector job scoped to the conne
   });
 });
 
+test("a simulated fixture connection is never a hosted broker scope", async () => {
+  await withDatabase(async (database) => {
+    const { connectionId } = await seedOrgConnection(database);
+    await database.prepare(
+      "UPDATE aws_connections SET source_kind = 'simulated_fixture' WHERE id = ?",
+    ).bind(connectionId).run();
+    assert.equal(await resolveHostedBrokerConnectionScope(connectionId, database), null);
+  });
+});
+
 test("an unknown connection is indistinguishable from a bad signature (no existence oracle)", async () => {
   await withDatabase(async (database) => {
     const { orgId, connectionId } = await seedOrgConnection(database);
@@ -262,7 +272,7 @@ test("the ingestion route is inert unless hosted mode AND the master switch are 
     SUTRA_DEPLOYMENT_ENV: cloudflare.env.SUTRA_DEPLOYMENT_ENV,
     SUTRA_LOCAL_MODE: cloudflare.env.SUTRA_LOCAL_MODE,
     SUTRA_IDENTITY_MODE: cloudflare.env.SUTRA_IDENTITY_MODE,
-    SUTRA_HOSTED_ENABLED: cloudflare.env.SUTRA_HOSTED_ENABLED,
+    SUTRA_BROKER_PUSH_INGEST_ENABLED: cloudflare.env.SUTRA_BROKER_PUSH_INGEST_ENABLED,
   };
   try {
     cloudflare.env.SUTRA_DEPLOYMENT_ENV = "production";
@@ -270,12 +280,12 @@ test("the ingestion route is inert unless hosted mode AND the master switch are 
     cloudflare.env.SUTRA_IDENTITY_MODE = "oidc";
     // Hosted runtime but master switch off => inert.
     for (const value of [undefined, "false", "TRUE", "1", " true"]) {
-      if (value === undefined) delete cloudflare.env.SUTRA_HOSTED_ENABLED;
-      else cloudflare.env.SUTRA_HOSTED_ENABLED = value;
+      if (value === undefined) delete cloudflare.env.SUTRA_BROKER_PUSH_INGEST_ENABLED;
+      else cloudflare.env.SUTRA_BROKER_PUSH_INGEST_ENABLED = value;
       assert.equal(isHostedBrokerIngestEnabled(), false, `master switch ${JSON.stringify(value)} must stay inert`);
     }
     // Master switch on AND hosted => live.
-    cloudflare.env.SUTRA_HOSTED_ENABLED = "true";
+    cloudflare.env.SUTRA_BROKER_PUSH_INGEST_ENABLED = "true";
     assert.equal(isHostedBrokerIngestEnabled(), true);
     // Master switch on but NOT a hosted runtime => still inert.
     cloudflare.env.SUTRA_DEPLOYMENT_ENV = "local";

@@ -42,6 +42,47 @@ const hostedShape = {
   SUTRA_ENVIRONMENT_KEY_SCOPE: "isolated",
 } as const;
 
+function testDer(tag: number, ...parts: readonly Uint8Array[]): Uint8Array {
+  const body = Buffer.concat(parts.map((part) => Buffer.from(part)));
+  const length = body.length < 128
+    ? Uint8Array.of(body.length)
+    : Uint8Array.of(0x82, (body.length >>> 8) & 0xff, body.length & 0xff);
+  return Uint8Array.from(Buffer.concat([Buffer.from([tag]), Buffer.from(length), body]));
+}
+
+const testSequence = testDer(0x30);
+const testSpki = testDer(0x30, testSequence, testDer(0x03, Uint8Array.of(0, ...new Uint8Array(260))));
+const testTbsCertificate = testDer(
+  0x30,
+  testDer(0x02, Uint8Array.of(1)),
+  testSequence,
+  testSequence,
+  testSequence,
+  testSequence,
+  testSpki,
+);
+const samlCertificate = Buffer.from(
+  testDer(0x30, testTbsCertificate, testSequence, testDer(0x03, Uint8Array.of(0, 0))),
+).toString("base64");
+
+const federatedShape = {
+  ...hostedShape,
+  SUTRA_IDENTITY_MODE: "federated",
+  SUTRA_SAML_TRANSACTION_KEY: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+  SUTRA_SAML_PROVIDERS: JSON.stringify([{
+    id: "enterprise",
+    label: "Enterprise SSO",
+    tenantId: "tenant-alpha",
+    entityId: "https://idp.example.test/metadata",
+    ssoUrl: "https://idp.example.test/sso",
+    signingCertificates: [samlCertificate],
+    tenantAttribute: "tenant_id",
+    emailAttribute: "email",
+    displayNameAttribute: "display_name",
+    nameIdFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+  }]),
+} as const;
+
 test("local runtime is loopback-only", () => {
   assert.equal(evaluateDeploymentBoundary("http://127.0.0.1:3000/dashboard", {}).allowed, true);
   const publicRequest = evaluateDeploymentBoundary("https://app.sutra.example/dashboard", {});
@@ -117,6 +158,27 @@ test("production stays disabled behind the SUTRA_HOSTED_ENABLED master switch (d
       hostedConfigurationIssues({ ...hostedShape, SUTRA_HOSTED_ENABLED: value }),
       ["hosted deployment is disabled pending adversarial auth review (set SUTRA_HOSTED_ENABLED=true only after sign-off)"],
       `SUTRA_HOSTED_ENABLED=${JSON.stringify(value)} must not enable hosted mode`,
+    );
+  }
+});
+
+test("enterprise SAML activates only through explicit federated mode with a pinned tenant provider", () => {
+  const enabled = { ...federatedShape, SUTRA_HOSTED_ENABLED: "true" };
+  assert.deepEqual(hostedConfigurationIssues(enabled), []);
+  assert.equal(
+    evaluateDeploymentBoundary("https://app.sutra.example/dashboard", enabled).allowed,
+    true,
+  );
+  for (const broken of [
+    { ...enabled, SUTRA_IDENTITY_MODE: "oidc" },
+    { ...enabled, SUTRA_SAML_TRANSACTION_KEY: "too-short" },
+    { ...enabled, SUTRA_SAML_PROVIDERS: "[]" },
+    { ...enabled, SUTRA_SAML_PROVIDERS: JSON.stringify([{ unexpected: true }]) },
+  ] as const) {
+    assert.ok(hostedConfigurationIssues(broken).length > 0);
+    assert.equal(
+      evaluateDeploymentBoundary("https://app.sutra.example/dashboard", broken).allowed,
+      false,
     );
   }
 });

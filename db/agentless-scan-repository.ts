@@ -73,10 +73,10 @@ export interface StoredTeardownDebt {
   readonly customerId: string;
   readonly connectionId: string;
   readonly runId: string;
-  readonly resourceKind: "snapshot" | "volume";
+  readonly resourceKind: "snapshot" | "volume" | "instance";
   readonly resourceId: string;
   readonly region: string;
-  readonly accountScope: string;
+  readonly accountScope: "customer" | "sutra-scan-account";
   readonly attempts: number;
   readonly lastError: string | null;
   readonly firstSeenAt: string;
@@ -153,6 +153,21 @@ function toStoredRun(row: RunRow): StoredAgentlessRun {
 function clampSeverity(value: string): string {
   const lower = value.toLowerCase();
   return lower === "critical" || lower === "high" || lower === "medium" || lower === "low" ? lower : "unknown";
+}
+
+async function findingId(
+  runId: string,
+  volumeId: string,
+  index: number,
+): Promise<string> {
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${runId}\u0000${volumeId}\u0000${index}`),
+  );
+  const hex = [...new Uint8Array(hash)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return `agf_${hex.slice(0, 48)}`;
 }
 
 export class AgentlessScanRepository {
@@ -286,7 +301,10 @@ export class AgentlessScanRepository {
     ).bind(runId, scope.orgId, scope.customerId).first<{ status: string }>();
     if (current === null || current === undefined) throw new AgentlessScanRepositoryError("RUN_NOT_FOUND");
     if (current.status === "completed" || current.status === "failed") {
-      throw new AgentlessScanRepositoryError("ILLEGAL_TRANSITION");
+      // A signed broker terminal result may be reconciled concurrently by two
+      // browser sessions. Terminal state is immutable, so an already-terminal
+      // row is an exact safe no-op rather than a reason to reopen it.
+      return;
     }
 
     const regions = context.regionByVolumeId ?? {};
@@ -296,16 +314,17 @@ export class AgentlessScanRepository {
     // findings is safer than a complete-looking run with none.
     let written = 0;
     for (const result of execution.results) {
-      for (const finding of result.findings) {
+      for (const [findingIndex, finding] of result.findings.entries()) {
         if (written >= MAX_FINDINGS_PER_RUN) break;
         written += 1;
         await db.prepare(
           `INSERT INTO agentless_scan_findings (
              id, org_id, customer_id, run_id, volume_id, instance_id, region,
              scanner, severity, title, created_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (id) DO NOTHING`,
         ).bind(
-          `agf_${crypto.randomUUID().replaceAll("-", "")}`,
+          await findingId(runId, result.volumeId, findingIndex),
           scope.orgId, scope.customerId, runId, result.volumeId,
           instances[result.volumeId] ?? null, regions[result.volumeId] ?? "unknown",
           finding.source, clampSeverity(finding.severity), finding.title.slice(0, 500), now,
@@ -324,23 +343,44 @@ export class AgentlessScanRepository {
     //
     // Both are recorded so that "what is this scan still costing?" has one
     // answer, regardless of whose job the cleanup is.
-    const outstanding: readonly { readonly volumeId: string; readonly resourceId: string; readonly owner: "sutra" | "customer"; readonly note: string }[] = [
-      ...execution.results.flatMap((result) =>
-        result.teardownFailures.map((resourceId) => ({
-          volumeId: result.volumeId, resourceId, owner: "sutra" as const,
+    const outstanding: readonly {
+      readonly volumeId: string;
+      readonly resourceId: string;
+      readonly kind: "snapshot" | "volume" | "instance";
+      readonly owner: "sutra" | "customer";
+      readonly region?: string;
+      readonly note: string;
+    }[] = execution.results.flatMap((result) => result.teardownDebt !== undefined
+      ? result.teardownDebt.map((debt) => ({
+        volumeId: result.volumeId,
+        resourceId: debt.resourceId,
+        kind: debt.resourceKind,
+        owner: debt.accountScope === "customer" ? "customer" as const : "sutra" as const,
+        region: debt.region,
+        note: debt.error,
+      }))
+      : [
+        ...result.teardownFailures.map((resourceId) => ({
+          volumeId: result.volumeId,
+          resourceId,
+          kind: resourceId.startsWith("vol-") ? "volume" as const : "snapshot" as const,
+          owner: "sutra" as const,
+          region: regions[result.volumeId] ?? "unknown",
           note: result.error ?? "teardown failed",
-        }))),
-      ...execution.results.flatMap((result) =>
-        result.cleanupHandoff.map((resourceId) => ({
-          volumeId: result.volumeId, resourceId, owner: "customer" as const,
+        })),
+        ...result.cleanupHandoff.map((resourceId) => ({
+          volumeId: result.volumeId,
+          resourceId,
+          kind: "snapshot" as const,
+          owner: "customer" as const,
+          region: regions[result.volumeId] ?? "unknown",
           note: "awaiting the customer-owned lifecycle policy; Sutra cannot delete it",
-        }))),
-    ];
+        })),
+      ]);
     for (const entry of outstanding) {
       {
         const result = { volumeId: entry.volumeId, error: entry.note };
         const resourceId = entry.resourceId;
-        const kind: "snapshot" | "volume" = resourceId.startsWith("vol-") ? "volume" : "snapshot";
         await db.prepare(
           `INSERT INTO agentless_teardown_debt (
              id, org_id, customer_id, connection_id, run_id, resource_kind, resource_id,
@@ -352,8 +392,8 @@ export class AgentlessScanRepository {
              last_error = excluded.last_error`,
         ).bind(
           `agd_${crypto.randomUUID().replaceAll("-", "")}`,
-          scope.orgId, scope.customerId, context.connectionId, runId, kind, resourceId,
-          regions[result.volumeId] ?? "unknown",
+          scope.orgId, scope.customerId, context.connectionId, runId, entry.kind, resourceId,
+          entry.region ?? regions[result.volumeId] ?? "unknown",
           entry.owner === "sutra" ? "sutra-scan-account" : "customer",
           entry.note, now, now,
         ).run();
@@ -460,8 +500,18 @@ export class AgentlessScanRepository {
     return (rows.results ?? []).map((row) => ({
       id: row.id, customerId: row.customer_id, connectionId: row.connection_id,
       runId: row.run_id,
-      resourceKind: row.resource_kind === "volume" ? "volume" : "snapshot",
-      resourceId: row.resource_id, region: row.region, accountScope: row.account_scope,
+      resourceKind:
+        row.resource_kind === "volume"
+          ? "volume"
+          : row.resource_kind === "instance"
+            ? "instance"
+            : "snapshot",
+      resourceId: row.resource_id,
+      region: row.region,
+      accountScope:
+        row.account_scope === "customer" || row.account_scope === "sutra-scan-account"
+          ? row.account_scope
+          : invalid(),
       attempts: Number(row.attempts), lastError: row.last_error,
       firstSeenAt: toIso(row.first_seen_at) as string,
       lastAttemptAt: toIso(row.last_attempt_at) as string,

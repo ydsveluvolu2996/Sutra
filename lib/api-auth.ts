@@ -12,6 +12,7 @@ import {
   type Capability,
   type MembershipManagementScope,
 } from "./auth-policy";
+import { assertSameOrigin } from "./aws-pilot-security";
 import { requestMatchesCanonicalOrigin } from "./request-origin";
 
 export const LOCAL_SESSION_COOKIE = "sutra_session";
@@ -91,9 +92,14 @@ export function assertLocalAuthRequest(request: Request): void {
 export function isHostedOidcRuntime(): boolean {
   const config = runtimeEnv();
   return (
-    (config.SUTRA_DEPLOYMENT_ENV === "staging" || config.SUTRA_DEPLOYMENT_ENV === "production") &&
-    config.SUTRA_LOCAL_MODE !== "true" &&
-    config.SUTRA_IDENTITY_MODE === "oidc"
+    config.SUTRA_LOCAL_MODE !== "true"
+    && (
+      (config.SUTRA_DEPLOYMENT_ENV === "staging" && config.SUTRA_IDENTITY_MODE === "oidc")
+      || (
+        config.SUTRA_DEPLOYMENT_ENV === "production"
+        && (config.SUTRA_IDENTITY_MODE === "oidc" || config.SUTRA_IDENTITY_MODE === "federated")
+      )
+    )
   );
 }
 
@@ -198,6 +204,9 @@ export async function requireApiSession(
   options: { readonly requireMfa?: boolean } = {},
 ): Promise<AuthenticatedLocalSession> {
   assertAuthenticationRequest(request);
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) {
+    assertSameOrigin(request, configuredPublicOrigin());
+  }
   const token = sessionTokenFromRequest(request);
   // Generic every-request authorize path: nothing downstream reads
   // `session.availableOrganizations` here (only the session/org-switcher views

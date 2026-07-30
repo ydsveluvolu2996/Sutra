@@ -1,17 +1,24 @@
 # GitHub repository release-readiness checklist
 
-This checklist keeps review claims proportional to evidence.
+**Status:** repository-control checklist. A checked-in workflow or local test is not
+evidence that GitHub protections are enabled or that a production deployment
+succeeded.
+
+This checklist keeps review claims proportional to evidence. The managed-production
+deployment contract is
+[`../deploy/production/README.md`](../deploy/production/README.md).
 
 | Gate | Current state | Required before production release |
 |---|---|---|
-| CI | Passing on the current branch | Keep required checks enabled on `main` |
+| CI | Required workflow definitions and local verification scripts are present | Confirm the exact release SHA passes every required check on protected `main` |
 | Secret scan | Repository scan passes | Enable GitHub secret scanning and push protection when plan supports it |
 | Dependency updates | Dependabot configuration added | Review and merge updates weekly |
 | Code scanning | CodeQL workflow prepared and gated | Enable Advanced Security or set repository variable `CODEQL_ENABLED=true` after entitlement |
 | Ownership | CODEOWNERS added | Add independent security and infrastructure reviewers |
-| PR quality | PR template added | Split the current large draft PR into reviewable feature PRs |
-| Branch safety | Branch protection unavailable on current private plan | Upgrade GitHub plan or move repository to an organization with required reviews/checks |
-| Release | Immutable ECR/OIDC workflow present | Configure protected `kubernetes-production-release` environment and independent approver |
+| PR quality | PR template added | Review security, identity, database, broker and infrastructure boundaries with accountable owners |
+| Branch safety | Repository files cannot prove the live GitHub protection state | Require protected `main`, required checks, restricted pushes and independent approval |
+| Managed production release | One immutable app/worker/broker ECR/OIDC workflow is present | Configure the protected `production-ha-release` environment, exact AWS OIDC trust and independent approver; perform one approved dry run and rollback exercise |
+| Kubernetes release | Separate Kubernetes release material remains scoped to that subsystem | Do not treat a Kubernetes workflow as approval for the managed application stack |
 | Documentation | Architecture, security and Kubernetes runbooks present | Keep changelog, release notes and customer limitations current |
 | Legal/commercial | No license selected | Choose proprietary commercial license or approved open-source license |
 

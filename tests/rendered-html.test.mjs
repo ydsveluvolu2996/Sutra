@@ -45,14 +45,16 @@ test("server-renders the Sutra public product site", async () => {
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/i);
 });
 
-test("server-renders an authentication gate without leaking protected route data", async () => {
-  const routes = ["/dashboard", "/customers", "/cmdb", "/cmdb/resource?key=demo", "/changes", "/findings", "/network-exposure", "/iac-scan", "/security-events", "/cases", "/cases/routing", "/compliance", "/compliance-frameworks", "/costs", "/reports", "/controls", "/roadmap", "/onboard", "/kubernetes/fleet", "/kubernetes/attack-paths", "/kubernetes/issues", "/kubernetes/permissions", "/kubernetes/iam", "/kubernetes/trends", "/kubernetes/vulnerability-updates", "/kubernetes/vulnerability-management", "/kubernetes/drift", "/settings"];
+test("server redirects anonymous private pages before rendering tenant content", async () => {
+  const routes = ["/access", "/agentless-scans", "/alerts", "/dashboard", "/customers", "/cmdb", "/cmdb/assets", "/cmdb/dependencies", "/cmdb/resource?key=demo", "/changes", "/cloud-detections", "/findings", "/findings/exceptions", "/flow-log-coverage", "/network-exposure", "/iac-scan", "/security-events", "/cases", "/cases/routing", "/compliance", "/compliance-frameworks", "/costs", "/costs/showback", "/reports", "/reports/builder", "/controls", "/roadmap", "/onboard", "/onboard/client", "/operations", "/patch", "/registry/inventory", "/vulnerabilities", "/vulnerabilities/exploitability", "/kubernetes", "/kubernetes/fleet", "/kubernetes/attack-paths", "/kubernetes/issues", "/kubernetes/permissions", "/kubernetes/iam", "/kubernetes/trends", "/kubernetes/vulnerability-updates", "/kubernetes/vulnerability-management", "/kubernetes/drift", "/settings", "/settings/notifications"];
 
   for (const pathname of routes) {
     const response = await render(pathname);
-    assert.equal(response.status, 200, pathname);
+    assert.equal(response.status, 307, pathname);
+    assert.match(response.headers.get("location") ?? "", /\/login\?next=/u, pathname);
+    assert.match(response.headers.get("cache-control") ?? "", /(?:^|,)\s*no-store(?:,|$)/u, pathname);
     const html = await response.text();
-    assert.match(html, /Opening your protected workspace/i, pathname);
+    assert.equal(html, "", pathname);
     assert.doesNotMatch(html, /Your AWS pilot workspace|AWS resource inventory|Onboard one AWS account/i, pathname);
   }
 });

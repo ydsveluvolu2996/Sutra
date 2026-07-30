@@ -14,7 +14,17 @@ does not prove inbox placement. Missing configuration, provider rejection and
 ambiguous network outcomes remain explicit. The one-time activation URL is
 still returned once as a controlled fallback.
 
-## Hosted EC2 private-beta configuration
+## Managed production configuration
+
+The managed/HA release is Zoho-only for invitation, password-reset, contact and
+scheduled-report email. Its private entrypoint requires both
+`SUTRA_CONTACT_PROVIDER=zoho` and
+`SUTRA_INVITATION_EMAIL_PROVIDER=zoho`; a missing or different provider fails
+startup instead of falling back to Resend. The remaining Zoho Mail account,
+regional OAuth and sender values come from the managed runtime secret described
+in [`zoho-mail-and-sso.md`](zoho-mail-and-sso.md).
+
+## Legacy EC2 private-beta configuration
 
 First authenticate `sutracmdb.com` with a transactional provider and verify the
 exact sender address. Then open an interactive SSM session to the host:
@@ -24,12 +34,11 @@ cd /opt/sutra
 sudo deploy/ec2/configure-invitation-email.sh
 ```
 
-The helper accepts only Resend or SendGrid, reads the API key without echo,
+This legacy helper accepts only Resend or SendGrid, reads the API key without echo,
 never accepts it on the command line, writes it to the ignored mode-`0600`
 runtime file on encrypted EBS, and recreates only the application container.
 It does not place the key in CloudFormation parameters, Git, shell history or
-normal command output. The final managed/HA deployment should move this key to
-a managed secret store and rotate it on a schedule.
+normal command output. It is not the managed-production release path.
 
 Required runtime values are:
 

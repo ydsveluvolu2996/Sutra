@@ -58,6 +58,16 @@ import postgresGovernancePoliciesSql from "../postgres/migrations/0058_governanc
 import postgresAgentlessScansSql from "../postgres/migrations/0059_agentless_scans.sql?raw";
 import postgresInvitationZohoProviderSql from "../postgres/migrations/0060_invitation_zoho_provider.sql?raw";
 import postgresAwsLiveSnapshotOriginSql from "../postgres/migrations/0061_aws_live_snapshot_origin.sql?raw";
+import postgresSamlAssertionReplaysSql from "../postgres/migrations/0062_saml_assertion_replays.sql?raw";
+import postgresDspmWorkspaceSql from "../postgres/migrations/0063_dspm_workspace.sql?raw";
+import postgresScimIdentityLifecycleSql from "../postgres/migrations/0064_scim_identity_lifecycle.sql?raw";
+import postgresHostedBrokerRuntimeSql from "../postgres/migrations/0065_hosted_broker_runtime.sql?raw";
+import postgresItsmManagedSecretsSql from "../postgres/migrations/0066_itsm_managed_secrets.sql?raw";
+import postgresAuditHashVersionSql from "../postgres/migrations/0067_audit_hash_version.sql?raw";
+import postgresAwsGlobalOwnershipSql from "../postgres/migrations/0068_aws_global_ownership.sql?raw";
+import postgresCmdbResourceRetirementSql from "../postgres/migrations/0069_cmdb_resource_retirement.sql?raw";
+import postgresManagedEvidenceObjectsSql from "../postgres/migrations/0070_managed_evidence_objects.sql?raw";
+import postgresItsmDeliveryEvidenceSql from "../postgres/migrations/0071_itsm_delivery_evidence.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -120,6 +130,16 @@ const migrations = [
   { id: "0059_agentless_scans", source: postgresAgentlessScansSql },
   { id: "0060_invitation_zoho_provider", source: postgresInvitationZohoProviderSql },
   { id: "0061_aws_live_snapshot_origin", source: postgresAwsLiveSnapshotOriginSql },
+  { id: "0062_saml_assertion_replays", source: postgresSamlAssertionReplaysSql },
+  { id: "0063_dspm_workspace", source: postgresDspmWorkspaceSql },
+  { id: "0064_scim_identity_lifecycle", source: postgresScimIdentityLifecycleSql },
+  { id: "0065_hosted_broker_runtime", source: postgresHostedBrokerRuntimeSql },
+  { id: "0066_itsm_managed_secrets", source: postgresItsmManagedSecretsSql },
+  { id: "0067_audit_hash_version", source: postgresAuditHashVersionSql },
+  { id: "0068_aws_global_ownership", source: postgresAwsGlobalOwnershipSql },
+  { id: "0069_cmdb_resource_retirement", source: postgresCmdbResourceRetirementSql },
+  { id: "0070_managed_evidence_objects", source: postgresManagedEvidenceObjectsSql },
+  { id: "0071_itsm_delivery_evidence", source: postgresItsmDeliveryEvidenceSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

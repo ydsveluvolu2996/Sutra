@@ -53,5 +53,6 @@ test("pilot uses the node:http runner and reads its configuration from the merge
   assert.match(source, /postInternalJobRun\(\{/u);
   assert.match(source, /const jobRunnerToken = environment\.SUTRA_JOB_RUNNER_TOKEN/u);
   assert.match(source, /environment\.SUTRA_JOB_RUNNER_INTERVAL_MS/u);
+  assert.match(source, /SUTRA_JOB_RUNNER_SELF_TICK !== "false"/u);
   assert.doesNotMatch(source, /fetch\(runUrl/u);
 });

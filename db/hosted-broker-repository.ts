@@ -28,9 +28,9 @@ export async function resolveHostedBrokerConnectionScope(
     `SELECT c.id AS connection_id, c.org_id AS org_id, c.customer_id AS customer_id
        FROM aws_connections c
        JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
-       JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
+      JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
         AND cu.status IN ('active', 'trial')
-      WHERE c.id = ? AND c.status = 'active'
+      WHERE c.id = ? AND c.status = 'active' AND c.source_kind = 'aws_trust_role'
       LIMIT 1`,
   ).bind(connectionId).first<{ connection_id: string; org_id: string; customer_id: string }>();
   if (row === null) return null;

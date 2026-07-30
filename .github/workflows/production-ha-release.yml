@@ -1,0 +1,589 @@
+name: Release Sutra managed production
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseReason:
+        description: Approved production release reason
+        required: true
+        type: string
+      changeTicket:
+        description: Approved change-management ticket
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sutra-managed-production-release
+  cancel-in-progress: false
+
+env:
+  APP_ECR_REPOSITORY: sutra/app
+  WORKER_ECR_REPOSITORY: sutra/notification-worker
+  BROKER_ECR_REPOSITORY: sutra/broker
+
+jobs:
+  release:
+    name: Build, scan, migrate, release, verify, and record evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production-ha-release
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    steps:
+      - name: Check out the exact release revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate protected release configuration
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+          CHANGE_TICKET: ${{ inputs.changeTicket }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
+          [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${STACK_NAME}" =~ ^[A-Za-z][A-Za-z0-9-]{2,127}$ ]]
+          [[ "${PUBLIC_ORIGIN}" =~ ^https://[A-Za-z0-9.-]+$ ]]
+          [[ "${#RELEASE_REASON}" -ge 10 && "${#RELEASE_REASON}" -le 160 ]]
+          [[ "${#CHANGE_TICKET}" -ge 3 && "${#CHANGE_TICKET}" -le 64 ]]
+          [[ "${RELEASE_REASON}" != *$'\n'* && "${RELEASE_REASON}" != *$'\r'* ]]
+          [[ "${CHANGE_TICKET}" != *$'\n'* && "${CHANGE_TICKET}" != *$'\r'* ]]
+          [[ "${APP_ECR_REPOSITORY}" == "sutra/app" ]]
+          [[ "${WORKER_ECR_REPOSITORY}" == "sutra/notification-worker" ]]
+          [[ "${BROKER_ECR_REPOSITORY}" == "sutra/broker" ]]
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned CloudFormation linter
+        run: python -m pip install --disable-pip-version-check cfn-lint==1.46.0
+
+      - name: Run source and managed-production gates
+        run: |
+          set -euo pipefail
+          pnpm security:secrets
+          pnpm typecheck
+          pnpm typecheck:collector
+          pnpm lint
+          node scripts/ci-test-shard.mjs
+          node --test tests/production-ha-infrastructure.test.mjs
+          bash deploy/production/validate-ha.sh
+          pnpm build
+
+      - name: Require successful CodeQL for the exact release SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CODEQL_ENABLED: ${{ vars.CODEQL_ENABLED }}
+        run: |
+          set -euo pipefail
+          [[ "${CODEQL_ENABLED}" == "true" ]] || {
+            echo "CODEQL_ENABLED=true and the corresponding GitHub entitlement are required." >&2
+            exit 1
+          }
+          runs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/codeql.yml/runs?head_sha=${GITHUB_SHA}&status=completed&per_page=100")"
+          successful="$(jq \
+            --arg sha "${GITHUB_SHA}" \
+            '[.workflow_runs[] | select(
+              .head_sha == $sha
+              and .head_branch == "main"
+              and .status == "completed"
+              and .conclusion == "success"
+              and (.event == "workflow_dispatch" or .event == "schedule")
+            )] | length' <<< "${runs}")"
+          [[ "${successful}" -ge 1 ]] || {
+            echo "No successful completed codeql.yml run exists for the exact release SHA." >&2
+            exit 1
+          }
+
+      - name: Configure short-lived AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-production-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Resolve the exact production boundary
+        id: stack
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          EXPECTED_PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+        run: |
+          set -euo pipefail
+          [[ "$(aws sts get-caller-identity --query Account --output text)" == "${AWS_ACCOUNT_ID}" ]]
+          stack="$(aws cloudformation describe-stacks \
+            --region "${AWS_REGION}" \
+            --stack-name "${STACK_NAME}" \
+            --output json)"
+          [[ "$(jq -r '.Stacks | length' <<< "${stack}")" == "1" ]]
+          [[ "$(jq -r '.Stacks[0].EnableTerminationProtection' <<< "${stack}")" == "true" ]]
+          status="$(jq -r '.Stacks[0].StackStatus' <<< "${stack}")"
+          [[ "${status}" == "CREATE_COMPLETE" || "${status}" == "UPDATE_COMPLETE" ]]
+          output() {
+            jq -er --arg key "$1" \
+              '.Stacks[0].Outputs[] | select(.OutputKey == $key) | .OutputValue' <<< "${stack}"
+          }
+          for key in \
+            PublicOrigin ClusterName ServiceName WorkerServiceName BrokerServiceName AppTaskDefinitionArn \
+            MigrationTaskDefinitionArn WorkerTaskDefinitionArn BrokerTaskDefinitionArn \
+            VulnerabilityFeedTaskDefinitionArn VulnerabilityFeedScheduleRuleName \
+            ApplicationSecurityGroupId BrokerSecurityGroupId PrivateAppSubnetIds EvidenceBucketName KmsKeyArn
+          do
+            value="$(output "${key}")"
+            [[ -n "${value}" && "${value}" != "null" ]]
+            echo "${key}=${value}" >> "${GITHUB_OUTPUT}"
+          done
+          [[ "$(output PublicOrigin)" == "${EXPECTED_PUBLIC_ORIGIN}" ]]
+
+      - name: Verify immutable repositories
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          for repository in "${APP_ECR_REPOSITORY}" "${WORKER_ECR_REPOSITORY}" "${BROKER_ECR_REPOSITORY}"; do
+            read -r uri mutability encryption < <(
+              aws ecr describe-repositories \
+                --region "${AWS_REGION}" \
+                --repository-names "${repository}" \
+                --query 'repositories[0].[repositoryUri,imageTagMutability,encryptionConfiguration.encryptionType]' \
+                --output text
+            )
+            [[ "${uri}" == "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${repository}" ]]
+            [[ "${mutability}" == "IMMUTABLE" ]]
+            [[ "${encryption}" == "AES256" || "${encryption}" == "KMS" ]]
+            expected_lifecycle="$(jq -cS . deploy/ec2/ecr-lifecycle-policy.json)"
+            actual_lifecycle="$(aws ecr get-lifecycle-policy --region "${AWS_REGION}" \
+              --repository-name "${repository}" --query lifecyclePolicyText --output text | jq -cS .)"
+            [[ "${actual_lifecycle}" == "${expected_lifecycle}" ]]
+          done
+
+      - name: Install Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate Docker to the approved ECR registry
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecr get-login-password --region "${AWS_REGION}" |
+            docker login --username AWS --password-stdin "${registry}"
+
+      - name: Build and push the immutable app candidate
+        id: app
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-app \
+            --cache-to type=gha,mode=max,scope=sutra-production-app \
+            --push --tag "${registry}/${APP_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${APP_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push the immutable worker candidate
+        id: worker
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file services/notification-worker/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-worker \
+            --cache-to type=gha,mode=max,scope=sutra-production-worker \
+            --push --tag "${registry}/${WORKER_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${WORKER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push the immutable broker candidate
+        id: broker
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-broker \
+            --cache-to type=gha,mode=max,scope=sutra-production-broker \
+            --push --tag "${registry}/${BROKER_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${BROKER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${BROKER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan the exact application digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.app.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan the exact worker digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.worker.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan the exact broker digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.broker.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Promote only the scanned manifests
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          APP_CANDIDATE: ${{ steps.app.outputs.candidate }}
+          APP_RELEASE: ${{ steps.app.outputs.release }}
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          WORKER_CANDIDATE: ${{ steps.worker.outputs.candidate }}
+          WORKER_RELEASE: ${{ steps.worker.outputs.release }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          BROKER_CANDIDATE: ${{ steps.broker.outputs.candidate }}
+          BROKER_RELEASE: ${{ steps.broker.outputs.release }}
+          BROKER_DIGEST: ${{ steps.broker.outputs.digest }}
+        run: |
+          set -euo pipefail
+          promote() {
+            local repository="$1" candidate="$2" release="$3" expected_digest="$4"
+            local response manifest media_type source_digest promoted_digest
+            response="$(aws ecr batch-get-image --region "${AWS_REGION}" \
+              --repository-name "${repository}" --image-ids "imageTag=${candidate}" --output json)"
+            jq -e '(.images | length) == 1 and ((.failures // []) | length) == 0' <<< "${response}" >/dev/null
+            source_digest="$(jq -r '.images[0].imageId.imageDigest' <<< "${response}")"
+            manifest="$(jq -r '.images[0].imageManifest' <<< "${response}")"
+            media_type="$(jq -r '.images[0].imageManifestMediaType' <<< "${response}")"
+            [[ "${source_digest}" == "${expected_digest}" ]]
+            [[ "${media_type}" == "application/vnd.oci.image.index.v1+json" ]]
+            printf '%s' "${manifest}" | jq -e '
+              .schemaVersion == 2
+              and any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")
+              and any(.manifests[]; .annotations["vnd.docker.reference.type"] == "attestation-manifest")
+            ' >/dev/null
+            promoted_digest="$(aws ecr put-image --region "${AWS_REGION}" \
+              --repository-name "${repository}" --image-manifest "${manifest}" \
+              --image-manifest-media-type "${media_type}" --image-tag "${release}" \
+              --image-digest "${expected_digest}" --query 'image.imageId.imageDigest' --output text)"
+            [[ "${promoted_digest}" == "${expected_digest}" ]]
+          }
+          promote "${APP_ECR_REPOSITORY}" "${APP_CANDIDATE}" "${APP_RELEASE}" "${APP_DIGEST}"
+          promote "${WORKER_ECR_REPOSITORY}" "${WORKER_CANDIDATE}" "${WORKER_RELEASE}" "${WORKER_DIGEST}"
+          promote "${BROKER_ECR_REPOSITORY}" "${BROKER_CANDIDATE}" "${BROKER_RELEASE}" "${BROKER_DIGEST}"
+
+      - name: Migrate, deploy all services, verify, and roll back on failure
+        id: deploy
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          PUBLIC_ORIGIN: ${{ steps.stack.outputs.PublicOrigin }}
+          CLUSTER: ${{ steps.stack.outputs.ClusterName }}
+          APP_SERVICE: ${{ steps.stack.outputs.ServiceName }}
+          WORKER_SERVICE: ${{ steps.stack.outputs.WorkerServiceName }}
+          BROKER_SERVICE: ${{ steps.stack.outputs.BrokerServiceName }}
+          MIGRATION_BASE_TASK: ${{ steps.stack.outputs.MigrationTaskDefinitionArn }}
+          FEED_BASE_TASK: ${{ steps.stack.outputs.VulnerabilityFeedTaskDefinitionArn }}
+          FEED_SCHEDULE_RULE: ${{ steps.stack.outputs.VulnerabilityFeedScheduleRuleName }}
+          APP_SECURITY_GROUP: ${{ steps.stack.outputs.ApplicationSecurityGroupId }}
+          PRIVATE_SUBNETS: ${{ steps.stack.outputs.PrivateAppSubnetIds }}
+          EVIDENCE_BUCKET: ${{ steps.stack.outputs.EvidenceBucketName }}
+          KMS_KEY_ARN: ${{ steps.stack.outputs.KmsKeyArn }}
+          APP_IMAGE: ${{ steps.app.outputs.ref }}
+          WORKER_IMAGE: ${{ steps.worker.outputs.ref }}
+          BROKER_IMAGE: ${{ steps.broker.outputs.ref }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+          CHANGE_TICKET: ${{ inputs.changeTicket }}
+        run: |
+          set -euo pipefail
+          previous_app="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+            --services "${APP_SERVICE}" --query 'services[0].taskDefinition' --output text)"
+          previous_worker="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+            --services "${WORKER_SERVICE}" --query 'services[0].taskDefinition' --output text)"
+          previous_broker="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+            --services "${BROKER_SERVICE}" --query 'services[0].taskDefinition' --output text)"
+          aws events list-targets-by-rule --region "${AWS_REGION}" \
+            --rule "${FEED_SCHEDULE_RULE}" --output json > previous-feed-targets.json
+          jq -e '(.Targets | length) == 1 and .Targets[0].Id == "vulnerability-feed-refresh"' \
+            previous-feed-targets.json >/dev/null
+          jq '.Targets[0]' previous-feed-targets.json > previous-feed-target.json
+          previous_feed="$(jq -er '.EcsParameters.TaskDefinitionArn' previous-feed-target.json)"
+          [[ "${previous_app}" =~ :task-definition/sutra-production-app:[0-9]+$ ]]
+          [[ "${previous_worker}" =~ :task-definition/sutra-production-worker:[0-9]+$ ]]
+          [[ "${previous_broker}" =~ :task-definition/sutra-production-broker:[0-9]+$ ]]
+          [[ "${previous_feed}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+          [[ "${FEED_BASE_TASK}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+
+          register_revision() {
+            local base="$1" image="$2" output="$3" targets_json="$4" update_release_identity="$5"
+            aws ecs describe-task-definition --region "${AWS_REGION}" --task-definition "${base}" \
+              --query taskDefinition --output json |
+              jq -e --arg image "${image}" --argjson targets "${targets_json}" \
+                --argjson updateReleaseIdentity "${update_release_identity}" '
+                ([.containerDefinitions[].name
+                  | select(. as $name | $targets | index($name) != null)] | length) as $targetCount
+                | if $targetCount != ($targets | length) then
+                    error("task definition does not contain every exact release container")
+                  else . end
+                | if $updateReleaseIdentity then
+                    ([.containerDefinitions[]
+                      | select(.name == "app")
+                      | .environment[]?
+                      | select(.name == "SUTRA_RELEASE_IMAGE")] | length) as $releaseIdentityCount
+                    | if $releaseIdentityCount != 1 then
+                        error("app task must contain exactly one SUTRA_RELEASE_IMAGE entry")
+                      else . end
+                  else . end
+                | .containerDefinitions |= map(
+                    if (.name as $name | $targets | index($name) != null)
+                    then .image = $image
+                    else .
+                    end
+                  )
+                | if $updateReleaseIdentity then
+                    .containerDefinitions |= map(
+                      if .name == "app" then
+                        .environment |= map(
+                          if .name == "SUTRA_RELEASE_IMAGE" then .value = $image else . end
+                        )
+                      else .
+                      end
+                    )
+                  else . end
+                | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
+              ' > "${output}"
+            aws ecs register-task-definition --region "${AWS_REGION}" \
+              --cli-input-json "file://${output}" \
+              --tags key=sutra:release-boundary,value=production \
+              --query 'taskDefinition.taskDefinitionArn' --output text
+          }
+
+          migration_task="$(register_revision \
+            "${MIGRATION_BASE_TASK}" "${APP_IMAGE}" migration.json '["migrate"]' false)"
+          new_app="$(register_revision \
+            "${previous_app}" "${APP_IMAGE}" app.json '["app","background-job-runner"]' true)"
+          new_worker="$(register_revision \
+            "${previous_worker}" "${WORKER_IMAGE}" worker.json '["notification-worker"]' false)"
+          new_broker="$(register_revision \
+            "${previous_broker}" "${BROKER_IMAGE}" broker.json '["hosted-broker"]' false)"
+          new_feed="$(register_revision \
+            "${previous_feed}" "${APP_IMAGE}" vulnerability-feed.json '["vulnerability-feed-refresh"]' false)"
+          [[ "${migration_task}" =~ :task-definition/sutra-production-migration:[0-9]+$ ]]
+          [[ "${new_app}" =~ :task-definition/sutra-production-app:[0-9]+$ ]]
+          [[ "${new_worker}" =~ :task-definition/sutra-production-worker:[0-9]+$ ]]
+          [[ "${new_broker}" =~ :task-definition/sutra-production-broker:[0-9]+$ ]]
+          [[ "${new_feed}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+
+          network="$(jq -cn --arg subnets "${PRIVATE_SUBNETS}" --arg sg "${APP_SECURITY_GROUP}" '
+            {awsvpcConfiguration:{subnets:($subnets|split(",")),securityGroups:[$sg],assignPublicIp:"DISABLED"}}')"
+          migration="$(aws ecs run-task --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+            --launch-type FARGATE --task-definition "${migration_task}" \
+            --network-configuration "${network}" \
+            --started-by "github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --output json)"
+          jq -e '(.failures | length) == 0 and (.tasks | length) == 1' <<< "${migration}" >/dev/null
+          migration_arn="$(jq -r '.tasks[0].taskArn' <<< "${migration}")"
+          aws ecs wait tasks-stopped --region "${AWS_REGION}" --cluster "${CLUSTER}" --tasks "${migration_arn}"
+          migration_result="$(aws ecs describe-tasks --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+            --tasks "${migration_arn}" --output json)"
+          [[ "$(jq -r '.tasks[0].containers[] | select(.name == "migrate") | .exitCode' <<< "${migration_result}")" == "0" ]]
+
+          jq --arg task "${new_feed}" \
+            '.EcsParameters.TaskDefinitionArn = $task | [.]' \
+            previous-feed-target.json > new-feed-targets.json
+          feed_schedule_updated=false
+          if aws events put-targets --region "${AWS_REGION}" \
+              --rule "${FEED_SCHEDULE_RULE}" \
+              --targets file://new-feed-targets.json > feed-target-update.json &&
+            [[ "$(jq -r '.FailedEntryCount' feed-target-update.json)" == "0" ]]
+          then
+            feed_schedule_updated=true
+          fi
+
+          deployed=false
+          deployment_verified=false
+          if [[ "${feed_schedule_updated}" == "true" ]] &&
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${APP_SERVICE}" --task-definition "${new_app}" --force-new-deployment >/dev/null &&
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${WORKER_SERVICE}" --task-definition "${new_worker}" --force-new-deployment >/dev/null &&
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${BROKER_SERVICE}" --task-definition "${new_broker}" --force-new-deployment >/dev/null &&
+            aws ecs wait services-stable --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --services "${APP_SERVICE}" "${WORKER_SERVICE}" "${BROKER_SERVICE}"
+          then
+            if health_headers="$(curl --fail --silent --show-error --retry 12 --retry-delay 5 \
+              --max-time 15 --dump-header - --output /dev/null "${PUBLIC_ORIGIN}/api/healthz")"
+            then
+              served_image="$(awk 'BEGIN{IGNORECASE=1} $1=="x-sutra-release-image:"{gsub("\\r","",$2); print $2}' \
+                <<< "${health_headers}")"
+              if [[ "${served_image}" == "${APP_IMAGE}" ]]; then deployment_verified=true; fi
+            fi
+          fi
+          if [[ "${deployment_verified}" == "true" ]]; then
+            scheduled_feed="$(aws events list-targets-by-rule --region "${AWS_REGION}" \
+              --rule "${FEED_SCHEDULE_RULE}" \
+              --query 'Targets[?Id==`vulnerability-feed-refresh`].EcsParameters.TaskDefinitionArn | [0]' \
+              --output text)"
+            [[ "${scheduled_feed}" == "${new_feed}" ]] || deployment_verified=false
+          fi
+          write_release_evidence() {
+            jq -n \
+              --arg schemaVersion "sutra.managed-production-release.v1" \
+              --arg repository "${GITHUB_REPOSITORY}" \
+              --arg commit "${GITHUB_SHA}" \
+              --arg runId "${GITHUB_RUN_ID}" \
+              --arg runAttempt "${GITHUB_RUN_ATTEMPT}" \
+              --arg actor "${GITHUB_ACTOR}" \
+              --arg reason "${RELEASE_REASON}" \
+              --arg ticket "${CHANGE_TICKET}" \
+              --arg appImage "${APP_IMAGE}" \
+              --arg workerImage "${WORKER_IMAGE}" \
+              --arg brokerImage "${BROKER_IMAGE}" \
+              --arg appTask "${new_app}" \
+              --arg workerTask "${new_worker}" \
+              --arg brokerTask "${new_broker}" \
+              --arg feedTask "${new_feed}" \
+              --arg migrationTask "${migration_task}" \
+              --arg releasedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              '{schemaVersion:$schemaVersion,repository:$repository,commit:$commit,runId:$runId,
+                runAttempt:$runAttempt,actor:$actor,reason:$reason,changeTicket:$ticket,
+                appImage:$appImage,workerImage:$workerImage,brokerImage:$brokerImage,appTask:$appTask,
+                workerTask:$workerTask,brokerTask:$brokerTask,feedTask:$feedTask,
+                migrationTask:$migrationTask,releasedAt:$releasedAt}' \
+              > release-evidence.json || return 1
+            expected_checksum="$(
+              openssl dgst -sha256 -binary release-evidence.json |
+                base64 |
+                tr -d '\n'
+            )" || return 1
+            evidence_result="$(aws s3api put-object --region "${AWS_REGION}" \
+              --bucket "${EVIDENCE_BUCKET}" \
+              --key "releases/${GITHUB_SHA}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json" \
+              --body release-evidence.json --server-side-encryption aws:kms \
+              --ssekms-key-id "${KMS_KEY_ARN}" --content-type application/json \
+              --checksum-algorithm SHA256 --output json)" || return 1
+            [[ "$(jq -r '.ChecksumSHA256' <<< "${evidence_result}")" == "${expected_checksum}" ]]
+          }
+          if [[ "${deployment_verified}" == "true" ]] && write_release_evidence; then
+            deployed=true
+          fi
+          if [[ "${deployed}" != "true" ]]; then
+            rollback_failed=false
+            jq '[.]' previous-feed-target.json > rollback-feed-targets.json
+            if ! aws events put-targets --region "${AWS_REGION}" \
+                --rule "${FEED_SCHEDULE_RULE}" \
+                --targets file://rollback-feed-targets.json > rollback-feed-result.json ||
+              [[ "$(jq -r '.FailedEntryCount' rollback-feed-result.json 2>/dev/null || echo 1)" != "0" ]]
+            then
+              rollback_failed=true
+            fi
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${APP_SERVICE}" --task-definition "${previous_app}" --force-new-deployment >/dev/null ||
+              rollback_failed=true
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${WORKER_SERVICE}" --task-definition "${previous_worker}" --force-new-deployment >/dev/null ||
+              rollback_failed=true
+            aws ecs update-service --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --service "${BROKER_SERVICE}" --task-definition "${previous_broker}" --force-new-deployment >/dev/null ||
+              rollback_failed=true
+            aws ecs wait services-stable --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --services "${APP_SERVICE}" "${WORKER_SERVICE}" "${BROKER_SERVICE}" || rollback_failed=true
+            if [[ "${rollback_failed}" == "true" ]]; then
+              echo "Managed production verification failed and rollback needs operator intervention." >&2
+            else
+              echo "Managed production verification failed; all services were rolled back." >&2
+            fi
+            exit 1
+          fi
+          echo "previous_app=${previous_app}" >> "${GITHUB_OUTPUT}"
+          echo "previous_worker=${previous_worker}" >> "${GITHUB_OUTPUT}"
+          echo "previous_broker=${previous_broker}" >> "${GITHUB_OUTPUT}"
+          echo "previous_feed=${previous_feed}" >> "${GITHUB_OUTPUT}"
+          echo "app_task=${new_app}" >> "${GITHUB_OUTPUT}"
+          echo "worker_task=${new_worker}" >> "${GITHUB_OUTPUT}"
+          echo "broker_task=${new_broker}" >> "${GITHUB_OUTPUT}"
+          echo "feed_task=${new_feed}" >> "${GITHUB_OUTPUT}"
+          echo "migration_task=${migration_task}" >> "${GITHUB_OUTPUT}"

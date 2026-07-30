@@ -30,6 +30,33 @@ const ACTIONABLE = new Set<NotificationOutboxStatus>([
   "retry_scheduled",
 ]);
 
+/**
+ * Configuration alone is not provider-delivery evidence. An enabled
+ * destination becomes adapter-ready only after the worker has delivered a job
+ * for the current saved destination version.
+ */
+export function withObservedNotificationReadiness(
+  destinations: readonly NotificationDestination[],
+  jobs: readonly NotificationOutboxJob[],
+  workerConfigured: boolean,
+): readonly NotificationDestination[] {
+  return destinations.map((destination) => {
+    const destinationUpdatedAt = Date.parse(destination.updatedAt);
+    const observedDelivery = Number.isFinite(destinationUpdatedAt) && jobs.some((job) =>
+      job.destinationId === destination.id &&
+      job.status === "delivered" &&
+      job.deliveredAt !== null &&
+      Date.parse(job.deliveredAt) >= destinationUpdatedAt);
+    return {
+      ...destination,
+      deliveryReadiness:
+        workerConfigured && observedDelivery
+          ? "configured" as const
+          : "adapter_not_configured" as const,
+    };
+  });
+}
+
 export function assessNotificationDeliveryHealth(input: {
   readonly destinations: readonly NotificationDestination[];
   readonly jobs: readonly NotificationOutboxJob[];

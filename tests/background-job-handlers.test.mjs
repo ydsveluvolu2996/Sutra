@@ -8,13 +8,32 @@ register(new URL("./cloudflare-loader.mjs", import.meta.url));
 const cloudflare = await import("cloudflare:workers");
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
 const { JobQueueRepository } = await import("../db/job-queue-repository.ts");
-const { buildJobHandlers, ensureRetentionSweepsEnqueued } = await import("../db/background-job-handlers.ts");
+const {
+  buildJobHandlers,
+  ensureRetentionSweepsEnqueued,
+  runItsmSecretCleanupJob,
+} = await import("../db/background-job-handlers.ts");
 const { runDueBackgroundJobs } = await import("../lib/background-job-runner.ts");
 
 const ORG_A = "org_handler_a";
 const ORG_B = "org_handler_b";
 const CUSTOMER_A = "cust_handler_a";
 const CUSTOMER_B = "cust_handler_b";
+
+test("every job kind emitted by the production ticks has a real handler", () => {
+  const handlers = buildJobHandlers();
+  for (const kind of [
+    "retention-sweep",
+    "finops-scheduled-report",
+    "alert-evaluation",
+    "finops-alert-sweep",
+    "agentless-teardown-sweep",
+    "vuln-feed-refresh",
+    "itsm-secret-cleanup",
+  ]) {
+    assert.equal(typeof handlers[kind], "function", `${kind} must never enter the queue unhandled`);
+  }
+});
 
 async function withDatabase(run) {
   const miniflare = new Miniflare({
@@ -75,5 +94,58 @@ test("runDueBackgroundJobs drains retention-sweep jobs to succeeded", async () =
     const sweeps = (await queue.list(ORG_A, null)).filter((job) => job.kind === "retention-sweep");
     assert.equal(sweeps.length, 1);
     assert.equal(sweeps[0].status, "succeeded");
+  });
+});
+
+test("ITSM secret cleanup failures are retried and later completed by the durable runner", async () => {
+  await withDatabase(async (queue) => {
+    const connectorId = "itc_00000000000000000000000000000001";
+    const secretReference =
+      `secret://itsm/${connectorId}/versions/00000000-0000-4000-8000-000000000001`;
+    const job = await queue.enqueue({
+      orgId: ORG_A,
+      customerId: CUSTOMER_A,
+      kind: "itsm-secret-cleanup",
+      payload: { connectorId, secretReference },
+      maxAttempts: 10,
+    }, 1_000);
+    let attempts = 0;
+    const cleanupRepository = {
+      async cleanupDeletedManagedSecret(scope, actualConnectorId, actualReference) {
+        attempts += 1;
+        assert.deepEqual(scope, { orgId: ORG_A, customerId: CUSTOMER_A });
+        assert.equal(actualConnectorId, connectorId);
+        assert.equal(actualReference, secretReference);
+        if (attempts === 1) throw new Error("temporary-secrets-manager-failure");
+      },
+    };
+    const handlers = {
+      "itsm-secret-cleanup": (leased) =>
+        runItsmSecretCleanupJob(leased, cleanupRepository),
+    };
+
+    const failed = await runDueBackgroundJobs({
+      queue,
+      handlers,
+      kinds: ["itsm-secret-cleanup"],
+      maxPerKind: 1,
+      now: () => 1_000,
+    });
+    assert.equal(failed.outcomes[0].retried, 1);
+    assert.equal(failed.totalSucceeded, 0);
+
+    const recovered = await runDueBackgroundJobs({
+      queue,
+      handlers,
+      kinds: ["itsm-secret-cleanup"],
+      maxPerKind: 1,
+      now: () => 10_000,
+    });
+    assert.equal(recovered.outcomes[0].succeeded, 1);
+    assert.equal(attempts, 2);
+    const stored = (await queue.list(ORG_A, CUSTOMER_A)).find((candidate) => candidate.id === job.id);
+    assert.equal(stored?.status, "succeeded");
+    assert.equal(stored?.attempt, 2);
+    assert.equal(stored?.maxAttempts, 10);
   });
 });

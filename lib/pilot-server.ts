@@ -32,6 +32,13 @@ import { parseAwsCostSnapshot } from "./cost-boundary";
 import type { AwsCostSnapshot } from "./cost-types";
 import { parseAwsSecurityEventCollection } from "./security-event-boundary";
 import type { AwsSecurityEventCollection } from "./security-event-types";
+import {
+  HostedBrokerClientSecurityError,
+  signHostedBrokerRequest,
+  verifyHostedBrokerResponse,
+  type HostedBrokerClientSigningConfiguration,
+} from "./hosted-broker-client-security";
+import type { AgentlessScanReadiness } from "./aws-agentless-readiness";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
@@ -39,6 +46,11 @@ interface PilotRuntimeEnv {
   readonly SUTRA_CONNECTION_KEY_VERSION?: string;
   readonly SUTRA_BROKER_SHARED_SECRET?: string;
   readonly SUTRA_BROKER_URL?: string;
+  readonly SUTRA_BROKER_AUTH_MODE?: string;
+  readonly SUTRA_BROKER_CLIENT_KEY_ID?: string;
+  readonly SUTRA_BROKER_CLIENT_PRIVATE_KEY?: string;
+  readonly SUTRA_BROKER_RESPONSE_KEY_ID?: string;
+  readonly SUTRA_BROKER_RESPONSE_PUBLIC_KEY?: string;
 }
 
 export type PilotActor = AuthorizedPilotActor;
@@ -46,8 +58,10 @@ export type PilotActor = AuthorizedPilotActor;
 export interface PilotSecrets {
   readonly connectionEncryptionKey: string;
   readonly connectionKeyVersion: string;
-  readonly brokerSharedSecret: string;
   readonly brokerUrl: string;
+  readonly brokerAuthentication:
+    | { readonly mode: "hmac"; readonly sharedSecret: string }
+    | ({ readonly mode: "asymmetric" } & HostedBrokerClientSigningConfiguration);
 }
 
 export class PilotServerError extends Error {
@@ -97,11 +111,10 @@ export function assertLocalSimulationRuntime(): void {
 export function getPilotSecrets(): PilotSecrets {
   const config = runtimeEnv();
   const connectionEncryptionKey = config.SUTRA_CONNECTION_ENCRYPTION_KEY?.trim();
-  const brokerSharedSecret = config.SUTRA_BROKER_SHARED_SECRET?.trim();
   const connectionKeyVersion = config.SUTRA_CONNECTION_KEY_VERSION?.trim() || "local-v1";
   const brokerUrl = config.SUTRA_BROKER_URL?.trim() || "http://127.0.0.1:8788";
 
-  if (!connectionEncryptionKey || !brokerSharedSecret) {
+  if (!connectionEncryptionKey) {
     throw new PilotServerError(
       503,
       "PILOT_NOT_CONFIGURED",
@@ -109,21 +122,55 @@ export function getPilotSecrets(): PilotSecrets {
     );
   }
   const parsedBrokerUrl = new URL(brokerUrl);
+  const local = config.SUTRA_LOCAL_MODE === "true";
+  const validLocalUrl =
+    parsedBrokerUrl.protocol === "http:" &&
+    isLocalHostname(parsedBrokerUrl.hostname);
+  const validHostedUrl =
+    parsedBrokerUrl.protocol === "https:" &&
+    !isLocalHostname(parsedBrokerUrl.hostname);
   if (
-    parsedBrokerUrl.protocol !== "http:" ||
-    !isLocalHostname(parsedBrokerUrl.hostname) ||
+    (local ? !validLocalUrl : !validHostedUrl) ||
     parsedBrokerUrl.username ||
     parsedBrokerUrl.password ||
-    parsedBrokerUrl.pathname !== "/"
+    parsedBrokerUrl.pathname !== "/" ||
+    parsedBrokerUrl.search ||
+    parsedBrokerUrl.hash
   ) {
     throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The collector address configuration is invalid");
   }
 
+  let brokerAuthentication: PilotSecrets["brokerAuthentication"];
+  if (local) {
+    const sharedSecret = config.SUTRA_BROKER_SHARED_SECRET?.trim();
+    if (!sharedSecret) {
+      throw new PilotServerError(503, "PILOT_NOT_CONFIGURED", "Collector configuration is incomplete");
+    }
+    brokerAuthentication = { mode: "hmac", sharedSecret };
+  } else {
+    if (config.SUTRA_BROKER_AUTH_MODE !== "asymmetric") {
+      throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The collector signing configuration is invalid");
+    }
+    const clientKeyId = config.SUTRA_BROKER_CLIENT_KEY_ID?.trim();
+    const clientPrivateKey = config.SUTRA_BROKER_CLIENT_PRIVATE_KEY?.trim();
+    const brokerKeyId = config.SUTRA_BROKER_RESPONSE_KEY_ID?.trim();
+    const brokerPublicKey = config.SUTRA_BROKER_RESPONSE_PUBLIC_KEY?.trim();
+    if (!clientKeyId || !clientPrivateKey || !brokerKeyId || !brokerPublicKey) {
+      throw new PilotServerError(503, "PILOT_NOT_CONFIGURED", "Collector configuration is incomplete");
+    }
+    brokerAuthentication = {
+      mode: "asymmetric",
+      clientKeyId,
+      clientPrivateKey,
+      brokerKeyId,
+      brokerPublicKey,
+    };
+  }
   return {
     connectionEncryptionKey,
     connectionKeyVersion,
-    brokerSharedSecret,
     brokerUrl: parsedBrokerUrl.origin,
+    brokerAuthentication,
   };
 }
 
@@ -145,8 +192,11 @@ function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-async function sha256Hex(value: string): Promise<string> {
-  return toHex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+async function sha256Hex(value: string | Uint8Array): Promise<string> {
+  const source = typeof value === "string" ? new TextEncoder().encode(value) : value;
+  const bytes = new Uint8Array(source.byteLength);
+  bytes.set(source);
+  return toHex(await crypto.subtle.digest("SHA-256", bytes.buffer));
 }
 
 async function hmacHex(secret: string, value: string): Promise<string> {
@@ -172,21 +222,39 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
-async function brokerFetch<T>(
+async function brokerFetchEnvelope<T>(
   path: string,
   method: "GET" | "PUT" | "POST",
   payload?: unknown,
   timeoutMs = 20_000,
-): Promise<T> {
+): Promise<{ readonly value: T; readonly authenticatedBody: Uint8Array }> {
   const config = getPilotSecrets();
   const body = payload === undefined ? "" : JSON.stringify(payload);
-  const timestamp = Date.now().toString();
   const nonce = crypto.randomUUID();
-  const bodyHash = await sha256Hex(body);
-  const signature = await hmacHex(
-    config.brokerSharedSecret,
-    `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}`,
-  );
+  const authenticationHeaders: Record<string, string> = {};
+  if (config.brokerAuthentication.mode === "hmac") {
+    const timestamp = Date.now().toString();
+    const bodyHash = await sha256Hex(body);
+    authenticationHeaders["x-sutra-timestamp"] = timestamp;
+    authenticationHeaders["x-sutra-nonce"] = nonce;
+    authenticationHeaders["x-sutra-signature"] = await hmacHex(
+      config.brokerAuthentication.sharedSecret,
+      `${method}\n${path}\n${timestamp}\n${nonce}\n${bodyHash}`,
+    );
+  } else {
+    try {
+      Object.assign(authenticationHeaders, (await signHostedBrokerRequest({
+        method,
+        path,
+        body,
+        now: Date.now(),
+        nonce,
+        config: config.brokerAuthentication,
+      })).headers);
+    } catch {
+      throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The collector signing configuration is invalid");
+    }
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
@@ -195,9 +263,7 @@ async function brokerFetch<T>(
       method,
       headers: {
         "content-type": "application/json",
-        "x-sutra-timestamp": timestamp,
-        "x-sutra-nonce": nonce,
-        "x-sutra-signature": signature,
+        ...authenticationHeaders,
       },
       body: body.length === 0 ? undefined : body,
       signal: controller.signal,
@@ -212,14 +278,33 @@ async function brokerFetch<T>(
   if (Number.isFinite(declaredLength) && declaredLength > 12 * 1024 * 1024) {
     throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
   }
-  const responseText = await readLimitedResponseText(response, 12 * 1024 * 1024);
-  const responseSignature = response.headers.get("x-sutra-response-signature") ?? "";
-  const expectedResponseSignature = await hmacHex(
-    config.brokerSharedSecret,
-    `${response.status}\n${path}\n${nonce}\n${await sha256Hex(responseText)}`,
-  );
-  if (!constantTimeEqual(responseSignature, expectedResponseSignature)) {
-    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
+  const responseBody = await readLimitedResponseText(response, 12 * 1024 * 1024);
+  const responseText = responseBody.text;
+  if (config.brokerAuthentication.mode === "hmac") {
+    const responseSignature = response.headers.get("x-sutra-response-signature") ?? "";
+    const expectedResponseSignature = await hmacHex(
+      config.brokerAuthentication.sharedSecret,
+      `${response.status}\n${path}\n${nonce}\n${await sha256Hex(responseBody.bytes)}`,
+    );
+    if (!constantTimeEqual(responseSignature, expectedResponseSignature)) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
+    }
+  } else {
+    try {
+      await verifyHostedBrokerResponse({
+        status: response.status,
+        path,
+        nonce,
+        body: responseBody.bytes,
+        headers: response.headers,
+        config: config.brokerAuthentication,
+      });
+    } catch (error) {
+      if (error instanceof HostedBrokerClientSecurityError) {
+        throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
+      }
+      throw error;
+    }
   }
 
   let parsed: unknown;
@@ -237,15 +322,34 @@ async function brokerFetch<T>(
       publicBrokerMessage(code),
     );
   }
-  return parsed as T;
+  return {
+    value: parsed as T,
+    // This is the exact UTF-8 body whose digest was authenticated immediately
+    // above. Keep it beside the parsed value so evidence archival cannot
+    // accidentally serialize a semantically-equivalent but different payload.
+    authenticatedBody: responseBody.bytes,
+  };
 }
 
-async function readLimitedResponseText(response: Response, maximumBytes: number): Promise<string> {
-  if (response.body === null) return "";
+async function brokerFetch<T>(
+  path: string,
+  method: "GET" | "PUT" | "POST",
+  payload?: unknown,
+  timeoutMs = 20_000,
+): Promise<T> {
+  return (await brokerFetchEnvelope<T>(path, method, payload, timeoutMs)).value;
+}
+
+async function readLimitedResponseText(
+  response: Response,
+  maximumBytes: number,
+): Promise<{ readonly text: string; readonly bytes: Uint8Array }> {
+  if (response.body === null) return { text: "", bytes: new Uint8Array() };
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let total = 0;
   let result = "";
+  const chunks: Uint8Array[] = [];
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -255,10 +359,19 @@ async function readLimitedResponseText(response: Response, maximumBytes: number)
         await reader.cancel();
         throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
       }
+      const copy = new Uint8Array(value.byteLength);
+      copy.set(value);
+      chunks.push(copy);
       result += decoder.decode(value, { stream: true });
     }
     result += decoder.decode();
-    return result;
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { text: result, bytes };
   } catch (error) {
     if (error instanceof PilotServerError) throw error;
     throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector returned invalid response bytes");
@@ -284,6 +397,8 @@ const BROKER_CODES = new Set([
   "JOB_NOT_READY",
   "SCHEDULE_NOT_FOUND",
   "STALE_SCHEDULE_MUTATION",
+  "ALREADY_RUNNING",
+  "RUN_NOT_TRACKED",
 ]);
 
 function safeBrokerErrorCode(value: unknown): string {
@@ -308,6 +423,8 @@ function publicBrokerMessage(code: string): string {
     JOB_NOT_READY: "The simulated inventory job is not complete",
     SCHEDULE_NOT_FOUND: "The simulated collection schedule was not found",
     STALE_SCHEDULE_MUTATION: "The schedule change was superseded by a newer operation",
+    ALREADY_RUNNING: "That agentless scan is already running",
+    RUN_NOT_TRACKED: "The agentless scan is not tracked by the collector",
     BROKER_REQUEST_FAILED: "The AWS collector rejected the request",
   };
   return messages[code] ?? messages.BROKER_REQUEST_FAILED;
@@ -318,29 +435,49 @@ function publicBrokerMessage(code: string): string {
  *
  * The Worker cannot execute one itself: workerd holds no AWS SDK and no AWS
  * credentials, by design. The collector owns the SDK, the role broker and the
- * workload identity, so this hands over the approved plan and the resolved settings
- * and gets back a 202 — the scan outlives any HTTP request, so the poll below is how
+ * workload identity, so this hands over only the approved plan; scan-account
+ * settings remain pinned inside the broker. It gets back a 202 — the scan outlives
+ * any HTTP request, so the poll below is how
  * its outcome is learned.
  */
 export async function startAgentlessScan(input: {
   readonly runId: string;
   readonly tenantId: string;
   readonly connectionId: string;
-  readonly region: string;
   readonly plan: unknown;
-  readonly settings: unknown;
-}): Promise<{ readonly runId: string; readonly phase: string; readonly startedAt: string }> {
-  return brokerFetch(
+}): Promise<{
+  readonly runId: string;
+  readonly phase: "running" | "completed" | "failed";
+  readonly startedAt: string;
+}> {
+  const value = await brokerFetch<unknown>(
     `/v1/agentless/scans/${input.runId}/execute`,
     "POST",
     {
       tenantId: input.tenantId,
       connectionId: input.connectionId,
-      region: input.region,
       plan: input.plan,
-      settings: input.settings,
     },
   );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless start response is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    record.runId !== input.runId ||
+    (record.phase !== "running" && record.phase !== "completed" && record.phase !== "failed") ||
+    typeof record.startedAt !== "string" ||
+    !Number.isFinite(Date.parse(record.startedAt)) ||
+    new Date(record.startedAt).toISOString() !== record.startedAt
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless start response is invalid");
+  }
+  return {
+    runId: input.runId,
+    phase: record.phase,
+    startedAt: record.startedAt,
+  };
 }
 
 /** Polls a scan. An untracked run is a 404 from the collector, which is NOT "clean". */
@@ -348,16 +485,233 @@ export async function readAgentlessRun(input: {
   readonly runId: string;
   readonly tenantId: string;
   readonly connectionId: string;
-}): Promise<unknown> {
+}): Promise<{
+  readonly runId: string;
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly phase: "running" | "completed" | "failed";
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly execution: unknown | null;
+  readonly error: { readonly code: string; readonly message: string } | null;
+}> {
   const query = new URLSearchParams({
     tenantId: input.tenantId,
     connectionId: input.connectionId,
   });
-  return brokerFetch(`/v1/agentless/scans/${input.runId}?${query.toString()}`, "GET");
+  const value = await brokerFetch<unknown>(
+    `/v1/agentless/scans/${input.runId}?${query.toString()}`,
+    "GET",
+  );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless run response is invalid");
+  }
+  const state = value as Record<string, unknown>;
+  const phase = state.phase;
+  const error = state.error;
+  if (
+    state.runId !== input.runId ||
+    state.tenantId !== input.tenantId ||
+    state.connectionId !== input.connectionId ||
+    (phase !== "running" && phase !== "completed" && phase !== "failed") ||
+    typeof state.startedAt !== "string" ||
+    (state.finishedAt !== null && typeof state.finishedAt !== "string") ||
+    (error !== null && (
+      typeof error !== "object" ||
+      Array.isArray(error) ||
+      typeof (error as Record<string, unknown>).code !== "string" ||
+      typeof (error as Record<string, unknown>).message !== "string"
+    ))
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless run response is invalid");
+  }
+  return {
+    runId: input.runId,
+    tenantId: input.tenantId,
+    connectionId: input.connectionId,
+    phase,
+    startedAt: state.startedAt,
+    finishedAt: state.finishedAt as string | null,
+    execution: state.execution ?? null,
+    error: error as { readonly code: string; readonly message: string } | null,
+  };
 }
 
 export async function getCollectorHealth(expectedPartition?: AwsPartition): Promise<CollectorHealth> {
   return parseCollectorHealth(await brokerFetch<unknown>("/v1/health", "GET"), expectedPartition);
+}
+
+export async function getAgentlessExecutionReadiness(): Promise<AgentlessScanReadiness> {
+  const value = await brokerFetch<unknown>("/v1/agentless/readiness", "GET");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless readiness response is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (
+    keys.length !== 5 ||
+    keys.some((key) => !["schema", "canExecute", "canPlan", "gaps", "summary"].includes(key)) ||
+    record.schema !== "sutra.aws-agentless-readiness.v1" ||
+    typeof record.canExecute !== "boolean" ||
+    record.canPlan !== true ||
+    typeof record.summary !== "string" ||
+    record.summary.length === 0 || record.summary.length > 600 ||
+    !Array.isArray(record.gaps) || record.gaps.length > 10
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless readiness response is invalid");
+  }
+  const gaps = record.gaps.map((gap) => {
+    if (typeof gap !== "object" || gap === null || Array.isArray(gap)) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless readiness response is invalid");
+    }
+    const entry = gap as Record<string, unknown>;
+    if (
+      Object.keys(entry).length !== 3 ||
+      typeof entry.id !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(entry.id) ||
+      typeof entry.summary !== "string" || entry.summary.length === 0 || entry.summary.length > 500 ||
+      (entry.owner !== "engineering" && entry.owner !== "operator")
+    ) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless readiness response is invalid");
+    }
+    return {
+      id: entry.id,
+      summary: entry.summary,
+      owner: entry.owner,
+    } as const;
+  });
+  if ((record.canExecute && gaps.length !== 0) || (!record.canExecute && gaps.length === 0)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless readiness response is inconsistent");
+  }
+  return {
+    schema: "sutra.aws-agentless-readiness.v1",
+    canExecute: record.canExecute,
+    canPlan: true,
+    gaps,
+    summary: record.summary,
+  };
+}
+
+export async function getAgentlessPlanProfile(): Promise<{
+  readonly scanAccountId: string;
+  readonly kmsReencrypt: boolean;
+}> {
+  const value = await brokerFetch<unknown>("/v1/agentless/plan-profile", "GET");
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless plan profile is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    record.schema !== "sutra.aws-agentless-plan-profile.v1" ||
+    typeof record.scanAccountId !== "string" ||
+    !/^\d{12}$/u.test(record.scanAccountId) ||
+    typeof record.kmsReencrypt !== "boolean"
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless plan profile is invalid");
+  }
+  return {
+    scanAccountId: record.scanAccountId,
+    kmsReencrypt: record.kmsReencrypt,
+  };
+}
+
+export interface AgentlessTeardownSweepResource {
+  readonly connectionId: string;
+  readonly resourceId: string;
+  readonly resourceKind: "snapshot" | "volume" | "instance";
+  readonly accountScope: "customer" | "sutra-scan-account";
+  readonly region: string;
+}
+
+export async function requestAgentlessTeardownSweep(input: {
+  readonly tenantId: string;
+  readonly operationId: string;
+  readonly resources: readonly AgentlessTeardownSweepResource[];
+}): Promise<{
+  readonly outcomes: readonly {
+    readonly resourceId: string;
+    readonly disposition:
+      | "settled"
+      | "deleted"
+      | "awaiting-customer"
+      | "retry-failed"
+      | "unknown";
+    readonly detail: string;
+  }[];
+  readonly summary: { readonly considered: number; readonly stillOutstanding: number };
+}> {
+  const value = await brokerFetch<unknown>(
+    "/v1/agentless/teardown-sweep",
+    "POST",
+    input,
+    5 * 60_000,
+  );
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless cleanup response is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  const outcomes = record.outcomes;
+  const summary = record.summary;
+  if (
+    Object.keys(record).sort().join(",") !== "outcomes,schema,summary" ||
+    record.schema !== "sutra.aws-agentless-teardown-sweep.v1" ||
+    !Array.isArray(outcomes) ||
+    outcomes.length !== input.resources.length ||
+    typeof summary !== "object" ||
+    summary === null ||
+    Array.isArray(summary)
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless cleanup response is invalid");
+  }
+  const expectedIds = new Set(input.resources.map((resource) => resource.resourceId));
+  const parsedOutcomes = outcomes.map((value) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless cleanup response is invalid");
+    }
+    const outcome = value as Record<string, unknown>;
+    if (
+      Object.keys(outcome).sort().join(",") !== "detail,disposition,resourceId" ||
+      typeof outcome.resourceId !== "string" ||
+      !expectedIds.delete(outcome.resourceId) ||
+      (outcome.disposition !== "settled" &&
+        outcome.disposition !== "deleted" &&
+        outcome.disposition !== "awaiting-customer" &&
+        outcome.disposition !== "retry-failed" &&
+        outcome.disposition !== "unknown") ||
+      typeof outcome.detail !== "string" ||
+      outcome.detail.length === 0 ||
+      outcome.detail.length > 500
+    ) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless cleanup response is invalid");
+    }
+    return {
+      resourceId: outcome.resourceId,
+      disposition: outcome.disposition,
+      detail: outcome.detail,
+    } as const;
+  });
+  const summaryRecord = summary as Record<string, unknown>;
+  const dispositions = ["settled", "deleted", "awaitingCustomer", "retryFailed", "unknown"] as const;
+  if (
+    Object.keys(summaryRecord).sort().join(",") !==
+      "awaitingCustomer,considered,deleted,retryFailed,settled,stillOutstanding,unknown" ||
+    dispositions.some((key) =>
+      !Number.isSafeInteger(summaryRecord[key]) ||
+      (summaryRecord[key] as number) < 0) ||
+    summaryRecord.considered !== parsedOutcomes.length ||
+    summaryRecord.stillOutstanding !==
+      parsedOutcomes.filter((outcome) =>
+        outcome.disposition !== "settled" && outcome.disposition !== "deleted").length
+  ) {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The agentless cleanup response is invalid");
+  }
+  return {
+    outcomes: parsedOutcomes,
+    summary: {
+      considered: summaryRecord.considered as number,
+      stillOutstanding: summaryRecord.stillOutstanding as number,
+    },
+  };
 }
 
 export async function registerCollectorConnection(input: {
@@ -466,7 +820,7 @@ export async function verifyCollectorConnection(input: {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07.3";
+  readonly permissionPackVersion: "standard-2026-07.4";
   readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
@@ -487,22 +841,26 @@ export async function runCollectorSync(input: {
   readonly jobId: string;
   readonly accountId: string;
   readonly partition: AwsPartition;
-}): Promise<PilotSnapshotPayload> {
+}): Promise<{
+  readonly snapshot: PilotSnapshotPayload;
+  readonly rawEvidenceBytes: Uint8Array;
+}> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
-  return parsePilotSnapshot(
-    await brokerFetch<unknown>(
-      `/v1/connections/${input.connectionId}/sync`,
-      "POST",
-      payload,
-      LIVE_AWS_BROKER_TIMEOUT_MS,
-    ),
-    {
+  const response = await brokerFetchEnvelope<unknown>(
+    `/v1/connections/${input.connectionId}/sync`,
+    "POST",
+    payload,
+    LIVE_AWS_BROKER_TIMEOUT_MS,
+  );
+  return {
+    snapshot: await parsePilotSnapshot(response.value, {
       jobId: input.jobId,
       connectionId: input.connectionId,
       accountId: input.accountId,
       partition: input.partition,
-    },
-  );
+    }),
+    rawEvidenceBytes: response.authenticatedBody,
+  };
 }
 
 export async function runCollectorCostCollection(input: {

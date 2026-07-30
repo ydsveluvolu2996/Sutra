@@ -627,6 +627,10 @@ Resources:
               - inspector2:ListCoverageStatistics
               - inspector2:ListDelegatedAdminAccounts
               - inspector2:ListFindings
+              - bedrock:ListGuardrails
+              - bedrock:GetGuardrail
+              - bedrock:GetModelInvocationLoggingConfiguration
+              - bedrock:GetAccountDataRetention
               - inspector2:ListMembers
             Resource: '*'
 

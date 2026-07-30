@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 const phases = [
   {
     number: "01",
-    state: "Live",
+    state: "Invitation-only live",
     tone: "gate",
     title: "Hosted identity and tenant isolation",
     summary: "Invitation-only access, Zoho OIDC, mandatory authorization checks, customer assignments, and tenant-scoped repositories form the hosted control-plane boundary.",
@@ -18,7 +18,7 @@ const phases = [
   },
   {
     number: "02",
-    state: "Live",
+    state: "Live for approved connections",
     tone: "gate",
     title: "AWS CMDB, posture, and collection",
     summary: "Customer-owned trust roles provide temporary read-only access for inventory, graph, change, coverage, native finding, and compliance evidence.",
@@ -27,7 +27,7 @@ const phases = [
   },
   {
     number: "03",
-    state: "Live when connected",
+    state: "Evidence dependent",
     tone: "gate",
     title: "Security, Kubernetes, and FinOps verticals",
     summary: "Each vertical reads its own persisted evidence and reports an empty or unavailable state until the required source is connected.",
@@ -55,12 +55,12 @@ const phases = [
 ] as const;
 
 const capabilityRows = [
-  ["AWS onboarding", "Live", "Customer-owned role, External ID, validation, rotation and offboarding"],
-  ["CMDB and CSPM", "Live after collection", "Persisted resources, graph, findings, changes, coverage and exports"],
-  ["Vulnerability and exposure", "Live when evidence exists", "Native AWS, Kubernetes, registry and approved scanner inputs"],
-  ["Kubernetes", "Live after enrollment", "Inventory, RBAC/CIEM, drift, runtime, supply chain and compliance"],
-  ["FinOps", "Live when billing is enabled", "Cost Explorer plus optional CUR-backed allocation and showback"],
-  ["Cases and governance", "Live", "Cases, routing, exceptions, approvals, reports and audit records"],
+  ["AWS onboarding", "Approved accounts only", "Customer-owned role, External ID, validation, rotation and offboarding"],
+  ["CMDB and CSPM", "Active after complete collection", "Persisted resources, graph, findings, changes, coverage and exports"],
+  ["Vulnerability and exposure", "Active when evidence exists", "Native AWS, Kubernetes, registry and approved scanner inputs"],
+  ["Kubernetes", "Active after enrollment", "Inventory, RBAC/CIEM, drift, runtime, supply chain and compliance"],
+  ["FinOps", "Active when billing is enabled", "Cost Explorer plus optional CUR-backed allocation and showback"],
+  ["Cases and governance", "Active with collected findings", "Cases, routing, exceptions, approvals, reports and audit records"],
   ["Notifications and ITSM", "Configuration dependent", "Readiness and delivery reflect configured workers and destinations"],
   ["Azure and Google Cloud", "Planned", "No provider evidence is displayed until dedicated collectors pass release gates"],
 ] as const;

@@ -1,4 +1,4 @@
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
+import { getLatestConnectionForCustomer } from "../../../../../db/pilot-repository";
 import { collectComplianceInputs } from "../../../../../lib/compliance-collected";
 import { buildFrameworkReadiness, COMPLIANCE_FRAMEWORKS } from "../../../../../lib/compliance-frameworks";
 import { ApiTokenRepository } from "../../../../../db/api-token-repository";
@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request): Promise<Response> {
   try {
     const token = await authenticatePublicRequest(request, "read:compliance", new ApiTokenRepository());
-    const connection = await getLatestConnectionForOrg(token.orgId);
-    if (connection === null || connection.customerId !== token.customerId) {
+    const connection = await getLatestConnectionForCustomer(token.orgId, token.customerId);
+    if (connection === null) {
       throw new PublicApiError(404, "NOT_FOUND", "No cloud connection is available to this token");
     }
     const inputs = await collectComplianceInputs({

@@ -1,8 +1,16 @@
 # Sutra readiness tracker
 
-This tracker separates verified product behavior from work that is merely planned. A phase is marked complete only after the relevant local checks pass. Live AWS results are never replaced with fabricated data; unavailable services are shown as unavailable with the collected reason.
+**Status:** historical local-walkthrough snapshot, retained for private-beta
+reproducibility. It is not the current managed-production release ledger.
 
-## Tomorrow's investor walkthrough
+This tracker separates the behavior verified for the original local walkthrough
+from work that was then planned. Current hosted source status and live gates are in
+[`hosted-production-foundation.md`](hosted-production-foundation.md) and
+[`production-acceptance-evidence.md`](production-acceptance-evidence.md). Live AWS
+results are never replaced with fabricated data; unavailable services are shown as
+unavailable with the collected reason.
+
+## Historical investor walkthrough
 
 | Phase | Status | Walkthrough outcome |
 | --- | --- | --- |
@@ -21,20 +29,20 @@ This tracker separates verified product behavior from work that is merely planne
 | Live permission-pack `.2` activation | Pending explicit AWS approval | Publish the reviewed immutable template, update the existing customer role with ten additional read-only actions, re-attest the same role, then restart the verified build |
 | GitHub milestone | Complete | Operations-wave source and the dynamic PostgreSQL CI-port hardening are committed and pushed to the existing draft pull request; GitHub CI passed |
 
-## Explicitly after the investor walkthrough
+## Production activation after the walkthrough
 
-These are production SaaS programs and are not represented as overnight deliverables:
+The repository now contains the managed HA app/worker/broker design, hosted
+OIDC/SAML/SCIM boundaries, durable jobs, managed ITSM credentials, private evidence
+storage and the protected three-image release workflow. Those are source
+capabilities, not live acceptance.
 
-- Hosted tenant isolation and independent tenant-isolation penetration testing.
-- Enterprise OIDC/SAML, SCIM, recovery administration and production identity lifecycle.
-- AWS Organizations/OU discovery and StackSets-based bulk account onboarding.
-- CUR 2.0 data lake ingestion, allocation rules, commitment optimization and billing-grade reconciliation.
-- Scheduled/event-driven CloudTrail ingestion, long-term log-lake retention, broader correlation and SIEM integrations beyond the bounded manual LookupEvents workspace.
-- Jira, ServiceNow, PSA, email, webhook, Slack and Teams delivery workflows.
-- Production workflow automation, escalation calendars, external ticket synchronization and two-person exception approval beyond the local case/exception workflows.
-- Customer white-labeling, subscription controls, usage metering and billing.
-- Managed queue/worker fleet, hosted observability/SLOs, HA, backup/DR exercises and penetration-test closure.
-- Independent workload/package/container vulnerability scanning; Sutra currently imports native Inspector evidence when available.
+Production remains gated on deployed two-tenant isolation, configured IdP/SCIM
+lifecycles, a disposable AWS trust-role run, live ITSM/notification delivery,
+agentless execution and teardown, S3/KMS evidence checks, backup/restore,
+AZ/load/failure exercises and independent penetration testing. AWS Organizations/OU
+bulk onboarding, billing-grade reconciliation, broad SIEM/PSA coverage,
+white-labeling, subscriptions/metering and managed detection/response remain product
+gaps.
 
 ## Walkthrough guardrails
 

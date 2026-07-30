@@ -35,20 +35,31 @@ import {
 import { buildMspScorecard } from "../lib/kubernetes-posture-trend.ts";
 import { addCaseNote } from "./case-repository";
 import { AlertRuleRepository, type RecordAlertEventInput } from "./alert-rule-repository";
+import { AgentlessScanRepository } from "./agentless-scan-repository";
 import { CloudVulnerabilityRepository } from "./cloud-vulnerability-repository";
 import { FinopsScheduledReportRepository, type ReportDeliveryKind } from "./finops-scheduled-report-repository";
 import { FinopsWorkspaceRepository } from "./finops-workspace-repository";
-import { ItsmConnectorRepository } from "./itsm-connector-repository";
+import {
+  ITSM_SECRET_CLEANUP_JOB_KIND,
+  ItsmConnectorRepository,
+} from "./itsm-connector-repository";
 import { JobQueueRepository } from "./job-queue-repository";
 import { KubernetesRepository } from "./kubernetes-repository";
 import {
   appendAuditEvent,
   createSyncRun,
+  failSyncRun,
   getConnectionForOrg,
   getLatestConnectionForOrg,
+  listHostedCollectorOperationRuns,
   listConnectionsForOrg,
+  markConnectionNeedsAttention,
   persistSnapshot,
 } from "./pilot-repository";
+import {
+  HOSTED_COLLECTOR_COLLECT_JOB_KIND,
+  runHostedCollectorJob,
+} from "../lib/hosted-collector-job";
 import { HOSTED_BROKER_INGEST_JOB_KIND } from "../lib/hosted-broker-ingest";
 import { runHostedBrokerIngestJob } from "../lib/hosted-broker-ingest-job";
 import { RetentionSweepRepository } from "./retention-sweep-repository";
@@ -60,6 +71,14 @@ import {
 } from "./finops-alert-service";
 import type { FinopsAlert } from "../lib/finops-alerts.ts";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
+import { planVulnFeedRefresh } from "../lib/vuln-feed-refresh-schedule";
+import { refreshBoundedVulnerabilityFeed } from "../lib/vuln-feed-runtime";
+import { VulnerabilityMirrorRepository } from "./vulnerability-mirror-repository";
+import {
+  requestAgentlessTeardownSweep,
+  runCollectorSync,
+  safeCollectionFailureCode,
+} from "../lib/pilot-server";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -132,6 +151,13 @@ async function runItsmDispatch(job: RunnableJob): Promise<void> {
     },
     itsmCase: payload.itsmCase,
   });
+  if (result.delivered) {
+    await new ItsmConnectorRepository().recordOutboundSuccess(
+      { orgId: job.orgId, customerId: payload.customerId },
+      connector.id,
+      connector.updatedAt,
+    );
+  }
   const outcome = deliveryOutcome(result);
   await addCaseNote({
     orgId: job.orgId,
@@ -144,6 +170,36 @@ async function runItsmDispatch(job: RunnableJob): Promise<void> {
   // Rethrow on a non-delivery so the queue's own backoff/dead-letter policy
   // decides the next attempt — the note above records what actually happened.
   if (!result.delivered) throw new Error(`itsm-dispatch ${outcome}`);
+}
+
+export async function runItsmSecretCleanupJob(
+  job: RunnableJob,
+  repository: Pick<ItsmConnectorRepository, "cleanupDeletedManagedSecret"> =
+    new ItsmConnectorRepository(),
+): Promise<void> {
+  if (
+    job.customerId === null ||
+    typeof job.payload !== "object" ||
+    job.payload === null ||
+    Array.isArray(job.payload)
+  ) {
+    throw new Error("itsm-secret-cleanup-payload-invalid");
+  }
+  const payload = job.payload as Record<string, unknown>;
+  if (
+    Object.keys(payload).some((key) => key !== "connectorId" && key !== "secretReference") ||
+    typeof payload.connectorId !== "string" ||
+    !/^itc_[a-f0-9]{32}$/u.test(payload.connectorId) ||
+    typeof payload.secretReference !== "string" ||
+    payload.secretReference.length > 512
+  ) {
+    throw new Error("itsm-secret-cleanup-payload-invalid");
+  }
+  await repository.cleanupDeletedManagedSecret(
+    { orgId: job.orgId, customerId: job.customerId },
+    payload.connectorId,
+    payload.secretReference,
+  );
 }
 
 const REPORT_ID = /^fsr_[a-f0-9]{32}$/u;
@@ -692,7 +748,7 @@ const FINOPS_SWEEP_ACTOR_ID = "system_finops_alert_sweep";
  */
 async function recordFinopsAlertSweepAudit(outcome: FinopsAlertSweepOutcome): Promise<void> {
   const requestKey = (await alertEvidenceHash(
-    `${outcome.orgId} ${outcome.customerId} ${outcome.jobId} ${outcome.attempt}`,
+    `${outcome.orgId}\u0000${outcome.customerId}\u0000${outcome.jobId}\u0000${outcome.attempt}`,
   )).slice(0, 32);
   await appendAuditEvent({
     orgId: outcome.orgId,
@@ -729,6 +785,7 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       await new RetentionSweepRepository().sweep(job.orgId);
     },
     "itsm-dispatch": runItsmDispatch,
+    [ITSM_SECRET_CLEANUP_JOB_KIND]: runItsmSecretCleanupJob,
     "finops-scheduled-report": (job) => runScheduledReportJob(job, {
       scheduleRepo: new FinopsScheduledReportRepository(),
       finopsRepo: new FinopsWorkspaceRepository(),
@@ -766,9 +823,87 @@ export function buildJobHandlers(): Record<string, JobHandler> {
     [HOSTED_BROKER_INGEST_JOB_KIND]: (job) => runHostedBrokerIngestJob(job, {
       getConnection: (orgId, connectionId) => getConnectionForOrg(orgId, connectionId),
       createSyncRun: (connectionId, options) => createSyncRun(connectionId, options),
-      persistSnapshot: ({ runId, payload, actorId, origin, orgId }) =>
-        persistSnapshot(runId, payload, actorId, origin, null, null, orgId),
+      persistSnapshot: ({ runId, payload, actorId, origin, orgId, rawEvidenceBytes }) =>
+        persistSnapshot(runId, payload, actorId, origin, null, null, orgId, rawEvidenceBytes),
     }),
+    [HOSTED_COLLECTOR_COLLECT_JOB_KIND]: (job) => runHostedCollectorJob(job, {
+      getConnection: (orgId, connectionId) => getConnectionForOrg(orgId, connectionId),
+      listOperationRuns: (input) => listHostedCollectorOperationRuns(input),
+      createSyncRun: (connectionId, options) => createSyncRun(connectionId, options),
+      runCollectorSync,
+      persistSnapshot: ({ runId, payload, rawEvidenceBytes, actorId, origin, orgId }) =>
+        persistSnapshot(runId, payload, actorId, origin, null, null, orgId, rawEvidenceBytes),
+      failSyncRun,
+      markConnectionNeedsAttention,
+      safeFailureCode: safeCollectionFailureCode,
+    }),
+    "agentless-teardown-sweep": (job) => {
+      const repository = new AgentlessScanRepository();
+      return runAgentlessTeardownSweepJob(job, {
+        // Keep one broker call inside its five-minute authenticated request
+        // bound even when AWS applies the SDK's full retry budget.
+        listOutstanding: (orgId) => repository.listOpenTeardownDebt(orgId, 25),
+        sweep: (resources) => requestAgentlessTeardownSweep({
+          tenantId: job.orgId,
+          operationId: job.id,
+          resources: resources.map((resource) => ({
+            connectionId: resource.connectionId,
+            resourceId: resource.resourceId,
+            resourceKind: resource.resourceKind,
+            accountScope: resource.accountScope,
+            region: resource.region,
+          })),
+        }),
+        settle: (orgId, resourceId) =>
+          repository.resolveTeardownDebt(orgId, resourceId),
+        recordAttempt: (orgId, resourceId, detail) =>
+          repository.recordTeardownAttempt(orgId, resourceId, detail),
+      });
+    },
+    "vuln-feed-refresh": (job) => {
+      const repository = new VulnerabilityMirrorRepository();
+      return runVulnFeedRefreshJob(job, {
+        readFeedState: () => repository.feedStates(),
+        plan: (states, now) => planVulnFeedRefresh(states, {}, now),
+        refreshFeed: (feed, options) => refreshBoundedVulnerabilityFeed({
+          feed,
+          repository,
+          ...(options.nvdWindowDays === undefined
+            ? {}
+            : { nvdWindowDays: options.nvdWindowDays }),
+        }),
+        audit: async (event) => {
+          const numberValue = (key: string): number => {
+            const value = event[key];
+            return typeof value === "number" && Number.isFinite(value) ? value : 0;
+          };
+          const failureCount = Array.isArray(event.failures)
+            ? event.failures.length
+            : 0;
+          await appendAuditEvent({
+            orgId: job.orgId,
+            actorType: "system",
+            actorId: "system:vulnerability-feed-refresh",
+            action: "vulnerability.feed_refresh.completed",
+            targetType: "vulnerability_feed_mirror",
+            targetId: job.id,
+            customerId: job.customerId,
+            outcome: failureCount === 0 ? "allowed" : "failed",
+            requestId: `vuln.feed_refresh:${job.id}:${job.attempt}`,
+            // Upstream exception text can contain URLs/request identifiers.
+            // Persist only bounded counts and the explicit host-handoff flag.
+            metadata: {
+              refreshed: numberValue("refreshed"),
+              rowsWritten: numberValue("rowsWritten"),
+              deferredToHost: numberValue("deferredToHost"),
+              needsHostRun: event.needsHostRun === true,
+              failureCount,
+              attempt: job.attempt,
+            },
+          });
+        },
+      });
+    },
   };
 }
 
@@ -851,7 +986,7 @@ export async function ensureDueAlertEvaluationsEnqueued(
   const enabled = await rules.listEnabledForAllTenants(now);
   const tenants = new Map<string, { readonly orgId: string; readonly customerId: string }>();
   for (const rule of enabled) {
-    tenants.set(`${rule.scope.orgId} ${rule.scope.customerId}`, rule.scope);
+    tenants.set(`${rule.scope.orgId}\u0000${rule.scope.customerId}`, rule.scope);
   }
   let enqueued = 0;
   for (const tenant of tenants.values()) {
@@ -947,18 +1082,20 @@ export const AGENTLESS_TEARDOWN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 export interface AgentlessTeardownSweepDeps {
   /** Open debt for the org. Org-scoped on purpose — see the repository comment. */
   listOutstanding: (orgId: string) => Promise<readonly {
+    readonly connectionId: string;
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
-    readonly accountScope: string;
+    readonly accountScope: "customer" | "sutra-scan-account";
     readonly attempts: number;
     readonly firstSeenAt: string;
   }[]>;
   sweep: (resources: readonly {
+    readonly connectionId: string;
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
-    readonly accountScope: string;
+    readonly accountScope: "customer" | "sutra-scan-account";
     readonly attempts: number;
     readonly firstSeenAt: string;
   }[]) => Promise<{

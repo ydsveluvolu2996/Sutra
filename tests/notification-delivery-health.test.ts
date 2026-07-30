@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assessNotificationDeliveryHealth } from "../lib/notification-delivery-health.ts";
+import {
+  assessNotificationDeliveryHealth,
+  withObservedNotificationReadiness,
+} from "../lib/notification-delivery-health.ts";
 import type {
   NotificationDestination,
   NotificationOutboxJob,
@@ -51,6 +54,25 @@ test("reports healthy only when worker and enabled destination adapters are read
   });
   assert.equal(health.state, "healthy");
   assert.equal(health.delivered, 1);
+});
+
+test("configuration is not treated as readiness until current-version delivery is observed", () => {
+  const unobserved = withObservedNotificationReadiness([destination], [], true);
+  assert.equal(unobserved[0]?.deliveryReadiness, "adapter_not_configured");
+
+  const beforeUpdate = withObservedNotificationReadiness(
+    [{ ...destination, updatedAt: "2026-07-17T09:00:00.000Z" }],
+    [job("delivered", "2026-07-17T08:59:00.000Z")],
+    true,
+  );
+  assert.equal(beforeUpdate[0]?.deliveryReadiness, "adapter_not_configured");
+
+  const observed = withObservedNotificationReadiness(
+    [destination],
+    [job("delivered")],
+    true,
+  );
+  assert.equal(observed[0]?.deliveryReadiness, "configured");
 });
 
 test("reports blocked delivery without claiming provider readiness", () => {

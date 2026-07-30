@@ -6,7 +6,8 @@ import type { ApiTokenRepository, AuthenticatedToken, PublicApiScope } from "../
  *   401 (missing/unknown/expired/revoked), 403 (scope), or 429 (quota) with a
  *   stable JSON error envelope — the reason is stated, never leaked beyond
  *   what the caller is entitled to know.
- * - Cursor pagination with an opaque base64url cursor. Page size is capped;
+ * - Cursor pagination with an HMAC-authenticated base64url cursor bound to the
+ *   exact token, organization, customer, and collection. Page size is capped;
  *   the envelope always says whether more data exists.
  * - Responses are versioned by path (v1) and never cache.
  */
@@ -84,16 +85,125 @@ function fromBase64Url(value: string): string {
   return atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
 }
 
-/** Opaque offset cursor. Pure and total: any malformed cursor is a 400. */
-export function encodeCursor(offset: number): string {
-  return toBase64Url(JSON.stringify({ o: offset }));
+function bytesToBase64Url(value: Uint8Array): string {
+  let binary = "";
+  for (const byte of value) binary += String.fromCharCode(byte);
+  return toBase64Url(binary);
 }
 
-export function decodeCursor(cursor: string | null): number {
+function base64UrlToBytes(value: string): ArrayBuffer {
+  return Uint8Array.from(
+    fromBase64Url(value),
+    (character) => character.charCodeAt(0),
+  ).buffer as ArrayBuffer;
+}
+
+export interface PublicCursorContext {
+  readonly orgId: string;
+  readonly customerId: string;
+  readonly tokenId: string;
+  readonly collection: string;
+  /** The bearer token is used only as ephemeral HMAC material and is never persisted. */
+  readonly signingSecret: string;
+}
+
+const CURSOR_COLLECTION = /^[a-z][a-z0-9-]{0,63}$/u;
+
+/**
+ * Bind pagination state to the authenticated token and dataset. A cursor from a
+ * different customer, token, or route fails exactly like a malformed cursor.
+ */
+export function publicCursorContext(
+  request: Request,
+  token: AuthenticatedToken,
+  collection: string,
+): PublicCursorContext {
+  const signingSecret = extractBearerToken(request.headers.get("authorization"));
+  if (signingSecret === null || !CURSOR_COLLECTION.test(collection)) {
+    throw new PublicApiError(400, "INVALID_CURSOR", "The cursor is not valid; restart from the first page");
+  }
+  return {
+    orgId: token.orgId,
+    customerId: token.customerId,
+    tokenId: token.id,
+    collection,
+    signingSecret,
+  };
+}
+
+function cursorPayload(offset: number, context: PublicCursorContext): string {
+  return JSON.stringify({
+    v: 1,
+    o: offset,
+    g: context.orgId,
+    c: context.customerId,
+    t: context.tokenId,
+    q: context.collection,
+  });
+}
+
+async function cursorKey(signingSecret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(signingSecret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+}
+
+/** HMAC-authenticated scoped cursor. Any malformed or wrong-scope cursor is a 400. */
+export async function encodeCursor(offset: number, context: PublicCursorContext): Promise<string> {
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new PublicApiError(400, "INVALID_CURSOR", "The cursor is not valid; restart from the first page");
+  }
+  const payload = cursorPayload(offset, context);
+  const signature = new Uint8Array(
+    await crypto.subtle.sign("HMAC", await cursorKey(context.signingSecret), new TextEncoder().encode(payload)),
+  );
+  return toBase64Url(JSON.stringify({ p: toBase64Url(payload), s: bytesToBase64Url(signature) }));
+}
+
+export async function decodeCursor(
+  cursor: string | null,
+  context: PublicCursorContext,
+): Promise<number> {
   if (cursor === null || cursor === "") return 0;
   try {
-    const parsed: unknown = JSON.parse(fromBase64Url(cursor));
-    if (typeof parsed === "object" && parsed !== null && Number.isSafeInteger((parsed as { o?: unknown }).o) && ((parsed as { o: number }).o) >= 0) {
+    const envelope: unknown = JSON.parse(fromBase64Url(cursor));
+    if (
+      typeof envelope !== "object" ||
+      envelope === null ||
+      typeof (envelope as { p?: unknown }).p !== "string" ||
+      typeof (envelope as { s?: unknown }).s !== "string" ||
+      Object.keys(envelope).length !== 2
+    ) {
+      throw new Error("invalid cursor envelope");
+    }
+    const encodedPayload = (envelope as { p: string }).p;
+    const payload = fromBase64Url(encodedPayload);
+    const parsed: unknown = JSON.parse(payload);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Object.keys(parsed).length !== 6 ||
+      (parsed as { v?: unknown }).v !== 1 ||
+      !Number.isSafeInteger((parsed as { o?: unknown }).o) ||
+      ((parsed as { o: number }).o) < 0 ||
+      (parsed as { g?: unknown }).g !== context.orgId ||
+      (parsed as { c?: unknown }).c !== context.customerId ||
+      (parsed as { t?: unknown }).t !== context.tokenId ||
+      (parsed as { q?: unknown }).q !== context.collection
+    ) {
+      throw new Error("invalid cursor payload");
+    }
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      await cursorKey(context.signingSecret),
+      base64UrlToBytes((envelope as { s: string }).s),
+      new TextEncoder().encode(payload),
+    );
+    if (valid) {
       return (parsed as { o: number }).o;
     }
   } catch {
@@ -112,11 +222,19 @@ export function parsePageSize(raw: string | null): number {
   return value;
 }
 
-/** Slice a full result set into a page + next cursor. Pure. */
-export function paginate<T>(items: readonly T[], offset: number, limit: number): { page: readonly T[]; nextCursor: string | null } {
+/** Slice a scoped result set into a page + an authenticated next cursor. */
+export async function paginate<T>(
+  items: readonly T[],
+  offset: number,
+  limit: number,
+  context: PublicCursorContext,
+): Promise<{ page: readonly T[]; nextCursor: string | null }> {
   const page = items.slice(offset, offset + limit);
   const nextOffset = offset + page.length;
-  return { page, nextCursor: nextOffset < items.length ? encodeCursor(nextOffset) : null };
+  return {
+    page,
+    nextCursor: nextOffset < items.length ? await encodeCursor(nextOffset, context) : null,
+  };
 }
 
 export async function sha256HexOf(value: string): Promise<string> {

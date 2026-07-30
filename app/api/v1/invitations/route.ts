@@ -71,7 +71,8 @@ export async function POST(request: Request): Promise<Response> {
       body.customerId === undefined || body.customerId === null
         ? null
         : boundedInputString(body.customerId, { label: "customer identifier", maximum: 128 });
-    // (LOW-2) OPTIONAL: pin the invitation to a specific OIDC issuer/provider so
+    // (LOW-2) OPTIONAL: pin the invitation to a specific federated identity
+    // issuer/provider so
     // only an identity from that IdP can accept it. Absent => unpinned (unchanged).
     const allowedIssuer =
       body.allowedIssuer === undefined || body.allowedIssuer === null
@@ -94,14 +95,14 @@ export async function POST(request: Request): Promise<Response> {
         activationUrlShownOnce: false,
       }, { headers: { "cache-control": "no-store" } });
     }
-    // The activation URL depends on how members authenticate. OIDC deployments
-    // hand the token to the federated sign-in start endpoint; local and
+    // The activation URL depends on how members authenticate. Federated
+    // deployments hand the token to the provider-selection login page; local and
     // managed-password deployments send the invitee to the set-password page.
     let invitationUrl: URL;
     const deliveryEnv = env as unknown as InvitationDeliveryEnv;
     const urlBase = activationBase(request.url, deliveryEnv.SUTRA_PUBLIC_ORIGIN);
     if (isHostedOidcRuntime()) {
-      invitationUrl = new URL("/api/auth/oidc/start", urlBase);
+      invitationUrl = new URL("/login", urlBase);
       invitationUrl.searchParams.set("invitation", created.token);
       invitationUrl.searchParams.set("returnTo", "/dashboard");
     } else {

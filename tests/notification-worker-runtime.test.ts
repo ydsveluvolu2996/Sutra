@@ -242,7 +242,7 @@ test("runtime environment is bounded", () => {
   assert.deepEqual(readNotificationWorkerRuntimeConfig({
     SUTRA_NOTIFICATION_POLL_INTERVAL_MS: "500",
     SUTRA_NOTIFICATION_HEALTH_PORT: "8081",
-    SUTRA_NOTIFICATION_SECRET_PREFIX: "sutra/notifications/",
+    SUTRA_NOTIFICATION_CONFIG_PREFIX: "sutra/notifications/",
   }), {
     pollIntervalMs: 500,
     healthPort: 8081,

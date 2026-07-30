@@ -61,6 +61,15 @@ export const localSessions = sqliteTable("local_sessions", {
   index("local_sessions_user_expiry_idx").on(table.userId, table.expiresAt, table.revokedAt),
 ]);
 
+export const samlAssertionReplays = sqliteTable("saml_assertion_replays", {
+  identityIssuer: text("identity_issuer").notNull(),
+  assertionId: text("assertion_id").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("saml_assertion_replays_identity_assertion_uq").on(table.identityIssuer, table.assertionId),
+  index("saml_assertion_replays_expiry_idx").on(table.expiresAt),
+]);
+
 export const memberships = sqliteTable("memberships", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().references(() => organizations.id),
@@ -234,8 +243,66 @@ export const awsConnections = sqliteTable("aws_connections", {
   updatedAt: timestamp("updated_at"),
 }, (table) => [
   uniqueIndex("aws_connections_customer_account_uq").on(table.orgId, table.customerId, table.partition, table.awsAccountId),
+  uniqueIndex("aws_connections_global_live_account_uq")
+    .on(table.partition, table.awsAccountId)
+    .where(sql`${table.sourceKind} = 'aws_trust_role'`),
+  uniqueIndex("aws_connections_global_live_role_uq")
+    .on(table.roleArn)
+    .where(sql`${table.sourceKind} = 'aws_trust_role' AND ${table.roleArn} <> ''`),
   index("aws_connections_scope_status_idx").on(table.orgId, table.customerId, table.status),
 ]);
+
+export const evidenceObjects = sqliteTable("evidence_objects", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  runId: text("run_id").notNull(),
+  snapshotId: text("snapshot_id"),
+  artifactKind: text("artifact_kind", {
+    enum: ["aws_snapshot_raw", "export_json", "export_csv"],
+  }).notNull(),
+  objectKey: text("object_key").notNull(),
+  contentType: text("content_type").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  status: text("status", { enum: ["staging", "available", "failed"] }).notNull().default("staging"),
+  retentionUntil: integer("retention_until", { mode: "timestamp_ms" }).notNull(),
+  createdBy: text("created_by").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+  availableAt: integer("available_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("evidence_objects_key_uq").on(table.objectKey),
+  uniqueIndex("evidence_objects_run_kind_uq")
+    .on(table.orgId, table.connectionId, table.runId, table.artifactKind),
+  index("evidence_objects_scope_time_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.createdAt, table.id),
+]);
+
+export const evidenceDownloadGrants = sqliteTable("evidence_download_grants", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  objectId: text("object_id").notNull().references(() => evidenceObjects.id),
+  actorId: text("actor_id").notNull(),
+  purpose: text("purpose", { enum: ["raw_evidence_review", "export_download"] }).notNull(),
+  tokenSha256: text("token_sha256").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  consumedAt: integer("consumed_at", { mode: "timestamp_ms" }),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("evidence_download_grants_token_uq").on(table.tokenSha256),
+  index("evidence_download_grants_scope_expiry_idx")
+    .on(table.orgId, table.customerId, table.actorId, table.expiresAt),
+]);
+
+export const evidenceLocalPayloads = sqliteTable("evidence_local_payloads", {
+  objectId: text("object_id").primaryKey().references(() => evidenceObjects.id),
+  contentSha256: text("content_sha256").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  bodyBase64: text("body_base64").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});
 
 export const syncRuns = sqliteTable("sync_runs", {
   id: text("id").primaryKey(),
@@ -344,6 +411,40 @@ export const cmdbResources = sqliteTable("cmdb_resources", {
   index("cmdb_resources_scope_type_idx").on(table.orgId, table.customerId, table.connectionId, table.resourceType, table.regionKey),
 ]);
 
+/**
+ * Mutable lifecycle projection over immutable CMDB resource evidence. Missing
+ * resources keep pointing at the exact row and snapshot in which they were last
+ * observed; no collected configuration or checksum is rewritten.
+ */
+export const cmdbResourceProjectionStates = sqliteTable("cmdb_resource_projection_states", {
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  resourceKey: text("resource_key").notNull(),
+  lifecycleState: text("lifecycle_state", {
+    enum: ["active", "retirement_pending", "retired"],
+  }).notNull().default("active"),
+  consecutiveCompleteMisses: integer("consecutive_complete_misses").notNull().default(0),
+  lastObservedResourceId: text("last_observed_resource_id").notNull().references(() => cmdbResources.id),
+  lastObservedSnapshotId: text("last_observed_snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  firstMissingSnapshotId: text("first_missing_snapshot_id").references(() => cmdbSnapshots.id),
+  stateChangedSnapshotId: text("state_changed_snapshot_id").notNull().references(() => cmdbSnapshots.id),
+  lastCompleteRunId: text("last_complete_run_id").notNull().references(() => syncRuns.id),
+  lastCompleteRunCreatedAt: integer("last_complete_run_created_at", { mode: "timestamp_ms" }).notNull(),
+  retirementPendingAt: integer("retirement_pending_at", { mode: "timestamp_ms" }),
+  retiredAt: integer("retired_at", { mode: "timestamp_ms" }),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("cmdb_resource_projection_identity_uq").on(table.orgId, table.connectionId, table.resourceKey),
+  index("cmdb_resource_projection_scope_state_idx").on(
+    table.orgId,
+    table.customerId,
+    table.connectionId,
+    table.lifecycleState,
+    table.resourceKey,
+  ),
+]);
+
 /** Immutable resource-level deltas between consecutively published complete snapshots. */
 export const cmdbChangeEvents = sqliteTable("cmdb_change_events", {
   id: text("id").primaryKey(),
@@ -357,6 +458,7 @@ export const cmdbChangeEvents = sqliteTable("cmdb_change_events", {
   changedPathsJson: text("changed_paths_json").notNull().default("[]"),
   beforeJson: text("before_json"),
   afterJson: text("after_json"),
+  projectionApplied: integer("projection_applied", { mode: "boolean" }).notNull().default(true),
   occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
 }, (table) => [
   uniqueIndex("cmdb_change_events_snapshot_resource_uq").on(table.toSnapshotId, table.resourceKey),
@@ -509,6 +611,7 @@ export const auditEvents = sqliteTable("audit_events", {
   metadataJson: text("metadata_json").notNull().default("{}"),
   previousEventHash: text("previous_event_hash"),
   eventHash: text("event_hash").notNull(),
+  hashVersion: integer("hash_version").notNull().default(1),
 }, (table) => [
   index("audit_events_org_time_idx").on(table.orgId, table.occurredAt, table.id),
   uniqueIndex("audit_events_org_request_id_uq").on(table.orgId, table.requestId),
@@ -879,4 +982,158 @@ export const kubernetesScanScannerEvidence = sqliteTable("kubernetes_scan_scanne
   uniqueIndex("kubernetes_scan_scanner_evidence_run_uq").on(table.scanRunId),
   index("kubernetes_scan_scanner_evidence_scope_idx")
     .on(table.orgId, table.customerId, table.clusterId, table.scanRunId),
+]);
+
+/** Immutable normalized data-security classification and exposure publications. */
+export const dspmScanRuns = sqliteTable("dspm_scan_runs", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  source: text("source", { enum: ["aws-macie", "agentless-classifier", "normalized-import"] }).notNull(),
+  status: text("status", { enum: ["COMPLETE", "PARTIAL"] }).notNull(),
+  coverageJson: text("coverage_json").notNull(),
+  evidenceSha256: text("evidence_sha256").notNull(),
+  assetCount: integer("asset_count").notNull(),
+  findingCount: integer("finding_count").notNull(),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  importedBy: text("imported_by").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("dspm_scan_runs_scope_id_uq").on(table.orgId, table.customerId, table.connectionId, table.id),
+  uniqueIndex("dspm_scan_runs_idempotency_uq").on(table.orgId, table.connectionId, table.idempotencyKey),
+  index("dspm_scan_runs_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.collectedAt, table.id),
+]);
+
+export const dspmAssetEvidence = sqliteTable("dspm_asset_evidence", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  scanRunId: text("scan_run_id").notNull().references(() => dspmScanRuns.id),
+  resourceKey: text("resource_key").notNull(),
+  resourceType: text("resource_type").notNull(),
+  region: text("region_key").notNull(),
+  classification: text("classification", {
+    enum: ["restricted", "confidential", "internal", "public", "unknown"],
+  }).notNull(),
+  categoriesJson: text("categories_json").notNull(),
+  ownerRef: text("owner_ref"),
+  encrypted: integer("encrypted", { mode: "boolean" }),
+  publicAccess: integer("public_access", { mode: "boolean" }),
+  crossAccountAccess: integer("cross_account_access", { mode: "boolean" }),
+  externalSharing: integer("external_sharing", { mode: "boolean" }),
+  credentialsDetected: integer("credentials_detected", { mode: "boolean" }),
+  dataSizeBytes: integer("data_size_bytes"),
+  riskScore: integer("risk_score").notNull(),
+  riskSeverity: text("risk_severity", {
+    enum: ["critical", "high", "medium", "low", "none"],
+  }).notNull(),
+  riskTitle: text("risk_title"),
+  riskFactorsJson: text("risk_factors_json").notNull(),
+  recommendationsJson: text("recommendations_json").notNull(),
+}, (table) => [
+  uniqueIndex("dspm_asset_evidence_run_resource_uq").on(table.scanRunId, table.resourceKey),
+  index("dspm_asset_evidence_scope_risk_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.riskSeverity, table.riskScore),
+]);
+
+export const dspmScanHeads = sqliteTable("dspm_scan_heads", {
+  connectionId: text("connection_id").primaryKey().references(() => awsConnections.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  scanRunId: text("scan_run_id").notNull().references(() => dspmScanRuns.id),
+  collectedAt: integer("collected_at", { mode: "timestamp_ms" }).notNull(),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  index("dspm_scan_heads_scope_idx").on(table.orgId, table.customerId, table.connectionId),
+]);
+
+/** Tenant-bound SCIM provisioning connector; only the token digest is retained. */
+export const scimConnectors = sqliteTable("scim_connectors", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  tokenPrefix: text("token_prefix").notNull(),
+  tokenSha256: text("token_sha256").notNull(),
+  identityIssuer: text("identity_issuer").notNull(),
+  subjectSource: text("subject_source", { enum: ["userName", "externalId"] }).notNull(),
+  roleMappingsJson: text("role_mappings_json").notNull().default("{}"),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+  lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
+  rotatedAt: integer("rotated_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  createdBy: text("created_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("scim_connectors_token_sha256_uq").on(table.tokenSha256),
+  index("scim_connectors_org_created_idx").on(table.orgId, table.createdAt, table.id),
+]);
+
+export const scimUserLinks = sqliteTable("scim_user_links", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  connectorId: text("connector_id").notNull().references(() => scimConnectors.id),
+  userId: text("user_id").notNull().references(() => users.id),
+  externalId: text("external_id"),
+  version: integer("version").notNull().default(1),
+  mutationNonce: text("mutation_nonce").notNull(),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("scim_user_links_connector_user_uq").on(table.connectorId, table.userId),
+  uniqueIndex("scim_user_links_connector_external_uq")
+    .on(table.connectorId, table.externalId)
+    .where(sql`${table.externalId} IS NOT NULL`),
+  index("scim_user_links_scope_idx").on(table.orgId, table.connectorId, table.updatedAt, table.id),
+]);
+
+export const scimGroups = sqliteTable("scim_groups", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  connectorId: text("connector_id").notNull().references(() => scimConnectors.id),
+  externalId: text("external_id"),
+  displayName: text("display_name").notNull(),
+  mappedRole: text("mapped_role", { enum: ["viewer", "analyst"] }),
+  version: integer("version").notNull().default(1),
+  mutationNonce: text("mutation_nonce").notNull(),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+}, (table) => [
+  uniqueIndex("scim_groups_connector_external_uq")
+    .on(table.connectorId, table.externalId)
+    .where(sql`${table.externalId} IS NOT NULL`),
+  index("scim_groups_scope_name_idx").on(table.orgId, table.connectorId, table.displayName, table.id),
+]);
+
+export const scimGroupMembers = sqliteTable("scim_group_members", {
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  connectorId: text("connector_id").notNull().references(() => scimConnectors.id),
+  groupId: text("group_id").notNull().references(() => scimGroups.id),
+  scimUserId: text("scim_user_id").notNull().references(() => scimUserLinks.id),
+  createdAt: timestamp("created_at"),
+}, (table) => [
+  uniqueIndex("scim_group_members_group_user_uq").on(table.groupId, table.scimUserId),
+  index("scim_group_members_user_idx").on(table.orgId, table.connectorId, table.scimUserId, table.groupId),
+]);
+
+/** Append-only SCIM security ledger protected by database immutability triggers. */
+export const scimAuditEvents = sqliteTable("scim_audit_events", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  connectorId: text("connector_id").references(() => scimConnectors.id),
+  actorType: text("actor_type", { enum: ["user", "scim_connector"] }).notNull(),
+  actorId: text("actor_id").notNull(),
+  action: text("action").notNull(),
+  targetType: text("target_type").notNull(),
+  targetId: text("target_id"),
+  outcome: text("outcome").notNull(),
+  requestId: text("request_id").notNull(),
+  metadataJson: text("metadata_json").notNull().default("{}"),
+  occurredAt: integer("occurred_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  uniqueIndex("scim_audit_events_org_request_uq").on(table.orgId, table.requestId),
+  index("scim_audit_events_scope_time_idx").on(table.orgId, table.occurredAt, table.id),
 ]);

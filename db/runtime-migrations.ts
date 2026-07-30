@@ -64,6 +64,15 @@ import governancePoliciesSchemaSql from "../drizzle/0064_governance_policies.sql
 import agentlessScansSchemaSql from "../drizzle/0065_agentless_scans.sql?raw";
 import invitationZohoProviderSchemaSql from "../drizzle/0066_invitation_zoho_provider.sql?raw";
 import awsLiveSnapshotOriginSchemaSql from "../drizzle/0067_aws_live_snapshot_origin.sql?raw";
+import samlAssertionReplaysSchemaSql from "../drizzle/0068_saml_assertion_replays.sql?raw";
+import dspmWorkspaceSchemaSql from "../drizzle/0069_dspm_workspace.sql?raw";
+import scimIdentityLifecycleSchemaSql from "../drizzle/0070_scim_identity_lifecycle.sql?raw";
+import itsmManagedSecretsSchemaSql from "../drizzle/0071_itsm_managed_secrets.sql?raw";
+import auditHashVersionSchemaSql from "../drizzle/0072_audit_hash_version.sql?raw";
+import awsGlobalOwnershipSchemaSql from "../drizzle/0073_aws_global_ownership.sql?raw";
+import cmdbResourceRetirementSchemaSql from "../drizzle/0074_cmdb_resource_retirement.sql?raw";
+import managedEvidenceObjectsSchemaSql from "../drizzle/0075_managed_evidence_objects.sql?raw";
+import itsmDeliveryEvidenceSchemaSql from "../drizzle/0076_itsm_delivery_evidence.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -145,6 +154,15 @@ const migrations = [
   { id: "0065_agentless_scans", statements: statementsFrom(agentlessScansSchemaSql) },
   { id: "0066_invitation_zoho_provider", statements: statementsFrom(invitationZohoProviderSchemaSql) },
   { id: "0067_aws_live_snapshot_origin", statements: statementsFrom(awsLiveSnapshotOriginSchemaSql) },
+  { id: "0068_saml_assertion_replays", statements: statementsFrom(samlAssertionReplaysSchemaSql) },
+  { id: "0069_dspm_workspace", statements: statementsFrom(dspmWorkspaceSchemaSql) },
+  { id: "0070_scim_identity_lifecycle", statements: statementsFrom(scimIdentityLifecycleSchemaSql) },
+  { id: "0071_itsm_managed_secrets", statements: statementsFrom(itsmManagedSecretsSchemaSql) },
+  { id: "0072_audit_hash_version", statements: statementsFrom(auditHashVersionSchemaSql) },
+  { id: "0073_aws_global_ownership", statements: statementsFrom(awsGlobalOwnershipSchemaSql) },
+  { id: "0074_cmdb_resource_retirement", statements: statementsFrom(cmdbResourceRetirementSchemaSql) },
+  { id: "0075_managed_evidence_objects", statements: statementsFrom(managedEvidenceObjectsSchemaSql) },
+  { id: "0076_itsm_delivery_evidence", statements: statementsFrom(itsmDeliveryEvidenceSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

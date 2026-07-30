@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import type {
@@ -18,6 +19,7 @@ import type {
 } from "../lib/pilot-types";
 import {
   deriveLocalAwsConnectionIdentity,
+  deriveScopedAwsConnectionIdentity,
   parseIamRoleArn,
   parseSafePilotFailure,
 } from "../lib/aws-pilot-security";
@@ -31,13 +33,17 @@ import { canonicalJson } from "../lib/canonical-json";
 import type { AwsRegionSelection } from "../lib/aws-region-selection.ts";
 import { LIVE_AWS_RUN_RECLAIM_AFTER_MS } from "../services/aws-collector/src/live-collection-limits";
 import { isExactDeclaredAwsCapabilityPartition } from "../lib/aws-permission-capabilities.ts";
+import { computeAuditEventHash } from "../lib/audit-export.ts";
+import { resolveResourceRetirementCompleteMisses } from "../lib/resource-retirement.ts";
+import { EvidenceRepository, type EvidenceObjectSummary } from "./evidence-repository.ts";
 
 export const LOCAL_ORG_ID = "org_local_sutra";
 export const LOCAL_ORG_SLUG = "local-sutra";
-const PILOT_PERMISSION_PACK = "standard-2026-07.3";
+const PILOT_PERMISSION_PACK = "standard-2026-07.4";
 export const CURRENT_PILOT_PERMISSION_PACK = PILOT_PERMISSION_PACK;
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
+const AWS_OWNERSHIP_CONFLICT_MESSAGE = "The AWS ownership claim could not be accepted";
 
 export class PilotRepositoryError extends Error {
   public readonly code: "NOT_FOUND" | "CONFLICT" | "INVALID_STATE" | "PERSISTENCE_FAILED";
@@ -53,6 +59,7 @@ export class PilotRepositoryError extends Error {
 }
 
 export interface CreateConnectionDraftInput {
+  readonly orgId?: string;
   readonly actorId: string;
   readonly operationId: string;
   readonly customerId: string;
@@ -104,11 +111,12 @@ export interface VerifiedRoleEvidence {
   readonly trustPolicyAttested: true;
   readonly permissionPolicyAttested: true;
   readonly sessionPolicyApplied: true;
-  readonly permissionPackVersion: "standard-2026-07.3";
+  readonly permissionPackVersion: "standard-2026-07.4";
   readonly capabilityAssessment: AwsPermissionCapabilityAssessment;
 }
 
 export interface CommitVerifiedConnectionRoleInput {
+  readonly orgId?: string;
   readonly connectionId: string;
   readonly expectedPreviousRoleArn: string | null;
   readonly roleArn: string;
@@ -152,6 +160,10 @@ interface ResourceRow {
   configuration_json: string;
   source_json: string;
   content_sha256: string;
+  lifecycle_state?: PilotResource["lifecycleState"];
+  consecutive_complete_misses?: number;
+  evidence_snapshot_id?: string;
+  evidence_snapshot_sha256?: string;
 }
 
 interface RelationshipRow {
@@ -321,10 +333,13 @@ async function createConnectionDraftWithAtomicAudit(
   const now = Date.now();
   const customerId = input.customerId;
   const connectionId = input.connectionId;
+  const orgId = input.orgId ?? LOCAL_ORG_ID;
   const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
   const expectedRolePath = input.expectedRolePath ?? "/sutra/";
   const expectedRoleName = input.expectedRoleName ?? "SutraCollectorRole";
-  const expectedIdentity = await deriveLocalAwsConnectionIdentity(input.accountId, input.partition);
+  const expectedIdentity = orgId === LOCAL_ORG_ID
+    ? await deriveLocalAwsConnectionIdentity(input.accountId, input.partition)
+    : await deriveScopedAwsConnectionIdentity(orgId, input.accountId, input.partition);
   if (
     !/^onb_[a-f0-9]{32}$/u.test(input.operationId) ||
     expectedIdentity.customerId !== customerId ||
@@ -332,7 +347,7 @@ async function createConnectionDraftWithAtomicAudit(
   ) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
-      "The local AWS onboarding identity is invalid",
+      "The AWS onboarding identity is invalid",
     );
   }
   if (
@@ -359,6 +374,7 @@ async function createConnectionDraftWithAtomicAudit(
   }
 
   const audit = resolveAuditInput({
+    orgId,
     actorId: input.actorId,
     action: "aws.connection.created",
     targetType: "aws_connection",
@@ -382,21 +398,43 @@ async function createConnectionDraftWithAtomicAudit(
   const replay = await recoverPendingConnectionHandoff(db, input, audit, true);
   if (replay !== null) return replay;
 
-  const existing = await db.prepare(
-    `SELECT id FROM aws_connections WHERE org_id = ? AND partition = ? AND aws_account_id = ? LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, input.partition, input.accountId).first<{ id: string }>();
-  if (existing !== null) {
-    throw new PilotRepositoryError("CONFLICT", "That AWS account already has a local Sutra connection");
+  if (orgId !== LOCAL_ORG_ID) {
+    const organization = await db.prepare(
+      `SELECT id FROM organizations WHERE id = ? AND status = 'active' LIMIT 1`,
+    ).bind(orgId).first<{ id: string }>();
+    if (organization === null) {
+      throw new PilotRepositoryError("INVALID_STATE", "The onboarding organization is not active");
+    }
+  }
+  if (await liveAccountOwnershipExists(db, input.partition, input.accountId)) {
+    await recordAwsOwnershipCollision({
+      db,
+      orgId,
+      actorId: input.actorId,
+      connectionId,
+      customerId: null,
+      partition: input.partition,
+      collisionKind: "account",
+      requestId: `security.aws_ownership:${input.operationId}:account`,
+    });
+    throw new PilotRepositoryError("CONFLICT", AWS_OWNERSHIP_CONFLICT_MESSAGE);
   }
 
   try {
-    await db.batch([
-      db.prepare(
+    const organizationStatement = orgId === LOCAL_ORG_ID
+      ? db.prepare(
         `INSERT OR IGNORE INTO organizations (id, slug, name, status, created_at) VALUES (?, ?, ?, 'active', ?)`,
-      ).bind(LOCAL_ORG_ID, LOCAL_ORG_SLUG, "Sutra local MSP", now),
+      ).bind(LOCAL_ORG_ID, LOCAL_ORG_SLUG, "Sutra local MSP", now)
+      : db.prepare(
+        `SELECT CASE WHEN EXISTS (
+           SELECT 1 FROM organizations WHERE id = ? AND status = 'active'
+         ) THEN 1 ELSE NULL END AS organization_active`,
+      ).bind(orgId);
+    await db.batch([
+      organizationStatement,
       db.prepare(
         `INSERT INTO customers (id, org_id, slug, name, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-      ).bind(customerId, LOCAL_ORG_ID, input.customerSlug, input.customerName, now, now),
+      ).bind(customerId, orgId, input.customerSlug, input.customerName, now, now),
       db.prepare(
         `INSERT INTO aws_connections
           (id, org_id, customer_id, partition, aws_account_id, role_arn,
@@ -406,7 +444,7 @@ async function createConnectionDraftWithAtomicAudit(
          VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
       ).bind(
         connectionId,
-        LOCAL_ORG_ID,
+        orgId,
         customerId,
         input.partition,
         input.accountId,
@@ -428,12 +466,18 @@ async function createConnectionDraftWithAtomicAudit(
     // recovery; every other conflict fails closed.
     const committed = await recoverPendingConnectionHandoff(db, input, audit, true);
     if (committed !== null) return committed;
-    const conflicting = await db.prepare(
-      `SELECT id FROM aws_connections
-        WHERE org_id = ? AND partition = ? AND aws_account_id = ? LIMIT 1`,
-    ).bind(LOCAL_ORG_ID, input.partition, input.accountId).first<{ id: string }>();
-    if (conflicting !== null) {
-      throw new PilotRepositoryError("CONFLICT", "That AWS account already has a local Sutra connection");
+    if (await liveAccountOwnershipExists(db, input.partition, input.accountId)) {
+      await recordAwsOwnershipCollision({
+        db,
+        orgId,
+        actorId: input.actorId,
+        connectionId,
+        customerId: null,
+        partition: input.partition,
+        collisionKind: "account",
+        requestId: `security.aws_ownership:${input.operationId}:account`,
+      });
+      throw new PilotRepositoryError("CONFLICT", AWS_OWNERSHIP_CONFLICT_MESSAGE);
     }
     throw new PilotRepositoryError(
       "PERSISTENCE_FAILED",
@@ -483,6 +527,7 @@ async function recoverPendingConnectionHandoff(
     // can complete an already-committed handoff without weakening the actor,
     // account, region, customer, or idempotency binding.
     assertMatchingAuditRequest(existingAudit, resolveAuditInput({
+      orgId: input.orgId ?? LOCAL_ORG_ID,
       actorId: input.actorId,
       action: "aws.connection.created",
       targetType: "aws_connection",
@@ -513,7 +558,7 @@ async function recoverPendingConnectionHandoff(
        JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
       WHERE c.org_id = ? AND c.id = ? AND c.customer_id = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, input.connectionId, input.customerId).first<PendingHandoffRow>();
+  ).bind(input.orgId ?? LOCAL_ORG_ID, input.connectionId, input.customerId).first<PendingHandoffRow>();
   if (row === null) {
     throw new PilotRepositoryError(
       "PERSISTENCE_FAILED",
@@ -599,6 +644,29 @@ export async function getLatestConnectionForOrg(orgId: string): Promise<PilotCon
   return row === null ? null : toPilotConnection(row);
 }
 
+/** Resolve the latest connection only inside an authenticated org+customer scope. */
+export async function getLatestConnectionForCustomer(
+  orgId: string,
+  customerId: string,
+): Promise<PilotConnection | null> {
+  const db = await readyDatabase();
+  const row = await db.prepare(
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
+            c.fixture_id, c.fixture_version, c.partition,
+            c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
+            c.permission_pack_version, c.role_provisioning_mode,
+            c.expected_role_path, c.expected_role_name, c.permission_capabilities_json,
+            c.last_validated_at,
+            c.last_successful_sync_at, c.created_at, c.updated_at
+       FROM aws_connections c
+       JOIN customers cu ON cu.id = c.customer_id AND cu.org_id = c.org_id
+      WHERE c.org_id = ? AND c.customer_id = ?
+      ORDER BY c.created_at DESC, c.id ASC
+      LIMIT 1`,
+  ).bind(orgId, customerId).first<ConnectionRow>();
+  return row === null ? null : toPilotConnection(row);
+}
+
 export function getLatestConnection(): Promise<PilotConnection | null> {
   return getLatestConnectionForOrg(LOCAL_ORG_ID);
 }
@@ -642,7 +710,8 @@ async function commitVerifiedConnectionRoleWithAtomicAudit(
   input: CommitVerifiedConnectionRoleInput,
 ): Promise<PilotConnection> {
   const db = await readyDatabase();
-  const current = await getConnection(input.connectionId);
+  const orgId = input.orgId ?? LOCAL_ORG_ID;
+  const current = await getConnectionForOrg(orgId, input.connectionId);
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -723,7 +792,23 @@ async function commitVerifiedConnectionRoleWithAtomicAudit(
     permissionPackVersion: PILOT_PERMISSION_PACK,
     capabilityAssessment: { grantedActions, missingActions },
   }));
+  const roleCollisionRequestId =
+    `security.aws_ownership:${input.connectionId}:${roleRegistrationRevision.slice(0, 32)}:role`;
+  if (await liveRoleOwnershipExists(db, input.roleArn, input.connectionId)) {
+    await recordAwsOwnershipCollision({
+      db,
+      orgId,
+      actorId: input.actorId,
+      connectionId: input.connectionId,
+      customerId: current.customerId,
+      partition: current.partition,
+      collisionKind: "role",
+      requestId: roleCollisionRequestId,
+    });
+    throw new PilotRepositoryError("CONFLICT", AWS_OWNERSHIP_CONFLICT_MESSAGE);
+  }
   const audit = resolveAuditInput({
+    orgId,
     actorId: input.actorId,
     action: "aws.connection.role_registered",
     targetType: "aws_connection",
@@ -746,7 +831,7 @@ async function commitVerifiedConnectionRoleWithAtomicAudit(
     },
     requestId: `aws.connection.role_verified:${input.connectionId}:${roleRegistrationRevision.slice(0, 32)}`,
   });
-  if (await connectionHasActiveWork(db, input.connectionId)) {
+  if (await connectionHasActiveWork(db, input.connectionId, orgId)) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
       "The AWS connection changed or has active work; retry role registration after it settles",
@@ -769,58 +854,77 @@ async function commitVerifiedConnectionRoleWithAtomicAudit(
     permissionCapabilitiesJson,
     now,
     now,
-    LOCAL_ORG_ID,
+    orgId,
     input.connectionId,
     expectedPreviousRole,
-    LOCAL_ORG_ID,
+    orgId,
     input.connectionId,
   );
-  return commitAuditedConnectionMutation({
-    db,
-    connectionId: input.connectionId,
-    mutation,
-    audit,
-    mutationGuard: {
-      sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
-               AND role_arn = ? AND status = 'active'
-               AND permission_pack_version = ? AND permission_capabilities_json = ?
-               AND last_validated_at = ? AND updated_at = ?`,
-      values: [
-        LOCAL_ORG_ID,
-        input.connectionId,
-        input.roleArn,
-        PILOT_PERMISSION_PACK,
-        permissionCapabilitiesJson,
-        now,
-        now,
-      ],
-    },
-    committedState: {
-      sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
-               AND role_arn = ? AND status = 'active'
-               AND permission_pack_version = ? AND permission_capabilities_json = ?
-               AND last_validated_at IS NOT NULL`,
-      values: [LOCAL_ORG_ID, input.connectionId, input.roleArn, PILOT_PERMISSION_PACK, permissionCapabilitiesJson],
-    },
-    persistenceMessage: "The verified IAM role and its audit evidence could not be committed atomically",
-  });
+  try {
+    return await commitAuditedConnectionMutation({
+      db,
+      connectionId: input.connectionId,
+      mutation,
+      audit,
+      mutationGuard: {
+        sql: `SELECT 1 FROM aws_connections
+               WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+                 AND role_arn = ? AND status = 'active'
+                 AND permission_pack_version = ? AND permission_capabilities_json = ?
+                 AND last_validated_at = ? AND updated_at = ?`,
+        values: [
+          orgId,
+          input.connectionId,
+          input.roleArn,
+          PILOT_PERMISSION_PACK,
+          permissionCapabilitiesJson,
+          now,
+          now,
+        ],
+      },
+      committedState: {
+        sql: `SELECT 1 FROM aws_connections
+               WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+                 AND role_arn = ? AND status = 'active'
+                 AND permission_pack_version = ? AND permission_capabilities_json = ?
+                 AND last_validated_at IS NOT NULL`,
+        values: [orgId, input.connectionId, input.roleArn, PILOT_PERMISSION_PACK, permissionCapabilitiesJson],
+      },
+      persistenceMessage: "The verified IAM role and its audit evidence could not be committed atomically",
+    });
+  } catch (error) {
+    if (await liveRoleOwnershipExists(db, input.roleArn, input.connectionId)) {
+      await recordAwsOwnershipCollision({
+        db,
+        orgId,
+        actorId: input.actorId,
+        connectionId: input.connectionId,
+        customerId: current.customerId,
+        partition: current.partition,
+        collisionKind: "role",
+        requestId: roleCollisionRequestId,
+      });
+      throw new PilotRepositoryError("CONFLICT", AWS_OWNERSHIP_CONFLICT_MESSAGE);
+    }
+    throw error;
+  }
 }
 
 export function disableAwsConnection(
   connectionId: string,
   actorId: string,
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<PilotConnection> {
-  return serializeAuditOperation(() => disableAwsConnectionWithAtomicAudit(connectionId, actorId));
+  return serializeAuditOperation(() => disableAwsConnectionWithAtomicAudit(connectionId, actorId, orgId));
 }
 
 async function disableAwsConnectionWithAtomicAudit(
   connectionId: string,
   actorId: string,
+  orgId: string,
 ): Promise<PilotConnection> {
   const db = await readyDatabase();
-  const current = await getConnection(connectionId);
+  const current = await getConnectionForOrg(orgId, connectionId);
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -828,7 +932,7 @@ async function disableAwsConnectionWithAtomicAudit(
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
   }
   if (current.status === "disabled" && current.roleArn === null) return current;
-  if (await connectionHasActiveWork(db, connectionId)) {
+  if (await connectionHasActiveWork(db, connectionId, orgId)) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
       "Wait for the active inventory operation to finish before disabling this connection",
@@ -836,7 +940,7 @@ async function disableAwsConnectionWithAtomicAudit(
   }
 
   const now = nextMutationTimestamp(current);
-  const audit = resolveConnectionDisabledAudit(current, actorId);
+  const audit = resolveConnectionDisabledAudit(current, actorId, orgId);
   const mutation = db.prepare(
     `UPDATE aws_connections
         SET status = 'disabled', updated_at = ?
@@ -846,7 +950,7 @@ async function disableAwsConnectionWithAtomicAudit(
           SELECT 1 FROM sync_runs
            WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
         )`,
-  ).bind(now, LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId);
+  ).bind(now, orgId, connectionId, orgId, connectionId);
   return commitAuditedConnectionMutation({
     db,
     connectionId,
@@ -856,13 +960,13 @@ async function disableAwsConnectionWithAtomicAudit(
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
                AND status = 'disabled' AND updated_at = ?`,
-      values: [LOCAL_ORG_ID, connectionId, now],
+      values: [orgId, connectionId, now],
     },
     committedState: {
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
                AND status = 'disabled'`,
-      values: [LOCAL_ORG_ID, connectionId],
+      values: [orgId, connectionId],
     },
     persistenceMessage: "The disabled state and its audit evidence could not be committed atomically",
   });
@@ -871,16 +975,18 @@ async function disableAwsConnectionWithAtomicAudit(
 export function offboardAwsConnection(
   connectionId: string,
   actorId: string,
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<PilotConnection> {
-  return serializeAuditOperation(() => offboardAwsConnectionWithAtomicAudit(connectionId, actorId));
+  return serializeAuditOperation(() => offboardAwsConnectionWithAtomicAudit(connectionId, actorId, orgId));
 }
 
 async function offboardAwsConnectionWithAtomicAudit(
   connectionId: string,
   actorId: string,
+  orgId: string,
 ): Promise<PilotConnection> {
   const db = await readyDatabase();
-  const current = await getConnection(connectionId);
+  const current = await getConnectionForOrg(orgId, connectionId);
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -892,7 +998,7 @@ async function offboardAwsConnectionWithAtomicAudit(
        FROM aws_connections
       WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connectionId).first<{
+  ).bind(orgId, connectionId).first<{
     role_arn: string;
     external_id_ciphertext: string;
   }>();
@@ -903,10 +1009,10 @@ async function offboardAwsConnectionWithAtomicAudit(
     lifecycle.role_arn.length === 0 &&
     lifecycle.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER
   ) {
-    const audit = resolveConnectionOffboardedAudit(current, actorId);
+    const audit = resolveConnectionOffboardedAudit(current, actorId, orgId);
     if (await auditRequestAlreadySatisfied(db, audit)) return current;
   }
-  if (await connectionHasActiveWork(db, connectionId)) {
+  if (await connectionHasActiveWork(db, connectionId, orgId)) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
       "Wait for the active inventory operation to finish before offboarding this connection",
@@ -914,7 +1020,7 @@ async function offboardAwsConnectionWithAtomicAudit(
   }
 
   const now = nextMutationTimestamp(current);
-  const audit = resolveConnectionOffboardedAudit(current, actorId);
+  const audit = resolveConnectionOffboardedAudit(current, actorId, orgId);
   const mutation = db.prepare(
     `UPDATE aws_connections
         SET role_arn = '', external_id_ciphertext = ?, external_id_key_version = ?,
@@ -928,9 +1034,9 @@ async function offboardAwsConnectionWithAtomicAudit(
     OFFBOARDED_EXTERNAL_ID_MARKER,
     OFFBOARDED_KEY_VERSION,
     now,
-    LOCAL_ORG_ID,
+    orgId,
     connectionId,
-    LOCAL_ORG_ID,
+    orgId,
     connectionId,
   );
   return commitAuditedConnectionMutation({
@@ -945,7 +1051,7 @@ async function offboardAwsConnectionWithAtomicAudit(
                AND external_id_key_version = ? AND status = 'disabled'
                AND updated_at = ?`,
       values: [
-        LOCAL_ORG_ID,
+        orgId,
         connectionId,
         OFFBOARDED_EXTERNAL_ID_MARKER,
         OFFBOARDED_KEY_VERSION,
@@ -958,7 +1064,7 @@ async function offboardAwsConnectionWithAtomicAudit(
                AND role_arn = '' AND external_id_ciphertext = ?
                AND external_id_key_version = ? AND status = 'disabled'`,
       values: [
-        LOCAL_ORG_ID,
+        orgId,
         connectionId,
         OFFBOARDED_EXTERNAL_ID_MARKER,
         OFFBOARDED_KEY_VERSION,
@@ -971,8 +1077,10 @@ async function offboardAwsConnectionWithAtomicAudit(
 function resolveConnectionDisabledAudit(
   connection: PilotConnection,
   actorId: string,
+  orgId: string = LOCAL_ORG_ID,
 ): ResolvedAuditInput {
   return resolveAuditInput({
+    orgId,
     actorId,
     action: "aws.connection.disabled",
     targetType: "aws_connection",
@@ -987,8 +1095,10 @@ function resolveConnectionDisabledAudit(
 function resolveConnectionOffboardedAudit(
   connection: PilotConnection,
   actorId: string,
+  orgId: string = LOCAL_ORG_ID,
 ): ResolvedAuditInput {
   return resolveAuditInput({
+    orgId,
     actorId,
     action: "aws.connection.offboarded",
     targetType: "aws_connection",
@@ -1025,12 +1135,16 @@ function nextMutationTimestamp(connection: PilotConnection): number {
   return Math.max(Date.now(), Date.parse(connection.updatedAt) + 1);
 }
 
-async function connectionHasActiveWork(db: D1Database, connectionId: string): Promise<boolean> {
+async function connectionHasActiveWork(
+  db: D1Database,
+  connectionId: string,
+  orgId: string = LOCAL_ORG_ID,
+): Promise<boolean> {
   return await db.prepare(
     `SELECT 1 FROM sync_runs
       WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connectionId).first() !== null;
+  ).bind(orgId, connectionId).first() !== null;
 }
 
 async function existenceGuardSatisfied(
@@ -1053,6 +1167,7 @@ async function recoverAuditedConnectionMutation(
   return requireUpdatedConnection(
     input.connectionId,
     "AWS connection disappeared after its audited mutation",
+    input.audit.orgId,
   );
 }
 
@@ -1089,8 +1204,12 @@ async function commitAuditedConnectionMutation(
   return updated;
 }
 
-async function requireUpdatedConnection(connectionId: string, message: string): Promise<PilotConnection> {
-  const updated = await getConnection(connectionId);
+async function requireUpdatedConnection(
+  connectionId: string,
+  message: string,
+  orgId: string = LOCAL_ORG_ID,
+): Promise<PilotConnection> {
+  const updated = await getConnectionForOrg(orgId, connectionId);
   if (updated === null) throw new PilotRepositoryError("PERSISTENCE_FAILED", message);
   return updated;
 }
@@ -1163,7 +1282,10 @@ export function getStoredConnectionSecret(connectionId: string): Promise<StoredC
   return getStoredConnectionSecretForOrg(LOCAL_ORG_ID, connectionId);
 }
 
-export async function markConnectionValidating(connectionId: string): Promise<void> {
+export async function markConnectionValidating(
+  connectionId: string,
+  orgId: string = LOCAL_ORG_ID,
+): Promise<void> {
   const db = await readyDatabase();
   const result = await db.prepare(
     `UPDATE aws_connections SET status = 'validating', updated_at = ?
@@ -1172,7 +1294,7 @@ export async function markConnectionValidating(connectionId: string): Promise<vo
           SELECT 1 FROM sync_runs
            WHERE org_id = ? AND connection_id = ? AND status = 'running'
         )`,
-  ).bind(Date.now(), LOCAL_ORG_ID, connectionId, LOCAL_ORG_ID, connectionId).run();
+  ).bind(Date.now(), orgId, connectionId, orgId, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) {
     throw new PilotRepositoryError("INVALID_STATE", "Connection is not ready for validation");
   }
@@ -1182,10 +1304,11 @@ export async function markConnectionValidated(
   connectionId: string,
   actorId: string,
   verification: VerifiedRoleEvidence,
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<void> {
   const db = await readyDatabase();
   const now = Date.now();
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(orgId, connectionId);
   if (connection === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -1234,8 +1357,9 @@ export async function markConnectionValidated(
           SET status = 'active', permission_pack_version = ?, permission_capabilities_json = ?,
               last_validated_at = ?, updated_at = ?
         WHERE org_id = ? AND id = ? AND status = 'validating'`,
-    ).bind(PILOT_PERMISSION_PACK, permissionCapabilitiesJson, now, now, LOCAL_ORG_ID, connectionId)],
+    ).bind(PILOT_PERMISSION_PACK, permissionCapabilitiesJson, now, now, orgId, connectionId)],
     audit: {
+      orgId,
       actorId,
       action: "aws.connection.trust_validated",
       targetType: "aws_connection",
@@ -1253,7 +1377,7 @@ export async function markConnectionValidated(
              WHERE org_id = ? AND id = ? AND status = 'active'
                AND permission_pack_version = ? AND permission_capabilities_json = ?
                AND last_validated_at = ? AND updated_at = ?`,
-      values: [LOCAL_ORG_ID, connectionId, PILOT_PERMISSION_PACK, permissionCapabilitiesJson, now, now],
+      values: [orgId, connectionId, PILOT_PERMISSION_PACK, permissionCapabilitiesJson, now, now],
     },
     persistenceMessage: "The verified permission pack and audit evidence could not be committed atomically",
   });
@@ -1263,17 +1387,19 @@ export async function markConnectionNeedsAttention(
   connectionId: string,
   actorId: string,
   safeReason: string,
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<void> {
   const db = await readyDatabase();
   const failure = parseSafePilotFailure({ code: safeReason });
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(orgId, connectionId);
   if (connection === null) return;
   const result = await db.prepare(
     `UPDATE aws_connections SET status = 'needs_attention', updated_at = ?
       WHERE org_id = ? AND id = ? AND status IN ('validating', 'active')`,
-  ).bind(Date.now(), LOCAL_ORG_ID, connectionId).run();
+  ).bind(Date.now(), orgId, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) return;
   await appendAuditEvent({
+    orgId,
     actorId,
     action: "aws.connection.validation_failed",
     targetType: "aws_connection",
@@ -1298,6 +1424,58 @@ export interface CreateSyncRunOptions {
   readonly orgId?: string;
   readonly idempotencyKey?: string;
   readonly triggerKind?: "manual" | "scheduled" | "onboarding";
+}
+
+export interface HostedCollectorOperationRun {
+  readonly id: string;
+  readonly idempotencyKey: string;
+  readonly status: PilotSyncRun["status"];
+}
+
+/**
+ * Read only sync runs belonging to one server-derived hosted collection
+ * operation. The prefix boundary prevents `abc` from matching `abcd`; all
+ * tenant and connection columns are part of the predicate.
+ */
+export async function listHostedCollectorOperationRuns(input: {
+  readonly orgId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly idempotencyBase: string;
+}): Promise<readonly HostedCollectorOperationRun[]> {
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u.test(input.orgId) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u.test(input.customerId) ||
+    !/^conn_[a-f0-9]{32}$/u.test(input.connectionId) ||
+    !/^hosted_collector_[a-f0-9]{64}$/u.test(input.idempotencyBase)
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "Hosted collection scope is invalid");
+  }
+  const db = await readyDatabase();
+  const rows = await db.prepare(
+    `SELECT id, idempotency_key, status
+       FROM sync_runs
+      WHERE org_id = ? AND customer_id = ? AND connection_id = ?
+        AND (
+          idempotency_key = ? OR
+          (substr(idempotency_key, 1, ?) = ? AND substr(idempotency_key, ?, 1) = '.')
+        )
+      ORDER BY created_at DESC, id DESC
+      LIMIT 25`,
+  ).bind(
+    input.orgId,
+    input.customerId,
+    input.connectionId,
+    input.idempotencyBase,
+    input.idempotencyBase.length,
+    input.idempotencyBase,
+    input.idempotencyBase.length + 1,
+  ).all<{ id: string; idempotency_key: string; status: PilotSyncRun["status"] }>();
+  return (rows.results ?? []).map((row) => ({
+    id: row.id,
+    idempotencyKey: row.idempotency_key,
+    status: row.status,
+  }));
 }
 
 export async function createSyncRun(
@@ -1337,7 +1515,16 @@ export async function createSyncRun(
   }
   const runId = id("sync");
   const idempotencyKey = options.idempotencyKey ?? runId;
-  const now = Date.now();
+  const previousRun = await db.prepare(
+    `SELECT created_at FROM sync_runs
+      WHERE org_id = ? AND customer_id = ? AND connection_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 1`,
+  ).bind(orgId, connection.customerId, connectionId).first<{ created_at: number }>();
+  // The per-connection run clock is monotonic even when several runs begin
+  // inside the same wall-clock millisecond. Projection ordering never depends
+  // on a random identifier except as a defensive legacy tie-breaker.
+  const now = Math.max(Date.now(), (previousRun?.created_at ?? -1) + 1);
   let result: D1Result<unknown>;
   try {
     result = await db.prepare(
@@ -1393,6 +1580,7 @@ export async function failSyncRun(
   connectionId: string,
   actorId: string,
   safeReason: string,
+  orgId: string = LOCAL_ORG_ID,
 ): Promise<void> {
   const db = await readyDatabase();
   const failure = parseSafePilotFailure({ code: safeReason });
@@ -1401,12 +1589,13 @@ export async function failSyncRun(
     `UPDATE sync_runs SET status = 'failed', coverage_state = 'unknown',
         totals_json = ?, finished_at = ?
       WHERE org_id = ? AND id = ? AND connection_id = ? AND status = 'running'`,
-  ).bind(JSON.stringify({ error: failure.code }), now, LOCAL_ORG_ID, runId, connectionId).run();
+  ).bind(JSON.stringify({ error: failure.code }), now, orgId, runId, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) {
     throw new PilotRepositoryError("INVALID_STATE", "The sync failure result is stale");
   }
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(orgId, connectionId);
   await appendAuditEvent({
+    orgId,
     actorId,
     action: "aws.sync.failed",
     targetType: "sync_run",
@@ -1425,6 +1614,28 @@ function chunks<T>(values: readonly T[], size: number): T[][] {
   return result;
 }
 
+function configuredResourceRetirementCompleteMisses(): number {
+  const runtime = env as unknown as {
+    readonly SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES?: string;
+  };
+  return resolveResourceRetirementCompleteMisses(
+    runtime.SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES ??
+      process.env.SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES,
+  );
+}
+
+function hostedEvidenceBytesRequired(): boolean {
+  const runtime = env as unknown as {
+    readonly SUTRA_DEPLOYMENT_ENV?: string;
+    readonly SUTRA_HOSTED_ENABLED?: string;
+  };
+  const deployment =
+    runtime.SUTRA_DEPLOYMENT_ENV ?? process.env.SUTRA_DEPLOYMENT_ENV;
+  const hosted =
+    runtime.SUTRA_HOSTED_ENABLED ?? process.env.SUTRA_HOSTED_ENABLED;
+  return deployment === "production" || hosted === "true";
+}
+
 export async function persistSnapshot(
   runId: string,
   payload: PilotSnapshotPayload,
@@ -1437,6 +1648,9 @@ export async function persistSnapshot(
   // the durable job's server-derived scope; the whole persist is then scoped to
   // that tenant and never to anything read from the payload.
   orgId: string = LOCAL_ORG_ID,
+  // Hosted ingestion supplies the exact request bytes covered by the broker
+  // signature. Manual live collection omits this and archives canonical JSON.
+  rawEvidenceBytes?: Uint8Array,
 ): Promise<string> {
   const db = await readyDatabase();
   const connection = await getConnectionForOrg(orgId, payload.connectionId);
@@ -1453,7 +1667,7 @@ export async function persistSnapshot(
     throw new PilotRepositoryError("INVALID_STATE", "The AWS connection is not active for this sync");
   }
   const scopedRun = await db.prepare(
-    `SELECT id, idempotency_key, trigger_kind, schedule_id FROM sync_runs
+    `SELECT id, idempotency_key, trigger_kind, schedule_id, created_at FROM sync_runs
       WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND id = ? AND status = 'running'
       LIMIT 1`,
   ).bind(orgId, connection.customerId, payload.connectionId, runId).first<{
@@ -1461,13 +1675,18 @@ export async function persistSnapshot(
     idempotency_key: string;
     trigger_kind: "manual" | "scheduled" | "onboarding";
     schedule_id: string | null;
+    created_at: number;
   }>();
   if (scopedRun === null || scopedRun.idempotency_key !== payload.jobId) {
     throw new PilotRepositoryError("INVALID_STATE", "The collector result does not belong to an active scoped sync");
   }
 
+  const retirementCompleteMisses = payload.coverageState === "complete"
+    ? configuredResourceRetirementCompleteMisses()
+    : null;
   let previousSnapshotId: string | null = null;
   let previousResources: readonly CmdbComparableResource[] = [];
+  const previousCompleteMisses = new Map<string, number>();
   if (payload.coverageState === "complete") {
     const previousHead = await db.prepare(
       `SELECT s.id
@@ -1480,15 +1699,45 @@ export async function persistSnapshot(
     ).bind(orgId, connection.customerId, payload.connectionId).first<{ id: string }>();
     if (previousHead !== null) {
       previousSnapshotId = previousHead.id;
-      const previousResult = await db.prepare(
-        `SELECT resource_key, service, resource_type, native_id, arn, name,
-                region_key, state, tags_json, configuration_json, source_json,
-                content_sha256
-           FROM cmdb_resources
-          WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND snapshot_id = ?
-          ORDER BY resource_key`,
-      ).bind(orgId, connection.customerId, payload.connectionId, previousHead.id).all<ResourceRow>();
-      previousResources = (previousResult.results ?? []).map(resourceRowToComparable);
+      const projectedResult = await db.prepare(
+        `SELECT r.resource_key, r.service, r.resource_type, r.native_id,
+                r.arn, r.name, r.region_key, r.state, r.tags_json,
+                r.configuration_json, r.source_json, r.content_sha256,
+                p.consecutive_complete_misses
+           FROM cmdb_resource_projection_states p
+           JOIN cmdb_resources r
+             ON r.id = p.last_observed_resource_id
+            AND r.org_id = p.org_id AND r.customer_id = p.customer_id
+            AND r.connection_id = p.connection_id
+            AND r.snapshot_id = p.last_observed_snapshot_id
+            AND r.resource_key = p.resource_key
+          WHERE p.org_id = ? AND p.customer_id = ? AND p.connection_id = ?
+            AND p.lifecycle_state <> 'retired'
+          ORDER BY r.resource_key`,
+      ).bind(orgId, connection.customerId, payload.connectionId).all<ResourceRow>();
+      const projectedRows = projectedResult.results ?? [];
+      if (projectedRows.length > 0) {
+        previousResources = projectedRows.map(resourceRowToComparable);
+        for (const row of projectedRows) {
+          previousCompleteMisses.set(
+            row.resource_key,
+            Number(row.consecutive_complete_misses ?? 0),
+          );
+        }
+      } else {
+        // Compatibility fallback for a manually seeded or pre-migration head.
+        const previousResult = await db.prepare(
+          `SELECT resource_key, service, resource_type, native_id, arn, name,
+                  region_key, state, tags_json, configuration_json, source_json,
+                  content_sha256
+             FROM cmdb_resources
+            WHERE org_id = ? AND customer_id = ? AND connection_id = ? AND snapshot_id = ?
+            ORDER BY resource_key`,
+        ).bind(orgId, connection.customerId, payload.connectionId, previousHead.id).all<ResourceRow>();
+        const fallbackRows = previousResult.results ?? [];
+        previousResources = fallbackRows.map(resourceRowToComparable);
+        for (const row of fallbackRows) previousCompleteMisses.set(row.resource_key, 0);
+      }
     }
   }
   const snapshotId = id("snap");
@@ -1523,8 +1772,38 @@ export async function persistSnapshot(
   ) {
     throw new PilotRepositoryError("INVALID_STATE", "Snapshot origin does not match the connection source");
   }
+  let evidenceObject: EvidenceObjectSummary | null = null;
+  if (origin.kind === "aws_live") {
+    if (rawEvidenceBytes === undefined && hostedEvidenceBytesRequired()) {
+      throw new PilotRepositoryError(
+        "PERSISTENCE_FAILED",
+        "Authenticated collector evidence bytes are required before hosted publication",
+      );
+    }
+    const body = rawEvidenceBytes ?? new TextEncoder().encode(canonicalJson(payload));
+    // This archive is intentionally BEFORE the first staging snapshot write.
+    // Managed production therefore cannot promote or partially persist a live
+    // snapshot when private evidence storage is unavailable.
+    evidenceObject = await new EvidenceRepository(db).archive({
+      scope: {
+        orgId,
+        customerId: connection.customerId,
+        connectionId: payload.connectionId,
+      },
+      runId,
+      snapshotId,
+      artifactKind: "aws_snapshot_raw",
+      contentType: "application/json",
+      body,
+      createdBy: actorId,
+    });
+  }
   const resourceChanges = payload.coverageState === "complete"
     ? diffCmdbResources(previousResources, payload.resources.map(toComparableResource))
+      .filter((change) =>
+        change.changeType !== "removed" ||
+        (previousCompleteMisses.get(change.resourceKey) ?? 0) + 1 >=
+          (retirementCompleteMisses ?? Number.POSITIVE_INFINITY))
     : [];
 
   await db.prepare(
@@ -1659,8 +1938,8 @@ export async function persistSnapshot(
       `INSERT INTO cmdb_change_events
         (id, org_id, customer_id, connection_id, from_snapshot_id,
          to_snapshot_id, resource_key, change_type, changed_paths_json,
-         before_json, after_json, occurred_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         before_json, after_json, projection_applied, occurred_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
     ).bind(
       `${snapshotId}:change:${change.changeType}:${index}:${change.resourceKey}`,
       orgId,
@@ -1691,6 +1970,147 @@ export async function persistSnapshot(
     ).bind(snapshotStatus, now, payload.snapshotSha256, snapshotId, orgId, runId, orgId, payload.connectionId),
   ];
   if (shouldPublishHead) {
+    // Lifecycle is a mutable projection over immutable collected rows. Only a
+    // complete run can enter this branch. Missing resources advance one grace
+    // step, while resources observed in this snapshot reset to active and point
+    // at their new immutable evidence. The run ordering guards make a late
+    // completion a retained snapshot, never a projection regression.
+    publicationStatements.push(db.prepare(
+      `UPDATE cmdb_resource_projection_states
+          SET consecutive_complete_misses = consecutive_complete_misses + 1,
+              lifecycle_state = CASE
+                WHEN consecutive_complete_misses + 1 >= ? THEN 'retired'
+                ELSE 'retirement_pending'
+              END,
+              first_missing_snapshot_id = CASE
+                WHEN consecutive_complete_misses = 0 THEN ?
+                ELSE first_missing_snapshot_id
+              END,
+              state_changed_snapshot_id = ?,
+              last_complete_run_id = ?,
+              last_complete_run_created_at = CAST(? AS BIGINT),
+              retirement_pending_at = CASE
+                WHEN consecutive_complete_misses = 0 THEN CAST(? AS BIGINT)
+                ELSE retirement_pending_at
+              END,
+              retired_at = CASE
+                WHEN consecutive_complete_misses + 1 >= ? THEN CAST(? AS BIGINT)
+                ELSE retired_at
+              END,
+              updated_at = CAST(? AS BIGINT)
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ?
+          AND lifecycle_state <> 'retired'
+          AND (
+            last_complete_run_created_at < CAST(? AS BIGINT) OR
+            (last_complete_run_created_at = CAST(? AS BIGINT) AND last_complete_run_id < ?)
+          )
+          AND NOT EXISTS (
+            SELECT 1
+              FROM cmdb_resources observed
+             WHERE observed.org_id = ? AND observed.customer_id = ?
+               AND observed.connection_id = ? AND observed.snapshot_id = ?
+               AND observed.resource_key = cmdb_resource_projection_states.resource_key
+          )`,
+    ).bind(
+      retirementCompleteMisses,
+      snapshotId,
+      snapshotId,
+      runId,
+      scopedRun.created_at,
+      now,
+      retirementCompleteMisses,
+      now,
+      now,
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      scopedRun.created_at,
+      scopedRun.created_at,
+      runId,
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      snapshotId,
+    ));
+    publicationStatements.push(db.prepare(
+      `INSERT INTO cmdb_resource_projection_states
+        (org_id, customer_id, connection_id, resource_key,
+         lifecycle_state, consecutive_complete_misses,
+         last_observed_resource_id, last_observed_snapshot_id,
+         first_missing_snapshot_id, state_changed_snapshot_id,
+         last_complete_run_id, last_complete_run_created_at,
+         retirement_pending_at, retired_at, updated_at)
+       SELECT r.org_id, r.customer_id, r.connection_id, r.resource_key,
+              'active', 0, r.id, r.snapshot_id, NULL, r.snapshot_id,
+              ?, CAST(? AS BIGINT), NULL, NULL, CAST(? AS BIGINT)
+         FROM cmdb_resources r
+        WHERE r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
+          AND r.snapshot_id = ?
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM connection_heads h
+               WHERE h.connection_id = ? AND h.org_id = ? AND h.customer_id = ?
+            ) OR EXISTS (
+              SELECT 1
+                FROM connection_heads h
+                JOIN cmdb_snapshots current_snapshot
+                  ON current_snapshot.id = h.snapshot_id
+                 AND current_snapshot.org_id = h.org_id
+                 AND current_snapshot.customer_id = h.customer_id
+                 AND current_snapshot.connection_id = h.connection_id
+                JOIN sync_runs current_run
+                  ON current_run.id = current_snapshot.sync_run_id
+                 AND current_run.org_id = current_snapshot.org_id
+                 AND current_run.customer_id = current_snapshot.customer_id
+                 AND current_run.connection_id = current_snapshot.connection_id
+               WHERE h.connection_id = ? AND h.org_id = ? AND h.customer_id = ?
+                 AND (
+                   current_run.created_at < CAST(? AS BIGINT) OR
+                   (current_run.created_at = CAST(? AS BIGINT) AND current_run.id < ?)
+                 )
+            )
+          )
+       ON CONFLICT (org_id, connection_id, resource_key) DO UPDATE SET
+         customer_id = excluded.customer_id,
+         lifecycle_state = 'active',
+         consecutive_complete_misses = 0,
+         last_observed_resource_id = excluded.last_observed_resource_id,
+         last_observed_snapshot_id = excluded.last_observed_snapshot_id,
+         first_missing_snapshot_id = NULL,
+         state_changed_snapshot_id = excluded.state_changed_snapshot_id,
+         last_complete_run_id = excluded.last_complete_run_id,
+         last_complete_run_created_at = excluded.last_complete_run_created_at,
+         retirement_pending_at = NULL,
+         retired_at = NULL,
+         updated_at = excluded.updated_at
+       WHERE (
+         cmdb_resource_projection_states.last_complete_run_created_at <
+           excluded.last_complete_run_created_at OR
+         (
+           cmdb_resource_projection_states.last_complete_run_created_at =
+             excluded.last_complete_run_created_at AND
+           cmdb_resource_projection_states.last_complete_run_id <
+             excluded.last_complete_run_id
+         )
+       )`,
+    ).bind(
+      runId,
+      scopedRun.created_at,
+      now,
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      snapshotId,
+      payload.connectionId,
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      orgId,
+      connection.customerId,
+      scopedRun.created_at,
+      scopedRun.created_at,
+      runId,
+    ));
     publicationStatements.push(db.prepare(
       `INSERT INTO connection_heads (connection_id, org_id, customer_id, snapshot_id, updated_at)
        SELECT ?, ?, ?, ?, ?
@@ -1698,8 +2118,82 @@ export async function persistSnapshot(
           AND r.connection_id = ? AND r.status = 'running')
        ON CONFLICT(connection_id) DO UPDATE SET snapshot_id = excluded.snapshot_id,
          customer_id = excluded.customer_id, updated_at = excluded.updated_at
-       WHERE connection_heads.org_id = excluded.org_id`,
-    ).bind(payload.connectionId, orgId, connection.customerId, snapshotId, now, runId, orgId, payload.connectionId));
+       WHERE connection_heads.org_id = excluded.org_id
+         AND connection_heads.customer_id = excluded.customer_id
+         AND EXISTS (
+           SELECT 1
+             FROM cmdb_snapshots current_snapshot
+             JOIN sync_runs current_run
+               ON current_run.id = current_snapshot.sync_run_id
+              AND current_run.org_id = current_snapshot.org_id
+              AND current_run.customer_id = current_snapshot.customer_id
+              AND current_run.connection_id = current_snapshot.connection_id
+            WHERE current_snapshot.id = connection_heads.snapshot_id
+              AND current_snapshot.org_id = connection_heads.org_id
+              AND current_snapshot.customer_id = connection_heads.customer_id
+              AND current_snapshot.connection_id = connection_heads.connection_id
+              AND (
+                current_run.created_at < CAST(? AS BIGINT) OR
+                (current_run.created_at = CAST(? AS BIGINT) AND current_run.id < ?)
+              )
+         )`,
+    ).bind(
+      payload.connectionId,
+      orgId,
+      connection.customerId,
+      snapshotId,
+      now,
+      runId,
+      orgId,
+      payload.connectionId,
+      scopedRun.created_at,
+      scopedRun.created_at,
+      runId,
+    ));
+    publicationStatements.splice(publicationStatements.length - 1, 0, db.prepare(
+      `UPDATE cmdb_change_events
+          SET projection_applied = 1
+        WHERE org_id = ? AND customer_id = ? AND connection_id = ?
+          AND to_snapshot_id = ? AND projection_applied = 0
+          AND (
+            NOT EXISTS (
+              SELECT 1 FROM connection_heads h
+               WHERE h.connection_id = ? AND h.org_id = ? AND h.customer_id = ?
+            ) OR EXISTS (
+              SELECT 1
+                FROM connection_heads h
+                JOIN cmdb_snapshots current_snapshot
+                  ON current_snapshot.id = h.snapshot_id
+                 AND current_snapshot.org_id = h.org_id
+                 AND current_snapshot.customer_id = h.customer_id
+                 AND current_snapshot.connection_id = h.connection_id
+                JOIN sync_runs current_run
+                  ON current_run.id = current_snapshot.sync_run_id
+                 AND current_run.org_id = current_snapshot.org_id
+                 AND current_run.customer_id = current_snapshot.customer_id
+                 AND current_run.connection_id = current_snapshot.connection_id
+               WHERE h.connection_id = ? AND h.org_id = ? AND h.customer_id = ?
+                 AND (
+                   current_run.created_at < CAST(? AS BIGINT) OR
+                   (current_run.created_at = CAST(? AS BIGINT) AND current_run.id < ?)
+                 )
+            )
+          )`,
+    ).bind(
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      snapshotId,
+      payload.connectionId,
+      orgId,
+      connection.customerId,
+      payload.connectionId,
+      orgId,
+      connection.customerId,
+      scopedRun.created_at,
+      scopedRun.created_at,
+      runId,
+    ));
   }
   if (localFixtureJobId !== null && origin.kind === "simulated_fixture") {
     publicationStatements.push(db.prepare(
@@ -1815,6 +2309,8 @@ export async function persistSnapshot(
         findings: payload.findings.length,
         snapshotSha256: payload.snapshotSha256,
         originKind: origin.kind,
+        evidenceObjectId: evidenceObject?.id ?? "",
+        evidenceContentSha256: evidenceObject?.contentSha256 ?? "",
       },
     };
   publicationStatements.push(await prepareAuditEventStatement(db, resolveAuditInput(publicationAudit)));
@@ -1843,6 +2339,7 @@ export async function getChangeHistory(scope: ChangeHistoryScope): Promise<reado
         AND s.org_id = e.org_id AND s.customer_id = e.customer_id
         AND s.connection_id = e.connection_id AND s.status = 'complete'
       WHERE e.org_id = ? AND e.customer_id = ? AND e.connection_id = ?
+        AND e.projection_applied = 1
       ORDER BY e.occurred_at DESC, e.id DESC
       LIMIT ?`,
   ).bind(scope.orgId, scope.customerId, scope.connectionId, limit).all<ChangeEventRow>();
@@ -1957,11 +2454,59 @@ export async function getPilotStateForOrg(
     db.prepare(
       `SELECT resource_key, service, resource_type, native_id, arn, name,
               region_key, state, tags_json, configuration_json, source_json,
-              content_sha256
-         FROM cmdb_resources
-        WHERE org_id = ? AND connection_id = ? AND snapshot_id = ?
+              content_sha256, lifecycle_state, consecutive_complete_misses,
+              evidence_snapshot_id, evidence_snapshot_sha256
+         FROM (
+           SELECT r.resource_key, r.service, r.resource_type, r.native_id,
+                  r.arn, r.name, r.region_key, r.state, r.tags_json,
+                  r.configuration_json, r.source_json, r.content_sha256,
+                  p.lifecycle_state, p.consecutive_complete_misses,
+                  s.id AS evidence_snapshot_id,
+                  s.snapshot_sha256 AS evidence_snapshot_sha256
+             FROM cmdb_resource_projection_states p
+             JOIN cmdb_resources r
+               ON r.id = p.last_observed_resource_id
+              AND r.org_id = p.org_id AND r.customer_id = p.customer_id
+              AND r.connection_id = p.connection_id
+              AND r.snapshot_id = p.last_observed_snapshot_id
+              AND r.resource_key = p.resource_key
+             JOIN cmdb_snapshots s
+               ON s.id = p.last_observed_snapshot_id
+              AND s.org_id = p.org_id AND s.customer_id = p.customer_id
+              AND s.connection_id = p.connection_id AND s.status = 'complete'
+            WHERE p.org_id = ? AND p.customer_id = ? AND p.connection_id = ?
+              AND p.lifecycle_state <> 'retired'
+           UNION ALL
+           SELECT r.resource_key, r.service, r.resource_type, r.native_id,
+                  r.arn, r.name, r.region_key, r.state, r.tags_json,
+                  r.configuration_json, r.source_json, r.content_sha256,
+                  'active' AS lifecycle_state, 0 AS consecutive_complete_misses,
+                  s.id AS evidence_snapshot_id,
+                  s.snapshot_sha256 AS evidence_snapshot_sha256
+             FROM cmdb_resources r
+             JOIN cmdb_snapshots s
+               ON s.id = r.snapshot_id AND s.org_id = r.org_id
+              AND s.customer_id = r.customer_id
+              AND s.connection_id = r.connection_id AND s.status = 'complete'
+            WHERE r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
+              AND r.snapshot_id = ?
+              AND NOT EXISTS (
+                SELECT 1 FROM cmdb_resource_projection_states p
+                 WHERE p.org_id = r.org_id AND p.customer_id = r.customer_id
+                   AND p.connection_id = r.connection_id
+                   AND p.resource_key = r.resource_key
+              )
+         ) projected_resources
         ORDER BY service, resource_type, region_key, name, native_id`,
-    ).bind(orgId, connection.id, head.id).all<ResourceRow>(),
+    ).bind(
+      orgId,
+      connection.customerId,
+      connection.id,
+      orgId,
+      connection.customerId,
+      connection.id,
+      head.id,
+    ).all<ResourceRow>(),
     db.prepare(
       `SELECT from_resource_key, to_resource_key, relation_type, evidence_json
          FROM cmdb_relationships
@@ -2000,6 +2545,12 @@ export async function getPilotStateForOrg(
       collectedAt: new Date(head.collected_at).toISOString(),
     }),
     contentSha256: row.content_sha256,
+    lifecycleState: row.lifecycle_state ?? "active",
+    consecutiveCompleteMisses: Number(row.consecutive_complete_misses ?? 0),
+    evidenceSnapshot: {
+      id: row.evidence_snapshot_id ?? head.id,
+      snapshotSha256: row.evidence_snapshot_sha256 ?? head.snapshot_sha256,
+    },
   }));
   const relationships: PilotRelationship[] = (relationshipResult.results ?? []).map((row) => ({
     fromResourceKey: row.from_resource_key,
@@ -2151,6 +2702,64 @@ interface ResolvedAuditInput extends Omit<AuditInput, "orgId"> {
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function liveAccountOwnershipExists(
+  db: D1Database,
+  partition: AwsPartition,
+  accountId: string,
+): Promise<boolean> {
+  return await db.prepare(
+    `SELECT 1 FROM aws_connections
+      WHERE source_kind = 'aws_trust_role' AND partition = ? AND aws_account_id = ?
+      LIMIT 1`,
+  ).bind(partition, accountId).first() !== null;
+}
+
+async function liveRoleOwnershipExists(
+  db: D1Database,
+  roleArn: string,
+  exceptConnectionId: string,
+): Promise<boolean> {
+  return await db.prepare(
+    `SELECT 1 FROM aws_connections
+      WHERE source_kind = 'aws_trust_role' AND role_arn = ? AND id <> ?
+      LIMIT 1`,
+  ).bind(roleArn, exceptConnectionId).first() !== null;
+}
+
+/**
+ * A collision is intentionally recorded only in the requesting tenant's
+ * tamper-evident audit chain. The signal contains neither the submitted
+ * account/role nor any identifier for the connection that already owns it.
+ */
+async function recordAwsOwnershipCollision(input: {
+  readonly db: D1Database;
+  readonly orgId: string;
+  readonly actorId: string;
+  readonly connectionId: string;
+  readonly customerId: string | null;
+  readonly partition: AwsPartition;
+  readonly collisionKind: "account" | "role";
+  readonly requestId: string;
+}): Promise<void> {
+  await appendAuditEventWithRetry(resolveAuditInput({
+    orgId: input.orgId,
+    actorId: input.actorId,
+    action: "security.aws_connection_ownership_collision",
+    targetType: "aws_connection",
+    targetId: input.connectionId,
+    customerId: input.customerId,
+    outcome: "denied",
+    requestId: input.requestId,
+    metadata: {
+      collisionKind: input.collisionKind,
+      partition: input.partition,
+      ownerDisclosure: false,
+      automaticTransfer: false,
+      transferRequiresExplicitAudit: true,
+    },
+  }));
 }
 
 function resolveAuditInput(input: AuditInput): ResolvedAuditInput {
@@ -2327,11 +2936,13 @@ async function prepareAuditEventStatement(
   const requestId = input.requestId;
   const metadataJson = input.metadataJson;
   const previousHash = previous?.event_hash ?? null;
-  const eventHash = await sha256Hex(JSON.stringify({
+  const hashVersion = 2 as const;
+  const eventHash = await computeAuditEventHash({
     eventId,
     orgId: input.orgId,
     customerId: input.customerId,
     occurredAt,
+    actorType: input.actorType,
     actorId: input.actorId,
     action: input.action,
     targetType: input.targetType,
@@ -2339,8 +2950,9 @@ async function prepareAuditEventStatement(
     outcome: input.outcome,
     requestId,
     metadataJson,
-    previousHash,
-  }));
+    previousEventHash: previousHash,
+    hashVersion,
+  });
   const mutationGuardCte = mutationGuard === undefined
     ? `, mutation_guard(valid) AS (SELECT 1)`
     : `, mutation_guard(valid) AS (
@@ -2348,8 +2960,9 @@ async function prepareAuditEventStatement(
      )`;
   const invalidGuard = failClosed
     ? `UNION ALL
-     SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-            NULL, NULL, NULL, NULL, NULL, NULL, NULL
+     SELECT NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, CAST(NULL AS SMALLINT)
        FROM chain_guard, mutation_guard
       WHERE chain_guard.valid = 0 OR mutation_guard.valid = 0`
     : "";
@@ -2367,8 +2980,8 @@ async function prepareAuditEventStatement(
      INSERT INTO audit_events
       (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
        target_type, target_id, outcome, request_id, metadata_json,
-       previous_event_hash, event_hash)
-     SELECT ?, ?, ?, CAST(? AS BIGINT), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       previous_event_hash, event_hash, hash_version)
+     SELECT ?, ?, ?, CAST(? AS BIGINT), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        FROM chain_guard, mutation_guard
       WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
      ${invalidGuard}`,
@@ -2392,5 +3005,6 @@ async function prepareAuditEventStatement(
     metadataJson,
     previousHash,
     eventHash,
+    hashVersion,
   );
 }

@@ -6,11 +6,10 @@ import { useCallback, useEffect, useState } from "react";
  * Agentless snapshot scanning.
  *
  * The single most important thing this panel does is refuse to imply a clean
- * bill of health. Agentless scanning can PLAN today but cannot execute — no
- * scanner container exists yet — so an empty findings table means "nothing has
- * looked", not "nothing is wrong". Those two readings are visually identical
- * unless the UI says which, so the readiness banner is not dismissible and the
- * empty state names the reason.
+ * bill of health. Execution is offered only when the server reports its exact
+ * production configuration and operator attestation; an empty findings table
+ * still means "nothing has looked" until a run reaches a persisted terminal
+ * result.
  *
  * The second thing it does is show outstanding snapshots as cost. Sutra creates
  * them and holds an explicit IAM deny on deleting them, so cleanup belongs to
@@ -49,7 +48,7 @@ interface ScanRun {
 
 interface Outstanding {
   readonly id: string;
-  readonly resourceKind: "snapshot" | "volume";
+  readonly resourceKind: "snapshot" | "volume" | "instance";
   readonly resourceId: string;
   readonly region: string;
   readonly accountScope: string;
@@ -127,6 +126,29 @@ export function AgentlessScansPanel(): React.JSX.Element {
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    const connectionId = data?.connectionId ?? null;
+    const running = data?.runs.filter((run) => run.status === "running") ?? [];
+    if (connectionId === null || running.length === 0) return;
+    let cancelled = false;
+    const reconcile = async (): Promise<void> => {
+      await Promise.all(running.map(async (run) => {
+        await fetch(`/api/v1/agentless-scans/${encodeURIComponent(run.id)}/reconcile`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ connectionId }),
+        });
+      }));
+      if (!cancelled) await load();
+    };
+    const timer = window.setInterval(() => { void reconcile(); }, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [data, load]);
+
   const readiness = data?.readiness;
   const outstanding = data?.outstanding ?? [];
 
@@ -159,6 +181,7 @@ export function AgentlessScansPanel(): React.JSX.Element {
       };
       if (payload.applied === true) {
         setApplyOutcome("Scan applied.");
+        await load();
         return;
       }
       setApplyOutcome([
@@ -273,7 +296,11 @@ export function AgentlessScansPanel(): React.JSX.Element {
                     <td>
                       {run.status === "planned" ? (
                         <button className="button button-secondary" type="button"
-                          disabled={applying !== null || data.connectionId === null}
+                          disabled={
+                            applying !== null ||
+                            data.connectionId === null ||
+                            readiness?.canExecute !== true
+                          }
                           onClick={() => { void apply(run.id, data.connectionId); }}>
                           {applying === run.id ? "Applying…" : "Apply"}
                         </button>
@@ -290,17 +317,17 @@ export function AgentlessScansPanel(): React.JSX.Element {
       {/* Cost, not a footnote. */}
       <article className="panel">
         <h2>
-          Snapshots awaiting cleanup{" "}
+          Scan resources awaiting cleanup{" "}
           {outstanding.length > 0 ? <span className="count">{outstanding.length}</span> : null}
         </h2>
         {outstanding.length === 0 ? (
-          <p className="muted">Nothing outstanding. No scan-created snapshot is currently billing.</p>
+          <p className="muted">Nothing outstanding. No scan-created resource is currently billing.</p>
         ) : (
           <>
             <p>
-              These exist because Sutra created them and <strong>cannot delete them</strong> — it holds
-              an explicit IAM deny. Your own Data Lifecycle Manager policy reaps them. Until it does,
-              each one incurs EBS snapshot storage cost.
+              Customer snapshots are reaped by your Data Lifecycle Manager policy because Sutra has
+              an explicit delete deny. Any Sutra-account instance, volume, or snapshot shown here is
+              retained as teardown debt until recovery proves it gone.
             </p>
             <div className="table-scroll">
               <table>

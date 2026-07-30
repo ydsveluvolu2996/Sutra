@@ -150,13 +150,7 @@ jobs:
         with:
           version: v0.72.0
 
-      - name: Gate fixable dependency vulnerabilities
-        run: trivy fs --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 .
-
-      - name: Gate Kubernetes and infrastructure misconfigurations
-        run: trivy config --quiet --severity HIGH,CRITICAL --exit-code 1 --ignorefile .trivyignore.yaml .
-
-      - name: Run the combined repository security gate
+      - name: Run the fail-closed repository security gate
         run: node scripts/pipeline-scan.mjs --fail-on high
 
       - name: Typecheck
@@ -215,7 +209,10 @@ jobs:
         run: python -m pip install --disable-pip-version-check cfn-lint==1.46.0
 
       - name: Validate CloudFormation templates
-        run: cfn-lint infrastructure/local-collector-role.yaml infrastructure/customer-onboarding-role.yaml infrastructure/hosted-identity.yaml infrastructure/github-ec2-release-role.yaml public/sutra-customer-onboarding-role.yaml
+        run: pnpm lint:cloudformation
+
+      - name: Validate managed-production infrastructure and release contract
+        run: bash deploy/production/validate-ha.sh
 
       - name: Test PostgreSQL adapter and repositories
         run: pnpm db:postgres:test

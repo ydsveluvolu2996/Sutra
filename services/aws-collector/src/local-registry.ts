@@ -25,6 +25,7 @@ import type {
 import {
   CURRENT_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
+  OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
   PRIOR_PERMISSION_PACK_VERSION,
 } from "./types.js";
@@ -525,7 +526,7 @@ function decodeAes256Key(value: string): Buffer {
   return decoded;
 }
 
-function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsConnection {
+export function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsConnection {
   if (!IDENTIFIER.test(input.tenantId) || !IDENTIFIER.test(input.connectionId)) {
     throw new RegistryIntegrityError();
   }
@@ -669,7 +670,7 @@ function parseTombstone(value: unknown): RegistryTombstone {
   };
 }
 
-function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
+export function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
   const legacyKeys = [
     "tenantId",
     "connectionId",
@@ -746,6 +747,7 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   const permissionPackVersion = record.permissionPackVersion ?? LEGACY_PERMISSION_PACK_VERSION;
   if (
     permissionPackVersion !== LEGACY_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== OLDER_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PRIOR_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION

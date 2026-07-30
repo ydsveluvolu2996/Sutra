@@ -1,11 +1,15 @@
+import { listComplianceExceptions } from "../../../../../db/compliance-exception-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
+import { getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { ComplianceWorkspaceRepository } from "../../../../../db/compliance-workspace-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { buildComplianceReport } from "../../../../../lib/compliance-report";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
+const SHA256_HEX = /^[a-f0-9]{64}$/u;
 
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -40,7 +44,7 @@ export async function POST(request: Request): Promise<Response> {
     };
     if (
       typeof connectionId !== "string" || !CONNECTION_ID.test(connectionId) ||
-      typeof reportSha256 !== "string" ||
+      typeof reportSha256 !== "string" || !SHA256_HEX.test(reportSha256) ||
       (decision !== "approved" && decision !== "needs-work") ||
       (note !== undefined && note !== null && typeof note !== "string")
     ) {
@@ -52,6 +56,21 @@ export async function POST(request: Request): Promise<Response> {
     const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "connection:manage", connection.customerId);
+    const [state, exceptions] = await Promise.all([
+      getPilotStateForOrg(authenticated.subject.orgId, connectionId),
+      listComplianceExceptions({
+        orgId: authenticated.subject.orgId,
+        customerId: connection.customerId,
+        connectionId,
+      }),
+    ]);
+    const currentReport = await buildComplianceReport(state, exceptions);
+    if (reportSha256 !== currentReport.reportSha256) {
+      throw Object.assign(
+        new Error("The compliance report changed; refresh it before recording a sign-off"),
+        { code: "INVALID_INPUT" },
+      );
+    }
     const repository = new ComplianceWorkspaceRepository();
     const signoff = await repository.recordSignoff(
       { orgId: authenticated.subject.orgId, customerId: connection.customerId },

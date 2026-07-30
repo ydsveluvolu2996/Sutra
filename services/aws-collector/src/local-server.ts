@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,6 +21,7 @@ import {
   RegistryStateError,
   type LocalAwsPartition,
   type RegisteredAwsConnection,
+  type RegisterAwsConnectionInput,
 } from "./local-registry.js";
 import {
   DurableLocalScheduler,
@@ -50,16 +51,21 @@ import {
 } from "./local-job-state.js";
 import {
   executeAgentlessScan,
+  type AgentlessScanExecution,
   type AgentlessScanPlan as AgentlessExecutePlan,
 } from "./scan-runner.js";
 
 import {
   createAgentlessExecutor,
+  sweepHostedAgentlessTeardownDebt,
   type AgentlessExecutionSettings,
+  type HostedAgentlessTeardownResource,
+  type AgentlessResourceTracker,
 } from "./agentless-execution.js";
 import {
   AgentlessRunAlreadyRunningError,
   AgentlessRunRegistry,
+  type AgentlessRunStore,
 } from "./agentless-run-registry.js";
 import {
   createWorkloadIdentityRoleBroker,
@@ -71,6 +77,8 @@ import {
   RequestAuthenticationError,
   RequestAuthenticator,
 } from "./request-auth.js";
+import { HostedRequestAuthenticationError } from "./hosted-request-auth.js";
+import { LIVE_AWS_BROKER_TIMEOUT_MS } from "./live-collection-limits.js";
 import {
   CollectorError,
   CURRENT_PERMISSION_PACK_VERSION,
@@ -80,6 +88,8 @@ import {
   type NormalizedAwsEvidence,
   type NormalizedAwsResource,
   type OnboardingTrustVerification,
+  type ConnectionScope,
+  type ScopedConnectionRegistry,
   type SafeJsonObject,
   type SafeJsonValue,
 } from "./types.js";
@@ -126,9 +136,9 @@ const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
 
 export interface LocalCollectorServerOptions {
-  readonly sharedSecret: string;
-  readonly registryEncryptionKey: string;
-  readonly registryPath: string;
+  readonly sharedSecret?: string;
+  readonly registryEncryptionKey?: string;
+  readonly registryPath?: string;
   readonly mode?: "fixture" | "live";
   readonly allowLiveAws?: boolean;
   readonly principalArn?: string;
@@ -143,6 +153,100 @@ export interface LocalCollectorServerOptions {
   readonly localJobMaxBackoffMs?: number;
   readonly localScheduleMaxCatchUpPerTick?: number;
   readonly localFixtureJobExecutor?: LocalFixtureJobExecutor;
+  /** Hosted-only dependency injection. Local callers leave these unset. */
+  readonly registry?: CollectorConnectionRegistry;
+  readonly authenticator?: CollectorRequestAuthenticator;
+  readonly operationCoordinator?: CollectorOperationCoordinator;
+  readonly hostedRuntime?: boolean;
+  readonly readiness?: () => Promise<boolean>;
+  readonly agentlessRunStore?: AgentlessRunStore;
+  readonly agentlessResourceTracker?: (input: {
+    readonly tenantId: string;
+    readonly runId: string;
+    readonly connectionId: string;
+  }) => AgentlessResourceTracker;
+  readonly agentlessExecutionFinalizer?: (
+    tenantId: string,
+    runId: string,
+    execution: AgentlessScanExecution,
+  ) => Promise<AgentlessScanExecution>;
+  /** Hosted broker independently pins every spend-capable setting. */
+  readonly hostedAgentlessSettings?: AgentlessExecutionSettings;
+  /**
+   * Non-secret subset used while execution approval is still fail-closed.
+   * Planning must bind the eventual scan account/KMS behavior without granting
+   * the public control plane any AWS credential or execution capability.
+   */
+  readonly hostedAgentlessPlanProfile?: {
+    readonly scanAccountId: string;
+    readonly kmsReencrypt: boolean;
+  };
+  /** Full broker-private settings used only to reconcile already-owned debt. */
+  readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
+  readonly agentlessCleanupLedger?: {
+    authorize(
+      tenantId: string,
+      resources: readonly HostedAgentlessTeardownResource[],
+    ): Promise<void>;
+    record(input: {
+      readonly tenantId: string;
+      readonly resource: HostedAgentlessTeardownResource;
+      readonly settled: boolean;
+      readonly detail: string;
+    }): Promise<void>;
+  };
+}
+
+export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
+  getRegistered(scope: ConnectionScope, connectionId: string): Promise<RegisteredAwsConnection | null>;
+  upsert(input: RegisterAwsConnectionInput): Promise<void>;
+  disable(scope: ConnectionScope, connectionId: string): Promise<void>;
+  offboard(scope: ConnectionScope, connectionId: string): Promise<void>;
+  activateOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
+  discardStagedOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
+}
+
+export interface CollectorRequestAuthenticator {
+  verify(input: {
+    readonly method: string;
+    readonly path: string;
+    readonly headers: IncomingMessage["headers"];
+    readonly body: string;
+  }): { readonly nonce: string; readonly timestamp: number } | Promise<{ readonly nonce: string; readonly timestamp: number }>;
+  responseSignature(
+    status: number,
+    path: string,
+    nonce: string,
+    body: string,
+  ): string | { readonly keyId: string; readonly signature: string } |
+    Promise<string | { readonly keyId: string; readonly signature: string }>;
+}
+
+export interface CollectorOperationLease {
+  readonly operationKey: string;
+  readonly leaseToken: string;
+}
+
+export interface CollectorOperationCoordinator {
+  claim(operationKey: string): Promise<CollectorOperationLease | null>;
+  release(lease: CollectorOperationLease): Promise<void>;
+}
+
+export class InMemoryCollectorOperationCoordinator implements CollectorOperationCoordinator {
+  private readonly leases = new Map<string, string>();
+
+  public async claim(operationKey: string): Promise<CollectorOperationLease | null> {
+    if (this.leases.has(operationKey)) return null;
+    const leaseToken = randomUUID();
+    this.leases.set(operationKey, leaseToken);
+    return { operationKey, leaseToken };
+  }
+
+  public async release(lease: CollectorOperationLease): Promise<void> {
+    if (this.leases.get(lease.operationKey) === lease.leaseToken) {
+      this.leases.delete(lease.operationKey);
+    }
+  }
 }
 
 interface ServerContext {
@@ -150,13 +254,19 @@ interface ServerContext {
   readonly principalArn: string;
   readonly sourceAccountId: string;
   readonly now: () => Date;
-  readonly registry: EncryptedFileConnectionRegistry;
-  readonly authenticator: RequestAuthenticator;
-  readonly activeConnectionOperations: Set<string>;
-  readonly lifecycleMutations: Set<string>;
+  readonly registry: CollectorConnectionRegistry;
+  readonly authenticator: CollectorRequestAuthenticator;
+  readonly operationCoordinator: CollectorOperationCoordinator;
+  readonly hostedRuntime: boolean;
+  readonly readiness: () => Promise<boolean>;
   readonly localJobs: LocalJobsContext | null;
-  /** In-flight agentless scans. Memory-only; see agentless-run-registry.ts. */
-  readonly agentlessRuns: AgentlessRunRegistry;
+  readonly agentlessRuns: AgentlessRunStore;
+  readonly agentlessResourceTracker?: LocalCollectorServerOptions["agentlessResourceTracker"];
+  readonly agentlessExecutionFinalizer?: LocalCollectorServerOptions["agentlessExecutionFinalizer"];
+  readonly hostedAgentlessSettings?: AgentlessExecutionSettings;
+  readonly hostedAgentlessPlanProfile?: LocalCollectorServerOptions["hostedAgentlessPlanProfile"];
+  readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
+  readonly agentlessCleanupLedger?: LocalCollectorServerOptions["agentlessCleanupLedger"];
 }
 
 interface LocalJobsContext {
@@ -232,25 +342,56 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     principalArn,
     sourceAccountId: parsedPrincipal.accountId,
     now,
-    registry: new EncryptedFileConnectionRegistry({
-      filePath: options.registryPath,
-      encryptionKey: options.registryEncryptionKey,
+    registry: options.registry ?? new EncryptedFileConnectionRegistry({
+      filePath: options.registryPath ?? (() => { throw new Error("registryPath is required"); })(),
+      encryptionKey: options.registryEncryptionKey ?? (() => { throw new Error("registryEncryptionKey is required"); })(),
       ...(options.now === undefined ? {} : { now: options.now }),
     }),
-    authenticator: new RequestAuthenticator({
-      sharedSecret: options.sharedSecret,
+    authenticator: options.authenticator ?? new RequestAuthenticator({
+      sharedSecret: options.sharedSecret ?? (() => { throw new Error("sharedSecret is required"); })(),
       ...(options.now === undefined ? {} : { now: () => options.now!().getTime() }),
     }),
-    activeConnectionOperations: new Set(),
-    lifecycleMutations: new Set(),
+    operationCoordinator: options.operationCoordinator ?? new InMemoryCollectorOperationCoordinator(),
+    hostedRuntime: options.hostedRuntime ?? false,
+    readiness: options.readiness ?? (async () => true),
     localJobs,
-    agentlessRuns: new AgentlessRunRegistry(options.now ?? (() => new Date())),
+    agentlessRuns: options.agentlessRunStore ??
+      new AgentlessRunRegistry(options.now ?? (() => new Date())),
+    ...(options.agentlessResourceTracker === undefined
+      ? {}
+      : { agentlessResourceTracker: options.agentlessResourceTracker }),
+    ...(options.agentlessExecutionFinalizer === undefined
+      ? {}
+      : { agentlessExecutionFinalizer: options.agentlessExecutionFinalizer }),
+    ...(options.hostedAgentlessSettings === undefined
+      ? {}
+      : { hostedAgentlessSettings: options.hostedAgentlessSettings }),
+    ...(options.hostedAgentlessPlanProfile === undefined &&
+        options.hostedAgentlessSettings === undefined
+      ? {}
+      : {
+        hostedAgentlessPlanProfile: options.hostedAgentlessPlanProfile ?? {
+          scanAccountId: options.hostedAgentlessSettings!.scanAccountId,
+          kmsReencrypt: options.hostedAgentlessSettings!.kmsKeyArn !== null,
+        },
+      }),
+    ...(options.hostedAgentlessCleanupSettings === undefined
+      ? {}
+      : { hostedAgentlessCleanupSettings: options.hostedAgentlessCleanupSettings }),
+    ...(options.agentlessCleanupLedger === undefined
+      ? {}
+      : { agentlessCleanupLedger: options.agentlessCleanupLedger }),
   };
 
   const server = createServer((request, response) => {
     void dispatch(context, request, response);
   });
-  server.requestTimeout = 190_000;
+  // Hosted inventory is bounded at five minutes and the app waits 330 seconds.
+  // Keep the broker request lifetime beyond that bound; the old 190-second
+  // local-fixture ceiling otherwise killed a healthy collection mid-flight.
+  server.requestTimeout = options.hostedRuntime
+    ? LIVE_AWS_BROKER_TIMEOUT_MS + 10_000
+    : 190_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
@@ -471,17 +612,29 @@ async function dispatch(
   const nonce = responseNonce(request);
   try {
     const body = await readBody(request);
-    context.authenticator.verify({
+    if (context.hostedRuntime && request.method === "GET" && path === "/readyz") {
+      if (body.length !== 0) throw invalidRequest();
+      const ready = await context.readiness();
+      const payload = JSON.stringify({ ok: ready });
+      response.statusCode = ready ? 200 : 503;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.setHeader("cache-control", "no-store");
+      response.setHeader("x-content-type-options", "nosniff");
+      response.setHeader("content-length", Buffer.byteLength(payload, "utf8"));
+      response.end(payload);
+      return;
+    }
+    await context.authenticator.verify({
       method: request.method ?? "",
       path,
       headers: request.headers,
       body,
     });
     const result = await route(context, request.method ?? "", path, body);
-    sendSigned(context, response, result.status, path, nonce, result.body);
+    await sendSigned(context, response, result.status, path, nonce, result.body);
   } catch (error: unknown) {
     const safe = safeHttpError(error);
-    sendSigned(context, response, safe.status, path, nonce, {
+    await sendSigned(context, response, safe.status, path, nonce, {
       code: safe.code,
       message: safe.message,
     });
@@ -491,23 +644,21 @@ async function dispatch(
 /** POST to start, GET to poll. A run id is opaque and never a capability. */
 const AGENTLESS_RUN_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})$/u;
 const AGENTLESS_EXECUTE_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})\/execute$/u;
+const AGENTLESS_TEARDOWN_SWEEP_PATH = "/v1/agentless/teardown-sweep";
 
 /**
  * Parses an agentless execute request. Every field is required and validated: this is
  * the request that spends money, so a malformed one is refused before a claim is made
  * rather than discovered after a snapshot exists.
  *
- * The SETTINGS come from the Worker, which resolves them through
- * resolveAgentlessExecutorConfig — the single place that owns the no-defaults contract
- * and the operator-facing list of unset names. They are re-validated for SHAPE here
- * because this process is the one that would act on them.
+ * The web app sends only tenant scope and the approved plan. Scan-account,
+ * network, KMS, image, role, and instance settings never leave the broker's
+ * pinned process configuration.
  */
 function parseAgentlessExecuteRequest(body: string): {
   readonly tenantId: string;
   readonly connectionId: string;
-  readonly region: string;
-  readonly plan: AgentlessExecutePlan;
-  readonly settings: AgentlessExecutionSettings;
+  readonly plan: AgentlessExecutePlan & { readonly scanAccountId: string };
 } {
   let parsed: unknown;
   try {
@@ -517,68 +668,118 @@ function parseAgentlessExecuteRequest(body: string): {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalidRequest();
   const record = parsed as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    !Object.hasOwn(record, "tenantId") ||
+    !Object.hasOwn(record, "connectionId") ||
+    !Object.hasOwn(record, "plan")
+  ) throw invalidRequest();
 
   const tenantId = record.tenantId;
   const connectionId = record.connectionId;
-  const region = record.region;
   if (
     typeof tenantId !== "string" || tenantId.length === 0 || tenantId.length > 128 ||
-    typeof connectionId !== "string" || connectionId.length === 0 || connectionId.length > 128 ||
-    typeof region !== "string" || !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(region)
+    typeof connectionId !== "string" || connectionId.length === 0 || connectionId.length > 128
   ) throw invalidRequest();
 
   const plan = record.plan;
   if (typeof plan !== "object" || plan === null || Array.isArray(plan)) throw invalidRequest();
   const planRecord = plan as Record<string, unknown>;
   if (
+    planRecord.schema !== "sutra.aws-agentless-scan-plan.v1" ||
+    planRecord.mode !== "plan" ||
     !Array.isArray(planRecord.volumes) ||
+    planRecord.volumes.length === 0 ||
+    planRecord.volumes.length > 1_000 ||
     !Array.isArray(planRecord.scanners) ||
+    planRecord.scanners.length === 0 ||
+    planRecord.scanners.length > 4 ||
+    planRecord.scanners.some((scanner) =>
+      scanner !== "vuln" && scanner !== "secret" && scanner !== "sbom" && scanner !== "malware") ||
+    new Set(planRecord.scanners).size !== planRecord.scanners.length ||
+    typeof planRecord.scanAccountId !== "string" ||
+    !/^\d{12}$/u.test(planRecord.scanAccountId) ||
     typeof planRecord.kmsReencrypt !== "boolean" ||
     typeof planRecord.summary !== "object" || planRecord.summary === null
   ) throw invalidRequest();
-  // An empty scanner list would run a scan that cannot find anything and then report
-  // an empty result, which is indistinguishable from a clean disk.
-  if (planRecord.scanners.length === 0) throw invalidRequest();
-
-  const settings = record.settings;
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) throw invalidRequest();
-  const settingsRecord = settings as Record<string, unknown>;
-  const instance = settingsRecord.instance;
-  if (typeof instance !== "object" || instance === null || Array.isArray(instance)) throw invalidRequest();
-  const instanceRecord = instance as Record<string, unknown>;
-  const requiredStrings: readonly [unknown, RegExp][] = [
-    [settingsRecord.scanAccountId, /^\d{12}$/u],
-    [settingsRecord.scanAvailabilityZone, /^[a-z]{2}(-gov)?-[a-z]+-\d[a-z]$/u],
-    [settingsRecord.scannerImage, /^[a-z0-9.\-_/:]+@sha256:[0-9a-f]{64}$/u],
-    [settingsRecord.orchestratorRoleArn, /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/u],
-    [instanceRecord.amiId, /^ami-[0-9a-f]{8,17}$/u],
-    [instanceRecord.instanceType, /^[a-z0-9]+\.[a-z0-9]+$/u],
-    [instanceRecord.subnetId, /^subnet-[0-9a-f]{8,17}$/u],
-    [instanceRecord.securityGroupId, /^sg-[0-9a-f]{8,17}$/u],
-    [instanceRecord.instanceProfileArn, /^arn:aws:iam::\d{12}:instance-profile\/[A-Za-z0-9+=,.@_/-]+$/u],
-    [instanceRecord.findingsBucket, /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u],
-  ];
-  for (const [value, pattern] of requiredStrings) {
-    if (typeof value !== "string" || !pattern.test(value)) throw invalidRequest();
+  const volumeKeys = new Set<string>();
+  for (const volume of planRecord.volumes) {
+    if (typeof volume !== "object" || volume === null || Array.isArray(volume)) throw invalidRequest();
+    const item = volume as Record<string, unknown>;
+    if (
+      typeof item.volumeId !== "string" || !/^vol-[0-9a-f]{8,32}$/u.test(item.volumeId) ||
+      volumeKeys.has(item.volumeId) ||
+      typeof item.region !== "string" || !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(item.region)
+    ) throw invalidRequest();
+    volumeKeys.add(item.volumeId);
   }
-  // Absent is legal and means the source volume is unencrypted; malformed is not.
-  const kmsKeyArn = settingsRecord.kmsKeyArn;
+  const summary = planRecord.summary as Record<string, unknown>;
   if (
-    kmsKeyArn !== null && kmsKeyArn !== undefined &&
-    (typeof kmsKeyArn !== "string" ||
-      !/^arn:aws(-us-gov|-cn)?:kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/u.test(kmsKeyArn))
+    !Number.isSafeInteger(summary.snapshotTtlHours) ||
+    (summary.snapshotTtlHours as number) < 1 ||
+    (summary.snapshotTtlHours as number) > 168
   ) throw invalidRequest();
-  // Only the exact boolean true. This records an operator attestation, so a near-miss
-  // must never be read as the claim.
-  if (settingsRecord.liveValidated !== true) throw invalidRequest();
 
   return {
     tenantId,
     connectionId,
-    region,
-    plan: plan as AgentlessExecutePlan,
-    settings: settings as unknown as AgentlessExecutionSettings,
+    plan: plan as AgentlessExecutePlan & { readonly scanAccountId: string },
   };
+}
+
+function parseAgentlessTeardownSweepRequest(body: string): {
+  readonly tenantId: string;
+  readonly operationId: string;
+  readonly resources: readonly HostedAgentlessTeardownResource[];
+} {
+  const record = exactJson(body, ["tenantId", "operationId", "resources"]);
+  if (
+    typeof record.tenantId !== "string" ||
+    record.tenantId.length === 0 ||
+    record.tenantId.length > 128 ||
+    typeof record.operationId !== "string" ||
+    !/^[A-Za-z0-9_-]{8,64}$/u.test(record.operationId) ||
+    !Array.isArray(record.resources) ||
+    record.resources.length === 0 ||
+    record.resources.length > 200
+  ) throw invalidRequest();
+  const seen = new Set<string>();
+  const resources = record.resources.map((value): HostedAgentlessTeardownResource => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalidRequest();
+    const item = value as Record<string, unknown>;
+    if (
+      Object.keys(item).sort().join(",") !==
+        "accountScope,connectionId,region,resourceId,resourceKind" ||
+      typeof item.connectionId !== "string" ||
+      item.connectionId.length === 0 ||
+      item.connectionId.length > 128 ||
+      (item.accountScope !== "customer" && item.accountScope !== "sutra-scan-account") ||
+      (item.resourceKind !== "snapshot" &&
+        item.resourceKind !== "volume" &&
+        item.resourceKind !== "instance") ||
+      typeof item.resourceId !== "string" ||
+      !/^(?:snap-|vol-|i-)[0-9a-f]{8,32}$/u.test(item.resourceId) ||
+      typeof item.region !== "string" ||
+      !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(item.region) ||
+      (item.accountScope === "customer" && item.resourceKind !== "snapshot") ||
+      seen.has(item.resourceId)
+    ) throw invalidRequest();
+    const prefix = item.resourceKind === "snapshot"
+      ? "snap-"
+      : item.resourceKind === "volume"
+        ? "vol-"
+        : "i-";
+    if (!item.resourceId.startsWith(prefix)) throw invalidRequest();
+    seen.add(item.resourceId);
+    return {
+      connectionId: item.connectionId,
+      resourceId: item.resourceId,
+      resourceKind: item.resourceKind,
+      accountScope: item.accountScope,
+      region: item.region,
+    };
+  });
+  return { tenantId: record.tenantId, operationId: record.operationId, resources };
 }
 
 /** Scope for a poll. Checked by the registry, so a foreign run reads as absent. */
@@ -602,27 +803,136 @@ async function route(
   path: string,
   body: string,
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "GET" && path === "/v1/agentless/readiness") {
+    requireEmptyBody(body);
+    const canExecute = context.hostedAgentlessSettings !== undefined;
+    const canPlan = context.hostedAgentlessPlanProfile !== undefined;
+    return {
+      status: 200,
+      body: {
+        schema: "sutra.aws-agentless-readiness.v1",
+        canExecute,
+        canPlan,
+        gaps: canExecute
+          ? []
+          : [{
+            id: "production-configuration",
+            summary:
+              "The hosted broker has not accepted a complete pinned scan configuration "
+              + "and exact live-validation operator attestation.",
+            owner: "operator",
+          }],
+        summary: canExecute
+          ? "The authenticated broker reports an executable, pinned agentless runtime."
+          : "Plans remain reviewable, but the broker refuses execution until its production configuration is complete.",
+      },
+    };
+  }
+
+  if (method === "GET" && path === "/v1/agentless/plan-profile") {
+    requireEmptyBody(body);
+    const profile = context.hostedAgentlessPlanProfile;
+    if (profile === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Agentless planning infrastructure is not pinned in this broker configuration",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        schema: "sutra.aws-agentless-plan-profile.v1",
+        scanAccountId: profile.scanAccountId,
+        kmsReencrypt: profile.kmsReencrypt,
+      },
+    };
+  }
+
+  if (method === "POST" && path === AGENTLESS_TEARDOWN_SWEEP_PATH) {
+    const settings = context.hostedAgentlessCleanupSettings;
+    const ledger = context.agentlessCleanupLedger;
+    if (settings === undefined || ledger === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Hosted agentless cleanup infrastructure is not pinned in this broker configuration",
+      );
+    }
+    const input = parseAgentlessTeardownSweepRequest(body);
+    // Authentication proves which app called; the durable resource ledger
+    // proves whether that app-supplied identifier is actually ours to delete.
+    await ledger.authorize(input.tenantId, input.resources);
+    const result = await sweepHostedAgentlessTeardownDebt({ ...input, settings }, {
+      registry: context.registry,
+      principalArn: context.principalArn,
+    });
+    for (const outcome of result.outcomes) {
+      const resource = input.resources.find(
+        (candidate) => candidate.resourceId === outcome.resourceId,
+      );
+      if (resource === undefined) throw new RegistryStateError();
+      await ledger.record({
+        tenantId: input.tenantId,
+        resource,
+        settled: outcome.disposition === "settled" || outcome.disposition === "deleted",
+        detail: outcome.detail,
+      });
+    }
+    return {
+      status: 200,
+      body: result,
+    };
+  }
+
   const agentlessExecuteMatch = AGENTLESS_EXECUTE_PATH.exec(requestPathname(path));
   if (method === "POST" && agentlessExecuteMatch !== null) {
+    if (context.hostedAgentlessSettings === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Hosted agentless execution is not approved in this broker configuration",
+      );
+    }
     const runId = agentlessExecuteMatch[1];
     if (runId === undefined) throw invalidRequest();
     const input = parseAgentlessExecuteRequest(body);
+    const settings = context.hostedAgentlessSettings;
+    const region = settings.scanAvailabilityZone.slice(0, -1);
+    if (
+      input.plan.scanAccountId !== settings.scanAccountId ||
+      input.plan.kmsReencrypt !== (settings.kmsKeyArn !== null)
+    ) {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "The approved plan no longer matches the broker's pinned scan profile",
+      );
+    }
+    const executionRequest = { ...input, region, settings };
 
     // Claimed BEFORE anything starts, so a retried POST cannot begin a second scan of
     // the same run — which would double the snapshots, the instances and the bill, and
     // let one teardown delete resources the other is still using.
     let claimed;
     try {
-      claimed = context.agentlessRuns.claim({
+      claimed = await context.agentlessRuns.claim({
         runId,
         tenantId: input.tenantId,
         connectionId: input.connectionId,
+        executionRequest,
       });
     } catch (error) {
       if (error instanceof AgentlessRunAlreadyRunningError) {
         return { status: 409, body: { code: "ALREADY_RUNNING", message: error.message } };
       }
       throw error;
+    }
+    if (claimed.phase !== "running") {
+      return {
+        status: 200,
+        body: { runId: claimed.runId, phase: claimed.phase, startedAt: claimed.startedAt },
+      };
     }
 
     // Built here so a misconfiguration — a denied assume, a malformed ARN — surfaces
@@ -635,16 +945,26 @@ async function route(
           tenantId: input.tenantId,
           connectionId: input.connectionId,
           runId,
-          region: input.region,
-          settings: input.settings,
+          region,
+          settings,
         },
-        { registry: context.registry, principalArn: context.principalArn },
+        {
+          registry: context.registry,
+          principalArn: context.principalArn,
+          ...(context.agentlessResourceTracker === undefined ? {} : {
+            resourceTracker: context.agentlessResourceTracker({
+              tenantId: input.tenantId,
+              runId,
+              connectionId: input.connectionId,
+            }),
+          }),
+        },
       );
     } catch (error) {
       const rawCode = (error as { code?: unknown }).code;
       const code = typeof rawCode === "string" ? rawCode : "EXECUTOR_UNAVAILABLE";
       const message = error instanceof Error ? error.message : "the executor could not be built";
-      context.agentlessRuns.fail(runId, { code, message });
+      await context.agentlessRuns.fail(runId, { code, message });
       return {
         status: 503,
         body: {
@@ -660,15 +980,21 @@ async function route(
     // Deliberately NOT awaited. A scan outlives the 190s requestTimeout, and timing out
     // mid-scan would leave a snapshot AND an instance billing with no caller left to
     // reap them. Every terminal state is recorded, so the poll route is the truth.
-    void executeAgentlessScan(input.plan, executor)
-      .then((execution) => context.agentlessRuns.complete(runId, execution))
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const rawExecution = await executeAgentlessScan(input.plan, executor);
+        const execution = context.agentlessExecutionFinalizer === undefined
+          ? rawExecution
+          : await context.agentlessExecutionFinalizer(input.tenantId, runId, rawExecution);
+        await context.agentlessRuns.complete(runId, execution);
+      } catch (error: unknown) {
         const rawCode = (error as { code?: unknown }).code;
-        context.agentlessRuns.fail(runId, {
+        await Promise.resolve(context.agentlessRuns.fail(runId, {
           code: typeof rawCode === "string" ? rawCode : "SCAN_FAILED",
           message: error instanceof Error ? error.message : "the scan failed",
-        });
-      });
+        })).catch(() => undefined);
+      }
+    })();
 
     return { status: 202, body: { runId, phase: claimed.phase, startedAt: claimed.startedAt } };
   }
@@ -679,7 +1005,7 @@ async function route(
     if (runId === undefined) throw invalidRequest();
     requireEmptyBody(body);
     const query = parseAgentlessRunQuery(path);
-    const state = context.agentlessRuns.read(runId, query);
+    const state = await context.agentlessRuns.read(runId, query);
     if (state === null) {
       // Unknown to THIS process. Not "failed", and certainly not "clean": the collector
       // may have restarted mid-scan while the AWS resources still exist.
@@ -700,12 +1026,25 @@ async function route(
 
   if (method === "GET" && path === "/v1/health") {
     if (body.length !== 0) throw invalidRequest();
+    if (!await context.readiness()) {
+      return {
+        status: 503,
+        body: {
+          ok: false,
+          mode: context.mode,
+          version: "0.3.0-hosted",
+          principalArn: context.principalArn,
+          sourceAccountId: context.sourceAccountId,
+          message: "Collector durable dependencies are unavailable.",
+        },
+      };
+    }
     return {
       status: 200,
       body: {
         ok: true,
         mode: context.mode,
-        version: "0.2.0-pilot",
+        version: context.hostedRuntime ? "0.3.0-hosted" : "0.2.0-pilot",
         principalArn: context.principalArn,
         sourceAccountId: context.sourceAccountId,
         message:
@@ -897,13 +1236,13 @@ async function route(
     if (pathConnectionId === undefined) throw invalidRequest();
     const input = parseRegistration(body, pathConnectionId);
     const operationKey = connectionOperationKey(input.tenantId, input.connectionId);
-    if (
-      context.activeConnectionOperations.has(operationKey) ||
-      context.lifecycleMutations.has(operationKey)
-    ) {
-      throw new RegistryStateError();
+    const lease = await context.operationCoordinator.claim(operationKey);
+    if (lease === null) throw new RegistryStateError();
+    try {
+      await context.registry.upsert(input);
+    } finally {
+      await context.operationCoordinator.release(lease);
     }
-    await context.registry.upsert(input);
     return { status: 200, body: { registered: true } };
   }
 
@@ -950,13 +1289,7 @@ async function route(
 
 async function collectConnectionCosts(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode !== "live") {
@@ -997,7 +1330,7 @@ async function collectConnectionCosts(context: ServerContext, job: ScopedJob): P
       now: context.now,
     });
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1029,13 +1362,7 @@ function ec2InstancesFromResources(
  */
 async function collectConnectionUtilization(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     const { fixtureEc2Utilization, collectEc2Utilization } = await import("./cloudwatch-runner.js");
@@ -1101,7 +1428,7 @@ async function collectConnectionUtilization(context: ServerContext, job: ScopedJ
       now: context.now,
     });
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1115,14 +1442,13 @@ async function collectConnectionSecurityEvents(
   job: ScopedSecurityEventJob,
 ): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (context.lifecycleMutations.has(operationKey)) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  return runTimedSecurityEventOperation({
-    activeOperations: context.activeConnectionOperations,
-    operationKey,
-    deadlineMs: SECURITY_EVENT_OPERATION_DEADLINE_MS,
-    operation: async (operationSignal) => {
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    return await runTimedSecurityEventOperation({
+      activeOperations: new Set(),
+      operationKey,
+      deadlineMs: SECURITY_EVENT_OPERATION_DEADLINE_MS,
+      operation: async (operationSignal) => {
       const connection = await requireCurrentActiveConnection(context.registry, job);
       if (context.mode !== "live") {
         throw new LocalHttpError(
@@ -1171,8 +1497,11 @@ async function collectConnectionSecurityEvents(
         now: context.now,
         abortSignal: operationSignal,
       });
-    },
-  });
+      },
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
 }
 
 export async function runTimedSecurityEventOperation<T>(input: {
@@ -1234,13 +1563,7 @@ function raceLocalAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<
 
 async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     const scope = { tenantId: job.tenantId };
     if (context.mode === "fixture") {
@@ -1258,7 +1581,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07.3",
+        permissionPackVersion: "standard-2026-07.4",
         capabilityAssessment: {
           grantedActions: [...IMPLEMENTED_READ_ACTIONS],
           missingActions: [],
@@ -1278,19 +1601,13 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
     await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
     return verificationResponse(verification);
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
 async function syncConnection(context: ServerContext, job: ScopedJob): Promise<PilotSnapshot> {
   const syncKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(syncKey) ||
-    context.lifecycleMutations.has(syncKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "A sync is already running for this connection");
-  }
-  context.activeConnectionOperations.add(syncKey);
+  const lease = await claimConnectionOperation(context, syncKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode === "fixture") {
@@ -1298,7 +1615,7 @@ async function syncConnection(context: ServerContext, job: ScopedJob): Promise<P
     }
     return await collectLiveSnapshot(context, connection, job);
   } finally {
-    context.activeConnectionOperations.delete(syncKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1308,13 +1625,7 @@ async function mutateConnectionLifecycle(
   action: "disable" | "offboard",
 ): Promise<void> {
   const operationKey = connectionOperationKey(scope.tenantId, scope.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.lifecycleMutations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     if (action === "disable") {
       await context.registry.disable({ tenantId: scope.tenantId }, scope.connectionId);
@@ -1322,7 +1633,7 @@ async function mutateConnectionLifecycle(
       await context.registry.offboard({ tenantId: scope.tenantId }, scope.connectionId);
     }
   } finally {
-    context.lifecycleMutations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1336,13 +1647,7 @@ async function mutateStagedRegistration(
   action: "activate" | "discard",
 ): Promise<void> {
   const operationKey = connectionOperationKey(candidate.tenantId, candidate.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.lifecycleMutations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     const scope = { tenantId: candidate.tenantId };
     if (action === "activate") {
@@ -1359,12 +1664,27 @@ async function mutateStagedRegistration(
       );
     }
   } finally {
-    context.lifecycleMutations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
 function connectionOperationKey(tenantId: string, connectionId: string): string {
   return `${tenantId}\u001f${connectionId}`;
+}
+
+async function claimConnectionOperation(
+  context: ServerContext,
+  operationKey: string,
+  registryError = false,
+): Promise<CollectorOperationLease> {
+  const lease = await context.operationCoordinator.claim(operationKey);
+  if (lease !== null) return lease;
+  if (registryError) throw new RegistryStateError();
+  throw new LocalHttpError(
+    409,
+    "INVALID_REQUEST",
+    "Another collection or lifecycle operation is already running for this connection",
+  );
 }
 
 async function collectLiveSnapshot(
@@ -1941,6 +2261,64 @@ function liveFindings(
           { publiclyAccessible: true, internetReachabilityProven: false });
       }
     }
+    if (source.resourceType === "aws.bedrock.guardrail") {
+      const status = scalarString(config.status);
+      if (status !== "READY") {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.GUARDRAIL_READY",
+          "medium",
+          "Bedrock guardrail version is not ready",
+          "The observed guardrail version is not in the READY state, so applications cannot rely on it as an active protection boundary.",
+          "Review the guardrail validation or deployment error in Amazon Bedrock, publish an approved version, and verify application enforcement.",
+          { status: status ?? "unknown", version: scalarString(config.version) ?? "unknown" },
+        );
+      }
+      const contentPolicy = jsonObject(config.contentPolicy);
+      if (contentPolicy === null || contentPolicy.filterCount === 0) {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.CONTENT_FILTERS",
+          "high",
+          "Bedrock guardrail has no harmful-content filters",
+          "The guardrail contains no observed harmful-content filter configuration.",
+          "Configure input and output content filters at strengths appropriate to the application risk, test them, and publish the reviewed guardrail version.",
+          { filterCount: 0 },
+        );
+      } else {
+        const disabled = jsonObjectArray(contentPolicy.filters).filter((filter) =>
+          filter.inputEnabled === false ||
+          filter.outputEnabled === false ||
+          filter.inputAction === "NONE" ||
+          filter.outputAction === "NONE"
+        ).length;
+        if (disabled > 0) {
+          add(
+            resourceKey,
+            "SUTRA.AWS.BEDROCK.CONTENT_FILTER_ENFORCEMENT",
+            "high",
+            "Bedrock content filters do not enforce both directions",
+            "One or more observed content filters disables evaluation or records detections without blocking for input or output.",
+            "Review each content category and enable an approved enforcement action for both prompts and model responses.",
+            { filtersWithoutBidirectionalEnforcement: disabled },
+          );
+        }
+      }
+      const sensitive = jsonObject(config.sensitiveInformationPolicy);
+      const piiEntityCount = finiteSafeNumber(sensitive?.piiEntityCount) ?? 0;
+      const regexCount = finiteSafeNumber(sensitive?.regexCount) ?? 0;
+      if (piiEntityCount === 0 && regexCount === 0) {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.SENSITIVE_INFORMATION",
+          "medium",
+          "Bedrock guardrail has no sensitive-information filters",
+          "No PII entity or custom sensitive-pattern filter was observed for this guardrail version.",
+          "Configure the PII classes and custom patterns relevant to the application, use blocking or anonymization as approved, then test both input and output handling.",
+          { piiEntityCount, regexCount },
+        );
+      }
+    }
     if (source.resourceType === "aws.ec2.security-group" && isPublicSshIngressCandidate(config.ingress)) {
       add(resourceKey, "SUTRA.AWS.EC2.SSH_PUBLIC", "high", "Security group allows public SSH ingress",
         "The security-group rule permits SSH from a public IPv4 or IPv6 CIDR. Route, NACL, attachment, and public-address evidence is still required to prove internet reachability.",
@@ -2009,6 +2387,36 @@ function liveFindings(
         "No account password policy was returned.",
         "Prefer federation and configure a strong policy for any remaining IAM users.", findingEvidence,
         accountSignalScope);
+    }
+    if (
+      item.evidenceType === "BEDROCK_MODEL_INVOCATION_LOGGING" &&
+      item.status === "NOT_CONFIGURED"
+    ) {
+      add(
+        null,
+        "SUTRA.AWS.BEDROCK.INVOCATION_LOGGING",
+        "medium",
+        "Bedrock model invocation logging is not configured",
+        `No model invocation logging destination was observed for Amazon Bedrock in ${item.region}.`,
+        "Configure an approved CloudWatch Logs or S3 destination with retention, encryption, and least-privilege access. Review whether prompt and response content may be logged before enabling content delivery.",
+        findingEvidence,
+        accountSignalScope,
+      );
+    }
+    if (
+      item.evidenceType === "BEDROCK_ACCOUNT_DATA_RETENTION" &&
+      item.data.mode === "provider_data_share"
+    ) {
+      add(
+        null,
+        "SUTRA.AWS.BEDROCK.PROVIDER_DATA_SHARE",
+        "high",
+        "Bedrock provider data sharing is enabled",
+        `The observed Amazon Bedrock account data-retention mode in ${item.region} permits provider data sharing.`,
+        "Confirm legal and data-owner approval. If sharing is not explicitly required, change the account retention mode to the approved non-sharing policy.",
+        findingEvidence,
+        accountSignalScope,
+      );
     }
   }
   return result;
@@ -2199,7 +2607,7 @@ function parseStagedRegistrationMutation(
 }
 
 async function activeCandidate(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await requireConnection(registry, job);
@@ -2215,7 +2623,7 @@ async function activeCandidate(
 }
 
 async function requireConnection(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await registry.getRegistered({ tenantId: job.tenantId }, job.connectionId);
@@ -2224,7 +2632,7 @@ async function requireConnection(
 }
 
 async function requireCurrentActiveConnection(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await requireConnection(registry, job);
@@ -2803,14 +3211,14 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return body;
 }
 
-function sendSigned(
+async function sendSigned(
   context: ServerContext,
   response: ServerResponse,
   status: number,
   path: string,
   nonce: string,
   payload: unknown,
-): void {
+): Promise<void> {
   let body = JSON.stringify(payload);
   if (Buffer.byteLength(body, "utf8") > RESPONSE_LIMIT) {
     status = 502;
@@ -2821,10 +3229,13 @@ function sendSigned(
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-content-type-options", "nosniff");
   response.setHeader("content-length", Buffer.byteLength(body, "utf8"));
-  response.setHeader(
-    "x-sutra-response-signature",
-    context.authenticator.responseSignature(status, path, nonce, body),
-  );
+  const signed = await context.authenticator.responseSignature(status, path, nonce, body);
+  if (typeof signed === "string") {
+    response.setHeader("x-sutra-response-signature", signed);
+  } else {
+    response.setHeader("x-sutra-key-id", signed.keyId);
+    response.setHeader("x-sutra-signature", signed.signature);
+  }
   response.end(body);
 }
 
@@ -2844,6 +3255,13 @@ function safeHttpError(error: unknown): LocalHttpError {
   if (error instanceof LocalHttpError) return error;
   if (error instanceof RequestAuthenticationError) {
     return new LocalHttpError(401, "INVALID_REQUEST", "Collector request authentication failed");
+  }
+  if (error instanceof HostedRequestAuthenticationError) {
+    return new LocalHttpError(
+      error.code === "REQUEST_REPLAYED" ? 409 : 401,
+      error.code === "REQUEST_REPLAYED" ? "REQUEST_REPLAYED" : "INVALID_REQUEST",
+      "Collector request authentication failed",
+    );
   }
   if (error instanceof RegistryConnectionNotFoundError) {
     return new LocalHttpError(404, "CONNECTION_NOT_FOUND", "The scoped connection was not found");
@@ -3030,6 +3448,18 @@ function scalarString(value: SafeJsonValue | undefined): string | null {
 
 function stringArray(value: SafeJsonValue | undefined): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function jsonObject(value: SafeJsonValue | undefined): SafeJsonObject | null {
+  return value !== undefined && isJsonObject(value) ? value : null;
+}
+
+function jsonObjectArray(value: SafeJsonValue | undefined): SafeJsonObject[] {
+  return Array.isArray(value) ? value.filter(isJsonObject) : [];
+}
+
+function finiteSafeNumber(value: SafeJsonValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function isJsonObject(value: SafeJsonValue): value is SafeJsonObject {
