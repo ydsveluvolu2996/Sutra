@@ -104,6 +104,10 @@ services:
       # organization-admin invitation exists.
       SUTRA_IDENTITY_MODE: ${SUTRA_IDENTITY_MODE:-password}
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true"
+      # Separate exact-string approval for the invitation-only OIDC adapter.
+      # The deployment boundary selects only the switch matching identity mode;
+      # neither switch can enable the other adapter.
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"
       SUTRA_PASSWORD_MFA_REQUIRED: "true"
       # Turnstile is mandatory for public password login, invitation acceptance
       # and the unauthenticated contact form. The entrypoint persists these into

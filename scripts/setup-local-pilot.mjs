@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { hostedOidcProviderIssues } from "../lib/hosted-oidc-providers.ts";
 import { validatedReleaseImage } from "../lib/release-identity.ts";
 
 const root = resolve(import.meta.dirname, "..");
@@ -94,6 +95,10 @@ const ZOHO_VARS = [
   "SUTRA_ZOHO_CLIENT_SECRET",
   "SUTRA_ZOHO_REFRESH_TOKEN",
 ];
+const OIDC_VARS = [
+  "SUTRA_OIDC_PROVIDERS",
+  "SUTRA_OIDC_TRANSACTION_KEY",
+];
 // Agentless disk scanning reads its configuration from the Worker `env` via
 // resolveAgentlessExecutorConfig, so these must reach .dev.vars and not merely the
 // container process env. Every one is optional and only written when present:
@@ -115,7 +120,13 @@ const AGENTLESS_VARS = [
   "SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN",
   "SUTRA_AGENTLESS_FINDINGS_BUCKET",
 ];
-const optionalPassthroughVars = [...CONTACT_VARS, ...INVITATION_VARS, ...ZOHO_VARS, ...AGENTLESS_VARS].map((name) => {
+const optionalPassthroughVars = [
+  ...CONTACT_VARS,
+  ...INVITATION_VARS,
+  ...ZOHO_VARS,
+  ...OIDC_VARS,
+  ...AGENTLESS_VARS,
+].map((name) => {
   const value = process.env[name]?.trim();
   if (value !== undefined && /[\r\n]/u.test(value)) {
     throw new Error(`${name} must be a single line`);
@@ -123,16 +134,28 @@ const optionalPassthroughVars = [...CONTACT_VARS, ...INVITATION_VARS, ...ZOHO_VA
   return { name, value };
 }).filter((entry) => entry.value);
 
-// A network-reachable password pilot is never inferred from a domain or from
-// NODE_ENV. It must use the exact, staging-only opt-in and a small allowlist of
-// fixed security settings. Those settings are copied into `.dev.vars` because
-// Wrangler reads its runtime binding values from that file rather than directly
-// from the container process environment.
-const privateBetaSwitch = process.env.SUTRA_PRIVATE_BETA_PASSWORD_ENABLED;
-if (privateBetaSwitch !== undefined && privateBetaSwitch !== "true" && privateBetaSwitch !== "false") {
+// A network-reachable private beta is never inferred from a domain or from
+// NODE_ENV. Password and OIDC have independent, staging-only exact switches and
+// share a small allowlist of fixed security settings. Those settings are copied
+// into `.dev.vars` because Wrangler reads its runtime binding values from that
+// file rather than directly from the container process environment.
+const privateBetaPasswordSwitch = process.env.SUTRA_PRIVATE_BETA_PASSWORD_ENABLED;
+if (
+  privateBetaPasswordSwitch !== undefined
+  && privateBetaPasswordSwitch !== "true"
+  && privateBetaPasswordSwitch !== "false"
+) {
   throw new Error("SUTRA_PRIVATE_BETA_PASSWORD_ENABLED must be exactly true or false");
 }
-const privateBetaRequested = privateBetaSwitch === "true";
+const privateBetaOidcSwitch = process.env.SUTRA_PRIVATE_BETA_OIDC_ENABLED;
+if (
+  privateBetaOidcSwitch !== undefined
+  && privateBetaOidcSwitch !== "true"
+  && privateBetaOidcSwitch !== "false"
+) {
+  throw new Error("SUTRA_PRIVATE_BETA_OIDC_ENABLED must be exactly true or false");
+}
+const privateBetaRequested = privateBetaPasswordSwitch === "true" || privateBetaOidcSwitch === "true";
 const releaseImage = validatedReleaseImage(process.env.SUTRA_RELEASE_IMAGE);
 
 // Cloudflare Turnstile protects public unauthenticated mutations. Network
@@ -203,12 +226,30 @@ if (privateBetaRequested) {
   const expected = {
     SUTRA_DEPLOYMENT_ENV: "staging",
     SUTRA_LOCAL_MODE: "false",
-    SUTRA_IDENTITY_MODE: "password",
     SUTRA_PASSWORD_MFA_REQUIRED: "true",
   };
   for (const [name, required] of Object.entries(expected)) {
     const value = process.env[name];
     if (value !== required) throw new Error(`${name} must be exactly ${required} for the private beta`);
+  }
+  const identityMode = process.env.SUTRA_IDENTITY_MODE;
+  if (identityMode !== "password" && identityMode !== "oidc") {
+    throw new Error("SUTRA_IDENTITY_MODE must be exactly password or oidc for the private beta");
+  }
+  if (identityMode === "password" && privateBetaPasswordSwitch !== "true") {
+    throw new Error("SUTRA_PRIVATE_BETA_PASSWORD_ENABLED must be exactly true for private-beta password identity");
+  }
+  if (identityMode === "oidc") {
+    if (privateBetaOidcSwitch !== "true") {
+      throw new Error("SUTRA_PRIVATE_BETA_OIDC_ENABLED must be exactly true for private-beta OIDC identity");
+    }
+    const providerIssues = hostedOidcProviderIssues(process.env.SUTRA_OIDC_PROVIDERS);
+    if (providerIssues.length > 0) {
+      throw new Error(`SUTRA_OIDC_PROVIDERS is invalid: ${providerIssues.join("; ")}`);
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(process.env.SUTRA_OIDC_TRANSACTION_KEY ?? "")) {
+      throw new Error("SUTRA_OIDC_TRANSACTION_KEY must be a managed 256-bit key for private-beta OIDC");
+    }
   }
   const publicOrigin = process.env.SUTRA_PUBLIC_ORIGIN ?? "";
   let parsedOrigin;
@@ -236,9 +277,11 @@ if (privateBetaRequested) {
   }
   privateBetaVars = [
     ...Object.entries(expected).map(([name, value]) => ({ name, value })),
+    { name: "SUTRA_IDENTITY_MODE", value: identityMode },
     { name: "SUTRA_PUBLIC_ORIGIN", value: parsedOrigin.origin },
     { name: "SUTRA_RELEASE_IMAGE", value: releaseImage },
-    { name: "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", value: "true" },
+    { name: "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", value: privateBetaPasswordSwitch ?? "false" },
+    { name: "SUTRA_PRIVATE_BETA_OIDC_ENABLED", value: privateBetaOidcSwitch ?? "false" },
     ...turnstileVars,
   ];
 }
@@ -309,6 +352,9 @@ if (existingContents === null) {
   // when a persistent runtime volume still contains a prior enabled value.
   if (!privateBetaRequested && /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu.test(updatedContents)) {
     updatedContents = upsertVariable(updatedContents, additions, "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", "false");
+  }
+  if (!privateBetaRequested && /^SUTRA_PRIVATE_BETA_OIDC_ENABLED=true$/mu.test(updatedContents)) {
+    updatedContents = upsertVariable(updatedContents, additions, "SUTRA_PRIVATE_BETA_OIDC_ENABLED", "false");
   }
   // A retained production identity must never be exposed by a later local-mode
   // start. Compose supplies the value again on every real private-beta start.

@@ -14,8 +14,11 @@ const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_RELEASE_IMAGE",
   "SUTRA_LOCAL_MODE",
   "SUTRA_IDENTITY_MODE",
+  "SUTRA_OIDC_PROVIDERS",
+  "SUTRA_OIDC_TRANSACTION_KEY",
   "SUTRA_PASSWORD_MFA_REQUIRED",
   "SUTRA_PASSWORD_IDENTITY_ENABLED",
+  "SUTRA_PRIVATE_BETA_OIDC_ENABLED",
   "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED",
   "SUTRA_BROKER_URL",
   "SUTRA_COLLECTOR_MODE",
@@ -34,6 +37,18 @@ const TURNSTILE = {
   SUTRA_TURNSTILE_SITE_KEY: "0x4AAAAAAAAAAAAAAAAAAAAAAA",
   SUTRA_TURNSTILE_SECRET_KEY: "0x4BBBBBBBBBBBBBBBBBBBBBBB",
   SUTRA_TURNSTILE_DEV_BYPASS: "false",
+};
+const OIDC = {
+  SUTRA_OIDC_PROVIDERS: JSON.stringify([{
+    id: "zoho",
+    issuer: "https://accounts.zoho.in",
+    authorizationEndpoint: "https://accounts.zoho.in/oauth/v2/auth",
+    tokenEndpoint: "https://accounts.zoho.in/oauth/v2/token",
+    jwksUri: "https://accounts.zoho.in/oauth/v2/keys",
+    clientId: "sutra-test-client",
+    clientSecret: "not-a-real-secret",
+  }]),
+  SUTRA_OIDC_TRANSACTION_KEY: "A".repeat(43),
 };
 
 function cleanEnvironment(overrides = {}) {
@@ -75,6 +90,7 @@ test("setup materializes only the explicit staging private-beta password allowli
     assert.match(contents, /^SUTRA_IDENTITY_MODE=password$/mu);
     assert.match(contents, /^SUTRA_PASSWORD_MFA_REQUIRED=true$/mu);
     assert.match(contents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu);
+    assert.match(contents, /^SUTRA_PRIVATE_BETA_OIDC_ENABLED=false$/mu);
     assert.match(contents, /^SUTRA_AUTH_ENCRYPTION_KEY=[A-Za-z0-9_-]{43}$/mu);
     assert.match(contents, /^SUTRA_TURNSTILE_ENABLED=true$/mu);
     assert.match(contents, /^SUTRA_TURNSTILE_SITE_KEY=0x4A+$/mu);
@@ -94,6 +110,70 @@ test("setup materializes only the explicit staging private-beta password allowli
     assert.match(localContents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=false$/mu);
     assert.doesNotMatch(localContents, /^SUTRA_RELEASE_IMAGE=/mu);
   });
+});
+
+test("setup materializes an explicitly approved invitation-only private-beta OIDC adapter", async () => {
+  await withConfig(async (config) => {
+    const environment = cleanEnvironment({
+      SUTRA_LOCAL_CONFIG_PATH: config,
+      SUTRA_DEPLOYMENT_ENV: "staging",
+      SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+      SUTRA_LOCAL_MODE: "false",
+      SUTRA_IDENTITY_MODE: "oidc",
+      SUTRA_PASSWORD_MFA_REQUIRED: "true",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+      ...OIDC,
+      ...TURNSTILE,
+    });
+    await execute(process.execPath, [setupScript], { env: environment });
+    const contents = await readFile(config, "utf8");
+    assert.match(contents, /^SUTRA_DEPLOYMENT_ENV=staging$/mu);
+    assert.match(contents, /^SUTRA_IDENTITY_MODE=oidc$/mu);
+    assert.match(contents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=false$/mu);
+    assert.match(contents, /^SUTRA_PRIVATE_BETA_OIDC_ENABLED=true$/mu);
+    assert.match(contents, /^SUTRA_OIDC_TRANSACTION_KEY=A{43}$/mu);
+    assert.ok(contents.includes(`SUTRA_OIDC_PROVIDERS=${OIDC.SUTRA_OIDC_PROVIDERS}`));
+  });
+});
+
+test("private-beta identity switches cannot cross-enable password and OIDC adapters", async () => {
+  for (const overrides of [
+    {
+      SUTRA_IDENTITY_MODE: "oidc",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "false",
+      ...OIDC,
+    },
+    {
+      SUTRA_IDENTITY_MODE: "password",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+    },
+    {
+      SUTRA_IDENTITY_MODE: "oidc",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+      ...OIDC,
+      SUTRA_OIDC_TRANSACTION_KEY: "too-short",
+    },
+  ]) {
+    await withConfig(async (config) => {
+      await assert.rejects(execute(process.execPath, [setupScript], {
+        env: cleanEnvironment({
+          SUTRA_LOCAL_CONFIG_PATH: config,
+          SUTRA_DEPLOYMENT_ENV: "staging",
+          SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+          SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+          SUTRA_LOCAL_MODE: "false",
+          SUTRA_PASSWORD_MFA_REQUIRED: "true",
+          ...TURNSTILE,
+          ...overrides,
+        }),
+      }));
+    });
+  }
 });
 
 test("setup refuses production, loopback and implicit private-beta activation", async () => {

@@ -111,6 +111,11 @@ The EC2 role can read only that exact secret. During a release,
 credential shapes, and allowed key set before atomically merging the values
 into the existing mode-0600 runtime environment.
 
+The single-host staging boundary has separate exact-string master switches for
+password and OIDC identity. Changing `SUTRA_IDENTITY_MODE` never lets one switch
+enable the other adapter, and the OIDC provider list plus transaction key must
+pass the same strict validation before the application starts.
+
 Use a two-phase activation:
 
 1. Publish `password` mode and deploy so Zoho Mail is active while the existing

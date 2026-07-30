@@ -6,6 +6,7 @@ import {
   generateScriptNonce,
   hostedConfigurationIssues,
   managedPasswordConfigurationIssues,
+  privateBetaOidcConfigurationIssues,
   privateBetaPasswordConfigurationIssues,
   responseSecurityHeaders,
 } from "../lib/deployment-security.ts";
@@ -143,6 +144,23 @@ const privateBetaPasswordShape = {
   SUTRA_PASSWORD_MFA_REQUIRED: "true",
 } as const;
 
+const privateBetaOidcShape = {
+  SUTRA_DEPLOYMENT_ENV: "staging",
+  SUTRA_PUBLIC_ORIGIN: "https://beta.sutra.example",
+  SUTRA_LOCAL_MODE: "false",
+  SUTRA_IDENTITY_MODE: "oidc",
+  SUTRA_OIDC_PROVIDERS: JSON.stringify([{
+    id: "zoho",
+    issuer: "https://accounts.zoho.in",
+    authorizationEndpoint: "https://accounts.zoho.in/oauth/v2/auth",
+    tokenEndpoint: "https://accounts.zoho.in/oauth/v2/token",
+    jwksUri: "https://accounts.zoho.in/oauth/v2/keys",
+    clientId: "sutra-test-client",
+    clientSecret: "not-a-real-secret",
+  }]),
+  SUTRA_OIDC_TRANSACTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+} as const;
+
 test("private-beta password mode is staging-only and independently deny-by-default", () => {
   assert.deepEqual(privateBetaPasswordConfigurationIssues(privateBetaPasswordShape), [
     "private-beta password deployment is disabled (set SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true only for an approved staging pilot)",
@@ -166,6 +184,50 @@ test("private-beta password mode is staging-only and independently deny-by-defau
       `private-beta switch ${JSON.stringify(value)} must fail closed`,
     );
   }
+});
+
+test("private-beta OIDC is invitation-ready, staging-only, and independently deny-by-default", () => {
+  assert.deepEqual(privateBetaOidcConfigurationIssues(privateBetaOidcShape), [
+    "private-beta OIDC deployment is disabled (set SUTRA_PRIVATE_BETA_OIDC_ENABLED=true only for an approved staging pilot)",
+  ]);
+  assert.equal(
+    evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", privateBetaOidcShape).allowed,
+    false,
+  );
+
+  const enabled = { ...privateBetaOidcShape, SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true" };
+  assert.deepEqual(privateBetaOidcConfigurationIssues(enabled), []);
+  assert.equal(evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", enabled).allowed, true);
+
+  for (const value of ["false", "TRUE", "1", "yes", " true", "true ", ""]) {
+    assert.equal(
+      evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", {
+        ...privateBetaOidcShape,
+        SUTRA_PRIVATE_BETA_OIDC_ENABLED: value,
+      }).allowed,
+      false,
+      `private-beta OIDC switch ${JSON.stringify(value)} must fail closed`,
+    );
+  }
+});
+
+test("private-beta identity switches cannot cross-enable the other adapter", () => {
+  assert.equal(
+    evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", {
+      ...privateBetaOidcShape,
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+    }).allowed,
+    false,
+    "the password switch must not enable private-beta OIDC",
+  );
+  assert.equal(
+    evaluateDeploymentBoundary("https://beta.sutra.example/dashboard", {
+      ...privateBetaPasswordShape,
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+    }).allowed,
+    false,
+    "the OIDC switch must not enable private-beta password",
+  );
 });
 
 test("private-beta and production password switches cannot cross-enable environments", () => {

@@ -25,6 +25,7 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_PASSWORD_MFA_REQUIRED?: string;
   readonly SUTRA_PASSWORD_IDENTITY_ENABLED?: string;
   readonly SUTRA_PRIVATE_BETA_PASSWORD_ENABLED?: string;
+  readonly SUTRA_PRIVATE_BETA_OIDC_ENABLED?: string;
 }
 
 export interface DeploymentBoundaryDecision {
@@ -199,15 +200,40 @@ export function privateBetaPasswordConfigurationIssues(environment: DeploymentSe
 }
 
 /**
+ * Invitation-only OIDC contract for the single-host private beta. This keeps
+ * the reviewed staging boundary and exact master switch without pretending the
+ * single-node loopback collector is the separately-reviewed hosted broker.
+ */
+export function privateBetaOidcConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
+  const issues: string[] = [];
+  if (environment.SUTRA_DEPLOYMENT_ENV !== "staging") issues.push("private-beta OIDC identity is restricted to staging");
+  if (environment.SUTRA_LOCAL_MODE !== "false") issues.push("local authentication must be explicitly disabled");
+  if (exactHttpsOrigin(environment.SUTRA_PUBLIC_ORIGIN) === null) issues.push("a canonical non-loopback HTTPS public origin is required");
+  if (environment.SUTRA_IDENTITY_MODE !== "oidc") issues.push("the private-beta OIDC identity adapter is required");
+  issues.push(...hostedOidcProviderIssues(environment.SUTRA_OIDC_PROVIDERS));
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) {
+    issues.push("a private-beta managed 256-bit OIDC transaction key is required");
+  }
+  if (environment.SUTRA_PRIVATE_BETA_OIDC_ENABLED !== "true") {
+    issues.push("private-beta OIDC deployment is disabled (set SUTRA_PRIVATE_BETA_OIDC_ENABLED=true only for an approved staging pilot)");
+  }
+  return issues;
+}
+
+/**
  * Selects the identity contract for a network deployment. `password` and `oidc`
  * are the only supported hosted identity modes; anything else falls through to
  * the OIDC contract, whose first check reports the missing adapter.
  */
 export function networkConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
-  if (environment.SUTRA_IDENTITY_MODE !== "password") return hostedConfigurationIssues(environment);
-  return environment.SUTRA_DEPLOYMENT_ENV === "staging"
-    ? privateBetaPasswordConfigurationIssues(environment)
-    : managedPasswordConfigurationIssues(environment);
+  if (environment.SUTRA_DEPLOYMENT_ENV === "staging") {
+    return environment.SUTRA_IDENTITY_MODE === "password"
+      ? privateBetaPasswordConfigurationIssues(environment)
+      : privateBetaOidcConfigurationIssues(environment);
+  }
+  return environment.SUTRA_IDENTITY_MODE === "password"
+    ? managedPasswordConfigurationIssues(environment)
+    : hostedConfigurationIssues(environment);
 }
 
 function isPreviewPublicPath(pathname: string): boolean {

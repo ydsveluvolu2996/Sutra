@@ -10,11 +10,15 @@ const host = await readFile(
 const redeploy = await readFile(new URL("../deploy/ec2/redeploy.sh", import.meta.url), "utf8");
 const release = await readFile(new URL("../deploy/ec2/release-update.sh", import.meta.url), "utf8");
 const sync = await readFile(new URL("../deploy/ec2/sync-zoho-runtime.sh", import.meta.url), "utf8");
+const setup = await readFile(new URL("../scripts/setup-local-pilot.mjs", import.meta.url), "utf8");
 
 test("production can switch between password and Zoho OIDC only through explicit runtime values", () => {
   assert.match(compose, /SUTRA_IDENTITY_MODE: \$\{SUTRA_IDENTITY_MODE:-password\}/u);
+  assert.match(compose, /SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"/u);
   assert.match(compose, /SUTRA_OIDC_PROVIDERS: \$\{SUTRA_OIDC_PROVIDERS:-\}/u);
   assert.match(compose, /SUTRA_OIDC_TRANSACTION_KEY: \$\{SUTRA_OIDC_TRANSACTION_KEY:-\}/u);
+  assert.match(setup, /const OIDC_VARS = \[[\s\S]*"SUTRA_OIDC_PROVIDERS"[\s\S]*"SUTRA_OIDC_TRANSACTION_KEY"/u);
+  assert.match(setup, /hostedOidcProviderIssues\(process\.env\.SUTRA_OIDC_PROVIDERS\)/u);
   assert.match(redeploy, /sync-zoho-runtime\.sh" --optional/u);
   assert.match(release, /sync-zoho-runtime\.sh/u);
 });
