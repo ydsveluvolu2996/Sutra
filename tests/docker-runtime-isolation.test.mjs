@@ -73,6 +73,17 @@ test("the application runtime contains only deployed runtime dependencies and bu
   assert.match(rootDockerfile, /\/app\/services\/aws-collector\/dist \/app\/services\/aws-collector\/dist/u);
   assert.match(rootDockerfile, /\/app\/docker\/postgres-init\.sh \/app\/docker\/postgres-init\.sh/u);
   assert.match(rootDockerfile, /\/app\/lib\/release-identity\.ts \/app\/lib\/release-identity\.ts/u);
+  for (const shipped of [
+    "scripts/start-pilot.mjs",
+    "scripts/serve-worker.mjs",
+    "scripts/worker-serve-config.mjs",
+  ]) {
+    assert.match(
+      rootDockerfile,
+      new RegExp(`/app/${shipped.replaceAll("/", "\\/").replaceAll(".", "\\.")} /app/${shipped.replaceAll("/", "\\/").replaceAll(".", "\\.")}`, "u"),
+      `${shipped} must be copied into the runtime image`,
+    );
+  }
   // The host EPSS timer runs `docker exec sutra-prod-app-1 node
   // scripts/vuln-feed-refresh.mjs`, so the script AND its whole import closure must
   // be in the image. Shipping the unit without these made the timer fail on first
@@ -100,7 +111,10 @@ test("the application runtime contains only deployed runtime dependencies and bu
   // rather than read the check.
   assert.equal(typeof packageManifest.dependencies.wrangler, "string");
   assert.equal(packageManifest.devDependencies.wrangler, undefined);
+  assert.equal(typeof packageManifest.dependencies.miniflare, "string");
+  assert.equal(packageManifest.devDependencies.miniflare, undefined);
   // Still exact-pinned, though — a range would let the image drift between
   // builds and make a release non-reproducible.
   assert.match(packageManifest.dependencies.wrangler, /^\d+\.\d+\.\d+$/u);
+  assert.match(packageManifest.dependencies.miniflare, /^\d+\.\d+\.\d+$/u);
 });

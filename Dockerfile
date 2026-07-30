@@ -57,6 +57,8 @@ COPY --from=builder --chown=node:node /app/services/aws-collector/dist /app/serv
 COPY --from=builder --chown=node:node /app/package.json /app/package.json
 COPY --from=builder --chown=node:node /app/services/aws-collector/package.json /app/services/aws-collector/package.json
 COPY --from=builder --chown=node:node /app/scripts/start-pilot.mjs /app/scripts/start-pilot.mjs
+COPY --from=builder --chown=node:node /app/scripts/serve-worker.mjs /app/scripts/serve-worker.mjs
+COPY --from=builder --chown=node:node /app/scripts/worker-serve-config.mjs /app/scripts/worker-serve-config.mjs
 COPY --from=builder --chown=node:node /app/scripts/internal-job-request.mjs /app/scripts/internal-job-request.mjs
 COPY --from=builder --chown=node:node /app/scripts/setup-local-pilot.mjs /app/scripts/setup-local-pilot.mjs
 COPY --from=builder --chown=node:node /app/scripts/postgres-migrate.mjs /app/scripts/postgres-migrate.mjs
