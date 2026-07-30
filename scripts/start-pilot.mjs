@@ -30,17 +30,27 @@ const collector = spawn(process.execPath, [resolve(root, "services/aws-collector
   env: environment,
   stdio: "inherit",
 });
+/**
+ * Serves on miniflare directly — NOT `wrangler dev`.
+ *
+ * `wrangler dev` is a development orchestrator: its ProxyController and
+ * InspectorProxyWorker sit above the workerd runtime, and every runtime death
+ * observed in production came from that layer rather than from workerd. A
+ * request-scoped fault (an unread body) was escalated to a fatal process exit, and
+ * a roughly hourly exit came from the same machinery. scripts/serve-worker.mjs
+ * starts the same runtime with the same bindings and none of that harness, so the
+ * restart logic below should now be a genuine backstop rather than routine.
+ */
 function spawnWeb() {
-  return spawn(resolve(root, "node_modules/.bin/wrangler"), [
-    "dev",
+  return spawn(process.execPath, [
+    resolve(root, "scripts/serve-worker.mjs"),
     "--config", resolve(root, "dist/server/wrangler.json"),
     "--env-file", variablesPath,
     "--ip", webHost,
     "--port", webPort,
-    "--show-interactive-dev-session", "false",
   ], {
     cwd: root,
-    env: { ...environment, WRANGLER_LOG_PATH: ".wrangler/wrangler.log" },
+    env: environment,
     stdio: "inherit",
   });
 }
