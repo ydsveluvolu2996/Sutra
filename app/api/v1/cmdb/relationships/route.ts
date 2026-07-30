@@ -1,4 +1,4 @@
-import { getLatestConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
+import { getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import {
   CmdbRelationshipRepository,
   type CmdbRelationshipScope,
@@ -12,7 +12,8 @@ import type { PilotConnection, PilotResource } from "../../../../../lib/pilot-ty
 import { CmdbCustomAssetRepository, type StoredCustomAsset } from "../../../../../db/cmdb-custom-asset-repository";
 import { toCmdbResource } from "../../../../../lib/cmdb-custom-assets";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
+import type { requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -57,26 +58,13 @@ function customAssetsAsResources(assets: readonly StoredCustomAsset[]): PilotRes
 }
 
 /**
- * Resolve the tenant scope from the SESSION, never the caller. The customer is
- * derived from the org's latest cloud connection (mirroring the saved-queries
- * and reports routes), and the capability is checked against that resolved
- * customer so scoping is enforced server-side.
+ * Resolve the tenant scope from the explicitly selected connection.
  */
 async function resolveScope(
   request: Request,
   capability: "connection:read" | "connection:manage",
 ): Promise<ResolvedScope> {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) {
-    throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  }
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return {
-    authenticated,
-    connection,
-    scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId },
-  };
+  return requireConnectionScope(request, capability);
 }
 
 function manualInputs(records: readonly { fromKey: string; toKey: string; relType: string; note: string | null }[]): ManualRelationshipInput[] {

@@ -57,10 +57,10 @@ test("server-renders an authentication gate without leaking protected route data
   }
 });
 
-test("server-renders the local login and MFA entry routes", async () => {
+test("server-renders the authentication and MFA entry routes", async () => {
   const login = await render("/login");
   assert.equal(login.status, 200);
-  assert.match(await login.text(), /Checking your local workspace/i);
+  assert.match(await login.text(), /Checking your workspace/i);
 
   const mfa = await render("/mfa/setup");
   assert.equal(mfa.status, 200);

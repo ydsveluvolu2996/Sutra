@@ -15,161 +15,104 @@ import ThemeToggle, { THEME_CHANGED_EVENT } from "./theme-toggle";
  * ================================================================== */
 
 type Row = { dot?: string; k: string; em?: string; v: string; tone?: string };
-function pvRows(bar: string, rows: Row[]): string {
+function pvRows(bar: string, _rows: Row[]): string {
+  void _rows;
   return (
-    '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>' + bar + "</span></div><div class=\"lx-pv-body\">" +
-    rows
-      .map(
-        (r) =>
-          '<div class="lx-pv-row"><span class="k">' +
-          (r.dot ? '<span class="dot" style="background:' + r.dot + '"></span>' : "") +
-          r.k +
-          (r.em ? " <em>" + r.em + "</em>" : "") +
-          '</span><span class="lx-pv-badge ' + (r.tone || "") + '">' + r.v + "</span></div>"
-      )
-      .join("") +
+    '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>' + bar + " · evidence boundary</span></div>" +
+    '<div class="lx-pv-body">' +
+    '<div class="lx-pv-row"><span class="k">Required source <em>configured for the customer workspace</em></span><span class="lx-pv-badge blue">Connect</span></div>' +
+    '<div class="lx-pv-row"><span class="k">Evidence <em>persisted from a successful collection or import</em></span><span class="lx-pv-badge violet">Source-backed</span></div>' +
+    '<div class="lx-pv-row"><span class="k">Before evidence exists <em>the workspace remains empty or unavailable</em></span><span class="lx-pv-badge green">No sample records</span></div>' +
     "</div></div>"
   );
 }
 
 /* Wiz-style inventory table: icon + name/sub + resource count per row */
 type InvRow = { ico: string; t: string; nm: string; sub: string; count: string };
-const STACK_ICO = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="5" rx="1.4"/><rect x="3" y="12" width="18" height="5" rx="1.4"/><path d="M6.5 6.5h.01M6.5 14.5h.01"/></svg>';
-function pvInventory(bar: string, rows: InvRow[]): string {
+function pvInventory(bar: string, _rows: InvRow[]): string {
+  void _rows;
   return (
     '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>' + bar + '</span></div><div class="lx-pv-body">' +
-    '<div class="lx-pv-hdr"><span>Resource</span><span>Collected</span></div>' +
-    rows
-      .map(
-        (r) =>
-          '<div class="lx-pv-row"><span class="k"><span class="lx-pv-ico" style="--tt:' + r.t + '"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7">' + r.ico + '</svg></span><span class="nm"><b>' + r.nm + '</b><em>' + r.sub + '</em></span></span><span class="lx-pv-count">' + STACK_ICO + r.count + '</span></div>'
-      )
-      .join('') +
+    '<div class="lx-pv-hdr"><span>Evidence categories</span><span>Readiness</span></div>' +
+    '<div class="lx-pv-row"><span class="k"><span class="nm"><b>Compute and containers</b><em>Populates from the connected AWS role</em></span></span><span class="lx-pv-badge blue">Connect</span></div>' +
+    '<div class="lx-pv-row"><span class="k"><span class="nm"><b>Identity and data</b><em>Shown only after a complete collection</em></span></span><span class="lx-pv-badge violet">Source-backed</span></div>' +
+    '<div class="lx-pv-row"><span class="k"><span class="nm"><b>Network relationships</b><em>Missing coverage remains explicit</em></span></span><span class="lx-pv-badge green">No sample counts</span></div>' +
     '</div></div>'
   );
 }
-const PV_INVENTORY = pvInventory("cmdb · product workspace", [
-  { ico: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/><rect x="9" y="9" width="6" height="6" rx="1"/>', t: "#f0842e", nm: "EC2 Instances", sub: "Virtual machines", count: "208" },
-  { ico: '<path d="M12 2 20.5 7v10L12 22 3.5 17V7z"/><circle cx="12" cy="12" r="3.4"/>', t: "#3b82f6", nm: "EKS Clusters", sub: "Container orchestrators", count: "4" },
-  { ico: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><circle cx="12" cy="10" r="2.4"/><path d="M12 12.4V15"/>', t: "#8b5cf6", nm: "IAM Roles", sub: "Identities & trust policies", count: "61" },
-  { ico: '<path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 6c0 1.7 3.6 3 8 3s8-1.3 8-3"/>', t: "#34d399", nm: "S3 Buckets", sub: "Object storage", count: "37" },
-  { ico: '<rect x="3" y="7" width="18" height="10" rx="2"/><path d="M7 12h.01M11 12h.01M15 12h.01"/>', t: "#22d3ee", nm: "Network Interfaces", sub: "ENIs · routes · NACLs", count: "143" },
-  { ico: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/>', t: "#fb7185", nm: "Load Balancers", sub: "ALB · listeners · targets", count: "9" },
-]);
+const PV_INVENTORY = pvInventory("cmdb · customer workspace", []);
 
 const GDEF =
   '<defs><linearGradient id="pvg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset=".5" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>';
 
 const PV_GRAPH =
-  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>security-graph · live</span></div><div class="lx-pv-graph"><svg viewBox="0 0 460 190" preserveAspectRatio="xMidYMid meet">' +
+  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>security graph · evidence model</span></div><div class="lx-pv-graph"><svg viewBox="0 0 460 190" preserveAspectRatio="xMidYMid meet">' +
   GDEF +
   '<path class="pvl" d="M44 132 C 110 132 118 96 168 92" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd2" d="M168 92 C 236 88 250 50 316 46" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd3" d="M168 92 C 240 96 300 118 416 120" fill="none" stroke="url(#pvg)" stroke-width="1.6"/><path class="pvl pd4" d="M168 92 C 200 66 250 62 292 118" fill="none" stroke="#fb7185" stroke-width="1.4" opacity=".7"/>' +
-  '<g class="pvn nd1"><circle cx="44" cy="132" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="44" y="156" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">internet</text></g>' +
-  '<g class="pvn nd2"><circle cx="168" cy="92" r="13" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="168" y="118" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#f4f7ff">api-gateway</text></g>' +
-  '<g class="pvn nd3"><circle cx="316" cy="46" r="11" fill="#0c1326" stroke="#22d3ee" stroke-width="1.6"/><text x="316" y="30" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">payments-sa</text></g>' +
-  '<g class="pvn nd4"><circle cx="416" cy="120" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="416" y="144" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">s3://billing</text></g>' +
-  '<g class="pvn nd5"><circle cx="292" cy="118" r="9" fill="#26121a" stroke="#fb7185" stroke-width="1.5"/><text x="292" y="140" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#fb7185">CVE</text></g>' +
+  '<g class="pvn nd1"><circle cx="44" cy="132" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="44" y="156" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">entry point</text></g>' +
+  '<g class="pvn nd2"><circle cx="168" cy="92" r="13" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="168" y="118" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#f4f7ff">workload</text></g>' +
+  '<g class="pvn nd3"><circle cx="316" cy="46" r="11" fill="#0c1326" stroke="#22d3ee" stroke-width="1.6"/><text x="316" y="30" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">identity</text></g>' +
+  '<g class="pvn nd4"><circle cx="416" cy="120" r="11" fill="#0c1326" stroke="#3b82f6" stroke-width="1.6"/><text x="416" y="144" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#808db2">data</text></g>' +
+  '<g class="pvn nd5"><circle cx="292" cy="118" r="9" fill="#26121a" stroke="#fb7185" stroke-width="1.5"/><text x="292" y="140" text-anchor="middle" font-family="monospace" font-size="8.5" fill="#fb7185">risk</text></g>' +
   "</svg></div></div>";
 
-const PV_TRENDS =
-  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>posture · last 90 days</span></div><div class="lx-pv-body lx-pv-spark"><div class="cap-score"><b>82</b><span>▲ +6 this month</span></div><svg viewBox="0 0 300 64" preserveAspectRatio="none">' +
-  GDEF +
-  '<path class="pva" d="M0 50 L30 46 L60 48 L90 40 L120 42 L150 34 L180 30 L210 32 L240 22 L270 20 L300 14 L300 64 L0 64 Z" fill="url(#pvg)"/><polyline class="pvl" points="0,50 30,46 60,48 90,40 120,42 150,34 180,30 210,32 240,22 270,20 300,14" fill="none" stroke="url(#pvg)" stroke-width="2"/></svg></div></div>';
+const PV_TRENDS = pvRows("posture history", []);
 
-const PV_FIX =
-  '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>kyverno-policy.yaml · generated</span></div><pre class="lx-pv-code"><span class="c"># reviewed suggestion — scoped to the finding</span>\napiVersion: kyverno.io/v1\nkind: <span class="b">ClusterPolicy</span>\nmetadata:\n  name: disallow-privileged\nspec:\n  rules:\n    - name: privileged-containers\n      validate:\n        message: <span class="g">"privileged not allowed"</span>\n        pattern: { spec: { containers: [ { securityContext: { privileged: <span class="g">false</span> } } ] } }</pre></div>';
+const PV_FIX = pvRows("guided remediation", []);
 
 type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string; g?: string };
 const CAPS: Cap[] = [
-  { code: "COLLECT", g: "See & prioritize", label: "Agentless collection", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>', title: "Agentless collection, in minutes", blurb: "Twenty-two collectors per region connect via a customer-owned IAM role with temporary STS credentials — full asset coverage with no agents on your workloads and no access keys stored, ever.", points: ["22 collectors per region via STS", "No agents · no stored keys", "Normalized into one CMDB"], pv: PV_INVENTORY },
-  { code: "GRAPH", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Every cloud, Kubernetes, identity and network relationship on one canvas — every edge a cited observation, not a guess.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click any edge to see the evidence"], pv: PV_GRAPH },
-  { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Not thousands of CVEs — the handful that are internet-reachable, running and exploitable, proven with observed evidence.", points: ["Toxic-combination detection", "Reachability from real network flows", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", [
-    { dot: "#fb7185", k: "Internet-reachable workload", em: "running CVE-2024-3094", v: "Critical", tone: "red" },
-    { dot: "#fbbf24", k: "Privileged pod reachable from ingress", em: "hostPID", v: "High", tone: "amber" },
-    { dot: "#fbbf24", k: "ServiceAccount can delete a prod S3 bucket", em: "no MFA", v: "High", tone: "amber" },
-    { dot: "#93c5fd", k: "Drifted workload gained a new CVE", em: "batch-runner · since last scan", v: "Medium", tone: "blue" },
-    { k: "12,988 CVEs suppressed", em: "not reachable · not running", v: "deprioritized", tone: "green" }]) },
-  { code: "CIEM", label: "Effective permissions", t: "#8b5cf6", icon: '<circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/>', title: "Effective permissions", blurb: "Resolve a workload's effective RBAC and follow its IRSA or EKS Pod Identity link into AWS — can this pod delete an S3 bucket?", points: ["In-cluster RBAC solver", "IRSA + Pod Identity → AWS reach", "Flags: secrets, exec, unused SA"], pv: pvRows("effective-permissions", [
-    { k: "api-gateway", em: "mounts payments-sa token", v: "IRSA", tone: "blue" },
-    { k: "payments-sa → PaymentsRole", em: "assume-role", v: "aws-reach", tone: "violet" },
-    { k: "s3:DeleteObject on billing/*", em: "allowed", v: "aws-write", tone: "red" },
-    { k: "batch-runner-sa", em: "no workload uses it", v: "unused", tone: "amber" }]) },
-  { code: "EXPOSE", label: "Network exposure", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/>', title: "Network exposure & port filtering", blurb: "A proven internet path — gateway route, NACL port filter, load-balancer target, DNS entry point — with open vs filtered ports per interface.", points: ["Hop-by-hop reachability, each hop cited", "Open vs NACL-filtered ports", "Missing evidence → honest unknown"], pv: pvRows("network-exposure", [
-    { dot: "#fb7185", k: "eni-api-gw", em: "443 open · 8080 filtered by acl-1", v: "Internet-exposed", tone: "red" },
-    { dot: "#34d399", k: "eni-batch", em: "22 filtered by acl-2", v: "Not exposed", tone: "green" },
-    { dot: "#fbbf24", k: "eni-worker", em: "no route evidence", v: "Unknown", tone: "amber" },
-    { dot: "#8b5cf6", k: "api.northstar.io", em: "DNS entry point → eni-api-gw", v: "DNS", tone: "violet" },
-    { dot: "#93c5fd", k: "alb/public-web", em: "2 healthy targets · listener :443", v: "LB target", tone: "blue" }]) },
-  { code: "PATCH", label: "Patch plans", t: "#f0842e", icon: '<rect x="4" y="4" width="7" height="7" rx="1.4"/><rect x="13" y="13" width="7" height="7" rx="1.4"/><path d="M11 7.5h5.5v5.5"/>', title: "Patch plans, not CVE lists", blurb: "Hundreds of CVEs collapse into the handful of version bumps that actually fix them — ranked by KEV, EPSS and reachability.", points: ["One upgrade per package + image", "KEV & EPSS-aware priority", "SLA due dates per severity"], pv: pvRows("patch-plan · ranked", [
-    { k: "openssl 3.0.11 → 3.0.14", em: "fixes 4 CVEs", v: "KEV", tone: "red" },
-    { k: "libxml2 2.9.1 → 2.12.0", em: "fixes 2 CVEs", v: "EPSS 0.62", tone: "amber" },
-    { k: "base image node:18 → node:20", em: "fixes 12 CVEs", v: "12 CVEs", tone: "blue" },
-    { k: "golang.org/x/net v0.17 → v0.23", em: "fixes 3 CVEs", v: "EPSS 0.31", tone: "blue" },
-    { k: "SLA", em: "critical 7d · high 30d", v: "2 due this week", tone: "amber" }]) },
-  { code: "GATE", g: "Ship & operate", label: "CI security gate", t: "#06b6c4", icon: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>', title: "CI security gate", blurb: "The same scanners gate every build — Jenkins, GitHub Actions or an in-cluster Job — with severity thresholds and a JUnit report the pipeline renders.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], pv: pvRows("ci-gate · fail-on high", [
-    { k: "secret-scan", em: "no committed secrets", v: "pass", tone: "green" },
-    { k: "iac-scan", em: "clean at fail-on high", v: "pass", tone: "green" },
-    { k: "image-vulns", em: "1 critical · CVE-2024-3094", v: "fail", tone: "red" },
-    { k: "sbom-attest", em: "no artifact provided", v: "skip", tone: "amber" }]) },
+  { code: "COLLECT", g: "See & prioritize", label: "Agentless collection", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>', title: "Agentless AWS collection", blurb: "Regional metadata collectors use a customer-owned IAM role and temporary STS credentials. Supported assets populate after a complete run; uncovered or failed sources remain explicit.", points: ["Customer-owned role via STS", "No agents · no stored access keys", "Complete snapshots normalized into one CMDB"], pv: PV_INVENTORY },
+  { code: "GRAPH", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Collected cloud, Kubernetes, identity, and network relationships share one model, with observation-backed edges and explicit missing evidence.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click an observed edge to see its evidence"], pv: PV_GRAPH },
+  { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Prioritize collected vulnerability and exposure evidence when the required network, workload, and scanner sources are available.", points: ["Toxic-combination detection", "Reachability from configured network sources", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", []) },
+  { code: "CIEM", label: "Effective permissions", t: "#8b5cf6", icon: '<circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/>', title: "Effective permissions", blurb: "Resolve collected Kubernetes RBAC and follow configured IRSA or EKS Pod Identity links into AWS.", points: ["In-cluster RBAC solver", "IRSA + Pod Identity → AWS reach", "Flags: secrets, exec, unused SA"], pv: pvRows("effective permissions", []) },
+  { code: "EXPOSE", label: "Network exposure", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/>', title: "Network exposure & port filtering", blurb: "Evaluate gateway routes, NACL port filters, load-balancer targets, and DNS entry points from collected AWS evidence.", points: ["Hop-by-hop reachability, each hop cited", "Open vs NACL-filtered ports", "Missing evidence → honest unknown"], pv: pvRows("network exposure", []) },
+  { code: "PATCH", label: "Patch plans", t: "#f0842e", icon: '<rect x="4" y="4" width="7" height="7" rx="1.4"/><rect x="13" y="13" width="7" height="7" rx="1.4"/><path d="M11 7.5h5.5v5.5"/>', title: "Patch plans, not CVE lists", blurb: "Translate imported vulnerability evidence into reviewed package and image upgrade plans, ranked by the enrichment sources that are configured.", points: ["One upgrade per package + image", "KEV & EPSS-aware priority", "SLA due dates per severity"], pv: pvRows("patch plans", []) },
+  { code: "GATE", g: "Ship & operate", label: "CI security gate", t: "#06b6c4", icon: '<path d="M12 3 20 6v6c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V6z"/><path d="m9 12 2 2 4-4"/>', title: "CI security gate", blurb: "Configured Jenkins, GitHub Actions, or in-cluster jobs can apply severity thresholds and publish machine-readable results.", points: ["Jenkins + Kubernetes + Actions", "Severity fail-on thresholds", "Skips reported, never silent passes"], pv: pvRows("CI gate", []) },
   { code: "TRENDS", label: "Posture trends", t: "#34d399", icon: '<path d="M4 19V5M4 19h16"/><path d="m7 14 3-3 3 2 4-5"/>', title: "Posture trends & scorecard", blurb: "A per-customer security score over time with regression detection and a resell-ready export — the report an MSP hands over.", points: ["Score per customer over time", "Automatic regression detection", "Exportable MSP scorecard"], pv: PV_TRENDS },
-  { code: "DRIFT", label: "Drift & new CVEs", t: "#f0842e", icon: '<path d="M8 3H4v4M4 3l6 6M16 21h4v-4M20 21l-6-6"/>', title: "Drift & new-CVE detection", blurb: "Catch a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan.", points: ["Live spec vs. admitted spec diff", "New-CVE delta between scans", "Severity-ranked, cited to the change"], pv: pvRows("drift · since last scan", [
-    { dot: "#fbbf24", k: "replicas", em: "3 → 5", v: "drift", tone: "amber" },
-    { dot: "#fbbf24", k: "image tag", em: ":1.4.2 → :latest", v: "drift", tone: "amber" },
-    { dot: "#fb7185", k: "batch-runner", em: "gained CVE-2024-3094", v: "new CVE", tone: "red" },
-    { dot: "#34d399", k: "api-gateway", em: "matches admitted spec · digest pinned", v: "in sync", tone: "green" }]) },
+  { code: "DRIFT", label: "Drift & new CVEs", t: "#f0842e", icon: '<path d="M8 3H4v4M4 3l6 6M16 21h4v-4M20 21l-6-6"/>', title: "Drift & new-CVE detection", blurb: "Compare collected workload state with an admitted specification, or compare imported image evidence between scans.", points: ["Collected spec vs. admitted spec diff", "New-CVE delta between scans", "Severity-ranked, cited to the change"], pv: pvRows("drift and new CVEs", []) },
   { code: "FIX", label: "Guided remediation", t: "#06b6c4", icon: '<path d="M14.5 6.5a3.5 3.5 0 0 1-4.6 4.6L4 17l3 3 5.9-5.9a3.5 3.5 0 0 1 4.6-4.6l-2.2 2.2-2-2z"/>', title: "Guided remediation", blurb: "Generate the exact Kyverno policy or kubectl patch that fixes an issue — a reviewed suggestion, never an automatic change.", points: ["Kyverno policy or kubectl patch", "Scoped to the specific finding", "You review and apply — never auto"], pv: PV_FIX },
-  { code: "RUNTIME", label: "Runtime detection", t: "#fb7185", icon: '<path d="M3 12h4l2 6 4-14 2 8h6"/>', title: "Runtime detection", blurb: "Signed, replay-resistant Falco events with Kubernetes context, human-confirmed cases and durable notification delivery.", points: ["Signed, replay-resistant events", "Full pod and workload context", "Human-confirmed cases + alerting"], pv: pvRows("runtime · falco events", [
-    { dot: "#fb7185", k: "Shell spawned in container", em: "api-gateway · pod-7f9", v: "signed", tone: "red" },
-    { dot: "#fbbf24", k: "Unexpected outbound connection", em: "batch-runner → 185.x", v: "case open", tone: "amber" },
-    { dot: "#fb7185", k: "Sensitive file read", em: "/etc/shadow", v: "signed", tone: "red" }]) },
-  { code: "COMPLY", label: "Readiness mappings", t: "#34d399", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h6"/>', title: "Readiness mappings", blurb: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", points: ["CIS, NSA/CISA, SOC 2 mappings", "Every control cited to evidence", "Honest readiness, not a pass stamp"], pv: '<div class="lx-pv"><div class="lx-pv-bar"><i></i><i></i><i></i><span>readiness · cited to evidence</span></div><div class="lx-pv-body"><div class="lx-pv-bars"><div class="lx-pv-barrow"><span>CIS Kubernetes</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:78%"></span></span><em>78%</em></div><div class="lx-pv-barrow"><span>NSA / CISA</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:84%"></span></span><em>84%</em></div><div class="lx-pv-barrow"><span>SOC 2 (CC)</span><span class="lx-pv-track"><span class="lx-pv-fill" style="width:71%"></span></span><em>71%</em></div></div></div></div>' },
-  { code: "VULN", g: "Manage & prove", label: "Vulnerability management", t: "#fb7185", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5h.01"/><path d="M5.5 5.5 3 3M18.5 5.5 21 3M5.5 18.5 3 21M18.5 18.5 21 21"/>', title: "Vulnerability management, unified", blurb: "One queue for cluster, cloud and container-registry CVEs — Trivy scans registry images, AWS Inspector findings arrive in the same view, all enriched from a local EPSS + KEV mirror (~349k CVEs), with SLA tracking and a waiver workflow.", points: ["EPSS + KEV mirror, refreshed locally", "Registry image scanning (Trivy) + AWS Inspector, one queue", "Waivers with owner, reason & expiry"], pv: pvRows("vuln-queue · unified", [
-    { dot: "#fb7185", k: "CVE-2024-3094 · xz-utils", em: "KEV · reachable · running", v: "act now", tone: "red" },
-    { dot: "#fbbf24", k: "registry.acme/app@sha256:… · openssl", em: "Trivy image scan", v: "registry", tone: "amber" },
-    { dot: "#fbbf24", k: "CVE-2023-44487 · http/2", em: "EPSS 0.71 · Inspector", v: "high", tone: "amber" },
-    { k: "CVE-2022-40897 · setuptools", em: "waived · expires 2026-09-01", v: "waived", tone: "blue" },
-    { k: "349,204 CVEs mirrored", em: "EPSS + KEV · nightly", v: "local DB", tone: "green" }]) },
-  { code: "SUPPLY", label: "Supply-chain trust", t: "#8b5cf6", icon: '<path d="M7 8a4 4 0 1 1 4 4H8a4 4 0 0 1-1-8z"/><path d="M17 16a4 4 0 1 1-4-4h3a4 4 0 0 1 1 8z"/>', title: "Supply-chain verification", blurb: "Cosign signatures, SLSA provenance and VEX statements verified per image — plus SBOM diffing between builds so a new dependency never slips in silently.", points: ["Cosign signature verification", "SLSA provenance & VEX statements", "SBOM diff between releases"], pv: pvRows("supply-chain · per image", [
-    { dot: "#34d399", k: "api-gateway:1.4.2", em: "cosign verified · SLSA L2", v: "trusted", tone: "green" },
-    { dot: "#fb7185", k: "batch-runner:latest", em: "unsigned image", v: "untrusted", tone: "red" },
-    { k: "SBOM diff 1.4.1 → 1.4.2", em: "+2 deps · 1 flagged", v: "review", tone: "amber" },
-    { k: "CVE-2024-3094", em: "VEX: not_affected (vendor)", v: "VEX", tone: "violet" }]) },
-  { code: "IAC", label: "IaC & admission", t: "#f0842e", icon: '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/><path d="m10 9-2 3 2 3M14 9l2 3-2 3"/>', title: "IaC & admission misconfiguration", blurb: "The same policy set scans Terraform and Kubernetes manifests in CI and enforces at admission with Kyverno — one source of truth from commit to cluster.", points: ["Terraform + manifest scanning", "Kyverno admission enforcement", "Same policies in CI and cluster"], pv: pvRows("iac-scan · fail-on high", [
-    { dot: "#fb7185", k: "aws_s3_bucket.exports", em: "public-read ACL", v: "fail", tone: "red" },
-    { dot: "#fbbf24", k: "Deployment/batch-runner", em: "privileged: true", v: "warn", tone: "amber" },
-    { dot: "#34d399", k: "admission · disallow-privileged", em: "blocked at deploy", v: "enforced", tone: "green" }]) },
-  { code: "NETPOL", label: "NetworkPolicy generator", t: "#22d3ee", icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/>', title: "Least-privilege NetworkPolicies", blurb: "Generate NetworkPolicies from observed Hubble flows — allow exactly what the workload actually talks to, deny the rest, and review before applying.", points: ["Built from observed flows", "Default-deny with explicit allows", "Reviewed before apply — never auto"], pv: pvRows("networkpolicy · generated", [
-    { dot: "#34d399", k: "allow api-gateway → payments :8443", em: "12,405 flows observed", v: "allow", tone: "green" },
-    { dot: "#34d399", k: "allow api-gateway → dns :53", em: "kube-dns", v: "allow", tone: "green" },
-    { dot: "#fb7185", k: "everything else", em: "default", v: "deny", tone: "red" },
-    { k: "policy.yaml", em: "ready for review", v: "generated", tone: "blue" }]) },
-  { code: "TENANCY", label: "MSP multi-tenancy", t: "#34d399", icon: '<circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.4a3.2 3.2 0 0 1 0 6.1M20.5 20a5.6 5.6 0 0 0-4.2-5.4"/>', title: "MSP multi-tenancy", blurb: "Portfolio roll-up for your team; every customer user sees only their explicitly granted workspaces, accounts, resources and findings — enforced at every layer.", points: ["Cross-customer portfolio view", "Per-customer scoped workspaces", "Isolation enforced at every query"], pv: pvRows("tenancy · scoped access", [
-    { dot: "#22d3ee", k: "MSP operator", em: "sees all customers", v: "portfolio", tone: "blue" },
-    { dot: "#8b5cf6", k: "northstar-admin", em: "Northstar workspace only", v: "scoped", tone: "violet" },
-    { dot: "#8b5cf6", k: "bluepeak-viewer", em: "read-only · Bluepeak", v: "scoped", tone: "violet" },
-    { k: "cross-tenant access attempts", em: "denied + audited", v: "0 allowed", tone: "green" }]) },
-  { code: "ALERTS", label: "Ticketing & alerting", t: "#06b6c4", icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', title: "Ticketing & alerting", blurb: "Findings route to the tools you already run — generic webhooks for Jira or ServiceNow, Slack notifications, with durable delivery and human-confirmed cases.", points: ["Generic webhook (Jira / ServiceNow)", "Durable, retried delivery", "Human-confirmed case workflow"], pv: pvRows("notifications · delivery", [
-    { dot: "#34d399", k: "Critical issue → Jira SEC-142", em: "webhook · 201 created", v: "delivered", tone: "green" },
-    { dot: "#34d399", k: "Runtime case → Slack #sec-ops", em: "signed event", v: "delivered", tone: "green" },
-    { dot: "#fbbf24", k: "ServiceNow INC0091", em: "retry 2/5 · backoff", v: "retrying", tone: "amber" }]) },
-  { code: "FINOPS", label: "Cloud cost (FinOps)", t: "#34d399", icon: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2a3 2.4 0 0 0-2.5-1.2c-1.8 0-2.8.9-2.8 1.9 0 1 .9 1.5 2.8 1.9 1.9.4 2.8 1 2.8 2s-1 1.9-2.8 1.9a3 2.4 0 0 1-2.5-1.2"/><path d="M12 6v12"/>', title: "FinOps cost allocation & savings", blurb: "Ingest AWS CUR 2.0 and FOCUS 1.0 billing, allocate spend by tag, account or service, track budgets, flag statistical spend anomalies, and surface commitment and rightsizing candidates — with an explicitly disclosed assumed discount rate, never a guaranteed-savings claim.", points: ["CUR 2.0 / FOCUS 1.0 ingestion + allocation", "Budgets + statistical anomaly signals", "Commitment & rightsizing, disclosed not promised"], pv: pvRows("finops · this period", [
-    { dot: "#fbbf24", k: "Untagged spend", em: "$4,210 unallocated · disclosed", v: "allocate", tone: "amber" },
-    { dot: "#fb7185", k: "EC2 spend spike", em: "3.1x trailing median", v: "anomaly", tone: "red" },
-    { dot: "#34d399", k: "Compute Savings Plan candidate", em: "~20% assumed rate · not a quote", v: "commitment", tone: "green" },
-    { dot: "#93c5fd", k: "Rightsizing candidate", em: "utilization not collected", v: "investigate", tone: "blue" }]) },
-  { code: "API", label: "Public API & SDKs", t: "#3b82f6", icon: '<path d="M8 3H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V16a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V16a2 2 0 0 1-2 2h-1"/>', title: "Public API & typed SDKs", blurb: "A versioned, tenant-scoped REST API at /api/public/v1 with scoped service-account tokens, opaque cursor pagination and idempotent writes — plus a typed OpenAPI spec and hand-written TypeScript and Python client SDKs, so your automation reads resources, findings, cases, vulnerabilities and compliance exactly as the UI does.", points: ["Versioned REST API · scoped tokens", "Typed TS + Python SDKs from OpenAPI", "Cursor pagination · idempotent writes · quotas"], pv: pvRows("public-api · /v1", [
-    { dot: "#34d399", k: "GET /v1/vulnerabilities", em: "scoped token · 200 OK", v: "read", tone: "green" },
-    { dot: "#93c5fd", k: "PATCH /v1/cases/{id}", em: "Idempotency-Key honored", v: "write", tone: "blue" },
-    { dot: "#8b5cf6", k: "@sutra/sdk · sutra (PyPI)", em: "generated from OpenAPI", v: "SDK", tone: "violet" },
-    { dot: "#fbbf24", k: "120 requests / minute / token", em: "quota enforced", v: "limit", tone: "amber" }]) },
+  { code: "RUNTIME", label: "Runtime detection", t: "#fb7185", icon: '<path d="M3 12h4l2 6 4-14 2 8h6"/>', title: "Runtime detection", blurb: "When a Falco source is configured, signed replay-resistant events can be correlated with collected Kubernetes context and cases.", points: ["Signed, replay-resistant events", "Full pod and workload context", "Human-confirmed cases + alerting"], pv: pvRows("runtime events", []) },
+  { code: "COMPLY", label: "Readiness mappings", t: "#34d399", icon: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 9 2 2 4-4M8 15h6"/>', title: "Readiness mappings", blurb: "CIS Kubernetes, NSA/CISA and SOC 2 readiness mapped to cited evidence — a readiness view, never a certification claim.", points: ["CIS, NSA/CISA, SOC 2 mappings", "Every evaluated control cites evidence", "Honest readiness, not a pass stamp"], pv: pvRows("readiness mappings", []) },
+  { code: "VULN", g: "Manage & prove", label: "Vulnerability management", t: "#fb7185", icon: '<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5h.01"/><path d="M5.5 5.5 3 3M18.5 5.5 21 3M5.5 18.5 3 21M18.5 18.5 21 21"/>', title: "Vulnerability management, unified", blurb: "Unify imported Kubernetes, registry, and AWS Inspector evidence with configured EPSS and KEV enrichment, SLA tracking, and waiver workflows.", points: ["EPSS + KEV enrichment", "Registry and AWS Inspector inputs in one queue", "Waivers with owner, reason & expiry"], pv: pvRows("vulnerability management", []) },
+  { code: "SUPPLY", label: "Supply-chain trust", t: "#8b5cf6", icon: '<path d="M7 8a4 4 0 1 1 4 4H8a4 4 0 0 1-1-8z"/><path d="M17 16a4 4 0 1 1-4-4h3a4 4 0 0 1 1 8z"/>', title: "Supply-chain verification", blurb: "Verify supplied Cosign signatures, SLSA provenance, VEX statements, and SBOMs for enrolled image sources.", points: ["Cosign signature verification", "SLSA provenance & VEX statements", "SBOM diff between releases"], pv: pvRows("supply-chain verification", []) },
+  { code: "IAC", label: "IaC & admission", t: "#f0842e", icon: '<path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/><path d="m10 9-2 3 2 3M14 9l2 3-2 3"/>', title: "IaC & admission misconfiguration", blurb: "Apply the policy set to supplied Terraform and Kubernetes manifests; Kyverno enforcement requires its own cluster configuration.", points: ["Terraform + manifest scanning", "Kyverno admission enforcement", "Same policies in CI and cluster"], pv: pvRows("IaC and admission", []) },
+  { code: "NETPOL", label: "NetworkPolicy generator", t: "#22d3ee", icon: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/>', title: "Least-privilege NetworkPolicies", blurb: "Generate reviewed NetworkPolicy suggestions after a Hubble flow source has supplied observed communication evidence.", points: ["Built from observed flows", "Default-deny with explicit allows", "Reviewed before apply — never auto"], pv: pvRows("NetworkPolicy generation", []) },
+  { code: "TENANCY", label: "MSP multi-tenancy", t: "#34d399", icon: '<circle cx="9" cy="8" r="3"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0"/><path d="M16 6.4a3.2 3.2 0 0 1 0 6.1M20.5 20a5.6 5.6 0 0 0-4.2-5.4"/>', title: "MSP multi-tenancy", blurb: "Portfolio access for MSP operators and explicitly granted customer workspaces, enforced by server-side tenant scope.", points: ["Cross-customer portfolio for authorized operators", "Per-customer scoped workspaces", "Isolation enforced at every query"], pv: pvRows("tenant-scoped access", []) },
+  { code: "ALERTS", label: "Ticketing & alerting", t: "#06b6c4", icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>', title: "Ticketing & alerting", blurb: "Configured destinations can receive findings through durable delivery; missing or failing destinations never report success.", points: ["Email, chat, webhook and incident destinations", "Durable, retried delivery", "Human-confirmed case workflow"], pv: pvRows("notification delivery", []) },
+  { code: "FINOPS", label: "Cloud cost (FinOps)", t: "#34d399", icon: '<circle cx="12" cy="12" r="9"/><path d="M14.5 9.2a3 2.4 0 0 0-2.5-1.2c-1.8 0-2.8.9-2.8 1.9 0 1 .9 1.5 2.8 1.9 1.9.4 2.8 1 2.8 2s-1 1.9-2.8 1.9a3 2.4 0 0 1-2.5-1.2"/><path d="M12 6v12"/>', title: "FinOps cost allocation & savings", blurb: "When billing evidence is enabled, allocate AWS spend, track budgets, evaluate anomalies, and review commitment or rightsizing candidates without guaranteed-savings claims.", points: ["Cost Explorer plus optional CUR allocation", "Budgets + statistical anomaly signals", "Commitment & rightsizing, disclosed not promised"], pv: pvRows("FinOps evidence", []) },
+  { code: "API", label: "Public API & SDKs", t: "#3b82f6", icon: '<path d="M8 3H7a2 2 0 0 0-2 2v3.5a2 2 0 0 1-2 2 2 2 0 0 1 2 2V16a2 2 0 0 0 2 2h1M16 3h1a2 2 0 0 1 2 2v3.5a2 2 0 0 0 2 2 2 2 0 0 0-2 2V16a2 2 0 0 1-2 2h-1"/>', title: "Public API & typed SDKs", blurb: "A versioned, tenant-scoped REST API with scoped service-account tokens, cursor pagination, idempotent writes, and published client contracts.", points: ["Versioned REST API · scoped tokens", "Typed TypeScript and Python clients", "Cursor pagination · idempotent writes · quotas"], pv: pvRows("public API", []) },
 ];
+
+const CAPABILITY_READINESS: Readonly<Record<string, string>> = {
+  COLLECT: "Live after AWS connection",
+  GRAPH: "Live after collection",
+  ISSUES: "Live when evidence exists",
+  CIEM: "Live after Kubernetes enrollment",
+  EXPOSE: "Live after collection",
+  PATCH: "Live when vulnerability sources are connected",
+  GATE: "Operator configured",
+  TRENDS: "Live after collection history exists",
+  DRIFT: "Live after Kubernetes enrollment",
+  FIX: "Live for supported evidence-backed findings",
+  RUNTIME: "Operator configured",
+  COMPLY: "Live when control evidence exists",
+  VULN: "Live when sources are connected",
+  SUPPLY: "Operator configured",
+  IAC: "Live after an IaC source is supplied",
+  NETPOL: "Operator configured",
+  TENANCY: "Live",
+  ALERTS: "Operator configured",
+  FINOPS: "Live when billing evidence is enabled",
+  API: "Live",
+};
 
 const MARQUEE = ["Amazon EKS", "AWS IAM & IRSA", "EKS Pod Identity", "Trivy Operator", "Falco runtime", "Kyverno admission", "Cilium · Hubble", "Amazon GuardDuty", "Security Hub", "Amazon Inspector", "SBOM & signing", "Kubernetes RBAC", "CIS Benchmarks", "KEV · EPSS", "Jenkins & GitOps gates", "Route tables & NACLs"];
 
 type Panel = { name: string; icon: string; h3: string; lead: string; points: string[]; mini: string; chips: string[] };
 const PLATFORM: Panel[] = [
-  { name: "cloud", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>', h3: "Cloud CMDB & reachability", lead: "Twenty-two collectors per region build a normalized asset graph, then trace which resources are provably internet-reachable — gateway route, NACL port filter, load-balancer target, DNS entry point.", points: ["Open vs NACL-filtered ports, per resource", "Every hop cited; unknowns disclosed, never guessed"], chips: ["CSPM & CMDB", "Route tables · IGW · NACLs", "ELB target membership", "DNS entry points", "Universal CMDB · blast-radius", "Cloud cost · FinOps allocation", "Report builder · CSV / PDF", "Public API v1 & typed SDKs"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M42 176 C 110 176 122 118 192 116 M192 116 C 262 114 282 64 352 62" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="42" cy="176" r="12"/><text x="42" y="200" text-anchor="middle">igw</text></g><g class="gn" style="opacity:1"><circle cx="192" cy="116" r="13"/><text x="192" y="140" text-anchor="middle" fill="#f4f7ff">subnet</text></g><g class="gn acc" style="opacity:1"><circle cx="352" cy="62" r="12"/><text x="352" y="86" text-anchor="middle">sg :443</text></g></svg>' },
-  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "KSPM over admitted specs, workload & image drift, SBOM findings and signed Falco runtime events — correlated onto the same workloads, not a separate console.", points: ["Live spec vs admitted-spec drift", "Runtime-informed prioritization (KEV · EPSS · reachable)"], chips: ["KSPM over admitted specs", "Workload & image drift", "SBOM & new-CVE delta", "Signed Falco runtime", "Unified vuln mgmt · EPSS · KEV", "Patch plans · generate-only", "Metric alerting · Jira / ServiceNow"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">drift</text></g></svg>' },
+  { name: "cloud", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8.5"/><path d="M3.5 12h17"/><path d="M12 3.5a14 14 0 0 1 0 17 14 14 0 0 1 0-17Z"/></svg>', h3: "Cloud CMDB & reachability", lead: "Connected regional collectors build a normalized asset graph and evaluate internet reachability from collected routes, NACLs, load-balancer targets, and DNS evidence.", points: ["Open vs NACL-filtered ports, per resource", "Every observed hop cited; missing inputs stay unknown"], chips: ["CSPM & CMDB", "Route tables · IGW · NACLs", "ELB target membership", "DNS entry points", "Universal CMDB · blast-radius", "Cloud cost · FinOps allocation", "Report builder · CSV / PDF", "Public API v1 & typed SDKs"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M42 176 C 110 176 122 118 192 116 M192 116 C 262 114 282 64 352 62" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="42" cy="176" r="12"/><text x="42" y="200" text-anchor="middle">gateway</text></g><g class="gn" style="opacity:1"><circle cx="192" cy="116" r="13"/><text x="192" y="140" text-anchor="middle" fill="#f4f7ff">network</text></g><g class="gn acc" style="opacity:1"><circle cx="352" cy="62" r="12"/><text x="352" y="86" text-anchor="middle">policy</text></g></svg>' },
+  { name: "k8s", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.2"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.2"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.2"/></svg>', h3: "Kubernetes posture & runtime", lead: "After enrollment, admitted specs, workload and image drift, SBOM evidence, and configured Falco events can correlate onto collected workloads.", points: ["Collected spec vs admitted-spec drift", "Runtime-informed priority when the required sources exist"], chips: ["KSPM over admitted specs", "Workload & image drift", "SBOM & new-CVE delta", "Signed Falco runtime", "Unified vuln mgmt · EPSS · KEV", "Patch plans · generate-only", "Configured metric alerting"], mini: '<svg viewBox="0 0 400 232"><g class="gn" style="opacity:1"><rect x="150" y="84" width="100" height="60" rx="11" stroke="#3b82f6" stroke-width="1.7"/><text x="200" y="118" text-anchor="middle" fill="#f4f7ff">workload</text></g><g class="gn crit" style="opacity:1"><circle cx="304" cy="66" r="10"/><text x="304" y="50" text-anchor="middle" fill="#fb7185">evidence</text></g></svg>' },
   { name: "id", icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/></svg>', h3: "Cross-plane effective permissions", lead: "Kubernetes RBAC unioned with IRSA and EKS Pod Identity into one answer: what can this pod actually do — in the cluster and in the AWS account?", points: ["RBAC ∪ IRSA ∪ Pod Identity → AWS reach", "Unused & default-ServiceAccount flags"], chips: ["In-cluster RBAC solver", "IRSA & EKS Pod Identity", "AWS-reach verdicts", "Unused-SA flags"], mini: '<svg viewBox="0 0 400 232"><path class="gl" d="M68 116 H 184 M216 116 H 332" stroke="#3b82f6"/><g class="gn" style="opacity:1"><circle cx="55" cy="116" r="13"/><text x="55" y="140" text-anchor="middle">pod</text></g><g class="gn acc" style="opacity:1"><circle cx="200" cy="116" r="13"/><text x="200" y="140" text-anchor="middle">SA</text></g><g class="gn" style="opacity:1"><circle cx="345" cy="116" r="13"/><text x="345" y="140" text-anchor="middle">IAM</text></g></svg>' },
 ];
 
@@ -201,20 +144,13 @@ const LAYERS = [
   { n: "04", h: "MSP control plane", p: "Role-aware dashboards, findings, audit history and customer access operate without exposing AWS credentials." },
 ];
 
-/* ------------------------------------------------------------------ *
- * Pricing. `monthly` is the list price in USD per month, per connected
- * workspace/account scope. Annual billing bills 10 months for 12 (two
- * months free ≈ 17% off), computed in the renderer. A tier with no
- * `monthly` is custom/enterprise ("Contact us"). Feature bullets are
- * drawn only from capabilities that already ship on this page (see CAPS
- * / PLATFORM above); any numeric limit is explicitly marked "example".
- * ------------------------------------------------------------------ */
-type Tier = { name: string; tagline: string; monthly?: number; cta: string; ctaHref: string; feat?: boolean; lead: string; points: string[]; eg: string };
+/* Commercial packaging is scoped with each customer. Public cards describe
+ * the product boundary, not a finalized rate card or contractual limit. */
+type Tier = { name: string; tagline: string; cta: string; ctaHref: string; feat?: boolean; lead: string; points: string[]; eg: string };
 const TIERS: Tier[] = [
   {
     name: "Starter",
     tagline: "Single-account posture, proven from day one",
-    monthly: 15,
     cta: "Book a walkthrough",
     ctaHref: "/contact",
     lead: "Agentless collection and the evidence graph for a small AWS + EKS footprint.",
@@ -225,12 +161,11 @@ const TIERS: Tier[] = [
       "Readiness mappings — CIS, NSA/CISA, SOC 2 (CC)",
       "Email & webhook alerting",
     ],
-    eg: "Example scope: up to 3 connected AWS accounts",
+    eg: "Workspace scope and commercial terms are confirmed during review",
   },
   {
     name: "Growth",
     tagline: "The full CNAPP + FinOps operations suite",
-    monthly: 30,
     cta: "Book a walkthrough",
     ctaHref: "/contact",
     feat: true,
@@ -243,7 +178,7 @@ const TIERS: Tier[] = [
       "Supply-chain trust, IaC scanning & CI security gate",
       "Ticketing — Jira / ServiceNow webhooks & Slack",
     ],
-    eg: "Example scope: up to 15 connected AWS accounts",
+    eg: "Source readiness and commercial terms are confirmed during review",
   },
   {
     name: "Portfolio",
@@ -258,18 +193,12 @@ const TIERS: Tier[] = [
       "Per-customer posture trends & resell-ready scorecards",
       "Isolation enforced at every query, cross-tenant access audited",
     ],
-    eg: "Example scope: unlimited customers, priced per workspace",
+    eg: "Portfolio scope and commercial terms are confirmed during review",
   },
 ];
 
-/* Annual billing = 10 months billed for 12 (two months free). */
-function annualTotal(monthly: number): number {
-  return monthly * 10;
-}
-
-/* Trust content. NO customer claims — no logos, quotes or testimonials, because
- * Sutra has no customers to cite yet and will not invent social proof. The badge
- * row and FAQ state only what is truthfully accurate about the product today. */
+/* Trust content. No unsupported customer claims, logos, quotes, or
+ * testimonials. The badge row and FAQ describe product boundaries only. */
 const TRUST_BADGES = [
   "SOC 2 readiness mapping — not a certification",
   "Read-only by default, customer-owned access",
@@ -315,7 +244,8 @@ function Plus() {
  * THE LOGIC (mirrored from the reference, not its words): the OUTER ring is
  * the three *planes* Sutra collects from — cloud, Kubernetes, identity — and
  * the INNER ring is the five *functions* that apply across all three. Every
- * one is a shipped capability; nothing here is aspirational.
+ * Readiness still depends on the source boundary described in the capability
+ * explorer and the platform coverage page.
  *
  * GEOMETRY — measured, not eyeballed. The wheel is a 420x440 viewBox with
  * centre (210,210). The segment band is `stroke-width: 44` on an r=150 arc,
@@ -545,30 +475,12 @@ function Statements() {
   );
 }
 
-/* Wiz-style typewriter: "Yes, Sutra works with <tool>|" */
-const TOOLS = ["Trivy Operator", "Falco", "Kyverno", "GuardDuty", "Security Hub", "Inspector", "Jenkins", "GitHub Actions", "Cilium · Hubble"];
 function TypeLine() {
-  const [txt, setTxt] = useState("");
-  useEffect(() => {
-    let w = 0, i = 0, del = false;
-    let t: ReturnType<typeof setTimeout>;
-    const tick = () => {
-      const word = TOOLS[w];
-      if (!del) {
-        i++;
-        setTxt(word.slice(0, i));
-        if (i === word.length) { del = true; t = setTimeout(tick, 1500); return; }
-      } else {
-        i--;
-        setTxt(word.slice(0, i));
-        if (i === 0) { del = false; w = (w + 1) % TOOLS.length; }
-      }
-      t = setTimeout(tick, del ? 32 : 72);
-    };
-    t = setTimeout(tick, 500);
-    return () => clearTimeout(t);
-  }, []);
-  return <p className="twr">Yes, Sutra works with <span className="twr-word">{txt}</span><span className="twr-caret" /></p>;
+  return (
+    <p className="twr">
+      Optional engines and destinations show <span className="twr-word">configured readiness</span> before they process evidence.
+    </p>
+  );
 }
 
 function FeatureExplorer() {
@@ -596,7 +508,7 @@ function FeatureExplorer() {
         ))}
       </div>
       <div className="ex-panel" key={sel} style={{ "--t": c.t } as React.CSSProperties}>
-        <div className="code">{c.code}</div>
+        <div className="code">{c.code} · {CAPABILITY_READINESS[c.code] ?? "Configuration dependent"}</div>
         <h3>{c.title}</h3>
         <p className="blurb">{c.blurb}</p>
         <ul className="ex-points">
@@ -813,38 +725,11 @@ export default function LandingZone() {
     );
     root.querySelectorAll(".rise").forEach((el) => io.observe(el));
 
-    /* ---- count-up stats ---- */
-    const cio = new IntersectionObserver(
-      (es) =>
-        es.forEach((e) => {
-          if (!e.isIntersecting) return;
-          cio.unobserve(e.target);
-          const el = e.target as HTMLElement;
-          const target = Number(el.getAttribute("data-n"));
-          const suffix = el.getAttribute("data-suffix") || "";
-          const node = el.firstChild;
-          if (!node) return;
-          if (reduce) { node.nodeValue = target + suffix; return; }
-          let t0: number | null = null;
-          const dur = 1100;
-          const step = (ts: number) => {
-            if (t0 === null) t0 = ts;
-            const k = Math.min(1, (ts - t0) / dur);
-            node.nodeValue = Math.round((1 - Math.pow(1 - k, 3)) * target) + suffix;
-            if (k < 1) requestAnimationFrame(step);
-          };
-          requestAnimationFrame(step);
-        }),
-      { threshold: 0.5 }
-    );
-    root.querySelectorAll(".stats .n").forEach((el) => cio.observe(el));
-
     return () => {
       if (raf) cancelAnimationFrame(raf);
       if (onResize) window.removeEventListener("resize", onResize);
       if (onThemeChange) window.removeEventListener(THEME_CHANGED_EVENT, onThemeChange);
       io.disconnect();
-      cio.disconnect();
     };
   }, []);
 
@@ -914,7 +799,7 @@ export default function LandingZone() {
             <span className="lx-kicker-short">Cloud ops for AWS MSPs</span>
           </span>
           <h1>See every risk.<br /><span className="accent">Prove every path.</span></h1>
-          <p>One platform for AWS and Amazon EKS operations — a live CMDB and asset inventory, reachability-proven security, cloud cost (FinOps), compliance readiness, and a tenant-scoped API — woven into a single evidence graph. Sutra surfaces the few risks that are provably reachable and cites the exact observation behind every finding.</p>
+          <p>One platform for AWS and Amazon EKS operations — connected inventory, evidence-backed reachability, cloud cost, compliance readiness, and tenant-scoped APIs woven into a single graph. Each workspace populates only after its required AWS, Kubernetes, billing, scanner, or destination source is connected.</p>
           <div className="hero-cta">
             <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
             <a className="btn" href="#trust">Review the trust model</a>
@@ -923,7 +808,7 @@ export default function LandingZone() {
         </div>
         <div className="lx-hero-stage">
           <div className="card">
-            <div className="card-bar"><i /><i /><i /><span>security-graph · live</span></div>
+            <div className="card-bar"><i /><i /><i /><span>security graph · evidence model</span></div>
             <div
               className="graph"
               dangerouslySetInnerHTML={{
@@ -939,14 +824,14 @@ export default function LandingZone() {
                   '<circle class="gpk k3" r="2.9" style="offset-path:path(\'M200 146 C 262 152 276 208 350 214\')"/>' +
                   '<circle class="gpk alert" r="3.4" style="offset-path:path(\'M200 146 C 226 110 268 100 314 112\')"/>' +
                   "</g>" +
-                  '<g class="gn" style="animation-delay:.15s"><circle cx="50" cy="214" r="13"/><text x="50" y="240" text-anchor="middle">internet</text></g>' +
-                  '<g class="gn" style="animation-delay:.5s"><circle cx="200" cy="146" r="15"/><text x="200" y="174" text-anchor="middle" fill="#f4f7ff">api-gateway</text></g>' +
-                  '<g class="gn acc" style="animation-delay:.85s"><circle cx="344" cy="62" r="13"/><text x="344" y="88" text-anchor="middle">payments-sa</text></g>' +
-                  '<g class="gn" style="animation-delay:1.05s"><circle cx="350" cy="214" r="13"/><text x="350" y="240" text-anchor="middle">s3://billing</text></g>' +
-                  '<g class="gn crit" style="animation-delay:1.25s"><circle cx="314" cy="112" r="11"/><text x="314" y="96" text-anchor="middle" fill="#fb7185">CVE</text></g></svg>' +
-                  '<span class="gchip c1"><b></b> Internet → api-gateway <em>path confirmed</em></span>' +
-                  '<span class="gchip c2"><b></b> payments-sa → s3:DeleteObject <em>via IRSA</em></span>' +
-                  '<span class="gchip c3"><b></b> 443 open · 8080 filtered <em>by acl-1</em></span>',
+                  '<g class="gn" style="animation-delay:.15s"><circle cx="50" cy="214" r="13"/><text x="50" y="240" text-anchor="middle">entry point</text></g>' +
+                  '<g class="gn" style="animation-delay:.5s"><circle cx="200" cy="146" r="15"/><text x="200" y="174" text-anchor="middle" fill="#f4f7ff">workload</text></g>' +
+                  '<g class="gn acc" style="animation-delay:.85s"><circle cx="344" cy="62" r="13"/><text x="344" y="88" text-anchor="middle">identity</text></g>' +
+                  '<g class="gn" style="animation-delay:1.05s"><circle cx="350" cy="214" r="13"/><text x="350" y="240" text-anchor="middle">data</text></g>' +
+                  '<g class="gn crit" style="animation-delay:1.25s"><circle cx="314" cy="112" r="11"/><text x="314" y="96" text-anchor="middle" fill="#fb7185">risk</text></g></svg>' +
+                  '<span class="gchip c1"><b></b> AWS collection <em>customer-owned role</em></span>' +
+                  '<span class="gchip c2"><b></b> Kubernetes context <em>after enrollment</em></span>' +
+                  '<span class="gchip c3"><b></b> Optional sources <em>explicitly configured</em></span>',
               }}
             />
           </div>
@@ -961,10 +846,10 @@ export default function LandingZone() {
 
       <div className="stats">
         <div className="wrap stats-in">
-          <div><div className="n" data-n="22">0<em>per region</em></div><div className="l">AWS evidence collectors</div></div>
-          <div><div className="n" data-n="5">0<em>frameworks</em></div><div className="l">Compliance readiness mappings</div></div>
-          <div><div className="n" data-n="100" data-suffix="%">0<em>of findings</em></div><div className="l">Cited to collected evidence</div></div>
-          <div><div className="n" data-n="0">0<em>stored</em></div><div className="l">Customer access keys</div></div>
+          <div><div className="n">AWS<em>live after connection</em></div><div className="l">Customer-owned role and persisted evidence</div></div>
+          <div><div className="n">EKS<em>live after enrollment</em></div><div className="l">Cluster, identity and runtime context</div></div>
+          <div><div className="n">Delivery<em>operator configured</em></div><div className="l">Destinations report their own readiness</div></div>
+          <div><div className="n">Azure · GCP<em>planned</em></div><div className="l">No provider evidence shown before release</div></div>
         </div>
       </div>
 
@@ -983,7 +868,7 @@ export default function LandingZone() {
         </section>
 
         <section className="block" style={{ paddingTop: 0 }} id="capabilities">
-          <div className="intro rise"><span className="sec-kicker">One correlated suite</span><h2>Every other tool floods you with CVEs. Sutra shows what&apos;s reachable.</h2><p className="lead">Cloud, Kubernetes, identity, network, runtime and supply-chain evidence in one graph — and only the risks proven to matter surface first. Every capability below is live in the product.</p></div>
+          <div className="intro rise"><span className="sec-kicker">One correlated suite</span><h2>Prioritize what the available evidence proves.</h2><p className="lead">AWS collection and tenant controls are live; Kubernetes, billing, runtime, scanner, and delivery views activate when their required sources are enrolled or configured. Planned providers stay labelled planned, and unconfigured areas show no sample records.</p></div>
           <div className="rise"><FeatureExplorer /></div>
         </section>
 
@@ -1001,12 +886,12 @@ export default function LandingZone() {
               <div key={r.dim} className="crow"><span className="dim">{r.dim}</span><span className="them">{r.them}</span><span className="sutra"><b>✓</b>{r.sutra}</span></div>
             ))}
           </div>
-          <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Every Sutra behavior above is live in the product.</p>
+          <p className="lx-compare-note">&ldquo;Typical CNAPP&rdquo; describes common industry patterns, not any specific vendor. Sutra behaviors remain subject to the source and readiness boundary shown for each capability.</p>
         </section>
 
         <section className="block" style={{ paddingTop: 0 }} id="pricing">
-          <div className="intro center rise"><span className="sec-kicker">Plans</span><h2>Pricing that scales with your book of business.</h2><p className="lead">Three tiers built around what Sutra already does — collection, the evidence graph, vulnerability management, FinOps, compliance readiness, the API and MSP multi-tenancy.</p></div>
-          <p className="lx-price-note">Simple per-month pricing, billed per connected workspace. Pay yearly and get <strong>two months free</strong> (about 17% off). Feature scopes marked <em>example</em> are illustrative, not fixed limits.</p>
+          <div className="intro center rise"><span className="sec-kicker">Commercial plans</span><h2>Scope the platform to your operating model.</h2><p className="lead">Choose the capability boundary that fits your AWS and EKS portfolio. Final scope, source readiness, service terms, and pricing are confirmed through a commercial review.</p></div>
+          <p className="lx-price-note">Public plan descriptions are capability guides, not a finalized rate card or contractual limit.</p>
           <div className="lx-tiers rise">
             {TIERS.map((t) => (
               <article key={t.name} className={"lx-tier" + (t.feat ? " feat" : "")}>
@@ -1014,9 +899,7 @@ export default function LandingZone() {
                 <h3>{t.name}</h3>
                 <p className="tagline">{t.tagline}</p>
                 <div className="lx-price">
-                  {t.monthly !== undefined
-                    ? <><b>${t.monthly}<span className="lx-price-unit">/mo</span></b><small>or ${annualTotal(t.monthly)}/yr billed annually — two months free</small></>
-                    : <><b>Custom</b><small>volume pricing for the whole book — let&rsquo;s talk</small></>}
+                  <b>Contact</b><small>commercial terms aligned to the approved scope</small>
                 </div>
                 <p className="lx-tier-lead">{t.lead}</p>
                 <ul>
@@ -1053,7 +936,7 @@ export default function LandingZone() {
 
       <div className="wrap">
         <section className="block" id="architecture">
-          <div className="intro rise"><span className="sec-kicker">From account to action</span><h2>A production architecture, not a browser-side AWS script.</h2><p className="lead">Collection, normalization and user access live in deliberately separate trust zones.</p></div>
+          <div className="intro rise"><span className="sec-kicker">From account to action</span><h2>A separated service architecture, not a browser-side AWS script.</h2><p className="lead">Collection, normalization, and user access follow deliberately separate trust boundaries.</p></div>
           <div className="layers-wrap">
             <svg className="ribbon" viewBox="0 0 1200 300" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#22d3ee" /><stop offset=".5" stopColor="#3b82f6" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient></defs><path d="M0 200 C 140 120 260 110 400 165 S 640 250 800 180 S 1060 80 1200 140" /></svg>
             <div className="layers rise">
@@ -1085,7 +968,7 @@ export default function LandingZone() {
 
       <section className="block proof" id="proof">
         <div className="wrap">
-          <div className="intro center rise"><span className="sec-kicker">Security &amp; trust</span><h2>How Sutra works — and what it will never claim.</h2><p className="lead">No customer logos and no quotes: Sutra is early and we will not invent social proof. What we can state plainly is how the product behaves today, and answer the questions teams actually ask.</p></div>
+          <div className="intro center rise"><span className="sec-kicker">Security &amp; trust</span><h2>How Sutra works — and what it will never claim.</h2><p className="lead">Trust statements are grounded in the product&apos;s access, evidence, and isolation boundaries. Unconfigured integrations remain unavailable, and readiness mappings are never presented as certifications.</p></div>
 
           {/* Honest trust posture — no certification the product does not hold. */}
           <div className="lx-badges rise" aria-label="Trust posture">

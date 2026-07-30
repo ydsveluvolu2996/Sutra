@@ -81,7 +81,7 @@ export function useSession(): SessionView {
       return current;
     } catch (caught) {
       setSession(null);
-      setError(caught instanceof Error ? caught.message : "Sutra could not check the local session");
+      setError(caught instanceof Error ? caught.message : "Sutra could not verify the active session");
       return null;
     } finally {
       setLoading(false);
@@ -98,7 +98,7 @@ export function useSession(): SessionView {
       }).catch((caught: unknown) => {
         if (!current) return;
         setSession(null);
-        setError(caught instanceof Error ? caught.message : "Sutra could not check the local session");
+        setError(caught instanceof Error ? caught.message : "Sutra could not verify the active session");
       }).finally(() => {
         if (current) setLoading(false);
       });

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { formatTimestamp } from "../components/use-pilot-state";
+import { formatTimestamp, usePilotState } from "../components/use-pilot-state";
 import { postAuth, useSession } from "../components/use-session";
 import { ApiTokensPanel } from "./api-tokens-panel";
 import { ItsmConnectorsPanel } from "./itsm-connectors-panel";
@@ -14,6 +14,8 @@ function roleLabel(role: string): string {
 
 export function SettingsBrowser() {
   const { session, loading, error, refresh } = useSession();
+  const { state, loading: workspaceLoading, error: workspaceError } = usePilotState();
+  const connectionId = state?.connection?.id ?? null;
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
 
@@ -52,7 +54,7 @@ export function SettingsBrowser() {
             <div><dt>Role</dt><dd>{roleLabel(session.membership.role)}</dd></div>
             <div><dt>Scope</dt><dd>{session.membership.scopeMode.replaceAll("_", " ")}</dd></div>
           </dl>
-          <p className="panel-footnote">Profile identity is managed by your organization&apos;s local authentication and cannot be edited here.</p>
+          <p className="panel-footnote">Profile identity is governed by your organization&apos;s identity policy and cannot be edited here.</p>
         </section>
 
         <section className="panel settings-card">
@@ -93,9 +95,11 @@ export function SettingsBrowser() {
           </div>
         </section>
       </div>
-      <ApiTokensPanel />
-      <ItsmConnectorsPanel />
-      <GovernancePoliciesPanel />
+      {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
+      {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
+      <ApiTokensPanel connectionId={connectionId} />
+      <ItsmConnectorsPanel connectionId={connectionId} />
+      <GovernancePoliciesPanel connectionId={connectionId} />
     </>
   );
 }

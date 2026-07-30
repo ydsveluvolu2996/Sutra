@@ -170,8 +170,8 @@ export function OnboardAccount() {
   const capabilities = new Set(session?.capabilities ?? []);
   const canCreateConnection = capabilities.has("customer:create")
     && capabilities.has("connection:manage");
-  const [customerName, setCustomerName] = useState("Pilot Customer");
-  const [accountId, setAccountId] = useState("123456789012");
+  const [customerName, setCustomerName] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [partition, setPartition] = useState("aws");
   const [regionSelectionMode, setRegionSelectionMode] =
     useState<AwsRegionSelectionMode>(ALL_ENABLED_AWS_REGIONS);
@@ -543,8 +543,8 @@ export function OnboardAccount() {
           ? "AWS connection disabled"
           : "AWS connection disabled; collector cleanup pending",
         message: response.collectorCleanup === "completed"
-          ? "New validation and inventory work is blocked in Sutra and the collector. Encrypted local trust material and CMDB history remain for investigation."
-          : "New Sutra work is blocked now. Start the local collector and use Reconcile collector disable to finish its idempotent cleanup.",
+          ? "New validation and inventory work is blocked in Sutra and the collector. Encrypted trust material and CMDB history remain for investigation."
+          : "New Sutra work is blocked now. Restore the collector service and use Reconcile collector disable to finish its idempotent cleanup.",
       });
       await refresh();
     } catch (caught) {
@@ -580,8 +580,8 @@ export function OnboardAccount() {
           ? "Local AWS trust offboarded"
           : "Local AWS trust offboarded; collector cleanup pending",
         message: response.collectorCleanup === "completed"
-          ? "Sutra and its local collector removed their trust material. CMDB and audit history remain. The customer-owned IAM role is unchanged; delete its CloudFormation stack or remove its trust policy in AWS."
-          : "Sutra removed its control-plane trust material and blocked future work. Start the local collector and reconcile cleanup. The customer-owned IAM role is unchanged and must be revoked separately in AWS.",
+          ? "Sutra and its collector removed their trust material. CMDB and audit history remain. The customer-owned IAM role is unchanged; delete its CloudFormation stack or remove its trust policy in AWS."
+          : "Sutra removed its control-plane trust material and blocked future work. Restore the collector service and reconcile cleanup. The customer-owned IAM role is unchanged and must be revoked separately in AWS.",
       });
       await refresh();
     } catch (caught) {
@@ -608,7 +608,7 @@ export function OnboardAccount() {
             })}
           </div>
 
-          {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the local pilot workspace…</div> : null}
+          {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the AWS workspace…</div> : null}
 
           {!loading && !connection && collectorMode !== "live" ? (
             <div className="onboard-copy"><p className="eyebrow">Local-only safety boundary</p><h2>AWS trust onboarding is disabled</h2><p>The collector is running in deterministic fixture mode, so Sutra will not create a trust-role connection or contact AWS. Use Simulation runs to exercise the durable queue, CMDB, change history, findings, and exports with clearly labelled local evidence.</p><a className="button button-primary" href="/operations">Open Simulation runs</a></div>
@@ -618,7 +618,7 @@ export function OnboardAccount() {
             <>
               <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. A lost response can recover the same actor-bound value only until the customer role is registered.</p></div>
               <form className="onboard-form" onSubmit={createConnection}>
-                <label><span>Customer workspace</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} required /><small>This local pilot supports one customer and one AWS account.</small></label>
+                <label><span>Customer workspace</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" required /><small>Each connection is bound to one approved customer workspace and one AWS account.</small></label>
                 <div className="form-grid">
                   <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                   <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
@@ -714,7 +714,7 @@ export function OnboardAccount() {
                   <li><b>4</b><span><strong>Register the resulting ARN.</strong> Use <code>{customerManagedArtifacts.roleArn}</code>. Sutra re-attests trust and permission drift before every collection.</span></li>
                 </ol>
                 <div className="quick-launch-history-warning"><strong>Handle as a one-time handoff</strong><span>These downloads contain the connection-specific ExternalId. Store them in the customer&apos;s protected infrastructure repository, never in chat or tickets, and delete local copies after deployment if they are not source-controlled securely.</span></div>
-              </section> : createdRoleMode === "customer_managed" && canDisplayInitialExternalId ? <div className="inline-warning" role="alert"><strong>Customer-role artifacts are unavailable.</strong><span>The server-returned trust handoff did not pass local artifact validation. Do not create or reuse a role; recover the handoff or contact the Sutra operator.</span></div> : null}
+              </section> : createdRoleMode === "customer_managed" && canDisplayInitialExternalId ? <div className="inline-warning" role="alert"><strong>Customer-role artifacts are unavailable.</strong><span>The server-returned trust handoff did not pass artifact validation. Do not create or reuse a role; recover the handoff or contact the Sutra operator.</span></div> : null}
 
               {createdRoleMode === "customer_managed" ? <div className="inline-warning"><strong>Unsafe existing roles are rejected.</strong><span>Sutra accepts only the selected <code>/sutra/…/</code> path and role name with one exact trust statement, one reviewed inline permission contract, no attached managed policies, and the expected dedicated-role tags. Broad permissions on any reused role are not considered acceptable.</span></div> : null}
 
@@ -730,14 +730,14 @@ export function OnboardAccount() {
               </div>
 
               <section id="connection-lifecycle" className="connection-lifecycle" aria-labelledby="connection-lifecycle-title">
-                <div><p className="eyebrow">Trust lifecycle</p><h2 id="connection-lifecycle-title">Control or remove collector access</h2><p>These actions never delete CMDB snapshots. Offboarding removes role and ExternalId material from Sutra and asks its local collector to erase its copy. It cannot delete or change the customer-owned IAM role; delete that role&apos;s CloudFormation stack or remove its trust policy separately in AWS.</p></div>
+                <div><p className="eyebrow">Trust lifecycle</p><h2 id="connection-lifecycle-title">Control or remove collector access</h2><p>These actions never delete CMDB snapshots. Offboarding removes role and ExternalId material from Sutra and asks the collector to erase its copy. It cannot delete or change the customer-owned IAM role; delete that role&apos;s CloudFormation stack or remove its trust policy separately in AWS.</p></div>
                 <div className="connection-lifecycle-actions">
                   <span className="status-pill status-medium" title="A safe rotation must stage a new value, verify the customer-side trust change, and prove the previous value is denied before promotion.">Two-phase rotation pending</span>
                   {connectionDisabled ? <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void disableConnection()}>{busy === "disable" ? "Reconciling…" : "Reconcile collector disable"}</button> : !connectionOffboarded ? <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void disableConnection()}>{busy === "disable" ? "Disabling…" : "Disable connection"}</button> : null}
-                  {!connectionOffboarded ? <button className="button button-danger" type="button" disabled={busy !== null} onClick={() => setConfirmingOffboard(true)}>Offboard local trust</button> : <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void offboardConnection(true)}>{busy === "offboard" ? "Reconciling…" : "Reconcile collector offboard"}</button>}
+                  {!connectionOffboarded ? <button className="button button-danger" type="button" disabled={busy !== null} onClick={() => setConfirmingOffboard(true)}>Offboard AWS trust</button> : <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void offboardConnection(true)}>{busy === "offboard" ? "Reconciling…" : "Reconcile collector offboard"}</button>}
                 </div>
-                {!connectionOffboarded ? <div className="inline-warning"><strong>ExternalId rotation is intentionally unavailable.</strong><span>This local release will not overwrite active trust until a two-phase workflow can verify the new customer policy and prove the old value is denied. Offboard and revoke the customer stack if immediate replacement is required.</span></div> : null}
-                {confirmingOffboard && !connectionOffboarded ? <div className="offboard-confirmation" role="group" aria-label="Confirm AWS trust offboarding"><strong>Confirm permanent local trust removal</strong><p>Enter AWS account ID <code>{connection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this local connection cannot be reactivated. This does not revoke the customer IAM role; delete its stack or remove its trust separately in AWS.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== connection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing local trust…" : "Verify & confirm local offboarding"}</button></div></div> : null}
+                {!connectionOffboarded ? <div className="inline-warning"><strong>ExternalId rotation is intentionally unavailable.</strong><span>This deployment will not overwrite active trust until a two-phase workflow can verify the new customer policy and prove the old value is denied. Offboard and revoke the customer stack if immediate replacement is required.</span></div> : null}
+                {confirmingOffboard && !connectionOffboarded ? <div className="offboard-confirmation" role="group" aria-label="Confirm AWS trust offboarding"><strong>Confirm permanent AWS trust removal</strong><p>Enter AWS account ID <code>{connection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this connection cannot be reactivated. This does not revoke the customer IAM role; delete its stack or remove its trust separately in AWS.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== connection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing AWS trust…" : "Verify & confirm offboarding"}</button></div></div> : null}
               </section>
             </>
           ) : null}
@@ -749,7 +749,7 @@ export function OnboardAccount() {
 
         <aside className="onboard-aside">
           <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact collector workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
-          <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Safe fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Fixture mode uses the dedicated Simulation runs workflow and cannot create or synchronize AWS trust connections. Every resulting snapshot is labelled as simulated evidence." : "Start the local collector before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
+          <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Development fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Development fixture mode cannot create or synchronize AWS trust connections. Every resulting snapshot is labelled as simulated evidence." : "Restore the collector service before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
           <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>Collector workload identity</li><li><b>3</b>STS AssumeRole</li><li><b>4</b>Temporary in-memory credentials</li><li><b>5</b>Validated normalized evidence</li></ol></section>
         </aside>
       </div>

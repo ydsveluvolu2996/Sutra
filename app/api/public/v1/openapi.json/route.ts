@@ -177,7 +177,7 @@ const SPEC = {
             type: "object",
             required: ["kind", "fixtureId", "fixtureVersion"],
             properties: {
-              kind: { type: "string", enum: ["unknown", "simulated_fixture", "aws_sandbox"] },
+              kind: { type: "string", enum: ["unknown", "simulated_fixture", "aws_live"] },
               fixtureId: { type: "string", nullable: true },
               fixtureVersion: { type: "string", nullable: true },
             },

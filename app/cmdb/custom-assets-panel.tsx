@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BUILTIN_ASSET_TYPES } from "../../lib/cmdb-custom-assets";
+import { usePilotState } from "../components/use-pilot-state";
 
 /* Custom / external asset management: bring SaaS apps, network devices, and
  * on-prem/non-cloud items into the CMDB as first-class assets via CSV/JSON
@@ -49,6 +50,8 @@ function fieldsSummary(fields: Readonly<Record<string, string>>): string {
 }
 
 export function CustomAssetsPanel() {
+  const { state, loading: workspaceLoading, error: workspaceError } = usePilotState();
+  const connectionId = state?.connection?.id ?? null;
   const [assetType, setAssetType] = useState<string>(BUILTIN_ASSET_TYPES[0]);
   const [format, setFormat] = useState<"csv" | "json">("csv");
   const [importText, setImportText] = useState("");
@@ -66,8 +69,16 @@ export function CustomAssetsPanel() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
 
   const loadAssets = useCallback(async () => {
+    if (connectionId === null) {
+      setAssets([]);
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     try {
-      const payload = await requestJson<{ assets: CustomAsset[] }>("/api/v1/cmdb/custom-assets");
+      const payload = await requestJson<{ assets: CustomAsset[] }>(
+        `/api/v1/cmdb/custom-assets?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setAssets(payload.assets);
       setLoadError(null);
     } catch (caught) {
@@ -76,7 +87,7 @@ export function CustomAssetsPanel() {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => {
     void (async () => {
@@ -93,16 +104,19 @@ export function CustomAssetsPanel() {
   }, [assets, typeFilter]);
 
   async function runImport() {
-    if (importText.trim().length === 0) return;
+    if (connectionId === null || importText.trim().length === 0) return;
     setImporting(true);
     setImportError(null);
     setLastImport(null);
     try {
-      const payload = await requestJson<WriteResponse>("/api/v1/cmdb/custom-assets", {
+      const payload = await requestJson<WriteResponse>(
+        `/api/v1/cmdb/custom-assets?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ format, data: importText, assetType }),
-      });
+        },
+      );
       setLastImport({ imported: payload.imported, rejected: payload.rejected });
       setAssets(payload.assets);
       if (payload.imported > 0) setImportText("");
@@ -114,13 +128,15 @@ export function CustomAssetsPanel() {
   }
 
   async function addAsset() {
-    if (draft.name.trim().length === 0) return;
+    if (connectionId === null || draft.name.trim().length === 0) return;
     setAdding(true);
     setAddError(null);
     try {
       const fields: Record<string, string> = {};
       if (draft.fieldKey.trim().length > 0) fields[draft.fieldKey.trim()] = draft.fieldValue;
-      const payload = await requestJson<WriteResponse>("/api/v1/cmdb/custom-assets", {
+      const payload = await requestJson<WriteResponse>(
+        `/api/v1/cmdb/custom-assets?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -131,7 +147,8 @@ export function CustomAssetsPanel() {
             fields,
           },
         }),
-      });
+        },
+      );
       setAssets(payload.assets);
       setDraft({ name: "", externalId: "", fieldKey: "", fieldValue: "" });
     } catch (caught) {
@@ -142,9 +159,10 @@ export function CustomAssetsPanel() {
   }
 
   async function deleteAsset(id: string) {
+    if (connectionId === null) return;
     try {
       const payload = await requestJson<{ assets: CustomAsset[] }>(
-        `/api/v1/cmdb/custom-assets?id=${encodeURIComponent(id)}`,
+        `/api/v1/cmdb/custom-assets?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
         { method: "DELETE" },
       );
       setAssets(payload.assets);
@@ -159,11 +177,24 @@ export function CustomAssetsPanel() {
 
   return (
     <>
+      <div className="page-heading">
+        <div>
+          <p className="eyebrow">CMDB enrichment</p>
+          <h1>Custom &amp; external assets</h1>
+          <p className="page-subtitle">
+            Add tenant-owned SaaS, network, and on-premises assets alongside read-only AWS evidence.
+            Every record keeps its imported or manual source label.
+          </p>
+        </div>
+      </div>
+      {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
+      {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
+
       <section className="panel" aria-label="Import custom assets">
         <div className="panel-heading">
           <div>
-            <h2>Custom &amp; external assets</h2>
-            <p>Bring SaaS apps, network devices, and on-prem/non-cloud items into the CMDB as first-class assets. These are user-supplied — imported or entered by hand, never discovered from AWS, which stays read-only. Every asset is labeled by its source.</p>
+            <h2>Import assets</h2>
+            <p>Bring SaaS apps, network devices, and on-prem/non-cloud items into the CMDB as first-class assets. These are user-supplied — imported or entered by hand, never discovered from AWS, which stays read-only.</p>
           </div>
         </div>
         <div className="cmdbq-actions">

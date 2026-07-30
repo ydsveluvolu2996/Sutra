@@ -21,10 +21,10 @@ export interface PilotStateView {
 async function readJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => null) as (T & PilotApiErrorBody) | null;
   if (!response.ok) {
-    throw new Error(body?.error?.message ?? "Sutra could not load the pilot workspace");
+    throw new Error(body?.error?.message ?? "Sutra could not load the selected workspace");
   }
   if (body === null) {
-    throw new Error("Sutra received an empty response from the pilot API");
+    throw new Error("Sutra received an empty workspace response");
   }
   return body;
 }
@@ -115,7 +115,7 @@ export function usePilotState(): PilotStateView {
       setHealth(loaded.health);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Sutra could not load the pilot workspace");
+      setError(caught instanceof Error ? caught.message : "Sutra could not load the selected workspace");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -130,7 +130,7 @@ export function usePilotState(): PilotStateView {
       setHealth(loaded.health);
       setError(null);
     }).catch((caught: unknown) => {
-      if (current) setError(caught instanceof Error ? caught.message : "Sutra could not load the pilot workspace");
+      if (current) setError(caught instanceof Error ? caught.message : "Sutra could not load the selected workspace");
     }).finally(() => {
       if (current) setLoading(false);
     });
@@ -166,6 +166,6 @@ export function snapshotOriginLabel(origin: SnapshotOrigin | null | undefined): 
   if (origin?.kind === "simulated_fixture") {
     return `Simulated fixture evidence${origin.fixtureVersion ? ` · ${origin.fixtureVersion}` : ""}`;
   }
-  if (origin?.kind === "aws_sandbox") return "Live AWS evidence";
+  if (origin?.kind === "aws_live") return "Live AWS evidence";
   return "Stored snapshot evidence";
 }

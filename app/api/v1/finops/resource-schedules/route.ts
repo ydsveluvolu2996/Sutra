@@ -1,4 +1,4 @@
-import { getConnectionForOrg, getLatestConnectionForOrg, getPilotStateForOrg } from "../../../../../db/pilot-repository";
+import { getPilotStateForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { ResourceScheduleRepository } from "../../../../../db/finops-resource-schedule-repository";
 import type {
@@ -18,7 +18,7 @@ import {
 import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
 import type { PilotResource } from "../../../../../lib/pilot-types";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -36,28 +36,13 @@ const MAX_EXCLUDED_ROWS = 100;
 const MAX_PLANNED_SCHEDULES = 25;
 
 /**
- * Resolve the tenant scope from the SESSION, never the caller — mirroring
- * app/api/v1/finops/allocation-rules/route.ts. `connectionId` is optional and,
- * when given, is resolved WITHIN the caller's org; otherwise the org's latest
- * connection is used. The capability is asserted against the resolved
- * connection's customer.
+ * Resolve the tenant scope from the explicitly selected connection.
  */
 async function resolveScope(
   request: Request,
   capability: "connection:read" | "connection:manage",
-  connectionId: string | null,
 ) {
-  const authenticated = await requireApiSession(request);
-  const connection = connectionId === null
-    ? await getLatestConnectionForOrg(authenticated.subject.orgId)
-    : await getConnectionForOrg(authenticated.subject.orgId, connectionId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return {
-    authenticated,
-    connection,
-    scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId },
-  };
+  return requireConnectionScope(request, capability);
 }
 
 function badRequest(): never {
@@ -118,14 +103,14 @@ export async function GET(request: Request): Promise<Response> {
     const periodParam = url.searchParams.get("period");
     const tagKeyParam = url.searchParams.get("resourceTagKey");
     if (
-      (connectionIdParam !== null && !CONNECTION_ID.test(connectionIdParam)) ||
+      connectionIdParam === null || !CONNECTION_ID.test(connectionIdParam) ||
       (idParam !== null && !SCHEDULE_ID.test(idParam)) ||
       (periodParam !== null && !BILLING_PERIOD.test(periodParam)) ||
       (tagKeyParam !== null && !RESOURCE_TAG_KEY.test(tagKeyParam))
     ) {
       badRequest();
     }
-    const { connection, scope } = await resolveScope(request, "connection:read", connectionIdParam);
+    const { connection, scope } = await resolveScope(request, "connection:read");
     const repository = new ResourceScheduleRepository();
     const schedules = idParam === null
       ? await repository.list(scope)
@@ -197,7 +182,7 @@ export async function POST(request: Request): Promise<Response> {
     };
     if (typeof name !== "string") badRequest();
     if (enabled !== undefined && typeof enabled !== "boolean") badRequest();
-    const { connection, scope } = await resolveScope(request, "connection:manage", null);
+    const { connection, scope } = await resolveScope(request, "connection:manage");
     const input: ResourceScheduleInput = {
       name,
       schedule: readSchedule(schedule),
@@ -232,7 +217,7 @@ export async function PATCH(request: Request): Promise<Response> {
       selector: selector === undefined ? undefined : readSelector(selector),
       enabled: enabled as boolean | undefined,
     };
-    const { scope } = await resolveScope(request, "connection:manage", null);
+    const { scope } = await resolveScope(request, "connection:manage");
     const repository = new ResourceScheduleRepository();
     const updated = await repository.update(scope, id, patch);
     if (updated === null) throw Object.assign(new Error("Resource schedule not found"), { code: "NOT_FOUND" });
@@ -248,7 +233,7 @@ export async function DELETE(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const id = url.searchParams.get("id") ?? "";
     if (!SCHEDULE_ID.test(id)) badRequest();
-    const { scope } = await resolveScope(request, "connection:manage", null);
+    const { scope } = await resolveScope(request, "connection:manage");
     const repository = new ResourceScheduleRepository();
     const deleted = await repository.delete(scope, id);
     return jsonResponse({ deleted, schedules: await repository.list(scope) });

@@ -120,6 +120,16 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.equal(implemented.includes("lambda:ListFunctions"), false);
 });
 
+test("public customer role advertises the enterprise permission-pack version", async () => {
+  const publicRole = await readFile(
+    resolve(root, "public/sutra-customer-role.yaml"),
+    "utf8",
+  );
+
+  assert.match(publicRole, /TemplateVersion:\s*\n\s+Value: standard-2026-07\.3/u);
+  assert.doesNotMatch(publicRole, /local-pilot|sandbox/u);
+});
+
 test("local collector role can assume only dedicated roles in the Sutra IAM namespace", async () => {
   const template = await readFile(
     resolve(root, "infrastructure/local-collector-role.yaml"),

@@ -105,7 +105,7 @@ export function getPilotSecrets(): PilotSecrets {
     throw new PilotServerError(
       503,
       "PILOT_NOT_CONFIGURED",
-      "Run the local pilot setup before onboarding an AWS account",
+      "Collector configuration is incomplete",
     );
   }
   const parsedBrokerUrl = new URL(brokerUrl);
@@ -116,7 +116,7 @@ export function getPilotSecrets(): PilotSecrets {
     parsedBrokerUrl.password ||
     parsedBrokerUrl.pathname !== "/"
   ) {
-    throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The local collector address is invalid");
+    throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The collector address configuration is invalid");
   }
 
   return {
@@ -137,7 +137,7 @@ function decodeBase64(value: string): Uint8Array {
     for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
     return bytes;
   } catch {
-    throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The local collector signing key is invalid");
+    throw new PilotServerError(500, "BROKER_CONFIGURATION_INVALID", "The collector signing configuration is invalid");
   }
 }
 
@@ -203,14 +203,14 @@ async function brokerFetch<T>(
       signal: controller.signal,
     });
   } catch {
-    throw new PilotServerError(503, "BROKER_UNAVAILABLE", "The local AWS collector is not reachable");
+    throw new PilotServerError(503, "BROKER_UNAVAILABLE", "The AWS collector is not reachable");
   } finally {
     clearTimeout(timeout);
   }
 
   const declaredLength = Number(response.headers.get("content-length") ?? "0");
   if (Number.isFinite(declaredLength) && declaredLength > 12 * 1024 * 1024) {
-    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the pilot limit");
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
   }
   const responseText = await readLimitedResponseText(response, 12 * 1024 * 1024);
   const responseSignature = response.headers.get("x-sutra-response-signature") ?? "";
@@ -253,7 +253,7 @@ async function readLimitedResponseText(response: Response, maximumBytes: number)
       total += value.byteLength;
       if (total > maximumBytes) {
         await reader.cancel();
-        throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the pilot limit");
+        throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
       }
       result += decoder.decode(value, { stream: true });
     }

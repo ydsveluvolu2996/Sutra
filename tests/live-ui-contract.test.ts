@@ -35,7 +35,8 @@ describe("hosted live UI contract", () => {
       readFile(path.join(root, "app/operations/simulated-operations-browser.tsx"), "utf8"),
       readFile(path.join(root, "app/operations/page.tsx"), "utf8"),
     ]);
-    assert.match(operations, /health\?\.mode === "fixture"/u);
+    assert.doesNotMatch(operations, /SimulatedOperationsBrowser/u);
+    assert.doesNotMatch(operations, /health\?\.mode === "fixture"/u);
     assert.match(operations, /postPilot\("\/api\/pilot\/connections\/sync"/u);
     assert.doesNotMatch(operations, /fetch\("\/api\/local\//u);
     assert.match(simulated, /fetch\("\/api\/local\//u);
@@ -51,6 +52,7 @@ describe("hosted live UI contract", () => {
       "app/api/local/jobs/simulated-sync/route.ts",
       "app/api/local/schedules/route.ts",
       "app/api/local/schedules/enabled/route.ts",
+      "app/api/v1/collection-schedule/status/route.ts",
     ];
     for (const route of routes) {
       const source = await readFile(path.join(root, route), "utf8");
@@ -74,6 +76,31 @@ describe("hosted live UI contract", () => {
     assert.doesNotMatch(source, /Run (?:another )?simulation/u);
     assert.doesNotMatch(source, /Preview — populated/u);
     assert.match(source, /No sample metrics/u);
+  });
+
+  it("starts enterprise AWS onboarding without pilot labels or sample account data", async () => {
+    const onboarding = await readFile(path.join(root, "app/onboard/onboard-account.tsx"), "utf8");
+    assert.match(onboarding, /useState\(""\)/u);
+    assert.doesNotMatch(onboarding, /useState\("Pilot Customer"\)/u);
+    assert.doesNotMatch(onboarding, /useState\("123456789012"\)/u);
+    assert.doesNotMatch(onboarding, /Checking the local pilot workspace/u);
+    assert.doesNotMatch(onboarding, /This local pilot supports/u);
+    assert.match(onboarding, /Each connection is bound to one approved customer workspace and one AWS account/u);
+  });
+
+  it("gives custom assets a professional page-level heading", async () => {
+    const assets = await readFile(path.join(root, "app/cmdb/custom-assets-panel.tsx"), "utf8");
+    assert.match(assets, /<h1>Custom &amp; external assets<\/h1>/u);
+    assert.match(assets, /<h2>Import assets<\/h2>/u);
+  });
+
+  it("preserves the validated customer connection across desktop and mobile navigation", async () => {
+    const shell = await readFile(path.join(root, "app/components/app-shell.tsx"), "utf8");
+    assert.match(shell, /function scopedWorkspaceHref\(href: string, connectionId: string \| null\)/u);
+    assert.match(shell, /url\.searchParams\.set\("connectionId", connectionId\)/u);
+    assert.ok(shell.includes('href={scopedWorkspaceHref("/dashboard", selectedConnectionId)}'));
+    assert.ok(shell.includes("href={scopedWorkspaceHref(item.href, selectedConnectionId)}"));
+    assert.ok(shell.includes("href={scopedWorkspaceHref(item.href, connectionId)}"));
   });
 
   it("pins the EC2 runtime to live AWS collection and disables local mode", async () => {

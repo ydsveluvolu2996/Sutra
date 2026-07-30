@@ -9,9 +9,8 @@ const route = await readFile(
 
 test("route is dynamic, authenticates, and gates on tenant scope resolved server-side", () => {
   assert.match(route, /export const dynamic = "force-dynamic"/u);
-  assert.match(route, /requireApiSession\(request\)/u);
-  assert.match(route, /getLatestConnectionForOrg\(authenticated\.subject\.orgId\)/u);
-  assert.match(route, /assertSessionCapability\(authenticated, capability, connection\.customerId\)/u);
+  assert.match(route, /requireConnectionScope\(request, capability\)/u);
+  assert.doesNotMatch(route, /getLatestConnectionForOrg/u);
   // Tenant identity is derived from the resolved connection, never the caller.
   assert.doesNotMatch(route, /searchParams\.get\("(?:orgId|customerId|tenantId)"\)/u);
   assert.match(route, /return errorResponse\(error\)/u);

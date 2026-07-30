@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePilotState } from "../components/use-pilot-state";
 
 /* CMDB dependency graph: pick a resource and view what it depends on, what
  * depends on it, or its blast radius — a typed adjacency list grouped by
@@ -220,6 +221,8 @@ function AdjacencyList({
 }
 
 export function DependenciesPanel() {
+  const { state, loading: workspaceLoading, error: workspaceError } = usePilotState();
+  const connectionId = state?.connection?.id ?? null;
   const [overview, setOverview] = useState<Overview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -239,8 +242,16 @@ export function DependenciesPanel() {
   const [savingManual, setSavingManual] = useState(false);
 
   const loadOverview = useCallback(async () => {
+    if (connectionId === null) {
+      setOverview(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     try {
-      const payload = await requestJson<Overview>("/api/v1/cmdb/relationships");
+      const payload = await requestJson<Overview>(
+        `/api/v1/cmdb/relationships?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setOverview(payload);
       setOverviewError(null);
     } catch (caught) {
@@ -249,7 +260,7 @@ export function DependenciesPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => {
     void (async () => {
@@ -258,10 +269,12 @@ export function DependenciesPanel() {
   }, [loadOverview]);
 
   const runTraversal = useCallback(async (key: string, activeMode: Mode, activeDepth: number) => {
+    if (connectionId === null) return;
     setRunning(true);
     setTraversalError(null);
     try {
       const params = new URLSearchParams({ resourceKey: key, mode: activeMode });
+      params.set("connectionId", connectionId);
       if (activeMode === "blast-radius") params.set("depth", String(activeDepth));
       const payload = await requestJson<TraversalResponse>(`/api/v1/cmdb/relationships?${params.toString()}`);
       setTraversal(payload);
@@ -271,7 +284,7 @@ export function DependenciesPanel() {
     } finally {
       setRunning(false);
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -302,11 +315,11 @@ export function DependenciesPanel() {
   }, []);
 
   async function saveManualEdge() {
-    if (draftFrom.trim().length === 0 || draftTo.trim().length === 0) return;
+    if (connectionId === null || draftFrom.trim().length === 0 || draftTo.trim().length === 0) return;
     setSavingManual(true);
     setManualError(null);
     try {
-      await requestJson("/api/v1/cmdb/relationships", {
+      await requestJson(`/api/v1/cmdb/relationships?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -328,8 +341,12 @@ export function DependenciesPanel() {
   }
 
   async function deleteManualEdge(id: string) {
+    if (connectionId === null) return;
     try {
-      await requestJson(`/api/v1/cmdb/relationships?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      await requestJson(
+        `/api/v1/cmdb/relationships?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
     } finally {
       await loadOverview();
       if (selectedKey !== null) await runTraversal(selectedKey, mode, depth);
@@ -359,6 +376,8 @@ export function DependenciesPanel() {
           </a>
         </div>
       </section>
+      {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
+      {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
 
       <div className="trust-strip" role="note">
         <span className="trust-icon">i</span>

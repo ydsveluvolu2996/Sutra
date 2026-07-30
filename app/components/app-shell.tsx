@@ -27,6 +27,13 @@ function roleLabel(role: PublicLocalSession["membership"]["role"]): string {
   return role.split("_").map((part) => `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`).join(" ");
 }
 
+function scopedWorkspaceHref(href: string, connectionId: string | null): string {
+  if (connectionId === null) return href;
+  const url = new URL(href, "https://www.sutracmdb.com");
+  url.searchParams.set("connectionId", connectionId);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export function AppShell({ active, children }: { active: NavKey; children: ReactNode }) {
   const sessionView = useSession();
 
@@ -47,7 +54,7 @@ export function AppShell({ active, children }: { active: NavKey; children: React
     return (
       <main className="workspace-auth-gate">
         <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-        <h1>{sessionView.error ? "Local access is unavailable" : "Opening your protected workspace"}</h1>
+        <h1>{sessionView.error ? "Secure access is unavailable" : "Opening your protected workspace"}</h1>
         <p>{sessionView.error ?? "Sutra is verifying your session and MFA state."}</p>
         {sessionView.error ? (
           <button className="button button-secondary" onClick={() => void sessionView.refresh()} type="button">Try again</button>
@@ -97,14 +104,15 @@ function AuthenticatedAppShell({
   const connection = state?.connection ?? null;
   const openFindings = state?.findings.filter((finding) => finding.status === "open").length ?? 0;
   const snapshotOrigin = state?.activeSnapshot?.origin;
-  const modeLabel = state?.activeSnapshot
+  const modeLabel = snapshotOrigin?.kind === "aws_live"
     ? snapshotOriginLabel(snapshotOrigin)
-    : health?.mode === "live" ? "AWS collector ready" : health?.mode === "fixture" ? "Fixture collector ready" : "Collector offline";
-  const modeKind = snapshotOrigin?.kind === "simulated_fixture"
-    ? "fixture"
-    : snapshotOrigin?.kind === "aws_sandbox" ? "live" : health?.mode ?? "offline";
+    : health?.mode === "live" ? "AWS collector ready" : "Collector unavailable";
+  const modeKind = snapshotOrigin?.kind === "aws_live" || health?.mode === "live"
+    ? "live"
+    : "offline";
   const scopeLabel = connection?.customerName ?? session.organization.name;
   const initials = userInitials(session);
+  const selectedConnectionId = connection?.id ?? null;
 
   // Closing the mobile drawer always returns focus to the toggle that opened
   // it, so a keyboard or screen-reader user is never dropped at the top of the
@@ -149,7 +157,7 @@ function AuthenticatedAppShell({
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link className="brand" href="/dashboard" aria-label="Sutra workspace home">
+        <Link className="brand" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span><strong>Sutra</strong><small>Cloud security, woven together.</small></span>
         </Link>
@@ -169,7 +177,14 @@ function AuthenticatedAppShell({
         </div>
         <nav className="main-nav grouped-nav" aria-label="Primary navigation">
           {visibleNav.map((group) => (
-            <NavigationGroup active={active} group={group} forceOpen={query !== ""} key={group.key} openFindings={openFindings} />
+            <NavigationGroup
+              active={active}
+              connectionId={selectedConnectionId}
+              group={group}
+              forceOpen={query !== ""}
+              key={group.key}
+              openFindings={openFindings}
+            />
           ))}
           {visibleNav.length === 0 ? <p className="nav-empty">No navigation matches &ldquo;{navQuery}&rdquo;.</p> : null}
         </nav>
@@ -208,7 +223,7 @@ function AuthenticatedAppShell({
                     {group.items.map((item) => (
                       <Link
                         aria-current={active === item.key ? "page" : undefined}
-                        href={item.href}
+                        href={scopedWorkspaceHref(item.href, selectedConnectionId)}
                         key={`${group.key}-${item.href}`}
                         onClick={() => closeMobileNav(false)}
                       >
@@ -253,11 +268,13 @@ function AuthenticatedAppShell({
 
 function NavigationGroup({
   active,
+  connectionId,
   group,
   forceOpen = false,
   openFindings,
 }: {
   readonly active: NavKey;
+  readonly connectionId: string | null;
   readonly group: NavGroup;
   readonly forceOpen?: boolean;
   readonly openFindings: number;
@@ -271,7 +288,7 @@ function NavigationGroup({
     const isActive = active === item.key;
     return (
       <Link
-        href={item.href}
+        href={scopedWorkspaceHref(item.href, connectionId)}
         key={`${group.key}-${item.href}`}
         className={isActive ? "active" : undefined}
         aria-current={isActive ? "page" : undefined}

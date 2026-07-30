@@ -62,7 +62,7 @@ export async function POST(request: Request): Promise<Response> {
       partition: stored.partition,
     });
     await persistSnapshot(runId, snapshot, actor.id, {
-      kind: "aws_sandbox",
+      kind: "aws_live",
       fixtureId: null,
       fixtureVersion: null,
     });

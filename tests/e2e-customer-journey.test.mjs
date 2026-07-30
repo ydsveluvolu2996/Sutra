@@ -839,7 +839,7 @@ test("onboarded customer can exercise every app section without a crash", async 
       // CMDB / changes
       ["app/api/v1/changes/route.ts", "changes", { params: { connectionId: CONNECTION_ID, limit: "50" } }],
       ["app/api/v1/cmdb/change-hints/route.ts", "cmdb/change-hints", { params: conn }],
-      ["app/api/v1/cmdb/saved-queries/route.ts", "cmdb/saved-queries", { params: {} }],
+      ["app/api/v1/cmdb/saved-queries/route.ts", "cmdb/saved-queries", { params: conn }],
       ["app/api/v1/cmdb/annotations/route.ts", "cmdb/annotations", { params: conn }],
       ["app/api/v1/cmdb/query/route.ts", "cmdb/query", {
         method: "POST",
@@ -864,11 +864,11 @@ test("onboarded customer can exercise every app section without a crash", async 
       ["app/api/v1/compliance/trend/route.ts", "compliance/trend", { params: { connectionId: CONNECTION_ID, framework: "soc-2-tsc" } }],
       ["app/api/v1/compliance/custom-frameworks/route.ts", "compliance/custom-frameworks", { params: conn }],
       ["app/api/v1/compliance/exceptions/route.ts", "compliance/exceptions", { params: conn }],
-      ["app/api/v1/compliance/control-assignments/route.ts", "compliance/control-assignments", { params: {} }],
+      ["app/api/v1/compliance/control-assignments/route.ts", "compliance/control-assignments", { params: conn }],
       ["app/api/v1/compliance/signoffs/route.ts", "compliance/signoffs", { params: conn }],
       // FinOps
       ["app/api/v1/finops/insights/route.ts", "finops/insights", { params: { connectionId: CONNECTION_ID, period: "2026-06", dimension: "service" } }],
-      ["app/api/v1/finops/budgets/route.ts", "finops/budgets", { params: {} }],
+      ["app/api/v1/finops/budgets/route.ts", "finops/budgets", { params: conn }],
       ["app/api/v1/costs/route.ts", "costs", { params: conn }],
       // Collection schedule / operations
       ["app/api/v1/collection-schedule/status/route.ts", "collection-schedule/status", { params: {} }],
@@ -891,10 +891,10 @@ test("onboarded customer can exercise every app section without a crash", async 
       ["app/api/v1/kubernetes/agents/route.ts", "kubernetes/agents", { params: connCluster }],
       ["app/api/v1/kubernetes/runtime-events/route.ts", "kubernetes/runtime-events", { params: connCluster }],
       // Identity / config
-      ["app/api/v1/api-tokens/route.ts", "api-tokens", { params: {} }],
+      ["app/api/v1/api-tokens/route.ts", "api-tokens", { params: conn }],
       ["app/api/v1/invitations/route.ts", "invitations", { params: {} }],
       ["app/api/v1/customer-assignments/route.ts", "customer-assignments", { params: {} }],
-      ["app/api/v1/itsm/connectors/route.ts", "itsm/connectors", { params: {} }],
+      ["app/api/v1/itsm/connectors/route.ts", "itsm/connectors", { params: conn }],
       ["app/api/v1/notification-destinations/route.ts", "notification-destinations", { params: { customerId: CUSTOMER_ID } }],
       // Public API (service-account bearer token) — minimal coverage.
       ["app/api/public/v1/openapi.json/route.ts", "public/openapi.json", { auth: "none" }],
@@ -907,17 +907,18 @@ test("onboarded customer can exercise every app section without a crash", async 
       // Release-readiness features (report builder, alerting, patch, universal
       // CMDB relationships/custom-assets, FinOps unit-counts + scheduled reports,
       // automated status).
-      ["app/api/v1/reports/saved/route.ts", "reports/saved", { params: {} }],
+      ["app/api/v1/reports/saved/route.ts", "reports/saved", { params: conn }],
       ["app/api/v1/reports/run/route.ts", "reports/run", {
         method: "POST",
+        params: conn,
         body: { definition: { dataset: "cmdb-resources", filters: { combine: "and", predicates: [{ kind: "field", field: "service", op: "eq", value: "ec2" }] }, columns: ["service", "name"] } },
       }],
       ["app/api/v1/alerts/route.ts", "alerts", { params: { customerId: CUSTOMER_ID } }],
       ["app/api/v1/patch/route.ts", "patch", { params: conn }],
-      ["app/api/v1/cmdb/relationships/route.ts", "cmdb/relationships", { params: {} }],
-      ["app/api/v1/cmdb/custom-assets/route.ts", "cmdb/custom-assets", { params: {} }],
-      ["app/api/v1/finops/unit-counts/route.ts", "finops/unit-counts", { params: {} }],
-      ["app/api/v1/finops/reports/route.ts", "finops/reports", { params: {} }],
+      ["app/api/v1/cmdb/relationships/route.ts", "cmdb/relationships", { params: conn }],
+      ["app/api/v1/cmdb/custom-assets/route.ts", "cmdb/custom-assets", { params: conn }],
+      ["app/api/v1/finops/unit-counts/route.ts", "finops/unit-counts", { params: conn }],
+      ["app/api/v1/finops/reports/route.ts", "finops/reports", { params: conn }],
       ["app/api/status/route.ts", "status", { auth: "none" }],
       // System-internal background-job drain (shared runner token).
       ["app/api/internal/jobs/run/route.ts", "internal/jobs/run", { method: "POST", auth: "job" }],

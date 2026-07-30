@@ -1,8 +1,7 @@
 import { addCaseNote, listFindingCases } from "../../../../../db/case-repository";
 import { ItsmConnectorRepository } from "../../../../../db/itsm-connector-repository";
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { buildOutboundTicket, signOutboundBody, type ItsmCaseLike } from "../../../../../lib/itsm-sync";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
@@ -26,11 +25,7 @@ export async function POST(request: Request): Promise<Response> {
       typeof record.connectorId !== "string" || !CONNECTOR_ID.test(record.connectorId) ||
       typeof record.caseId !== "string" || !CASE_ID.test(record.caseId)
     ) throw Object.assign(new Error("The ITSM dispatch request is invalid"), { code: "INVALID_INPUT" });
-    const authenticated = await requireApiSession(request);
-    const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-    if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-    assertSessionCapability(authenticated, "connection:manage", connection.customerId);
-    const scope = { orgId: authenticated.subject.orgId, customerId: connection.customerId };
+    const { authenticated, connection, scope } = await requireConnectionScope(request, "connection:manage");
     const repository = new ItsmConnectorRepository();
     const connector = await repository.getForDispatch(scope, record.connectorId);
     if (connector === null || !connector.enabled) throw Object.assign(new Error("The ITSM connector is unavailable"), { code: "NOT_FOUND" });

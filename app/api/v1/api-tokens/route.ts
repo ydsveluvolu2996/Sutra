@@ -1,6 +1,5 @@
-import { getLatestConnectionForOrg } from "../../../../db/pilot-repository";
 import { ApiTokenRepository } from "../../../../db/api-token-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -8,12 +7,7 @@ export const dynamic = "force-dynamic";
 const TOKEN_ID = /^pat_[a-f0-9]{32}$/u;
 
 async function resolveScope(request: Request) {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  // Token management is workspace configuration.
-  assertSessionCapability(authenticated, "connection:manage", connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, "connection:manage");
 }
 
 export async function GET(request: Request): Promise<Response> {

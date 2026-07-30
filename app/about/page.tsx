@@ -88,8 +88,9 @@ export default function AboutPage() {
       <section className="lx-legal-section">
         <h2>What we will not do</h2>
         <p>
-          Sutra is early, and we will not invent social proof or claim capabilities the product does not have.
-          We support AWS and Amazon EKS — not multi-cloud. We map collected evidence to CIS Kubernetes, NSA/CISA
+          We do not invent social proof or claim capabilities the product does not have. We support AWS and Amazon
+          EKS today — Azure and Google Cloud remain planned. Optional Kubernetes, scanner, billing, and delivery
+          capabilities report their own configuration readiness. We map collected evidence to CIS Kubernetes, NSA/CISA
           and SOC 2 Common Criteria as an honest readiness view; that is a readiness mapping, <b>not</b> a
           certification. If you want to see how it behaves before connecting an account,{" "}
           <a href="/contact">book a walkthrough</a>.

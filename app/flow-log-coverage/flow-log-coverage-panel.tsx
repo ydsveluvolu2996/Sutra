@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { connectionIdFromPilotStateResponse } from "../../lib/pilot-state-response";
 
 /**
  * VPC flow-log coverage.
@@ -58,10 +59,6 @@ interface CoverageResponse {
   readonly scannedAt: string | null;
 }
 
-interface PilotConnection {
-  readonly connectionId: string | null;
-}
-
 const LEVEL_LABEL: Record<VpcCoverage["level"], string> = {
   "vpc": "VPC-level log",
   "all-subnets": "Every subnet covered",
@@ -75,6 +72,19 @@ export function FlowLogCoveragePanel(): React.JSX.Element {
   const [connected, setConnected] = useState<boolean | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const pageHeading = (
+    <div className="page-heading">
+      <div>
+        <p className="eyebrow">Network visibility</p>
+        <h1>VPC flow-log coverage</h1>
+        <p className="page-subtitle">
+          Which VPCs record network traffic, and which are permanent investigative blind spots.
+          A VPC with no flow log cannot be investigated after an incident — the evidence never
+          existed and cannot be recovered retroactively.
+        </p>
+      </div>
+    </div>
+  );
 
   // Deliberately NOT `void load()`: a helper that calls setLoading(true)
   // synchronously is a cascading render that react-hooks/set-state-in-effect
@@ -83,11 +93,15 @@ export function FlowLogCoveragePanel(): React.JSX.Element {
     let cancelled = false;
     void (async () => {
       try {
-        const stateResponse = await fetch("/api/pilot/state", { credentials: "same-origin" });
+        const requestedConnectionId = new URLSearchParams(window.location.search).get("connectionId");
+        const statePath = requestedConnectionId !== null && /^conn_[a-f0-9]{32}$/u.test(requestedConnectionId)
+          ? `/api/pilot/state?connectionId=${encodeURIComponent(requestedConnectionId)}`
+          : "/api/pilot/state";
+        const stateResponse = await fetch(statePath, { credentials: "same-origin" });
         if (!stateResponse.ok) throw new Error("Could not load the workspace state");
-        const state = await stateResponse.json() as PilotConnection;
+        const state = await stateResponse.json() as unknown;
         if (cancelled) return;
-        const connectionId = state.connectionId;
+        const connectionId = connectionIdFromPilotStateResponse(state);
         setConnected(connectionId !== null);
         if (connectionId === null) return;
 
@@ -107,27 +121,33 @@ export function FlowLogCoveragePanel(): React.JSX.Element {
     return () => { cancelled = true; };
   }, []);
 
-  if (loading) return <section className="panel"><p>Loading flow-log coverage…</p></section>;
+  if (loading) return <>{pageHeading}<section className="panel"><p>Loading flow-log coverage…</p></section></>;
 
   if (error !== null) {
     return (
-      <section className="panel">
-        <p className="cmdbq-error" role="alert">{error}</p>
-      </section>
+      <>
+        {pageHeading}
+        <section className="panel">
+          <p className="cmdbq-error" role="alert">{error}</p>
+        </section>
+      </>
     );
   }
 
   if (connected === false) {
     return (
-      <section className="panel empty-workspace">
-        <span className="empty-workspace-icon">FL</span>
-        <h2>No AWS account is connected</h2>
-        <p>
-          Connect and validate a customer account so Sutra can collect VPC flow-log configuration
-          and report which networks are observable.
-        </p>
-        <a className="button button-primary" href="/onboard">Connect AWS account</a>
-      </section>
+      <>
+        {pageHeading}
+        <section className="panel empty-workspace">
+          <span className="empty-workspace-icon">FL</span>
+          <h2>No AWS account is connected</h2>
+          <p>
+            Connect and validate a customer account so Sutra can collect VPC flow-log configuration
+            and report which networks are observable.
+          </p>
+          <a className="button button-primary" href="/onboard">Connect AWS account</a>
+        </section>
+      </>
     );
   }
 
@@ -136,17 +156,7 @@ export function FlowLogCoveragePanel(): React.JSX.Element {
 
   return (
     <>
-      <div className="page-heading">
-        <div>
-          <p className="eyebrow">Network visibility</p>
-          <h1>VPC flow-log coverage</h1>
-          <p className="page-subtitle">
-            Which VPCs record network traffic, and which are permanent investigative blind spots.
-            A VPC with no flow log cannot be investigated after an incident — the evidence never
-            existed and cannot be recovered retroactively.
-          </p>
-        </div>
-      </div>
+      {pageHeading}
 
       {/* Not dismissible: the boundary between "recorded" and "analysed" is the
           single easiest thing for a reader to get wrong on this page. */}

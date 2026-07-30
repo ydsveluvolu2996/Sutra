@@ -8,7 +8,6 @@ import {
   snapshotOriginLabel,
   usePilotState,
 } from "../components/use-pilot-state";
-import { SimulatedOperationsBrowser } from "./simulated-operations-browser";
 
 function runTone(status: PilotSyncRun["status"]): string {
   if (status === "succeeded") return "status-positive";
@@ -169,13 +168,5 @@ function LiveOperationsBrowser() {
 }
 
 export function OperationsBrowser() {
-  const { state, health, loading, error } = usePilotState();
-  if (loading) return <div className="loading-state" role="status"><span className="loading-spinner" />Opening collection operations…</div>;
-  if (health?.mode === "fixture" && state?.connection?.sourceKind !== "aws_trust_role") {
-    return <SimulatedOperationsBrowser />;
-  }
-  if (health === null && state === null) {
-    return <div className="page-alert page-alert-error" role="alert"><strong>Collection operations are unavailable</strong><span>{error ?? "Sutra could not load collector state."}</span></div>;
-  }
   return <LiveOperationsBrowser />;
 }

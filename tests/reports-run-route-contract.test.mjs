@@ -7,8 +7,7 @@ const savedRoute = await readFile(new URL("../app/api/v1/reports/saved/route.ts"
 
 test("run route is dynamic, authenticates, and gates on the resolved tenant scope server-side", () => {
   assert.match(runRoute, /export const dynamic = "force-dynamic"/u);
-  assert.match(runRoute, /requireApiSession\(request\)/u);
-  assert.match(runRoute, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
+  assert.match(runRoute, /requireConnectionScope\(request, "connection:read"\)/u);
   // Tenant identity comes from the resolved connection, never from the caller.
   assert.doesNotMatch(runRoute, /searchParams\.get\("(?:orgId|customerId|tenantId)"\)/u);
   assert.match(runRoute, /return errorResponse\(error\)/u);
@@ -36,8 +35,7 @@ test("run route returns RFC-4180 CSV with a text/csv content type and an attachm
 
 test("saved route is dynamic, authenticates, and never trusts caller-supplied tenant ids", () => {
   assert.match(savedRoute, /export const dynamic = "force-dynamic"/u);
-  assert.match(savedRoute, /requireApiSession\(request\)/u);
-  assert.match(savedRoute, /assertSessionCapability\(authenticated, capability, connection\.customerId\)/u);
+  assert.match(savedRoute, /requireConnectionScope\(request, capability\)/u);
   assert.doesNotMatch(savedRoute, /searchParams\.get\("(?:orgId|customerId|tenantId)"\)/u);
   assert.match(savedRoute, /jsonResponse\(/u);
   assert.match(savedRoute, /return errorResponse\(error\)/u);

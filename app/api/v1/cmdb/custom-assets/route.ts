@@ -1,8 +1,7 @@
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { CmdbCustomAssetRepository } from "../../../../../db/cmdb-custom-asset-repository";
 import { normalizeCustomAsset, parseAssetImport, isValidAssetType } from "../../../../../lib/cmdb-custom-assets";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -17,17 +16,10 @@ function invalid(): never {
 }
 
 /**
- * Resolve the tenant scope from the SESSION, never the caller. The customer is
- * derived from the org's latest cloud connection (mirroring the other CMDB and
- * FinOps workspace routes) and the capability is checked against that resolved
- * customer, so scoping is enforced server-side rather than trusted from input.
+ * Resolve the tenant scope from the explicitly selected connection.
  */
 async function resolveScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 export async function GET(request: Request): Promise<Response> {

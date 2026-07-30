@@ -1,16 +1,11 @@
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { ComplianceWorkspaceRepository } from "../../../../../db/compliance-workspace-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 async function resolveScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 export async function GET(request: Request): Promise<Response> {

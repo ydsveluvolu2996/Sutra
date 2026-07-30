@@ -656,4 +656,4 @@ Outputs:
     Description: This template grants metadata and finding reads only.
     Value: READ_ONLY
   TemplateVersion:
-    Value: 0.2.0-local-pilot
+    Value: standard-2026-07.3

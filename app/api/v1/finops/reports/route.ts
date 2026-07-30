@@ -1,7 +1,6 @@
-import { getConnectionForOrg, getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -18,22 +17,9 @@ function invalid(): never {
   throw Object.assign(new Error("The scheduled-report request is invalid"), { code: "INVALID_INPUT" });
 }
 
-/** Resolve the tenant from the org's latest connection (list/enable/delete). */
+/** Resolve the tenant from the explicitly selected connection. */
 async function resolveTenantScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
-}
-
-/** Resolve the tenant from the specific connection a new schedule names. */
-async function resolveConnectionScope(request: Request, connectionId: string) {
-  const authenticated = await requireApiSession(request);
-  const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
-  if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, "connection:manage", connection.customerId);
-  return { authenticated, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 export async function GET(request: Request): Promise<Response> {
@@ -75,7 +61,8 @@ export async function POST(request: Request): Promise<Response> {
       typeof deliveryTarget !== "string" || deliveryTarget.length === 0 || deliveryTarget.length > 2_048 ||
       (enabled !== undefined && typeof enabled !== "boolean")
     ) invalid();
-    const { authenticated, scope } = await resolveConnectionScope(request, connectionId);
+    const { authenticated, connection, scope } = await resolveTenantScope(request, "connection:manage");
+    if (connection.id !== connectionId) invalid();
     const repository = new FinopsScheduledReportRepository();
     // The repository performs the authoritative SSRF/email validation of the
     // destination and rejects an unsafe target.

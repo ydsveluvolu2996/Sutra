@@ -1,7 +1,6 @@
-import { getLatestConnectionForOrg } from "../../../../../db/pilot-repository";
 import { AllocationRuleRepository } from "../../../../../db/allocation-rules-repository";
 import type { AllocationRuleInput, AllocationRulePatch } from "../../../../../db/allocation-rules-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -9,11 +8,7 @@ export const dynamic = "force-dynamic";
 const RULE_ID = /^ar_[a-f0-9]{32}$/u;
 
 async function resolveScope(request: Request, capability: "connection:read" | "connection:manage") {
-  const authenticated = await requireApiSession(request);
-  const connection = await getLatestConnectionForOrg(authenticated.subject.orgId);
-  if (connection === null) throw Object.assign(new Error("No cloud connection is configured"), { code: "NOT_FOUND" });
-  assertSessionCapability(authenticated, capability, connection.customerId);
-  return { authenticated, connection, scope: { orgId: authenticated.subject.orgId, customerId: connection.customerId } };
+  return requireConnectionScope(request, capability);
 }
 
 function badRequest(): never {

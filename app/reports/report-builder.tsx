@@ -11,6 +11,7 @@ import {
   type ReportDataset,
   type ReportDefinition,
 } from "../../lib/report-builder";
+import { usePilotState } from "../components/use-pilot-state";
 
 /* Custom report builder: pick a dataset, add filters, choose columns, then Run,
  * Save as a named view, load a saved view, Export CSV, or Print (Save as PDF).
@@ -64,6 +65,8 @@ async function requestJson<T>(input: string, init?: RequestInit): Promise<T> {
 }
 
 export function ReportBuilder() {
+  const { state, loading: workspaceLoading, error: workspaceError } = usePilotState();
+  const connectionId = state?.connection?.id ?? null;
   const [dataset, setDataset] = useState<ReportDataset>("cmdb-resources");
   const [filters, setFilters] = useState<FilterDraft[]>([defaultFilter("cmdb-resources")]);
   const [combine, setCombine] = useState<"and" | "or">("and");
@@ -85,13 +88,19 @@ export function ReportBuilder() {
   const fieldOptions = dataset === "cmdb-resources" ? CMDB_FIELDS : FINDINGS_FIELDS;
 
   const loadSaved = useCallback(async () => {
+    if (connectionId === null) {
+      setSaved([]);
+      return;
+    }
     try {
-      const payload = await requestJson<{ reports: SavedReport[] }>("/api/v1/reports/saved");
+      const payload = await requestJson<{ reports: SavedReport[] }>(
+        `/api/v1/reports/saved?connectionId=${encodeURIComponent(connectionId)}`,
+      );
       setSaved(payload.reports);
     } catch {
       setSaved([]);
     }
-  }, []);
+  }, [connectionId]);
 
   useEffect(() => { void (async () => { await loadSaved(); })(); }, [loadSaved]);
 
@@ -139,14 +148,18 @@ export function ReportBuilder() {
   }
 
   async function run() {
+    if (connectionId === null) return;
     setRunning(true);
     setError(null);
     try {
-      const payload = await requestJson<{ report: ReportResultView }>("/api/v1/reports/run", {
+      const payload = await requestJson<{ report: ReportResultView }>(
+        `/api/v1/reports/run?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ definition: buildDefinition() }),
-      });
+        },
+      );
       setResult(payload.report);
     } catch (caught) {
       setResult(null);
@@ -157,14 +170,18 @@ export function ReportBuilder() {
   }
 
   async function exportCsv() {
+    if (connectionId === null) return;
     setExporting(true);
     setError(null);
     try {
-      const response = await fetch("/api/v1/reports/run?format=csv", {
+      const response = await fetch(
+        `/api/v1/reports/run?connectionId=${encodeURIComponent(connectionId)}&format=csv`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ definition: buildDefinition(), format: "csv" }),
-      });
+        },
+      );
       if (!response.ok) {
         const payload: unknown = await response.json().catch(() => null);
         const message = typeof payload === "object" && payload !== null && "error" in payload
@@ -189,14 +206,17 @@ export function ReportBuilder() {
   }
 
   async function saveView() {
-    if (saveName.trim().length === 0) return;
+    if (connectionId === null || saveName.trim().length === 0) return;
     setSaveError(null);
     try {
-      const payload = await requestJson<{ reports: SavedReport[] }>("/api/v1/reports/saved", {
+      const payload = await requestJson<{ reports: SavedReport[] }>(
+        `/api/v1/reports/saved?connectionId=${encodeURIComponent(connectionId)}`,
+        {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name: saveName.trim(), definition: buildDefinition() }),
-      });
+        },
+      );
       setSaved(payload.reports);
       setSaveName("");
     } catch (caught) {
@@ -205,8 +225,12 @@ export function ReportBuilder() {
   }
 
   async function deleteView(id: string) {
+    if (connectionId === null) return;
     try {
-      const payload = await requestJson<{ reports: SavedReport[] }>(`/api/v1/reports/saved?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const payload = await requestJson<{ reports: SavedReport[] }>(
+        `/api/v1/reports/saved?connectionId=${encodeURIComponent(connectionId)}&id=${encodeURIComponent(id)}`,
+        { method: "DELETE" },
+      );
       setSaved(payload.reports);
     } catch {
       await loadSaved();
@@ -236,7 +260,7 @@ export function ReportBuilder() {
     setError(null);
   }
 
-  const canRun = selectedColumns.length > 0;
+  const canRun = connectionId !== null && selectedColumns.length > 0;
 
   return (
     <>
@@ -259,6 +283,8 @@ export function ReportBuilder() {
           <a className="button button-secondary" href="/reports">Executive report</a>
         </div>
       </section>
+      {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
+      {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
 
       {error ? <div className="page-alert page-alert-error report-noprint" role="alert"><strong>Report action needs attention</strong><span>{error}</span></div> : null}
 

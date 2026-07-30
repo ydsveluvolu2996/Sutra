@@ -57,6 +57,7 @@ import postgresFinopsExternalCostsSql from "../postgres/migrations/0057_finops_e
 import postgresGovernancePoliciesSql from "../postgres/migrations/0058_governance_policies.sql?raw";
 import postgresAgentlessScansSql from "../postgres/migrations/0059_agentless_scans.sql?raw";
 import postgresInvitationZohoProviderSql from "../postgres/migrations/0060_invitation_zoho_provider.sql?raw";
+import postgresAwsLiveSnapshotOriginSql from "../postgres/migrations/0061_aws_live_snapshot_origin.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -118,6 +119,7 @@ const migrations = [
   { id: "0058_governance_policies", source: postgresGovernancePoliciesSql },
   { id: "0059_agentless_scans", source: postgresAgentlessScansSql },
   { id: "0060_invitation_zoho_provider", source: postgresInvitationZohoProviderSql },
+  { id: "0061_aws_live_snapshot_origin", source: postgresAwsLiveSnapshotOriginSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

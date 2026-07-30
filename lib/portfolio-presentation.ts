@@ -96,7 +96,7 @@ export function evidenceSourceLabel(connection: PortfolioConnectionSummary): {
       detail: `${connection.fixtureId ?? "fixture"} · ${connection.fixtureVersion ?? "version unavailable"}`,
     };
   }
-  if (connection.latestSnapshotOrigin === "aws_sandbox") {
+  if (connection.latestSnapshotOrigin === "aws_live") {
     return { label: "Live AWS", detail: "Customer trust role · AWS API evidence" };
   }
   if (connection.latestSnapshotAt === null) {
