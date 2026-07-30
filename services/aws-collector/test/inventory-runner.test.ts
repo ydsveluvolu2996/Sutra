@@ -1121,6 +1121,20 @@ class PostureEdgeCaseClientFactory extends FakeClientFactory {
   }
 }
 
+class NoPasswordPolicyClientFactory extends FakeClientFactory {
+  public override iam(): IamInventoryClient {
+    const client = super.iam();
+    return {
+      getAccountSummary: (signal) => client.getAccountSummary(signal),
+      getAccountPasswordPolicy: async () => {
+        const error = new Error("The account has no custom IAM password policy");
+        error.name = "NoSuchEntityException";
+        throw error;
+      },
+    };
+  }
+}
+
 class MultiRegionCloudTrailClientFactory extends FakeClientFactory {
   public readonly describeInputs: {
     readonly region: string;
@@ -1879,6 +1893,39 @@ test("native finding adapters mark a final over-cap page partial even without a 
       .filter((item) => item.evidenceType === "AWS_NATIVE_FINDING")
       .length,
     3_000,
+  );
+});
+
+test("an absent IAM password policy is complete evidence rather than a collector failure", async () => {
+  const sink = new CapturingSink();
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients: new NoPasswordPolicyClientFactory(),
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 2,
+    now: () => new Date("2026-07-15T12:00:00Z"),
+  });
+
+  const result = await runner.collect(context());
+  const passwordPolicyEvidence = sink.batches
+    .flatMap((batch) => batch.evidence)
+    .find((item) => item.evidenceType === "IAM_ACCOUNT_PASSWORD_POLICY");
+
+  assert.equal(result.coverage, "COMPLETE");
+  assert.equal(passwordPolicyEvidence?.status, "NOT_CONFIGURED");
+  assert.deepEqual(passwordPolicyEvidence?.data, {});
+  assert.deepEqual(
+    result.collectorCoverage.find(
+      (entry) => entry.collectorKey === "iam.password-policy",
+    ),
+    {
+      collectorKey: "iam.password-policy",
+      region: "global",
+      status: "SUCCEEDED",
+      itemsObserved: 1,
+      pagesObserved: 1,
+    },
   );
 });
 

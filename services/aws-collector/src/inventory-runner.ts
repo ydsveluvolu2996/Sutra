@@ -2734,7 +2734,12 @@ async function collectIamPasswordPolicy(
     });
     state.observePage(1);
   } catch (error: unknown) {
-    if (!isNamedError(error, "NoSuchEntity")) throw error;
+    if (
+      !isNamedError(error, "NoSuchEntity") &&
+      !isNamedError(error, "NoSuchEntityException")
+    ) {
+      throw error;
+    }
     await state.emit({
       resources: [],
       evidence: [
