@@ -122,7 +122,7 @@ export function AccessBrowser() {
   const [customerId, setCustomerId] = useState("");
   const [scopeMode, setScopeMode] = useState("assigned_customers");
   const [lifetimeHours, setLifetimeHours] = useState("24");
-  const [totpCode, setTotpCode] = useState("");
+  const [sessionTotpCode, setSessionTotpCode] = useState("");
   const [oneTimeInvitation, setOneTimeInvitation] = useState<OneTimeInvitation | null>(null);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -229,13 +229,6 @@ export function AccessBrowser() {
     setShareNotice(null);
     setOneTimeInvitation(null);
     try {
-      if (totpCode.length === 6) {
-        await postAuth("/api/auth/mfa/step-up", { code: totpCode });
-        // A verified TOTP step is single-use. Clear it immediately so an
-        // ambiguous invitation response can be retried with the sticky
-        // idempotency key without first resubmitting an already-used MFA code.
-        setTotpCode("");
-      }
       const body = {
         email,
         role: effectiveRole,
@@ -274,7 +267,6 @@ export function AccessBrowser() {
           : deliveryNotice(delivery));
       }
       setEmail("");
-      setTotpCode("");
       try {
         await load();
       } catch (caught) {
@@ -285,7 +277,7 @@ export function AccessBrowser() {
     } catch (caught) {
       const retryGuidance = attemptedCreation
         ? "Retry this exact invitation safely; Sutra will reuse its idempotency key and will not create or email a duplicate."
-        : "No invitation creation request was sent. Complete MFA and try again.";
+        : "No invitation creation request was sent. Check the invitation details and try again.";
       setError(caught instanceof Error
         ? `${caught.message}. ${retryGuidance}`
         : `Sutra could not create the invitation. ${retryGuidance}`);
@@ -345,11 +337,6 @@ export function AccessBrowser() {
     // never leave a stale activation link on screen.
     setOneTimeInvitation((current) => current?.invitation.id === invitation.id ? null : current);
     try {
-      await stepUpIfProvided();
-      // TOTP values are single-use. Clear a successfully consumed code before
-      // entering the ambiguous delivery window so a retry can safely replay
-      // the sticky invitation operation without failing MFA first.
-      if (totpCode.length === 6) setTotpCode("");
       const idempotencyKey = resendOperations.current.get(invitation.id) ?? crypto.randomUUID();
       resendOperations.current.set(invitation.id, idempotencyKey);
       attemptedDelivery = true;
@@ -388,7 +375,7 @@ export function AccessBrowser() {
       // next click safely replays the same request rather than sending twice.
       const retryGuidance = attemptedDelivery
         ? "Retry this delivery action safely; Sutra will reuse its idempotency key."
-        : "No delivery request was sent. Complete MFA and try again.";
+        : "No delivery request was sent. Try again.";
       setError(caught instanceof Error
         ? `${caught.message}. ${retryGuidance}`
         : `Sutra could not resend the invitation. ${retryGuidance}`);
@@ -402,7 +389,6 @@ export function AccessBrowser() {
     setError(null);
     setNotice(null);
     try {
-      if (totpCode.length === 6) await postAuth("/api/auth/mfa/step-up", { code: totpCode });
       const response = await fetch("/api/v1/invitations", {
         method: "DELETE",
         credentials: "same-origin",
@@ -410,7 +396,6 @@ export function AccessBrowser() {
         body: JSON.stringify({ invitationId }),
       });
       await readAuthResponse<{ revoked: true }>(response);
-      setTotpCode("");
       setOneTimeInvitation((current) => current?.invitation.id === invitationId ? null : current);
       setShareNotice(null);
       setNotice("Invitation revoked. Any unaccepted activation link for it is no longer valid.");
@@ -422,15 +407,17 @@ export function AccessBrowser() {
     }
   }
 
-  async function stepUpIfProvided(): Promise<void> {
-    if (totpCode.length === 6) await postAuth("/api/auth/mfa/step-up", { code: totpCode });
+  async function stepUpSessionIfProvided(): Promise<void> {
+    if (sessionTotpCode.length === 6) {
+      await postAuth("/api/auth/mfa/step-up", { code: sessionTotpCode });
+    }
   }
 
   async function revokeSession(session: ManagedSession): Promise<void> {
     setBusy(true);
     setError(null);
     try {
-      await stepUpIfProvided();
+      await stepUpSessionIfProvided();
       const response = await fetch("/api/v1/sessions", {
         method: "DELETE",
         credentials: "same-origin",
@@ -438,7 +425,7 @@ export function AccessBrowser() {
         body: JSON.stringify({ sessionId: session.id }),
       });
       const result = await readAuthResponse<{ revoked: boolean; signedOut: boolean }>(response);
-      setTotpCode("");
+      setSessionTotpCode("");
       if (result.signedOut) {
         window.location.replace("/login");
         return;
@@ -456,12 +443,12 @@ export function AccessBrowser() {
     setBusy(true);
     setError(null);
     try {
-      await stepUpIfProvided();
+      await stepUpSessionIfProvided();
       await postAuth<{ revoked: number }>("/api/v1/sessions", {
         operation: "revoke_other_sessions",
         confirmation: "REVOKE OTHER SESSIONS",
       });
-      setTotpCode("");
+      setSessionTotpCode("");
       await load();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Sutra could not revoke the other sessions");
@@ -491,7 +478,7 @@ export function AccessBrowser() {
       <CustomerAssignments />
 
       <section className="panel">
-        <div className="panel-heading"><div><p className="eyebrow">New membership</p><h2>{customerScoped ? "Invite a teammate to a customer you administer" : "Invite an operator or customer user"}</h2></div><span className="status-pill status-positive">MFA protected</span></div>
+        <div className="panel-heading"><div><p className="eyebrow">New membership</p><h2>{customerScoped ? "Invite a teammate to a customer you administer" : "Invite an operator or customer user"}</h2></div><span className="status-pill status-positive">Verified session</span></div>
         <form className="auth-form" onSubmit={(event) => void submit(event)}>
           <div className="auth-field-pair">
             <label><span>Verified email</span><input type="email" maxLength={254} required value={email} onChange={(event) => setEmail(event.target.value)} /></label>
@@ -512,7 +499,6 @@ export function AccessBrowser() {
             <label><span>Expires after</span><select value={lifetimeHours} onChange={(event) => setLifetimeHours(event.target.value)}><option value="1">1 hour</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168">7 days</option></select></label>
           </div>
           {selectedCustomerRequired ? <label><span>Assigned customer</span><select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}>{customers.length === 0 ? <option value="">No available customers</option> : customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select><small>This invitation creates access only to the selected customer.</small></label> : null}
-          <label><span>Authenticator code for this privileged action</span><input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={totpCode} onChange={(event) => setTotpCode(event.target.value.replace(/\D/gu, "").slice(0, 6))} /><small>Required when your last MFA verification is more than five minutes old.</small></label>
           <button className="button button-primary" disabled={busy || (selectedCustomerRequired && !customerId)} type="submit">{busy ? "Creating invitation…" : "Create and deliver invitation"}</button>
           <p className="limitation-note">Automatic email requires a configured transactional email provider. Sutra reports provider acceptance separately from inbox delivery and always shows the new link once for secure manual sharing.</p>
         </form>
@@ -536,6 +522,7 @@ export function AccessBrowser() {
           <div><p className="eyebrow">Session administration</p><h2>Signed-in browser sessions</h2></div>
           <button className="button button-secondary button-small" disabled={busy || sessions.filter((managed) => managed.status === "active" && !managed.current).length === 0} onClick={() => void revokeOtherSessions()} type="button">Revoke all other org sessions</button>
         </div>
+        <label className="assignment-mfa"><span>Authenticator code for session revocation</span><input inputMode="numeric" pattern="[0-9]{6}" maxLength={6} value={sessionTotpCode} onChange={(event) => setSessionTotpCode(event.target.value.replace(/\D/gu, "").slice(0, 6))} /><small>Only needed when the last MFA verification is more than five minutes old. Invitations never require an extra code.</small></label>
         <p className="limitation-note">Each row is a server-side session, not a fingerprint of a physical device. Sutra does not retain raw IP addresses or browser fingerprints. Revocation is organization-scoped, MFA-protected, and committed with hash-chained audit evidence.</p>
         {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading active sessions…</div> : (
           <>

@@ -45,37 +45,42 @@ test("resend uses a sticky idempotency key and never leaves an old token visible
   assert.match(access, /will reuse its idempotency key/iu);
 });
 
-test("resend clears consumed MFA before an ambiguous delivery and preserves replay state", () => {
+test("resend stays low-friction while preserving replay state", () => {
   const resendStart = access.indexOf("async function resend(");
   const resendEnd = access.indexOf("async function revoke(", resendStart);
   assert.notEqual(resendStart, -1);
   assert.notEqual(resendEnd, -1);
   const resend = access.slice(resendStart, resendEnd);
-  const stepUp = resend.indexOf("await stepUpIfProvided();");
-  const clearTotp = resend.indexOf('setTotpCode("");', stepUp);
-  const rememberOperation = resend.indexOf("resendOperations.current.set", clearTotp);
+  const rememberOperation = resend.indexOf("resendOperations.current.set");
   const deliveryAttempt = resend.indexOf("attemptedDelivery = true", rememberOperation);
   const readResponse = resend.indexOf("await readAuthResponse", deliveryAttempt);
   const forgetOperation = resend.indexOf("resendOperations.current.delete", readResponse);
 
-  assert.ok(stepUp >= 0 && stepUp < clearTotp, "MFA must succeed before its code is cleared");
-  assert.ok(clearTotp < rememberOperation, "the consumed code must clear before delivery can become ambiguous");
+  assert.doesNotMatch(resend, /mfa\/step-up|totp/iu, "resending an invitation must not ask for another code");
+  assert.ok(rememberOperation >= 0, "the resend operation must retain an idempotency key");
   assert.ok(rememberOperation < deliveryAttempt, "the replay key must be retained before sending");
   assert.ok(deliveryAttempt < readResponse && readResponse < forgetOperation,
     "the replay key must be deleted only after a readable successful response");
 });
 
 test("initial creation uses a sticky request-bound idempotency key", () => {
+  const submitStart = access.indexOf("async function submit(");
+  const submitEnd = access.indexOf("async function copyCurrentInvitation", submitStart);
+  const submit = access.slice(submitStart, submitEnd);
   assert.match(access, /creationOperation\.current\?\.bodyJson === bodyJson/u);
   assert.match(access, /creationOperation\.current = operation/u);
   assert.match(access, /"Idempotency-Key": operation\.key/u);
   assert.match(access, /will reuse its idempotency key and will not create or email a duplicate/iu);
   assert.match(access, /previous creation was confirmed without creating or emailing a duplicate/iu);
-  assert.match(
-    access,
-    /await postAuth\("\/api\/auth\/mfa\/step-up", \{ code: totpCode \}\);\s*\/\/[\s\S]*?setTotpCode\(""\);/u,
-    "a consumed MFA code is cleared before the ambiguous invitation request",
-  );
+  assert.doesNotMatch(submit, /mfa\/step-up|totp/iu, "creating an invitation must not ask for another code");
+  assert.doesNotMatch(access, /Authenticator code for this privileged action/u);
+});
+
+test("recent MFA remains available only for session revocation", () => {
+  assert.match(access, /Authenticator code for session revocation/u);
+  assert.match(access, /stepUpSessionIfProvided/u);
+  assert.match(access, /postAuth\("\/api\/auth\/mfa\/step-up", \{ code: sessionTotpCode \}\)/u);
+  assert.match(access, /Invitations never require an extra code/u);
 });
 
 test("assigned-customer invitations always submit an exact customer identifier", () => {
