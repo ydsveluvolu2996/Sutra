@@ -295,12 +295,14 @@ jobs:
             case "${status}" in
               Success) break ;;
               Cancelled|TimedOut|Failed|Cancelling)
-                status_details="$(aws ssm get-command-invocation \
+                invocation_details="$(aws ssm get-command-invocation \
                   --region "${AWS_REGION}" \
                   --command-id "${command_id}" \
                   --instance-id "${EC2_INSTANCE_ID}" \
-                  --query StatusDetails --output text 2>/dev/null || printf 'Unavailable')"
-                echo "SSM release failed: ${status_details}" >&2
+                  --query '{status:StatusDetails,stdout:StandardOutputContent,stderr:StandardErrorContent}' \
+                  --output json 2>/dev/null || printf '{"status":"Unavailable","stdout":"","stderr":""}')"
+                jq -r '"SSM release failed: \(.status)\n--- host stdout ---\n\(.stdout)\n--- host stderr ---\n\(.stderr)"' \
+                  <<<"${invocation_details}" >&2
                 exit 1
                 ;;
               Pending|InProgress|Delayed) sleep 5 ;;
