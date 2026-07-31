@@ -217,6 +217,74 @@ jobs:
       - name: Test PostgreSQL adapter and repositories
         run: pnpm db:postgres:test
 
+  scanner-image:
+    name: Agentless scanner image and vulnerability gate
+    needs: reuse-pr-gate
+    if: ${{ needs.reuse-pr-gate.outputs.reuse != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build scanner dist and load the linux-amd64 image once
+        id: scanner
+        run: |
+          set -euo pipefail
+          image_ref="sutra/agentless-scanner:ci-${GITHUB_SHA}"
+          [[ "${image_ref}" =~ ^sutra/agentless-scanner:ci-[a-f0-9]{40}$ ]]
+          pnpm build:agentless-scanner
+          docker buildx build \
+            --file services/agentless-scanner/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=false \
+            --sbom=false \
+            --cache-from type=gha,scope=sutra-ci-agentless-scanner \
+            --cache-to type=gha,mode=max,scope=sutra-ci-agentless-scanner \
+            --load \
+            --tag "${image_ref}" \
+            services/agentless-scanner
+          echo "ref=${image_ref}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan every High and Critical scanner-image finding
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          scan-type: image
+          image-ref: ${{ steps.scanner.outputs.ref }}
+          scanners: vuln
+          vuln-type: os,library
+          trivyignores: /dev/null
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+          hide-progress: true
+
   release-gate:
     # Preserve the existing required-check name. An exact squash/merge commit
     # may reuse only a successful CI run for that PR's immutable head SHA.
@@ -224,7 +292,7 @@ jobs:
     # fail closed into a complete rerun.
     name: Typecheck, lint, test, and build
     if: ${{ always() }}
-    needs: [reuse-pr-gate, quality, integration]
+    needs: [reuse-pr-gate, quality, integration, scanner-image]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -235,14 +303,17 @@ jobs:
           REUSE_REASON: ${{ needs.reuse-pr-gate.outputs.reason }}
           QUALITY_RESULT: ${{ needs.quality.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
+          SCANNER_IMAGE_RESULT: ${{ needs.scanner-image.result }}
         run: |
           set -euo pipefail
           test "$PROVENANCE_RESULT" = success
           if [[ "$REUSE" == "true" ]]; then
             test "$QUALITY_RESULT" = skipped
             test "$INTEGRATION_RESULT" = skipped
+            test "$SCANNER_IMAGE_RESULT" = skipped
             echo "Reused prior verification: $REUSE_REASON"
           else
             test "$QUALITY_RESULT" = success
             test "$INTEGRATION_RESULT" = success
+            test "$SCANNER_IMAGE_RESULT" = success
           fi

@@ -3,6 +3,10 @@ import type {
   VulnerabilityMirrorRepository,
 } from "../db/vulnerability-mirror-repository.ts";
 import { validateCisaKevCatalog } from "./exploitability-feed.ts";
+import {
+  productionOutboundFetch,
+  type ManagedOutboundEnvironment,
+} from "./managed-outbound-fetch.ts";
 import { parseNvdRecord } from "./vulnerability-database.ts";
 
 const KEV_URL =
@@ -41,10 +45,14 @@ export async function refreshBoundedVulnerabilityFeed(input: {
   readonly feed: "kev" | "nvd";
   readonly nvdWindowDays?: number;
   readonly repository: VulnerabilityMirrorRepository;
+  readonly environment?: ManagedOutboundEnvironment;
   readonly fetchImpl?: typeof fetch;
   readonly now?: () => number;
 }): Promise<number> {
-  const fetchImpl = input.fetchImpl ?? fetch;
+  const fetchImpl = productionOutboundFetch(
+    input.environment ?? {},
+    input.fetchImpl,
+  );
   const nowMs = (input.now ?? Date.now)();
   const asOf = new Date(nowMs).toISOString();
   let rows: readonly MirrorRow[];

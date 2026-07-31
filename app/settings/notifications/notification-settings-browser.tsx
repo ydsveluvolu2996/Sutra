@@ -162,7 +162,7 @@ export function NotificationSettingsBrowser() {
           <p className="eyebrow">Tenant notification routing</p>
           <h1>Notification destinations</h1>
           <p className="page-subtitle">
-            Configure customer-scoped email, Slack, Microsoft Teams, and generic ticketing-webhook delivery (Jira, ServiceNow, PagerDuty) without exposing provider secrets to the browser or database.
+            Configure customer-scoped email, Slack, Microsoft Teams, PagerDuty, and provider-bounded Jira Cloud or ServiceNow webhook delivery without exposing provider secrets to the browser or database.
           </p>
         </div>
       </section>
@@ -213,8 +213,8 @@ export function NotificationSettingsBrowser() {
           <div className="report-metrics" aria-label="Notification delivery health">
             <div><small>Delivery health</small><strong>{workspace.health.state.replaceAll("_", " ")}</strong><span>{workspace.health.message}</span></div>
             <div><small>Enabled routes</small><strong>{workspace.health.enabledDestinations}</strong><span>{workspace.health.configuredDestinations} adapter-ready</span></div>
-            <div><small>Actionable queue</small><strong>{workspace.health.queued + workspace.health.processing + workspace.health.retrying}</strong><span>{workspace.health.oldestActionableAgeSeconds === null ? "No queued work" : `Oldest ${workspace.health.oldestActionableAgeSeconds}s`}</span></div>
-            <div><small>Delivery failures</small><strong>{workspace.health.deadLetter}</strong><span>{workspace.health.retrying} retrying · {workspace.health.adapterMissing} adapter-blocked</span></div>
+            <div><small>Actionable queue</small><strong>{workspace.health.queued + workspace.health.processing + workspace.health.retrying + workspace.health.providerAccepted}</strong><span>{workspace.health.providerAccepted} accepted, awaiting feedback · {workspace.health.oldestActionableAgeSeconds === null ? "No queued work" : `Oldest ${workspace.health.oldestActionableAgeSeconds}s`}</span></div>
+            <div><small>Delivery failures</small><strong>{workspace.health.deadLetter + workspace.health.deliveryFailed + workspace.health.deliveryDelayed}</strong><span>{workspace.health.deliveryFailed} provider-failed · {workspace.health.deliveryDelayed} delivery-delayed · {workspace.health.retrying} retrying · {workspace.health.adapterMissing} adapter-blocked</span></div>
           </div>
         ) : null}
         <form className="auth-form" onSubmit={(event) => void save(event)}>
@@ -225,7 +225,8 @@ export function NotificationSettingsBrowser() {
                 <option value="email">Amazon SES email</option>
                 <option value="slack">Slack Incoming Webhook</option>
                 <option value="microsoft_teams">Microsoft Teams Workflow</option>
-                <option value="generic_webhook">Generic ticketing webhook (Jira / ServiceNow / PagerDuty)</option>
+                <option value="generic_webhook">Ticket webhook (Jira Cloud Automation / ServiceNow)</option>
+                <option value="pagerduty">PagerDuty Events API v2</option>
               </select>
             </label>
             <label>
@@ -264,7 +265,7 @@ export function NotificationSettingsBrowser() {
               <small>
                 Enter an opaque secret reference only. Sutra rejects raw webhook URLs.
                 {channel === "generic_webhook"
-                  ? " The worker POSTs a stable sutra.ticket.v1 JSON envelope to the webhook URL held in this managed secret."
+                  ? " Only Jira Cloud Automation and ServiceNow API webhook hosts and paths are accepted. The worker POSTs a stable sutra.ticket.v1 JSON envelope through Sutra’s signed outbound gateway."
                   : ""}
               </small>
             </label>
@@ -309,9 +310,9 @@ export function NotificationSettingsBrowser() {
             <div className="data-row" key={job.id}>
               <span className="primary-cell"><strong>{new Date(job.createdAt).toLocaleString()}</strong><small>{job.id}</small></span>
               <span>{job.channel.replaceAll("_", " ")}</span>
-              <span><span className={`connection-status connection-${job.status === "delivered" ? "active" : job.status === "dead_letter" ? "disabled" : "pending"}`}>{job.status.replaceAll("_", " ")}</span></span>
+              <span><span className={`connection-status connection-${job.status === "delivered" ? "active" : job.status === "dead_letter" || job.status === "delivery_failed" ? "disabled" : "pending"}`}>{job.status.replaceAll("_", " ")}</span></span>
               <span>{job.attemptCount}</span>
-              <span>{job.lastErrorCode?.replaceAll("_", " ") ?? "Awaiting worker"}</span>
+              <span>{job.lastErrorCode?.replaceAll("_", " ") ?? (job.status === "provider_accepted" ? "Awaiting SES feedback" : "Awaiting worker")}</span>
             </div>
           ))}
           {(workspace?.jobs.length ?? 0) === 0 ? <div className="empty-row">No notification jobs have been queued.</div> : null}

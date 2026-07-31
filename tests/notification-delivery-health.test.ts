@@ -98,3 +98,45 @@ test("reports delayed and dead-lettered delivery as degraded", () => {
   assert.equal(health.oldestActionableAgeSeconds, 600);
   assert.equal(health.deadLetter, 1);
 });
+
+test("does not treat provider acceptance as delivery and degrades terminal SES feedback", () => {
+  const accepted = assessNotificationDeliveryHealth({
+    destinations: [destination],
+    jobs: [job("provider_accepted", "2026-07-17T08:50:00.000Z")],
+    workerConfigured: true,
+    now: Date.parse("2026-07-17T09:00:00.000Z"),
+  });
+  assert.equal(accepted.state, "degraded");
+  assert.equal(accepted.providerAccepted, 1);
+  assert.equal(accepted.delivered, 0);
+  assert.equal(
+    withObservedNotificationReadiness([destination], [job("provider_accepted")], true)[0]
+      ?.deliveryReadiness,
+    "adapter_not_configured",
+  );
+
+  const failed = assessNotificationDeliveryHealth({
+    destinations: [destination],
+    jobs: [job("delivery_failed")],
+    workerConfigured: true,
+    now: Date.parse("2026-07-17T09:00:00.000Z"),
+  });
+  assert.equal(failed.state, "degraded");
+  assert.equal(failed.deliveryFailed, 1);
+});
+
+test("degrades immediately when SES reports a delivery delay", () => {
+  const delayed = {
+    ...job("provider_accepted", "2026-07-17T08:59:59.000Z"),
+    lastErrorCode: "SES_DELIVERY_DELAY",
+  };
+  const health = assessNotificationDeliveryHealth({
+    destinations: [destination],
+    jobs: [delayed],
+    workerConfigured: true,
+    now: Date.parse("2026-07-17T09:00:00.000Z"),
+  });
+  assert.equal(health.oldestActionableAgeSeconds, 1);
+  assert.equal(health.deliveryDelayed, 1);
+  assert.equal(health.state, "degraded");
+});

@@ -68,6 +68,7 @@ import postgresAwsGlobalOwnershipSql from "../postgres/migrations/0068_aws_globa
 import postgresCmdbResourceRetirementSql from "../postgres/migrations/0069_cmdb_resource_retirement.sql?raw";
 import postgresManagedEvidenceObjectsSql from "../postgres/migrations/0070_managed_evidence_objects.sql?raw";
 import postgresItsmDeliveryEvidenceSql from "../postgres/migrations/0071_itsm_delivery_evidence.sql?raw";
+import postgresSesDeliveryFeedbackSql from "../postgres/migrations/0072_ses_delivery_feedback.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -140,6 +141,7 @@ const migrations = [
   { id: "0069_cmdb_resource_retirement", source: postgresCmdbResourceRetirementSql },
   { id: "0070_managed_evidence_objects", source: postgresManagedEvidenceObjectsSql },
   { id: "0071_itsm_delivery_evidence", source: postgresItsmDeliveryEvidenceSql },
+  { id: "0072_ses_delivery_feedback", source: postgresSesDeliveryFeedbackSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

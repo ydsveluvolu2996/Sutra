@@ -120,6 +120,7 @@ export async function POST(request: Request): Promise<Response> {
       activationUrl: invitationUrl.toString(),
       expiresAt: created.invitation.expiresAt,
       role: created.invitation.role,
+      operationId: deliveryIdempotencyKey,
     }, deliveryEnv);
     let invitation = begun.invitation;
     try {

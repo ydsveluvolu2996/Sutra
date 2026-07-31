@@ -73,6 +73,7 @@ import awsGlobalOwnershipSchemaSql from "../drizzle/0073_aws_global_ownership.sq
 import cmdbResourceRetirementSchemaSql from "../drizzle/0074_cmdb_resource_retirement.sql?raw";
 import managedEvidenceObjectsSchemaSql from "../drizzle/0075_managed_evidence_objects.sql?raw";
 import itsmDeliveryEvidenceSchemaSql from "../drizzle/0076_itsm_delivery_evidence.sql?raw";
+import sesDeliveryFeedbackSchemaSql from "../drizzle/0077_ses_delivery_feedback.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -163,6 +164,7 @@ const migrations = [
   { id: "0074_cmdb_resource_retirement", statements: statementsFrom(cmdbResourceRetirementSchemaSql) },
   { id: "0075_managed_evidence_objects", statements: statementsFrom(managedEvidenceObjectsSchemaSql) },
   { id: "0076_itsm_delivery_evidence", statements: statementsFrom(itsmDeliveryEvidenceSchemaSql) },
+  { id: "0077_ses_delivery_feedback", statements: statementsFrom(sesDeliveryFeedbackSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

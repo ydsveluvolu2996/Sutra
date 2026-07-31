@@ -1273,7 +1273,7 @@ async function route(
     }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
-      return { status: 200, body: await verifyConnection(context, job) };
+      return { status: 200, body: await attestOnboardingTrust(context, job) };
     }
     if (action === "costs") {
       return { status: 200, body: await collectConnectionCosts(context, job) };
@@ -1561,7 +1561,14 @@ function raceLocalAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
+/**
+ * Execute the explicitly requested onboarding-attestation endpoint.
+ *
+ * This is an endpoint action, not an authorization guard for the other
+ * allowlisted connection actions. Those actions enforce their own persisted
+ * state preconditions in the scoped registry.
+ */
+async function attestOnboardingTrust(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
   const lease = await claimConnectionOperation(context, operationKey, true);
   try {

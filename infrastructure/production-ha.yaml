@@ -10,13 +10,13 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label: { default: Network prerequisites }
-        Parameters: [VpcId, VpcCidr, PublicSubnetIds, PrivateAppSubnetIds, PrivateDatabaseSubnetIds, AlbIngressPrefixListId, ApprovedHttpsEgressPrefixListId]
+        Parameters: [VpcId, VpcCidr, PublicSubnetIds, PrivateAppSubnetIds, PrivateDatabaseSubnetIds, AlbIngressPrefixListId, ApprovedHttpsEgressPrefixListId, S3GatewayPrefixListId, EndpointSecurityGroupId, NetworkFirewallArn]
       - Label: { default: Immutable release }
-        Parameters: [SutraAppImage, SutraMigrationImage, NotificationWorkerImage, HostedBrokerImage, PublicOrigin, BrokerHostName, HostedReleaseApproval, HostedRuntimeArchitectureApproval]
+        Parameters: [SutraAppImage, SutraMigrationImage, NotificationWorkerImage, HostedBrokerImage, AgentlessScannerImage, ReleaseActivation, PublicOrigin, BrokerHostName, HostedReleaseApproval, HostedRuntimeArchitectureApproval]
       - Label: { default: Runtime secret and encryption }
-        Parameters: [IdentityMode, ApplicationRuntimeSecretArn, KmsKeyArn]
+        Parameters: [IdentityMode, ApplicationRuntimeSecretArn, CustomerRoleTemplateUrl, KmsKeyArn]
       - Label: { default: Agentless scanner approval and pinned infrastructure }
-        Parameters: [AgentlessLiveValidationApproval, AgentlessScanAvailabilityZone, AgentlessKmsKeyArn, AgentlessScannerImage, AgentlessOrchestratorRoleArn, AgentlessAmiId, AgentlessInstanceType, AgentlessSubnetId, AgentlessSecurityGroupId, AgentlessInstanceProfileArn, AgentlessFindingsBucket]
+        Parameters: [AgentlessLiveValidationApproval, AgentlessScanAvailabilityZone, AgentlessKmsKeyArn, AgentlessOrchestratorRoleArn, AgentlessAmiId, AgentlessInstanceType, AgentlessSubnetId, AgentlessSecurityGroupId, AgentlessInstanceProfileArn, AgentlessFindingsBucket]
       - Label: { default: Application capacity }
         Parameters: [TaskCpu, TaskMemory, MinimumTaskCount, MaximumTaskCount, MinimumWorkerTaskCount, MaximumWorkerTaskCount, MinimumBrokerTaskCount, MaximumBrokerTaskCount, ResourceRetirementCompleteMisses, EvidenceRetentionDays]
       - Label: { default: Database capacity and recovery }
@@ -24,7 +24,9 @@ Metadata:
       - Label: { default: "Edge, logging, and alerting" }
         Parameters: [CertificateArn, EnableWaf, WafClientIpHeader, EnableContainerInsights, LogRetentionDays, AccessLogRetentionDays, AlarmSnsTopicArn]
       - Label: { default: Protected GitHub release identity }
-        Parameters: [GitHubOidcProviderArn, GitHubRepository, GitHubReleaseEnvironment, AppRepositoryName, WorkerRepositoryName, BrokerRepositoryName, NotificationSesIdentityArn]
+        Parameters: [GitHubOidcProviderArn, GitHubRepository, GitHubReleaseEnvironment, AppRepositoryName, WorkerRepositoryName, BrokerRepositoryName, ScannerRepositoryName]
+      - Label: { default: SES security-notification feedback }
+        Parameters: [NotificationSesActivation, NotificationSesIdentityArn]
 
 Parameters:
   VpcId:
@@ -50,8 +52,26 @@ Parameters:
     Type: String
     AllowedPattern: ^pl-[0-9a-f]{8,17}$
     Description: >-
-      Existing managed prefix list containing only approved AWS endpoints,
-      Zoho, SES, and notification destination HTTPS addresses.
+      Existing managed prefix list containing only reviewed external-service
+      IPv4 ranges. Private interface endpoints use EndpointSecurityGroupId.
+  S3GatewayPrefixListId:
+    Type: String
+    AllowedPattern: ^pl-[0-9a-f]{8,17}$
+    Description: >-
+      AWS-managed regional S3 prefix list verified as
+      com.amazonaws.<region>.s3. Regional IDs must not be hardcoded.
+  EndpointSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: >-
+      Existing security group attached only to the managed-production AWS
+      PrivateLink endpoints. Workload HTTPS egress targets this group directly.
+  NetworkFirewallArn:
+    Type: String
+    AllowedPattern: ^arn:aws:network-firewall:[a-z0-9-]+:[0-9]{12}:firewall/sutra-production-egress-inspection$
+    Description: >-
+      Exact production egress firewall. Bootstrap and every release verify its
+      deletion/policy/subnet protections and two-AZ READY state before changing
+      workloads.
   CertificateArn:
     Type: String
     AllowedPattern: ^arn:aws(?:-[a-z]+)*:acm:[a-z0-9-]+:[0-9]{12}:certificate/[0-9a-f-]{36}$
@@ -76,8 +96,8 @@ Parameters:
     AllowedPattern: ^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$
   AgentlessScannerImage:
     Type: String
-    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$
-    Description: Separately validated immutable scanner image; mutable tags are rejected.
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/agentless-scanner@sha256:[a-f0-9]{64}$
+    Description: Release-controlled, separately scanned immutable scanner image; mutable tags and other repositories are rejected.
   AgentlessOrchestratorRoleArn:
     Type: String
     AllowedPattern: ^arn:aws:iam::[0-9]{12}:role/sutra/[A-Za-z0-9+=,.@_/-]+$
@@ -124,12 +144,29 @@ Parameters:
     Type: String
     AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/broker@sha256:[a-f0-9]{64}$
     Description: Immutable hosted AWS broker digest. Mutable tags are rejected.
+  ReleaseActivation:
+    Type: String
+    Default: inactive-before-first-migration
+    AllowedValues:
+      - inactive-before-first-migration
+      - active-after-successful-migration
+    Description: >-
+      Fail-closed first-deployment latch. The bootstrap workflow creates the
+      stack inactive, runs the exact digest's migration, and changes this value
+      only from its separately protected activation job.
   ApplicationRuntimeSecretArn:
     Type: String
     AllowedPattern: ^arn:aws(?:-[a-z]+)*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:sutra/production/runtime-[A-Za-z0-9/_+=.@-]+$
     Description: >-
       Existing KMS-encrypted JSON secret. Required keys are documented in
       deploy/production/README.md and are injected individually.
+  CustomerRoleTemplateUrl:
+    Type: String
+    MaxLength: 1024
+    AllowedPattern: '^https://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\.s3\.ap-south-1\.amazonaws\.com/templates/standard-2026-07\.4/1f08f008ab024bc9c440340340e7a7cfbad7ed394e6704c3df7173766f727fc8\.yaml\?versionId=(?!null$)[A-Za-z0-9._~%+=/-]{1,256}$'
+    Description: >-
+      Immutable ap-south-1 S3 URL for the exact reviewed customer onboarding
+      role template. A non-null S3 VersionId is mandatory.
   IdentityMode:
     Type: String
     AllowedValues: [oidc, federated]
@@ -276,10 +313,24 @@ Parameters:
     Type: String
     Default: sutra/broker
     AllowedValues: [sutra/broker]
+  ScannerRepositoryName:
+    Type: String
+    Default: sutra/agentless-scanner
+    AllowedValues: [sutra/agentless-scanner]
   NotificationSesIdentityArn:
     Type: String
     AllowedPattern: ^arn:aws(?:-[a-z]+)*:ses:[a-z0-9-]+:[0-9]{12}:identity/[A-Za-z0-9_.@-]+$
     Description: Existing verified SES domain or address identity used by the notification worker.
+  NotificationSesActivation:
+    Type: String
+    Default: disabled-ses-production-access-denied
+    AllowedValues:
+      - disabled-ses-production-access-denied
+      - active-after-production-access-and-feedback-validation
+    Description: >-
+      Independent fail-closed SES latch. Activate only after GetAccount reports
+      ProductionAccessEnabled=true and the configuration-set feedback path,
+      suppression, reputation alarms, and live bounce/complaint tests pass.
 
 Conditions:
   WafEnabled: !Equals [!Ref EnableWaf, "true"]
@@ -287,6 +338,8 @@ Conditions:
   HasAlarmTopic: !Not [!Equals [!Ref AlarmSnsTopicArn, ""]]
   FederatedIdentityEnabled: !Equals [!Ref IdentityMode, federated]
   BackupVaultLockEnabled: !Equals [!Ref EnableBackupVaultLock, "true"]
+  ProductionActivated: !Equals [!Ref ReleaseActivation, active-after-successful-migration]
+  SesNotificationsActivated: !Equals [!Ref NotificationSesActivation, active-after-production-access-and-feedback-validation]
   AgentlessExecutionApproved: !Equals [!Ref AgentlessLiveValidationApproval, approved-after-live-end-to-end-agentless-validation]
 
 Resources:
@@ -340,6 +393,133 @@ Resources:
         - { Key: "sutra:component", Value: edge }
         - { Key: "sutra:environment", Value: production }
 
+  SesNotificationConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: sutra-production-security-notifications
+      DeliveryOptions:
+        TlsPolicy: REQUIRE
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SendingOptions:
+        SendingEnabled: !If [SesNotificationsActivated, true, false]
+      SuppressionOptions:
+        SuppressedReasons: [BOUNCE, COMPLAINT]
+
+  SesFeedbackDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: sutra-production-ses-feedback-dlq
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:data-classification", Value: security-delivery-evidence }
+
+  SesFeedbackQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: sutra-production-ses-feedback
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      MaximumMessageSize: 262144
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 10
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SesFeedbackDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:data-classification", Value: security-delivery-evidence }
+
+  SesFeedbackEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: sutra-production-ses-feedback
+      Description: Routes only this SES configuration set's delivery evidence to the encrypted queue.
+      EventBusName: default
+      State: !If [SesNotificationsActivated, ENABLED, DISABLED]
+      EventPattern:
+        source: [aws.ses]
+        detail:
+          eventType:
+            - Send
+            - Delivery
+            - DeliveryDelay
+            - Bounce
+            - Complaint
+            - Reject
+            - Rendering Failure
+          mail:
+            tags:
+              "ses:configuration-set": [!Ref SesNotificationConfigurationSet]
+      Targets:
+        - Id: encrypted-feedback-queue
+          Arn: !GetAtt SesFeedbackQueue.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt SesFeedbackDeadLetterQueue.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  SesFeedbackQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SesFeedbackQueue
+        - !Ref SesFeedbackDeadLetterQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource:
+              - !GetAtt SesFeedbackQueue.Arn
+              - !GetAtt SesFeedbackDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowOnlyExactEventRule
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource:
+              - !GetAtt SesFeedbackQueue.Arn
+              - !GetAtt SesFeedbackDeadLetterQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !GetAtt SesFeedbackEventRule.Arn
+
+  SesNotificationEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesNotificationConfigurationSet
+      EventDestination:
+        Name: sutra-production-eventbridge
+        Enabled: !If [SesNotificationsActivated, true, false]
+        MatchingEventTypes:
+          - SEND
+          - DELIVERY
+          - DELIVERY_DELAY
+          - BOUNCE
+          - COMPLAINT
+          - REJECT
+          - RENDERING_FAILURE
+        EventBridgeDestination:
+          EventBusArn: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default
+
   Cluster:
     Type: AWS::ECS::Cluster
     Properties:
@@ -383,6 +563,16 @@ Resources:
           ToPort: 443
           DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
           Description: HTTPS to reviewed production destinations only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
         - IpProtocol: udp
           FromPort: 53
           ToPort: 53
@@ -405,7 +595,17 @@ Resources:
           FromPort: 443
           ToPort: 443
           DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
-          Description: SES, Secrets Manager, and approved notification HTTPS destinations
+          Description: SES and approved external notification HTTPS destinations
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
         - IpProtocol: udp
           FromPort: 53
           ToPort: 53
@@ -427,8 +627,20 @@ Resources:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
-          DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
-          Description: STS and read-only AWS APIs through reviewed endpoints
+          CidrIp: 0.0.0.0/0
+          Description: >-
+            Broker-only L3 reachability; private subnet defaults force this
+            through strict L7 Network Firewall for .amazonaws.com
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
         - IpProtocol: udp
           FromPort: 53
           ToPort: 53
@@ -451,7 +663,17 @@ Resources:
           FromPort: 443
           ToPort: 443
           DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
-          Description: CISA, FIRST EPSS, NVD, and required private AWS endpoints
+          Description: CISA, FIRST EPSS, NVD, and approved external feed destinations
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
         - IpProtocol: udp
           FromPort: 53
           ToPort: 53
@@ -1039,7 +1261,9 @@ Resources:
                 Resource: !GetAtt ApplicationLogGroup.Arn
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !Ref DatabaseRuntimeSecret
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
               - Effect: Allow
                 Action: kms:Decrypt
                 Resource: !Ref KmsKeyArn
@@ -1050,6 +1274,7 @@ Resources:
   MigrationExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: sutra-production-ha-migration-execution
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -1092,7 +1317,7 @@ Resources:
             Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: PullWorkerWriteWorkerLogsAndReadDatabaseSecret
+        - PolicyName: PullWorkerWriteWorkerLogsAndReadRuntimeSecrets
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -1107,7 +1332,9 @@ Resources:
                 Resource: !GetAtt WorkerLogGroup.Arn
               - Effect: Allow
                 Action: secretsmanager:GetSecretValue
-                Resource: !Ref DatabaseRuntimeSecret
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
               - Effect: Allow
                 Action: kms:Decrypt
                 Resource: !Ref KmsKeyArn
@@ -1260,13 +1487,37 @@ Resources:
                 Condition:
                   StringEquals:
                     kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
-        - PolicyName: SendFromOneVerifiedSesIdentity
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: ses:SendEmail
-                Resource: !Ref NotificationSesIdentityArn
+        - !If
+          - SesNotificationsActivated
+          - PolicyName: SendFromOneVerifiedSesIdentity
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: SendOnlyAfterSesFeedbackActivation
+                  Effect: Allow
+                  Action: ses:SendEmail
+                  Resource: !Ref NotificationSesIdentityArn
+          - !Ref "AWS::NoValue"
+        - !If
+          - SesNotificationsActivated
+          - PolicyName: ConsumeOnlySesFeedbackQueue
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: ReceiveAndDeleteExactFeedbackQueue
+                  Effect: Allow
+                  Action:
+                    - sqs:ReceiveMessage
+                    - sqs:DeleteMessage
+                  Resource: !GetAtt SesFeedbackQueue.Arn
+                - Sid: DecryptOnlySesFeedbackThroughSqs
+                  Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref KmsKeyArn
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: !Sub sqs.${AWS::Region}.amazonaws.com
+          - !Ref "AWS::NoValue"
 
   AppTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -1303,6 +1554,7 @@ Resources:
             - { Name: SUTRA_DB_NAME, Value: sutra }
             - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
             - { Name: SUTRA_PUBLIC_ORIGIN, Value: !Ref PublicOrigin }
+            - { Name: SUTRA_CUSTOMER_ROLE_TEMPLATE_URL, Value: !Ref CustomerRoleTemplateUrl }
             - { Name: SUTRA_RELEASE_IMAGE, Value: !Ref SutraAppImage }
             - { Name: SUTRA_HOSTED_RELEASE_APPROVAL, Value: !Ref HostedReleaseApproval }
             - { Name: SUTRA_IDENTITY_MODE, Value: !Ref IdentityMode }
@@ -1334,6 +1586,9 @@ Resources:
             - { Name: SUTRA_ZOHO_CLIENT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_ID::" }
             - { Name: SUTRA_ZOHO_CLIENT_SECRET, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_SECRET::" }
             - { Name: SUTRA_ZOHO_REFRESH_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_REFRESH_TOKEN::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_KEY_ID::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY::" }
             - { Name: SUTRA_OIDC_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_PROVIDERS::" }
             - { Name: SUTRA_OIDC_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_TRANSACTION_KEY::" }
             - !If
@@ -1421,6 +1676,9 @@ Resources:
             - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_KEY_ID::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_PRIVATE_KEY::" }
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1467,6 +1725,10 @@ Resources:
 
   WorkerTaskDefinition:
     Type: AWS::ECS::TaskDefinition
+    DependsOn:
+      - SesNotificationEventDestination
+      - SesFeedbackEventRule
+      - SesFeedbackQueuePolicy
     Properties:
       Family: sutra-production-worker
       RequiresCompatibilities: [FARGATE]
@@ -1489,10 +1751,25 @@ Resources:
             - { Name: SUTRA_NOTIFICATION_HEALTH_PORT, Value: "8081" }
             - { Name: SUTRA_NOTIFICATION_POLL_INTERVAL_MS, Value: "1000" }
             - { Name: SUTRA_NOTIFICATION_CONFIG_PREFIX, Value: "sutra/notifications/" }
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_CONFIGURATION_SET, Value: !Ref SesNotificationConfigurationSet }
+              - !Ref "AWS::NoValue"
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_FEEDBACK_QUEUE_URL, Value: !Ref SesFeedbackQueue }
+              - !Ref "AWS::NoValue"
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_FEEDBACK_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }
+              - !Ref "AWS::NoValue"
             - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
             - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_KEY_ID::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_PRIVATE_KEY::" }
           HealthCheck:
             Command:
               - CMD
@@ -1619,7 +1896,7 @@ Resources:
       Name: sutra-production-vulnerability-feed
       Description: Daily strict EPSS bulk refresh in a private bounded Fargate task
       ScheduleExpression: cron(30 3 * * ? *)
-      State: ENABLED
+      State: !If [ProductionActivated, ENABLED, DISABLED]
       Targets:
         - Id: vulnerability-feed-refresh
           Arn: !GetAtt Cluster.Arn
@@ -1647,7 +1924,7 @@ Resources:
       LaunchType: FARGATE
       PlatformVersion: LATEST
       TaskDefinition: !Ref AppTaskDefinition
-      DesiredCount: !Ref MinimumTaskCount
+      DesiredCount: !If [ProductionActivated, !Ref MinimumTaskCount, 0]
       EnableECSManagedTags: true
       PropagateTags: TASK_DEFINITION
       AvailabilityZoneRebalancing: ENABLED
@@ -1677,7 +1954,7 @@ Resources:
       LaunchType: FARGATE
       PlatformVersion: LATEST
       TaskDefinition: !Ref WorkerTaskDefinition
-      DesiredCount: !Ref MinimumWorkerTaskCount
+      DesiredCount: !If [ProductionActivated, !Ref MinimumWorkerTaskCount, 0]
       EnableECSManagedTags: true
       PropagateTags: TASK_DEFINITION
       AvailabilityZoneRebalancing: ENABLED
@@ -1703,7 +1980,7 @@ Resources:
       LaunchType: FARGATE
       PlatformVersion: LATEST
       TaskDefinition: !Ref BrokerTaskDefinition
-      DesiredCount: !Ref MinimumBrokerTaskCount
+      DesiredCount: !If [ProductionActivated, !Ref MinimumBrokerTaskCount, 0]
       EnableECSManagedTags: true
       PropagateTags: TASK_DEFINITION
       AvailabilityZoneRebalancing: ENABLED
@@ -1727,6 +2004,7 @@ Resources:
 
   ServiceScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
     DependsOn: AppService
     Properties:
       ServiceNamespace: ecs
@@ -1737,6 +2015,7 @@ Resources:
 
   CpuScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
     Properties:
       PolicyName: sutra-production-app-cpu
       PolicyType: TargetTrackingScaling
@@ -1749,6 +2028,7 @@ Resources:
 
   MemoryScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
     Properties:
       PolicyName: sutra-production-app-memory
       PolicyType: TargetTrackingScaling
@@ -1761,6 +2041,7 @@ Resources:
 
   WorkerScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
     DependsOn: WorkerService
     Properties:
       ServiceNamespace: ecs
@@ -1771,6 +2052,7 @@ Resources:
 
   WorkerCpuScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
     Properties:
       PolicyName: sutra-production-worker-cpu
       PolicyType: TargetTrackingScaling
@@ -1783,6 +2065,7 @@ Resources:
 
   BrokerScalableTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
     DependsOn: BrokerService
     Properties:
       ServiceNamespace: ecs
@@ -1793,6 +2076,7 @@ Resources:
 
   BrokerCpuScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
     Properties:
       PolicyName: sutra-production-broker-cpu
       PolicyType: TargetTrackingScaling
@@ -1802,6 +2086,23 @@ Resources:
         ScaleInCooldown: 300
         ScaleOutCooldown: 60
         PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+
+  ActivationVerificationHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: ProductionActivated
+
+  ActivationVerification:
+    Type: AWS::CloudFormation::WaitCondition
+    Condition: ProductionActivated
+    DependsOn:
+      - AppService
+      - WorkerService
+      - BrokerService
+      - VulnerabilityFeedSchedule
+    Properties:
+      Handle: !Ref ActivationVerificationHandle
+      Timeout: "1800"
+      Count: 1
 
   EvidenceBucket:
     Type: AWS::S3::Bucket
@@ -2017,6 +2318,74 @@ Resources:
         - { Name: ServiceName, Value: sutra-production-worker }
       AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
 
+  SesFeedbackQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES feedback has not been durably reconciled within five minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 300
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt SesFeedbackQueue.QueueName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesFeedbackDeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES feedback was invalid, unmatched, or could not be reconciled after redrive attempts.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt SesFeedbackDeadLetterQueue.QueueName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesBounceReputationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES account bounce reputation rate is at or above three percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.BounceRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0.03
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesComplaintReputationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES account complaint reputation rate is at or above 0.05 percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.ComplaintRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0.0005
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
   GitHubProductionReleaseRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2055,6 +2424,7 @@ Resources:
                   - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
                   - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${WorkerRepositoryName}
                   - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${BrokerRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ScannerRepositoryName}
         - PolicyName: RegisterAndDeployProductionTaskRevision
           PolicyDocument:
             Version: "2012-10-17"
@@ -2133,6 +2503,25 @@ Resources:
                 Effect: Allow
                 Action: cloudformation:DescribeStacks
                 Resource: !Ref "AWS::StackId"
+              - Sid: VerifyRegionalAwsManagedPrefixLists
+                Effect: Allow
+                Action: ec2:DescribeManagedPrefixLists
+                Resource: "*"
+              - Sid: VerifyExactProductionNetworkFirewall
+                Effect: Allow
+                Action: network-firewall:DescribeFirewall
+                Resource: !Ref NetworkFirewallArn
+              - Sid: ReadExactRuntimeSecretForReleasePreflight
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ApplicationRuntimeSecretArn
+              - Sid: DecryptExactRuntimeSecretForReleasePreflight
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
               - Sid: WriteImmutableReleaseEvidence
                 Effect: Allow
                 Action: s3:PutObject
@@ -2148,7 +2537,13 @@ Resources:
                     kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
 
 Outputs:
+  ReleaseActivation: { Value: !Ref ReleaseActivation }
+  NotificationSesActivation: { Value: !Ref NotificationSesActivation }
+  SesNotificationConfigurationSetName: { Value: !Ref SesNotificationConfigurationSet }
+  SesFeedbackQueueUrl: { Value: !Ref SesFeedbackQueue }
+  SesFeedbackDeadLetterQueueUrl: { Value: !Ref SesFeedbackDeadLetterQueue }
   PublicOrigin: { Value: !Ref PublicOrigin }
+  CustomerRoleTemplateUrl: { Value: !Ref CustomerRoleTemplateUrl }
   LoadBalancerDnsName: { Value: !GetAtt PublicLoadBalancer.DNSName }
   BrokerLoadBalancerDnsName: { Value: !GetAtt BrokerLoadBalancer.DNSName }
   AccessLogBucketName: { Value: !Ref AccessLogBucket }
@@ -2165,6 +2560,9 @@ Outputs:
   VulnerabilityFeedScheduleRuleName: { Value: !Ref VulnerabilityFeedSchedule }
   ApplicationSecurityGroupId: { Value: !Ref ApplicationSecurityGroup }
   BrokerSecurityGroupId: { Value: !Ref BrokerSecurityGroup }
+  EndpointSecurityGroupId: { Value: !Ref EndpointSecurityGroupId }
+  S3GatewayPrefixListId: { Value: !Ref S3GatewayPrefixListId }
+  NetworkFirewallArn: { Value: !Ref NetworkFirewallArn }
   PrivateAppSubnetIds:
     Value: !Join [",", !Ref PrivateAppSubnetIds]
   DatabaseEndpoint:

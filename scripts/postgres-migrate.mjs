@@ -83,6 +83,7 @@ const migrationFiles = [
   "0069_cmdb_resource_retirement.sql",
   "0070_managed_evidence_objects.sql",
   "0071_itsm_delivery_evidence.sql",
+  "0072_ses_delivery_feedback.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

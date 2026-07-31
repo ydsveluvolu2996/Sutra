@@ -23,6 +23,7 @@ env:
   APP_ECR_REPOSITORY: sutra/app
   WORKER_ECR_REPOSITORY: sutra/notification-worker
   BROKER_ECR_REPOSITORY: sutra/broker
+  SCANNER_ECR_REPOSITORY: sutra/agentless-scanner
 
 jobs:
   release:
@@ -58,7 +59,7 @@ jobs:
           [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
           [[ "${STACK_NAME}" =~ ^[A-Za-z][A-Za-z0-9-]{2,127}$ ]]
-          [[ "${PUBLIC_ORIGIN}" =~ ^https://[A-Za-z0-9.-]+$ ]]
+          [[ "${PUBLIC_ORIGIN}" == "https://www.sutracmdb.com" ]]
           [[ "${#RELEASE_REASON}" -ge 10 && "${#RELEASE_REASON}" -le 160 ]]
           [[ "${#CHANGE_TICKET}" -ge 3 && "${#CHANGE_TICKET}" -le 64 ]]
           [[ "${RELEASE_REASON}" != *$'\n'* && "${RELEASE_REASON}" != *$'\r'* ]]
@@ -66,6 +67,7 @@ jobs:
           [[ "${APP_ECR_REPOSITORY}" == "sutra/app" ]]
           [[ "${WORKER_ECR_REPOSITORY}" == "sutra/notification-worker" ]]
           [[ "${BROKER_ECR_REPOSITORY}" == "sutra/broker" ]]
+          [[ "${SCANNER_ECR_REPOSITORY}" == "sutra/agentless-scanner" ]]
 
       - name: Install pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
@@ -157,17 +159,63 @@ jobs:
             jq -er --arg key "$1" \
               '.Stacks[0].Outputs[] | select(.OutputKey == $key) | .OutputValue' <<< "${stack}"
           }
+          parameter() {
+            jq -er --arg key "$1" \
+              '.Stacks[0].Parameters[] | select(.ParameterKey == $key) | .ParameterValue' <<< "${stack}"
+          }
           for key in \
-            PublicOrigin ClusterName ServiceName WorkerServiceName BrokerServiceName AppTaskDefinitionArn \
+            ReleaseActivation PublicOrigin CustomerRoleTemplateUrl ClusterName ServiceName WorkerServiceName BrokerServiceName AppTaskDefinitionArn \
             MigrationTaskDefinitionArn WorkerTaskDefinitionArn BrokerTaskDefinitionArn \
             VulnerabilityFeedTaskDefinitionArn VulnerabilityFeedScheduleRuleName \
-            ApplicationSecurityGroupId BrokerSecurityGroupId PrivateAppSubnetIds EvidenceBucketName KmsKeyArn
+            ApplicationSecurityGroupId BrokerSecurityGroupId EndpointSecurityGroupId \
+            S3GatewayPrefixListId NetworkFirewallArn PrivateAppSubnetIds EvidenceBucketName KmsKeyArn
           do
             value="$(output "${key}")"
             [[ -n "${value}" && "${value}" != "null" ]]
             echo "${key}=${value}" >> "${GITHUB_OUTPUT}"
           done
+          runtime_secret_arn="$(parameter ApplicationRuntimeSecretArn)"
+          identity_mode="$(parameter IdentityMode)"
+          customer_role_template_url="$(parameter CustomerRoleTemplateUrl)"
+          [[ "${runtime_secret_arn}" =~ ^arn:aws:secretsmanager:${AWS_REGION}:${AWS_ACCOUNT_ID}:secret:sutra/production/runtime-[A-Za-z0-9/_+=.@-]+$ ]]
+          [[ "${identity_mode}" == "oidc" || "${identity_mode}" == "federated" ]]
+          [[ "${customer_role_template_url}" == "$(output CustomerRoleTemplateUrl)" ]]
+          [[ "${customer_role_template_url}" =~ ^https://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\.s3\.ap-south-1\.amazonaws\.com/templates/standard-2026-07\.4/1f08f008ab024bc9c440340340e7a7cfbad7ed394e6704c3df7173766f727fc8\.yaml\?versionId=[A-Za-z0-9._~%+=/-]+$ ]]
+          [[ "${customer_role_template_url}" != *"?versionId=null" ]]
+          echo "ApplicationRuntimeSecretArn=${runtime_secret_arn}" >> "${GITHUB_OUTPUT}"
+          echo "IdentityMode=${identity_mode}" >> "${GITHUB_OUTPUT}"
+          [[ "$(output ReleaseActivation)" == "active-after-successful-migration" ]]
           [[ "$(output PublicOrigin)" == "${EXPECTED_PUBLIC_ORIGIN}" ]]
+          s3_prefix_list_id="$(output S3GatewayPrefixListId)"
+          [[ "${s3_prefix_list_id}" =~ ^pl-[0-9a-f]{8,17}$ ]]
+          read -r owner name family state < <(
+            aws ec2 describe-managed-prefix-lists \
+              --region "${AWS_REGION}" \
+              --prefix-list-ids "${s3_prefix_list_id}" \
+              --query 'PrefixLists[0].[OwnerId,PrefixListName,AddressFamily,State]' \
+              --output text
+          )
+          [[ "${owner}" == "AWS" ]]
+          [[ "${name}" == "com.amazonaws.${AWS_REGION}.s3" ]]
+          [[ "${family}" == "IPv4" ]]
+          [[ "${state}" == "create-complete" ]]
+          firewall_arn="$(output NetworkFirewallArn)"
+          [[ "${firewall_arn}" == "arn:aws:network-firewall:${AWS_REGION}:${AWS_ACCOUNT_ID}:firewall/sutra-production-egress-inspection" ]]
+          firewall="$(aws network-firewall describe-firewall \
+            --region "${AWS_REGION}" \
+            --firewall-arn "${firewall_arn}" \
+            --output json)"
+          jq -e --arg arn "${firewall_arn}" '
+            .Firewall.FirewallArn == $arn
+            and .Firewall.FirewallName == "sutra-production-egress-inspection"
+            and .Firewall.DeleteProtection == true
+            and .Firewall.FirewallPolicyChangeProtection == true
+            and .Firewall.SubnetChangeProtection == true
+            and (.Firewall.SubnetMappings | length) == 2
+            and .FirewallStatus.Status == "READY"
+            and (.FirewallStatus.SyncStates | length) == 2
+            and all(.FirewallStatus.SyncStates[]; .Attachment.Status == "READY")
+          ' <<< "${firewall}" >/dev/null
 
       - name: Verify immutable repositories
         env:
@@ -175,17 +223,23 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
         run: |
           set -euo pipefail
-          for repository in "${APP_ECR_REPOSITORY}" "${WORKER_ECR_REPOSITORY}" "${BROKER_ECR_REPOSITORY}"; do
-            read -r uri mutability encryption < <(
+          for repository in \
+            "${APP_ECR_REPOSITORY}" \
+            "${WORKER_ECR_REPOSITORY}" \
+            "${BROKER_ECR_REPOSITORY}" \
+            "${SCANNER_ECR_REPOSITORY}"
+          do
+            read -r uri mutability encryption scan_on_push < <(
               aws ecr describe-repositories \
                 --region "${AWS_REGION}" \
                 --repository-names "${repository}" \
-                --query 'repositories[0].[repositoryUri,imageTagMutability,encryptionConfiguration.encryptionType]' \
+                --query 'repositories[0].[repositoryUri,imageTagMutability,encryptionConfiguration.encryptionType,imageScanningConfiguration.scanOnPush]' \
                 --output text
             )
             [[ "${uri}" == "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${repository}" ]]
             [[ "${mutability}" == "IMMUTABLE" ]]
             [[ "${encryption}" == "AES256" || "${encryption}" == "KMS" ]]
+            [[ "${scan_on_push}" == "True" ]]
             expected_lifecycle="$(jq -cS . deploy/ec2/ecr-lifecycle-policy.json)"
             actual_lifecycle="$(aws ecr get-lifecycle-policy --region "${AWS_REGION}" \
               --repository-name "${repository}" --query lifecyclePolicyText --output text | jq -cS .)"
@@ -286,6 +340,35 @@ jobs:
           echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
           echo "ref=${registry}/${BROKER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
 
+      - name: Build scanner dist and push the immutable scanner candidate once
+        id: scanner
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pnpm build:agentless-scanner
+          docker buildx build \
+            --file services/agentless-scanner/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-agentless-scanner \
+            --cache-to type=gha,mode=max,scope=sutra-production-agentless-scanner \
+            --push --tag "${registry}/${SCANNER_ECR_REPOSITORY}:${candidate}" \
+            services/agentless-scanner
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${SCANNER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${SCANNER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
       - name: Scan the exact application digest
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -316,6 +399,18 @@ jobs:
           exit-code: "1"
           hide-progress: true
 
+      - name: Scan the exact scanner digest including unfixed findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: ${{ steps.scanner.outputs.ref }}
+          trivyignores: /dev/null
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+          hide-progress: true
+
       - name: Promote only the scanned manifests
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
@@ -328,6 +423,9 @@ jobs:
           BROKER_CANDIDATE: ${{ steps.broker.outputs.candidate }}
           BROKER_RELEASE: ${{ steps.broker.outputs.release }}
           BROKER_DIGEST: ${{ steps.broker.outputs.digest }}
+          SCANNER_CANDIDATE: ${{ steps.scanner.outputs.candidate }}
+          SCANNER_RELEASE: ${{ steps.scanner.outputs.release }}
+          SCANNER_DIGEST: ${{ steps.scanner.outputs.digest }}
         run: |
           set -euo pipefail
           promote() {
@@ -355,10 +453,12 @@ jobs:
           promote "${APP_ECR_REPOSITORY}" "${APP_CANDIDATE}" "${APP_RELEASE}" "${APP_DIGEST}"
           promote "${WORKER_ECR_REPOSITORY}" "${WORKER_CANDIDATE}" "${WORKER_RELEASE}" "${WORKER_DIGEST}"
           promote "${BROKER_ECR_REPOSITORY}" "${BROKER_CANDIDATE}" "${BROKER_RELEASE}" "${BROKER_DIGEST}"
+          promote "${SCANNER_ECR_REPOSITORY}" "${SCANNER_CANDIDATE}" "${SCANNER_RELEASE}" "${SCANNER_DIGEST}"
 
       - name: Migrate, deploy all services, verify, and roll back on failure
         id: deploy
         env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
           AWS_REGION: ${{ vars.AWS_REGION }}
           PUBLIC_ORIGIN: ${{ steps.stack.outputs.PublicOrigin }}
           CLUSTER: ${{ steps.stack.outputs.ClusterName }}
@@ -372,13 +472,36 @@ jobs:
           PRIVATE_SUBNETS: ${{ steps.stack.outputs.PrivateAppSubnetIds }}
           EVIDENCE_BUCKET: ${{ steps.stack.outputs.EvidenceBucketName }}
           KMS_KEY_ARN: ${{ steps.stack.outputs.KmsKeyArn }}
+          APPLICATION_RUNTIME_SECRET_ARN: ${{ steps.stack.outputs.ApplicationRuntimeSecretArn }}
+          IDENTITY_MODE: ${{ steps.stack.outputs.IdentityMode }}
           APP_IMAGE: ${{ steps.app.outputs.ref }}
           WORKER_IMAGE: ${{ steps.worker.outputs.ref }}
           BROKER_IMAGE: ${{ steps.broker.outputs.ref }}
+          SCANNER_IMAGE: ${{ steps.scanner.outputs.ref }}
           RELEASE_REASON: ${{ inputs.releaseReason }}
           CHANGE_TICKET: ${{ inputs.changeTicket }}
         run: |
           set -euo pipefail
+          scanner_pattern="^${AWS_ACCOUNT_ID}\\.dkr\\.ecr\\.${AWS_REGION}\\.amazonaws\\.com/sutra/agentless-scanner@sha256:[a-f0-9]{64}$"
+          [[ "${SCANNER_IMAGE}" =~ ${scanner_pattern} ]]
+          runtime_secret_version_id="$(
+            aws secretsmanager get-secret-value \
+              --region "${AWS_REGION}" \
+              --secret-id "${APPLICATION_RUNTIME_SECRET_ARN}" \
+              --version-stage AWSCURRENT \
+              --query VersionId \
+              --output text
+          )"
+          [[ "${runtime_secret_version_id}" =~ ^[A-Za-z0-9-]{32,64}$ ]]
+          aws secretsmanager get-secret-value \
+            --region "${AWS_REGION}" \
+            --secret-id "${APPLICATION_RUNTIME_SECRET_ARN}" \
+            --version-id "${runtime_secret_version_id}" \
+            --version-stage AWSCURRENT \
+            --query SecretString \
+            --output text |
+            SUTRA_EXPECTED_IDENTITY_MODE="${IDENTITY_MODE}" \
+              node scripts/validate-production-runtime-secret.mjs >/dev/null
           previous_app="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
             --services "${APP_SERVICE}" --query 'services[0].taskDefinition' --output text)"
           previous_worker="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
@@ -396,17 +519,46 @@ jobs:
           [[ "${previous_broker}" =~ :task-definition/sutra-production-broker:[0-9]+$ ]]
           [[ "${previous_feed}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
           [[ "${FEED_BASE_TASK}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+          previous_scanner="$(
+            aws ecs describe-task-definition \
+              --region "${AWS_REGION}" \
+              --task-definition "${previous_broker}" \
+              --query taskDefinition \
+              --output json |
+              jq -er '
+                [.containerDefinitions[]
+                  | select(.name == "hosted-broker")
+                  | .environment[]?
+                  | select(.name == "SUTRA_AGENTLESS_SCANNER_IMAGE")
+                  | .value] as $values
+                | if ($values | length) == 1 then $values[0]
+                  else error("broker task must contain exactly one scanner release identity")
+                  end
+              '
+          )"
+          [[ "${previous_scanner}" =~ ${scanner_pattern} ]]
 
           register_revision() {
-            local base="$1" image="$2" output="$3" targets_json="$4" update_release_identity="$5"
+            local base="$1" image="$2" output="$3" targets_json="$4"
+            local update_release_identity="$5" scanner_image="$6"
             aws ecs describe-task-definition --region "${AWS_REGION}" --task-definition "${base}" \
               --query taskDefinition --output json |
               jq -e --arg image "${image}" --argjson targets "${targets_json}" \
-                --argjson updateReleaseIdentity "${update_release_identity}" '
+                --argjson updateReleaseIdentity "${update_release_identity}" \
+                --arg scannerImage "${scanner_image}" '
                 ([.containerDefinitions[].name
                   | select(. as $name | $targets | index($name) != null)] | length) as $targetCount
                 | if $targetCount != ($targets | length) then
                     error("task definition does not contain every exact release container")
+                  else . end
+                | if $scannerImage != "" then
+                    ([.containerDefinitions[]
+                      | select(.name == "hosted-broker")
+                      | .environment[]?
+                      | select(.name == "SUTRA_AGENTLESS_SCANNER_IMAGE")] | length) as $scannerIdentityCount
+                    | if $scannerIdentityCount != 1 then
+                        error("broker task must contain exactly one SUTRA_AGENTLESS_SCANNER_IMAGE entry")
+                      else . end
                   else . end
                 | if $updateReleaseIdentity then
                     ([.containerDefinitions[]
@@ -433,6 +585,18 @@ jobs:
                       end
                     )
                   else . end
+                | if $scannerImage != "" then
+                    .containerDefinitions |= map(
+                      if .name == "hosted-broker" then
+                        .environment |= map(
+                          if .name == "SUTRA_AGENTLESS_SCANNER_IMAGE"
+                          then .value = $scannerImage
+                          else . end
+                        )
+                      else .
+                      end
+                    )
+                  else . end
                 | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
               ' > "${output}"
             aws ecs register-task-definition --region "${AWS_REGION}" \
@@ -442,23 +606,43 @@ jobs:
           }
 
           migration_task="$(register_revision \
-            "${MIGRATION_BASE_TASK}" "${APP_IMAGE}" migration.json '["migrate"]' false)"
+            "${MIGRATION_BASE_TASK}" "${APP_IMAGE}" migration.json '["migrate"]' false "")"
           new_app="$(register_revision \
-            "${previous_app}" "${APP_IMAGE}" app.json '["app","background-job-runner"]' true)"
+            "${previous_app}" "${APP_IMAGE}" app.json '["app","background-job-runner"]' true "")"
           new_worker="$(register_revision \
-            "${previous_worker}" "${WORKER_IMAGE}" worker.json '["notification-worker"]' false)"
+            "${previous_worker}" "${WORKER_IMAGE}" worker.json '["notification-worker"]' false "")"
           new_broker="$(register_revision \
-            "${previous_broker}" "${BROKER_IMAGE}" broker.json '["hosted-broker"]' false)"
+            "${previous_broker}" "${BROKER_IMAGE}" broker.json '["hosted-broker"]' false "${SCANNER_IMAGE}")"
           new_feed="$(register_revision \
-            "${previous_feed}" "${APP_IMAGE}" vulnerability-feed.json '["vulnerability-feed-refresh"]' false)"
+            "${previous_feed}" "${APP_IMAGE}" vulnerability-feed.json '["vulnerability-feed-refresh"]' false "")"
           [[ "${migration_task}" =~ :task-definition/sutra-production-migration:[0-9]+$ ]]
           [[ "${new_app}" =~ :task-definition/sutra-production-app:[0-9]+$ ]]
           [[ "${new_worker}" =~ :task-definition/sutra-production-worker:[0-9]+$ ]]
           [[ "${new_broker}" =~ :task-definition/sutra-production-broker:[0-9]+$ ]]
           [[ "${new_feed}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+          aws ecs describe-task-definition \
+            --region "${AWS_REGION}" \
+            --task-definition "${new_broker}" \
+            --query taskDefinition \
+            --output json |
+            jq -e --arg scannerImage "${SCANNER_IMAGE}" '
+              [.containerDefinitions[]
+                | select(.name == "hosted-broker")
+                | .environment[]?
+                | select(.name == "SUTRA_AGENTLESS_SCANNER_IMAGE" and .value == $scannerImage)]
+              | length == 1
+            ' >/dev/null
 
           network="$(jq -cn --arg subnets "${PRIVATE_SUBNETS}" --arg sg "${APP_SECURITY_GROUP}" '
             {awsvpcConfiguration:{subnets:($subnets|split(",")),securityGroups:[$sg],assignPublicIp:"DISABLED"}}')"
+          [[ "$(
+            aws secretsmanager get-secret-value \
+              --region "${AWS_REGION}" \
+              --secret-id "${APPLICATION_RUNTIME_SECRET_ARN}" \
+              --version-stage AWSCURRENT \
+              --query VersionId \
+              --output text
+          )" == "${runtime_secret_version_id}" ]]
           migration="$(aws ecs run-task --region "${AWS_REGION}" --cluster "${CLUSTER}" \
             --launch-type FARGATE --task-definition "${migration_task}" \
             --network-configuration "${network}" \
@@ -522,6 +706,8 @@ jobs:
               --arg appImage "${APP_IMAGE}" \
               --arg workerImage "${WORKER_IMAGE}" \
               --arg brokerImage "${BROKER_IMAGE}" \
+              --arg scannerImage "${SCANNER_IMAGE}" \
+              --arg previousScannerImage "${previous_scanner}" \
               --arg appTask "${new_app}" \
               --arg workerTask "${new_worker}" \
               --arg brokerTask "${new_broker}" \
@@ -530,7 +716,8 @@ jobs:
               --arg releasedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               '{schemaVersion:$schemaVersion,repository:$repository,commit:$commit,runId:$runId,
                 runAttempt:$runAttempt,actor:$actor,reason:$reason,changeTicket:$ticket,
-                appImage:$appImage,workerImage:$workerImage,brokerImage:$brokerImage,appTask:$appTask,
+                appImage:$appImage,workerImage:$workerImage,brokerImage:$brokerImage,
+                scannerImage:$scannerImage,previousScannerImage:$previousScannerImage,appTask:$appTask,
                 workerTask:$workerTask,brokerTask:$brokerTask,feedTask:$feedTask,
                 migrationTask:$migrationTask,releasedAt:$releasedAt}' \
               > release-evidence.json || return 1
@@ -571,19 +758,41 @@ jobs:
               rollback_failed=true
             aws ecs wait services-stable --region "${AWS_REGION}" --cluster "${CLUSTER}" \
               --services "${APP_SERVICE}" "${WORKER_SERVICE}" "${BROKER_SERVICE}" || rollback_failed=true
+            restored_broker="$(aws ecs describe-services --region "${AWS_REGION}" --cluster "${CLUSTER}" \
+              --services "${BROKER_SERVICE}" --query 'services[0].taskDefinition' --output text)" ||
+              rollback_failed=true
+            if [[ "${restored_broker:-}" != "${previous_broker}" ]]; then
+              rollback_failed=true
+            elif ! aws ecs describe-task-definition \
+                --region "${AWS_REGION}" \
+                --task-definition "${restored_broker}" \
+                --query taskDefinition \
+                --output json |
+              jq -e --arg scannerImage "${previous_scanner}" '
+                [.containerDefinitions[]
+                  | select(.name == "hosted-broker")
+                  | .environment[]?
+                  | select(.name == "SUTRA_AGENTLESS_SCANNER_IMAGE" and .value == $scannerImage)]
+                | length == 1
+              ' >/dev/null
+            then
+              rollback_failed=true
+            fi
             if [[ "${rollback_failed}" == "true" ]]; then
-              echo "Managed production verification failed and rollback needs operator intervention." >&2
+              echo "Managed production verification failed and scanner-aware rollback needs operator intervention." >&2
             else
-              echo "Managed production verification failed; all services were rolled back." >&2
+              echo "Managed production verification failed; all services and the prior scanner digest were restored." >&2
             fi
             exit 1
           fi
           echo "previous_app=${previous_app}" >> "${GITHUB_OUTPUT}"
           echo "previous_worker=${previous_worker}" >> "${GITHUB_OUTPUT}"
           echo "previous_broker=${previous_broker}" >> "${GITHUB_OUTPUT}"
+          echo "previous_scanner=${previous_scanner}" >> "${GITHUB_OUTPUT}"
           echo "previous_feed=${previous_feed}" >> "${GITHUB_OUTPUT}"
           echo "app_task=${new_app}" >> "${GITHUB_OUTPUT}"
           echo "worker_task=${new_worker}" >> "${GITHUB_OUTPUT}"
           echo "broker_task=${new_broker}" >> "${GITHUB_OUTPUT}"
+          echo "scanner_image=${SCANNER_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "feed_task=${new_feed}" >> "${GITHUB_OUTPUT}"
           echo "migration_task=${migration_task}" >> "${GITHUB_OUTPUT}"

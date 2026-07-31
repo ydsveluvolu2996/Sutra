@@ -65,9 +65,23 @@ test("the instance shuts down on every path, including failure", () => {
   );
 });
 
+test("the private runtime never installs packages from public repositories", () => {
+  const script = buildScanUserData(SETTINGS, "/dev/sdf");
+  assert.doesNotMatch(script, /\b(?:dnf|yum|apt-get)\s+install\b/u);
+  assert.match(script, /command -v docker/u);
+  assert.match(script, /command -v aws/u);
+  assert.match(script, /publish_refusal HOST_PREREQUISITES_MISSING/u);
+});
+
 test("a failure publishes a refusal, so no findings and a refusal never look alike", () => {
   const script = buildScanUserData(SETTINGS, "/dev/sdf");
-  for (const code of ["DOCKER_UNAVAILABLE", "ECR_LOGIN_FAILED", "IMAGE_PULL_FAILED", "SCANNER_FAILED"]) {
+  for (const code of [
+    "HOST_PREREQUISITES_MISSING",
+    "DOCKER_UNAVAILABLE",
+    "ECR_LOGIN_FAILED",
+    "IMAGE_PULL_FAILED",
+    "SCANNER_FAILED",
+  ]) {
     assert.match(script, new RegExp(`publish_refusal ${code}`, "u"), `${code} must be published`);
   }
   assert.match(script, /refusal\.json/u);

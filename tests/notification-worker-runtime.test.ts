@@ -10,6 +10,7 @@ import {
   type NotificationRuntimeAdapters,
 } from "../services/notification-worker/runtime-adapters.ts";
 import {
+  processNotificationWorkerIteration,
   readNotificationWorkerRuntimeConfig,
   runNotificationWorker,
 } from "../services/notification-worker/runtime.ts";
@@ -47,7 +48,7 @@ test("maps an opaque reference to a bounded managed-secret prefix", async () => 
   );
 });
 
-test("resolves a generic ticketing webhook secret to an arbitrary pinned host", async () => {
+test("resolves only a provider-bounded Jira Cloud ticketing webhook secret", async () => {
   const requested: string[] = [];
   const reader: ManagedSecretReader = {
     async getSecretString(secretId) {
@@ -55,8 +56,8 @@ test("resolves a generic ticketing webhook secret to an arbitrary pinned host", 
       return JSON.stringify({
         version: 1,
         channel: "generic_webhook",
-        webhookUrl: "https://sutra.example-ticketing.com/inbound/9f8e7d6c",
-        expectedHostname: "sutra.example-ticketing.com",
+        webhookUrl: "https://automation.atlassian.com/pro/hooks/0123456789abcdef0123456789abcdef",
+        expectedHostname: "automation.atlassian.com",
         idempotencyHeader: "Idempotency-Key",
       });
     },
@@ -67,7 +68,7 @@ test("resolves a generic ticketing webhook secret to an arbitrary pinned host", 
     channel: "generic_webhook",
   });
   assert.equal(requested[0], "sutra/notifications/org-a/customer-a/generic_webhook/jira");
-  assert.equal(resolved?.expectedHostname, "sutra.example-ticketing.com");
+  assert.equal(resolved?.expectedHostname, "automation.atlassian.com");
   assert.equal(resolved?.idempotencyHeader, "Idempotency-Key");
 });
 
@@ -147,12 +148,15 @@ test("rejects malformed, cross-channel, and unexpected secret documents", async 
 
 test("SES adapter validates its fixed endpoint and delegates signing to the workload SDK", async () => {
   const requests: unknown[] = [];
-  const transport = new AwsSdkSesV2Transport(() => ({
-    async send(input) {
-      requests.push(input);
-      return { status: 200, headers: {}, bodyBytes: new Uint8Array() };
-    },
-  }));
+  const transport = new AwsSdkSesV2Transport(
+    () => ({
+      async send(input) {
+        requests.push(input);
+        return { status: 200, headers: {}, bodyBytes: new Uint8Array() };
+      },
+    }),
+    "sutra-security-notifications",
+  );
   const body = new TextEncoder().encode(JSON.stringify({
     FromEmailAddress: "alerts@example.com",
     Destination: { ToAddresses: ["soc@example.com"] },
@@ -175,6 +179,10 @@ test("SES adapter validates its fixed endpoint and delegates signing to the work
   });
   assert.equal(response.status, 200);
   assert.equal(requests.length, 1);
+  assert.equal(
+    (requests[0] as { ConfigurationSetName?: string }).ConfigurationSetName,
+    "sutra-security-notifications",
+  );
   await assert.rejects(
     transport.post({
       service: "ses",
@@ -188,6 +196,50 @@ test("SES adapter validates its fixed endpoint and delegates signing to the work
     }),
     /configuration rejected/u,
   );
+});
+
+test("SES adapter fails closed without event publishing and sanitizes SDK failures", async () => {
+  let sends = 0;
+  const input = {
+    service: "ses" as const,
+    region: "ap-south-1",
+    url: new URL("https://email.ap-south-1.amazonaws.com/v2/email/outbound-emails"),
+    headers: { "content-type": "application/json" },
+    body: new TextEncoder().encode(JSON.stringify({
+      FromEmailAddress: "alerts@example.com",
+      Destination: { ToAddresses: ["soc@example.com"] },
+      Content: { Simple: { Subject: { Data: "Test" }, Body: { Text: { Data: "Test" } } } },
+    })),
+    redirect: "error" as const,
+    timeoutMs: 5_000 as const,
+    maximumResponseBytes: 16_384 as const,
+  };
+  const unconfigured = new AwsSdkSesV2Transport(() => ({
+    async send() {
+      sends += 1;
+      return { status: 200, headers: {}, bodyBytes: new Uint8Array() };
+    },
+  }));
+  const unconfiguredResponse = await unconfigured.post(input);
+  assert.equal(unconfiguredResponse.status, 0);
+  assert.equal(unconfiguredResponse.adapterErrorCode, "ADAPTER_NOT_CONFIGURED");
+  assert.equal(sends, 0);
+
+  for (const [name, status] of [
+    ["MessageRejected", 400],
+    ["AccessDeniedException", 403],
+    ["TooManyRequestsException", 429],
+    ["ServiceUnavailableException", 503],
+  ] as const) {
+    const configured = new AwsSdkSesV2Transport(() => ({
+      async send() {
+        const error = new Error("sensitive provider detail");
+        error.name = name;
+        throw error;
+      },
+    }), "sutra-security-notifications");
+    assert.equal((await configured.post(input)).status, status);
+  }
 });
 
 test("runtime exposes readiness and shuts down without leaking destination material", async () => {
@@ -208,6 +260,7 @@ test("runtime exposes readiness and shuts down without leaking destination mater
       http: { async post() { throw new Error("unused"); } },
       ses: { async post() { throw new Error("unused"); } },
     },
+    feedback: null,
     destroy() {
       calls += 100;
     },
@@ -217,6 +270,10 @@ test("runtime exposes readiness and shuts down without leaking destination mater
       pollIntervalMs: 100,
       healthPort: port,
       secretPrefix: "sutra/notifications/",
+      sesConfigurationSetName: null,
+      sesFeedbackQueueUrl: null,
+      sesFeedbackAccountId: null,
+      awsRegion: null,
     },
     adapters,
     signal: abort.signal,
@@ -243,10 +300,23 @@ test("runtime environment is bounded", () => {
     SUTRA_NOTIFICATION_POLL_INTERVAL_MS: "500",
     SUTRA_NOTIFICATION_HEALTH_PORT: "8081",
     SUTRA_NOTIFICATION_CONFIG_PREFIX: "sutra/notifications/",
+    SUTRA_SES_CONFIGURATION_SET: "sutra-security-notifications",
+    SUTRA_SES_FEEDBACK_QUEUE_URL:
+      "https://sqs.ap-south-1.amazonaws.com/123456789012/sutra-production-ses-feedback",
+    SUTRA_SES_FEEDBACK_ACCOUNT_ID: "123456789012",
+    AWS_REGION: "ap-south-1",
+    SUTRA_MANAGED_OUTBOUND_URL: "https://outbound.sutracmdb.com",
+    SUTRA_MANAGED_OUTBOUND_KEY_ID: "notification-worker",
+    SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY: "a".repeat(96),
   }), {
     pollIntervalMs: 500,
     healthPort: 8081,
     secretPrefix: "sutra/notifications/",
+    sesConfigurationSetName: "sutra-security-notifications",
+    sesFeedbackQueueUrl:
+      "https://sqs.ap-south-1.amazonaws.com/123456789012/sutra-production-ses-feedback",
+    sesFeedbackAccountId: "123456789012",
+    awsRegion: "ap-south-1",
   });
   assert.throws(
     () => readNotificationWorkerRuntimeConfig({
@@ -256,4 +326,37 @@ test("runtime environment is bounded", () => {
     }),
     /configuration rejected/u,
   );
+  assert.throws(
+    () => readNotificationWorkerRuntimeConfig({
+      SUTRA_SES_CONFIGURATION_SET: "configuration set with spaces",
+    }),
+    /configuration rejected/u,
+  );
+  assert.throws(
+    () => readNotificationWorkerRuntimeConfig({
+      SUTRA_SES_CONFIGURATION_SET: "sutra-security-notifications",
+      AWS_REGION: "ap-south-1",
+    }),
+    /configuration rejected/u,
+  );
+});
+
+test("available outbound work aborts an empty SES long poll instead of starving delivery", async () => {
+  let feedbackAborted = false;
+  const result = await processNotificationWorkerIteration({
+    signal: new AbortController().signal,
+    async processOutbound() {
+      return "delivered";
+    },
+    processFeedback(signal) {
+      return new Promise((resolve) => {
+        signal.addEventListener("abort", () => {
+          feedbackAborted = true;
+          resolve("idle");
+        }, { once: true });
+      });
+    },
+  });
+  assert.equal(result, "delivered");
+  assert.equal(feedbackAborted, true);
 });

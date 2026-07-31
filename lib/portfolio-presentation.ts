@@ -1,4 +1,8 @@
-import type { PortfolioConnectionSummary } from "./portfolio-types";
+import type {
+  PortfolioConnectionSummary,
+  PortfolioCustomerSummary,
+  PortfolioState,
+} from "./portfolio-types";
 
 export type SnapshotFreshness = "fresh" | "aging" | "stale" | "missing";
 
@@ -17,6 +21,51 @@ export interface ConnectionHealthView {
 const HOUR_MS = 60 * 60 * 1_000;
 const FRESH_HOURS = 24;
 const AGING_HOURS = 72;
+
+function latestSnapshot(connections: readonly PortfolioConnectionSummary[]): string | null {
+  return connections.reduce<string | null>((latest, connection) => {
+    if (connection.latestSnapshotAt === null) return latest;
+    return latest === null || connection.latestSnapshotAt > latest
+      ? connection.latestSnapshotAt
+      : latest;
+  }, null);
+}
+
+/**
+ * Local fixture customers are useful development tooling, but they must never
+ * enter a hosted portfolio response if a fixture database was accidentally
+ * restored or reused. Recompute every aggregate from the remaining live
+ * connections so fixture rows cannot survive as inflated totals.
+ */
+export function portfolioForRuntime(
+  portfolio: PortfolioState,
+  allowSimulatedEvidence: boolean,
+): PortfolioState {
+  if (allowSimulatedEvidence) return portfolio;
+  const customers = portfolio.customers.flatMap<PortfolioCustomerSummary>((customer) => {
+    const connections = customer.connections.filter((connection) => connection.sourceKind !== "simulated_fixture");
+    const hadSimulatedConnection = connections.length !== customer.connections.length;
+    if (hadSimulatedConnection && connections.length === 0) return [];
+    return [{
+      ...customer,
+      connectionCount: connections.length,
+      resourceCount: connections.reduce((total, connection) => total + connection.resourceCount, 0),
+      openFindingCount: connections.reduce((total, connection) => total + connection.openFindingCount, 0),
+      latestSnapshotAt: latestSnapshot(connections),
+      connections,
+    }];
+  });
+  return {
+    ...portfolio,
+    totals: {
+      customers: customers.length,
+      connections: customers.reduce((total, customer) => total + customer.connectionCount, 0),
+      resources: customers.reduce((total, customer) => total + customer.resourceCount, 0),
+      openFindings: customers.reduce((total, customer) => total + customer.openFindingCount, 0),
+    },
+    customers,
+  };
+}
 
 function parsedTimestamp(value: string | null): number | null {
   if (value === null) return null;

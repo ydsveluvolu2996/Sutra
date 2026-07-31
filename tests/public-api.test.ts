@@ -40,6 +40,8 @@ describe("cursor codec", () => {
     assert.equal(await decodeCursor("", alphaContext), 0);
     await assert.rejects(() => decodeCursor("not-base64!", alphaContext), (error: unknown) =>
       error instanceof PublicApiError && error.status === 400 && error.code === "INVALID_CURSOR");
+    await assert.rejects(() => decodeCursor("a".repeat(4_097), alphaContext), (error: unknown) =>
+      error instanceof PublicApiError && error.status === 400 && error.code === "INVALID_CURSOR");
     await assert.rejects(() => encodeCursor(-0.5 as number, alphaContext), PublicApiError);
   });
 

@@ -113,8 +113,12 @@ export async function GET(request: Request): Promise<Response> {
         state: notificationHealth.state,
         enabledDestinations: notificationHealth.enabledDestinations,
         configuredDestinations: notificationHealth.configuredDestinations,
-        actionableJobs: notificationHealth.queued + notificationHealth.processing + notificationHealth.retrying,
-        deadLetter: notificationHealth.deadLetter,
+        actionableJobs:
+          notificationHealth.queued +
+          notificationHealth.processing +
+          notificationHealth.retrying +
+          notificationHealth.providerAccepted,
+        deadLetter: notificationHealth.deadLetter + notificationHealth.deliveryFailed,
       },
       itsm: {
         connectorCount: connectors.length,

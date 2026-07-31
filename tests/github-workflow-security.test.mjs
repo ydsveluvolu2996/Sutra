@@ -88,9 +88,10 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /^\s{2}reuse-pr-gate:\s*$/mu);
   assert.match(ci, /^\s{2}quality:\s*$/mu);
   assert.match(ci, /^\s{2}integration:\s*$/mu);
+  assert.match(ci, /^\s{2}scanner-image:\s*$/mu);
   assert.match(ci, /^\s{2}release-gate:\s*$/mu);
   assert.doesNotMatch(ci, /^\s{2}(test|build):\s*$/mu);
-  assert.match(ci, /needs: \[reuse-pr-gate, quality, integration\]/u);
+  assert.match(ci, /needs: \[reuse-pr-gate, quality, integration, scanner-image\]/u);
   assert.match(ci, /repos\/\$\{REPOSITORY\}\/commits\/\$\{COMMIT_SHA\}\/pulls/u);
   assert.match(ci, /actions\/workflows\/ci\.yml\/runs\?event=pull_request&head_sha=/u);
   assert.match(ci, /\.merge_commit_sha == \$commit_sha/u);
@@ -114,6 +115,23 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(pipelineScan, /"config", "--quiet", "--severity"/u);
   assert.match(pipelineScan, /required scanner unavailable: trivy/u);
   assert.match(ci, /pnpm build/u);
+  assert.match(ci, /pnpm build:agentless-scanner/u);
+  assert.equal(
+    [...ci.matchAll(/services\/agentless-scanner\/Dockerfile/gu)].length,
+    1,
+    "CI must build the scanner Dockerfile once",
+  );
+  assert.match(ci, /--platform linux\/amd64/u);
+  assert.match(ci, /--load/u);
+  assert.match(ci, /--cache-from type=gha,scope=sutra-ci-agentless-scanner/u);
+  assert.match(ci, /--cache-to type=gha,mode=max,scope=sutra-ci-agentless-scanner/u);
+  assert.match(ci, /Scan every High and Critical scanner-image finding/u);
+  assert.match(ci, /scan-type: image/u);
+  assert.match(ci, /trivyignores: \/dev\/null/u);
+  assert.match(ci, /severity: CRITICAL,HIGH/u);
+  assert.match(ci, /ignore-unfixed: false/u);
+  assert.match(ci, /SCANNER_IMAGE_RESULT: \$\{\{ needs\.scanner-image\.result \}\}/u);
+  assert.match(ci, /test "\$SCANNER_IMAGE_RESULT" = success/u);
   assert.match(ci, /pnpm test:rendered/u);
   assert.match(ci, /if: \$\{\{ always\(\) \}\}/u);
   assert.match(ci, /PROVENANCE_RESULT: \$\{\{ needs\.reuse-pr-gate\.result \}\}/u);

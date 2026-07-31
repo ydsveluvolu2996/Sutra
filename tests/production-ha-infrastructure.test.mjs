@@ -10,6 +10,18 @@ const workflow = readFileSync(
   new URL("../.github/workflows/production-ha-release.yml", import.meta.url),
   "utf8",
 );
+const bootstrapWorkflow = readFileSync(
+  new URL("../.github/workflows/production-ha-bootstrap.yml", import.meta.url),
+  "utf8",
+);
+const bootstrapScript = readFileSync(
+  new URL("../deploy/production/bootstrap-ha.sh", import.meta.url),
+  "utf8",
+);
+const runtimeSecretValidator = readFileSync(
+  new URL("../scripts/validate-production-runtime-secret.mjs", import.meta.url),
+  "utf8",
+);
 const appEntrypoint = readFileSync(
   new URL("../deploy/production/entrypoint.sh", import.meta.url),
   "utf8",
@@ -48,6 +60,25 @@ test("managed production is a separate multi-AZ ECS and RDS topology", () => {
   assert.match(template, /MinimumTaskCount:[\s\S]*?MinValue:\s+2/u);
   assert.match(template, /MinimumWorkerTaskCount:[\s\S]*?MinValue:\s+2/u);
   assert.match(template, /MinimumBrokerTaskCount:[\s\S]*?MinValue:\s+2/u);
+  assert.match(
+    template,
+    /ReleaseActivation:[\s\S]*?Default:\s+inactive-before-first-migration/u,
+  );
+  assert.match(
+    template,
+    /ProductionActivated:\s+!Equals \[!Ref ReleaseActivation, active-after-successful-migration\]/u,
+  );
+  assert.match(template, /Type:\s+AWS::CloudFormation::WaitConditionHandle/u);
+  assert.match(
+    template,
+    /ActivationVerification:[\s\S]*?Type:\s+AWS::CloudFormation::WaitCondition[\s\S]*?Timeout:\s+"1800"/u,
+  );
+  assert.equal(
+    [...template.matchAll(
+      /DesiredCount:\s+!If \[ProductionActivated, !Ref Minimum(?:Worker|Broker)?TaskCount, 0\]/gu,
+    )].length,
+    3,
+  );
   assert.match(template, /AvailabilityZoneRebalancing:\s+ENABLED/gu);
   assert.match(template, /Type:\s+AWS::ApplicationAutoScaling::ScalableTarget/gu);
   assert.match(template, /Type:\s+AWS::RDS::DBInstance/u);
@@ -60,8 +91,59 @@ test("managed production is a separate multi-AZ ECS and RDS topology", () => {
 
 test("managed production fails closed around ingress, health, secrets, and immutable images", () => {
   assert.match(template, /SourcePrefixListId:\s+!Ref AlbIngressPrefixListId/u);
-  assert.match(template, /DestinationPrefixListId:\s+!Ref ApprovedHttpsEgressPrefixListId/gu);
-  assert.doesNotMatch(template, /CidrIp:\s+0\.0\.0\.0\/0/u);
+  assert.match(
+    template,
+    /NetworkFirewallArn:[\s\S]*?firewall\/sutra-production-egress-inspection/u,
+  );
+  assert.match(
+    template,
+    /Action: network-firewall:DescribeFirewall\s*\n\s+Resource: !Ref NetworkFirewallArn/u,
+  );
+  assert.equal(
+    [...template.matchAll(
+      /DestinationPrefixListId:\s+!Ref ApprovedHttpsEgressPrefixListId/gu,
+    )].length,
+    3,
+  );
+  assert.equal(
+    [...template.matchAll(
+      /DestinationSecurityGroupId:\s+!Ref EndpointSecurityGroupId/gu,
+    )].length,
+    4,
+  );
+  assert.equal(
+    [...template.matchAll(
+      /DestinationPrefixListId:\s+!Ref S3GatewayPrefixListId/gu,
+    )].length,
+    4,
+  );
+  assert.equal(
+    [...template.matchAll(/CidrIp:\s+0\.0\.0\.0\/0/gu)].length,
+    1,
+  );
+  const brokerSecurityGroup = template.slice(
+    template.indexOf("  BrokerSecurityGroup:"),
+    template.indexOf("  VulnerabilityFeedSecurityGroup:"),
+  );
+  assert.match(
+    brokerSecurityGroup,
+    /IpProtocol:\s+tcp[\s\S]*?FromPort:\s+443[\s\S]*?ToPort:\s+443[\s\S]*?CidrIp:\s+0\.0\.0\.0\/0/u,
+  );
+  assert.match(
+    brokerSecurityGroup,
+    /strict L7 Network Firewall for \.amazonaws\.com/u,
+  );
+  for (const [start, end] of [
+    ["  ApplicationSecurityGroup:", "  WorkerSecurityGroup:"],
+    ["  WorkerSecurityGroup:", "  BrokerSecurityGroup:"],
+    ["  VulnerabilityFeedSecurityGroup:", "  AlbIngressFromApprovedEdge:"],
+  ]) {
+    const securityGroup = template.slice(
+      template.indexOf(start),
+      template.indexOf(end),
+    );
+    assert.doesNotMatch(securityGroup, /CidrIp:\s+0\.0\.0\.0\/0/u);
+  }
   assert.doesNotMatch(template, /SUTRA_NOTIFICATION_SECRET_PREFIX/u);
   assert.match(template, /SUTRA_NOTIFICATION_CONFIG_PREFIX/u);
   const ingressResources = [...template.matchAll(
@@ -78,6 +160,7 @@ test("managed production fails closed around ingress, health, secrets, and immut
   assert.match(template, /sutra\/app@sha256:\[a-f0-9\]\{64\}/u);
   assert.match(template, /sutra\/notification-worker@sha256:\[a-f0-9\]\{64\}/u);
   assert.match(template, /sutra\/broker@sha256:\[a-f0-9\]\{64\}/u);
+  assert.match(template, /sutra\/agentless-scanner@sha256:\[a-f0-9\]\{64\}/u);
   assert.match(template, /Scheme:\s+internal/u);
   assert.match(template, /HealthCheckPath:\s+\/readyz/u);
   assert.match(template, /SUTRA_BROKER_AUTH_MODE, Value: asymmetric/u);
@@ -161,12 +244,19 @@ test("EPSS bulk refresh is a strict private daily task on the released app diges
   assert.match(feedTask, /1800s/u);
   assert.match(feedTask, /ReadonlyRootFilesystem: true/u);
   assert.match(feedTask, /SUTRA_DB_APP_PASSWORD/u);
+  for (const key of [
+    "SUTRA_MANAGED_OUTBOUND_URL",
+    "SUTRA_MANAGED_OUTBOUND_KEY_ID",
+    "SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY",
+  ]) {
+    assert.match(feedTask, new RegExp(`Name: ${key}`, "u"));
+  }
   assert.doesNotMatch(feedTask, /TaskRoleArn/u, "feed task needs no AWS application privileges");
-  assert.match(feedRole, /Resource: !Ref DatabaseRuntimeSecret/u);
-  assert.doesNotMatch(feedRole, /ApplicationRuntimeSecretArn/u);
+  assert.match(feedRole, /- !Ref DatabaseRuntimeSecret/u);
+  assert.match(feedRole, /- !Ref ApplicationRuntimeSecretArn/u);
   assert.match(template, /Name: sutra-production-vulnerability-feed/u);
   assert.match(template, /ScheduleExpression: cron\(30 3 \* \* \? \*\)/u);
-  assert.match(template, /State: ENABLED/u);
+  assert.match(template, /State: !If \[ProductionActivated, ENABLED, DISABLED\]/u);
   assert.match(template, /AssignPublicIp: DISABLED/u);
   assert.match(template, /SecurityGroups: \[!Ref VulnerabilityFeedSecurityGroup\]/u);
   assert.match(template, /sutra-production-vulnerability-feed:\*/u);
@@ -190,19 +280,30 @@ test("backup, evidence, edge protection, and observability are explicit", () => 
   assert.match(template, /HeaderName:\s+!Ref WafClientIpHeader/u);
   assert.match(template, /Type:\s+AWS::WAFv2::LoggingConfiguration/u);
   assert.match(template, /access_logs\.s3\.enabled/u);
-  assert.match(template, /logdelivery\.elasticloadbalancing\.amazonaws\.com/u);
+  assert.ok(template.includes("logdelivery.elasticloadbalancing.amazonaws.com"));
   assert.match(template, /Type:\s+AWS::CloudWatch::Alarm/gu);
   assert.match(template, /ContainerInsightsEnabled/u);
   assert.match(template, /KmsKeyId:\s+!Ref KmsKeyArn/u);
 });
 
-test("one protected workflow releases app, worker, and broker digests with migration, rollback, and evidence", () => {
+test("one protected workflow releases all four digests with migration, rollback, and evidence", () => {
   assert.match(workflow, /environment:\s+production-ha-release/u);
   assert.match(workflow, /id-token:\s+write/u);
   assert.match(workflow, /workflow_dispatch/u);
   assert.match(workflow, /changeTicket/u);
   assert.match(workflow, /actions:\s+read/u);
   assert.match(workflow, /CODEQL_ENABLED/u);
+  assert.match(workflow, /aws ec2 describe-managed-prefix-lists/u);
+  assert.match(workflow, /\[\[ "\$\{owner\}" == "AWS" \]\]/u);
+  assert.match(workflow, /com\.amazonaws\.\$\{AWS_REGION\}\.s3/u);
+  assert.match(workflow, /aws network-firewall describe-firewall/u);
+  assert.match(workflow, /\.Firewall\.DeleteProtection == true/u);
+  assert.match(workflow, /\.Firewall\.FirewallPolicyChangeProtection == true/u);
+  assert.match(workflow, /\.Firewall\.SubnetChangeProtection == true/u);
+  assert.match(
+    workflow,
+    /output ReleaseActivation\)" == "active-after-successful-migration"/u,
+  );
   assert.match(workflow, /actions\/workflows\/codeql\.yml\/runs\?head_sha=\$\{GITHUB_SHA\}/u);
   assert.match(workflow, /\.head_sha == \$sha/u);
   assert.match(workflow, /\.conclusion == "success"/u);
@@ -211,7 +312,18 @@ test("one protected workflow releases app, worker, and broker digests with migra
   assert.match(workflow, /Scan the exact application digest/u);
   assert.match(workflow, /Scan the exact worker digest/u);
   assert.match(workflow, /Scan the exact broker digest/u);
+  assert.match(workflow, /Scan the exact scanner digest including unfixed findings/u);
+  assert.match(
+    workflow,
+    /image-ref: \$\{\{ steps\.scanner\.outputs\.ref \}\}[\s\S]*?trivyignores: \/dev\/null[\s\S]*?ignore-unfixed: false/u,
+  );
   assert.match(workflow, /BROKER_ECR_REPOSITORY:\s+sutra\/broker/u);
+  assert.match(workflow, /SCANNER_ECR_REPOSITORY:\s+sutra\/agentless-scanner/u);
+  assert.equal(
+    [...workflow.matchAll(/docker buildx build/gu)].length,
+    4,
+    "app, worker, broker, and scanner must each be built exactly once",
+  );
   assert.match(workflow, /Promote only the scanned manifests/u);
   const promote = workflow.indexOf("Promote only the scanned manifests");
   const migrate = workflow.indexOf("migration_task=");
@@ -226,6 +338,7 @@ test("one protected workflow releases app, worker, and broker digests with migra
   assert.match(workflow, /previous_app/u);
   assert.match(workflow, /previous_worker/u);
   assert.match(workflow, /previous_broker/u);
+  assert.match(workflow, /previous_scanner/u);
   assert.match(workflow, /register_revision \\\s*\n\s+"\$\{previous_app\}"/u);
   assert.match(workflow, /register_revision \\\s*\n\s+"\$\{previous_worker\}"/u);
   assert.match(workflow, /register_revision \\\s*\n\s+"\$\{previous_broker\}"/u);
@@ -233,8 +346,13 @@ test("one protected workflow releases app, worker, and broker digests with migra
   assert.match(workflow, /'\["app","background-job-runner"\]'\s+true/u);
   assert.match(workflow, /SUTRA_RELEASE_IMAGE/u);
   assert.match(workflow, /releaseIdentityCount != 1/u);
-  assert.match(workflow, /all services were rolled back/u);
+  assert.match(workflow, /SUTRA_AGENTLESS_SCANNER_IMAGE/u);
+  assert.match(workflow, /scannerIdentityCount != 1/u);
+  assert.match(workflow, /prior scanner digest were restored/u);
+  assert.match(workflow, /restored_broker/u);
   assert.match(workflow, /brokerImage/u);
+  assert.match(workflow, /scannerImage/u);
+  assert.match(workflow, /previousScannerImage/u);
   assert.match(workflow, /brokerTask/u);
   assert.match(workflow, /feedTask/u);
   assert.match(workflow, /events put-targets/u);
@@ -251,17 +369,200 @@ test("one protected workflow releases app, worker, and broker digests with migra
   assert.doesNotMatch(workflow, /access-key-id|secret-access-key/iu);
 });
 
+test("first deployment builds once and remains dormant until migration and separate activation approval", () => {
+  assert.match(bootstrapWorkflow, /environment:\s+production-ha-bootstrap/u);
+  assert.match(bootstrapWorkflow, /environment:\s+production-ha-activation/u);
+  assert.match(bootstrapWorkflow, /id-token:\s+write/gu);
+  assert.ok(bootstrapWorkflow.includes('GITHUB_REF}" == "refs/heads/main"'));
+  assert.match(
+    bootstrapWorkflow,
+    /actions\/workflows\/codeql\.yml\/runs\?head_sha=\$\{GITHUB_SHA\}/u,
+  );
+  assert.equal(
+    [...bootstrapWorkflow.matchAll(/docker buildx build/gu)].length,
+    4,
+    "app, worker, broker, and scanner must each be built exactly once",
+  );
+  assert.equal(
+    [...bootstrapWorkflow.matchAll(/uses:\s+aquasecurity\/trivy-action@/gu)].length,
+    4,
+  );
+  assert.match(bootstrapWorkflow, /pnpm build:agentless-scanner/u);
+  assert.match(
+    bootstrapWorkflow,
+    /Scan the exact scanner digest including unfixed findings[\s\S]*?trivyignores: \/dev\/null[\s\S]*?ignore-unfixed: false/u,
+  );
+  assert.doesNotMatch(bootstrapWorkflow, /bootstrap-candidate-/u);
+  assert.match(bootstrapWorkflow, /Promote only the scanned manifests/u);
+  assert.match(bootstrapWorkflow, /bootstrap-ha\.sh prepare/u);
+  assert.match(bootstrapWorkflow, /bootstrap-ha\.sh activate/u);
+  assert.match(
+    bootstrapWorkflow,
+    /CFN_TEMPLATE_BUCKET[\s\S]*?sutra-production-ha-bootstrap-templates-\$\{AWS_ACCOUNT_ID\}-\$\{AWS_REGION\}/u,
+  );
+  assert.equal(
+    (
+      bootstrapWorkflow.match(
+        /\[\[ "\$\{PUBLIC_ORIGIN\}" == "https:\/\/www\.sutracmdb\.com" \]\]/gu,
+      ) ?? []
+    ).length,
+    2,
+  );
+  assert.match(
+    bootstrapScript,
+    /\[\[ "\$\{PUBLIC_ORIGIN\}" == "https:\/\/www\.sutracmdb\.com" \]\]/u,
+  );
+  assert.doesNotMatch(bootstrapWorkflow, /access-key-id|secret-access-key/iu);
+
+  assert.match(
+    bootstrapScript,
+    /prepare\(\) \{[\s\S]*?assert_inactive[\s\S]*?run_migration[\s\S]*?assert_inactive[\s\S]*?\n\}/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /activate\(\) \{[\s\S]*?verify_migration_result[\s\S]*?begin_activation[\s\S]*?verify_active_services[\s\S]*?signal_activation SUCCESS[\s\S]*?write_activation_evidence[\s\S]*?\n\}/u,
+  );
+  assert.match(bootstrapScript, /ReleaseActivation/u);
+  assert.match(bootstrapScript, /desiredCount == 0/u);
+  assert.match(bootstrapScript, /State --output text\)" == "DISABLED"/u);
+  assert.match(bootstrapScript, /\.desiredCount >= 2/u);
+  assert.match(bootstrapScript, /x-sutra-release-image:/u);
+  assert.match(bootstrapScript, /SUTRA_AGENTLESS_SCANNER_IMAGE/u);
+  assert.match(bootstrapScript, /aws network-firewall describe-firewall/u);
+  assert.match(bootstrapScript, /\.Firewall\.DeleteProtection == true/u);
+  assert.match(
+    bootstrapScript,
+    /all\(\.FirewallStatus\.SyncStates\[\]; \.Attachment\.Status == "READY"\)/u,
+  );
+  assert.match(bootstrapScript, /--arg scannerImage "\$\{SCANNER_IMAGE\}"/u);
+  assert.match(
+    bootstrapScript,
+    /and \(has\("AgentlessScannerImage"\) \| not\)/u,
+  );
+  assert.match(bootstrapScript, /AgentlessScannerImage:env\.SCANNER_IMAGE/u);
+  assert.match(bootstrapScript, /aws secretsmanager get-secret-value/u);
+  assert.match(
+    bootstrapScript,
+    /--version-id "\$\{version_id\}"[\s\S]*--version-stage AWSCURRENT/u,
+  );
+  assert.match(bootstrapScript, /RUNTIME_SECRET_VERSION_ID="\$\{version_id\}"/u);
+  assert.match(bootstrapWorkflow, /runtime_secret_version_id/u);
+  assert.match(
+    bootstrapScript,
+    /validate_runtime_secret "\$\{RUNTIME_SECRET_VERSION_ID\}"[\s\S]*run_migration/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /activate\(\)[\s\S]*validate_runtime_secret "\$\{RUNTIME_SECRET_VERSION_ID\}"[\s\S]*verify_migration_result/u,
+  );
+  assert.match(bootstrapScript, /aws s3api put-object/u);
+  assert.match(bootstrapScript, /--checksum-algorithm SHA256/u);
+  assert.match(bootstrapScript, /\.ChecksumSHA256/u);
+  assert.match(bootstrapScript, /--template-url "\$\{TEMPLATE_URL\}"/u);
+  assert.doesNotMatch(bootstrapScript, /--template-body/u);
+  assert.match(bootstrapScript, /node scripts\/validate-production-runtime-secret\.mjs/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_URL/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_APP_KEY_ID/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_WORKER_KEY_ID/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_FEED_KEY_ID/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_WORKER_PRIVATE_KEY/u);
+  assert.match(runtimeSecretValidator, /SUTRA_MANAGED_OUTBOUND_FEED_PRIVATE_KEY/u);
+  assert.match(
+    runtimeSecretValidator,
+    /SUTRA_MANAGED_OUTBOUND_URL !== "https:\/\/outbound\.sutracmdb\.com"/u,
+  );
+  assert.match(runtimeSecretValidator, /createPrivateKey/u);
+  assert.match(runtimeSecretValidator, /createPublicKey/u);
+  assert.match(runtimeSecretValidator, /new Set\(allKeyIds\)\.size/u);
+  assert.match(runtimeSecretValidator, /new Set\(allPrivateSources\)\.size/u);
+  assert.match(
+    bootstrapScript,
+    /--query SecretString\s+\\\n\s+--output text \|\s*\n\s+SUTRA_EXPECTED_IDENTITY_MODE=/u,
+  );
+  assert.doesNotMatch(
+    bootstrapScript,
+    /--arg(?:json)?\s+(?:url|keyId|privateKey)\s+"\$\{SUTRA_MANAGED_OUTBOUND_/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /Activation failed; returning[\s\S]*update_phase "\$\{INACTIVE\}"[\s\S]*assert_exact_images[\s\S]*assert_inactive/u,
+  );
+  assert.match(bootstrapScript, /signal_activation FAILURE/u);
+  assert.match(bootstrapScript, /trap 'exit 130' INT/u);
+  assert.doesNotMatch(
+    bootstrapScript,
+    /--argjson\s+supplied\s+"\$\{PRODUCTION_HA_PARAMETERS_JSON\}"/u,
+  );
+  assert.match(bootstrapScript, /--enable-termination-protection/u);
+  assert.match(bootstrapScript, /--server-side-encryption aws:kms/u);
+  assert.match(bootstrapScript, /"CustomerRoleTemplateUrl"/u);
+  assert.match(bootstrapScript, /standard-2026-07\.4/u);
+  assert.match(bootstrapScript, /versionId=/u);
+  assert.match(bootstrapScript, /endswith\("\?versionId=null"\)/u);
+  assert.match(template, /CustomerRoleTemplateUrl:/u);
+  assert.match(template, /versionId=\(\?!null\$\)/u);
+  assert.match(appTaskDefinition, /Name: SUTRA_CUSTOMER_ROLE_TEMPLATE_URL/u);
+  assert.match(appEntrypoint, /^SUTRA_CUSTOMER_ROLE_TEMPLATE_URL$/mu);
+  assert.match(workflow, /!= \*"\?versionId=null"/u);
+});
+
 test("release IAM is protected by the exact GitHub environment and exact services", () => {
   assert.match(template, /environment:\$\{GitHubReleaseEnvironment\}/u);
   assert.match(template, /Action:\s+sts:AssumeRoleWithWebIdentity/u);
+  assert.match(template, /Action:\s+ec2:DescribeManagedPrefixLists/u);
   assert.match(template, /Resource:\s*\n\s+- !Ref AppService\s*\n\s+- !Ref WorkerService\s*\n\s+- !Ref BrokerService/u);
   assert.match(template, /sutra-production-migration:\*/u);
   assert.match(template, /sutra-production-vulnerability-feed:\*/u);
   assert.match(template, /events:PutTargets/u);
   assert.match(template, /iam:PassedToService:\s+events\.amazonaws\.com/u);
   assert.match(template, /ecr:GetLifecyclePolicy/u);
+  assert.match(template, /repository\/\$\{ScannerRepositoryName\}/u);
   assert.match(template, /Sid:\s+TagOnlyProductionTaskRevision/u);
   assert.match(template, /ecs:cluster:\s+!GetAtt Cluster\.Arn/u);
   assert.match(template, /iam:PassedToService:\s+ecs-tasks\.amazonaws\.com/u);
   assert.match(template, /Resource:\s+!Sub "\$\{EvidenceBucket\.Arn\}\/releases\/\*"/u);
+  assert.match(template, /ReadExactRuntimeSecretForReleasePreflight/u);
+  assert.match(workflow, /validate-production-runtime-secret\.mjs/u);
+});
+
+test("SES feedback is encrypted, observable, least-privilege, and fail-closed", () => {
+  assert.match(
+    template,
+    /NotificationSesActivation:[\s\S]*Default:\s+disabled-ses-production-access-denied/u,
+  );
+  assert.match(
+    template,
+    /SesNotificationsActivated:\s+!Equals \[!Ref NotificationSesActivation, active-after-production-access-and-feedback-validation\]/u,
+  );
+  assert.match(template, /Type:\s+AWS::SES::ConfigurationSet/u);
+  assert.match(template, /SendingEnabled:\s+!If \[SesNotificationsActivated, true, false\]/u);
+  assert.match(template, /Type:\s+AWS::SES::ConfigurationSetEventDestination/u);
+  assert.match(
+    template,
+    /EventBusArn:\s+!Sub arn:\$\{AWS::Partition\}:events:\$\{AWS::Region\}:\$\{AWS::AccountId\}:event-bus\/default/u,
+  );
+  assert.doesNotMatch(template, /Type:\s+AWS::Events::EventBus\s/u);
+  assert.match(
+    template,
+    /"ses:configuration-set":\s+\[!Ref SesNotificationConfigurationSet\]/u,
+  );
+  assert.match(template, /QueueName:\s+sutra-production-ses-feedback/u);
+  assert.match(template, /KmsMasterKeyId:\s+!Ref KmsKeyArn/u);
+  assert.match(template, /maxReceiveCount:\s+5/u);
+  assert.match(template, /ReceiveMessageWaitTimeSeconds:\s+10/u);
+  assert.match(
+    template,
+    /Action:\s*\n\s+- sqs:ReceiveMessage\s*\n\s+- sqs:DeleteMessage[\s\S]*Resource:\s+!GetAtt SesFeedbackQueue\.Arn/u,
+  );
+  assert.doesNotMatch(template, /sqs:DeleteMessage[\s\S]{0,120}SesFeedbackDeadLetterQueue/u);
+  assert.match(template, /MetricName:\s+ApproximateAgeOfOldestMessage/u);
+  assert.match(template, /MetricName:\s+ApproximateNumberOfMessagesVisible/u);
+  assert.match(template, /MetricName:\s+Reputation\.BounceRate/u);
+  assert.match(template, /MetricName:\s+Reputation\.ComplaintRate/u);
+  assert.match(bootstrapScript, /has\("NotificationSesActivation"\) \| not/u);
+  assert.match(
+    bootstrapScript,
+    /NotificationSesActivation:"disabled-ses-production-access-denied"/u,
+  );
 });

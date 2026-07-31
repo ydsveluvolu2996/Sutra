@@ -1,0 +1,1310 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Sutra managed-production network prerequisite: a dedicated two-AZ VPC with
+  public ALB, private application, dedicated inspection/NAT-egress, and
+  isolated database subnets; one NAT gateway and Network Firewall endpoint per
+  AZ; private AWS service endpoints; and fail-closed customer managed ingress
+  and HTTPS egress controls.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: VPC and availability zones }
+        Parameters: [VpcCidr, AvailabilityZoneA, AvailabilityZoneB, S3GatewayPrefixListId]
+      - Label: { default: Subnet address plan }
+        Parameters:
+          - PublicSubnetCidrA
+          - PublicSubnetCidrB
+          - PublicNatEgressSubnetCidrA
+          - PublicNatEgressSubnetCidrB
+          - FirewallSubnetCidrA
+          - FirewallSubnetCidrB
+          - PrivateAppSubnetCidrA
+          - PrivateAppSubnetCidrB
+          - PrivateDatabaseSubnetCidrA
+          - PrivateDatabaseSubnetCidrB
+      - Label: { default: Network audit logging }
+        Parameters: [KmsKeyArn, FlowLogRetentionDays, NetworkFirewallLifecyclePhase]
+      - Label: { default: Reviewed HTTPS egress CIDRs }
+        Parameters:
+          - ApprovedHttpsEgressChangeTicket
+          - ApprovedHttpsEgressCidr01
+          - ApprovedHttpsEgressCidr02
+          - ApprovedHttpsEgressCidr03
+          - ApprovedHttpsEgressCidr04
+          - ApprovedHttpsEgressCidr05
+          - ApprovedHttpsEgressCidr06
+          - ApprovedHttpsEgressCidr07
+          - ApprovedHttpsEgressCidr08
+          - ApprovedHttpsEgressCidr09
+          - ApprovedHttpsEgressCidr10
+          - ApprovedHttpsEgressCidr11
+          - ApprovedHttpsEgressCidr12
+          - ApprovedHttpsEgressCidr13
+          - ApprovedHttpsEgressCidr14
+          - ApprovedHttpsEgressCidr15
+          - ApprovedHttpsEgressCidr16
+          - ApprovedHttpsEgressCidr17
+          - ApprovedHttpsEgressCidr18
+    ParameterLabels:
+      ApprovedHttpsEgressCidr01:
+        default: Required reviewed HTTPS destination CIDR
+  CloudflareIpv4Snapshot:
+    Source: https://www.cloudflare.com/ips-v4
+    Retrieved: "2026-07-30"
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.64.0.0/16
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  AvailabilityZoneA:
+    Type: AWS::EC2::AvailabilityZone::Name
+  AvailabilityZoneB:
+    Type: AWS::EC2::AvailabilityZone::Name
+  S3GatewayPrefixListId:
+    Type: String
+    AllowedPattern: '^pl-[0-9a-f]{8,17}$'
+  KmsKeyArn:
+    Type: String
+    AllowedPattern: '^arn:aws(?:-[a-z]+)*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$'
+  FlowLogRetentionDays:
+    Type: Number
+    Default: 90
+    AllowedValues: [30, 60, 90, 120, 180, 365, 400, 545, 731, 1827, 3653]
+  NetworkFirewallLifecyclePhase:
+    Type: String
+    AllowedValues:
+      - rollback-safe-first-create
+      - protected-after-live-route-validation
+  PublicSubnetCidrA:
+    Type: String
+    Default: 10.64.0.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PublicSubnetCidrB:
+    Type: String
+    Default: 10.64.1.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PublicNatEgressSubnetCidrA:
+    Type: String
+    Default: 10.64.2.0/28
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PublicNatEgressSubnetCidrB:
+    Type: String
+    Default: 10.64.2.16/28
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  FirewallSubnetCidrA:
+    Type: String
+    Default: 10.64.48.0/28
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  FirewallSubnetCidrB:
+    Type: String
+    Default: 10.64.48.16/28
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PrivateAppSubnetCidrA:
+    Type: String
+    Default: 10.64.16.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PrivateAppSubnetCidrB:
+    Type: String
+    Default: 10.64.17.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PrivateDatabaseSubnetCidrA:
+    Type: String
+    Default: 10.64.32.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  PrivateDatabaseSubnetCidrB:
+    Type: String
+    Default: 10.64.33.0/24
+    AllowedPattern: '^(?:10(?:\.\d{1,3}){3}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}|192\.168(?:\.\d{1,3}){2})/(?:1[6-9]|2[0-8])$'
+  ApprovedHttpsEgressChangeTicket:
+    Type: String
+    MinLength: 3
+    MaxLength: 64
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9._:/-]{2,63}$'
+    Description: Immutable review/change identifier recorded on every external prefix-list entry.
+  ApprovedHttpsEgressCidr01:
+    Type: String
+    AllowedPattern: '^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+    Description: >-
+      Required provider-published stable IPv4 range or fixed reviewed egress-control
+      address. AWS-managed service ranges such as S3 must use their dedicated
+      prefix-list parameter instead of consuming an external slot.
+  ApprovedHttpsEgressCidr02:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr03:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr04:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr05:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr06:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr07:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr08:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr09:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr10:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr11:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr12:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr13:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr14:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr15:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr16:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr17:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+  ApprovedHttpsEgressCidr18:
+    Type: String
+    Default: ""
+    AllowedPattern: '^$|^(?:\d{1,3}\.){3}\d{1,3}/(?:[1-9]|[12][0-9]|3[0-2])$'
+
+Rules:
+  AvailabilityZonesMustDiffer:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AvailabilityZoneA, !Ref AvailabilityZoneB]]
+        AssertDescription: Production requires two distinct Availability Zones.
+
+Conditions:
+  NetworkFirewallProtected: !Equals
+    - !Ref NetworkFirewallLifecyclePhase
+    - protected-after-live-route-validation
+  HasApprovedHttpsEgressCidr02: !Not [!Equals [!Ref ApprovedHttpsEgressCidr02, ""]]
+  HasApprovedHttpsEgressCidr03: !Not [!Equals [!Ref ApprovedHttpsEgressCidr03, ""]]
+  HasApprovedHttpsEgressCidr04: !Not [!Equals [!Ref ApprovedHttpsEgressCidr04, ""]]
+  HasApprovedHttpsEgressCidr05: !Not [!Equals [!Ref ApprovedHttpsEgressCidr05, ""]]
+  HasApprovedHttpsEgressCidr06: !Not [!Equals [!Ref ApprovedHttpsEgressCidr06, ""]]
+  HasApprovedHttpsEgressCidr07: !Not [!Equals [!Ref ApprovedHttpsEgressCidr07, ""]]
+  HasApprovedHttpsEgressCidr08: !Not [!Equals [!Ref ApprovedHttpsEgressCidr08, ""]]
+  HasApprovedHttpsEgressCidr09: !Not [!Equals [!Ref ApprovedHttpsEgressCidr09, ""]]
+  HasApprovedHttpsEgressCidr10: !Not [!Equals [!Ref ApprovedHttpsEgressCidr10, ""]]
+  HasApprovedHttpsEgressCidr11: !Not [!Equals [!Ref ApprovedHttpsEgressCidr11, ""]]
+  HasApprovedHttpsEgressCidr12: !Not [!Equals [!Ref ApprovedHttpsEgressCidr12, ""]]
+  HasApprovedHttpsEgressCidr13: !Not [!Equals [!Ref ApprovedHttpsEgressCidr13, ""]]
+  HasApprovedHttpsEgressCidr14: !Not [!Equals [!Ref ApprovedHttpsEgressCidr14, ""]]
+  HasApprovedHttpsEgressCidr15: !Not [!Equals [!Ref ApprovedHttpsEgressCidr15, ""]]
+  HasApprovedHttpsEgressCidr16: !Not [!Equals [!Ref ApprovedHttpsEgressCidr16, ""]]
+  HasApprovedHttpsEgressCidr17: !Not [!Equals [!Ref ApprovedHttpsEgressCidr17, ""]]
+  HasApprovedHttpsEgressCidr18: !Not [!Equals [!Ref ApprovedHttpsEgressCidr18, ""]]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      InstanceTenancy: default
+      Tags:
+        - { Key: Name, Value: sutra-production }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network }
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - { Key: Name, Value: sutra-production }
+        - { Key: "sutra:environment", Value: production }
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  VpcFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /sutra/production/network/${AWS::StackName}/vpc-flow
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref FlowLogRetentionDays
+      Tags:
+        - { Key: Name, Value: sutra-production-vpc-flow }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  VpcFlowLogDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: vpc-flow-logs.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:vpc-flow-log/*
+      Policies:
+        - PolicyName: DeliverOnlyToSutraVpcFlowLogGroup
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteOnlySutraVpcFlowStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                Resource: !GetAtt VpcFlowLogGroup.Arn
+              - Sid: DiscoverPrecreatedLogGroup
+                Effect: Allow
+                Action: logs:DescribeLogGroups
+                Resource: "*"
+      Tags:
+        - { Key: Name, Value: sutra-production-vpc-flow-delivery }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  VpcFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt VpcFlowLogDeliveryRole.Arn
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: !Ref VpcFlowLogGroup
+      LogFormat: '${version} ${account-id} ${interface-id} ${srcaddr} ${dstaddr} ${srcport} ${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status} ${vpc-id} ${subnet-id} ${instance-id} ${tcp-flags} ${type} ${pkt-srcaddr} ${pkt-dstaddr} ${region} ${az-id} ${flow-direction} ${traffic-path}'
+      MaxAggregationInterval: 60
+      ResourceId: !Ref Vpc
+      ResourceType: VPC
+      TrafficType: ALL
+      Tags:
+        - { Key: Name, Value: sutra-production-all-traffic }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref PublicSubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-public-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-alb }
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref PublicSubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-public-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-alb }
+
+  PrivateAppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref PrivateAppSubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-app-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: private-app }
+
+  PrivateAppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref PrivateAppSubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-app-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: private-app }
+
+  PublicNatEgressSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref PublicNatEgressSubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-egress-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-nat-egress }
+
+  PublicNatEgressSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref PublicNatEgressSubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-egress-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-nat-egress }
+
+  FirewallSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref FirewallSubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-firewall-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: network-firewall }
+
+  FirewallSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref FirewallSubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-firewall-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: network-firewall }
+
+  PrivateDatabaseSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneA
+      CidrBlock: !Ref PrivateDatabaseSubnetCidrA
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-database-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: isolated-database }
+
+  PrivateDatabaseSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      AvailabilityZone: !Ref AvailabilityZoneB
+      CidrBlock: !Ref PrivateDatabaseSubnetCidrB
+      MapPublicIpOnLaunch: false
+      Tags:
+        - { Key: Name, Value: sutra-production-database-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: isolated-database }
+
+  NatGatewayEipA:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-a }
+        - { Key: "sutra:environment", Value: production }
+
+  NatGatewayEipB:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-b }
+        - { Key: "sutra:environment", Value: production }
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt NatGatewayEipA.AllocationId
+      ConnectivityType: public
+      SubnetId: !Ref PublicNatEgressSubnetA
+      Tags:
+        - { Key: Name, Value: sutra-production-a }
+        - { Key: "sutra:environment", Value: production }
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      AllocationId: !GetAtt NatGatewayEipB.AllocationId
+      ConnectivityType: public
+      SubnetId: !Ref PublicNatEgressSubnetB
+      Tags:
+        - { Key: Name, Value: sutra-production-b }
+        - { Key: "sutra:environment", Value: production }
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-public }
+        - { Key: "sutra:environment", Value: production }
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  PrivateAppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-app-a }
+        - { Key: "sutra:environment", Value: production }
+
+  PrivateAppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-app-b }
+        - { Key: "sutra:environment", Value: production }
+
+  PublicNatEgressRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-egress-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-nat-egress }
+
+  PublicNatEgressRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-nat-egress-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: public-nat-egress }
+
+  PublicNatEgressDefaultRouteA:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicNatEgressRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicNatEgressDefaultRouteB:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicNatEgressRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicNatEgressSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicNatEgressRouteTableA
+      SubnetId: !Ref PublicNatEgressSubnetA
+
+  PublicNatEgressSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicNatEgressRouteTableB
+      SubnetId: !Ref PublicNatEgressSubnetB
+
+  FirewallRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-firewall-a }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: network-firewall }
+
+  FirewallRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-firewall-b }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:network-tier", Value: network-firewall }
+
+  FirewallDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref FirewallRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  FirewallDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref FirewallRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+
+  FirewallSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref FirewallRouteTableA
+      SubnetId: !Ref FirewallSubnetA
+
+  FirewallSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref FirewallRouteTableB
+      SubnetId: !Ref FirewallSubnetB
+
+  PrivateAppSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateAppRouteTableA
+      SubnetId: !Ref PrivateAppSubnetA
+
+  PrivateAppSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateAppRouteTableB
+      SubnetId: !Ref PrivateAppSubnetB
+
+  PrivateDatabaseRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-database-a }
+        - { Key: "sutra:environment", Value: production }
+
+  PrivateDatabaseRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-database-b }
+        - { Key: "sutra:environment", Value: production }
+
+  PrivateDatabaseSubnetRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateDatabaseRouteTableA
+      SubnetId: !Ref PrivateDatabaseSubnetA
+
+  PrivateDatabaseSubnetRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateDatabaseRouteTableB
+      SubnetId: !Ref PrivateDatabaseSubnetB
+
+  ManagedEgressDomainRuleGroup:
+    Type: AWS::NetworkFirewall::RuleGroup
+    Properties:
+      Capacity: 100
+      RuleGroupName: sutra-production-managed-egress
+      Type: STATEFUL
+      RuleGroup:
+        RuleVariables:
+          IPSets:
+            HOME_NET:
+              Definition:
+                - !Ref PrivateAppSubnetCidrA
+                - !Ref PrivateAppSubnetCidrB
+        RulesSource:
+          RulesSourceList:
+            GeneratedRulesType: ALLOWLIST
+            Targets:
+              - outbound.sutracmdb.com
+              - .amazonaws.com
+            TargetTypes:
+              - TLS_SNI
+        StatefulRuleOptions:
+          RuleOrder: STRICT_ORDER
+      Tags:
+        - { Key: Name, Value: sutra-production-managed-egress }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-firewall-egress }
+
+  InspectionFirewallPolicy:
+    Type: AWS::NetworkFirewall::FirewallPolicy
+    Properties:
+      FirewallPolicyName: sutra-production-managed-egress
+      FirewallPolicy:
+        StatelessDefaultActions:
+          - aws:forward_to_sfe
+        StatelessFragmentDefaultActions:
+          - aws:forward_to_sfe
+        StatefulDefaultActions:
+          - aws:drop_established_app_layer
+          - aws:alert_established_app_layer
+        StatefulEngineOptions:
+          RuleOrder: STRICT_ORDER
+          StreamExceptionPolicy: DROP
+        StatefulRuleGroupReferences:
+          - Priority: 10
+            ResourceArn: !Ref ManagedEgressDomainRuleGroup
+      Tags:
+        - { Key: Name, Value: sutra-production-managed-egress }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-firewall-egress }
+
+  InspectionFirewall:
+    Type: AWS::NetworkFirewall::Firewall
+    Properties:
+      DeleteProtection: !If [NetworkFirewallProtected, true, false]
+      FirewallName: sutra-production-egress-inspection
+      FirewallPolicyArn: !Ref InspectionFirewallPolicy
+      FirewallPolicyChangeProtection: true
+      SubnetChangeProtection: true
+      SubnetMappings:
+        - SubnetId: !Ref FirewallSubnetA
+        - SubnetId: !Ref FirewallSubnetB
+      VpcId: !Ref Vpc
+      Tags:
+        - { Key: Name, Value: sutra-production-egress-inspection }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-firewall-egress }
+
+  FirewallAlertLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /sutra/production/network/${AWS::StackName}/network-firewall-alert
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref FlowLogRetentionDays
+      Tags:
+        - { Key: Name, Value: sutra-production-network-firewall-alert }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  FirewallFlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub /sutra/production/network/${AWS::StackName}/network-firewall-flow
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref FlowLogRetentionDays
+      Tags:
+        - { Key: Name, Value: sutra-production-network-firewall-flow }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  InspectionFirewallLogging:
+    Type: AWS::NetworkFirewall::LoggingConfiguration
+    Properties:
+      FirewallArn: !Ref InspectionFirewall
+      LoggingConfiguration:
+        LogDestinationConfigs:
+          - LogDestination:
+              logGroup: !Ref FirewallAlertLogGroup
+            LogDestinationType: CloudWatchLogs
+            LogType: ALERT
+          - LogDestination:
+              logGroup: !Ref FirewallFlowLogGroup
+            LogDestinationType: CloudWatchLogs
+            LogType: FLOW
+
+  FirewallRouteResolverLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /aws/lambda/sutra-production-network-firewall-routes
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref FlowLogRetentionDays
+      Tags:
+        - { Key: Name, Value: sutra-production-network-firewall-route-resolver }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-audit }
+
+  FirewallRouteResolverRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ResolveOnlyThisFirewall
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadFirewallEndpointState
+                Effect: Allow
+                Action: network-firewall:DescribeFirewall
+                Resource: !Ref InspectionFirewall
+              - Sid: ReadRouteState
+                Effect: Allow
+                Action: ec2:DescribeRouteTables
+                Resource: "*"
+              - Sid: ManageOnlyInspectionRouteTables
+                Effect: Allow
+                Action:
+                  - ec2:CreateRoute
+                  - ec2:DeleteRoute
+                  - ec2:ReplaceRoute
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:route-table/${PrivateAppRouteTableA}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:route-table/${PrivateAppRouteTableB}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:route-table/${PublicNatEgressRouteTableA}
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:route-table/${PublicNatEgressRouteTableB}
+              - Sid: WriteOnlyResolverLog
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub ${FirewallRouteResolverLogGroup.Arn}:*
+      Tags:
+        - { Key: Name, Value: sutra-production-network-firewall-route-resolver }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:component", Value: network-firewall-egress }
+
+  FirewallRouteResolverFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: FirewallRouteResolverLogGroup
+    Properties:
+      FunctionName: sutra-production-network-firewall-routes
+      Description: Resolves unordered Network Firewall endpoints by exact AZ and owns symmetric routes.
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt FirewallRouteResolverRole.Arn
+      Runtime: python3.13
+      Timeout: 900
+      Code:
+        ZipFile: |
+          import json
+          import time
+          import urllib.request
+
+          import boto3
+
+          ec2 = boto3.client("ec2")
+          network_firewall = boto3.client("network-firewall")
+
+
+          def respond(event, context, status, data=None, reason=None):
+              body = json.dumps({
+                  "Status": status,
+                  "Reason": reason or "See CloudWatch Logs: " + context.log_stream_name,
+                  "PhysicalResourceId": event.get(
+                      "PhysicalResourceId",
+                      event["StackId"] + "/firewall-routes",
+                  ),
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "NoEcho": False,
+                  "Data": data or {},
+              }).encode("utf-8")
+              request = urllib.request.Request(
+                  event["ResponseURL"],
+                  data=body,
+                  method="PUT",
+                  headers={
+                      "content-type": "",
+                      "content-length": str(len(body)),
+                  },
+              )
+              with urllib.request.urlopen(request, timeout=10):
+                  pass
+
+
+          def endpoint_map(properties):
+              expected = {
+                  properties["AvailabilityZoneA"],
+                  properties["AvailabilityZoneB"],
+              }
+              deadline = time.monotonic() + 720
+              while time.monotonic() < deadline:
+                  response = network_firewall.describe_firewall(
+                      FirewallArn=properties["FirewallArn"],
+                  )
+                  sync_states = response["FirewallStatus"].get("SyncStates", {})
+                  endpoints = {}
+                  for availability_zone in expected:
+                      attachment = sync_states.get(availability_zone, {}).get(
+                          "Attachment",
+                          {},
+                      )
+                      endpoint_id = attachment.get("EndpointId", "")
+                      if (
+                          attachment.get("Status") == "READY"
+                          and endpoint_id.startswith("vpce-")
+                      ):
+                          endpoints[availability_zone] = endpoint_id
+                  if endpoints.keys() == expected:
+                      return endpoints
+                  time.sleep(10)
+              raise RuntimeError(
+                  "Network Firewall endpoints were not READY in both exact Availability Zones"
+              )
+
+
+          def route_specs(properties, endpoints):
+              return [
+                  (
+                      properties["PrivateAppRouteTableA"],
+                      "0.0.0.0/0",
+                      endpoints[properties["AvailabilityZoneA"]],
+                  ),
+                  (
+                      properties["PrivateAppRouteTableB"],
+                      "0.0.0.0/0",
+                      endpoints[properties["AvailabilityZoneB"]],
+                  ),
+                  (
+                      properties["PublicNatEgressRouteTableA"],
+                      properties["PrivateAppSubnetCidrA"],
+                      endpoints[properties["AvailabilityZoneA"]],
+                  ),
+                  (
+                      properties["PublicNatEgressRouteTableB"],
+                      properties["PrivateAppSubnetCidrB"],
+                      endpoints[properties["AvailabilityZoneB"]],
+                  ),
+              ]
+
+
+          def current_route(route_table_id, destination):
+              response = ec2.describe_route_tables(
+                  RouteTableIds=[route_table_id],
+              )
+              for route in response["RouteTables"][0].get("Routes", []):
+                  if route.get("DestinationCidrBlock") == destination:
+                      return route
+              return None
+
+
+          def apply_routes(specs):
+              for route_table_id, destination, endpoint_id in specs:
+                  current = current_route(route_table_id, destination)
+                  arguments = {
+                      "RouteTableId": route_table_id,
+                      "DestinationCidrBlock": destination,
+                      "VpcEndpointId": endpoint_id,
+                  }
+                  if current is None:
+                      response = ec2.create_route(**arguments)
+                  elif current.get("VpcEndpointId") == endpoint_id:
+                      continue
+                  else:
+                      response = ec2.replace_route(**arguments)
+                  if not response.get("Return"):
+                      raise RuntimeError(
+                          "EC2 did not confirm the symmetric inspection route"
+                      )
+
+
+          def delete_routes(specs):
+              for route_table_id, destination, endpoint_id in specs:
+                  current = current_route(route_table_id, destination)
+                  if current and current.get("VpcEndpointId") == endpoint_id:
+                      response = ec2.delete_route(
+                          RouteTableId=route_table_id,
+                          DestinationCidrBlock=destination,
+                      )
+                      if not response.get("Return"):
+                          raise RuntimeError(
+                              "EC2 did not confirm inspection route deletion"
+                          )
+
+
+          def handler(event, context):
+              try:
+                  properties = event["ResourceProperties"]
+                  endpoints = endpoint_map(properties)
+                  specs = route_specs(properties, endpoints)
+                  if event["RequestType"] == "Delete":
+                      delete_routes(specs)
+                  else:
+                      apply_routes(specs)
+                  respond(
+                      event,
+                      context,
+                      "SUCCESS",
+                      {
+                          "EndpointIdA": endpoints[properties["AvailabilityZoneA"]],
+                          "EndpointIdB": endpoints[properties["AvailabilityZoneB"]],
+                      },
+                  )
+              except Exception as error:
+                  respond(event, context, "FAILED", reason=str(error)[:1024])
+
+  SymmetricInspectionRoutes:
+    Type: Custom::SymmetricNetworkFirewallRoutes
+    DependsOn:
+      - InspectionFirewallLogging
+      - PrivateAppSubnetRouteTableAssociationA
+      - PrivateAppSubnetRouteTableAssociationB
+      - PublicNatEgressSubnetRouteTableAssociationA
+      - PublicNatEgressSubnetRouteTableAssociationB
+    Properties:
+      ServiceToken: !GetAtt FirewallRouteResolverFunction.Arn
+      FirewallArn: !Ref InspectionFirewall
+      AvailabilityZoneA: !Ref AvailabilityZoneA
+      AvailabilityZoneB: !Ref AvailabilityZoneB
+      PrivateAppRouteTableA: !Ref PrivateAppRouteTableA
+      PrivateAppRouteTableB: !Ref PrivateAppRouteTableB
+      PublicNatEgressRouteTableA: !Ref PublicNatEgressRouteTableA
+      PublicNatEgressRouteTableB: !Ref PublicNatEgressRouteTableB
+      PrivateAppSubnetCidrA: !Ref PrivateAppSubnetCidrA
+      PrivateAppSubnetCidrB: !Ref PrivateAppSubnetCidrB
+
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: HTTPS from the two private application subnets to AWS PrivateLink endpoints
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref PrivateAppSubnetCidrA
+          Description: Application subnet A
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref PrivateAppSubnetCidrB
+          Description: Application subnet B
+      SecurityGroupEgress: []
+      Tags:
+        - { Key: Name, Value: sutra-production-private-endpoints }
+        - { Key: "sutra:environment", Value: production }
+
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  EcrDockerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  CloudWatchLogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  StsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sts
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.kms
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SesApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.email
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  SqsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Interface
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+      PrivateDnsEnabled: true
+      SubnetIds: [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]
+      SecurityGroupIds: [!Ref EndpointSecurityGroup]
+
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Gateway
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds: [!Ref PrivateAppRouteTableA, !Ref PrivateAppRouteTableB]
+
+  CloudflareIngressPrefixList:
+    Type: AWS::EC2::PrefixList
+    Properties:
+      AddressFamily: IPv4
+      MaxEntries: 20
+      PrefixListName: !Sub ${AWS::StackName}-cloudflare-ipv4
+      Entries:
+        - { Cidr: 173.245.48.0/20, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 103.21.244.0/22, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 103.22.200.0/22, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 103.31.4.0/22, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 141.101.64.0/18, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 108.162.192.0/18, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 190.93.240.0/20, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 188.114.96.0/20, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 197.234.240.0/22, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 198.41.128.0/17, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 162.158.0.0/15, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 104.16.0.0/13, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 104.24.0.0/14, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 172.64.0.0/13, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+        - { Cidr: 131.0.72.0/22, Description: Cloudflare IPv4 snapshot 2026-07-30 }
+      Tags:
+        - { Key: Name, Value: sutra-production-cloudflare-ingress }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:source", Value: cloudflare-published-ipv4 }
+
+  ApprovedHttpsEgressPrefixList:
+    Type: AWS::EC2::PrefixList
+    Properties:
+      AddressFamily: IPv4
+      MaxEntries: 18
+      PrefixListName: !Sub ${AWS::StackName}-approved-https-egress
+      Entries:
+        - Cidr: !Ref ApprovedHttpsEgressCidr01
+          Description: !Sub Approved external HTTPS destination 01 via ${ApprovedHttpsEgressChangeTicket}
+        - !If
+          - HasApprovedHttpsEgressCidr02
+          - Cidr: !Ref ApprovedHttpsEgressCidr02
+            Description: !Sub Approved external HTTPS destination 02 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr03
+          - Cidr: !Ref ApprovedHttpsEgressCidr03
+            Description: !Sub Approved external HTTPS destination 03 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr04
+          - Cidr: !Ref ApprovedHttpsEgressCidr04
+            Description: !Sub Approved external HTTPS destination 04 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr05
+          - Cidr: !Ref ApprovedHttpsEgressCidr05
+            Description: !Sub Approved external HTTPS destination 05 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr06
+          - Cidr: !Ref ApprovedHttpsEgressCidr06
+            Description: !Sub Approved external HTTPS destination 06 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr07
+          - Cidr: !Ref ApprovedHttpsEgressCidr07
+            Description: !Sub Approved external HTTPS destination 07 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr08
+          - Cidr: !Ref ApprovedHttpsEgressCidr08
+            Description: !Sub Approved external HTTPS destination 08 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr09
+          - Cidr: !Ref ApprovedHttpsEgressCidr09
+            Description: !Sub Approved external HTTPS destination 09 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr10
+          - Cidr: !Ref ApprovedHttpsEgressCidr10
+            Description: !Sub Approved external HTTPS destination 10 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr11
+          - Cidr: !Ref ApprovedHttpsEgressCidr11
+            Description: !Sub Approved external HTTPS destination 11 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr12
+          - Cidr: !Ref ApprovedHttpsEgressCidr12
+            Description: !Sub Approved external HTTPS destination 12 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr13
+          - Cidr: !Ref ApprovedHttpsEgressCidr13
+            Description: !Sub Approved external HTTPS destination 13 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr14
+          - Cidr: !Ref ApprovedHttpsEgressCidr14
+            Description: !Sub Approved external HTTPS destination 14 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr15
+          - Cidr: !Ref ApprovedHttpsEgressCidr15
+            Description: !Sub Approved external HTTPS destination 15 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr16
+          - Cidr: !Ref ApprovedHttpsEgressCidr16
+            Description: !Sub Approved external HTTPS destination 16 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr17
+          - Cidr: !Ref ApprovedHttpsEgressCidr17
+            Description: !Sub Approved external HTTPS destination 17 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+        - !If
+          - HasApprovedHttpsEgressCidr18
+          - Cidr: !Ref ApprovedHttpsEgressCidr18
+            Description: !Sub Approved external HTTPS destination 18 via ${ApprovedHttpsEgressChangeTicket}
+          - !Ref AWS::NoValue
+      Tags:
+        - { Key: Name, Value: sutra-production-approved-https-egress }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:change-ticket", Value: !Ref ApprovedHttpsEgressChangeTicket }
+
+Outputs:
+  VpcId:
+    Description: Supply as production-ha.yaml VpcId.
+    Value: !Ref Vpc
+  VpcCidr:
+    Description: Supply as production-ha.yaml VpcCidr.
+    Value: !Ref VpcCidr
+  PublicSubnetIds:
+    Description: Supply as production-ha.yaml PublicSubnetIds.
+    Value: !Join [",", [!Ref PublicSubnetA, !Ref PublicSubnetB]]
+  PrivateAppSubnetIds:
+    Description: Supply as production-ha.yaml PrivateAppSubnetIds.
+    Value: !Join [",", [!Ref PrivateAppSubnetA, !Ref PrivateAppSubnetB]]
+  PrivateDatabaseSubnetIds:
+    Description: Supply as production-ha.yaml PrivateDatabaseSubnetIds.
+    Value: !Join [",", [!Ref PrivateDatabaseSubnetA, !Ref PrivateDatabaseSubnetB]]
+  AlbIngressPrefixListId:
+    Description: Supply as production-ha.yaml AlbIngressPrefixListId.
+    Value: !Ref CloudflareIngressPrefixList
+  ApprovedHttpsEgressPrefixListId:
+    Description: Supply as production-ha.yaml ApprovedHttpsEgressPrefixListId.
+    Value: !Ref ApprovedHttpsEgressPrefixList
+  S3GatewayPrefixListId:
+    Description: Supply as production-ha.yaml S3GatewayPrefixListId.
+    Value: !Ref S3GatewayPrefixListId
+  NatGatewayIds:
+    Description: Redundant per-AZ NAT gateways downstream of the inspection endpoints.
+    Value: !Join [",", [!Ref NatGatewayA, !Ref NatGatewayB]]
+  PublicNatEgressSubnetIds:
+    Value: !Join [",", [!Ref PublicNatEgressSubnetA, !Ref PublicNatEgressSubnetB]]
+  FirewallSubnetIds:
+    Value: !Join [",", [!Ref FirewallSubnetA, !Ref FirewallSubnetB]]
+  NetworkFirewallArn:
+    Value: !Ref InspectionFirewall
+  NetworkFirewallLifecyclePhase:
+    Value: !Ref NetworkFirewallLifecyclePhase
+  NetworkFirewallPolicyArn:
+    Value: !Ref InspectionFirewallPolicy
+  ManagedEgressDomainRuleGroupArn:
+    Value: !Ref ManagedEgressDomainRuleGroup
+  FirewallEndpointIdA:
+    Value: !GetAtt SymmetricInspectionRoutes.EndpointIdA
+  FirewallEndpointIdB:
+    Value: !GetAtt SymmetricInspectionRoutes.EndpointIdB
+  FirewallAlertLogGroupName:
+    Value: !Ref FirewallAlertLogGroup
+  FirewallFlowLogGroupName:
+    Value: !Ref FirewallFlowLogGroup
+  EndpointSecurityGroupId:
+    Description: Supply as production-ha.yaml EndpointSecurityGroupId.
+    Value: !Ref EndpointSecurityGroup
+  KmsKeyArn:
+    Description: Supply as production-ha.yaml KmsKeyArn.
+    Value: !Ref KmsKeyArn
+  VpcFlowLogId:
+    Description: VPC-wide ALL-traffic Flow Log used for audit acceptance.
+    Value: !Ref VpcFlowLog
+  VpcFlowLogGroupName:
+    Description: Retained KMS-encrypted CloudWatch Logs destination.
+    Value: !Ref VpcFlowLogGroup
+  VpcFlowLogDeliveryRoleArn:
+    Description: Least-privilege service role used only by VPC Flow Logs.
+    Value: !GetAtt VpcFlowLogDeliveryRole.Arn

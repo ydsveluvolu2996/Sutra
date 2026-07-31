@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import {
   LocalAuthError,
   loginHostedUser,
@@ -19,6 +20,7 @@ import {
 } from "../../../../../lib/hosted-oidc-runtime";
 import { verifyOidcIdToken } from "../../../../../lib/oidc-id-token";
 import { openOidcTransaction, validateOidcCallback } from "../../../../../lib/oidc-pkce";
+import type { ManagedOutboundEnvironment } from "../../../../../lib/managed-outbound-fetch";
 
 export const dynamic = "force-dynamic";
 
@@ -72,8 +74,14 @@ export async function GET(request: Request): Promise<Response> {
       provider.client,
       code,
       transaction.codeVerifier,
+      undefined,
+      env as unknown as ManagedOutboundEnvironment,
     );
-    const jwks = await fetchOidcJwks(provider.client);
+    const jwks = await fetchOidcJwks(
+      provider.client,
+      undefined,
+      env as unknown as ManagedOutboundEnvironment,
+    );
     const identity = await verifyOidcIdToken(idToken, {
       issuer: provider.client.issuer,
       clientId: provider.client.clientId,

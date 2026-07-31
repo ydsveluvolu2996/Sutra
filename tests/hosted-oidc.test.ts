@@ -56,6 +56,10 @@ test("code exchange uses PKCE form data and returns only the bounded ID token", 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.input, configuration.tokenEndpoint);
   assert.equal(calls[0]?.init?.redirect, "manual");
+  assert.equal(
+    new Headers(calls[0]?.init?.headers).get("idempotency-key"),
+    null,
+  );
   const body = new URLSearchParams(String(calls[0]?.init?.body));
   assert.equal(body.get("grant_type"), "authorization_code");
   assert.equal(body.get("code_verifier"), "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");

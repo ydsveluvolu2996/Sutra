@@ -34,7 +34,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Sutra agentless snapshot scanning: an isolated VPC, KMS key, ECR repository,
-  ECS/Fargate cluster and three scoped IAM roles used to scan a copied EBS
+  private EC2 scan network and scoped IAM roles used to scan a copied EBS
   snapshot's contents without an agent. See the comments at the top of this
   file for the single-account boundary rationale and the ECS prerequisite.
 
@@ -55,6 +55,7 @@ Metadata:
           default: Network
         Parameters:
           - VpcCidr
+          - S3GatewayPrefixListId
 
 Parameters:
   MonthlyBudgetUsd:
@@ -100,6 +101,15 @@ Parameters:
       existing VPC is harmless today — but pick a free range if you ever intend
       to peer it.
 
+  S3GatewayPrefixListId:
+    Type: String
+    AllowedPattern: '^pl-[0-9a-f]{8,17}$'
+    ConstraintDescription: Must be the AWS-managed com.amazonaws.<region>.s3 IPv4 prefix-list ID.
+    Description: >-
+      AWS-managed com.amazonaws.<region>.s3 IPv4 prefix-list ID. The scanner
+      security group uses this exact destination for ECR layer reads and
+      findings uploads; CloudFormation has no regional pseudo-parameter for it.
+
 Conditions:
   HasOrchestratorPrincipal:
     Fn::Not:
@@ -110,10 +120,9 @@ Conditions:
 Resources:
 
   # ─── Network ──────────────────────────────────────────────────────────────
-  # Public subnets with no NAT Gateway. A NAT would add a standing monthly cost
-  # before a single scan runs; instead the task gets a public IP behind a
-  # security group that permits ZERO inbound. Reachability is identical for
-  # egress to ECR/S3/EBS, and nothing can reach the task.
+  # Fully private subnets: no IGW, NAT, public IP, peering, or default route.
+  # Scanner hosts can reach only ECR's API/registry interface endpoints and the
+  # S3 gateway endpoint used by ECR layers and findings publication.
   ScanVpc:
     Type: AWS::EC2::VPC
     Properties:
@@ -127,23 +136,7 @@ Resources:
         - Key: sutra:component
           Value: agentless-scan
 
-  ScanInternetGateway:
-    Type: AWS::EC2::InternetGateway
-    Properties:
-      Tags:
-        - Key: sutra:component
-          Value: agentless-scan
-
-  ScanGatewayAttachment:
-    Type: AWS::EC2::VPCGatewayAttachment
-    Properties:
-      VpcId:
-        Ref: ScanVpc
-      InternetGatewayId:
-        Ref: ScanInternetGateway
-
-  # Two AZs: Fargate capacity in a single AZ can be unavailable transiently, and
-  # a scan that cannot place a task is a scan that silently does not happen.
+  # Two AZs because a copied EBS volume and its EC2 scanner must share an AZ.
   ScanSubnetA:
     Type: AWS::EC2::Subnet
     Properties:
@@ -195,16 +188,6 @@ Resources:
         - Key: sutra:component
           Value: agentless-scan
 
-  ScanDefaultRoute:
-    Type: AWS::EC2::Route
-    DependsOn: ScanGatewayAttachment
-    Properties:
-      RouteTableId:
-        Ref: ScanRouteTable
-      DestinationCidrBlock: '0.0.0.0/0'
-      GatewayId:
-        Ref: ScanInternetGateway
-
   ScanSubnetARouteAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
@@ -221,24 +204,65 @@ Resources:
       RouteTableId:
         Ref: ScanRouteTable
 
-  # No SecurityGroupIngress block at all — an empty ingress list means nothing
-  # can open a connection to the scanner, which is the point. It only talks out,
-  # over TLS, to pull its image and read snapshot blocks.
+  # No ingress and no default egress. Separate rules name only the interface
+  # endpoint SG and AWS-managed S3 prefix list; there is no CIDR-wide escape.
   ScannerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Sutra agentless scanner - egress 443 only, no inbound.
+      GroupDescription: Sutra agentless scanner - private AWS endpoints only, no inbound.
       VpcId:
         Ref: ScanVpc
-      SecurityGroupEgress:
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: '0.0.0.0/0'
-          Description: ECR, S3, EBS direct APIs and CloudWatch Logs.
+      SecurityGroupEgress: []
       Tags:
         - Key: sutra:component
           Value: agentless-scan
+
+  ScanEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Accept TLS from the agentless scanner to private interface endpoints.
+      VpcId:
+        Ref: ScanVpc
+      SecurityGroupEgress: []
+      Tags:
+        - Key: sutra:component
+          Value: agentless-scan
+
+  EndpointTlsFromScanner:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId:
+        Ref: ScanEndpointSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId:
+        Ref: ScannerSecurityGroup
+      Description: TLS from scanner hosts only.
+
+  ScannerTlsToInterfaceEndpoints:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: ScannerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId:
+        Ref: ScanEndpointSecurityGroup
+      Description: ECR API and registry interface endpoints only.
+
+  ScannerTlsToS3Gateway:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId:
+        Ref: ScannerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationPrefixListId:
+        Ref: S3GatewayPrefixListId
+      Description: ECR layer reads and findings writes through the S3 gateway endpoint.
 
   # ─── Encryption ───────────────────────────────────────────────────────────
   ScanKmsKey:
@@ -530,12 +554,16 @@ Resources:
             Statement:
               - Sid: PullThePinnedScannerImage
                 Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: '*'
+              - Sid: PullOnlyTheScannerRepository
+                Effect: Allow
                 Action:
-                  - ecr:GetAuthorizationToken
                   - ecr:BatchGetImage
                   - ecr:GetDownloadUrlForLayer
                   - ecr:BatchCheckLayerAvailability
-                Resource: '*'
+                Resource:
+                  Fn::GetAtt: [ScannerEcrRepository, Arn]
               - Sid: UseTheScanKeyForVolumeAndFindings
                 Effect: Allow
                 Action:
@@ -549,16 +577,19 @@ Resources:
                   - kms:GenerateDataKeyWithoutPlaintext
                 Resource:
                   Fn::GetAtt: [ScanKmsKey, Arn]
-              # Write-only, and only under its own instance prefix: the scanner
-              # can publish its result and cannot read another scan's findings.
-              # Granted from the ROLE rather than the key policy on purpose: naming this
-              # role inside the key would close a cycle (key -> role -> bucket -> key),
-              # which CloudFormation rejects outright.
-              - Sid: PublishOwnFindingsOnly
+              # Write-only under the scan namespace: the scanner can publish a
+              # result but cannot list or read any result. A run-specific IAM
+              # resource cannot be expressed because runId is generated after
+              # this shared instance role; the endpoint policy repeats this
+              # exact write-only bound and the orchestrator uses random run IDs.
+              # Granted from the ROLE rather than the key policy on purpose:
+              # naming this role inside the key would close a cycle
+              # (key -> role -> bucket -> key), which CloudFormation rejects.
+              - Sid: PublishScanFindingsOnly
                 Effect: Allow
                 Action: s3:PutObject
                 Resource:
-                  Fn::Sub: '${FindingsBucket.Arn}/scans/${!aws:userid}/*'
+                  Fn::Sub: '${FindingsBucket.Arn}/scans/*'
               - Sid: DenyControlPlaneAndCredentials
                 Effect: Deny
                 Action:
@@ -614,6 +645,106 @@ Resources:
         - Key: sutra:component
           Value: agentless-scan
 
+  # ─── Private AWS service paths ─────────────────────────────────────────────
+  # These are the complete runtime call graph from scan-instance-operations:
+  # ECR auth/manifest/layers and S3 findings publication. KMS is invoked by S3
+  # on the caller's behalf; IMDS is link-local; no Logs, STS, EC2, package
+  # repository, or public Trivy OCI call is made by the scanner host.
+  ScanEcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: ScanVpc
+      ServiceName:
+        Fn::Sub: 'com.amazonaws.${AWS::Region}.ecr.api'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - Ref: ScanSubnetA
+        - Ref: ScanSubnetB
+      SecurityGroupIds:
+        - Ref: ScanEndpointSecurityGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AuthorizeScannerRole
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt: [ScannerInstanceRole, Arn]
+            Action: ecr:GetAuthorizationToken
+            Resource: '*'
+          - Sid: ReadScannerRepositoryMetadata
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt: [ScannerInstanceRole, Arn]
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+            Resource:
+              Fn::GetAtt: [ScannerEcrRepository, Arn]
+
+  ScanEcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Interface
+      VpcId:
+        Ref: ScanVpc
+      ServiceName:
+        Fn::Sub: 'com.amazonaws.${AWS::Region}.ecr.dkr'
+      PrivateDnsEnabled: true
+      SubnetIds:
+        - Ref: ScanSubnetA
+        - Ref: ScanSubnetB
+      SecurityGroupIds:
+        - Ref: ScanEndpointSecurityGroup
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: PullOnlyTheScannerRepository
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt: [ScannerInstanceRole, Arn]
+            Action:
+              - ecr:BatchGetImage
+              - ecr:GetDownloadUrlForLayer
+              - ecr:BatchCheckLayerAvailability
+            Resource:
+              Fn::GetAtt: [ScannerEcrRepository, Arn]
+
+  ScanS3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      VpcId:
+        Ref: ScanVpc
+      ServiceName:
+        Fn::Sub: 'com.amazonaws.${AWS::Region}.s3'
+      RouteTableIds:
+        - Ref: ScanRouteTable
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # Docker follows ECR's signed layer URLs to this AWS-owned regional
+          # bucket. It receives no access to any other S3 read path.
+          - Sid: ReadRegionalEcrLayers
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource:
+              Fn::Sub: 'arn:${AWS::Partition}:s3:::prod-${AWS::Region}-starport-layer-bucket/*'
+          - Sid: PublishFindingsOnly
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt: [ScannerInstanceRole, Arn]
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub: '${FindingsBucket.Arn}/scans/*'
+
 
 Outputs:
   ScanAccountId:
@@ -642,6 +773,11 @@ Outputs:
   ScannerSecurityGroupId:
     Value:
       Ref: ScannerSecurityGroup
+
+  ScanS3GatewayEndpointId:
+    Description: Private S3 route used for ECR layers and findings publication.
+    Value:
+      Ref: ScanS3GatewayEndpoint
 
   OrchestratorRoleArn:
     Description: The control plane assumes this to launch scans.

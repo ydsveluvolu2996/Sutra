@@ -96,6 +96,10 @@ export function requirePilotActor(
   return authorizePilotRequest(request, capability, customerId);
 }
 
+export function isLocalSimulationRuntime(): boolean {
+  return runtimeEnv().SUTRA_LOCAL_MODE === "true";
+}
+
 /**
  * Fixture catalogs, queues, schedules, and publication controls are developer
  * tooling. Keep the boundary on the server as well as in the UI so a hosted
@@ -103,7 +107,7 @@ export function requirePilotActor(
  * directly.
  */
 export function assertLocalSimulationRuntime(): void {
-  if (runtimeEnv().SUTRA_LOCAL_MODE !== "true") {
+  if (!isLocalSimulationRuntime()) {
     throw new PilotServerError(404, "NOT_FOUND", "The requested resource was not found");
   }
 }
@@ -538,7 +542,11 @@ export async function readAgentlessRun(input: {
 }
 
 export async function getCollectorHealth(expectedPartition?: AwsPartition): Promise<CollectorHealth> {
-  return parseCollectorHealth(await brokerFetch<unknown>("/v1/health", "GET"), expectedPartition);
+  const health = parseCollectorHealth(await brokerFetch<unknown>("/v1/health", "GET"), expectedPartition);
+  if (!isLocalSimulationRuntime() && health.mode !== "live") {
+    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The hosted collector did not report live mode");
+  }
+  return health;
 }
 
 export async function getAgentlessExecutionReadiness(): Promise<AgentlessScanReadiness> {

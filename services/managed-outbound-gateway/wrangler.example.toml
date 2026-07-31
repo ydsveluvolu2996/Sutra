@@ -1,0 +1,25 @@
+name = "sutra-managed-outbound"
+main = "worker.ts"
+compatibility_date = "2026-07-01"
+workers_dev = false
+
+# Bind the gateway as the origin for one dedicated Custom Domain. Cloudflare
+# creates the DNS record and certificate; do not attach this Worker to the
+# public application route or enable a workers.dev route.
+routes = [
+  { pattern = "outbound.sutracmdb.com", custom_domain = true }
+]
+
+[durable_objects]
+bindings = [
+  { name = "OUTBOUND_REQUEST_STATE", class_name = "OutboundRequestStateDurableObject" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OutboundRequestStateDurableObject"]
+
+# SUTRA_OUTBOUND_CLIENT_KEYS is a secret, not a [vars] value:
+# {"production-app":"<base64url raw 32-byte Ed25519 public key>"}
+# Set it with:
+#   npx wrangler secret put SUTRA_OUTBOUND_CLIENT_KEYS

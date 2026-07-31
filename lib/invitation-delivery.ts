@@ -25,6 +25,7 @@ export interface InvitationEmailInput {
   readonly activationUrl: string;
   readonly expiresAt: string;
   readonly role: string;
+  readonly operationId?: string;
 }
 
 export interface InvitationDeliveryResult {
@@ -161,7 +162,7 @@ function rejected(providerName: Exclude<InvitationDeliveryProvider, "none">, sta
 export async function deliverInvitationEmail(
   input: InvitationEmailInput,
   env: InvitationDeliveryEnv,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<InvitationDeliveryResult> {
   if (env.SUTRA_INVITATION_EMAIL_PROVIDER?.trim().toLocaleLowerCase("en-US") === "zoho") {
     const configuredFrom = env.SUTRA_INVITATION_FROM?.trim();
@@ -193,6 +194,7 @@ export async function deliverInvitationEmail(
         toAddress: input.recipient,
         subject: safeHeader("You're invited to Sutra CMDB", MAXIMUM_SUBJECT_LENGTH),
         content: textBody(input),
+        operationId: input.operationId,
       }, fetchImpl);
       return {
         status: outcome.status,
@@ -241,7 +243,7 @@ export async function deliverInvitationEmail(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(request.url, {
+    const response = await (fetchImpl ?? fetch)(request.url, {
       method: "POST",
       // "manual" (not "error"): the Workers/workerd runtime can reject the
       // "error" redirect mode outright, which surfaced as an immediate

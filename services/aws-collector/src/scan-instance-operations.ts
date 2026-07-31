@@ -92,6 +92,8 @@ export function findingsPrefix(runId: string): string {
  * * The container gets SYS_ADMIN and the device, and NOTHING else — not --privileged.
  * * It publishes a refusal as well as a success, because a scan that produced no
  *   findings and a scan that refused must never look the same.
+ * * The pinned host AMI must already contain Docker and AWS CLI. Installing
+ *   packages at boot would require an ungoverned public repository path.
  * * It shuts down on every path, including failure, so a wedged scan still stops
  *   billing without depending on the orchestrator to reap it.
  */
@@ -122,7 +124,9 @@ for _ in $(seq 1 60); do
   sleep 5
 done
 
-dnf install -y docker >/dev/null 2>&1 || yum install -y docker >/dev/null 2>&1
+command -v docker >/dev/null 2>&1 \\
+  && command -v aws >/dev/null 2>&1 \\
+  || { publish_refusal HOST_PREREQUISITES_MISSING "pinned scanner AMI lacks Docker or AWS CLI"; exit 1; }
 systemctl start docker || { publish_refusal DOCKER_UNAVAILABLE "docker did not start"; exit 1; }
 
 # Credentials come from the instance profile; none are written to disk or to the

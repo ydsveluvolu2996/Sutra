@@ -17,7 +17,10 @@ export interface NotificationDeliveryHealth {
   readonly queued: number;
   readonly processing: number;
   readonly retrying: number;
+  readonly providerAccepted: number;
+  readonly deliveryDelayed: number;
   readonly delivered: number;
+  readonly deliveryFailed: number;
   readonly deadLetter: number;
   readonly adapterMissing: number;
   readonly oldestActionableAgeSeconds: number | null;
@@ -27,6 +30,7 @@ export interface NotificationDeliveryHealth {
 const ACTIONABLE = new Set<NotificationOutboxStatus>([
   "pending",
   "processing",
+  "provider_accepted",
   "retry_scheduled",
 ]);
 
@@ -73,7 +77,13 @@ export function assessNotificationDeliveryHealth(input: {
     : Math.max(0, Math.floor((now - Math.min(...actionable.map((job) => Date.parse(job.createdAt)))) / 1_000));
   const adapterMissing = counts.get("not_configured") ?? 0;
   const deadLetter = counts.get("dead_letter") ?? 0;
+  const deliveryFailed = counts.get("delivery_failed") ?? 0;
   const retrying = counts.get("retry_scheduled") ?? 0;
+  const deliveryDelayed = input.jobs.filter(
+    (job) =>
+      job.status === "provider_accepted" &&
+      job.lastErrorCode === "SES_DELIVERY_DELAY",
+  ).length;
   const configuredDestinations = enabled.filter(
     (destination) => destination.deliveryReadiness === "configured",
   ).length;
@@ -86,9 +96,15 @@ export function assessNotificationDeliveryHealth(input: {
   } else if (!input.workerConfigured || configuredDestinations < enabled.length || adapterMissing > 0) {
     state = "blocked";
     message = "Delivery is durably queued, but one or more provider adapters are not configured.";
-  } else if (deadLetter > 0 || retrying > 0 || (oldestActionableAgeSeconds ?? 0) > 300) {
+  } else if (
+    deadLetter > 0 ||
+    deliveryFailed > 0 ||
+    deliveryDelayed > 0 ||
+    retrying > 0 ||
+    (oldestActionableAgeSeconds ?? 0) > 300
+  ) {
     state = "degraded";
-    message = "Delivery requires operator attention because jobs are delayed, retrying, or dead-lettered.";
+    message = "Delivery requires operator attention because jobs are delayed, retrying, failed, or dead-lettered.";
   } else {
     state = "healthy";
     message = "The worker and enabled destinations are ready, with no delayed or failed job observed.";
@@ -101,7 +117,10 @@ export function assessNotificationDeliveryHealth(input: {
     queued: counts.get("pending") ?? 0,
     processing: counts.get("processing") ?? 0,
     retrying,
+    providerAccepted: counts.get("provider_accepted") ?? 0,
+    deliveryDelayed,
     delivered: counts.get("delivered") ?? 0,
+    deliveryFailed,
     deadLetter,
     adapterMissing,
     oldestActionableAgeSeconds,

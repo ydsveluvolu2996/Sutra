@@ -73,6 +73,7 @@ export async function POST(request: Request): Promise<Response> {
             recipient: created.email,
             resetUrl: resetUrl.toString(),
             expiresAt: new Date(created.expiresAt).toISOString(),
+            operationId: created.id,
           },
           env as unknown as InvitationDeliveryEnv,
         );

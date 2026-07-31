@@ -16,7 +16,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { mkdir, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 
 import { parseTrivyReport, type ParsedFinding } from "./trivy-report.js";
 
@@ -30,6 +30,7 @@ export interface RunResult {
   readonly device: string;
   readonly filesystem: string;
   readonly trivyDbUpdatedAt: string;
+  readonly trivyJavaDbUpdatedAt: string;
 }
 
 export class ScanRefusedError extends Error {
@@ -43,6 +44,26 @@ interface Exec {
   (command: string, args: readonly string[], options?: { readonly timeoutMs?: number }):
     Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }>;
 }
+
+interface TrivyDatabaseMetadata {
+  readonly Version: number;
+  readonly NextUpdate: string;
+  readonly UpdatedAt: string;
+  readonly DownloadedAt: string;
+}
+
+interface VerifiedTrivyDatabases {
+  readonly vulnerabilityUpdatedAt: string;
+  readonly javaUpdatedAt: string;
+}
+
+type ReadTextFile = (path: string) => Promise<string>;
+
+const TRIVY_VULNERABILITY_DB_METADATA = "/var/cache/trivy/db/metadata.json";
+const TRIVY_JAVA_DB_METADATA = "/var/cache/trivy/java-db/metadata.json";
+const VULNERABILITY_DB_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+const JAVA_DB_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 const execProcess: Exec = (command, args, options) =>
   new Promise((resolve, reject) => {
@@ -172,20 +193,88 @@ export async function mountReadOnly(
   }
 }
 
-/**
- * Refreshes the vulnerability database and REFUSES if it could not be refreshed.
- * Trivy scans happily against a stale or absent DB and reports zero findings,
- * which would be published as "this disk is clean".
- */
-export async function updateTrivyDatabase(exec: Exec = execProcess): Promise<string> {
-  const updated = await exec("trivy", ["image", "--download-db-only"], { timeoutMs: 10 * 60 * 1000 });
-  if (updated.code !== TRIVY_OK) {
+function parseDatabaseMetadata(
+  raw: string,
+  label: "VULN" | "JAVA",
+  nowMs: number,
+  maxAgeMs: number,
+): TrivyDatabaseMetadata {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new ScanRefusedError(`${label}_DB_METADATA_INVALID`, "database metadata is not JSON");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new ScanRefusedError(`${label}_DB_METADATA_INVALID`, "database metadata is not an object");
+  }
+  const metadata = parsed as Record<string, unknown>;
+  if (
+    !Number.isSafeInteger(metadata.Version)
+    || (metadata.Version as number) < 1
+    || typeof metadata.NextUpdate !== "string"
+    || typeof metadata.UpdatedAt !== "string"
+    || typeof metadata.DownloadedAt !== "string"
+  ) {
+    throw new ScanRefusedError(`${label}_DB_METADATA_INVALID`, "database metadata fields are incomplete");
+  }
+  const updatedAtMs = Date.parse(metadata.UpdatedAt);
+  const downloadedAtMs = Date.parse(metadata.DownloadedAt);
+  const nextUpdateMs = Date.parse(metadata.NextUpdate);
+  if (
+    !Number.isFinite(updatedAtMs)
+    || !Number.isFinite(downloadedAtMs)
+    || !Number.isFinite(nextUpdateMs)
+    || updatedAtMs > nowMs + MAX_CLOCK_SKEW_MS
+    || downloadedAtMs > nowMs + MAX_CLOCK_SKEW_MS
+    || nextUpdateMs < updatedAtMs
+  ) {
+    throw new ScanRefusedError(`${label}_DB_METADATA_INVALID`, "database metadata timestamps are invalid");
+  }
+  if (nowMs - updatedAtMs > maxAgeMs || nowMs - downloadedAtMs > maxAgeMs) {
     throw new ScanRefusedError(
-      "VULN_DB_UNAVAILABLE",
-      `refusing to scan with an unrefreshed database: ${updated.stderr.trim() || `exit ${updated.code}`}`,
+      `${label}_DB_STALE`,
+      `database exceeds the ${Math.floor(maxAgeMs / (60 * 60 * 1000))}-hour release freshness limit`,
     );
   }
-  return new Date().toISOString();
+  return metadata as unknown as TrivyDatabaseMetadata;
+}
+
+/**
+ * Verifies the databases baked into the immutable release image.
+ *
+ * Production has no public OCI route. Runtime downloads are therefore forbidden:
+ * the release build fetches both databases, and each scan reads Trivy's own
+ * metadata and refuses stale, missing, malformed, or future-dated content.
+ */
+export async function verifyTrivyDatabases(
+  readText: ReadTextFile = async (path) => readFile(path, "utf8"),
+  nowMs = Date.now(),
+): Promise<VerifiedTrivyDatabases> {
+  let vulnerabilityRaw: string;
+  let javaRaw: string;
+  try {
+    [vulnerabilityRaw, javaRaw] = await Promise.all([
+      readText(TRIVY_VULNERABILITY_DB_METADATA),
+      readText(TRIVY_JAVA_DB_METADATA),
+    ]);
+  } catch {
+    throw new ScanRefusedError(
+      "TRIVY_DATABASES_MISSING",
+      "the immutable scanner image does not contain both required databases",
+    );
+  }
+  const vulnerability = parseDatabaseMetadata(
+    vulnerabilityRaw,
+    "VULN",
+    nowMs,
+    VULNERABILITY_DB_MAX_AGE_MS,
+  );
+  const java = parseDatabaseMetadata(javaRaw, "JAVA", nowMs, JAVA_DB_MAX_AGE_MS);
+  return {
+    vulnerabilityUpdatedAt: new Date(Date.parse(vulnerability.UpdatedAt)).toISOString(),
+    javaUpdatedAt: new Date(Date.parse(java.UpdatedAt)).toISOString(),
+  };
 }
 
 export async function runTrivy(exec: Exec = execProcess): Promise<unknown> {
@@ -193,6 +282,10 @@ export async function runTrivy(exec: Exec = execProcess): Promise<unknown> {
     "rootfs",
     "--format", "json",
     "--scanners", "vuln,secret,misconfig",
+    // Production is private. These flags are both a network guarantee and a
+    // fail-closed guarantee: only the already-verified immutable DBs may be used.
+    "--skip-db-update",
+    "--skip-java-db-update",
     // Skip our own cache so the report never describes the scanner's own files.
     "--skip-dirs", "/var/cache/trivy",
     "--quiet",
@@ -212,14 +305,15 @@ export async function runScan(exec: Exec = execProcess): Promise<RunResult> {
   const device = await resolveScanDevice(exec);
   const filesystem = await detectFilesystem(device, exec);
   await mountReadOnly(device, filesystem, exec);
-  const trivyDbUpdatedAt = await updateTrivyDatabase(exec);
+  const databases = await verifyTrivyDatabases();
   const parsed = parseTrivyReport(await runTrivy(exec));
   return {
     findings: parsed.findings,
     summary: { ...parsed.summary },
     device,
     filesystem,
-    trivyDbUpdatedAt,
+    trivyDbUpdatedAt: databases.vulnerabilityUpdatedAt,
+    trivyJavaDbUpdatedAt: databases.javaUpdatedAt,
   };
 }
 

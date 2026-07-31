@@ -5,24 +5,82 @@
 # only job is: mount read-only, run Trivy, emit findings as JSON, exit.
 #
 # ── WHY THE IMAGE LOOKS LIKE THIS ───────────────────────────────────────────
-# * Pinned Trivy by digest, not by tag. The scanner's output IS the product's
-#   vulnerability claim, so "which scanner version produced this finding" has to
-#   be reproducible. A moving tag makes a finding unexplainable after the fact.
-# * The Trivy DB is NOT baked in. A vulnerability database frozen at image build
-#   time silently ages, and a scan that reports "no CVEs" from a three-month-old
-#   database is worse than no scan. It is fetched at run time and the entrypoint
-#   refuses to scan if the fetch failed.
+# * Trivy is built from a checksum-verified stable Go module. The scanner's
+#   output IS the product's vulnerability claim, so the exact release and
+#   patched dependency closure must be reproducible.
+# * Both Trivy databases are baked into the immutable release image. Production
+#   scan subnets have no Internet path: the entrypoint verifies Trivy's actual
+#   vulnerability and Java DB metadata on every run, refuses stale content, and
+#   scans with both update mechanisms disabled.
 # * No AWS SDK, no credentials, no network egress needed to the control plane.
 #   The container does not create, share, or delete snapshots — the executor does
 #   that. Keeping the blast radius to "reads a filesystem" is the point.
 
-# Digest resolved from the Docker Hub registry on 2026-07-28 and verified to be
-# the manifest 0.72.0 actually points at. If you bump the tag you MUST re-resolve
-# the digest — the tag alone is mutable and would silently change which scanner
-# produced a customer's findings.
-FROM aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f AS trivy
+# Trivy 0.72.0's published binary still contains fixed High-severity Go
+# dependencies. Build the stable module with those dependencies upgraded instead
+# of shipping a known-vulnerable security scanner. Building it as a dependency
+# of a tiny external module is intentional: Go then records Trivy's real v0.72.0
+# module version in the binary instead of the unversioned/pseudo-version metadata
+# produced when compiling a source checkout. Both the Go toolchain image and all
+# downloaded modules are cryptographically pinned.
+FROM golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS trivy
 
-FROM node:22.23.1-bookworm-slim
+WORKDIR /src/build
+
+# Go's checksum database verifies the complete module closure. The expected
+# module content hashes below add a fail-closed, reviewable pin for Trivy and
+# each security override rather than trusting a mutable tag or a floating proxy
+# response. The external build module is never copied into the runtime image.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+  go mod init sutra.local/trivy-release-build \
+  && go mod edit -go=1.26.0 \
+  && go mod edit -require=github.com/aquasecurity/trivy@v0.72.0 \
+  && go mod edit -replace=golang.org/x/text=golang.org/x/text@v0.39.0 \
+  && go mod edit -replace=google.golang.org/grpc=google.golang.org/grpc@v1.82.1 \
+  && go mod edit -replace=oras.land/oras-go/v2=oras.land/oras-go/v2@v2.6.2 \
+  && TRIVY_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json github.com/aquasecurity/trivy@v0.72.0)" \
+  && printf '%s\n' "${TRIVY_MODULE}" \
+       | grep -Fq '"Sum": "h1:W3v+NE94olOzk3nSwwha59DTBsbcgLRXa4QNSJpRQQM="' \
+  && XTEXT_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json golang.org/x/text@v0.39.0)" \
+  && printf '%s\n' "${XTEXT_MODULE}" \
+       | grep -Fq '"Sum": "h1:UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus="' \
+  && GRPC_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json google.golang.org/grpc@v1.82.1)" \
+  && printf '%s\n' "${GRPC_MODULE}" \
+       | grep -Fq '"Sum": "h1:NnAxzGRA0677vCa4BUkOAnO5+FfQqVl9iUXeD0IqcGE="' \
+  && ORAS_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json oras.land/oras-go/v2@v2.6.2)" \
+  && printf '%s\n' "${ORAS_MODULE}" \
+       | grep -Fq '"Sum": "h1:N04RXngAp1LJKTG6ifz3xHPipasEkWr+hFmInja5YKo="' \
+  && GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go mod download all \
+  && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOMAXPROCS=2 \
+     GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go build \
+       -mod=mod \
+       -p=2 \
+       -trimpath \
+       -ldflags="-s -w -extldflags '-static' -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.72.0-sutra.1" \
+       -o /out/trivy \
+       github.com/aquasecurity/trivy/cmd/trivy
+
+# Fetch both official Trivy databases during the controlled release build. They
+# become part of the immutable scanner digest that is scanned and promoted; the
+# production instance never talks to public OCI registries.
+FROM trivy AS trivy-db
+ENV TRIVY_CACHE_DIR=/out/trivy-cache
+RUN /out/trivy image --download-db-only \
+  && /out/trivy image --download-java-db-only \
+  && test -s /out/trivy-cache/db/trivy.db \
+  && test -s /out/trivy-cache/db/metadata.json \
+  && test -s /out/trivy-cache/java-db/trivy-java.db \
+  && test -s /out/trivy-cache/java-db/metadata.json
+
+# Multi-architecture manifest resolved from the official Node registry on
+# 2026-07-30. Pinning the digest makes the runtime packages reproducible while
+# retaining the explicit Node 22.23.1 release line.
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
 
 # util-linux for blkid/lsblk (filesystem detection), and the xfs/btrfs tools so a
 # non-ext4 root volume is mountable rather than silently skipped. Customers run
@@ -36,7 +94,8 @@ RUN apt-get update \
        ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
-COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
+COPY --from=trivy /out/trivy /usr/local/bin/trivy
+COPY --from=trivy-db /out/trivy-cache /var/cache/trivy
 
 # Remove the bundled package managers. This container runs as root, holds
 # CAP_SYS_ADMIN, and has an untrusted customer filesystem mounted at /mnt/scan —
@@ -59,10 +118,10 @@ COPY package.json ./
 # mount failure is distinguishable from a missing mount point.
 RUN mkdir -p /mnt/scan && chmod 0755 /mnt/scan
 
-# Trivy's database cache. Writable, and deliberately outside /mnt/scan so nothing
-# the scanner writes can land on a filesystem derived from customer data.
+# Trivy's baked database cache is deliberately outside /mnt/scan so nothing the
+# scanner writes can land on a filesystem derived from customer data. It is
+# copied from the release-build stage; there is no runtime database download.
 ENV TRIVY_CACHE_DIR=/var/cache/trivy
-RUN mkdir -p /var/cache/trivy
 
 # NOT switched to a non-root user: mounting a block device requires CAP_SYS_ADMIN.
 # The compensating controls are that this container holds no credentials, runs in

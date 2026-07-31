@@ -73,6 +73,7 @@ import type { FinopsAlert } from "../lib/finops-alerts.ts";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
 import { planVulnFeedRefresh } from "../lib/vuln-feed-refresh-schedule";
 import { refreshBoundedVulnerabilityFeed } from "../lib/vuln-feed-runtime";
+import type { ManagedOutboundEnvironment } from "../lib/managed-outbound-fetch";
 import { VulnerabilityMirrorRepository } from "./vulnerability-mirror-repository";
 import {
   requestAgentlessTeardownSweep,
@@ -150,6 +151,7 @@ async function runItsmDispatch(job: RunnableJob): Promise<void> {
       projectKey: connector.projectKey,
     },
     itsmCase: payload.itsmCase,
+    environment: env as unknown as ManagedOutboundEnvironment,
   });
   if (result.delivered) {
     await new ItsmConnectorRepository().recordOutboundSuccess(
@@ -868,6 +870,7 @@ export function buildJobHandlers(): Record<string, JobHandler> {
         refreshFeed: (feed, options) => refreshBoundedVulnerabilityFeed({
           feed,
           repository,
+          environment: env as unknown as ManagedOutboundEnvironment,
           ...(options.nvdWindowDays === undefined
             ? {}
             : { nvdWindowDays: options.nvdWindowDays }),

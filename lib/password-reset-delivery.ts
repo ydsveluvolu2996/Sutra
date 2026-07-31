@@ -19,9 +19,10 @@ export async function deliverPasswordResetEmail(
     readonly recipient: string;
     readonly resetUrl: string;
     readonly expiresAt: string;
+    readonly operationId?: string;
   },
   env: InvitationDeliveryEnv,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<InvitationDeliveryResult> {
   if (env.SUTRA_INVITATION_EMAIL_PROVIDER?.trim().toLowerCase() === "zoho") {
     const from = env.SUTRA_INVITATION_FROM?.trim();
@@ -52,6 +53,7 @@ export async function deliverPasswordResetEmail(
           "",
           "If you did not request this change, ignore this email and contact support@sutracmdb.com.",
         ].join("\n"),
+        operationId: input.operationId,
       }, fetchImpl);
       return {
         status: outcome.status,
@@ -137,7 +139,7 @@ export async function deliverPasswordResetEmail(
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
     try {
-      const response = await fetchImpl(url, {
+      const response = await (fetchImpl ?? fetch)(url, {
         method: "POST",
         redirect: "manual",
         headers: {

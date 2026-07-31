@@ -110,6 +110,10 @@ try {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
+  await run(process.execPath, ["--test", resolve(root, "tests/postgres-ses-feedback.test.mjs")], {
+    ...process.env,
+    SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
+  });
   await run(process.execPath, ["--test", resolve(root, "tests/postgres-resource-retirement.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,

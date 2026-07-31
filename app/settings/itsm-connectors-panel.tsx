@@ -99,14 +99,14 @@ export function ItsmConnectorsPanel({ connectionId }: { readonly connectionId: s
 
   return (
     <section className="panel" aria-label="ITSM connectors">
-      <div className="panel-heading"><div><h2>Jira and ServiceNow connectors</h2><p>Signed, bidirectional case synchronization. Unknown remote states remain unmapped and visible.</p></div></div>
+      <div className="panel-heading"><div><h2>Jira and ServiceNow connectors</h2><p>Signed delivery through provider-bounded Jira Cloud Automation and ServiceNow API webhook endpoints. Unknown remote states remain unmapped and visible.</p></div></div>
       <div className="cmdbq-row">
         <input aria-label="Connector name" placeholder="connector name" value={name} onChange={(event) => setName(event.target.value)} />
         <select aria-label="Connector type" value={connectorType} onChange={(event) => setConnectorType(event.target.value as "jira" | "servicenow")}>
           <option value="jira">Jira</option>
           <option value="servicenow">ServiceNow</option>
         </select>
-        <input aria-label="ITSM endpoint URL" placeholder="https://itsm.example/api/tickets" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+        <input aria-label="ITSM endpoint URL" placeholder={connectorType === "jira" ? "https://automation.atlassian.com/pro/hooks/…" : "https://instance.service-now.com/api/…"} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
       </div>
       <div className="cmdbq-row">
         <input aria-label="Project key" placeholder="project key (Jira only)" value={projectKey} onChange={(event) => setProjectKey(event.target.value)} />

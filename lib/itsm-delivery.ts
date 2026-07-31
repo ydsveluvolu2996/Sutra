@@ -19,6 +19,11 @@ import {
   type ItsmConnectorType,
 } from "./itsm-sync.ts";
 import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
+import {
+  requiredManagedOutboundFetch,
+  type ManagedOutboundEnvironment,
+} from "./managed-outbound-fetch.ts";
+import { isManagedTicketWebhookUrl } from "./managed-provider-webhooks.ts";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const PAYLOAD_PREVIEW_LIMIT = 500;
@@ -42,9 +47,9 @@ export async function deliverItsmTicket(input: {
   readonly itsmCase: ItsmCaseLike;
   readonly timeoutMs?: number;
   readonly fetchImpl?: typeof fetch;
+  readonly environment?: ManagedOutboundEnvironment;
 }): Promise<ItsmDeliveryResult> {
   const { connector, itsmCase } = input;
-  const fetchImpl = input.fetchImpl ?? fetch;
   const ticket = buildOutboundTicket(itsmCase, connector.connectorType, connector.projectKey);
   const outboundBody = JSON.stringify(ticket.payload);
   const payloadPreview = outboundBody.slice(0, PAYLOAD_PREVIEW_LIMIT);
@@ -53,11 +58,36 @@ export async function deliverItsmTicket(input: {
     // Block SSRF targets right before egress and refuse to follow redirects so
     // a 3xx to an internal target cannot bypass the guard after the first hop.
     const target = assertSafeOutboundUrl(connector.baseUrl);
+    if (
+      input.fetchImpl === undefined &&
+      !isManagedTicketWebhookUrl(target, connector.connectorType)
+    ) {
+      throw new Error("ManagedProviderDestinationDenied");
+    }
+    const fetchImpl = requiredManagedOutboundFetch(
+      input.environment ?? process.env as unknown as ManagedOutboundEnvironment,
+      input.fetchImpl,
+    );
+    const digest = new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode([
+          "sutra.itsm-delivery.v1",
+          connector.connectorType,
+          target.toString(),
+          outboundBody,
+        ].join("\u0000")),
+      ),
+    );
+    const idempotencyKey = `itsm-${[...digest]
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("")}`;
     const response = await fetchImpl(target, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         "x-sutra-signature": signature,
+        "idempotency-key": idempotencyKey,
       },
       body: outboundBody,
       redirect: "error",

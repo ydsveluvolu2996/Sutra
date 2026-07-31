@@ -4,14 +4,42 @@ import {
   type NotificationRuntimeAdapters,
 } from "./runtime-adapters.ts";
 import type { SecurityNotificationDeliveryDependencies } from "../../lib/security-notification-delivery.ts";
+import {
+  processOneSesFeedback,
+  type SesFeedbackProcessingResult,
+  type SesFeedbackQueue,
+} from "./ses-feedback.ts";
 
 const INTEGER = /^\d{1,6}$/u;
 const SAFE_PREFIX = /^[A-Za-z0-9/_+=.@-]{1,128}$/u;
+const SES_CONFIGURATION_SET = /^[A-Za-z0-9_-]{1,64}$/u;
+const AWS_REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
+const AWS_ACCOUNT_ID = /^\d{12}$/u;
+const SQS_QUEUE_URL = /^https:\/\/sqs\.([a-z0-9-]+)\.amazonaws\.com\/(\d{12})\/sutra-production-ses-feedback$/u;
+const MANAGED_OUTBOUND_URL = /^https:\/\/outbound\.sutracmdb\.com$/u;
+const MANAGED_OUTBOUND_KEY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+const BASE64URL_PRIVATE_KEY = /^[A-Za-z0-9_-]{64,4096}$/u;
+
+type NotificationOutboundResult =
+  | "idle"
+  | "provider_accepted"
+  | "delivered"
+  | "retry_scheduled"
+  | "dead_letter"
+  | "not_configured";
+
+type NotificationWorkerResult =
+  | NotificationOutboundResult
+  | SesFeedbackProcessingResult;
 
 export interface NotificationWorkerRuntimeConfig {
   readonly pollIntervalMs: number;
   readonly healthPort: number;
   readonly secretPrefix: string;
+  readonly sesConfigurationSetName: string | null;
+  readonly sesFeedbackQueueUrl: string | null;
+  readonly sesFeedbackAccountId: string | null;
+  readonly awsRegion: string | null;
 }
 
 export interface NotificationWorkerRuntimeStatus {
@@ -19,13 +47,49 @@ export interface NotificationWorkerRuntimeStatus {
   readonly ready: boolean;
   readonly stopping: boolean;
   readonly lastPollCompletedAt: string | null;
-  readonly lastResult: "idle" | "delivered" | "retry_scheduled" | "dead_letter" | "not_configured" | null;
+  readonly lastResult: NotificationWorkerResult | null;
   readonly consecutiveFailures: number;
 }
 
 export type ProcessOneSecurityNotification = (input: {
   readonly delivery: SecurityNotificationDeliveryDependencies;
-}) => Promise<"idle" | "delivered" | "retry_scheduled" | "dead_letter" | "not_configured">;
+  readonly feedback: SesFeedbackQueue | null;
+  readonly feedbackConfiguration: {
+    readonly expectedRegion: string;
+    readonly expectedAccountId: string;
+    readonly expectedConfigurationSetName: string;
+  } | null;
+  readonly signal: AbortSignal;
+}) => Promise<NotificationWorkerResult>;
+
+export async function processNotificationWorkerIteration(input: {
+  readonly signal: AbortSignal;
+  readonly processOutbound: () => Promise<NotificationOutboundResult>;
+  readonly processFeedback: ((signal: AbortSignal) => Promise<SesFeedbackProcessingResult>) | null;
+}): Promise<NotificationWorkerResult> {
+  if (input.processFeedback === null) return input.processOutbound();
+  const feedbackAbort = new AbortController();
+  const abortFeedback = () => feedbackAbort.abort();
+  if (input.signal.aborted) {
+    feedbackAbort.abort();
+  } else {
+    input.signal.addEventListener("abort", abortFeedback, { once: true });
+  }
+  const feedbackOutcome = input.processFeedback(feedbackAbort.signal).then(
+    (value) => ({ value, error: null }),
+    (error: unknown) => ({ value: null, error }),
+  );
+  try {
+    const outbound = await input.processOutbound();
+    if (outbound !== "idle") feedbackAbort.abort();
+    const feedback = await feedbackOutcome;
+    if (feedback.error !== null) throw feedback.error;
+    return outbound === "idle" ? feedback.value ?? "idle" : outbound;
+  } finally {
+    feedbackAbort.abort();
+    input.signal.removeEventListener("abort", abortFeedback);
+  }
+}
 
 async function defaultProcessor(): Promise<ProcessOneSecurityNotification> {
   const databaseUrl = process.env.DATABASE_URL?.trim();
@@ -42,7 +106,20 @@ async function defaultProcessor(): Promise<ProcessOneSecurityNotification> {
     import("./postgres-repository.ts"),
   ]);
   const repository = new PostgresSecurityNotificationWorkerRepository(databaseUrl);
-  return ({ delivery }) => processOneSecurityNotification({ repository, delivery });
+  return async ({ delivery, feedback, feedbackConfiguration, signal }) => {
+    return processNotificationWorkerIteration({
+      signal,
+      processOutbound: () => processOneSecurityNotification({ repository, delivery }),
+      processFeedback: feedback === null || feedbackConfiguration === null
+        ? null
+        : (feedbackSignal) => processOneSesFeedback({
+            queue: feedback,
+            repository,
+            ...feedbackConfiguration,
+            signal: feedbackSignal,
+          }),
+    });
+  };
 }
 
 export function readNotificationWorkerRuntimeConfig(
@@ -54,6 +131,26 @@ export function readNotificationWorkerRuntimeConfig(
     env.SUTRA_NOTIFICATION_CONFIG_PREFIX ??
     env.SUTRA_NOTIFICATION_SECRET_PREFIX ??
     "sutra/notifications/";
+  const sesConfigurationSetName =
+    env.SUTRA_SES_CONFIGURATION_SET?.trim() ?? "";
+  const sesFeedbackQueueUrl =
+    env.SUTRA_SES_FEEDBACK_QUEUE_URL?.trim() ?? "";
+  const sesFeedbackAccountId =
+    env.SUTRA_SES_FEEDBACK_ACCOUNT_ID?.trim() ?? "";
+  const awsRegion = env.AWS_REGION?.trim() ?? "";
+  const managedOutboundUrl = env.SUTRA_MANAGED_OUTBOUND_URL?.trim() ?? "";
+  const managedOutboundKeyId = env.SUTRA_MANAGED_OUTBOUND_KEY_ID?.trim() ?? "";
+  const managedOutboundPrivateKey =
+    env.SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY?.trim() ?? "";
+  const feedbackValues = [
+    sesConfigurationSetName,
+    sesFeedbackQueueUrl,
+    sesFeedbackAccountId,
+  ];
+  const feedbackConfigured = feedbackValues.every((value) => value !== "");
+  const feedbackPartiallyConfigured =
+    feedbackValues.some((value) => value !== "") && !feedbackConfigured;
+  const queueMatch = SQS_QUEUE_URL.exec(sesFeedbackQueueUrl);
   if (
     !INTEGER.test(poll) ||
     Number(poll) < 100 ||
@@ -62,12 +159,37 @@ export function readNotificationWorkerRuntimeConfig(
     Number(port) < 1_024 ||
     Number(port) > 65_535 ||
     !SAFE_PREFIX.test(secretPrefix) ||
-    !secretPrefix.endsWith("/")
+    !secretPrefix.endsWith("/") ||
+    (
+      sesConfigurationSetName !== "" &&
+      !SES_CONFIGURATION_SET.test(sesConfigurationSetName)
+    ) ||
+    feedbackPartiallyConfigured ||
+    (
+      feedbackConfigured &&
+      (
+        !AWS_REGION.test(awsRegion) ||
+        !AWS_ACCOUNT_ID.test(sesFeedbackAccountId) ||
+        queueMatch === null ||
+        queueMatch[1] !== awsRegion ||
+        queueMatch[2] !== sesFeedbackAccountId
+      )
+    ) ||
+    !MANAGED_OUTBOUND_URL.test(managedOutboundUrl) ||
+    !MANAGED_OUTBOUND_KEY_ID.test(managedOutboundKeyId) ||
+    !BASE64URL_PRIVATE_KEY.test(managedOutboundPrivateKey)
   ) throw new Error("Notification worker runtime configuration rejected");
   return {
     pollIntervalMs: Number(poll),
     healthPort: Number(port),
     secretPrefix,
+    sesConfigurationSetName:
+      sesConfigurationSetName === "" ? null : sesConfigurationSetName,
+    sesFeedbackQueueUrl:
+      sesFeedbackQueueUrl === "" ? null : sesFeedbackQueueUrl,
+    sesFeedbackAccountId:
+      sesFeedbackAccountId === "" ? null : sesFeedbackAccountId,
+    awsRegion: awsRegion === "" ? null : awsRegion,
   };
 }
 
@@ -138,7 +260,25 @@ export async function runNotificationWorker(input: {
   const signal = input.signal ?? ownedAbort.signal;
   const adapters = input.adapters ?? createAwsNotificationRuntimeAdapters({
     secretPrefix: config.secretPrefix,
+    sesConfigurationSetName: config.sesConfigurationSetName,
+    sesFeedbackQueueUrl: config.sesFeedbackQueueUrl,
+    awsRegion: config.awsRegion,
+    managedOutboundEnvironment: process.env as unknown as {
+      readonly SUTRA_MANAGED_OUTBOUND_URL?: string;
+      readonly SUTRA_MANAGED_OUTBOUND_KEY_ID?: string;
+      readonly SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY?: string;
+    },
   });
+  const feedbackConfiguration =
+    config.sesConfigurationSetName !== null &&
+    config.sesFeedbackAccountId !== null &&
+    config.awsRegion !== null
+      ? {
+          expectedRegion: config.awsRegion,
+          expectedAccountId: config.sesFeedbackAccountId,
+          expectedConfigurationSetName: config.sesConfigurationSetName,
+        }
+      : null;
   const processOne = input.processOne ?? await defaultProcessor();
   let state: NotificationWorkerRuntimeStatus = {
     live: true,
@@ -154,7 +294,12 @@ export async function runNotificationWorker(input: {
   try {
     while (!signal.aborted) {
       try {
-        const result = await processOne({ delivery: adapters.dependencies });
+        const result = await processOne({
+          delivery: adapters.dependencies,
+          feedback: adapters.feedback,
+          feedbackConfiguration,
+          signal,
+        });
         state = {
           ...state,
           ready: true,

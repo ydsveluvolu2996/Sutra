@@ -6,13 +6,12 @@ import {
 } from "node:crypto";
 import {
   chmod,
-  lstat,
   mkdir,
   open,
-  readFile,
   rename,
   rm,
 } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
 import type {
@@ -419,12 +418,19 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
   }
 
   private async readDocument(): Promise<RegistryDocument> {
+    let handle;
     try {
-      const metadata = await lstat(this.filePath);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      // Open the object once without following a final symlink, then inspect
+      // and read that same descriptor. A path swap cannot redirect this read.
+      handle = await open(
+        this.filePath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024) {
         throw new RegistryIntegrityError();
       }
-      const raw = await readFile(this.filePath, { encoding: "utf8" });
+      const raw = await handle.readFile({ encoding: "utf8" });
       if (Buffer.byteLength(raw, "utf8") > 8 * 1024 * 1024) {
         throw new RegistryIntegrityError();
       }
@@ -445,6 +451,8 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       if (isMissingFile(error)) return emptyDocument();
       if (error instanceof RegistryError) throw error;
       throw new RegistryIntegrityError();
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined);
     }
   }
 

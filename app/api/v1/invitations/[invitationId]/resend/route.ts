@@ -89,6 +89,7 @@ export async function POST(
       activationUrl: url.toString(),
       expiresAt: begun.invitation.expiresAt,
       role: begun.invitation.role,
+      operationId: idempotencyKey,
     }, deliveryEnv);
     let invitation = begun.invitation;
     try {

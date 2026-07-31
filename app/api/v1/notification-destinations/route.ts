@@ -6,7 +6,11 @@ import {
   normalizeNotificationDestinationConfig,
 } from "../../../../lib/notification-destination-boundary";
 import { appendAuditEvent } from "../../../../db/pilot-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
+import {
+  assertSessionCapability,
+  configuredPublicOrigin,
+  requireApiSession,
+} from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import type { NotificationDestinationConfig } from "../../../../lib/notification-destination-types";
 import {
@@ -24,6 +28,27 @@ export const dynamic = "force-dynamic";
 const CUSTOMER_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,191}$/u;
 const DESTINATION_ID = /^ndest_[a-f0-9]{32}$/u;
 const CHANNELS = new Set(["email", "slack", "microsoft_teams", "generic_webhook", "pagerduty"]);
+
+export function notificationPublicOrigin(requestUrl: string): string {
+  const configured = configuredPublicOrigin();
+  const candidate = configured ?? new URL(requestUrl).origin;
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return invalid("The canonical public origin is invalid");
+  }
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.origin !== candidate
+  ) return invalid("The canonical public origin is invalid");
+  return parsed.origin;
+}
 
 function invalid(message = "The notification destination request is invalid"): never {
   throw Object.assign(new Error(message), { code: "INVALID_INPUT", status: 400 });
@@ -191,7 +216,7 @@ export async function POST(request: Request): Promise<Response> {
         throw Object.assign(new Error("Notification destination not found"), { code: "NOT_FOUND" });
       }
       const eventId = `notify_${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
-      const publicOrigin = "https://app.sutracmdb.com";
+      const publicOrigin = notificationPublicOrigin(request.url);
       const event = normalizeSecurityNotificationEvent({
         eventId,
         orgId: authenticated.subject.orgId,

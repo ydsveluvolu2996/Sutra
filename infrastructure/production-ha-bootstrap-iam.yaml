@@ -1,0 +1,1124 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  First-deployment-only GitHub OIDC role and CloudFormation execution role for
+  the exact Sutra managed-production stack. This stack is an account
+  prerequisite and is intentionally separate from production-ha.yaml.
+
+Parameters:
+  ExpectedAccountId:
+    Type: String
+    Default: "738663485493"
+    AllowedValues: ["738663485493"]
+    Description: Fixed production account.
+  GitHubOidcProviderArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::738663485493:oidc-provider/token\.actions\.githubusercontent\.com$
+    Description: Existing account-local GitHub OIDC provider.
+  GitHubRepository:
+    Type: String
+    Default: ydsveluvolu2996/Sutra
+    AllowedValues: [ydsveluvolu2996/Sutra]
+  ProductionStackName:
+    Type: String
+    Default: sutra-production-ha
+    AllowedValues: [sutra-production-ha]
+    Description: Fixed production workload stack.
+  ProductionVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Production VPC.
+  NetworkFirewallArn:
+    Type: String
+    AllowedPattern: ^arn:aws:network-firewall:[a-z0-9-]+:738663485493:firewall/sutra-production-egress-inspection$
+    Description: Protected production egress firewall.
+  ApplicationRuntimeSecretArn:
+    Type: String
+    AllowedPattern: ^arn:aws:secretsmanager:[a-z0-9-]+:738663485493:secret:sutra/production/runtime-[A-Za-z0-9/_+=.@-]+$
+    Description: Existing production runtime secret.
+  KmsKeyArn:
+    Type: String
+    AllowedPattern: ^arn:aws:kms:[a-z0-9-]+:738663485493:key/[0-9a-f-]{36}$
+    Description: Existing production KMS key.
+  AppRepositoryName:
+    Type: String
+    Default: sutra/app
+    AllowedValues: [sutra/app]
+  WorkerRepositoryName:
+    Type: String
+    Default: sutra/notification-worker
+    AllowedValues: [sutra/notification-worker]
+  BrokerRepositoryName:
+    Type: String
+    Default: sutra/broker
+    AllowedValues: [sutra/broker]
+  ScannerRepositoryName:
+    Type: String
+    Default: sutra/agentless-scanner
+    AllowedValues: [sutra/agentless-scanner]
+
+Rules:
+  ExactProductionAccount:
+    Assertions:
+      - Assert: !Equals
+          - !Ref "AWS::AccountId"
+          - !Ref ExpectedAccountId
+        AssertDescription: This template may be deployed only in AWS account 738663485493.
+  ExactAccountOidcProvider:
+    Assertions:
+      - Assert: !Equals
+          - !Ref GitHubOidcProviderArn
+          - !Sub arn:${AWS::Partition}:iam::${ExpectedAccountId}:oidc-provider/token.actions.githubusercontent.com
+        AssertDescription: The GitHub provider must be the account-local token.actions.githubusercontent.com provider.
+  RuntimeSecretIsRegionalAndAccountLocal:
+    Assertions:
+      - Assert: !Equals
+          - !Select [4, !Split [":", !Ref ApplicationRuntimeSecretArn]]
+          - !Ref ExpectedAccountId
+        AssertDescription: The runtime secret must belong to the exact production account.
+      - Assert: !Equals
+          - !Select [3, !Split [":", !Ref ApplicationRuntimeSecretArn]]
+          - !Ref AWS::Region
+        AssertDescription: The runtime secret must be in the template region.
+  KmsKeyIsRegionalAndAccountLocal:
+    Assertions:
+      - Assert: !Equals
+          - !Select [4, !Split [":", !Ref KmsKeyArn]]
+          - !Ref ExpectedAccountId
+        AssertDescription: The KMS key must belong to the exact production account.
+      - Assert: !Equals
+          - !Select [3, !Split [":", !Ref KmsKeyArn]]
+          - !Ref AWS::Region
+        AssertDescription: The KMS key must be in the template region.
+  NetworkFirewallIsRegionalAndAccountLocal:
+    Assertions:
+      - Assert: !Equals
+          - !Select [4, !Split [":", !Ref NetworkFirewallArn]]
+          - !Ref ExpectedAccountId
+        AssertDescription: The Network Firewall must belong to the exact production account.
+      - Assert: !Equals
+          - !Select [3, !Split [":", !Ref NetworkFirewallArn]]
+          - !Ref AWS::Region
+        AssertDescription: The Network Firewall must be in the template region.
+
+Resources:
+  CloudFormationNetworkAndEdgePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Region-bound network, load-balancer, and WAF operations.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: NetworkReads
+            Effect: Allow
+            Action:
+              - ec2:DescribeAvailabilityZones
+              - ec2:DescribeAccountAttributes
+              - ec2:DescribeInternetGateways
+              - ec2:DescribeManagedPrefixLists
+              - ec2:DescribeNetworkInterfaces
+              - ec2:DescribeSecurityGroupRules
+              - ec2:DescribeSecurityGroups
+              - ec2:DescribeSubnets
+              - ec2:DescribeVpcAttribute
+              - ec2:DescribeVpcs
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: SecurityGroups
+            Effect: Allow
+            Action:
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:UpdateSecurityGroupRuleDescriptionsEgress
+              - ec2:UpdateSecurityGroupRuleDescriptionsIngress
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                ec2:Vpc: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${ExpectedAccountId}:vpc/${ProductionVpcId}
+          - Sid: NetworkTags
+            Effect: Allow
+            Action:
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource:
+              - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${ExpectedAccountId}:security-group/*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: LoadBalancers
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:AddTags
+              - elasticloadbalancing:CreateListener
+              - elasticloadbalancing:CreateLoadBalancer
+              - elasticloadbalancing:CreateRule
+              - elasticloadbalancing:CreateTargetGroup
+              - elasticloadbalancing:DeleteListener
+              - elasticloadbalancing:DeleteLoadBalancer
+              - elasticloadbalancing:DeleteRule
+              - elasticloadbalancing:DeleteTargetGroup
+              - elasticloadbalancing:DeregisterTargets
+              - elasticloadbalancing:ModifyListener
+              - elasticloadbalancing:ModifyListenerAttributes
+              - elasticloadbalancing:ModifyLoadBalancerAttributes
+              - elasticloadbalancing:ModifyRule
+              - elasticloadbalancing:ModifyTargetGroup
+              - elasticloadbalancing:ModifyTargetGroupAttributes
+              - elasticloadbalancing:RegisterTargets
+              - elasticloadbalancing:RemoveTags
+              - elasticloadbalancing:SetIpAddressType
+              - elasticloadbalancing:SetRulePriorities
+              - elasticloadbalancing:SetSecurityGroups
+              - elasticloadbalancing:SetSubnets
+            Resource:
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:loadbalancer/app/sutra-production/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:loadbalancer/app/sutra-production-broker/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:targetgroup/sutra-production-app/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:targetgroup/sutra-production-broker/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:listener/app/sutra-production/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:listener/app/sutra-production-broker/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:listener-rule/app/sutra-production/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:listener-rule/app/sutra-production-broker/*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: LoadBalancerReads
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:DescribeCapacityReservation
+              - elasticloadbalancing:DescribeListenerAttributes
+              - elasticloadbalancing:DescribeListeners
+              - elasticloadbalancing:DescribeLoadBalancerAttributes
+              - elasticloadbalancing:DescribeLoadBalancers
+              - elasticloadbalancing:DescribeRules
+              - elasticloadbalancing:DescribeTags
+              - elasticloadbalancing:DescribeTargetGroupAttributes
+              - elasticloadbalancing:DescribeTargetGroups
+              - elasticloadbalancing:DescribeTargetHealth
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: CertificateRead
+            Effect: Allow
+            Action:
+              - acm:DescribeCertificate
+              - acm:GetCertificate
+              - acm:ListCertificates
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: WebAcl
+            Effect: Allow
+            Action:
+              - wafv2:AssociateWebACL
+              - wafv2:CreateWebACL
+              - wafv2:DeleteLoggingConfiguration
+              - wafv2:DeleteWebACL
+              - wafv2:DisassociateWebACL
+              - wafv2:GetLoggingConfiguration
+              - wafv2:GetWebACL
+              - wafv2:GetWebACLForResource
+              - wafv2:ListTagsForResource
+              - wafv2:PutLoggingConfiguration
+              - wafv2:TagResource
+              - wafv2:UntagResource
+              - wafv2:UpdateWebACL
+              - elasticloadbalancing:CreateWebACLAssociation
+              - elasticloadbalancing:DeleteWebACLAssociation
+              - elasticloadbalancing:GetLoadBalancerWebACL
+            Resource:
+              - !Sub arn:${AWS::Partition}:wafv2:${AWS::Region}:${ExpectedAccountId}:regional/webacl/sutra-production/*
+              - !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${ExpectedAccountId}:loadbalancer/app/sutra-production/*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: WafReads
+            Effect: Allow
+            Action:
+              - elasticloadbalancing:SetWebACL
+              - wafv2:ListLoggingConfigurations
+              - wafv2:ListWebACLs
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+
+  CloudFormationDataPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Database, secret, KMS, and retained-bucket operations.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: Database
+            Effect: Allow
+            Action:
+              - rds:AddTagsToResource
+              - rds:CreateDBInstance
+              - rds:CreateDBSnapshot
+              - rds:CreateDBParameterGroup
+              - rds:CreateDBSubnetGroup
+              - rds:DeleteDBInstance
+              - rds:DeleteDBParameterGroup
+              - rds:DeleteDBSubnetGroup
+              - rds:DescribeDBInstances
+              - rds:ListTagsForResource
+              - rds:ModifyDBInstance
+              - rds:ModifyDBParameterGroup
+              - rds:ModifyDBSubnetGroup
+              - rds:RemoveTagsFromResource
+              - rds:RebootDBInstance
+              - rds:ResetDBParameterGroup
+            Resource:
+              - !Sub arn:${AWS::Partition}:rds:${AWS::Region}:${ExpectedAccountId}:db:sutra-production
+              - !Sub arn:${AWS::Partition}:rds:${AWS::Region}:${ExpectedAccountId}:pg:${ProductionStackName}-*
+              - !Sub arn:${AWS::Partition}:rds:${AWS::Region}:${ExpectedAccountId}:subgrp:${ProductionStackName}-*
+              - !Sub arn:${AWS::Partition}:rds:${AWS::Region}:${ExpectedAccountId}:snapshot:${ProductionStackName}-*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: DatabaseReads
+            Effect: Allow
+            Action:
+              - rds:DescribeDBEngineVersions
+              - rds:DescribeDBInstances
+              - rds:DescribeDBParameterGroups
+              - rds:DescribeDBParameters
+              - rds:DescribeDBSnapshots
+              - rds:DescribeDBSubnetGroups
+              - rds:DescribeEngineDefaultParameters
+              - rds:DescribeEvents
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: DatabaseSecrets
+            Effect: Allow
+            Action:
+              - secretsmanager:CreateSecret
+              - secretsmanager:DeleteSecret
+              - secretsmanager:DescribeSecret
+              - secretsmanager:GetSecretValue
+              - secretsmanager:GetResourcePolicy
+              - secretsmanager:ListSecretVersionIds
+              - secretsmanager:PutResourcePolicy
+              - secretsmanager:PutSecretValue
+              - secretsmanager:RemoveRegionsFromReplication
+              - secretsmanager:ReplicateSecretToRegions
+              - secretsmanager:RestoreSecret
+              - secretsmanager:RotateSecret
+              - secretsmanager:StopReplicationToReplica
+              - secretsmanager:TagResource
+              - secretsmanager:UntagResource
+              - secretsmanager:UpdateSecret
+              - secretsmanager:UpdateSecretVersionStage
+            Resource:
+              - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${ExpectedAccountId}:secret:sutra/production/database/admin-*
+              - !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${ExpectedAccountId}:secret:sutra/production/database/runtime-*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: GeneratePasswords
+            Effect: Allow
+            Action: secretsmanager:GetRandomPassword
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: KeyReads
+            Effect: Allow
+            Action:
+              - kms:DescribeKey
+              - kms:GetKeyPolicy
+              - kms:ListGrants
+            Resource: !Ref KmsKeyArn
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: AliasReads
+            Effect: Allow
+            Action: kms:ListAliases
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: CreateKeyGrants
+            Effect: Allow
+            Action: kms:CreateGrant
+            Resource: !Ref KmsKeyArn
+            Condition:
+              Bool:
+                kms:GrantIsForAWSResource: "true"
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: RetireKeyGrants
+            Effect: Allow
+            Action:
+              - kms:RetireGrant
+              - kms:RevokeGrant
+            Resource: !Ref KmsKeyArn
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ResolveGeneratedSecretsAndBackupEncryption
+            Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !Ref KmsKeyArn
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                kms:ViaService:
+                  - !Sub backup.${AWS::Region}.amazonaws.com
+                  - !Sub rds.${AWS::Region}.amazonaws.com
+                  - !Sub secretsmanager.${AWS::Region}.amazonaws.com
+          - Sid: CreateOnlyNamedWorkloadStackBuckets
+            Effect: Allow
+            Action: s3:CreateBucket
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-accesslogbucket-*
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-evidencebucket-*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: WorkloadBuckets
+            Effect: Allow
+            Action:
+              - s3:DeleteBucket
+              - s3:DeleteBucketPolicy
+              - s3:GetBucketAcl
+              - s3:GetBucketOwnershipControls
+              - s3:GetBucketPolicy
+              - s3:GetBucketTagging
+              - s3:GetBucketVersioning
+              - s3:GetEncryptionConfiguration
+              - s3:GetLifecycleConfiguration
+              - s3:GetBucketPublicAccessBlock
+              - s3:ListBucket
+              - s3:ListTagsForResource
+              - s3:PutBucketOwnershipControls
+              - s3:PutBucketPolicy
+              - s3:PutBucketPublicAccessBlock
+              - s3:PutBucketTagging
+              - s3:PutBucketVersioning
+              - s3:PutEncryptionConfiguration
+              - s3:PutLifecycleConfiguration
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-accesslogbucket-*
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-evidencebucket-*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Ref ExpectedAccountId
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: BucketList
+            Effect: Allow
+            Action: s3:ListAllMyBuckets
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: RollbackBucketReads
+            Effect: Allow
+            Action: s3:ListBucketVersions
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-accesslogbucket-*
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-evidencebucket-*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Ref ExpectedAccountId
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: RollbackObjects
+            Effect: Allow
+            Action:
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+              - "s3:GetObject"
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-accesslogbucket-*/*
+              - !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-evidencebucket-*/*
+            Condition:
+              StringEquals:
+                aws:ResourceAccount: !Ref ExpectedAccountId
+                aws:RequestedRegion: !Ref AWS::Region
+
+  CloudFormationComputeAndIamPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: ECS, EventBridge, autoscaling, and stack-role operations.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EcsResources
+            Effect: Allow
+            Action:
+              - ecs:CreateCluster
+              - ecs:CreateService
+              - ecs:DeleteCluster
+              - ecs:DeleteService
+              - ecs:DescribeClusters
+              - ecs:DescribeServiceDeployments
+              - ecs:DescribeServices
+              - ecs:ListTagsForResource
+              - ecs:RegisterTaskDefinition
+              - ecs:TagResource
+              - ecs:UntagResource
+              - ecs:UpdateCluster
+              - ecs:UpdateClusterSettings
+              - ecs:UpdateService
+              - ecs:StopServiceDeployment
+            Resource:
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:cluster/sutra-production
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-app
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-worker
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-broker
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service-deployment/sutra-production/sutra-production-app/*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service-deployment/sutra-production/sutra-production-worker/*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service-deployment/sutra-production/sutra-production-broker/*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-app:*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-migration:*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-worker:*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-broker:*
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-vulnerability-feed:*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: EcsReads
+            Effect: Allow
+            Action:
+              - ecs:DeregisterTaskDefinition
+              - ecs:DescribeTaskDefinition
+              - ecs:ListClusters
+              - ecs:ListTaskDefinitions
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: EcsDeploymentReads
+            Effect: Allow
+            Action: ecs:ListServiceDeployments
+            Resource:
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-app
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-worker
+              - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-broker
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: EcsServiceList
+            Effect: Allow
+            Action: ecs:ListServices
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+              ArnEquals:
+                ecs:cluster: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:cluster/sutra-production
+          - Sid: RegisterTasks
+            Effect: Allow
+            Action: ecs:RegisterTaskDefinition
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                aws:RequestTag/sutra:release-boundary: production
+          - Sid: FeedSchedule
+            Effect: Allow
+            Action:
+              - events:DeleteRule
+              - events:DescribeRule
+              - events:ListTagsForResource
+              - events:ListTargetsByRule
+              - events:PutRule
+              - events:PutTargets
+              - events:RemoveTargets
+              - events:TagResource
+              - events:UntagResource
+            Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${ExpectedAccountId}:rule/sutra-production-vulnerability-feed
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ScalingWrites
+            Effect: Allow
+            Action:
+              - application-autoscaling:DeleteScalingPolicy
+              - application-autoscaling:DeregisterScalableTarget
+              - application-autoscaling:PutScalingPolicy
+              - application-autoscaling:RegisterScalableTarget
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                application-autoscaling:service-namespace: ecs
+          - Sid: ScalingReads
+            Effect: Allow
+            Action:
+              - application-autoscaling:DescribeScalableTargets
+              - application-autoscaling:DescribeScalingActivities
+              - application-autoscaling:DescribeScalingPolicies
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ScalingTags
+            Effect: Allow
+            Action:
+              - application-autoscaling:TagResource
+              - application-autoscaling:UntagResource
+            Resource: !Sub arn:${AWS::Partition}:application-autoscaling:${AWS::Region}:${ExpectedAccountId}:scalable-target/*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: StackRoles
+            Effect: Allow
+            Action:
+              - iam:AttachRolePolicy
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListAttachedRolePolicies
+              - iam:ListRolePolicies
+              - iam:ListRoleTags
+              - iam:PutRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:UpdateRole
+              - iam:UpdateRoleDescription
+            Resource: !Sub arn:${AWS::Partition}:iam::${ExpectedAccountId}:role/${ProductionStackName}-*
+          - Sid: RoleReads
+            Effect: Allow
+            Action: iam:ListRoles
+            Resource: "*"
+          - Sid: PassStackRoles
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub arn:${AWS::Partition}:iam::${ExpectedAccountId}:role/${ProductionStackName}-*
+            Condition:
+              StringEquals:
+                iam:PassedToService:
+                  - backup.amazonaws.com
+                  - ecs-tasks.amazonaws.com
+                  - events.amazonaws.com
+                  - monitoring.rds.amazonaws.com
+          - Sid: ServiceLinkedRoles
+            Effect: Allow
+            Action: iam:CreateServiceLinkedRole
+            Resource: "*"
+            Condition:
+              StringEquals:
+                iam:AWSServiceName:
+                  - backup.amazonaws.com
+                  - ecs.amazonaws.com
+                  - ecs.application-autoscaling.amazonaws.com
+                  - elasticloadbalancing.amazonaws.com
+                  - rds.amazonaws.com
+                  - wafv2.amazonaws.com
+
+  CloudFormationOperationsPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LogGroups
+            Effect: Allow
+            Action:
+              - logs:AssociateKmsKey
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:DeleteRetentionPolicy
+              - logs:DisassociateKmsKey
+              - logs:ListTagsForResource
+              - logs:PutRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+            Resource:
+              - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${ExpectedAccountId}:log-group:/sutra/production/*
+              - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${ExpectedAccountId}:log-group:aws-waf-logs-sutra-production
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: LogGroupReads
+            Effect: Allow
+            Action: logs:DescribeLogGroups
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: WafLogging
+            Effect: Allow
+            Action:
+              - logs:DeleteResourcePolicy
+              - logs:DescribeResourcePolicies
+              - logs:PutResourcePolicy
+              - logs:CreateLogDelivery
+              - logs:DeleteLogDelivery
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: Alarms
+            Effect: Allow
+            Action:
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:DescribeAlarms
+              - cloudwatch:ListTagsForResource
+              - cloudwatch:PutMetricAlarm
+              - cloudwatch:TagResource
+              - cloudwatch:UntagResource
+            Resource: !Sub arn:${AWS::Partition}:cloudwatch:${AWS::Region}:${ExpectedAccountId}:alarm:${ProductionStackName}-*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: MetricReads
+            Effect: Allow
+            Action: cloudwatch:GetMetricData
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: BackupResources
+            Effect: Allow
+            Action:
+              - backup:CreateBackupPlan
+              - backup:CreateBackupSelection
+              - backup:CreateBackupVault
+              - backup:DeleteBackupPlan
+              - backup:DeleteBackupSelection
+              - backup:DeleteBackupVault
+              - backup:DeleteBackupVaultLockConfiguration
+              - backup:DescribeBackupVault
+              - backup:GetBackupPlan
+              - backup:GetBackupSelection
+              - backup:ListTags
+              - backup:PutBackupVaultLockConfiguration
+              - backup:TagResource
+              - backup:UntagResource
+              - backup:UpdateBackupPlan
+            Resource:
+              - !Sub arn:${AWS::Partition}:backup:${AWS::Region}:${ExpectedAccountId}:backup-vault:sutra-production
+              - !Sub arn:${AWS::Partition}:backup:${AWS::Region}:${ExpectedAccountId}:backup-plan:*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: BackupReads
+            Effect: Allow
+            Action:
+              - backup:ListBackupPlans
+              - backup:ListBackupSelections
+              - backup:ListBackupVaults
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+
+  CloudFormationMessagingPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SesConfiguration
+            Effect: Allow
+            Action: ["ses:CreateConfigurationSet", "ses:CreateConfigurationSetEventDestination", "ses:DeleteConfigurationSet", "ses:DeleteConfigurationSetEventDestination", "ses:DescribeConfigurationSet", "ses:GetConfigurationSet", "ses:GetConfigurationSetEventDestinations", "ses:ListConfigurationSets", "ses:PutConfigurationSetArchivingOptions", "ses:PutConfigurationSetDeliveryOptions", "ses:PutConfigurationSetReputationOptions", "ses:PutConfigurationSetSendingOptions", "ses:PutConfigurationSetSuppressionOptions", "ses:PutConfigurationSetTrackingOptions", "ses:PutConfigurationSetVdmOptions", "ses:TagResource", "ses:UntagResource", "ses:UpdateConfigurationSetEventDestination"]
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ExactFeedbackQueues
+            Effect: Allow
+            Action: ["sqs:CreateQueue", "sqs:DeleteQueue", "sqs:GetQueueAttributes", "sqs:GetQueueUrl", "sqs:ListQueueTags", "sqs:SetQueueAttributes", "sqs:TagQueue", "sqs:UntagQueue"]
+            Resource:
+              - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${ExpectedAccountId}:sutra-production-ses-feedback
+              - !Sub arn:${AWS::Partition}:sqs:${AWS::Region}:${ExpectedAccountId}:sutra-production-ses-feedback-dlq
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ReadQueueCollection
+            Effect: Allow
+            Action: sqs:ListQueues
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: ExactFeedbackRule
+            Effect: Allow
+            Action: ["events:DeleteRule", "events:DescribeRule", "events:ListTagsForResource", "events:ListTargetsByRule", "events:PutRule", "events:PutTargets", "events:RemoveTargets", "events:TagResource", "events:UntagResource"]
+            Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${ExpectedAccountId}:rule/sutra-production-ses-feedback
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: RuleList
+            Effect: Allow
+            Action: events:ListRules
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+          - Sid: DefaultBusRead
+            Effect: Allow
+            Action: events:DescribeEventBus
+            Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${ExpectedAccountId}:event-bus/default
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+
+  BootstrapTemplateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub sutra-production-ha-bootstrap-templates-${ExpectedAccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KmsKeyArn
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - { Key: "sutra:component", Value: production-bootstrap-templates }
+        - { Key: "sutra:environment", Value: production }
+
+  BootstrapTemplateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BootstrapTemplateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt BootstrapTemplateBucket.Arn
+              - !Sub "${BootstrapTemplateBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: DenyUploadsWithoutKms
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${BootstrapTemplateBucket.Arn}/templates/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyUnexpectedKmsKey
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${BootstrapTemplateBucket.Arn}/templates/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !Ref KmsKeyArn
+
+  CloudFormationTemplateReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read-only access to protected staged templates.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ReadOnlyBootstrapWorkloadTemplates
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource: !Sub "${BootstrapTemplateBucket.Arn}/templates/*"
+          - Sid: DecryptOnlyTemplatesReadThroughS3
+            Effect: Allow
+            Action: kms:Decrypt
+            Resource: !Ref KmsKeyArn
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sutra-production-ha-cloudformation
+      Description: Production CloudFormation execution role.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudformation.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref CloudFormationNetworkAndEdgePolicy
+        - !Ref CloudFormationDataPolicy
+        - !Ref CloudFormationComputeAndIamPolicy
+        - !Ref CloudFormationOperationsPolicy
+        - !Ref CloudFormationMessagingPolicy
+        - !Ref CloudFormationTemplateReadPolicy
+      Tags:
+        - { Key: "sutra:component", Value: production-cloudformation-execution }
+        - { Key: "sutra:environment", Value: production }
+
+  GitHubBootstrapRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sutra-production-ha-bootstrap
+      Description: First-deployment GitHub OIDC role; disable after activation.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubRepository}:environment:production-ha-bootstrap
+                  - !Sub repo:${GitHubRepository}:environment:production-ha-activation
+      Policies:
+        - PolicyName: PublishAndVerifyFourImmutableRepositories
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetLifecyclePolicy
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${ExpectedAccountId}:repository/${AppRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${ExpectedAccountId}:repository/${WorkerRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${ExpectedAccountId}:repository/${BrokerRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${ExpectedAccountId}:repository/${ScannerRepositoryName}
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+        - PolicyName: ChangeOnlyTheExactProductionStack
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PrepareStack
+                Effect: Allow
+                Action: cloudformation:CreateChangeSet
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:stack/${ProductionStackName}/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:changeSet/sutra-bootstrap-*/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+                    cloudformation:RoleArn: !GetAtt CloudFormationExecutionRole.Arn
+                  StringLike:
+                    cloudformation:TemplateUrl: !Sub https://${BootstrapTemplateBucket}.s3.${AWS::Region}.amazonaws.com/templates/*
+              - Sid: UpdateStack
+                Effect: Allow
+                Action: cloudformation:UpdateStack
+                Resource: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:stack/${ProductionStackName}/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+                    cloudformation:RoleArn: !GetAtt CloudFormationExecutionRole.Arn
+              - Sid: ExecuteStack
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResource
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:UpdateTerminationProtection
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:stack/${ProductionStackName}/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:changeSet/sutra-bootstrap-*/*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: PassCfnRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt CloudFormationExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: cloudformation.amazonaws.com
+        - PolicyName: StageAndReadOnlyEncryptedWorkloadTemplate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: PutTemplates
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${BootstrapTemplateBucket.Arn}/templates/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref ExpectedAccountId
+                    s3:x-amz-server-side-encryption: aws:kms
+                    s3:x-amz-server-side-encryption-aws-kms-key-id: !Ref KmsKeyArn
+              - Sid: ReadOnlyVersionedBootstrapTemplates
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "${BootstrapTemplateBucket.Arn}/templates/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref ExpectedAccountId
+        - PolicyName: PreflightRuntimeAndVerifyActivation
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: RuntimeSecret
+                Effect: Allow
+                Action:
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref ApplicationRuntimeSecretArn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: RuntimeDecrypt
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+              - Sid: RunMigration
+                Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-migration:*
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:cluster/sutra-production
+              - Sid: PassMigrationRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${ExpectedAccountId}:role/sutra-production-ha-migration-execution
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+              - Sid: VerifyEcs
+                Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                  - ecs:DescribeServices
+                  - ecs:DescribeTasks
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:cluster/sutra-production
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-app
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-worker
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:service/sutra-production/sutra-production-broker
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task/sutra-production/*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-app:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-migration:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-worker:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-broker:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:task-definition/sutra-production-vulnerability-feed:*
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: TaskDefinitionReads
+                Effect: Allow
+                Action: ecs:DescribeTaskDefinition
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: TaskList
+                Effect: Allow
+                Action: ecs:ListTasks
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+                  ArnEquals:
+                    ecs:cluster: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${ExpectedAccountId}:cluster/sutra-production
+              - Sid: VerifyFeed
+                Effect: Allow
+                Action:
+                  - events:DescribeRule
+                  - events:ListTargetsByRule
+                Resource: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${ExpectedAccountId}:rule/sutra-production-vulnerability-feed
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: VerifyFirewall
+                Effect: Allow
+                Action: network-firewall:DescribeFirewall
+                Resource: !Ref NetworkFirewallArn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: WriteEvidence
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:${AWS::Partition}:s3:::${ProductionStackName}-evidencebucket-*/releases/*
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref ExpectedAccountId
+                    s3:x-amz-server-side-encryption: aws:kms
+                    s3:x-amz-server-side-encryption-aws-kms-key-id: !Ref KmsKeyArn
+              - Sid: ArtifactKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+      Tags:
+        - { Key: "sutra:component", Value: production-first-deployment }
+        - { Key: "sutra:environment", Value: production }
+
+Outputs:
+  GitHubBootstrapRoleArn:
+    Description: Value for AWS_BOOTSTRAP_ROLE_ARN.
+    Value: !GetAtt GitHubBootstrapRole.Arn
+  CloudFormationExecutionRoleArn:
+    Description: Value for CFN_EXECUTION_ROLE_ARN.
+    Value: !GetAtt CloudFormationExecutionRole.Arn
+  BootstrapTemplateBucketName:
+    Description: Value for CFN_TEMPLATE_BUCKET.
+    Value: !Ref BootstrapTemplateBucket
+  ProductionStackArnPattern:
+    Description: Authorized workload stack boundary.
+    Value: !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${ExpectedAccountId}:stack/${ProductionStackName}/*
+  AuthorizedGitHubSubjects:
+    Description: Trusted protected GitHub subjects.
+    Value: >-
+      repo:ydsveluvolu2996/Sutra:environment:production-ha-bootstrap,
+      repo:ydsveluvolu2996/Sutra:environment:production-ha-activation

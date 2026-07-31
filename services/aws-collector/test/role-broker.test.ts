@@ -964,7 +964,9 @@ function agentlessAllowed(): string[] {
 }
 
 test("the agentless session cap allows exactly three writes and nothing more", () => {
-  const writes = agentlessAllowed().filter((action) => !/^sts:|:Describe\*$/u.test(action));
+  const writes = agentlessAllowed().filter(
+    (action) => !action.startsWith("sts:") && !action.endsWith(":Describe*"),
+  );
   // Any fourth write action here is a privilege expansion and must be a
   // deliberate, reviewed change — not something a refactor can add quietly.
   assert.deepEqual(writes.sort(), [

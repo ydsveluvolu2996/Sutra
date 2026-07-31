@@ -78,6 +78,31 @@ describe("hosted live UI contract", () => {
     assert.match(source, /No sample metrics/u);
   });
 
+  it("does not claim a clean dashboard posture before evidence is published", async () => {
+    const dashboard = await readFile(path.join(root, "app/dashboard/page.tsx"), "utf8");
+    assert.match(dashboard, /const hasPublishedSnapshot =/u);
+    assert.match(dashboard, /Score unavailable/u);
+    assert.match(dashboard, /No finding snapshot published/u);
+    assert.match(dashboard, /does not infer a clean posture before the first complete collection/u);
+  });
+
+  it("rejects simulated workspace evidence from hosted API responses", async () => {
+    const [stateRoute, portfolioRoute, pilotServer] = await Promise.all([
+      readFile(path.join(root, "app/api/pilot/state/route.ts"), "utf8"),
+      readFile(path.join(root, "app/api/v1/portfolio/route.ts"), "utf8"),
+      readFile(path.join(root, "lib/pilot-server.ts"), "utf8"),
+    ]);
+    assert.match(stateRoute, /allowSimulatedEvidence = isLocalSimulationRuntime\(\)/u);
+    assert.match(stateRoute, /connection\.sourceKind === "simulated_fixture"/u);
+    assert.match(portfolioRoute, /portfolioForRuntime\(portfolio, isLocalSimulationRuntime\(\)\)/u);
+    assert.match(pilotServer, /!isLocalSimulationRuntime\(\) && health\.mode !== "live"/u);
+  });
+
+  it("does not publish social icons with placeholder destinations", async () => {
+    const landing = await readFile(path.join(root, "app/components/landing-zone.tsx"), "utf8");
+    assert.doesNotMatch(landing, /href="#top" aria-label="(?:X|LinkedIn|RSS)"/u);
+  });
+
   it("starts enterprise AWS onboarding without pilot labels or sample account data", async () => {
     const onboarding = await readFile(path.join(root, "app/onboard/onboard-account.tsx"), "utf8");
     assert.match(onboarding, /useState\(""\)/u);

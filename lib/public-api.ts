@@ -108,6 +108,7 @@ export interface PublicCursorContext {
 }
 
 const CURSOR_COLLECTION = /^[a-z][a-z0-9-]{0,63}$/u;
+const PUBLIC_CURSOR_MAX_LENGTH = 4_096;
 
 /**
  * Bind pagination state to the authenticated token and dataset. A cursor from a
@@ -169,21 +170,32 @@ export async function decodeCursor(
   context: PublicCursorContext,
 ): Promise<number> {
   if (cursor === null || cursor === "") return 0;
+  if (cursor.length > PUBLIC_CURSOR_MAX_LENGTH) {
+    throw new PublicApiError(400, "INVALID_CURSOR", "The cursor is not valid; restart from the first page");
+  }
   try {
     const envelope: unknown = JSON.parse(fromBase64Url(cursor));
+    // Authenticate the opaque payload before any payload-controlled semantic
+    // check. Invalid envelope members are normalized only for this failed
+    // verification attempt and are rejected by the exact-shape check below.
+    const envelopeRecord = Object(envelope) as Record<string, unknown>;
+    const encodedPayload = String(envelopeRecord.p ?? "");
+    const encodedSignature = String(envelopeRecord.s ?? "");
+    const payload = fromBase64Url(encodedPayload);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      await cursorKey(context.signingSecret),
+      base64UrlToBytes(encodedSignature),
+      new TextEncoder().encode(payload),
+    );
+    if (!valid) throw new Error("invalid cursor signature");
+    const parsed: unknown = JSON.parse(payload);
     if (
       typeof envelope !== "object" ||
       envelope === null ||
       typeof (envelope as { p?: unknown }).p !== "string" ||
       typeof (envelope as { s?: unknown }).s !== "string" ||
-      Object.keys(envelope).length !== 2
-    ) {
-      throw new Error("invalid cursor envelope");
-    }
-    const encodedPayload = (envelope as { p: string }).p;
-    const payload = fromBase64Url(encodedPayload);
-    const parsed: unknown = JSON.parse(payload);
-    if (
+      Object.keys(envelope).length !== 2 ||
       typeof parsed !== "object" ||
       parsed === null ||
       Object.keys(parsed).length !== 6 ||
@@ -197,15 +209,7 @@ export async function decodeCursor(
     ) {
       throw new Error("invalid cursor payload");
     }
-    const valid = await crypto.subtle.verify(
-      "HMAC",
-      await cursorKey(context.signingSecret),
-      base64UrlToBytes((envelope as { s: string }).s),
-      new TextEncoder().encode(payload),
-    );
-    if (valid) {
-      return (parsed as { o: number }).o;
-    }
+    return (parsed as { o: number }).o;
   } catch {
     /* fall through to the typed error */
   }

@@ -65,7 +65,7 @@ test("callback validates state, code, id-token, and provisioning BEFORE issuing 
     "resolveHostedOidcProvider(request, transaction.provider)", // bind the rest of the flow to the SEALED provider only
     "validateOidcCallback(request.url, transaction)", // constant-time state match, code shape, reject error param
     "exchangeOidcAuthorizationCode(", // PKCE code exchange at the provider's token endpoint
-    "fetchOidcJwks(provider.client)", // provider-pinned JWKS
+    "fetchOidcJwks(", // provider-pinned JWKS through the managed outbound adapter
     "verifyOidcIdToken(idToken", // iss/aud/exp/nonce/signature pinned to the sealed provider
   ];
   let cursor = 0;

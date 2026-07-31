@@ -153,8 +153,8 @@ test("SAML AuthnRequest is SP-initiated, request-bound, and uses the exact ACS a
   assert.equal(authorization.searchParams.get("RelayState"), transaction.relayState);
   const request = inflateRawSync(Buffer.from(authorization.searchParams.get("SAMLRequest") ?? "", "base64")).toString("utf8");
   assert.match(request, new RegExp(`ID="${transaction.requestId}"`, "u"));
-  assert.match(request, new RegExp(`AssertionConsumerServiceURL="${ACS}"`, "u"));
-  assert.match(request, new RegExp(`<saml:Issuer>${SP_ENTITY_ID}</saml:Issuer>`, "u"));
+  assert.ok(request.includes(`AssertionConsumerServiceURL="${ACS}"`));
+  assert.ok(request.includes(`<saml:Issuer>${SP_ENTITY_ID}</saml:Issuer>`));
 });
 
 test("a valid RSA-SHA256 signed assertion maps into the configured tenant identity namespace", async () => {

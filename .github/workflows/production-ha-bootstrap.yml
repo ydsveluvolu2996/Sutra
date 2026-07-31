@@ -1,0 +1,488 @@
+name: Bootstrap Sutra managed production
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseReason:
+        description: Approved first-production-release reason
+        required: true
+        type: string
+      changeTicket:
+        description: Approved change-management ticket
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sutra-managed-production-release
+  cancel-in-progress: false
+
+env:
+  APP_ECR_REPOSITORY: sutra/app
+  WORKER_ECR_REPOSITORY: sutra/notification-worker
+  BROKER_ECR_REPOSITORY: sutra/broker
+  SCANNER_ECR_REPOSITORY: sutra/agentless-scanner
+
+jobs:
+  prepare:
+    name: Build once, scan, create dormant stack, and migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production-ha-bootstrap
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    outputs:
+      app_image: ${{ steps.app.outputs.ref }}
+      worker_image: ${{ steps.worker.outputs.ref }}
+      broker_image: ${{ steps.broker.outputs.ref }}
+      scanner_image: ${{ steps.scanner.outputs.ref }}
+      migration_task_arn: ${{ steps.prepare.outputs.migration_task_arn }}
+      runtime_secret_version_id: ${{ steps.prepare.outputs.runtime_secret_version_id }}
+      load_balancer_dns: ${{ steps.prepare.outputs.load_balancer_dns }}
+      broker_load_balancer_dns: ${{ steps.prepare.outputs.broker_load_balancer_dns }}
+    steps:
+      - name: Check out the exact first-release revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate protected bootstrap configuration
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_BOOTSTRAP_ROLE_ARN: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          CFN_EXECUTION_ROLE_ARN: ${{ vars.CFN_EXECUTION_ROLE_ARN }}
+          CFN_TEMPLATE_BUCKET: ${{ vars.CFN_TEMPLATE_BUCKET }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          CODEQL_ENABLED: ${{ vars.CODEQL_ENABLED }}
+          PARAMETERS_JSON: ${{ secrets.PRODUCTION_HA_PARAMETERS_JSON }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+          CHANGE_TICKET: ${{ inputs.changeTicket }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
+          [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "${AWS_BOOTSTRAP_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${CFN_EXECUTION_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${CFN_TEMPLATE_BUCKET}" == "sutra-production-ha-bootstrap-templates-${AWS_ACCOUNT_ID}-${AWS_REGION}" ]]
+          [[ "${STACK_NAME}" =~ ^[A-Za-z][A-Za-z0-9-]{2,127}$ ]]
+          [[ "${PUBLIC_ORIGIN}" == "https://www.sutracmdb.com" ]]
+          [[ "${CODEQL_ENABLED}" == "true" ]]
+          [[ -n "${PARAMETERS_JSON}" ]]
+          [[ "${#RELEASE_REASON}" -ge 10 && "${#RELEASE_REASON}" -le 160 ]]
+          [[ "${#CHANGE_TICKET}" -ge 3 && "${#CHANGE_TICKET}" -le 64 ]]
+          [[ "${RELEASE_REASON}" != *$'\n'* && "${RELEASE_REASON}" != *$'\r'* ]]
+          [[ "${CHANGE_TICKET}" != *$'\n'* && "${CHANGE_TICKET}" != *$'\r'* ]]
+          [[ "${APP_ECR_REPOSITORY}" == "sutra/app" ]]
+          [[ "${WORKER_ECR_REPOSITORY}" == "sutra/notification-worker" ]]
+          [[ "${BROKER_ECR_REPOSITORY}" == "sutra/broker" ]]
+          [[ "${SCANNER_ECR_REPOSITORY}" == "sutra/agentless-scanner" ]]
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install pinned CloudFormation linter
+        run: python -m pip install --disable-pip-version-check cfn-lint==1.46.0
+
+      - name: Run source and managed-production gates
+        run: |
+          set -euo pipefail
+          pnpm security:secrets
+          pnpm typecheck
+          pnpm typecheck:collector
+          pnpm lint
+          node scripts/ci-test-shard.mjs
+          node --test tests/production-ha-infrastructure.test.mjs
+          bash deploy/production/validate-ha.sh
+          pnpm build
+
+      - name: Require successful CodeQL for the exact main SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          runs="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/codeql.yml/runs?head_sha=${GITHUB_SHA}&status=completed&per_page=100")"
+          successful="$(jq \
+            --arg sha "${GITHUB_SHA}" \
+            '[.workflow_runs[] | select(
+              .head_sha == $sha
+              and .head_branch == "main"
+              and .status == "completed"
+              and .conclusion == "success"
+              and (.event == "workflow_dispatch" or .event == "schedule")
+            )] | length' <<< "${runs}")"
+          [[ "${successful}" -ge 1 ]] || {
+            echo "No successful completed codeql.yml run exists for the exact main SHA." >&2
+            exit 1
+          }
+
+      - name: Configure bootstrap credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Verify immutable repositories
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          [[ "$(aws sts get-caller-identity --query Account --output text)" == "${AWS_ACCOUNT_ID}" ]]
+          for repository in \
+            "${APP_ECR_REPOSITORY}" \
+            "${WORKER_ECR_REPOSITORY}" \
+            "${BROKER_ECR_REPOSITORY}" \
+            "${SCANNER_ECR_REPOSITORY}"
+          do
+            read -r uri mutability encryption scan_on_push < <(
+              aws ecr describe-repositories \
+                --region "${AWS_REGION}" \
+                --repository-names "${repository}" \
+                --query 'repositories[0].[repositoryUri,imageTagMutability,encryptionConfiguration.encryptionType,imageScanningConfiguration.scanOnPush]' \
+                --output text
+            )
+            [[ "${uri}" == "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${repository}" ]]
+            [[ "${mutability}" == "IMMUTABLE" ]]
+            [[ "${encryption}" == "AES256" || "${encryption}" == "KMS" ]]
+            [[ "${scan_on_push}" == "True" ]]
+            expected_lifecycle="$(jq -cS . deploy/ec2/ecr-lifecycle-policy.json)"
+            actual_lifecycle="$(aws ecr get-lifecycle-policy --region "${AWS_REGION}" \
+              --repository-name "${repository}" --query lifecyclePolicyText --output text | jq -cS .)"
+            [[ "${actual_lifecycle}" == "${expected_lifecycle}" ]]
+          done
+
+      - name: Install Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Authenticate Docker to the approved ECR registry
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          aws ecr get-login-password --region "${AWS_REGION}" |
+            docker login --username AWS --password-stdin "${registry}"
+
+      - name: Build and push the immutable app candidate once
+        id: app
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-app \
+            --cache-to type=gha,mode=max,scope=sutra-production-app \
+            --push --tag "${registry}/${APP_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${APP_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${APP_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push the immutable worker candidate once
+        id: worker
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file services/notification-worker/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-worker \
+            --cache-to type=gha,mode=max,scope=sutra-production-worker \
+            --push --tag "${registry}/${WORKER_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${WORKER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${WORKER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push the immutable broker candidate once
+        id: broker
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-broker \
+            --cache-to type=gha,mode=max,scope=sutra-production-broker \
+            --push --tag "${registry}/${BROKER_ECR_REPOSITORY}:${candidate}" .
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${BROKER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${BROKER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build scanner dist and push the immutable scanner candidate once
+        id: scanner
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          candidate="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          pnpm build:agentless-scanner
+          docker buildx build \
+            --file services/agentless-scanner/Dockerfile \
+            --platform linux/amd64 \
+            --provenance=mode=max \
+            --sbom=true \
+            --cache-from type=gha,scope=sutra-production-agentless-scanner \
+            --cache-to type=gha,mode=max,scope=sutra-production-agentless-scanner \
+            --push --tag "${registry}/${SCANNER_ECR_REPOSITORY}:${candidate}" \
+            services/agentless-scanner
+          digest="$(aws ecr describe-images --region "${AWS_REGION}" \
+            --repository-name "${SCANNER_ECR_REPOSITORY}" --image-ids "imageTag=${candidate}" \
+            --query 'imageDetails[0].imageDigest' --output text)"
+          [[ "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]
+          echo "candidate=${candidate}" >> "${GITHUB_OUTPUT}"
+          echo "release=${release}" >> "${GITHUB_OUTPUT}"
+          echo "digest=${digest}" >> "${GITHUB_OUTPUT}"
+          echo "ref=${registry}/${SCANNER_ECR_REPOSITORY}@${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Scan the exact application digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.app.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan the exact worker digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.worker.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan the exact broker digest
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.broker.outputs.ref }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Scan the exact scanner digest including unfixed findings
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: ${{ steps.scanner.outputs.ref }}
+          trivyignores: /dev/null
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: "1"
+          hide-progress: true
+
+      - name: Promote only the scanned manifests
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          APP_CANDIDATE: ${{ steps.app.outputs.candidate }}
+          APP_RELEASE: ${{ steps.app.outputs.release }}
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          WORKER_CANDIDATE: ${{ steps.worker.outputs.candidate }}
+          WORKER_RELEASE: ${{ steps.worker.outputs.release }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+          BROKER_CANDIDATE: ${{ steps.broker.outputs.candidate }}
+          BROKER_RELEASE: ${{ steps.broker.outputs.release }}
+          BROKER_DIGEST: ${{ steps.broker.outputs.digest }}
+          SCANNER_CANDIDATE: ${{ steps.scanner.outputs.candidate }}
+          SCANNER_RELEASE: ${{ steps.scanner.outputs.release }}
+          SCANNER_DIGEST: ${{ steps.scanner.outputs.digest }}
+        run: |
+          set -euo pipefail
+          promote() {
+            local repository="$1" candidate="$2" release="$3" expected_digest="$4"
+            local response manifest media_type source_digest promoted_digest
+            response="$(aws ecr batch-get-image --region "${AWS_REGION}" \
+              --repository-name "${repository}" --image-ids "imageTag=${candidate}" --output json)"
+            jq -e '(.images | length) == 1 and ((.failures // []) | length) == 0' <<< "${response}" >/dev/null
+            source_digest="$(jq -r '.images[0].imageId.imageDigest' <<< "${response}")"
+            manifest="$(jq -r '.images[0].imageManifest' <<< "${response}")"
+            media_type="$(jq -r '.images[0].imageManifestMediaType' <<< "${response}")"
+            [[ "${source_digest}" == "${expected_digest}" ]]
+            [[ "${media_type}" == "application/vnd.oci.image.index.v1+json" ]]
+            printf '%s' "${manifest}" | jq -e '
+              .schemaVersion == 2
+              and any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64")
+              and any(.manifests[]; .annotations["vnd.docker.reference.type"] == "attestation-manifest")
+            ' >/dev/null
+            promoted_digest="$(aws ecr put-image --region "${AWS_REGION}" \
+              --repository-name "${repository}" --image-manifest "${manifest}" \
+              --image-manifest-media-type "${media_type}" --image-tag "${release}" \
+              --image-digest "${expected_digest}" --query 'image.imageId.imageDigest' --output text)"
+            [[ "${promoted_digest}" == "${expected_digest}" ]]
+          }
+          promote "${APP_ECR_REPOSITORY}" "${APP_CANDIDATE}" "${APP_RELEASE}" "${APP_DIGEST}"
+          promote "${WORKER_ECR_REPOSITORY}" "${WORKER_CANDIDATE}" "${WORKER_RELEASE}" "${WORKER_DIGEST}"
+          promote "${BROKER_ECR_REPOSITORY}" "${BROKER_CANDIDATE}" "${BROKER_RELEASE}" "${BROKER_DIGEST}"
+          promote "${SCANNER_ECR_REPOSITORY}" "${SCANNER_CANDIDATE}" "${SCANNER_RELEASE}" "${SCANNER_DIGEST}"
+
+      - name: Refresh bootstrap credentials before stack creation
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-stack-bootstrap-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Create the dormant stack and run its migration
+        id: prepare
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          CFN_EXECUTION_ROLE_ARN: ${{ vars.CFN_EXECUTION_ROLE_ARN }}
+          CFN_TEMPLATE_BUCKET: ${{ vars.CFN_TEMPLATE_BUCKET }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          PRODUCTION_HA_PARAMETERS_JSON: ${{ secrets.PRODUCTION_HA_PARAMETERS_JSON }}
+          APP_IMAGE: ${{ steps.app.outputs.ref }}
+          WORKER_IMAGE: ${{ steps.worker.outputs.ref }}
+          BROKER_IMAGE: ${{ steps.broker.outputs.ref }}
+          SCANNER_IMAGE: ${{ steps.scanner.outputs.ref }}
+        run: deploy/production/bootstrap-ha.sh prepare
+
+  activate:
+    name: Approve edge wiring, activate HA, verify, and record evidence
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production-ha-activation
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Check out the exact prepared revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Validate protected activation configuration
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_BOOTSTRAP_ROLE_ARN: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          CFN_EXECUTION_ROLE_ARN: ${{ vars.CFN_EXECUTION_ROLE_ARN }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          APP_IMAGE: ${{ needs.prepare.outputs.app_image }}
+          WORKER_IMAGE: ${{ needs.prepare.outputs.worker_image }}
+          BROKER_IMAGE: ${{ needs.prepare.outputs.broker_image }}
+          SCANNER_IMAGE: ${{ needs.prepare.outputs.scanner_image }}
+          MIGRATION_TASK_ARN: ${{ needs.prepare.outputs.migration_task_arn }}
+          RUNTIME_SECRET_VERSION_ID: ${{ needs.prepare.outputs.runtime_secret_version_id }}
+        run: |
+          set -euo pipefail
+          [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
+          [[ "${AWS_BOOTSTRAP_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${CFN_EXECUTION_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
+          [[ "${STACK_NAME}" =~ ^[A-Za-z][A-Za-z0-9-]{2,127}$ ]]
+          [[ "${PUBLIC_ORIGIN}" == "https://www.sutracmdb.com" ]]
+          [[ "${APP_IMAGE}" =~ /sutra/app@sha256:[a-f0-9]{64}$ ]]
+          [[ "${WORKER_IMAGE}" =~ /sutra/notification-worker@sha256:[a-f0-9]{64}$ ]]
+          [[ "${BROKER_IMAGE}" =~ /sutra/broker@sha256:[a-f0-9]{64}$ ]]
+          [[ "${SCANNER_IMAGE}" =~ /sutra/agentless-scanner@sha256:[a-f0-9]{64}$ ]]
+          [[ "${MIGRATION_TASK_ARN}" =~ ^arn:aws:ecs: ]]
+          [[ "${RUNTIME_SECRET_VERSION_ID}" =~ ^[A-Za-z0-9-]{32,64}$ ]]
+
+      - name: Configure activation credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
+        with:
+          role-to-assume: ${{ vars.AWS_BOOTSTRAP_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: sutra-activation-${{ github.run_id }}-${{ github.run_attempt }}
+          role-duration-seconds: 3600
+          allowed-account-ids: ${{ vars.AWS_ACCOUNT_ID }}
+          mask-aws-account-id: true
+
+      - name: Activate only the prepared digests and verify the public edge
+        env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          STACK_NAME: ${{ vars.PRODUCTION_STACK_NAME }}
+          CFN_EXECUTION_ROLE_ARN: ${{ vars.CFN_EXECUTION_ROLE_ARN }}
+          PUBLIC_ORIGIN: ${{ vars.PUBLIC_ORIGIN }}
+          APP_IMAGE: ${{ needs.prepare.outputs.app_image }}
+          WORKER_IMAGE: ${{ needs.prepare.outputs.worker_image }}
+          BROKER_IMAGE: ${{ needs.prepare.outputs.broker_image }}
+          SCANNER_IMAGE: ${{ needs.prepare.outputs.scanner_image }}
+          MIGRATION_TASK_ARN: ${{ needs.prepare.outputs.migration_task_arn }}
+          RUNTIME_SECRET_VERSION_ID: ${{ needs.prepare.outputs.runtime_secret_version_id }}
+          RELEASE_REASON: ${{ inputs.releaseReason }}
+          CHANGE_TICKET: ${{ inputs.changeTicket }}
+        run: deploy/production/bootstrap-ha.sh activate

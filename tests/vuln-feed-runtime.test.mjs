@@ -19,7 +19,7 @@ test("bounded KEV refresh writes real catalog membership rows", async () => {
     repository: repository(writes),
     now: () => Date.parse("2026-07-30T00:00:00.000Z"),
     fetchImpl: async (url, options) => {
-      assert.match(String(url), /cisa\.gov/u);
+      assert.equal(new URL(String(url)).hostname, "www.cisa.gov");
       assert.equal(options.redirect, "error");
       return new Response(JSON.stringify({
         dateReleased: "2026-07-30",

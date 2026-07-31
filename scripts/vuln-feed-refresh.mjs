@@ -14,11 +14,16 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 import { validateCisaKevCatalog } from "../lib/exploitability-feed.ts";
+import { productionOutboundFetch } from "../lib/managed-outbound-fetch.ts";
 import { ingestVulnerabilityFeeds, serializeMirror } from "../lib/vulnerability-feed-ingest.ts";
 
 const KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
 const EPSS_URL = "https://epss.cyentia.com/epss_scores-current.csv.gz";
 const USER_AGENT = "sutra-vuln-feed-refresh";
+
+function outboundFetch() {
+  return productionOutboundFetch(process.env);
+}
 
 function outputPath() {
   const args = process.argv.slice(2);
@@ -28,13 +33,13 @@ function outputPath() {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+  const response = await outboundFetch()(url, { headers: { "user-agent": USER_AGENT } });
   if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
   return response.json();
 }
 
 async function fetchGzipText(url) {
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+  const response = await outboundFetch()(url, { headers: { "user-agent": USER_AGENT } });
   if (!response.ok) throw new Error(`${url} -> HTTP ${response.status}`);
   return gunzipSync(Buffer.from(await response.arrayBuffer())).toString("utf8");
 }
@@ -50,7 +55,7 @@ async function fetchNvdRecent() {
     "https://services.nvd.nist.gov/rest/json/cves/2.0" +
     `?lastModStartDate=${encodeURIComponent(start.toISOString())}` +
     `&lastModEndDate=${encodeURIComponent(end.toISOString())}&resultsPerPage=2000&startIndex=0`;
-  const response = await fetch(url, { headers: { "user-agent": USER_AGENT } });
+  const response = await outboundFetch()(url, { headers: { "user-agent": USER_AGENT } });
   if (!response.ok) throw new Error(`NVD -> HTTP ${response.status}`);
   const body = await response.json();
   return Array.isArray(body?.vulnerabilities) ? body.vulnerabilities : [];
