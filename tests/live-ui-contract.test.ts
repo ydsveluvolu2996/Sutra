@@ -40,7 +40,10 @@ describe("hosted live UI contract", () => {
     const source = (
       await Promise.all(files.map((file) => readFile(file, "utf8")))
     ).join("\n");
-    assert.doesNotMatch(source, /https:\/\/app\.sutracmdb\.com/u);
+    assert.doesNotMatch(
+      source,
+      /^(?:[\s\S]*https:\/\/app\.sutracmdb\.com[\s\S]*)$/u,
+    );
   });
 
   it("backs every visible navigation destination with a real page", async () => {

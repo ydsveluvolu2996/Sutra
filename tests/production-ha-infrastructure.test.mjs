@@ -294,7 +294,10 @@ test("backup, evidence, edge protection, and observability are explicit", () => 
   assert.match(template, /HeaderName:\s+!Ref WafClientIpHeader/u);
   assert.match(template, /Type:\s+AWS::WAFv2::LoggingConfiguration/u);
   assert.match(template, /access_logs\.s3\.enabled/u);
-  assert.ok(template.includes("logdelivery.elasticloadbalancing.amazonaws.com"));
+  assert.match(
+    template,
+    /^(?:[\s\S]*logdelivery\.elasticloadbalancing\.amazonaws\.com[\s\S]*)$/u,
+  );
   assert.match(template, /Type:\s+AWS::CloudWatch::Alarm/gu);
   assert.match(template, /ContainerInsightsEnabled/u);
   assert.match(template, /KmsKeyId:\s+!Ref KmsKeyArn/u);

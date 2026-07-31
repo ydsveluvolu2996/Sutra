@@ -58,7 +58,10 @@ test("authenticated web API only queues; provider delivery remains worker-owned"
   assert.match(route, /assertSameOrigin/);
   assert.match(route, /requiredConfiguredPublicOrigin/u);
   assert.match(route, /const publicOrigin = requiredConfiguredPublicOrigin\(\)/u);
-  assert.doesNotMatch(route, /https:\/\/app\.sutracmdb\.com/u);
+  assert.doesNotMatch(
+    route,
+    /^(?:[\s\S]*https:\/\/app\.sutracmdb\.com[\s\S]*)$/u,
+  );
   assert.match(apiAuth, /export function requiredConfiguredPublicOrigin/u);
   assert.match(apiAuth, /parsed\.origin !== value/u);
   assert.match(

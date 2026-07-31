@@ -158,9 +158,11 @@ test("delivers SES v2, Slack, and Teams through bounded injected transports", as
   const webhooks = fixture.calls.filter((call) => call.kind === "webhook");
   assert.equal(webhooks.length, 2);
   assert.ok(webhooks.every((call) => call.timeoutMs === 5_000 && call.redirect === "error"));
-  const teams = webhooks.find((call) => String(call.url).includes("logic.azure.com"));
+  const teams = webhooks.find(
+    (call) => new URL(String(call.url)).hostname === "prod-00.westus.logic.azure.com",
+  );
   assert.equal((teams?.headers as Record<string, string>)["Idempotency-Key"], deliveryId);
-  const slack = webhooks.find((call) => String(call.url).includes("hooks.slack.com"));
+  const slack = webhooks.find((call) => new URL(String(call.url)).hostname === "hooks.slack.com");
   assert.equal("Idempotency-Key" in (slack?.headers as Record<string, string>), false);
 });
 

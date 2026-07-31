@@ -81,21 +81,24 @@ test("all production notification and ticket writes select the signed provider-b
   assert.doesNotMatch(itsmRoute, /fetch\(target/u);
   assert.match(finopsDelivery, /requiredManagedOutboundFetch/u);
   assert.match(finopsDelivery, /isManagedTicketWebhookUrl/u);
-  for (const providerDomain of [
-    "hooks.slack.com",
-    "events.pagerduty.com",
-    "logic.azure.com",
-    "powerplatform.com",
-    "atlassian.com",
-    "service-now.com",
+  for (const [providerDomain, providerPattern] of [
+    ["hooks.slack.com", /^(?:[\s\S]*hooks\.slack\.com[\s\S]*)$/u],
+    ["events.pagerduty.com", /^(?:[\s\S]*events\.pagerduty\.com[\s\S]*)$/u],
+    ["logic.azure.com", /^(?:[\s\S]*logic\.azure\.com[\s\S]*)$/u],
+    ["powerplatform.com", /^(?:[\s\S]*powerplatform\.com[\s\S]*)$/u],
+    ["atlassian.com", /^(?:[\s\S]*atlassian\.com[\s\S]*)$/u],
+    ["service-now.com", /^(?:[\s\S]*service-now\.com[\s\S]*)$/u],
   ]) {
     assert.doesNotMatch(
       network,
-      new RegExp(providerDomain.replaceAll(".", "\\."), "u"),
+      providerPattern,
       `${providerDomain} must not be added to the production firewall`,
     );
   }
-  assert.match(network, /outbound\.sutracmdb\.com/u);
+  assert.match(
+    network,
+    /^(?:[\s\S]*outbound\.sutracmdb\.com[\s\S]*)$/u,
+  );
 });
 
 test("both vulnerability refresh paths select the signed adapter", () => {

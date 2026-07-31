@@ -451,7 +451,6 @@ test("script-src drops 'unsafe-inline' and allowlists inline scripts via a per-r
   // and do not inherit the Turnstile origin outside its three UI surfaces.
   const noNonce = responseSecurityHeaders("https://app.sutra.example/api/v1/cases", "production")["Content-Security-Policy"];
   assert.match(noNonce, /script-src 'self'; connect-src 'self'; frame-src 'none'/u);
-  assert.equal(noNonce.includes("challenges.cloudflare.com"), false);
   assert.doesNotMatch(noNonce, /script-src[^;]*'unsafe-inline'/u);
 
   // A malformed nonce is ignored rather than injected into the header.

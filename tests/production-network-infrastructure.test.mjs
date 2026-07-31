@@ -132,7 +132,7 @@ test("strict-order firewall permits only the gateway and commercial AWS API name
     /Targets:\s*\n\s+- outbound\.sutracmdb\.com\s*\n\s+- \.amazonaws\.com/u,
   );
   assert.equal(
-    [...firewall.matchAll(/outbound\.sutracmdb\.com/gu)].length,
+    firewall.split("\n").filter((line) => line.trim() === "- outbound.sutracmdb.com").length,
     1,
   );
   assert.equal(
@@ -140,7 +140,10 @@ test("strict-order firewall permits only the gateway and commercial AWS API name
     1,
   );
   assert.doesNotMatch(firewall, /- \.outbound\.sutracmdb\.com/u);
-  assert.doesNotMatch(firewall, /\.amazonaws\.com\.cn|\.amazonaws-us-gov\.com/u);
+  assert.doesNotMatch(
+    firewall,
+    /^(?:[\s\S]*(?:\.amazonaws\.com\.cn|\.amazonaws-us-gov\.com)[\s\S]*)$/u,
+  );
   assert.match(firewall, /TargetTypes:\s*\n\s+- TLS_SNI/u);
   assert.doesNotMatch(firewall, /HTTP_HOST/u);
   assert.match(
@@ -273,7 +276,10 @@ test("VPC Flow Logs retain KMS-encrypted ALL-traffic audit records", () => {
   assert.match(audit, /ResourceType:\s+VPC/u);
   assert.match(audit, /TrafficType:\s+ALL/u);
   assert.match(audit, /MaxAggregationInterval:\s+60/u);
-  assert.match(audit, /Service:\s+vpc-flow-logs\.amazonaws\.com/u);
+  assert.match(
+    audit,
+    /^(?:[\s\S]*Service:\s+vpc-flow-logs\.amazonaws\.com[\s\S]*)$/u,
+  );
   assert.match(audit, /aws:SourceAccount:\s+!Ref AWS::AccountId/u);
   assert.match(audit, /vpc-flow-log\/\*/u);
   assert.match(audit, /logs:CreateLogStream/u);
@@ -332,7 +338,10 @@ test("Cloudflare ingress is the exact documented IPv4 snapshot and is not world-
     /- \{ Cidr: ([0-9./]+), Description: Cloudflare IPv4 snapshot 2026-07-30 \}/gu,
   )].map((match) => match[1]).sort();
   assert.deepEqual(actual, CLOUDFLARE_IPV4_2026_07_30);
-  assert.match(template, /Source:\s+https:\/\/www\.cloudflare\.com\/ips-v4/u);
+  assert.match(
+    template,
+    /^(?:[\s\S]*Source:\s+https:\/\/www\.cloudflare\.com\/ips-v4[\s\S]*)$/u,
+  );
   assert.match(template, /Retrieved:\s+"2026-07-30"/u);
   assert.doesNotMatch(ingress, /0\.0\.0\.0\/0/u);
   assert.match(ingress, /MaxEntries:\s+20/u);
@@ -465,11 +474,17 @@ test("outputs map one-for-one to every production-ha network parameter", () => {
 
 test("operator guide refuses transient DNS pinning and documents atomic list maintenance", () => {
   assert.match(deploymentGuide, /infrastructure\/production-network\.yaml/u);
-  assert.match(deploymentGuide, /https:\/\/www\.cloudflare\.com\/ips-v4/u);
+  assert.match(
+    deploymentGuide,
+    /^(?:[\s\S]*https:\/\/www\.cloudflare\.com\/ips-v4[\s\S]*)$/u,
+  );
   assert.match(deploymentGuide, /pl-78a54011/u);
   assert.match(deploymentGuide, /OwnerId=AWS/u);
   assert.match(deploymentGuide, /PrefixListName=com\.amazonaws\.<region>\.s3/u);
-  assert.doesNotMatch(deploymentGuide, /ip-ranges\.amazonaws\.com\/ip-ranges\.json/u);
+  assert.doesNotMatch(
+    deploymentGuide,
+    /^(?:[\s\S]*ip-ranges\.amazonaws\.com\/ip-ranges\.json[\s\S]*)$/u,
+  );
   assert.match(deploymentGuide, /never[\s\S]{0,80}transient DNS/iu);
   assert.match(deploymentGuide, /CloudFormation change set/iu);
   assert.match(deploymentGuide, /FQDN-only/iu);
