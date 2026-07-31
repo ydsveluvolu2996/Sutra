@@ -17,7 +17,11 @@ const CONTENT_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+/-]{1,126}$/u;
 const MAX_GRANT_TTL_MS = 5 * 60 * 1000;
 const MIN_GRANT_TTL_MS = 15 * 1000;
 
-export type EvidenceArtifactKind = "aws_snapshot_raw" | "export_json" | "export_csv";
+export type EvidenceArtifactKind =
+  | "aws_snapshot_raw"
+  | "export_json"
+  | "export_csv"
+  | "finops_source_snapshot";
 export type EvidenceDownloadPurpose = "raw_evidence_review" | "export_download";
 
 export interface EvidenceScope {
@@ -267,7 +271,12 @@ export class EvidenceRepository {
       (input.snapshotId !== undefined && input.snapshotId !== null && !IDENTIFIER.test(input.snapshotId)) ||
       !IDENTIFIER.test(input.createdBy) ||
       !CONTENT_TYPE.test(input.contentType) ||
-      !["aws_snapshot_raw", "export_json", "export_csv"].includes(input.artifactKind) ||
+      ![
+        "aws_snapshot_raw",
+        "export_json",
+        "export_csv",
+        "finops_source_snapshot",
+      ].includes(input.artifactKind) ||
       input.body.byteLength < 1 ||
       input.body.byteLength > MAX_EVIDENCE_OBJECT_BYTES
     ) reject("INVALID_INPUT");
@@ -439,7 +448,9 @@ export class EvidenceRepository {
     if (object === null) reject("SCOPE_NOT_FOUND");
     if (
       (input.purpose === "raw_evidence_review" && object.artifact_kind !== "aws_snapshot_raw") ||
-      (input.purpose === "export_download" && object.artifact_kind === "aws_snapshot_raw")
+      (input.purpose === "export_download" &&
+        object.artifact_kind !== "export_json" &&
+        object.artifact_kind !== "export_csv")
     ) reject("INVALID_INPUT");
     const token = `sutra_evd_${randomBase64Url(32)}`;
     const tokenSha256 = await sha256Hex(token);

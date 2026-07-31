@@ -9,6 +9,7 @@ import {
   EncryptedFileConnectionRegistry,
   RegistryIntegrityError,
   RegistryStateError,
+  parsePersistedConnection,
 } from "../src/local-registry.js";
 
 const NOW = new Date("2026-07-15T10:00:00.000Z");
@@ -536,6 +537,80 @@ test("registry authentication rejects a wrong encryption key", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("persisted successor records accept only exact tenant-bound FinOps contracts", () => {
+  const persisted = {
+    tenantId: "org_local_sutra",
+    connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    expectedAccountId: "123456789012",
+    partition: "aws",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraCollectorRole",
+    externalId: EXTERNAL_ID,
+    status: "ACTIVE",
+    sessionNamePrefix: "sutra-",
+    enabledRegions: ["us-east-1"],
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString(),
+    permissionPackVersion: "standard-2026-08.1",
+    roleProvisioningMode: "sutra_template",
+    expectedRolePath: "/sutra/",
+    expectedRoleName: "SutraCollectorRole",
+    foundationalFinopsContracts: [{
+      tenantId: "org_local_sutra",
+      connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      contractId: "foundational-cur2-export-v1",
+      exportTable: "COST_AND_USAGE_REPORT",
+      policyName: "SutraFoundationalCur2ReadV1",
+      region: "us-east-1",
+      bucket: "customer-cur2-export",
+      prefix: "sutra/cur2/sutra_foundational_cur2_v1/",
+      exportName: "sutra_foundational_cur2_v1",
+      exportArn:
+        "arn:aws:bcm-data-exports:us-east-1:123456789012:" +
+        "export/sutra_foundational_cur2_v1-1234",
+    }],
+  };
+  const parsed = parsePersistedConnection(persisted);
+  assert.equal(parsed.permissionPackVersion, "standard-2026-08.1");
+  assert.equal(
+    parsed.foundationalFinopsContracts?.[0]?.policyName,
+    "SutraFoundationalCur2ReadV1",
+  );
+
+  const crossTenant = structuredClone(persisted);
+  crossTenant.foundationalFinopsContracts[0]!.tenantId = "other_tenant";
+  assert.throws(
+    () => parsePersistedConnection(crossTenant),
+    RegistryIntegrityError,
+  );
+
+  const widenedPrefix = structuredClone(persisted);
+  widenedPrefix.foundationalFinopsContracts[0]!.prefix = "sutra/cur2/";
+  assert.throws(
+    () => parsePersistedConnection(widenedPrefix),
+    RegistryIntegrityError,
+  );
+
+  const differentExportArn = structuredClone(persisted);
+  differentExportArn.foundationalFinopsContracts[0]!.exportArn =
+    "arn:aws:bcm-data-exports:us-east-1:123456789012:" +
+    "export/different_export-1234";
+  assert.throws(
+    () => parsePersistedConnection(differentExportArn),
+    RegistryIntegrityError,
+  );
+
+  const additionalField = structuredClone(persisted) as typeof persisted & {
+    foundationalFinopsContracts: Array<
+      typeof persisted.foundationalFinopsContracts[number] & { wildcard: string }
+    >;
+  };
+  additionalField.foundationalFinopsContracts[0]!.wildcard = "*";
+  assert.throws(
+    () => parsePersistedConnection(additionalField),
+    RegistryIntegrityError,
+  );
 });
 
 function connection(connectionId: string) {

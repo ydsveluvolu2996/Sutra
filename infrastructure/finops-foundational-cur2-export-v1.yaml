@@ -1,0 +1,350 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Versioned customer-side Foundational FinOps add-on. Creates an AWS CUR 2.0
+  Data Export in a dedicated S3 prefix and attaches only prefix-scoped billing
+  reads to an existing Sutra collector role. The permanent collector cannot
+  create, update, or delete exports. Contract: foundational-cur2-export-v1.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Existing Sutra role contract
+        Parameters:
+          - CollectorRoleName
+          - BaseCollectorPermissionPackVersion
+      - Label:
+          default: Dedicated billing export destination
+        Parameters:
+          - ExistingBucketName
+          - DestinationBucketRegion
+          - ExportPrefix
+          - ExportName
+    ParameterLabels:
+      BaseCollectorPermissionPackVersion:
+        default: Verified base collector permission pack
+      ExistingBucketName:
+        default: Existing dedicated S3 bucket (optional)
+
+Parameters:
+  CollectorRoleName:
+    Type: String
+    Default: SutraCollectorRole
+    AllowedValues:
+      - SutraCollectorRole
+      - SutraReadOnlyRole
+    Description: >-
+      Existing role under /sutra/. This add-on does not create, replace, or
+      weaken that role or its permission ceiling.
+
+  BaseCollectorPermissionPackVersion:
+    Type: String
+    Default: standard-2026-07.4
+    AllowedValues:
+      - standard-2026-07.4
+      - standard-2026-08.1
+    Description: >-
+      Must match the permission-pack tag on the existing role. The current
+      standard-2026-07.4 ceiling explicitly denies these new reads, so this
+      stack is blocked until the separately reviewed standard-2026-08.1 base
+      role has been deployed and attested.
+
+  ExistingBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|(?!.*\.\.)(?!\d+\.\d+\.\d+\.\d+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: >-
+      Leave empty to create a retained private bucket, or provide one dedicated
+      bucket whose bucket policy this stack is authorized to manage.
+
+  DestinationBucketRegion:
+    Type: String
+    Default: us-east-1
+    AllowedPattern: '^[a-z]{2}(-gov)?-[a-z]+-[0-9]$'
+    Description: >-
+      Region of the dedicated destination bucket. When this stack creates the
+      bucket, this value must equal the CloudFormation stack Region.
+
+  ExportPrefix:
+    Type: String
+    Default: sutra/cur2
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,62}(/[A-Za-z0-9][A-Za-z0-9_-]{0,62}){0,3}$'
+    Description: >-
+      Dedicated S3 key prefix with no leading or trailing slash and no dot
+      segments. Collector access is further restricted to this prefix plus the
+      export name.
+
+  ExportName:
+    Type: String
+    Default: sutra_foundational_cur2_v1
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '^[0-9A-Za-z_-]+$'
+    Description: Immutable AWS Data Export name for this template contract.
+
+Rules:
+  RejectCurrentReadCeiling:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: BaseCollectorPermissionPackVersion
+            - standard-2026-08.1
+        AssertDescription: >-
+          Do not launch this add-on against standard-2026-07.4. First deploy
+          and attest the separately reviewed standard-2026-08.1 base role.
+
+  CreatedBucketRegionMatchesStack:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: ExistingBucketName
+        - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: DestinationBucketRegion
+            - Ref: AWS::Region
+        AssertDescription: >-
+          A bucket created by this stack is in the stack Region, so its declared
+          Data Exports destination Region must match.
+
+Conditions:
+  CreateDestinationBucket:
+    Fn::Equals:
+      - Ref: ExistingBucketName
+      - ''
+
+Resources:
+  BillingExportBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateDestinationBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: sutra:component
+          Value: foundational-cur2-export
+        - Key: sutra:contract
+          Value: foundational-cur2-export-v1
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+  BillingExportBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Fn::If:
+          - CreateDestinationBucket
+          - Ref: BillingExportBucket
+          - Ref: ExistingBucketName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowAccountBoundDataExportsToWriteExactPrefix
+            Effect: Allow
+            Principal:
+              Service: bcm-data-exports.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: BillingExportBucket
+                      - Ref: ExistingBucketName
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: >-
+                    arn:${AWS::Partition}:bcm-data-exports:${AWS::Region}:${AWS::AccountId}:export/*
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+
+  FoundationalCur2Export:
+    Type: AWS::BCMDataExports::Export
+    DependsOn:
+      - BillingExportBucketPolicy
+    Properties:
+      Export:
+        Name:
+          Ref: ExportName
+        Description: >-
+          Sutra Foundational CUR 2.0 hourly, resource-level, split-cost-capable
+          billing export. Customer-owned and delivered only to the dedicated
+          prefix declared by this stack.
+        DataQuery:
+          QueryStatement: >-
+            SELECT identity_line_item_id AS line_item_id,
+            identity_time_interval, bill_payer_account_id,
+            bill_payer_account_name, bill_billing_period_start_date,
+            bill_billing_period_end_date, bill_invoice_id,
+            bill_invoicing_entity, bill_billing_entity, bill_bill_type,
+            line_item_usage_account_id, line_item_usage_account_name,
+            line_item_line_item_type, line_item_usage_start_date,
+            line_item_usage_end_date, line_item_product_code,
+            line_item_usage_type, line_item_operation,
+            line_item_availability_zone, line_item_resource_id,
+            line_item_usage_amount, line_item_currency_code,
+            line_item_unblended_cost, line_item_net_unblended_cost,
+            line_item_legal_entity, line_item_line_item_description,
+            line_item_tax_type, pricing_unit, pricing_currency,
+            pricing_public_on_demand_cost, pricing_public_on_demand_rate,
+            pricing_term, pricing_rate_id, pricing_purchase_option,
+            product_servicecode, product_region_code, product_product_family,
+            reservation_effective_cost, reservation_reservation_a_r_n,
+            reservation_start_time, reservation_end_time,
+            reservation_total_reserved_units,
+            savings_plan_savings_plan_effective_cost,
+            savings_plan_savings_plan_a_r_n, savings_plan_start_time,
+            savings_plan_end_time, savings_plan_offering_type,
+            savings_plan_payment_option, resource_tags, cost_category,
+            capacity_reservation_capacity_reservation_arn,
+            capacity_reservation_capacity_reservation_status,
+            split_line_item_actual_usage, split_line_item_net_split_cost,
+            split_line_item_parent_resource_id,
+            split_line_item_public_on_demand_unused_cost,
+            split_line_item_reserved_usage, split_line_item_split_cost,
+            split_line_item_split_usage, split_line_item_split_usage_ratio,
+            split_line_item_unused_cost
+            FROM COST_AND_USAGE_REPORT
+          TableConfigurations:
+            COST_AND_USAGE_REPORT:
+              TIME_GRANULARITY: HOURLY
+              INCLUDE_RESOURCES: 'TRUE'
+              INCLUDE_SPLIT_COST_ALLOCATION_DATA: 'TRUE'
+              INCLUDE_CAPACITY_RESERVATION_DATA: 'TRUE'
+              INCLUDE_MANUAL_DISCOUNT_COMPATIBILITY: 'FALSE'
+        DestinationConfigurations:
+          S3Destination:
+            S3Bucket:
+              Fn::If:
+                - CreateDestinationBucket
+                - Ref: BillingExportBucket
+                - Ref: ExistingBucketName
+            S3Prefix:
+              Ref: ExportPrefix
+            S3Region:
+              Ref: DestinationBucketRegion
+            S3OutputConfigurations:
+              Compression: GZIP
+              Format: TEXT_OR_CSV
+              OutputType: CUSTOM
+              Overwrite: CREATE_NEW_REPORT
+        RefreshCadence:
+          Frequency: SYNCHRONOUS
+      Tags:
+        - Key: sutra:component
+          Value: foundational-cur2-export
+        - Key: sutra:contract
+          Value: foundational-cur2-export-v1
+
+  CollectorFoundationalBillingReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SutraFoundationalCur2ReadV1
+      Roles:
+        - Ref: CollectorRoleName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ListOnlyExactFoundationalExportPrefix
+            Effect: Allow
+            Action: s3:ListBucket
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: BillingExportBucket
+                      - Ref: ExistingBucketName
+            Condition:
+              StringLike:
+                s3:prefix:
+                  - Fn::Sub: '${ExportPrefix}/${ExportName}'
+                  - Fn::Sub: '${ExportPrefix}/${ExportName}/*'
+
+          - Sid: ReadDedicatedBucketLocation
+            Effect: Allow
+            Action: s3:GetBucketLocation
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: BillingExportBucket
+                      - Ref: ExistingBucketName
+
+          - Sid: ReadOnlyExactFoundationalExportObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectAttributes
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: BillingExportBucket
+                      - Ref: ExistingBucketName
+
+          - Sid: ListDataExports
+            Effect: Allow
+            Action: bcm-data-exports:ListExports
+            Resource: '*'
+
+          - Sid: ReadOnlyThisDataExport
+            Effect: Allow
+            Action: bcm-data-exports:GetExport
+            Resource:
+              Fn::GetAtt:
+                - FoundationalCur2Export
+                - ExportArn
+
+Outputs:
+  TemplateContractVersion:
+    Description: Version of this separately reviewed add-on contract.
+    Value: foundational-cur2-export-v1
+
+  RequiredBasePermissionPackVersion:
+    Description: Base role contract required before this add-on can launch.
+    Value: standard-2026-08.1
+
+  DestinationBucketName:
+    Description: Dedicated bucket containing the AWS Data Export.
+    Value:
+      Fn::If:
+        - CreateDestinationBucket
+        - Ref: BillingExportBucket
+        - Ref: ExistingBucketName
+
+  DestinationObjectPrefix:
+    Description: Exact object namespace readable by the Sutra collector.
+    Value:
+      Fn::Sub: '${ExportPrefix}/${ExportName}/'
+
+  DataExportArn:
+    Description: Customer-owned CUR 2.0 Data Export ARN.
+    Value:
+      Fn::GetAtt:
+        - FoundationalCur2Export
+        - ExportArn

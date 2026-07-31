@@ -69,6 +69,11 @@ import postgresCmdbResourceRetirementSql from "../postgres/migrations/0069_cmdb_
 import postgresManagedEvidenceObjectsSql from "../postgres/migrations/0070_managed_evidence_objects.sql?raw";
 import postgresItsmDeliveryEvidenceSql from "../postgres/migrations/0071_itsm_delivery_evidence.sql?raw";
 import postgresSesDeliveryFeedbackSql from "../postgres/migrations/0072_ses_delivery_feedback.sql?raw";
+import postgresFinopsBillingEngineV2Sql from "../postgres/migrations/0073_finops_billing_engine_v2.sql?raw";
+import postgresFinopsFoundationalConfigSql from "../postgres/migrations/0074_finops_foundational_config.sql?raw";
+import postgresFinopsSourceJobLedgerSql from "../postgres/migrations/0075_finops_source_job_ledger.sql?raw";
+import postgresFinopsSourceSnapshotsSql from "../postgres/migrations/0076_finops_source_snapshots.sql?raw";
+import postgresFinopsSourceEvidenceArtifactSql from "../postgres/migrations/0077_finops_source_evidence_artifact.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -142,6 +147,11 @@ const migrations = [
   { id: "0070_managed_evidence_objects", source: postgresManagedEvidenceObjectsSql },
   { id: "0071_itsm_delivery_evidence", source: postgresItsmDeliveryEvidenceSql },
   { id: "0072_ses_delivery_feedback", source: postgresSesDeliveryFeedbackSql },
+  { id: "0073_finops_billing_engine_v2", source: postgresFinopsBillingEngineV2Sql },
+  { id: "0074_finops_foundational_config", source: postgresFinopsFoundationalConfigSql },
+  { id: "0075_finops_source_job_ledger", source: postgresFinopsSourceJobLedgerSql },
+  { id: "0076_finops_source_snapshots", source: postgresFinopsSourceSnapshotsSql },
+  { id: "0077_finops_source_evidence_artifact", source: postgresFinopsSourceEvidenceArtifactSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

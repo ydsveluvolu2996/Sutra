@@ -39,6 +39,8 @@ import {
   type HostedBrokerClientSigningConfiguration,
 } from "./hosted-broker-client-security";
 import type { AgentlessScanReadiness } from "./aws-agentless-readiness";
+import type { FinopsExportChunkRequest } from "../services/aws-collector/src/finops-export-chunk";
+import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
   readonly SUTRA_LOCAL_MODE?: string;
@@ -869,6 +871,238 @@ export async function runCollectorSync(input: {
     }),
     rawEvidenceBytes: response.authenticatedBody,
   };
+}
+
+/**
+ * Request one broker-bounded S3 range for canonical FinOps ingestion.
+ *
+ * The shared broker client authenticates the request and verifies the signed
+ * response before returning. Temporary AWS credentials never enter this
+ * process, and this function never accepts or returns an unbounded object.
+ */
+export async function runFinopsExportChunkRead(
+  input: FinopsExportChunkRequest,
+): Promise<unknown> {
+  return brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/finops-export-chunk`,
+    "POST",
+    {
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      jobId: input.jobId,
+      region: input.region,
+      bucket: input.bucket,
+      prefix: input.prefix,
+      key: input.key,
+      offset: input.offset,
+      maximumBytes: input.maximumBytes,
+      versionId: input.versionId,
+      ifMatch: input.ifMatch,
+    },
+    90_000,
+  );
+}
+
+export interface FinopsSourceCollectionResult {
+  readonly schemaVersion: "sutra.finops-source-dispatch.v1";
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly contractId: string;
+  readonly sourceId: FinopsSourceId;
+  readonly configured: boolean;
+  readonly implementationState: "NOT_CONFIGURED" | "NOT_IMPLEMENTED" | "IMPLEMENTED";
+  readonly collectionStatus: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string | null;
+  readonly collectedAt: string;
+  readonly dataThroughAt: string | null;
+  readonly coverage: {
+    readonly pagesObserved: number;
+    readonly recordsObserved: number;
+    readonly recordsAccepted: number;
+    readonly recordsRejected: number;
+    readonly recordsOmitted: number;
+  };
+  readonly evidence: Readonly<Record<string, unknown>> | null;
+  readonly errorCode: string | null;
+  readonly limitations: readonly string[];
+}
+
+const FINOPS_SOURCE_RESULT_KEYS = [
+  "schemaVersion",
+  "tenantId",
+  "connectionId",
+  "jobId",
+  "contractId",
+  "sourceId",
+  "configured",
+  "implementationState",
+  "collectionStatus",
+  "accountId",
+  "partition",
+  "region",
+  "collectedAt",
+  "dataThroughAt",
+  "coverage",
+  "evidence",
+  "errorCode",
+  "limitations",
+] as const;
+const FINOPS_SOURCE_COVERAGE_KEYS = [
+  "pagesObserved",
+  "recordsObserved",
+  "recordsAccepted",
+  "recordsRejected",
+  "recordsOmitted",
+] as const;
+const FINOPS_SOURCE_ACCOUNT_ID = /^\d{12}$/u;
+const FINOPS_SOURCE_REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
+const FINOPS_SOURCE_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u;
+
+function exactFinopsRecord(
+  value: unknown,
+  expectedKeys: readonly string[],
+): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const actual = Object.keys(record);
+  return actual.length === expectedKeys.length && actual.every((key) => expectedKeys.includes(key))
+    ? record
+    : null;
+}
+
+function normalizedFinopsIso(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const epoch = Date.parse(value);
+  return Number.isFinite(epoch) && new Date(epoch).toISOString() === value ? value : null;
+}
+
+function boundedFinopsCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function safeFinopsJson(
+  value: unknown,
+  depth = 0,
+  budget: { remaining: number } = { remaining: 100_000 },
+): boolean {
+  budget.remaining -= 1;
+  if (budget.remaining < 0 || depth > 12) return false;
+  if (value === null || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value === "string") return value.length <= 16_384 && !value.includes("\0");
+  if (Array.isArray(value)) {
+    return value.length <= 25_000 && value.every((entry) => safeFinopsJson(entry, depth + 1, budget));
+  }
+  if (typeof value !== "object") return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return entries.length <= 2_000 && entries.every(([key, entry]) =>
+    key.length > 0 && key.length <= 256 && !key.includes("\0") &&
+    safeFinopsJson(entry, depth + 1, budget));
+}
+
+/**
+ * Re-validates the signed broker result against server-resolved connection and
+ * source identity. A syntactically valid response cannot redirect evidence to
+ * another tenant, connection, contract, account, partition, or source.
+ */
+export function parseFinopsSourceCollectionResult(
+  value: unknown,
+  expected: {
+    readonly tenantId: string;
+    readonly connectionId: string;
+    readonly jobId: string;
+    readonly contractId: string;
+    readonly sourceId: FinopsSourceId;
+    readonly accountId: string;
+    readonly partition: AwsPartition;
+  },
+): FinopsSourceCollectionResult {
+  const record = exactFinopsRecord(value, FINOPS_SOURCE_RESULT_KEYS);
+  const coverage = exactFinopsRecord(record?.coverage, FINOPS_SOURCE_COVERAGE_KEYS);
+  const collectedAt = normalizedFinopsIso(record?.collectedAt);
+  const dataThroughAt = record?.dataThroughAt === null
+    ? null
+    : normalizedFinopsIso(record?.dataThroughAt);
+  const region = record?.region;
+  const evidence = record?.evidence;
+  const limitations = record?.limitations;
+  const errorCode = record?.errorCode;
+  if (
+    record === null || coverage === null ||
+    record.schemaVersion !== "sutra.finops-source-dispatch.v1" ||
+    record.tenantId !== expected.tenantId ||
+    record.connectionId !== expected.connectionId ||
+    record.jobId !== expected.jobId ||
+    record.contractId !== expected.contractId ||
+    record.sourceId !== expected.sourceId ||
+    record.accountId !== expected.accountId || !FINOPS_SOURCE_ACCOUNT_ID.test(expected.accountId) ||
+    record.partition !== expected.partition ||
+    typeof record.configured !== "boolean" ||
+    !new Set(["NOT_CONFIGURED", "NOT_IMPLEMENTED", "IMPLEMENTED"]).has(String(record.implementationState)) ||
+    !new Set(["COMPLETE", "PARTIAL", "UNAVAILABLE"]).has(String(record.collectionStatus)) ||
+    (region !== null && (typeof region !== "string" || !FINOPS_SOURCE_REGION.test(region))) ||
+    collectedAt === null ||
+    (record.dataThroughAt !== null && dataThroughAt === null) ||
+    (dataThroughAt !== null && dataThroughAt > collectedAt) ||
+    !FINOPS_SOURCE_COVERAGE_KEYS.every((key) => boundedFinopsCount(coverage[key])) ||
+    (coverage.recordsAccepted as number) + (coverage.recordsRejected as number) +
+      (coverage.recordsOmitted as number) > (coverage.recordsObserved as number) ||
+    !Array.isArray(limitations) || limitations.length > 256 ||
+    limitations.some((entry) => typeof entry !== "string" || !FINOPS_SOURCE_CODE.test(entry)) ||
+    (errorCode !== null && (typeof errorCode !== "string" || !FINOPS_SOURCE_CODE.test(errorCode))) ||
+    (evidence !== null && (
+      typeof evidence !== "object" || Array.isArray(evidence) || !safeFinopsJson(evidence)
+    )) ||
+    (record.collectionStatus === "UNAVAILABLE" && evidence !== null) ||
+    (record.collectionStatus !== "UNAVAILABLE" && (
+      record.configured !== true || record.implementationState !== "IMPLEMENTED" || evidence === null
+    )) ||
+    (record.collectionStatus === "COMPLETE" && (
+      errorCode !== null || dataThroughAt === null ||
+      coverage.recordsRejected !== 0 || coverage.recordsOmitted !== 0 ||
+      coverage.recordsAccepted !== coverage.recordsObserved
+    )) ||
+    ((record.implementationState === "NOT_CONFIGURED" || record.implementationState === "NOT_IMPLEMENTED") &&
+      record.collectionStatus !== "UNAVAILABLE")
+  ) {
+    throw new PilotServerError(
+      502,
+      "BROKER_RESPONSE_INVALID",
+      "The collector returned invalid FinOps source evidence",
+    );
+  }
+  return record as unknown as FinopsSourceCollectionResult;
+}
+
+/**
+ * Calls the server-owned FinOps source endpoint through the authenticated
+ * broker boundary. AWS operations and provider filters are deliberately absent
+ * from this contract; the persisted contract and collector catalog own them.
+ */
+export async function runFinopsSourceCollection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly contractId: string;
+  readonly sourceId: FinopsSourceId;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+}): Promise<FinopsSourceCollectionResult> {
+  const value = await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/finops-source`,
+    "POST",
+    {
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      jobId: input.jobId,
+      contractId: input.contractId,
+    },
+    90_000,
+  );
+  return parseFinopsSourceCollectionResult(value, input);
 }
 
 export async function runCollectorCostCollection(input: {

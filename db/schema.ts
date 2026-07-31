@@ -260,7 +260,12 @@ export const evidenceObjects = sqliteTable("evidence_objects", {
   runId: text("run_id").notNull(),
   snapshotId: text("snapshot_id"),
   artifactKind: text("artifact_kind", {
-    enum: ["aws_snapshot_raw", "export_json", "export_csv"],
+    enum: [
+      "aws_snapshot_raw",
+      "export_json",
+      "export_csv",
+      "finops_source_snapshot",
+    ],
   }).notNull(),
   objectKey: text("object_key").notNull(),
   contentType: text("content_type").notNull(),
@@ -666,6 +671,117 @@ export const costSnapshots = sqliteTable("cost_snapshots", {
 }, (table) => [
   uniqueIndex("cost_snapshots_connection_hash_uq").on(table.orgId, table.connectionId, table.payloadSha256),
   index("cost_snapshots_scope_time_idx").on(table.orgId, table.customerId, table.connectionId, table.collectedAt, table.id),
+]);
+
+/**
+ * Manifest-level state for the canonical FinOps billing engine. A refreshed
+ * AWS billing period is written under stagingGenerationId and becomes visible
+ * only when activeGenerationId is switched after reconciliation.
+ */
+export const finopsExportPartitions = sqliteTable("finops_export_partitions", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  exportName: text("export_name").notNull(),
+  billingPeriod: text("billing_period").notNull(),
+  sourceTable: text("source_table").notNull(),
+  sourceFormat: text("source_format").notNull(),
+  sourceVersion: text("source_version").notNull(),
+  status: text("status", { enum: ["staging", "ready", "failed"] }).notNull(),
+  manifestBucket: text("manifest_bucket").notNull(),
+  manifestKey: text("manifest_key").notNull(),
+  manifestSha256: text("manifest_sha256").notNull(),
+  schemaSha256: text("schema_sha256").notNull(),
+  manifestEtag: text("manifest_etag"),
+  manifestVersionId: text("manifest_version_id"),
+  sourceUpdatedAt: text("source_updated_at"),
+  observedAt: text("observed_at").notNull(),
+  activeGenerationId: text("active_generation_id"),
+  activeManifestSha256: text("active_manifest_sha256"),
+  activeManifestVersionId: text("active_manifest_version_id"),
+  activeSourceTable: text("active_source_table"),
+  activeSourceFormat: text("active_source_format"),
+  activeSourceVersion: text("active_source_version"),
+  activeSourceUpdatedAt: text("active_source_updated_at"),
+  activeObservedAt: text("active_observed_at"),
+  activeAcceptedRows: integer("active_accepted_rows"),
+  activeRejectedRows: integer("active_rejected_rows"),
+  activeCurrencyTotalsJson: text("active_currency_totals_json"),
+  activeCommittedAt: text("active_committed_at"),
+  stagingGenerationId: text("staging_generation_id"),
+  stagingManifestSha256: text("staging_manifest_sha256"),
+  acceptedRows: integer("accepted_rows").notNull().default(0),
+  rejectedRows: integer("rejected_rows").notNull().default(0),
+  fileCount: integer("file_count").notNull(),
+  columnsJson: text("columns_json").notNull(),
+  dataFilesJson: text("data_files_json").notNull(),
+  currencyTotalsJson: text("currency_totals_json"),
+  lastErrorCode: text("last_error_code"),
+  lastErrorAt: text("last_error_at"),
+  committedAt: text("committed_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_export_partitions_scope_uq")
+    .on(table.orgId, table.customerId, table.connectionId, table.exportName, table.billingPeriod),
+  index("finops_export_partitions_health_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.status, table.observedAt),
+]);
+
+/** Queryable canonical billing facts. canonicalJson preserves every normalized
+ * source dimension while common groupings remain indexed columns. */
+export const finopsBillingLinesV2 = sqliteTable("finops_billing_lines_v2", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  exportName: text("export_name").notNull(),
+  billingPeriod: text("billing_period").notNull(),
+  generationId: text("generation_id").notNull(),
+  sourceFormat: text("source_format").notNull(),
+  sourceVersion: text("source_version").notNull(),
+  lineItemId: text("line_item_id").notNull(),
+  payerAccountId: text("payer_account_id"),
+  usageAccountId: text("usage_account_id").notNull(),
+  service: text("service").notNull(),
+  productCode: text("product_code"),
+  productName: text("product_name"),
+  productFamily: text("product_family"),
+  resourceId: text("resource_id"),
+  resourceType: text("resource_type"),
+  region: text("region"),
+  availabilityZone: text("availability_zone"),
+  operation: text("operation"),
+  usageType: text("usage_type"),
+  chargeKind: text("charge_kind").notNull(),
+  chargeCategory: text("charge_category").notNull(),
+  usageStart: text("usage_start").notNull(),
+  usageEnd: text("usage_end"),
+  amountMicros: text("amount_micros").notNull(),
+  netUnblendedCostMicros: text("net_unblended_cost_micros"),
+  amortizedMicros: text("amortized_micros"),
+  listCostMicros: text("list_cost_micros"),
+  contractedCostMicros: text("contracted_cost_micros"),
+  publicOnDemandCostMicros: text("public_on_demand_cost_micros"),
+  currency: text("currency").notNull(),
+  commitmentType: text("commitment_type"),
+  commitmentId: text("commitment_id"),
+  commitmentExpiry: text("commitment_expiry"),
+  invoiceId: text("invoice_id"),
+  billingEntity: text("billing_entity"),
+  legalEntity: text("legal_entity"),
+  tagsJson: text("tags_json").notNull().default("{}"),
+  costCategoriesJson: text("cost_categories_json").notNull().default("{}"),
+  canonicalJson: text("canonical_json").notNull(),
+  createdAt: text("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_billing_lines_v2_generation_line_uq")
+    .on(table.orgId, table.customerId, table.connectionId, table.exportName, table.billingPeriod, table.generationId, table.lineItemId),
+  index("finops_billing_lines_v2_query_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.billingPeriod, table.generationId, table.service, table.usageAccountId),
+  index("finops_billing_lines_v2_resource_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.resourceId, table.billingPeriod),
 ]);
 
 /** Time-bounded, finding-specific compliance risk acceptance workflow. */
@@ -1136,4 +1252,280 @@ export const scimAuditEvents = sqliteTable("scim_audit_events", {
 }, (table) => [
   uniqueIndex("scim_audit_events_org_request_uq").on(table.orgId, table.requestId),
   index("scim_audit_events_scope_time_idx").on(table.orgId, table.occurredAt, table.id),
+]);
+
+/** Immutable, generation-independent tenant KPI goal versions. */
+export const finopsKpiGoalVersions = sqliteTable("finops_kpi_goal_versions", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  kpiId: text("kpi_id").notNull(),
+  version: integer("version").notNull(),
+  targetDirection: text("target_direction", {
+    enum: ["higher_is_better", "lower_is_better"],
+  }).notNull(),
+  targetBasisPoints: integer("target_basis_points").notNull(),
+  effectiveFrom: text("effective_from").notNull(),
+  effectiveTo: text("effective_to"),
+  actorId: text("actor_id").notNull(),
+  auditReference: text("audit_reference").notNull(),
+  rbacDecisionId: text("rbac_decision_id").notNull(),
+  rbacDecision: text("rbac_decision", { enum: ["allow"] }).notNull(),
+  rbacAction: text("rbac_action", { enum: ["finops:kpi-goal:write"] }).notNull(),
+  rbacResource: text("rbac_resource").notNull(),
+  rbacActorId: text("rbac_actor_id").notNull(),
+  rbacDecidedAt: text("rbac_decided_at").notNull(),
+  rbacPolicyVersion: text("rbac_policy_version").notNull(),
+  rbacEvidenceReference: text("rbac_evidence_reference").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_kpi_goal_versions_scope_version_uq")
+    .on(table.orgId, table.customerId, table.connectionId, table.kpiId, table.version),
+  index("finops_kpi_goal_versions_scope_effective_idx")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.kpiId,
+      table.effectiveFrom,
+      table.effectiveTo,
+      table.version,
+    ),
+]);
+
+/** Immutable organization taxonomy publication; only the head pointer mutates. */
+export const finopsTaxonomySnapshots = sqliteTable("finops_taxonomy_snapshots", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  version: integer("version").notNull(),
+  source: text("source", {
+    enum: ["aws_organizations", "operator_map", "cmdb"],
+  }).notNull(),
+  sourceEvidenceId: text("source_evidence_id").notNull(),
+  observedAt: text("observed_at").notNull(),
+  createdBy: text("created_by").notNull(),
+  auditReference: text("audit_reference").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_taxonomy_snapshots_scope_version_uq")
+    .on(table.orgId, table.customerId, table.connectionId, table.version),
+  index("finops_taxonomy_snapshots_scope_time_idx")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.observedAt,
+      table.version,
+    ),
+]);
+
+export const finopsTaxonomyAssignments = sqliteTable("finops_taxonomy_assignments", {
+  snapshotId: text("snapshot_id").notNull().references(() => finopsTaxonomySnapshots.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  accountId: text("account_id").notNull(),
+  company: text("company"),
+  businessUnit: text("business_unit"),
+  environment: text("environment"),
+  costCenter: text("cost_center"),
+  owner: text("owner"),
+}, (table) => [
+  uniqueIndex("finops_taxonomy_assignments_snapshot_account_uq")
+    .on(table.snapshotId, table.accountId),
+  index("finops_taxonomy_assignments_scope_account_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.accountId, table.snapshotId),
+]);
+
+export const finopsTaxonomyAllowedValues = sqliteTable("finops_taxonomy_allowed_values", {
+  snapshotId: text("snapshot_id").notNull().references(() => finopsTaxonomySnapshots.id),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  dimension: text("dimension", {
+    enum: ["company", "business_unit", "environment", "cost_center", "account"],
+  }).notNull(),
+  value: text("value").notNull(),
+}, (table) => [
+  uniqueIndex("finops_taxonomy_allowed_values_snapshot_dimension_value_uq")
+    .on(table.snapshotId, table.dimension, table.value),
+  index("finops_taxonomy_allowed_values_scope_dimension_idx")
+    .on(table.orgId, table.customerId, table.connectionId, table.dimension, table.value, table.snapshotId),
+]);
+
+export const finopsTaxonomyHeads = sqliteTable("finops_taxonomy_heads", {
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  snapshotId: text("snapshot_id").notNull().references(() => finopsTaxonomySnapshots.id),
+  promotedBy: text("promoted_by").notNull(),
+  promotedAt: integer("promoted_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_taxonomy_heads_scope_uq")
+    .on(table.orgId, table.customerId, table.connectionId),
+  uniqueIndex("finops_taxonomy_heads_snapshot_uq").on(table.snapshotId),
+]);
+
+/**
+ * Durable Data Collection Monitor attempt ledger. Identity is immutable after
+ * insertion; repository and database guards allow only bounded lifecycle
+ * transitions from queued to running to one terminal status.
+ */
+export const finopsSourceJobAttempts = sqliteTable("finops_source_job_attempts", {
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  sourceId: text("source_id").notNull(),
+  jobId: text("job_id").notNull(),
+  attempt: integer("attempt").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  status: text("status", {
+    enum: ["queued", "running", "succeeded", "partial", "failed", "cancelled"],
+  }).notNull(),
+  queuedAt: text("queued_at").notNull(),
+  startedAt: text("started_at"),
+  finishedAt: text("finished_at"),
+  acceptedRecords: integer("accepted_records"),
+  rejectedRecords: integer("rejected_records"),
+  expectedRecords: integer("expected_records"),
+  processedBytes: integer("processed_bytes"),
+  reconciliationOutcome: text("reconciliation_outcome", {
+    enum: ["matched", "mismatched"],
+  }),
+  reconciliationEvidenceReference: text("reconciliation_evidence_reference"),
+  errorCode: text("error_code", {
+    enum: [
+      "AUTHORIZATION_FAILED",
+      "SOURCE_UNAVAILABLE",
+      "THROTTLED",
+      "TIMEOUT",
+      "SCHEMA_MISMATCH",
+      "RECONCILIATION_FAILED",
+      "CANCELLED",
+      "INTERNAL_ERROR",
+    ],
+  }),
+  errorMessage: text("error_message"),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_source_job_attempts_identity_uq")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.jobId,
+      table.attempt,
+    ),
+  uniqueIndex("finops_source_job_attempts_scope_idempotency_uq")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.idempotencyKey,
+    ),
+  index("finops_source_job_attempts_scope_page_idx")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.queuedAt,
+      table.sourceId,
+      table.jobId,
+      table.attempt,
+    ),
+  index("finops_source_job_attempts_scope_source_health_idx")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.status,
+      table.queuedAt,
+    ),
+]);
+
+/**
+ * Immutable normalized source-generation evidence. Provider payloads are never
+ * stored here: evidenceReferenceCiphertext is an application-sealed pointer to
+ * the private evidence object, and the active head is the only mutable record.
+ */
+export const finopsSourceSnapshots = sqliteTable("finops_source_snapshots", {
+  generationId: text("generation_id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  sourceId: text("source_id").notNull(),
+  jobId: text("job_id").notNull(),
+  attempt: integer("attempt").notNull(),
+  status: text("status", {
+    enum: ["ready", "complete", "partial", "failed", "stale"],
+  }).notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  schemaVersion: text("schema_version").notNull(),
+  collectedAt: text("collected_at").notNull(),
+  dataThroughAt: text("data_through_at").notNull(),
+  coverageAssessment: text("coverage_assessment", {
+    enum: ["complete", "partial", "unknown"],
+  }).notNull(),
+  coverageExpectedRecords: integer("coverage_expected_records"),
+  coverageObservedRecords: integer("coverage_observed_records").notNull(),
+  coverageMissingRecords: integer("coverage_missing_records"),
+  reconciliationExpectedRecords: integer("reconciliation_expected_records"),
+  reconciliationAcceptedRecords: integer("reconciliation_accepted_records").notNull(),
+  reconciliationRejectedRecords: integer("reconciliation_rejected_records").notNull(),
+  reconciliationOutcome: text("reconciliation_outcome", {
+    enum: ["matched", "mismatched", "not_run"],
+  }).notNull(),
+  evidenceReferenceCiphertext: text("evidence_reference_ciphertext").notNull(),
+  evidenceReferenceKeyVersion: text("evidence_reference_key_version").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_source_snapshots_scope_generation_uq")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.generationId,
+    ),
+  uniqueIndex("finops_source_snapshots_scope_job_attempt_uq")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.jobId,
+      table.attempt,
+    ),
+  index("finops_source_snapshots_scope_source_time_idx")
+    .on(
+      table.orgId,
+      table.customerId,
+      table.connectionId,
+      table.sourceId,
+      table.dataThroughAt,
+      table.collectedAt,
+      table.generationId,
+    ),
+]);
+
+/** Atomically advanced pointer to the latest accepted generation per source. */
+export const finopsSourceSnapshotHeads = sqliteTable("finops_source_snapshot_heads", {
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  sourceId: text("source_id").notNull(),
+  activeGenerationId: text("active_generation_id").notNull()
+    .references(() => finopsSourceSnapshots.generationId),
+  advancedAt: integer("advanced_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_source_snapshot_heads_scope_uq")
+    .on(table.orgId, table.customerId, table.connectionId, table.sourceId),
+  uniqueIndex("finops_source_snapshot_heads_generation_uq")
+    .on(table.activeGenerationId),
 ]);

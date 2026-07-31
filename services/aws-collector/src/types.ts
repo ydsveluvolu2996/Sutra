@@ -23,6 +23,14 @@ export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
  */
 export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.4" as const;
 /**
+ * Separately published successor ceiling used only by the Foundational FinOps
+ * object broker. It is intentionally not CURRENT_PERMISSION_PACK_VERSION:
+ * regular inventory/onboarding remains pinned to .4 until the whole product
+ * permission pack is promoted. The successor grants no S3/Data Exports reads
+ * by itself; an independently attested immutable add-on is mandatory.
+ */
+export const FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.1" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -35,10 +43,62 @@ export const OLDER_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
 export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION
   | typeof LEGACY_PERMISSION_PACK_VERSION;
+
+export type FoundationalFinopsContractId =
+  | "foundational-cur2-export-v1"
+  | "foundational-focus12-export-v1";
+
+/**
+ * Server-owned copy of immutable CloudFormation outputs. This value is never
+ * accepted from a collector request. It binds an add-on policy to one tenant,
+ * connection, account, export, bucket and prefix.
+ */
+export interface FoundationalFinopsAddOnContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly contractId: FoundationalFinopsContractId;
+  readonly exportTable: "COST_AND_USAGE_REPORT" | "FOCUS_1_2_AWS";
+  readonly policyName:
+    | "SutraFoundationalCur2ReadV1"
+    | "SutraFoundationalFocus12ReadV1";
+  readonly region: string;
+  readonly bucket: string;
+  readonly prefix: string;
+  readonly exportName: string;
+  readonly exportArn: string;
+}
+
+export interface FoundationalFinopsBindingRequest {
+  readonly contractId: FoundationalFinopsContractId;
+  readonly exportName: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly prefix: string;
+}
+
+/**
+ * Immutable, server-owned identity for one AWS FinOps source integration.
+ *
+ * Requests carry only `contractId`. AWS operations, endpoints, account scope,
+ * partition and region are all derived from this persisted contract and the
+ * collector's compiled source catalog.
+ */
+export interface FinopsSourceContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly contractId: string;
+  readonly sourceId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly permissionContractId: string | null;
+  readonly policyName: string | null;
+}
 
 export type AwsConnectionStatus =
   | "PENDING"
@@ -81,6 +141,16 @@ export interface StoredAwsConnection {
   readonly roleProvisioningMode?: AwsRoleProvisioningMode;
   readonly expectedRolePath?: string;
   readonly expectedRoleName?: string;
+  /**
+   * Optional for old records and for successor records awaiting operator
+   * attestation. Missing is fail-closed on every FinOps object request.
+   */
+  readonly foundationalFinopsContracts?: readonly FoundationalFinopsAddOnContract[];
+  /**
+   * Persisted by the trusted control plane. Public collector requests cannot
+   * create or modify these source bindings.
+   */
+  readonly finopsSourceContracts?: readonly FinopsSourceContract[];
 }
 
 export interface ScopedConnectionRegistry {

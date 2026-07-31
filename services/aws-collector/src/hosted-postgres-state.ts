@@ -243,6 +243,20 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
       const timestamp = new Date(this.now()).toISOString();
       return {
         ...candidate,
+        ...(unchanged && previous.foundationalFinopsContracts !== undefined
+          ? {
+              foundationalFinopsContracts: structuredClone(
+                previous.foundationalFinopsContracts,
+              ),
+            }
+          : {}),
+        ...(unchanged && previous.finopsSourceContracts !== undefined
+          ? {
+              finopsSourceContracts: structuredClone(
+                previous.finopsSourceContracts,
+              ),
+            }
+          : {}),
         status: unchanged ? previous.status : "PENDING",
         permissionPackVersion: unchanged
           ? previous.permissionPackVersion

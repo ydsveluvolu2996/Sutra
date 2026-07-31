@@ -23,11 +23,14 @@ import type {
 } from "./types.js";
 import {
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
   PRIOR_PERMISSION_PACK_VERSION,
 } from "./types.js";
+import { parseFoundationalFinopsContracts } from "./finops-permission-contract.js";
+import { parseFinopsSourceContracts } from "./finops-source-contract.js";
 import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
@@ -140,6 +143,12 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ...(connection.sessionNamePrefix === undefined
         ? {}
         : { sessionNamePrefix: connection.sessionNamePrefix }),
+      ...(connection.foundationalFinopsContracts === undefined
+        ? {}
+        : { foundationalFinopsContracts: structuredClone(connection.foundationalFinopsContracts) }),
+      ...(connection.finopsSourceContracts === undefined
+        ? {}
+        : { finopsSourceContracts: structuredClone(connection.finopsSourceContracts) }),
     };
   }
 
@@ -191,6 +200,20 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
           ...document.connections,
           [key]: {
             ...parsed,
+            ...(unchanged && previous.foundationalFinopsContracts !== undefined
+              ? {
+                  foundationalFinopsContracts: structuredClone(
+                    previous.foundationalFinopsContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.finopsSourceContracts !== undefined
+              ? {
+                  finopsSourceContracts: structuredClone(
+                    previous.finopsSourceContracts,
+                  ),
+                }
+              : {}),
             status: unchanged ? previous.status : "PENDING",
             permissionPackVersion: unchanged
               ? previous.permissionPackVersion
@@ -699,14 +722,20 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     "expectedRolePath",
     "expectedRoleName",
   ];
-  const record = exactRecord(
-    value,
-    Object.hasOwn(value, "roleProvisioningMode")
+  const selectedKeys = Object.hasOwn(value, "roleProvisioningMode")
       ? roleContractKeys
       : Object.hasOwn(value, "permissionPackVersion")
         ? currentKeys
-        : legacyKeys,
-  );
+        : legacyKeys;
+  const optionalContractKeys = [
+    ...(Object.hasOwn(value, "foundationalFinopsContracts")
+      ? ["foundationalFinopsContracts"]
+      : []),
+    ...(Object.hasOwn(value, "finopsSourceContracts")
+      ? ["finopsSourceContracts"]
+      : []),
+  ];
+  const record = exactRecord(value, [...selectedKeys, ...optionalContractKeys]);
   if (
     typeof record.tenantId !== "string" ||
     typeof record.connectionId !== "string" ||
@@ -758,14 +787,53 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     permissionPackVersion !== OLDER_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PRIOR_PERMISSION_PACK_VERSION &&
-    permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
+    permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
+  }
+  let foundationalFinopsContracts;
+  if (Object.hasOwn(record, "foundationalFinopsContracts")) {
+    try {
+      foundationalFinopsContracts = parseFoundationalFinopsContracts(
+        record.foundationalFinopsContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
+  let finopsSourceContracts;
+  if (Object.hasOwn(record, "finopsSourceContracts")) {
+    try {
+      finopsSourceContracts = parseFinopsSourceContracts(
+        record.finopsSourceContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
   }
   return {
     ...parsed,
     status: record.status,
     permissionPackVersion,
+    ...(foundationalFinopsContracts === undefined
+      ? {}
+      : { foundationalFinopsContracts }),
+    ...(finopsSourceContracts === undefined
+      ? {}
+      : { finopsSourceContracts }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

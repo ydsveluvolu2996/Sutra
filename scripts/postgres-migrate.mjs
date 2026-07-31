@@ -84,6 +84,11 @@ const migrationFiles = [
   "0070_managed_evidence_objects.sql",
   "0071_itsm_delivery_evidence.sql",
   "0072_ses_delivery_feedback.sql",
+  "0073_finops_billing_engine_v2.sql",
+  "0074_finops_foundational_config.sql",
+  "0075_finops_source_job_ledger.sql",
+  "0076_finops_source_snapshots.sql",
+  "0077_finops_source_evidence_artifact.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

@@ -32,6 +32,9 @@ import {
   type AwsTemporaryCredentials,
   type CallerIdentityClientFactory,
   type ConnectionScope,
+  type FoundationalFinopsAddOnContract,
+  type FoundationalFinopsBindingRequest,
+  type FinopsSourceContract,
   type NegativeExternalIdProbe,
   type OnboardingTrustVerification,
   type ParsedIamRoleArn,
@@ -42,7 +45,19 @@ import {
   type StoredAwsConnection,
   type ValidatedRoleSession,
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
 } from "./types.js";
+import {
+  foundationalFinopsObjectArn,
+  parseFoundationalFinopsContracts,
+  resolveFoundationalFinopsContract,
+} from "./finops-permission-contract.js";
+import {
+  actionsForFinopsSourceContracts,
+  FINOPS_SOURCE_DEFINITIONS,
+  parseFinopsSourceContracts,
+  resolveFinopsSourceContract,
+} from "./finops-source-contract.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -71,6 +86,15 @@ const UNSAFE_SHARED_ROLE_NAME =
   /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
 const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
+const FINOPS_PERMISSION_PACK_VERSION = FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION;
+const FINOPS_CEILING_ACTIONS = [
+  "s3:ListBucket",
+  "s3:GetBucketLocation",
+  "s3:GetObject",
+  "s3:GetObjectAttributes",
+  "bcm-data-exports:ListExports",
+  "bcm-data-exports:GetExport",
+] as const;
 export const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:DescribeRegions",
@@ -384,6 +408,70 @@ export function agentlessSnapshotSessionPolicy(roleArn: string): string {
   return policy;
 }
 
+/**
+ * Per-export STS intersection for the object broker. It intentionally excludes
+ * ListBucket, bucket-location and Data Exports APIs: the chunk path needs only
+ * the pinned object plus the four IAM calls required to re-attest the role.
+ */
+export function finopsDataExportSessionPolicy(
+  roleArn: string,
+  contract: FoundationalFinopsAddOnContract,
+): string {
+  const parsed = parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: TRUST_ATTESTATION_ACTIONS,
+        Resource: roleArn,
+      },
+      {
+        Effect: "Allow",
+        Action: ["s3:GetObject", "s3:GetObjectAttributes"],
+        Resource: foundationalFinopsObjectArn(contract, parsed.partition),
+      },
+    ],
+  });
+  if (policy.length > 900) {
+    throw new ConnectionIntegrityError("The FinOps STS session policy exceeds its safe limit");
+  }
+  return policy;
+}
+
+/** Exact STS intersection for one attested server-owned FinOps source. */
+export function finopsSourceSessionPolicy(
+  roleArn: string,
+  contract: FinopsSourceContract,
+): string {
+  parseIamRoleArn(roleArn);
+  const definition = FINOPS_SOURCE_DEFINITIONS[
+    contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+  ];
+  if (
+    definition === undefined ||
+    definition.implementationState !== "IMPLEMENTED" ||
+    definition.permissionContractId !== contract.permissionContractId ||
+    definition.policyName !== contract.policyName ||
+    definition.actions.length === 0
+  ) {
+    throw new ConnectionIntegrityError("The FinOps source permission contract is invalid");
+  }
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      { Effect: "Allow", Action: TRUST_ATTESTATION_ACTIONS, Resource: roleArn },
+      { Effect: "Allow", Action: definition.actions, Resource: "*" },
+    ],
+  });
+  if (policy.length > 900) {
+    throw new ConnectionIntegrityError("The FinOps source STS session policy exceeds its safe limit");
+  }
+  return policy;
+}
+
 type JsonRecord = Record<string, unknown>;
 
 function record(value: unknown): JsonRecord {
@@ -465,6 +553,10 @@ function assertExpectedPermissionPolicy(
   value: string | undefined,
   roleArn: string,
   provisioningMode: AwsRoleProvisioningMode,
+  permissionPackVersion:
+    | typeof PERMISSION_PACK_VERSION
+    | typeof FINOPS_PERMISSION_PACK_VERSION = PERMISSION_PACK_VERSION,
+  additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
   exactKeys(document, ["Version", "Statement"]);
@@ -488,7 +580,14 @@ function assertExpectedPermissionPolicy(
     ceiling.Resource !== "*" ||
     !sameStringSet(
       stringList(ceiling.NotAction),
-      [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
+      [
+        ...IMPLEMENTED_READ_ACTIONS,
+        ...TRUST_ATTESTATION_ACTIONS,
+        ...(permissionPackVersion === FINOPS_PERMISSION_PACK_VERSION
+          ? FINOPS_CEILING_ACTIONS
+          : []),
+        ...additionalCeilingActions,
+      ],
     ) ||
     metadata.Effect !== "Allow" ||
     metadata.Resource !== "*" ||
@@ -509,10 +608,44 @@ function assertExpectedPermissionPolicy(
   };
 }
 
+function assertFinopsSourcePolicy(
+  value: string | undefined,
+  contract: FinopsSourceContract,
+): void {
+  const definition = FINOPS_SOURCE_DEFINITIONS[
+    contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+  ];
+  if (
+    definition === undefined ||
+    definition.implementationState !== "IMPLEMENTED" ||
+    definition.permissionContractId !== contract.permissionContractId ||
+    definition.policyName !== contract.policyName ||
+    definition.actions.length === 0
+  ) throw new Error("unsupported FinOps source permission contract");
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== 1
+  ) throw new Error("unexpected FinOps source policy shape");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    statement.Sid !== "ExactFinopsSourceRead" ||
+    statement.Effect !== "Allow" ||
+    statement.Resource !== "*" ||
+    !sameStringSet(stringList(statement.Action), definition.actions)
+  ) throw new Error("unexpected FinOps source permission policy");
+}
+
 function assertExpectedRole(
   role: Awaited<ReturnType<RoleContractClient["getRole"]>>,
   resolved: ResolvedConnection,
   expectedPrincipalArn: string,
+  permissionPackVersion:
+    | typeof PERMISSION_PACK_VERSION
+    | typeof FINOPS_PERMISSION_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -534,7 +667,7 @@ function assertExpectedRole(
   }
   if (
     tags.get("sutra:access-mode") !== "read-only" ||
-    tags.get("sutra:permission-pack") !== PERMISSION_PACK_VERSION ||
+    tags.get("sutra:permission-pack") !== permissionPackVersion ||
     tags.get("sutra:managed-by") !==
       (resolved.roleProvisioningMode === "sutra_template" ? "cloudformation" : "customer")
   ) {
@@ -546,6 +679,105 @@ function assertExpectedRole(
     resolved.sessionNamePrefix,
     expectedPrincipalArn,
   );
+}
+
+function assertFoundationalFinopsPolicy(
+  value: string | undefined,
+  contract: FoundationalFinopsAddOnContract,
+  partition: AwsPartition,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  const expectedCount =
+    contract.contractId === "foundational-cur2-export-v1" ? 5 : 4;
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== expectedCount
+  ) {
+    throw new Error("unexpected Foundational FinOps policy shape");
+  }
+  const statements = document.Statement.map(record);
+  const statement = (sid: string): JsonRecord => {
+    const matches = statements.filter((candidate) => candidate.Sid === sid);
+    if (matches.length !== 1) throw new Error("missing or duplicate FinOps statement");
+    return matches[0] as JsonRecord;
+  };
+  const bucketArn = `arn:${partition}:s3:::${contract.bucket}`;
+  const objectArn = foundationalFinopsObjectArn(contract, partition);
+  const prefixRoot = contract.prefix.slice(0, -1);
+
+  const listSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ListOnlyExactFoundationalExportPrefix"
+    : "ListOnlyExactFocus12ExportPrefix";
+  const list = statement(listSid);
+  exactKeys(list, ["Sid", "Effect", "Action", "Resource", "Condition"]);
+  const condition = record(list.Condition);
+  exactKeys(condition, ["StringLike"]);
+  const like = record(condition.StringLike);
+  exactKeys(like, ["s3:prefix"]);
+  if (
+    list.Effect !== "Allow" ||
+    !sameStringSet(stringList(list.Action), ["s3:ListBucket"]) ||
+    list.Resource !== bucketArn ||
+    !sameStringSet(stringList(like["s3:prefix"]), [prefixRoot, `${prefixRoot}/*`])
+  ) {
+    throw new Error("unexpected FinOps list permission");
+  }
+
+  const locationSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadDedicatedBucketLocation"
+    : "ReadDedicatedFocus12BucketLocation";
+  const location = statement(locationSid);
+  exactKeys(location, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    location.Effect !== "Allow" ||
+    !sameStringSet(stringList(location.Action), ["s3:GetBucketLocation"]) ||
+    location.Resource !== bucketArn
+  ) {
+    throw new Error("unexpected FinOps bucket permission");
+  }
+
+  const objectSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadOnlyExactFoundationalExportObjects"
+    : "ReadOnlyExactFocus12ExportObjects";
+  const objects = statement(objectSid);
+  exactKeys(objects, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    objects.Effect !== "Allow" ||
+    !sameStringSet(
+      stringList(objects.Action),
+      ["s3:GetObject", "s3:GetObjectAttributes"],
+    ) ||
+    objects.Resource !== objectArn
+  ) {
+    throw new Error("unexpected FinOps object permission");
+  }
+
+  if (contract.contractId === "foundational-cur2-export-v1") {
+    const listExports = statement("ListDataExports");
+    exactKeys(listExports, ["Sid", "Effect", "Action", "Resource"]);
+    if (
+      listExports.Effect !== "Allow" ||
+      !sameStringSet(stringList(listExports.Action), ["bcm-data-exports:ListExports"]) ||
+      listExports.Resource !== "*"
+    ) {
+      throw new Error("unexpected Data Exports list permission");
+    }
+  }
+
+  const exportSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadOnlyThisDataExport"
+    : "ReadOnlyThisFocus12ExportStatus";
+  const dataExport = statement(exportSid);
+  exactKeys(dataExport, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    dataExport.Effect !== "Allow" ||
+    !sameStringSet(stringList(dataExport.Action), ["bcm-data-exports:GetExport"]) ||
+    dataExport.Resource !== contract.exportArn
+  ) {
+    throw new Error("unexpected Data Export permission");
+  }
 }
 
 async function allInlinePolicyNames(
@@ -650,6 +882,131 @@ export class AwsRoleBroker {
     // Re-attest on every collection so customer-side role drift cannot silently
     // expand the compact read-family session cap.
     await this.attestRoleContract(resolved, validated.credentials);
+    return validated;
+  }
+
+  /**
+   * Successor-only session for one immutable Foundational FinOps export.
+   * The request is matched against server-owned CloudFormation outputs before
+   * STS, then both the .8.1 base policy and every recorded add-on are attested.
+   */
+  public async assumeValidatedFinopsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: FoundationalFinopsBindingRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      resolved.connection.permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION ||
+      resolved.connection.foundationalFinopsContracts === undefined
+    ) {
+      throw new ConnectionStateError();
+    }
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let contracts: readonly FoundationalFinopsAddOnContract[];
+    let sourceContracts: readonly FinopsSourceContract[];
+    let contract: FoundationalFinopsAddOnContract;
+    try {
+      contracts = parseFoundationalFinopsContracts(
+        resolved.connection.foundationalFinopsContracts,
+        owner,
+      );
+      contract = resolveFoundationalFinopsContract(contracts, owner, request);
+      sourceContracts = resolved.connection.finopsSourceContracts === undefined
+        ? []
+        : parseFinopsSourceContracts(
+            resolved.connection.finopsSourceContracts,
+            owner,
+          );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "Stored Foundational FinOps binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      jobId,
+      (roleArn) => finopsDataExportSessionPolicy(roleArn, contract),
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      contracts,
+      sourceContracts,
+    );
+    return validated;
+  }
+
+  /**
+   * Successor-only session for one persisted FinOps source identity. The caller
+   * supplies only the opaque contract ID; source actions and endpoint scope are
+   * recovered from encrypted registry state and the compiled source catalog.
+   */
+  public async assumeValidatedFinopsSourceSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    contractId: string,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      resolved.connection.permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION ||
+      resolved.connection.finopsSourceContracts === undefined
+    ) throw new ConnectionStateError();
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let sourceContracts: readonly FinopsSourceContract[];
+    let foundationalContracts: readonly FoundationalFinopsAddOnContract[];
+    let contract: FinopsSourceContract | null;
+    try {
+      sourceContracts = parseFinopsSourceContracts(
+        resolved.connection.finopsSourceContracts,
+        owner,
+      );
+      contract = resolveFinopsSourceContract(sourceContracts, owner, contractId);
+      foundationalContracts = resolved.connection.foundationalFinopsContracts === undefined
+        ? []
+        : parseFoundationalFinopsContracts(
+            resolved.connection.foundationalFinopsContracts,
+            owner,
+          );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "Stored FinOps source binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    if (contract === null) throw new ConnectionStateError();
+    const definition = FINOPS_SOURCE_DEFINITIONS[
+      contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+    ];
+    if (definition?.implementationState !== "IMPLEMENTED") {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      jobId,
+      (roleArn) => finopsSourceSessionPolicy(roleArn, contract),
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      foundationalContracts,
+      sourceContracts,
+    );
     return validated;
   }
 
@@ -788,6 +1145,96 @@ export class AwsRoleBroker {
       // reason entirely makes an attestation regression undiagnosable — the whole
       // contract check collapses to one opaque string. Keep it as a cause, which
       // reaches server logs and test output and never the response body.
+      (failure as { cause?: unknown }).cause = reason;
+      throw failure;
+    }
+  }
+
+  private async attestFinopsRoleContract(
+    resolved: ResolvedConnection,
+    credentials: AwsTemporaryCredentials,
+    contracts: readonly FoundationalFinopsAddOnContract[],
+    suppliedSourceContracts?: readonly FinopsSourceContract[],
+  ): Promise<void> {
+    try {
+      const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
+      if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
+        throw new Error("principal partition mismatch");
+      }
+      const client = this.dependencies.roleContractClientFactory(credentials);
+      const owner = {
+        tenantId: resolved.connection.tenantId,
+        connectionId: resolved.connection.connectionId,
+        expectedAccountId: resolved.connection.expectedAccountId,
+        partition: resolved.parsedRoleArn.partition,
+      } as const;
+      const sourceContracts = suppliedSourceContracts ??
+        (resolved.connection.finopsSourceContracts === undefined
+          ? []
+          : parseFinopsSourceContracts(
+              resolved.connection.finopsSourceContracts,
+              owner,
+            ));
+      const role = await client.getRole(resolved.parsedRoleArn.roleName);
+      assertExpectedRole(
+        role,
+        resolved,
+        expectedPrincipal.arn,
+        FINOPS_PERMISSION_PACK_VERSION,
+      );
+      const attachedPolicies = await allAttachedManagedPolicies(
+        client,
+        resolved.parsedRoleArn.roleName,
+      );
+      if (attachedPolicies.length !== 0) {
+        throw new Error("attached managed policies are prohibited");
+      }
+      const policyNames = await allInlinePolicyNames(
+        client,
+        resolved.parsedRoleArn.roleName,
+      );
+      const expectedPolicyNames = [
+        EXPECTED_POLICY_NAME,
+        ...contracts.map(({ policyName }) => policyName),
+        ...sourceContracts.flatMap(({ policyName }) =>
+          policyName === null ? [] : [policyName]
+        ),
+      ];
+      if (!sameStringSet(policyNames, expectedPolicyNames)) {
+        throw new Error("unexpected inline policy set");
+      }
+      const basePolicy = await client.getRolePolicy(
+        resolved.parsedRoleArn.roleName,
+        EXPECTED_POLICY_NAME,
+      );
+      assertExpectedPermissionPolicy(
+        basePolicy.policyDocument,
+        resolved.connection.roleArn,
+        resolved.roleProvisioningMode,
+        FINOPS_PERMISSION_PACK_VERSION,
+        actionsForFinopsSourceContracts(sourceContracts),
+      );
+      for (const contract of contracts) {
+        const policy = await client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,
+          contract.policyName,
+        );
+        assertFoundationalFinopsPolicy(
+          policy.policyDocument,
+          contract,
+          resolved.parsedRoleArn.partition,
+        );
+      }
+      for (const contract of sourceContracts) {
+        if (contract.policyName === null) continue;
+        const policy = await client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,
+          contract.policyName,
+        );
+        assertFinopsSourcePolicy(policy.policyDocument, contract);
+      }
+    } catch (reason) {
+      const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
       (failure as { cause?: unknown }).cause = reason;
       throw failure;
     }

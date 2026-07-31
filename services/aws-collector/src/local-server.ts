@@ -82,6 +82,7 @@ import { LIVE_AWS_BROKER_TIMEOUT_MS } from "./live-collection-limits.js";
 import {
   CollectorError,
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type InventoryCollectorCoverage,
@@ -94,6 +95,17 @@ import {
   type SafeJsonValue,
 } from "./types.js";
 import { isValidAwsRegionSelection } from "./aws-region-selection.js";
+import {
+  createAwsFinopsExportChunkClient,
+  parseFinopsExportChunkRequest,
+  readFinopsExportChunk,
+  type FinopsExportChunkClientFactory,
+} from "./finops-export-chunk.js";
+import {
+  executeFinopsSourceDispatch,
+  parseFinopsSourceDispatchRequest,
+  type FinopsSourceDispatchRequest,
+} from "./finops-source-runner.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -107,7 +119,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|finops-source|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -195,6 +207,11 @@ export interface LocalCollectorServerOptions {
       readonly detail: string;
     }): Promise<void>;
   };
+  /**
+   * Broker-only S3 range client. Hosted production uses the AWS SDK; tests may
+   * inject a deterministic client. The web/control-plane never receives this.
+   */
+  readonly finopsExportChunkClientFactory?: FinopsExportChunkClientFactory;
 }
 
 export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
@@ -267,6 +284,7 @@ interface ServerContext {
   readonly hostedAgentlessPlanProfile?: LocalCollectorServerOptions["hostedAgentlessPlanProfile"];
   readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
   readonly agentlessCleanupLedger?: LocalCollectorServerOptions["agentlessCleanupLedger"];
+  readonly finopsExportChunkClientFactory: FinopsExportChunkClientFactory;
 }
 
 interface LocalJobsContext {
@@ -381,6 +399,8 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     ...(options.agentlessCleanupLedger === undefined
       ? {}
       : { agentlessCleanupLedger: options.agentlessCleanupLedger }),
+    finopsExportChunkClientFactory:
+      options.finopsExportChunkClientFactory ?? createAwsFinopsExportChunkClient,
   };
 
   const server = createServer((request, response) => {
@@ -1271,6 +1291,20 @@ async function route(
       const eventJob = parseSecurityEventJob(body, pathConnectionId, context.now());
       return { status: 200, body: await collectConnectionSecurityEvents(context, eventJob) };
     }
+    if (action === "finops-export-chunk") {
+      const request = parseFinopsExportChunkRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectFinopsExportChunk(context, request),
+      };
+    }
+    if (action === "finops-source") {
+      const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectFinopsSource(context, request),
+      };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
       return { status: 200, body: await attestOnboardingTrust(context, job) };
@@ -1285,6 +1319,113 @@ async function route(
   }
 
   throw new LocalHttpError(404, "INVALID_REQUEST", "The collector endpoint does not exist");
+}
+
+function parseFinopsSourceHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): FinopsSourceDispatchRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(body) as unknown;
+    const request = parseFinopsSourceDispatchRequest(value);
+    if (request.connectionId !== pathConnectionId) throw invalidRequest();
+    return request;
+  } catch (error) {
+    if (error instanceof LocalHttpError) throw error;
+    throw invalidRequest();
+  }
+}
+
+async function collectFinopsSource(
+  context: ServerContext,
+  request: FinopsSourceDispatchRequest,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, request);
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "FinOps source collection requires explicit live AWS mode",
+      );
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    return executeFinopsSourceDispatch(request, {
+      registry: context.registry,
+      broker,
+      now: context.now,
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectFinopsExportChunk(
+  context: ServerContext,
+  request: ReturnType<typeof parseFinopsExportChunkRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(
+    request.tenantId,
+    request.connectionId,
+  );
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsActiveConnection(context.registry, {
+      tenantId: request.tenantId,
+      connectionId: request.connectionId,
+      jobId: request.jobId,
+    });
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "FinOps export reads require explicit live AWS mode",
+      );
+    }
+    if (!finopsRegionMatchesPartition(request.region, connection.partition)) {
+      throw invalidRequest();
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedFinopsSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.jobId,
+      {
+        contractId: request.contractId,
+        exportName: request.exportName,
+        region: request.region,
+        bucket: request.bucket,
+        prefix: request.prefix,
+      },
+    );
+    return readFinopsExportChunk(
+      request,
+      session.credentials,
+      context.finopsExportChunkClientFactory,
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+function finopsRegionMatchesPartition(
+  region: string,
+  partition: RegisteredAwsConnection["partition"],
+): boolean {
+  if (partition === "aws-cn") return region.startsWith("cn-");
+  if (partition === "aws-us-gov") return region.startsWith("us-gov-");
+  return !region.startsWith("cn-") && !region.startsWith("us-gov-");
 }
 
 async function collectConnectionCosts(context: ServerContext, job: ScopedJob): Promise<unknown> {
@@ -2646,6 +2787,35 @@ async function requireCurrentActiveConnection(
   if (
     connection.status !== "ACTIVE" ||
     connection.permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
+  ) {
+    throw new RegistryStateError();
+  }
+  return connection;
+}
+
+async function requireFinopsActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION ||
+    connection.foundationalFinopsContracts === undefined
+  ) {
+    throw new RegistryStateError();
+  }
+  return connection;
+}
+
+async function requireFinopsSourceActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryStateError();
   }

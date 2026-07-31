@@ -39,6 +39,7 @@ import { AgentlessScanRepository } from "./agentless-scan-repository";
 import { CloudVulnerabilityRepository } from "./cloud-vulnerability-repository";
 import { FinopsScheduledReportRepository, type ReportDeliveryKind } from "./finops-scheduled-report-repository";
 import { FinopsWorkspaceRepository } from "./finops-workspace-repository";
+import { FinopsBillingEngineRepository } from "./finops-billing-engine-repository";
 import {
   ITSM_SECRET_CLEANUP_JOB_KIND,
   ItsmConnectorRepository,
@@ -79,8 +80,25 @@ import { VulnerabilityMirrorRepository } from "./vulnerability-mirror-repository
 import {
   requestAgentlessTeardownSweep,
   runCollectorSync,
+  runFinopsExportChunkRead,
+  runFinopsSourceCollection,
   safeCollectionFailureCode,
 } from "../lib/pilot-server";
+import {
+  createFinopsBrokerObjectReader,
+} from "../lib/finops-broker-object-reader";
+import {
+  FINOPS_DATA_EXPORT_INGEST_JOB_KIND,
+  runFinopsDataExportIngestJob,
+} from "../lib/finops-data-export-ingest-job";
+import {
+  FINOPS_SOURCE_COLLECT_JOB_KIND,
+  runFinopsSourceCollectJob,
+} from "../lib/finops-source-collect-job";
+import { FinopsEvidenceReferenceSealer } from "../lib/finops-source-evidence-reference";
+import { FinopsSourceJobLedgerRepository } from "./finops-source-job-ledger-repository";
+import { FinopsSourceSnapshotRepository } from "./finops-source-snapshot-repository";
+import { EvidenceRepository } from "./evidence-repository";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -842,6 +860,31 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       markConnectionNeedsAttention,
       safeFailureCode: safeCollectionFailureCode,
     }),
+    [FINOPS_DATA_EXPORT_INGEST_JOB_KIND]: (job) =>
+      runFinopsDataExportIngestJob(job, {
+        getConnection: (orgId, connectionId) =>
+          getConnectionForOrg(orgId, connectionId),
+        repository: new FinopsBillingEngineRepository(),
+        readObject: (boundary, request) =>
+          createFinopsBrokerObjectReader(boundary, {
+            readChunk: runFinopsExportChunkRead,
+          })(request),
+        now: Date.now,
+      }),
+    [FINOPS_SOURCE_COLLECT_JOB_KIND]: async (job) =>
+      runFinopsSourceCollectJob(job, {
+        getConnection: (orgId, connectionId) =>
+          getConnectionForOrg(orgId, connectionId),
+        collect: runFinopsSourceCollection,
+        ledger: new FinopsSourceJobLedgerRepository(),
+        evidence: new EvidenceRepository(),
+        snapshots: new FinopsSourceSnapshotRepository(),
+        evidenceReferenceSealer:
+          await FinopsEvidenceReferenceSealer.fromEnvironment(
+            env as unknown as Readonly<Record<string, string | undefined>>,
+          ),
+        now: Date.now,
+      }),
     "agentless-teardown-sweep": (job) => {
       const repository = new AgentlessScanRepository();
       return runAgentlessTeardownSweepJob(job, {
