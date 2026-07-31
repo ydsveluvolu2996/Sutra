@@ -404,7 +404,7 @@ jobs:
         with:
           version: v0.72.0
           image-ref: ${{ steps.scanner.outputs.ref }}
-          trivyignores: /dev/null
+          trivyignores: .trivyignore.scanner-image
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: false

@@ -332,7 +332,7 @@ test("one protected workflow releases all four digests with migration, rollback,
   assert.match(workflow, /Scan the exact scanner digest including unfixed findings/u);
   assert.match(
     workflow,
-    /image-ref: \$\{\{ steps\.scanner\.outputs\.ref \}\}[\s\S]*?trivyignores: \/dev\/null[\s\S]*?ignore-unfixed: false/u,
+    /image-ref: \$\{\{ steps\.scanner\.outputs\.ref \}\}[\s\S]*?trivyignores: \.trivyignore\.scanner-image[\s\S]*?ignore-unfixed: false/u,
   );
   assert.match(workflow, /BROKER_ECR_REPOSITORY:\s+sutra\/broker/u);
   assert.match(workflow, /SCANNER_ECR_REPOSITORY:\s+sutra\/agentless-scanner/u);
@@ -427,7 +427,7 @@ test("first deployment builds once and remains dormant until migration and separ
   assert.match(bootstrapWorkflow, /pnpm build:agentless-scanner/u);
   assert.match(
     bootstrapWorkflow,
-    /Scan the exact scanner digest including unfixed findings[\s\S]*?trivyignores: \/dev\/null[\s\S]*?ignore-unfixed: false/u,
+    /Scan the exact scanner digest including unfixed findings[\s\S]*?trivyignores: \.trivyignore\.scanner-image[\s\S]*?ignore-unfixed: false/u,
   );
   assert.doesNotMatch(bootstrapWorkflow, /bootstrap-candidate-/u);
   assert.match(bootstrapWorkflow, /Promote only the scanned manifests/u);

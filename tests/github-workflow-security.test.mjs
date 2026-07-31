@@ -84,6 +84,10 @@ test("workflow inputs are never interpolated directly into shell scripts", () =>
 
 test("CI reuses only exact successful PR verification and otherwise runs consolidated gates", () => {
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const scannerIgnore = readFileSync(
+    new URL("../.trivyignore.scanner-image", import.meta.url),
+    "utf8",
+  );
 
   assert.match(ci, /^\s{2}reuse-pr-gate:\s*$/mu);
   assert.match(ci, /^\s{2}quality:\s*$/mu);
@@ -127,7 +131,12 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /--cache-to type=gha,mode=max,scope=sutra-ci-agentless-scanner/u);
   assert.match(ci, /Scan every High and Critical scanner-image finding/u);
   assert.match(ci, /scan-type: image/u);
-  assert.match(ci, /trivyignores: \/dev\/null/u);
+  assert.match(ci, /trivyignores: \.trivyignore\.scanner-image/u);
+  assert.doesNotMatch(
+    scannerIgnore,
+    /^\s*(?!#)\S+/mu,
+    "the scanner-image gate must not suppress any vulnerability identifier",
+  );
   assert.match(ci, /severity: CRITICAL,HIGH/u);
   assert.match(ci, /ignore-unfixed: false/u);
   assert.match(ci, /SCANNER_IMAGE_RESULT: \$\{\{ needs\.scanner-image\.result \}\}/u);

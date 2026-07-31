@@ -278,7 +278,7 @@ jobs:
           image-ref: ${{ steps.scanner.outputs.ref }}
           scanners: vuln
           vuln-type: os,library
-          trivyignores: /dev/null
+          trivyignores: .trivyignore.scanner-image
           format: table
           severity: CRITICAL,HIGH
           ignore-unfixed: false
