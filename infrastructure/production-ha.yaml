@@ -14,7 +14,7 @@ Metadata:
       - Label: { default: Immutable release }
         Parameters: [SutraAppImage, SutraMigrationImage, NotificationWorkerImage, HostedBrokerImage, AgentlessScannerImage, ReleaseActivation, PublicOrigin, BrokerHostName, HostedReleaseApproval, HostedRuntimeArchitectureApproval]
       - Label: { default: Runtime secret and encryption }
-        Parameters: [IdentityMode, ApplicationRuntimeSecretArn, CustomerRoleTemplateUrl, KmsKeyArn]
+        Parameters: [IdentityMode, ApplicationRuntimeSecretArn, ApplicationRuntimeSecretVersionId, CustomerRoleTemplateUrl, KmsKeyArn]
       - Label: { default: Agentless scanner approval and pinned infrastructure }
         Parameters: [AgentlessLiveValidationApproval, AgentlessScanAvailabilityZone, AgentlessKmsKeyArn, AgentlessOrchestratorRoleArn, AgentlessAmiId, AgentlessInstanceType, AgentlessSubnetId, AgentlessSecurityGroupId, AgentlessInstanceProfileArn, AgentlessFindingsBucket]
       - Label: { default: Application capacity }
@@ -160,6 +160,13 @@ Parameters:
     Description: >-
       Existing KMS-encrypted JSON secret. Required keys are documented in
       deploy/production/README.md and are injected individually.
+  ApplicationRuntimeSecretVersionId:
+    Type: String
+    AllowedPattern: ^[A-Za-z0-9-]{32,64}$
+    Description: >-
+      Exact Secrets Manager version that passed semantic release preflight.
+      Every application-runtime ECS secret reference is pinned to this immutable
+      version instead of resolving a mutable staging label at task launch.
   CustomerRoleTemplateUrl:
     Type: String
     MaxLength: 1024
@@ -1572,37 +1579,37 @@ Resources:
             - { Name: SUTRA_EVIDENCE_RETENTION_DAYS, Value: !Ref EvidenceRetentionDays }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
-            - { Name: SUTRA_AUTH_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AUTH_ENCRYPTION_KEY::" }
-            - { Name: SUTRA_CONNECTION_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONNECTION_ENCRYPTION_KEY::" }
-            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::" }
-            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::" }
-            - { Name: SUTRA_TURNSTILE_SITE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SITE_KEY::" }
-            - { Name: SUTRA_TURNSTILE_SECRET_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SECRET_KEY::" }
-            - { Name: SUTRA_CONTACT_RECIPIENT, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_RECIPIENT::" }
-            - { Name: SUTRA_CONTACT_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_FROM::" }
-            - { Name: SUTRA_INVITATION_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_INVITATION_FROM::" }
-            - { Name: SUTRA_ZOHO_DATACENTER, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_DATACENTER::" }
-            - { Name: SUTRA_ZOHO_MAIL_ACCOUNT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_MAIL_ACCOUNT_ID::" }
-            - { Name: SUTRA_ZOHO_CLIENT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_ID::" }
-            - { Name: SUTRA_ZOHO_CLIENT_SECRET, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_SECRET::" }
-            - { Name: SUTRA_ZOHO_REFRESH_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_REFRESH_TOKEN::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_KEY_ID::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY::" }
-            - { Name: SUTRA_OIDC_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_PROVIDERS::" }
-            - { Name: SUTRA_OIDC_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_TRANSACTION_KEY::" }
+            - { Name: SUTRA_AUTH_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AUTH_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONNECTION_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONNECTION_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_TURNSTILE_SITE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SITE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_TURNSTILE_SECRET_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SECRET_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONTACT_RECIPIENT, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_RECIPIENT::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONTACT_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_FROM::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_INVITATION_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_INVITATION_FROM::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_DATACENTER, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_DATACENTER::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_MAIL_ACCOUNT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_MAIL_ACCOUNT_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_CLIENT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_CLIENT_SECRET, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_SECRET::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_REFRESH_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_REFRESH_TOKEN::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_OIDC_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_PROVIDERS::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_OIDC_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_TRANSACTION_KEY::${ApplicationRuntimeSecretVersionId}" }
             - !If
               - FederatedIdentityEnabled
-              - { Name: SUTRA_SAML_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_PROVIDERS::" }
+              - { Name: SUTRA_SAML_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_PROVIDERS::${ApplicationRuntimeSecretVersionId}" }
               - !Ref "AWS::NoValue"
             - !If
               - FederatedIdentityEnabled
-              - { Name: SUTRA_SAML_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_TRANSACTION_KEY::" }
+              - { Name: SUTRA_SAML_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_TRANSACTION_KEY::${ApplicationRuntimeSecretVersionId}" }
               - !Ref "AWS::NoValue"
-            - { Name: SUTRA_BROKER_CLIENT_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_KEY_ID::" }
-            - { Name: SUTRA_BROKER_CLIENT_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_PRIVATE_KEY::" }
-            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::" }
-            - { Name: SUTRA_BROKER_RESPONSE_PUBLIC_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PUBLIC_KEY::" }
+            - { Name: SUTRA_BROKER_CLIENT_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_CLIENT_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_PUBLIC_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PUBLIC_KEY::${ApplicationRuntimeSecretVersionId}" }
           HealthCheck:
             Command:
               - CMD
@@ -1633,7 +1640,7 @@ Resources:
             - { Name: SUTRA_PUBLIC_ORIGIN, Value: !Ref PublicOrigin }
             - { Name: SUTRA_JOB_RUNNER_INTERVAL_MS, Value: "15000" }
           Secrets:
-            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::" }
+            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::${ApplicationRuntimeSecretVersionId}" }
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1676,9 +1683,9 @@ Resources:
             - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_KEY_ID::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_PRIVATE_KEY::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -1767,9 +1774,9 @@ Resources:
             - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_KEY_ID::" }
-            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_PRIVATE_KEY::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
           HealthCheck:
             Command:
               - CMD
@@ -1838,10 +1845,10 @@ Resources:
             - { Name: SUTRA_AGENTLESS_FINDINGS_BUCKET, Value: !Ref AgentlessFindingsBucket }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
-            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::" }
-            - { Name: SUTRA_APP_PUBLIC_KEYS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_APP_PUBLIC_KEYS::" }
-            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::" }
-            - { Name: SUTRA_BROKER_RESPONSE_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PRIVATE_KEY::" }
+            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_APP_PUBLIC_KEYS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_APP_PUBLIC_KEYS::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
           HealthCheck:
             Command:
               - CMD

@@ -69,10 +69,18 @@ test("semantic preflight covers every runtime key referenced by the HA template"
     new URL("../infrastructure/production-ha.yaml", import.meta.url),
     "utf8",
   );
-  const referenced = [...template.matchAll(/ApplicationRuntimeSecretArn\}:([A-Z0-9_]+)::/gu)]
+  const referenced = [...template.matchAll(
+    /ApplicationRuntimeSecretArn\}:([A-Z0-9_]+)::\$\{ApplicationRuntimeSecretVersionId\}/gu,
+  )]
     .map((match) => match[1])
     .sort();
   assert.deepEqual([...new Set(referenced)], [...PRODUCTION_RUNTIME_SECRET_KEYS]);
+  assert.ok(referenced.length > 0);
+  assert.doesNotMatch(
+    template,
+    /ApplicationRuntimeSecretArn\}:[A-Z0-9_]+::"/u,
+    "no application runtime reference may resolve a mutable staging label",
+  );
   assert.equal(validateProductionRuntimeSecret(fixture(), "oidc"), true);
 });
 

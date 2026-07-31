@@ -21,6 +21,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { parseTrivyReport, type ParsedFinding } from "./trivy-report.js";
 
 const MOUNT_POINT = "/mnt/scan";
+const SCAN_DEVICE = "/dev/sutra-scan-device";
 /** Trivy exits 0 with findings and 0 without; a non-zero exit is a real error. */
 const TRIVY_OK = 0;
 
@@ -83,78 +84,21 @@ const execProcess: Exec = (command, args, options) =>
   });
 
 /**
- * Resolves the attached data device.
- *
- * UNVALIDATED: on Nitro instances EBS volumes appear as /dev/nvme*n1 and the
- * requested device name is NOT honoured, so the caller cannot simply pass
- * /dev/sdf and be believed. This picks the single non-root block device, and
- * refuses when the count is anything other than one rather than guessing —
- * scanning the wrong disk would attribute findings to the wrong customer.
+ * Accepts only the single device node that the host resolved from the requested
+ * EBS volume ID and explicitly granted read-only to this container. Resolving a
+ * device from the container-wide block-device list would reintroduce ambiguity
+ * and would require exposing the host's entire /dev tree.
  */
-export async function resolveScanDevice(
-  exec: Exec = execProcess,
-  rootDeviceHint = "/",
-): Promise<string> {
-  const listed = await exec("lsblk", ["-J", "-o", "NAME,TYPE,MOUNTPOINT,SIZE"]);
-  if (listed.code !== 0) {
-    throw new ScanRefusedError("LSBLK_FAILED", listed.stderr.trim() || `exit ${listed.code}`);
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(listed.stdout);
-  } catch {
-    throw new ScanRefusedError("LSBLK_UNPARSABLE", "lsblk did not return JSON");
-  }
-  const devices = (parsed as { blockdevices?: unknown }).blockdevices;
-  if (!Array.isArray(devices)) {
-    throw new ScanRefusedError("LSBLK_UNPARSABLE", "no blockdevices array");
-  }
-
-  const candidates: string[] = [];
-  /** Candidate -> its candidate children, so a parent disk can be dropped. */
-  const childrenOf = new Map<string, string[]>();
-  const visit = (node: unknown, depth: number): void => {
-    const record = typeof node === "object" && node !== null ? node as Record<string, unknown> : null;
-    if (record === null) return;
-    const name = typeof record.name === "string" ? record.name : null;
-    const type = typeof record.type === "string" ? record.type : "";
-    const mountpoint = typeof record.mountpoint === "string" ? record.mountpoint : null;
-    const children = Array.isArray(record.children) ? record.children : [];
-    // A device carrying the running root filesystem is this container's own disk.
-    const holdsRoot = mountpoint === rootDeviceHint
-      || children.some((child) => {
-        const c = typeof child === "object" && child !== null ? child as Record<string, unknown> : null;
-        return c !== null && c.mountpoint === rootDeviceHint;
-      });
-    if (name !== null && (type === "disk" || (type === "part" && depth > 0)) && !holdsRoot && mountpoint === null) {
-      const path = `/dev/${name}`;
-      candidates.push(path);
-      childrenOf.set(path, children.flatMap((child) => {
-        const c = typeof child === "object" && child !== null ? child as Record<string, unknown> : null;
-        return c !== null && typeof c.name === "string" && c.mountpoint == null ? [`/dev/${c.name}`] : [];
-      }));
-    }
-    for (const child of children) visit(child, depth + 1);
-  };
-  for (const device of devices) visit(device, 0);
-
-  // Prefer a partition over its whole-disk parent: a snapshot of a normal root
-  // volume has a partition table, and mounting the raw disk fails.
-  //
-  // Decided from the lsblk TREE, not from the device name. A name pattern cannot
-  // do this — `/dev/nvme1n1` ends in a digit exactly like a partition does, so a
-  // regex reads the parent disk as a partition and the whole set looks ambiguous.
-  const withCandidateChildren = new Set(
-    candidates.filter((device) => (childrenOf.get(device) ?? []).some((child) => candidates.includes(child))),
-  );
-  const chosen = candidates.filter((device) => !withCandidateChildren.has(device));
-  if (chosen.length !== 1) {
+export function requiredScanDevice(
+  configuredDevice = process.env.SUTRA_SCAN_DEVICE,
+): string {
+  if (configuredDevice !== SCAN_DEVICE) {
     throw new ScanRefusedError(
-      "AMBIGUOUS_DEVICE",
-      `expected exactly one unmounted candidate, found ${chosen.length}: ${chosen.join(", ") || "none"}`,
+      "SCAN_DEVICE_NOT_BOUND",
+      `SUTRA_SCAN_DEVICE must identify the exact read-only device ${SCAN_DEVICE}`,
     );
   }
-  return chosen[0] as string;
+  return configuredDevice;
 }
 
 /** Detects the filesystem so the right read-only mount options are used. */
@@ -301,8 +245,10 @@ export async function runTrivy(exec: Exec = execProcess): Promise<unknown> {
   }
 }
 
-export async function runScan(exec: Exec = execProcess): Promise<RunResult> {
-  const device = await resolveScanDevice(exec);
+export async function runScan(
+  exec: Exec = execProcess,
+  device = requiredScanDevice(),
+): Promise<RunResult> {
   const filesystem = await detectFilesystem(device, exec);
   await mountReadOnly(device, filesystem, exec);
   const databases = await verifyTrivyDatabases();

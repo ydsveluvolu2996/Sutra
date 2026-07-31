@@ -541,11 +541,15 @@ jobs:
           register_revision() {
             local base="$1" image="$2" output="$3" targets_json="$4"
             local update_release_identity="$5" scanner_image="$6"
+            local expects_runtime_secret="$7"
             aws ecs describe-task-definition --region "${AWS_REGION}" --task-definition "${base}" \
               --query taskDefinition --output json |
               jq -e --arg image "${image}" --argjson targets "${targets_json}" \
                 --argjson updateReleaseIdentity "${update_release_identity}" \
-                --arg scannerImage "${scanner_image}" '
+                --arg scannerImage "${scanner_image}" \
+                --arg runtimeSecretArn "${APPLICATION_RUNTIME_SECRET_ARN}" \
+                --arg runtimeSecretVersion "${runtime_secret_version_id}" \
+                --argjson expectsRuntimeSecret "${expects_runtime_secret}" '
                 ([.containerDefinitions[].name
                   | select(. as $name | $targets | index($name) != null)] | length) as $targetCount
                 | if $targetCount != ($targets | length) then
@@ -597,6 +601,33 @@ jobs:
                       end
                     )
                   else . end
+                | .containerDefinitions |= map(
+                    if has("secrets") then
+                      .secrets |= map(
+                        if (.valueFrom | startswith($runtimeSecretArn + ":")) then
+                          .valueFrom |= sub(
+                            "::[A-Za-z0-9-]*$";
+                            "::" + $runtimeSecretVersion
+                          )
+                        else .
+                        end
+                      )
+                    else .
+                    end
+                  )
+                | [.containerDefinitions[].secrets[]?
+                    | select((.name | startswith("SUTRA_DB_")) | not)
+                  ] as $runtimeSecretEntries
+                | if (($runtimeSecretEntries | length) > 0) != $expectsRuntimeSecret then
+                    error("task definition application runtime secret presence is unexpected")
+                  elif (all(
+                    $runtimeSecretEntries[];
+                    (.valueFrom | startswith($runtimeSecretArn + ":"))
+                    and (.valueFrom | endswith("::" + $runtimeSecretVersion))
+                  ) | not) then
+                    error("task definition contains an unpinned application runtime secret")
+                  else .
+                  end
                 | del(.taskDefinitionArn,.revision,.status,.requiresAttributes,.compatibilities,.registeredAt,.registeredBy)
               ' > "${output}"
             aws ecs register-task-definition --region "${AWS_REGION}" \
@@ -605,21 +636,47 @@ jobs:
               --query 'taskDefinition.taskDefinitionArn' --output text
           }
 
+          assert_task_runtime_secret_version() {
+            local task_definition="$1"
+            aws ecs describe-task-definition \
+              --region "${AWS_REGION}" \
+              --task-definition "${task_definition}" \
+              --query taskDefinition \
+              --output json |
+              jq -e \
+                --arg runtimeSecretArn "${APPLICATION_RUNTIME_SECRET_ARN}" \
+                --arg runtimeSecretVersion "${runtime_secret_version_id}" '
+                  [.containerDefinitions[].secrets[]?
+                    | select((.name | startswith("SUTRA_DB_")) | not)
+                  ] as $runtimeSecretEntries
+                  | ($runtimeSecretEntries | length) > 0
+                  and all(
+                    $runtimeSecretEntries[];
+                    (.valueFrom | startswith($runtimeSecretArn + ":"))
+                    and (.valueFrom | endswith("::" + $runtimeSecretVersion))
+                  )
+                ' >/dev/null
+          }
+
           migration_task="$(register_revision \
-            "${MIGRATION_BASE_TASK}" "${APP_IMAGE}" migration.json '["migrate"]' false "")"
+            "${MIGRATION_BASE_TASK}" "${APP_IMAGE}" migration.json '["migrate"]' false "" false)"
           new_app="$(register_revision \
-            "${previous_app}" "${APP_IMAGE}" app.json '["app","background-job-runner"]' true "")"
+            "${previous_app}" "${APP_IMAGE}" app.json '["app","background-job-runner"]' true "" true)"
           new_worker="$(register_revision \
-            "${previous_worker}" "${WORKER_IMAGE}" worker.json '["notification-worker"]' false "")"
+            "${previous_worker}" "${WORKER_IMAGE}" worker.json '["notification-worker"]' false "" true)"
           new_broker="$(register_revision \
-            "${previous_broker}" "${BROKER_IMAGE}" broker.json '["hosted-broker"]' false "${SCANNER_IMAGE}")"
+            "${previous_broker}" "${BROKER_IMAGE}" broker.json '["hosted-broker"]' false "${SCANNER_IMAGE}" true)"
           new_feed="$(register_revision \
-            "${previous_feed}" "${APP_IMAGE}" vulnerability-feed.json '["vulnerability-feed-refresh"]' false "")"
+            "${previous_feed}" "${APP_IMAGE}" vulnerability-feed.json '["vulnerability-feed-refresh"]' false "" true)"
           [[ "${migration_task}" =~ :task-definition/sutra-production-migration:[0-9]+$ ]]
           [[ "${new_app}" =~ :task-definition/sutra-production-app:[0-9]+$ ]]
           [[ "${new_worker}" =~ :task-definition/sutra-production-worker:[0-9]+$ ]]
           [[ "${new_broker}" =~ :task-definition/sutra-production-broker:[0-9]+$ ]]
           [[ "${new_feed}" =~ :task-definition/sutra-production-vulnerability-feed:[0-9]+$ ]]
+          assert_task_runtime_secret_version "${new_app}"
+          assert_task_runtime_secret_version "${new_worker}"
+          assert_task_runtime_secret_version "${new_broker}"
+          assert_task_runtime_secret_version "${new_feed}"
           aws ecs describe-task-definition \
             --region "${AWS_REGION}" \
             --task-definition "${new_broker}" \

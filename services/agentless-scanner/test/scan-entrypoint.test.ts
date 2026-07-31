@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   ScanRefusedError,
   detectFilesystem,
-  resolveScanDevice,
+  requiredScanDevice,
   runTrivy,
   verifyTrivyDatabases,
 } from "../src/scan-entrypoint.js";
@@ -23,69 +23,24 @@ function fakeExec(
   };
 }
 
-function lsblk(devices: unknown): string {
-  return JSON.stringify({ blockdevices: devices });
-}
-
-test("picks the single unmounted partition and ignores the container's own root disk", async () => {
-  const device = await resolveScanDevice(fakeExec({
-    lsblk: { stdout: lsblk([
-      { name: "nvme0n1", type: "disk", mountpoint: null, children: [{ name: "nvme0n1p1", type: "part", mountpoint: "/" }] },
-      { name: "nvme1n1", type: "disk", mountpoint: null, children: [{ name: "nvme1n1p1", type: "part", mountpoint: null }] },
-    ]) },
-  }));
-  // The scan target, not the disk this container is running from.
-  assert.equal(device, "/dev/nvme1n1p1");
-});
-
-test("REFUSES when two candidate disks are attached rather than guessing", async () => {
-  // Guessing here would attribute one customer's CVEs to another's volume.
-  await assert.rejects(
-    () => resolveScanDevice(fakeExec({
-      lsblk: { stdout: lsblk([
-        { name: "nvme0n1", type: "disk", mountpoint: null, children: [{ name: "nvme0n1p1", type: "part", mountpoint: "/" }] },
-        { name: "nvme1n1", type: "disk", mountpoint: null, children: [] },
-        { name: "nvme2n1", type: "disk", mountpoint: null, children: [] },
-      ]) },
-    })),
-    (error: unknown) => error instanceof ScanRefusedError && error.code === "AMBIGUOUS_DEVICE",
+test("accepts only the exact device node explicitly bound by the host", () => {
+  assert.equal(
+    requiredScanDevice("/dev/sutra-scan-device"),
+    "/dev/sutra-scan-device",
   );
-});
-
-test("REFUSES when nothing is attached — an empty scan is not a clean scan", async () => {
-  await assert.rejects(
-    () => resolveScanDevice(fakeExec({
-      lsblk: { stdout: lsblk([
-        { name: "nvme0n1", type: "disk", mountpoint: null, children: [{ name: "nvme0n1p1", type: "part", mountpoint: "/" }] },
-      ]) },
-    })),
-    (error: unknown) => error instanceof ScanRefusedError && error.code === "AMBIGUOUS_DEVICE",
-  );
-});
-
-test("handles a whole-disk volume with no partition table", async () => {
-  const device = await resolveScanDevice(fakeExec({
-    lsblk: { stdout: lsblk([
-      { name: "nvme0n1", type: "disk", mountpoint: null, children: [{ name: "nvme0n1p1", type: "part", mountpoint: "/" }] },
-      { name: "nvme1n1", type: "disk", mountpoint: null, children: [] },
-    ]) },
-  }));
-  assert.equal(device, "/dev/nvme1n1");
-});
-
-test("lsblk failure and unparsable output are distinct refusals", async () => {
-  await assert.rejects(
-    () => resolveScanDevice(fakeExec({ lsblk: { code: 1, stderr: "no permission" } })),
-    (e: unknown) => e instanceof ScanRefusedError && e.code === "LSBLK_FAILED",
-  );
-  await assert.rejects(
-    () => resolveScanDevice(fakeExec({ lsblk: { stdout: "not json" } })),
-    (e: unknown) => e instanceof ScanRefusedError && e.code === "LSBLK_UNPARSABLE",
-  );
-  await assert.rejects(
-    () => resolveScanDevice(fakeExec({ lsblk: { stdout: JSON.stringify({}) } })),
-    (e: unknown) => e instanceof ScanRefusedError && e.code === "LSBLK_UNPARSABLE",
-  );
+  for (const configuredDevice of [
+    undefined,
+    "",
+    "/dev/nvme1n1",
+    "/dev/sdf",
+    "/dev/sutra-scan-device/../nvme0n1",
+  ]) {
+    assert.throws(
+      () => requiredScanDevice(configuredDevice),
+      (error: unknown) =>
+        error instanceof ScanRefusedError && error.code === "SCAN_DEVICE_NOT_BOUND",
+    );
+  }
 });
 
 test("an unidentifiable filesystem is refused, not mounted blind", async () => {

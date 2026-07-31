@@ -72,6 +72,10 @@ stack_parameter() {
 }
 
 validate_stack_identity() {
+  [[ "${RUNTIME_SECRET_VERSION_ID:-}" =~ ^[A-Za-z0-9-]{32,64}$ ]] ||
+    fail "Validated runtime secret version identity is unavailable."
+  [[ "$(stack_parameter ApplicationRuntimeSecretVersionId)" == "${RUNTIME_SECRET_VERSION_ID}" ]] ||
+    fail "Stack application runtime secret version is not the semantically validated version."
   [[ "$(stack_output PublicOrigin)" == "${PUBLIC_ORIGIN}" ]] ||
     fail "Stack PublicOrigin does not match the protected environment."
   [[ "$(stack_output ReleaseActivation)" == "$(stack_parameter ReleaseActivation)" ]] ||
@@ -131,15 +135,49 @@ assert_broker_scanner_image() {
     ' >/dev/null
 }
 
+assert_task_runtime_secret_version() {
+  local task_definition="$1" runtime_secret_arn runtime_secret_version
+  runtime_secret_arn="$(stack_parameter ApplicationRuntimeSecretArn)"
+  runtime_secret_version="$(stack_parameter ApplicationRuntimeSecretVersionId)"
+  aws ecs describe-task-definition \
+    --region "${AWS_REGION}" \
+    --task-definition "${task_definition}" \
+    --query taskDefinition \
+    --output json |
+    jq -e \
+      --arg runtimeSecretArn "${runtime_secret_arn}" \
+      --arg runtimeSecretVersion "${runtime_secret_version}" '
+        [.containerDefinitions[].secrets[]?
+          | select((.name | startswith("SUTRA_DB_")) | not)
+        ] as $runtimeSecretEntries
+        | ($runtimeSecretEntries | length) > 0
+        and all(
+          $runtimeSecretEntries[];
+          (.valueFrom | startswith($runtimeSecretArn + ":"))
+          and (.valueFrom | endswith("::" + $runtimeSecretVersion))
+        )
+      ' >/dev/null ||
+    fail "Task definition does not pin every application runtime secret to the validated version."
+}
+
 assert_exact_images() {
-  assert_task_image "$(stack_output AppTaskDefinitionArn)" "${APP_IMAGE}" \
+  local app_task feed_task worker_task broker_task
+  app_task="$(stack_output AppTaskDefinitionArn)"
+  feed_task="$(stack_output VulnerabilityFeedTaskDefinitionArn)"
+  worker_task="$(stack_output WorkerTaskDefinitionArn)"
+  broker_task="$(stack_output BrokerTaskDefinitionArn)"
+  assert_task_image "${app_task}" "${APP_IMAGE}" \
     app background-job-runner
   assert_task_image "$(stack_output MigrationTaskDefinitionArn)" "${APP_IMAGE}" migrate
-  assert_task_image "$(stack_output WorkerTaskDefinitionArn)" "${WORKER_IMAGE}" notification-worker
-  assert_task_image "$(stack_output BrokerTaskDefinitionArn)" "${BROKER_IMAGE}" hosted-broker
-  assert_broker_scanner_image "$(stack_output BrokerTaskDefinitionArn)"
-  assert_task_image "$(stack_output VulnerabilityFeedTaskDefinitionArn)" "${APP_IMAGE}" \
+  assert_task_image "${worker_task}" "${WORKER_IMAGE}" notification-worker
+  assert_task_image "${broker_task}" "${BROKER_IMAGE}" hosted-broker
+  assert_broker_scanner_image "${broker_task}"
+  assert_task_image "${feed_task}" "${APP_IMAGE}" \
     vulnerability-feed-refresh
+  assert_task_runtime_secret_version "${app_task}"
+  assert_task_runtime_secret_version "${worker_task}"
+  assert_task_runtime_secret_version "${broker_task}"
+  assert_task_runtime_secret_version "${feed_task}"
 }
 
 assert_inactive() {
@@ -352,6 +390,7 @@ prepare_stack_parameters() {
     and (has("NotificationWorkerImage") | not)
     and (has("HostedBrokerImage") | not)
     and (has("AgentlessScannerImage") | not)
+    and (has("ApplicationRuntimeSecretVersionId") | not)
     and (has("ReleaseActivation") | not)
     and (has("NotificationSesActivation") | not)
     and (has("PublicOrigin") | not)
@@ -383,13 +422,14 @@ prepare_stack_parameters() {
       and ($url | endswith("?versionId=null") | not)
     ' <<< "${PRODUCTION_HA_PARAMETERS_JSON}" >/dev/null ||
     fail "CustomerRoleTemplateUrl must be the versionId-qualified ap-south-1 S3 object for the exact reviewed template version and SHA-256."
-  jq '
+  jq --arg runtimeSecretVersion "${RUNTIME_SECRET_VERSION_ID}" '
       (. + {
         SutraAppImage:env.APP_IMAGE,
         SutraMigrationImage:env.APP_IMAGE,
         NotificationWorkerImage:env.WORKER_IMAGE,
         HostedBrokerImage:env.BROKER_IMAGE,
         AgentlessScannerImage:env.SCANNER_IMAGE,
+        ApplicationRuntimeSecretVersionId:$runtimeSecretVersion,
         ReleaseActivation:"inactive-before-first-migration",
         NotificationSesActivation:"disabled-ses-production-access-denied",
         PublicOrigin:env.PUBLIC_ORIGIN,
@@ -616,8 +656,8 @@ prepare() {
     fail "PUBLIC_ORIGIN must be the canonical managed-production origin."
   [[ "$(aws sts get-caller-identity --query Account --output text)" == "${AWS_ACCOUNT_ID}" ]] ||
     fail "AWS credentials are not for the approved production account."
-  prepare_stack_parameters
   validate_runtime_secret
+  prepare_stack_parameters
   validate_network_firewall \
     "$(jq -er '.NetworkFirewallArn' <<< "${PRODUCTION_HA_PARAMETERS_JSON}")" \
     "$(jq -er '.VpcId' <<< "${PRODUCTION_HA_PARAMETERS_JSON}")"

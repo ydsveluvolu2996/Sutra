@@ -155,6 +155,20 @@ test("managed production fails closed around ingress, health, secrets, and immut
   assert.match(template, /ReadonlyRootFilesystem:\s+true/gu);
   assert.match(template, /AssignPublicIp:\s+DISABLED/gu);
   assert.match(template, /ApplicationRuntimeSecretArn/u);
+  assert.match(
+    template,
+    /ApplicationRuntimeSecretVersionId:[\s\S]*?AllowedPattern: \^\[A-Za-z0-9-\]\{32,64\}\$/u,
+  );
+  const runtimeSecretReferences = [
+    ...template.matchAll(
+      /ApplicationRuntimeSecretArn\}:[A-Z0-9_]+::\$\{ApplicationRuntimeSecretVersionId\}/gu,
+    ),
+  ];
+  assert.ok(runtimeSecretReferences.length > 0);
+  assert.doesNotMatch(
+    template,
+    /ApplicationRuntimeSecretArn\}:[A-Z0-9_]+::"/u,
+  );
   assert.match(template, /secretsmanager:GetSecretValue/u);
   assert.match(template, /kms:ViaService/u);
   assert.match(template, /sutra\/app@sha256:\[a-f0-9\]\{64\}/u);
@@ -348,6 +362,26 @@ test("one protected workflow releases all four digests with migration, rollback,
   assert.match(workflow, /releaseIdentityCount != 1/u);
   assert.match(workflow, /SUTRA_AGENTLESS_SCANNER_IMAGE/u);
   assert.match(workflow, /scannerIdentityCount != 1/u);
+  assert.match(
+    workflow,
+    /--arg runtimeSecretVersion "\$\{runtime_secret_version_id\}"/u,
+  );
+  assert.match(
+    workflow,
+    /sub\(\s*"::\[A-Za-z0-9-\]\*\$";\s*"::" \+ \$runtimeSecretVersion\s*\)/u,
+  );
+  assert.match(workflow, /expectsRuntimeSecret/u);
+  assert.match(
+    workflow,
+    /select\(\(\.name \| startswith\("SUTRA_DB_"\)\) \| not\)/u,
+  );
+  assert.match(workflow, /unpinned application runtime secret/u);
+  assert.equal(
+    [...workflow.matchAll(
+      /assert_task_runtime_secret_version "\$\{new_(?:app|worker|broker|feed)\}"/gu,
+    )].length,
+    4,
+  );
   assert.match(workflow, /prior scanner digest were restored/u);
   assert.match(workflow, /restored_broker/u);
   assert.match(workflow, /brokerImage/u);
@@ -447,6 +481,36 @@ test("first deployment builds once and remains dormant until migration and separ
   );
   assert.match(bootstrapScript, /RUNTIME_SECRET_VERSION_ID="\$\{version_id\}"/u);
   assert.match(bootstrapWorkflow, /runtime_secret_version_id/u);
+  assert.match(
+    bootstrapScript,
+    /and \(has\("ApplicationRuntimeSecretVersionId"\) \| not\)/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /--arg runtimeSecretVersion "\$\{RUNTIME_SECRET_VERSION_ID\}"/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /ApplicationRuntimeSecretVersionId:\$runtimeSecretVersion/u,
+  );
+  assert.match(
+    bootstrapScript,
+    /stack_parameter ApplicationRuntimeSecretVersionId\)" == "\$\{RUNTIME_SECRET_VERSION_ID\}"/u,
+  );
+  assert.match(bootstrapScript, /assert_task_runtime_secret_version/u);
+  assert.match(
+    bootstrapScript,
+    /select\(\(\.name \| startswith\("SUTRA_DB_"\)\) \| not\)/u,
+  );
+  const prepareFunction = bootstrapScript.slice(
+    bootstrapScript.indexOf("prepare() {"),
+    bootstrapScript.indexOf("rollback_activation()"),
+  );
+  assert.ok(
+    prepareFunction.indexOf("validate_runtime_secret") <
+      prepareFunction.indexOf("prepare_stack_parameters"),
+    "semantic validation must produce the pinned version before parameter creation",
+  );
   assert.match(
     bootstrapScript,
     /validate_runtime_secret "\$\{RUNTIME_SECRET_VERSION_ID\}"[\s\S]*run_migration/u,

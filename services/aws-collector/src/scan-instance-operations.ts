@@ -38,6 +38,7 @@ import type { AgentlessResourceTracker } from "./agentless-execution.js";
 const AMI_ID = /^ami-[0-9a-f]{8,17}$/u;
 const SUBNET_ID = /^subnet-[0-9a-f]{8,17}$/u;
 const SECURITY_GROUP_ID = /^sg-[0-9a-f]{8,17}$/u;
+const VOLUME_ID = /^vol-[0-9a-f]{8,32}$/u;
 const IMAGE_DIGEST = /^[a-z0-9.\-_/]+@sha256:[0-9a-f]{64}$/u;
 const BUCKET = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u;
 
@@ -97,9 +98,18 @@ export function findingsPrefix(runId: string): string {
  * * It shuts down on every path, including failure, so a wedged scan still stops
  *   billing without depending on the orchestrator to reap it.
  */
-export function buildScanUserData(settings: ScanInstanceSettings, deviceName: string): string {
+export function buildScanUserData(
+  settings: ScanInstanceSettings,
+  scanVolumeId: string,
+): string {
+  if (!VOLUME_ID.test(scanVolumeId)) {
+    throw new ScanInstanceOperationsError(
+      "VOLUME_ID_INVALID",
+      `not an EBS volume id: ${scanVolumeId}`,
+    );
+  }
   const prefix = findingsPrefix(settings.runId);
-  const bareDevice = deviceName.replace("/dev/", "");
+  const volumeSerial = scanVolumeId.replace("-", "");
   return `#!/bin/bash
 set -uo pipefail
 # Stop billing no matter how this ends. Set FIRST so an early failure still halts.
@@ -109,20 +119,65 @@ REGION=${settings.region}
 BUCKET=${settings.findingsBucket}
 PREFIX=${prefix}
 IMAGE=${settings.scannerImage}
+VOLUME_ID=${scanVolumeId}
+VOLUME_SERIAL=${volumeSerial}
 
 publish_refusal() {
   printf '{"code":"%s","message":"%s"}' "$1" "$2" > /tmp/refusal.json
   aws s3 cp /tmp/refusal.json "s3://$BUCKET/$PREFIX/${REFUSAL_OBJECT}" --region "$REGION" || true
 }
 
-# The attach is asynchronous: the volume may not be visible the instant we boot.
+# The attach is asynchronous. Resolve the exact EBS disk from the volume ID
+# exposed by the Nitro NVMe serial. Never infer the target from disk order or
+# expose the host's complete device tree to the scanner container.
+SCAN_DISK=""
 for _ in $(seq 1 60); do
-  test -b /dev/${bareDevice} && break
-  # NVMe-backed instance types rename the device; the scanner resolves the real
-  # one from the lsblk tree itself, so any extra disk appearing is enough here.
-  lsblk -dn -o NAME | grep -qv "^$(lsblk -dn -o NAME | head -1)$" && break
+  MATCHING_DISKS="$(
+    lsblk -dn -o PATH,TYPE,SERIAL |
+      awk -v target="$VOLUME_SERIAL" '
+        $2 == "disk" {
+          serial = tolower($3)
+          gsub(/[^a-z0-9]/, "", serial)
+          if (serial == target) print $1
+        }
+      '
+  )"
+  MATCH_COUNT="$(printf '%s\n' "$MATCHING_DISKS" | awk 'NF { count += 1 } END { print count + 0 }')"
+  if [ "$MATCH_COUNT" -eq 1 ]; then
+    SCAN_DISK="$MATCHING_DISKS"
+    break
+  fi
+  if [ "$MATCH_COUNT" -gt 1 ]; then
+    publish_refusal TARGET_VOLUME_AMBIGUOUS "multiple disks reported serial $VOLUME_ID"
+    exit 1
+  fi
   sleep 5
 done
+if [ -z "$SCAN_DISK" ] || [ ! -b "$SCAN_DISK" ]; then
+  publish_refusal TARGET_VOLUME_NOT_FOUND "no block device reported serial $VOLUME_ID"
+  exit 1
+fi
+
+# A normal root snapshot has one filesystem partition. A whole-disk filesystem
+# has none. More than one partition is refused because choosing would be a guess.
+SCAN_PARTITIONS="$(
+  lsblk -lnpo PATH,TYPE "$SCAN_DISK" |
+    awk '$2 == "part" { print $1 }'
+)"
+PARTITION_COUNT="$(printf '%s\n' "$SCAN_PARTITIONS" | awk 'NF { count += 1 } END { print count + 0 }')"
+case "$PARTITION_COUNT" in
+  0) SCAN_DEVICE="$SCAN_DISK" ;;
+  1) SCAN_DEVICE="$SCAN_PARTITIONS" ;;
+  *)
+    publish_refusal TARGET_VOLUME_PARTITIONS_AMBIGUOUS \
+      "volume $VOLUME_ID contains $PARTITION_COUNT partitions"
+    exit 1
+    ;;
+esac
+if [ ! -b "$SCAN_DEVICE" ]; then
+  publish_refusal TARGET_DEVICE_INVALID "resolved scan target is not a block device"
+  exit 1
+fi
 
 command -v docker >/dev/null 2>&1 \\
   && command -v aws >/dev/null 2>&1 \\
@@ -137,12 +192,15 @@ aws ecr get-login-password --region "$REGION" \\
 
 docker pull "$IMAGE" || { publish_refusal IMAGE_PULL_FAILED "could not pull the pinned scanner"; exit 1; }
 
-# One capability and the block devices only, never full-privilege mode. The
-# scanner mounts read-only and refuses rather than guessing on an ambiguous device.
+# One capability and one read-only block device only. The scanner has no network
+# namespace route and cannot enumerate or open any other host device.
 docker run --rm \\
+  --network none \\
+  --cap-drop ALL \\
   --cap-add SYS_ADMIN \\
   --security-opt no-new-privileges \\
-  -v /dev:/dev \\
+  --device "$SCAN_DEVICE":/dev/sutra-scan-device:r \\
+  -e SUTRA_SCAN_DEVICE=/dev/sutra-scan-device \\
   "$IMAGE" > /tmp/scan.out 2>/tmp/scan.err
 STATUS=$?
 
@@ -202,7 +260,10 @@ export class AwsScanInstanceOperations implements ScanInstanceOperations {
       SubnetId: s.subnetId,
       SecurityGroupIds: [s.securityGroupId],
       IamInstanceProfile: { Arn: s.instanceProfileArn },
-      UserData: Buffer.from(buildScanUserData(s, input.deviceName), "utf8").toString("base64"),
+      UserData: Buffer.from(
+        buildScanUserData(s, input.scanVolumeId),
+        "utf8",
+      ).toString("base64"),
       // Self-terminate on the shutdown the user-data issues, so a finished scan
       // stops billing without waiting for the orchestrator to reap it.
       InstanceInitiatedShutdownBehavior: "terminate",

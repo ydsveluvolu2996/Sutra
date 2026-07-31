@@ -13,6 +13,7 @@ const [
   itsmRoute,
   finopsDelivery,
   network,
+  wranglerExample,
 ] = await Promise.all([
   readFile(new URL("../infrastructure/production-ha.yaml", import.meta.url), "utf8"),
   readFile(new URL("../deploy/production/entrypoint.sh", import.meta.url), "utf8"),
@@ -24,6 +25,13 @@ const [
   readFile(new URL("../app/api/v1/itsm/dispatch/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../lib/finops-report-delivery.ts", import.meta.url), "utf8"),
   readFile(new URL("../infrastructure/production-network.yaml", import.meta.url), "utf8"),
+  readFile(
+    new URL(
+      "../services/managed-outbound-gateway/wrangler.example.toml",
+      import.meta.url,
+    ),
+    "utf8",
+  ),
 ]);
 
 const zohoCallers = await Promise.all([
@@ -104,4 +112,14 @@ test("production Zoho call paths preserve an absent fetch injection for the adap
     );
   }
   assert.ok(zohoCallers[3]?.includes("}, input.fetchImpl);"));
+});
+
+test("gateway configuration example documents the enforced authorization-record shape", () => {
+  assert.match(wranglerExample, /"publicKey":/u);
+  assert.match(wranglerExample, /"allowedTargets":/u);
+  assert.match(wranglerExample, /"production-app":\s*\{/u);
+  assert.doesNotMatch(
+    wranglerExample,
+    /"production-app":"<base64url raw 32-byte Ed25519 public key>"/u,
+  );
 });

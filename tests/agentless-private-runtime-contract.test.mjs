@@ -47,3 +47,21 @@ test("runtime cannot install packages or fetch public Trivy databases", () => {
   assert.match(runtime, /\/var\/cache\/trivy\/db\/metadata\.json/u);
   assert.match(runtime, /\/var\/cache\/trivy\/java-db\/metadata\.json/u);
 });
+
+test("host resolves the requested EBS identity and exposes only one read-only device", () => {
+  assert.match(userData, /lsblk -dn -o PATH,TYPE,SERIAL/u);
+  assert.match(userData, /serial == target/u);
+  assert.match(userData, /TARGET_VOLUME_NOT_FOUND/u);
+  assert.match(userData, /TARGET_VOLUME_AMBIGUOUS/u);
+  assert.match(userData, /--network none/u);
+  assert.match(userData, /--cap-drop ALL/u);
+  assert.match(
+    userData,
+    /--device "\$SCAN_DEVICE":\/dev\/sutra-scan-device:r/u,
+  );
+  assert.doesNotMatch(userData, /-v \/dev:\/dev/u);
+  assert.doesNotMatch(userData, /\/dev:\/dev/u);
+  assert.match(runtime, /const SCAN_DEVICE = "\/dev\/sutra-scan-device"/u);
+  assert.match(runtime, /SCAN_DEVICE_NOT_BOUND/u);
+  assert.doesNotMatch(runtime, /lsblk/u);
+});

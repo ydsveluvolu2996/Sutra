@@ -20,6 +20,18 @@ tag = "v1"
 new_sqlite_classes = ["OutboundRequestStateDurableObject"]
 
 # SUTRA_OUTBOUND_CLIENT_KEYS is a secret, not a [vars] value:
-# {"production-app":"<base64url raw 32-byte Ed25519 public key>"}
+# {
+#   "production-app": {
+#     "publicKey": "<base64url raw 32-byte Ed25519 public key>",
+#     "allowedTargets": [
+#       "zoho-in-oauth",
+#       "zoho-in-jwks",
+#       "zoho-in-mail",
+#       "turnstile-siteverify",
+#       "jira-cloud-webhook",
+#       "servicenow-webhook"
+#     ]
+#   }
+# }
 # Set it with:
 #   npx wrangler secret put SUTRA_OUTBOUND_CLIENT_KEYS

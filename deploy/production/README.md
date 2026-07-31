@@ -515,7 +515,9 @@ The stack intentionally does not guess or purchase these items:
     `approved-after-live-end-to-end-agentless-validation`. Broker run, resource,
     lease, and restart-recovery state is durable in PostgreSQL; customer-owned
     snapshots are lifecycle handoffs and scan-account cleanup failures remain
-    visible as teardown debt.
+    visible as teardown debt. The pinned scanner host resolves the attached disk
+    from the exact EBS volume ID, grants only the selected block device read-only
+    to a networkless container, and never binds the host's complete `/dev` tree.
 12. **Vulnerability feeds.** Managed production runs a strict daily private
     Fargate task for the complete FIRST EPSS bulk feed; the in-app durable job
     separately refreshes bounded CISA KEV and NVD windows. The approved HTTPS
@@ -659,14 +661,15 @@ and has two independently protected jobs:
 names to scalar values. It must contain every parameter without a template
 default except the workflow-controlled `SutraAppImage`,
 `SutraMigrationImage`, `NotificationWorkerImage`, `HostedBrokerImage`,
-`AgentlessScannerImage`, `ReleaseActivation`, `PublicOrigin`,
+`AgentlessScannerImage`, `ApplicationRuntimeSecretVersionId`,
+`ReleaseActivation`, `PublicOrigin`,
 `GitHubRepository`, `GitHubReleaseEnvironment`, and
 `NotificationSesActivation`. `NetworkFirewallArn`
 remains a protected operator-supplied parameter because it identifies the
 separately deployed prerequisite. `CustomerRoleTemplateUrl` is also required
 and bootstrap accepts only the exact reviewed, versionId-qualified
 `ap-south-1` S3 path described above. The workflow injects those
-ten values and rejects attempts to override them. Bootstrap always injects
+eleven values and rejects attempts to override them. Bootstrap always injects
 `NotificationSesActivation=disabled-ses-production-access-denied`; SES
 activation requires a later, separately reviewed change after AWS grants
 production access and the feedback acceptance procedure passes. Keep the configuration
@@ -686,8 +689,10 @@ prepared ECS migration task, stack/service and stack-resource verification,
 `secretsmanager:GetSecretValue` for the exact runtime secret (plus its exact
 KMS decrypt permission), and the release-evidence prefix. The prepare job
 streams the exact `AWSCURRENT` document into the shared semantic validator and
-passes only its VersionId between jobs; secret values are never placed in a
-command argument, temporary file, log, or workflow output. The
+passes only its VersionId between jobs. Every application-runtime ECS secret
+reference is pinned to that immutable version, and the task-definition checks
+fail if any non-database secret points anywhere else. Secret values are never
+placed in a command argument, temporary file, log, or workflow output. The
 CloudFormation execution role owns the resource-creation permissions; do not
 grant its permissions directly to the GitHub role. Remove or disable the
 bootstrap trust after first activation. Future releases use only the narrower
@@ -702,15 +707,18 @@ four images. It:
    SBOM/provenance;
 4. scans the exact digests and promotes only those manifests; the scanner scan
    does not ignore unfixed High or Critical findings;
-5. registers a migration task revision and requires exit code zero;
-6. registers and deploys all three service revisions and pins the broker's
+5. semantically validates one runtime-secret version, pins every new
+   application-runtime task reference to it, and rechecks the immutable
+   references before migration;
+6. registers a migration task revision and requires exit code zero;
+7. registers and deploys all three service revisions and pins the broker's
    scanner environment to the exact new scanner digest;
-7. waits for all services and verifies the public health endpoint serves the
+8. waits for all services and verifies the public health endpoint serves the
    exact application digest;
-8. rolls all services back to their previous task definitions on rollout or
+9. rolls all services back to their previous task definitions on rollout or
    verification failure, restoring and verifying the prior broker scanner
    digest; and
-9. checksum-verifies release metadata written to the KMS-encrypted evidence
+10. checksum-verifies release metadata written to the KMS-encrypted evidence
    bucket before declaring success. Both the current and prior scanner digests
    are retained in that evidence. A write/checksum failure rolls all three
    services back to the exact task definitions captured before deployment.
