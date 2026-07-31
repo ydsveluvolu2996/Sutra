@@ -36,12 +36,13 @@ const durationsPath = resolve(root, "tests/test-durations.json");
 // executed by dedicated CI jobs instead:
 //   - rendered-html: needs `pnpm build` output (runs in the build job).
 //   - postgres-repositories / postgres-resource-retirement /
-//     postgres-trust-audit: need a live PostgreSQL service with migrations
-//     applied (run by `pnpm db:postgres:test`).
+//     postgres-ses-feedback / postgres-trust-audit: need a live PostgreSQL
+//     service with migrations applied (run by `pnpm db:postgres:test`).
 const EXCLUDED = new Set([
   "rendered-html.test.mjs",
   "postgres-repositories.test.mjs",
   "postgres-resource-retirement.test.mjs",
+  "postgres-ses-feedback.test.mjs",
   "postgres-trust-audit.test.mjs",
 ]);
 

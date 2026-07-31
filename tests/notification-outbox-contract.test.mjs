@@ -7,6 +7,7 @@ const files = {
   postgres: new URL("../postgres/migrations/0011_notification_destinations_outbox.sql", import.meta.url),
   repository: new URL("../db/security-notification-repository.ts", import.meta.url),
   route: new URL("../app/api/v1/notification-destinations/route.ts", import.meta.url),
+  apiAuth: new URL("../lib/api-auth.ts", import.meta.url),
   worker: new URL("../services/notification-worker/worker.ts", import.meta.url),
   workerRepository: new URL("../services/notification-worker/postgres-repository.ts", import.meta.url),
   sesFeedbackSqlite: new URL("../drizzle/0077_ses_delivery_feedback.sql", import.meta.url),
@@ -46,18 +47,20 @@ test("repository claims atomically, recovers expired leases, and scopes every re
 });
 
 test("authenticated web API only queues; provider delivery remains worker-owned", async () => {
-  const [route, worker, bootstrap] = await Promise.all([
+  const [route, apiAuth, worker, bootstrap] = await Promise.all([
     readFile(files.route, "utf8"),
+    readFile(files.apiAuth, "utf8"),
     readFile(files.worker, "utf8"),
     readFile(files.bootstrap, "utf8"),
   ]);
   assert.match(route, /requireApiSession/);
   assert.match(route, /assertSessionCapability/);
   assert.match(route, /assertSameOrigin/);
-  assert.match(route, /configuredPublicOrigin/u);
-  assert.match(route, /notificationPublicOrigin\(request\.url\)/u);
+  assert.match(route, /requiredConfiguredPublicOrigin/u);
+  assert.match(route, /const publicOrigin = requiredConfiguredPublicOrigin\(\)/u);
   assert.doesNotMatch(route, /https:\/\/app\.sutracmdb\.com/u);
-  assert.match(route, /parsed\.origin !== candidate/u);
+  assert.match(apiAuth, /export function requiredConfiguredPublicOrigin/u);
+  assert.match(apiAuth, /parsed\.origin !== value/u);
   assert.match(
     bootstrap,
     /\[\[ "\$\{PUBLIC_ORIGIN\}" == "https:\/\/www\.sutracmdb\.com" \]\]/u,

@@ -3,6 +3,7 @@ misconfigurations:
     paths:
       - deploy/ec2/cloudformation-single-node.yaml
       - infrastructure/agentless-scan-account.yaml
+      - infrastructure/production-ha.yaml
     statement: >-
       The private-beta host has no inbound security-group rules. Its explicit,
       port-bounded egress rules must reach dynamic AWS APIs, Cloudflare Tunnel,
@@ -17,8 +18,14 @@ misconfigurations:
       for ECR/logs/ebs plus a free S3 gateway endpoint, which removes 0.0.0.0/0
       entirely. That was deferred because the scan VPC deliberately has no NAT (a
       NAT idles at more than this feature costs in use) and four interface
-      endpoints carry their own standing hourly charge. Until then the blast radius
-      is bounded by the scanner task holding no AWS credentials and
+      endpoints carry their own standing hourly charge. The production broker
+      is a different, fully hardened case: its only broad L3 rule is TCP 443,
+      its private-subnet default route is forced through the two-AZ strict-order
+      Network Firewall, and that firewall permits only the managed gateway and
+      reviewed AWS API namespaces. A security group cannot express those FQDN
+      controls, so removing the L3 rule would also remove the inspected route.
+      Until the agentless endpoint migration, its blast radius is bounded by
+      the scanner task holding no AWS credentials and
       SutraAgentlessScannerRole denying rds, secretsmanager, ssm:GetParameter*,
       dynamodb, iam, sts:AssumeRole and organizations.
   - id: AWS-0035
@@ -59,14 +66,26 @@ misconfigurations:
   - id: AWS-0132
     paths:
       - infrastructure/production-ha.yaml
+      - infrastructure/production-ha-bootstrap-iam.yaml
     statement: >-
-      This path contains two scanner false positives with distinct AWS
-      constraints. EvidenceBucket explicitly uses aws:kms and the supplied
-      customer-managed KmsKeyArn, but the scanner cannot resolve the
-      CloudFormation intrinsic. AccessLogBucket is exclusively the ALB access-log
-      destination; ALB log delivery requires SSE-S3 and does not support SSE-KMS
-      for that destination. Both buckets block public access, enforce TLS,
-      version objects, and retain data under explicit lifecycle policies.
+      These paths contain scanner false positives plus one AWS service
+      constraint. EvidenceBucket and BootstrapTemplateBucket explicitly use
+      aws:kms and the supplied customer-managed KmsKeyArn, but the scanner
+      cannot resolve that CloudFormation intrinsic. AccessLogBucket is
+      exclusively the ALB access-log destination; ALB log delivery requires
+      SSE-S3 and does not support SSE-KMS for that destination. Every bucket
+      blocks public access, enforces TLS, versions objects, and retains data
+      under explicit lifecycle policies.
+  - id: AWS-0096
+    paths:
+      - infrastructure/production-ha.yaml
+    statement: >-
+      SesFeedbackQueue and SesFeedbackDeadLetterQueue both declare
+      KmsMasterKeyId as the exact account-local customer-managed KmsKeyArn and
+      set a bounded data-key reuse period. The scanner cannot resolve that
+      CloudFormation parameter reference and incorrectly reports both queues as
+      unencrypted. Template contracts and cfn-lint keep the encryption
+      properties release-blocking.
   - id: DS-0002
     paths:
       - services/agentless-scanner/Dockerfile

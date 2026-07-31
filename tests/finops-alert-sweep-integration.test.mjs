@@ -108,6 +108,8 @@ async function seedTenant(database, {
 }
 
 async function withDatabase(run) {
+  const previousPublicOrigin = cloudflare.env.SUTRA_PUBLIC_ORIGIN;
+  cloudflare.env.SUTRA_PUBLIC_ORIGIN = "https://www.sutracmdb.com";
   const miniflare = new Miniflare({
     modules: true,
     script: "export default { fetch() { return new Response('ok'); } }",
@@ -204,6 +206,11 @@ async function withDatabase(run) {
     });
   } finally {
     await miniflare.dispose();
+    if (previousPublicOrigin === undefined) {
+      delete cloudflare.env.SUTRA_PUBLIC_ORIGIN;
+    } else {
+      cloudflare.env.SUTRA_PUBLIC_ORIGIN = previousPublicOrigin;
+    }
   }
 }
 
