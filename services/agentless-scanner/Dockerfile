@@ -78,24 +78,21 @@ RUN /out/trivy image --download-db-only \
   && test -s /out/trivy-cache/java-db/metadata.json
 
 # Multi-architecture manifest resolved from the official Node registry on
-# 2026-07-30. Pinning the digest makes the runtime packages reproducible while
-# retaining the explicit Node 22.23.1 release line.
-FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
+# 2026-07-31. Pinning the Alpine 3.23 digest makes the runtime packages
+# reproducible while retaining the explicit Node 22.23.1 release line. Debian
+# 12 carries unfixed High/Critical findings in its base utilities; the scanner
+# gate intentionally rejects those rather than suppressing them.
+FROM node:22.23.1-alpine3.23@sha256:8516dce0483394d5708d4b2ee6cacb79fb1d617ea4e2787c2120bcca92ce372e AS scanner-runtime-packages
 
 # util-linux for blkid/lsblk (filesystem detection), and the xfs/btrfs tools so a
 # non-ext4 root volume is mountable rather than silently skipped. Customers run
 # Amazon Linux 2023 on xfs by default, so xfsprogs is not optional here.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends \
+RUN apk add --no-cache \
        util-linux \
        xfsprogs \
        btrfs-progs \
        e2fsprogs \
-       ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
-
-COPY --from=trivy /out/trivy /usr/local/bin/trivy
-COPY --from=trivy-db /out/trivy-cache /var/cache/trivy
+       ca-certificates
 
 # Remove the bundled package managers. This container runs as root, holds
 # CAP_SYS_ADMIN, and has an untrusted customer filesystem mounted at /mnt/scan —
@@ -106,7 +103,13 @@ COPY --from=trivy-db /out/trivy-cache /var/cache/trivy
 # The root Dockerfile strips these for the same reason.
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
   && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
-    /usr/local/bin/pnpm /usr/local/bin/yarn /usr/local/bin/yarnpkg
+    /usr/local/bin/pnpm /usr/local/bin/yarn /usr/local/bin/yarnpkg \
+    /sbin/apk /usr/sbin/apk /usr/bin/apk
+
+FROM scanner-runtime-packages
+
+COPY --from=trivy /out/trivy /usr/local/bin/trivy
+COPY --from=trivy-db /out/trivy-cache /var/cache/trivy
 
 WORKDIR /opt/scanner
 

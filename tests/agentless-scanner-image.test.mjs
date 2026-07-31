@@ -54,13 +54,24 @@ test("agentless scanner builds versioned Trivy from an immutable patched module 
 });
 
 test("agentless scanner runtime is digest-pinned and contains no build toolchain", () => {
+  const runtimePackages = dockerfile.indexOf("AS scanner-runtime-packages");
+  const packageManagerRemoval = dockerfile.indexOf("rm -rf /usr/local/lib/node_modules/npm");
+  const finalRuntime = dockerfile.indexOf("FROM scanner-runtime-packages");
   assert.ok(
     dockerfile.includes(
-      "FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3",
+      "FROM node:22.23.1-alpine3.23@sha256:8516dce0483394d5708d4b2ee6cacb79fb1d617ea4e2787c2120bcca92ce372e",
     ),
   );
+  assert.ok(dockerfile.includes("apk add --no-cache"));
+  assert.ok(dockerfile.includes("/sbin/apk"));
   assert.ok(dockerfile.includes("COPY --from=trivy /out/trivy /usr/local/bin/trivy"));
   assert.ok(dockerfile.includes("rm -rf /usr/local/lib/node_modules/npm"));
+  assert.ok(
+    runtimePackages >= 0
+      && packageManagerRemoval > runtimePackages
+      && finalRuntime > packageManagerRemoval,
+    "package managers must be absent from the reusable scanner runtime stage",
+  );
   assert.equal(dockerfile.includes("COPY --from=trivy /usr/local/go"), false);
   assert.equal(dockerfile.includes("COPY --from=trivy /go"), false);
 });
