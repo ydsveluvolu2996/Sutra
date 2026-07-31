@@ -62,7 +62,7 @@ test("TOTP secrets are encrypted and bound to the user and key version", async (
   await assert.rejects(openTotpSecret(sealed, key, "user_b"));
 });
 
-test("privileged AWS trust changes require MFA verified within five minutes", () => {
+test("destructive trust and administrative changes can require MFA verified within five minutes", () => {
   const now = Date.UTC(2026, 6, 16, 12, 0, 0);
   const fiveMinutes = 5 * 60 * 1000;
   assert.equal(isRecentMfaVerification(now - fiveMinutes, now, fiveMinutes), true);

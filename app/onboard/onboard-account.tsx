@@ -181,7 +181,6 @@ export function OnboardAccount() {
   const [rolePath, setRolePath] = useState(SUTRA_ROLE_NAMESPACE);
   const [roleName, setRoleName] = useState(SUTRA_TEMPLATE_ROLE_NAME);
   const [roleArn, setRoleArn] = useState("");
-  const [roleStepUpCode, setRoleStepUpCode] = useState("");
   const [created, setCreated] = useState<CreateConnectionResponse | null>(null);
   const [oneTimeExternalId, setOneTimeExternalId] = useState<string | null>(null);
   const [handoffDrafts, setHandoffDrafts] = useState<PendingHandoffDraft[]>(() =>
@@ -405,8 +404,6 @@ export function OnboardAccount() {
     setError(null);
     setNotice(null);
     try {
-      await postPilot("/api/auth/mfa/step-up", { code: roleStepUpCode });
-      setRoleStepUpCode("");
       // Hide the value during proof so it cannot linger on screen. The server
       // keeps the same actor-bound handoff recoverable if AWS proof or the
       // atomic database commit fails.
@@ -720,8 +717,8 @@ export function OnboardAccount() {
 
               {!connectionOffboarded ? <form className="onboard-form role-registration" onSubmit={registerRole}>
                 <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={created ? expectedRoleArn(created) : selectedRoleArn ?? "Dedicated role ARN"} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the deployment output after the role is created." : !roleValid ? `Use the exact selected dedicated role ARN: ${selectedRoleArn ?? "unavailable"}.` : "Role ARN syntax, account, path, and name match; the server will still attest its exact trust, permissions, and tags."}</small></label>
-                <label><span>Authenticator code</span><input autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={roleStepUpCode} onChange={(event) => setRoleStepUpCode(event.target.value.replace(/\D/gu, ""))} required /><small>A fresh six-digit MFA code is required before Sutra can register or replace AWS trust.</small></label>
-                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || !/^\d{6}$/u.test(roleStepUpCode) || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
+                <p className="limitation-note">Your existing MFA-verified Sutra session authorizes this step. Sutra still proves the exact AWS account, role trust, permissions, tags, and incorrect-ExternalId denial before registration commits.</p>
+                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
               </form> : null}
 
               <div className="onboard-validation-action">

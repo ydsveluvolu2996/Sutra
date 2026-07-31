@@ -1,4 +1,3 @@
-import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
   commitVerifiedConnectionRole,
   getStoredConnectionSecretForOrg,
@@ -60,7 +59,11 @@ export async function POST(request: Request): Promise<Response> {
     const body = parseBody(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, body.connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
-    requireRecentMfa(actor.authenticated);
+    // The normal API authorization boundary already requires an MFA-verified
+    // session. Do not force the customer to enter a second one-time code during
+    // onboarding; exact customer capability, same-origin checks, server-held
+    // ExternalId, and positive plus negative AWS trust attestation remain
+    // mandatory before the role can be committed.
     return await withLocalOnboardingAccountLock(
       stored.partition,
       stored.accountId,
