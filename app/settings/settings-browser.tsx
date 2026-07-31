@@ -8,6 +8,7 @@ import { ApiTokensPanel } from "./api-tokens-panel";
 import { EnterpriseReadinessPanel } from "./enterprise-readiness-panel";
 import { ItsmConnectorsPanel } from "./itsm-connectors-panel";
 import GovernancePoliciesPanel from "./governance-policies-panel";
+import { ScimConnectorsPanel } from "./scim-connectors-panel";
 
 function roleLabel(role: string): string {
   return role.split("_").map((part) => `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`).join(" ");
@@ -99,6 +100,7 @@ export function SettingsBrowser() {
       {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
       {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
       <EnterpriseReadinessPanel connectionId={connectionId} />
+      {canManageMembers ? <ScimConnectorsPanel /> : null}
       <ApiTokensPanel connectionId={connectionId} />
       <ItsmConnectorsPanel connectionId={connectionId} />
       <GovernancePoliciesPanel connectionId={connectionId} />

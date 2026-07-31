@@ -12,6 +12,17 @@ interface AssignableCustomer {
   readonly slug: string;
 }
 
+interface IdentityProvider {
+  readonly kind: "oidc" | "saml";
+  readonly id: string;
+  readonly label: string;
+}
+
+interface InvitationListResult {
+  readonly invitations: readonly Invitation[];
+  readonly identityProviders: readonly IdentityProvider[];
+}
+
 interface Invitation {
   readonly id: string;
   readonly email: string;
@@ -115,6 +126,7 @@ export function AccessBrowser() {
   const customerScoped = capabilities.has("membership:manage:customer") && !capabilities.has("membership:manage");
 
   const [invitations, setInvitations] = useState<readonly Invitation[]>([]);
+  const [identityProviders, setIdentityProviders] = useState<readonly IdentityProvider[]>([]);
   const [sessions, setSessions] = useState<readonly ManagedSession[]>([]);
   const [customers, setCustomers] = useState<readonly AssignableCustomer[]>([]);
   const [email, setEmail] = useState("");
@@ -122,6 +134,7 @@ export function AccessBrowser() {
   const [customerId, setCustomerId] = useState("");
   const [scopeMode, setScopeMode] = useState("assigned_customers");
   const [lifetimeHours, setLifetimeHours] = useState("24");
+  const [identityProviderKey, setIdentityProviderKey] = useState("");
   const [sessionTotpCode, setSessionTotpCode] = useState("");
   const [oneTimeInvitation, setOneTimeInvitation] = useState<OneTimeInvitation | null>(null);
   const [shareNotice, setShareNotice] = useState<string | null>(null);
@@ -184,7 +197,18 @@ export function AccessBrowser() {
 
   const load = useCallback(async () => {
     const invitationResponse = await fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" });
-    setInvitations((await readAuthResponse<{ invitations: readonly Invitation[] }>(invitationResponse)).invitations);
+    const invitationBody = await readAuthResponse<InvitationListResult>(invitationResponse);
+    setInvitations(invitationBody.invitations);
+    setIdentityProviders(invitationBody.identityProviders);
+    setIdentityProviderKey((current) => {
+      if (invitationBody.identityProviders.some((provider) => `${provider.kind}:${provider.id}` === current)) {
+        return current;
+      }
+      const only = invitationBody.identityProviders.length === 1
+        ? invitationBody.identityProviders[0]
+        : undefined;
+      return only === undefined ? "" : `${only.kind}:${only.id}`;
+    });
     if (customerScoped) {
       setSessions([]);
       return;
@@ -196,7 +220,7 @@ export function AccessBrowser() {
   useEffect(() => {
     let active = true;
     const invitations = fetch("/api/v1/invitations", { cache: "no-store", credentials: "same-origin" })
-      .then((response) => readAuthResponse<{ invitations: readonly Invitation[] }>(response));
+      .then((response) => readAuthResponse<InvitationListResult>(response));
     const sessions = customerScoped
       ? Promise.resolve<{ sessions: readonly ManagedSession[] }>({ sessions: [] })
       : fetch("/api/v1/sessions", { cache: "no-store", credentials: "same-origin" })
@@ -207,6 +231,11 @@ export function AccessBrowser() {
       .then(([invitationBody, sessionBody, customerBody]) => {
         if (!active) return;
         setInvitations(invitationBody.invitations);
+        setIdentityProviders(invitationBody.identityProviders);
+        const onlyProvider = invitationBody.identityProviders.length === 1
+          ? invitationBody.identityProviders[0]
+          : undefined;
+        setIdentityProviderKey(onlyProvider === undefined ? "" : `${onlyProvider.kind}:${onlyProvider.id}`);
         setSessions(sessionBody.sessions);
         setCustomers(customerBody.customers);
         setCustomerId((current) => current || customerBody.customers[0]?.id || "");
@@ -229,12 +258,21 @@ export function AccessBrowser() {
     setShareNotice(null);
     setOneTimeInvitation(null);
     try {
+      const selectedProvider = identityProviders.find(
+        (provider) => `${provider.kind}:${provider.id}` === identityProviderKey,
+      );
+      if (identityProviders.length > 0 && selectedProvider === undefined) {
+        throw new Error("Choose the sign-in provider this invitation must use");
+      }
       const body = {
         email,
         role: effectiveRole,
         scopeMode: effectiveScopeMode,
         lifetimeHours: Number(lifetimeHours),
         ...(selectedCustomerRequired ? { customerId } : {}),
+        ...(selectedProvider === undefined
+          ? {}
+          : { identityProvider: { kind: selectedProvider.kind, id: selectedProvider.id } }),
       };
       const bodyJson = JSON.stringify(body);
       const operation = creationOperation.current?.bodyJson === bodyJson
@@ -498,8 +536,22 @@ export function AccessBrowser() {
             <label><span>Customer scope</span><select disabled={customerScoped || effectiveRole === "org_admin"} value={effectiveScopeMode} onChange={(event) => setScopeMode(event.target.value)}><option value="assigned_customers">One assigned customer</option><option value="all_customers">All customers</option></select><small>{effectiveRole === "org_admin" ? "Organization administrators always receive organization-wide access." : customerScoped ? "Your administration rights require one explicit customer." : "Choose the smallest scope this member needs."}</small></label>
             <label><span>Expires after</span><select value={lifetimeHours} onChange={(event) => setLifetimeHours(event.target.value)}><option value="1">1 hour</option><option value="24">24 hours</option><option value="72">3 days</option><option value="168">7 days</option></select></label>
           </div>
+          {identityProviders.length > 0 ? (
+            <label>
+              <span>Required sign-in provider</span>
+              <select required value={identityProviderKey} onChange={(event) => setIdentityProviderKey(event.target.value)}>
+                {identityProviders.length > 1 ? <option value="">Choose a provider</option> : null}
+                {identityProviders.map((provider) => (
+                  <option key={`${provider.kind}:${provider.id}`} value={`${provider.kind}:${provider.id}`}>
+                    {provider.label} · {provider.kind.toUpperCase()}
+                  </option>
+                ))}
+              </select>
+              <small>The invitation is cryptographically bound to the selected provider&apos;s exact server-configured issuer.</small>
+            </label>
+          ) : null}
           {selectedCustomerRequired ? <label><span>Assigned customer</span><select required value={customerId} onChange={(event) => setCustomerId(event.target.value)}>{customers.length === 0 ? <option value="">No available customers</option> : customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select><small>This invitation creates access only to the selected customer.</small></label> : null}
-          <button className="button button-primary" disabled={busy || (selectedCustomerRequired && !customerId)} type="submit">{busy ? "Creating invitation…" : "Create and deliver invitation"}</button>
+          <button className="button button-primary" disabled={busy || (selectedCustomerRequired && !customerId) || (identityProviders.length > 0 && !identityProviderKey)} type="submit">{busy ? "Creating invitation…" : "Create and deliver invitation"}</button>
           <p className="limitation-note">Automatic email requires a configured transactional email provider. Sutra reports provider acceptance separately from inbox delivery and always shows the new link once for secure manual sharing.</p>
         </form>
         {oneTimeInvitation ? (

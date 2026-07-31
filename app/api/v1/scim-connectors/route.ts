@@ -3,8 +3,11 @@ import {
   validateScimRoleMappings,
   type ScimSubjectSource,
 } from "../../../../db/scim-repository";
-import { requireRecentMfa } from "../../../../db/auth-repository";
-import { authorizeMembershipManagementRequest } from "../../../../lib/api-auth";
+import { LocalAuthError, requireRecentMfa } from "../../../../db/auth-repository";
+import {
+  authorizeMembershipManagementRequest,
+  isHostedOidcRuntime,
+} from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
   authErrorResponse,
@@ -12,7 +15,10 @@ import {
   exactInputObject,
   readAuthJson,
 } from "../../../../lib/auth-http";
-import { LocalAuthError } from "../../../../db/auth-repository";
+import {
+  hostedIdentityProviderSummaries,
+  resolveHostedIdentityProviderIssuer,
+} from "../../../../lib/hosted-identity-provider-directory";
 import { jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +36,12 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const authenticated = await requireOrgAdministrator(request);
     return jsonResponse(
-      { connectors: await new ScimConnectorRepository().list(authenticated.subject.orgId) },
+      {
+        connectors: await new ScimConnectorRepository().list(authenticated.subject.orgId),
+        identityProviders: isHostedOidcRuntime()
+          ? hostedIdentityProviderSummaries(request)
+          : [],
+      },
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
@@ -45,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
     requireRecentMfa(authenticated);
     const body = exactInputObject(
       await readAuthJson(request, 16 * 1024),
-      ["name", "identityIssuer", "subjectSource"],
+      ["name", "identityProvider", "subjectSource"],
       ["roleMappings", "expiresAt"],
     );
     const subjectSource = boundedInputString(
@@ -61,7 +72,7 @@ export async function POST(request: Request): Promise<Response> {
       orgId: authenticated.subject.orgId,
       actorId: authenticated.subject.userId,
       name: boundedInputString(body.name, { label: "SCIM connector name", maximum: 64 }),
-      identityIssuer: boundedInputString(body.identityIssuer, { label: "identity issuer", maximum: 2048 }),
+      identityIssuer: resolveHostedIdentityProviderIssuer(request, body.identityProvider),
       subjectSource,
       roleMappings: validateScimRoleMappings(body.roleMappings),
       expiresAt,
