@@ -67,6 +67,25 @@ interface ScanListResponse {
   readonly reason?: string;
 }
 
+type Scanner = "vuln" | "secret" | "sbom" | "malware";
+
+const SCANNERS: readonly Scanner[] = ["vuln", "secret", "sbom", "malware"];
+
+interface ScanPlanResponse {
+  readonly run?: ScanRun;
+  readonly plan?: {
+    readonly scanners: readonly string[];
+    readonly summary: {
+      readonly inScope: number;
+      readonly skipped: number;
+      readonly snapshots: number;
+    };
+  };
+  readonly readiness?: Readiness;
+  readonly volumesConsidered?: number;
+  readonly error?: { readonly message?: string };
+}
+
 function shortDate(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString().slice(0, 16).replace("T", " ");
@@ -76,8 +95,16 @@ export function AgentlessScansPanel(): React.JSX.Element {
   const [data, setData] = useState<ScanListResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [planning, setPlanning] = useState(false);
   const [applying, setApplying] = useState<string | null>(null);
+  const [planOutcome, setPlanOutcome] = useState<string | null>(null);
   const [applyOutcome, setApplyOutcome] = useState<string | null>(null);
+  const [requiredTagKey, setRequiredTagKey] = useState("");
+  const [requiredTagValue, setRequiredTagValue] = useState("");
+  const [includeUnattached, setIncludeUnattached] = useState(false);
+  const [maxConcurrentScans, setMaxConcurrentScans] = useState("4");
+  const [snapshotTtlHours, setSnapshotTtlHours] = useState("24");
+  const [scanners, setScanners] = useState<readonly Scanner[]>(["vuln", "secret", "sbom"]);
 
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -155,12 +182,10 @@ export function AgentlessScansPanel(): React.JSX.Element {
   /**
    * Applies a planned run.
    *
-   * Today this is expected to return 409 with the readiness and configuration gaps,
-   * and that outcome is surfaced verbatim rather than flattened into a generic
-   * error. "Here is exactly which settings are unset" is the message that lets an
-   * operator close a gap; "could not apply" is the message that makes them guess.
-   * The response's own `interpretation` is shown too, because the one reading that
-   * must never happen is treating a refused apply as a completed clean scan.
+   * Execution is available only when authenticated broker readiness says it is.
+   * Any refusal is surfaced verbatim rather than flattened into a generic error:
+   * the exact configuration gap lets an operator fix it, and the response's own
+   * interpretation prevents a refused apply being mistaken for a clean scan.
    */
   async function apply(runId: string, connectionId: string | null): Promise<void> {
     if (connectionId === null) return;
@@ -196,6 +221,66 @@ export function AgentlessScansPanel(): React.JSX.Element {
     }
   }
 
+  async function createPlan(): Promise<void> {
+    const connectionId = data?.connectionId ?? null;
+    const concurrency = Number(maxConcurrentScans);
+    const ttlHours = Number(snapshotTtlHours);
+    if (connectionId === null) return;
+    if (scanners.length === 0) {
+      setPlanOutcome("Select at least one scanner before creating a plan.");
+      return;
+    }
+    if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) {
+      setPlanOutcome("Concurrent scans must be a whole number from 1 to 64.");
+      return;
+    }
+    if (!Number.isInteger(ttlHours) || ttlHours < 1 || ttlHours > 168) {
+      setPlanOutcome("Snapshot retention must be a whole number from 1 to 168 hours.");
+      return;
+    }
+    const tagKey = requiredTagKey.trim();
+    const tagValue = requiredTagValue.trim();
+    if (tagKey.length === 0 && tagValue.length > 0) {
+      setPlanOutcome("Set a required tag key before setting its value.");
+      return;
+    }
+
+    setPlanning(true);
+    setPlanOutcome(null);
+    try {
+      const response = await fetch("/api/v1/agentless-scans", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          connectionId,
+          ...(tagKey.length > 0 ? {
+            requiredTagKey: tagKey,
+            ...(tagValue.length > 0 ? { requiredTagValue: tagValue } : {}),
+          } : {}),
+          includeUnattached,
+          maxConcurrentScans: concurrency,
+          snapshotTtlHours: ttlHours,
+          scanners,
+        }),
+      });
+      const payload = await response.json() as ScanPlanResponse;
+      if (!response.ok || payload.run === undefined || payload.plan === undefined) {
+        throw new Error(payload.error?.message ?? `The scan plan could not be created (${response.status}).`);
+      }
+      setPlanOutcome(
+        `Plan ${payload.run.id} created for ${payload.plan.summary.inScope} in-scope volume(s); `
+        + `${payload.plan.summary.skipped} skipped and ${payload.plan.summary.snapshots} snapshot(s) proposed. `
+        + "No AWS resource was created.",
+      );
+      await load();
+    } catch (cause) {
+      setPlanOutcome(cause instanceof Error ? cause.message : "The scan plan could not be created.");
+    } finally {
+      setPlanning(false);
+    }
+  }
+
   return (
     <div className="stack-lg">
       <header className="panel-head">
@@ -212,7 +297,7 @@ export function AgentlessScansPanel(): React.JSX.Element {
           mistaken for a clean result while this is true. */}
       {readiness !== undefined && !readiness.canExecute ? (
         <article className="panel" aria-labelledby="agentless-readiness">
-          <h2 id="agentless-readiness">Scanning is not yet executable</h2>
+          <h2 id="agentless-readiness">Execution requirements are incomplete</h2>
           <p><strong>{readiness.summary}</strong></p>
           <ul>
             {readiness.gaps.map((gap) => (
@@ -233,6 +318,76 @@ export function AgentlessScansPanel(): React.JSX.Element {
           <p className="muted">{data.reason}</p>
         </article>
       ) : null}
+
+      {data !== null && data.available !== false ? <article className="panel" aria-labelledby="agentless-plan-heading">
+        <div className="panel-title-row">
+          <div>
+            <p className="eyebrow">PLAN · NO AWS WRITE</p>
+            <h2 id="agentless-plan-heading">Create a reviewable scan plan</h2>
+          </div>
+        </div>
+        <p className="muted">
+          Scope the collected EBS inventory and record the exact scanners, concurrency, snapshot
+          retention and skipped volumes before any AWS resource is created.
+        </p>
+        <div className="agentless-plan-form">
+          <div className="agentless-plan-fields">
+            <label>
+              <span>Required tag key <small>(optional)</small></span>
+              <input maxLength={128} placeholder="sutra-agentless" value={requiredTagKey} onChange={(event) => setRequiredTagKey(event.target.value)} />
+            </label>
+            <label>
+              <span>Required tag value <small>(defaults to true)</small></span>
+              <input maxLength={128} placeholder="true" value={requiredTagValue} onChange={(event) => setRequiredTagValue(event.target.value)} />
+            </label>
+            <label>
+              <span>Maximum concurrent scans</span>
+              <input inputMode="numeric" max={64} min={1} type="number" value={maxConcurrentScans} onChange={(event) => setMaxConcurrentScans(event.target.value)} />
+            </label>
+            <label>
+              <span>Snapshot retention (hours)</span>
+              <input inputMode="numeric" max={168} min={1} type="number" value={snapshotTtlHours} onChange={(event) => setSnapshotTtlHours(event.target.value)} />
+            </label>
+          </div>
+          <fieldset className="agentless-plan-options">
+            <legend>Scanners</legend>
+            {SCANNERS.map((scanner) => (
+              <label className="agentless-plan-option" key={scanner}>
+                <input
+                  checked={scanners.includes(scanner)}
+                  onChange={(event) => setScanners((current) => event.target.checked
+                    ? [...current, scanner]
+                    : current.filter((entry) => entry !== scanner))}
+                  type="checkbox"
+                />
+                <span>{scanner}</span>
+              </label>
+            ))}
+          </fieldset>
+          <label className="agentless-plan-option">
+            <input checked={includeUnattached} onChange={(event) => setIncludeUnattached(event.target.checked)} type="checkbox" />
+            <span>Include unattached EBS volumes</span>
+          </label>
+          <div className="agentless-plan-actions">
+            <button
+              className="button button-primary"
+              disabled={
+                planning ||
+                loading ||
+                data?.connectionId == null ||
+                readiness?.canPlan !== true ||
+                scanners.length === 0
+              }
+              onClick={() => { void createPlan(); }}
+              type="button"
+            >
+              {planning ? "Creating plan…" : "Create plan"}
+            </button>
+            <span className="muted">Planning reads the latest collected CMDB snapshot only.</span>
+          </div>
+          {planOutcome !== null ? <p className="inline-warning" role="status"><strong>Plan result</strong><span>{planOutcome}</span></p> : null}
+        </div>
+      </article> : null}
 
       <article className="panel">
         <div className="panel-title-row">

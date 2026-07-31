@@ -2033,6 +2033,19 @@ h3 { letter-spacing: -.02em; }
 .case-routing-rule-row { display: grid; grid-template-columns: 56px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e3e8f4); border-radius: 10px; padding: 9px 12px; }
 .case-routing-rule-row small { display: block; color: #7d87a6; overflow-wrap: anywhere; }
 
+/* Agentless scan plan */
+.agentless-plan-form { display: grid; gap: 14px; margin-top: 16px; }
+.agentless-plan-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.agentless-plan-fields label { display: grid; gap: 5px; color: #545e80; font-size: 11px; font-weight: 600; }
+.agentless-plan-fields label > span small { color: var(--ink-faint, #8792a8); font-weight: 500; }
+.agentless-plan-fields input { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid var(--line-dark, #c9d3ec); border-radius: 7px; background: #fff; color: var(--ink, #1c2333); font-size: 12px; }
+.agentless-plan-options { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 12px 12px; border: 1px solid var(--line, #e3e8f4); border-radius: 7px; }
+.agentless-plan-options legend { padding: 0 4px; color: #7d87a6; font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.agentless-plan-option { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink, #1c2333); font-size: 12px; font-weight: 500; text-transform: capitalize; }
+.agentless-plan-option input { width: 18px; height: 18px; margin: 0; }
+.agentless-plan-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.agentless-plan-actions .muted { font-size: 10px; }
+
 /* Drift detection */
 .drift-list { display: flex; flex-direction: column; gap: 6px; }
 .drift-row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 12px; align-items: center; border: 1px solid var(--line, #e3e8f4); border-radius: 10px; padding: 9px 12px; }
@@ -3630,6 +3643,7 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .app-shell .filter-control,
   .app-shell .offboard-confirmation input,
   .app-shell .case-routing-form input,
+  .app-shell .agentless-plan-fields input,
   .app-shell .vuln-waiver-form input,
   .app-shell .cmdbq-row select,
   .app-shell .cmdbq-row input,

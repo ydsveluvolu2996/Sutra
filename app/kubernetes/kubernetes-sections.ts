@@ -30,9 +30,9 @@ export const KUBERNETES_SECTIONS: readonly KubernetesSectionDefinition[] = [
   { key: "exposure", label: "Exposure", title: "Workload exposure", description: "Reported network resources and findings whose normalized evidence describes exposure." },
   { key: "rbac", label: "RBAC", title: "Kubernetes RBAC", description: "Reported roles, bindings and service accounts. Effective-permission simulation is not inferred." },
   { key: "network", label: "Network", title: "Kubernetes network", description: "Reported services, ingresses, endpoints and network policies." },
-  { key: "runtime", label: "Runtime", title: "Runtime security", description: "Runtime telemetry status and limitations; runtime collection cannot be enabled from this build." },
+  { key: "runtime", label: "Runtime", title: "Runtime security", description: "Signed Falco heartbeat and normalized runtime evidence for enrolled clusters, with missing sensor coverage disclosed." },
   { key: "compliance", label: "Compliance", title: "Kubernetes compliance", description: "Evidence-backed Kubernetes control results, not certification or audit opinion." },
-  { key: "policies", label: "Policies", title: "Policy results", description: "Observed control identifiers and findings. Admission-policy enforcement is not available." },
+  { key: "policies", label: "Policies", title: "Policy results", description: "Observed control and admission-policy results; enforcement is reported only from collected evidence and applied through customer-controlled GitOps." },
   { key: "scan-history", label: "Scan history", title: "Kubernetes scan history", description: "Kubernetes-specific collection history when the normalized API reports it." },
   { key: "coverage", label: "Coverage", title: "Kubernetes coverage", description: "Exact collector checks and unsupported visibility boundaries." },
 ] as const;

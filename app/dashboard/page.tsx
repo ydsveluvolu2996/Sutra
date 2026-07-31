@@ -219,7 +219,7 @@ const EXPLORE_LINKS: readonly { readonly href: string; readonly glyph: string; r
   { href: "/kubernetes/supply-chain", glyph: "SC", label: "Supply chain", blurb: "SBOM inventory and artifact provenance trust" },
   { href: "/kubernetes/attack-paths", glyph: "AP", label: "Attack paths", blurb: "Reachable cross-plane attack chains" },
   { href: "/kubernetes/permissions", glyph: "EP", label: "Effective permissions", blurb: "CIEM effective-access analysis" },
-  { href: "/cases/routing", glyph: "CR", label: "Case routing", blurb: "Automatic case assignment routing rules" },
+  { href: "/cases/routing", glyph: "CR", label: "Case routing", blurb: "Preview tenant-scoped assignment and ITSM routing decisions" },
   { href: "/findings/exceptions", glyph: "FE", label: "Finding exceptions", blurb: "Governed, time-boxed risk acceptances" },
   { href: "/vulnerabilities/exploitability", glyph: "XP", label: "Exploitability", blurb: "KEV-first, EPSS-ranked exploitability" },
 ];

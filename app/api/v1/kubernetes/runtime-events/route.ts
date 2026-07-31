@@ -133,7 +133,9 @@ export async function POST(request: Request): Promise<Response> {
       summary: `A human-approved case ${created.caseNumber} was created from immutable Falco runtime evidence. Automatic containment remains disabled.`,
       occurredAt: created.createdAt,
       findingCount: 1,
-      reportUrl: `${publicOrigin}/cases`,
+      reportUrl:
+        `${publicOrigin}/kubernetes/runtime?connectionId=${encodeURIComponent(input.connectionId)}`
+        + `#runtime-event-${encodeURIComponent(created.sourceId)}`,
       evidenceSha256: created.evidenceSha256,
     }, publicOrigin);
     const queued = await Promise.allSettled(destinations.map(async (destination) => {

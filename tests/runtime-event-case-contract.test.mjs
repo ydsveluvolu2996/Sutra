@@ -52,6 +52,9 @@ test("authenticated route requires an explicit create-case operation and never s
   assert.match(source, /input\.operation !== "create_case"/);
   assert.match(source, /providerDeliveryAttempted: false/);
   assert.match(source, /notifications\.enqueue\(/);
+  assert.match(source, /\/kubernetes\/runtime\?connectionId=\$\{encodeURIComponent\(input\.connectionId\)\}/u);
+  assert.match(source, /#runtime-event-\$\{encodeURIComponent\(created\.sourceId\)\}/u);
+  assert.doesNotMatch(source, /reportUrl: `\$\{publicOrigin\}\/cases`/u);
   assert.doesNotMatch(source, /deliverSecurityNotification|resolveWebhook|automaticContainment: true/u);
 });
 
@@ -60,6 +63,9 @@ test("runtime UI requires a human confirmation and has no containment action", a
   assert.match(source, /window\.confirm/);
   assert.match(source, /Create case/);
   assert.match(source, /does not contain or modify the workload/);
+  assert.match(source, /id=\{`runtime-event-\$\{item\.id\}`\}/u);
+  assert.match(source, /\/kubernetes\/runtime\?connectionId=\$\{encodeURIComponent\(connectionId\)\}#runtime-event-/u);
+  assert.match(source, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/u);
   assert.doesNotMatch(source, /containWorkload|deletePod|isolateNamespace|automatic.?containment.?true/iu);
 });
 

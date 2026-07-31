@@ -3,6 +3,7 @@ import { AgentlessScanRepository } from "../../../../db/agentless-scan-repositor
 import { buildAgentlessScanPlan, type AgentlessVolume } from "../../../../lib/aws-agentless-scan-plan";
 import type { PilotResource } from "../../../../lib/pilot-types";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
+import { authorize } from "../../../../lib/auth-policy";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import {
   errorResponse,
@@ -81,10 +82,10 @@ function volumesFromSnapshot(resources: readonly PilotResource[]): AgentlessVolu
  * List scan runs, or one run with its findings.
  *
  * Always reports execution readiness alongside the data. Agentless scanning has
- * a reviewed plan, persistence and an AWS executor, but no scanner container
- * yet — so a caller must be able to tell "no findings because nothing is wrong"
- * apart from "no findings because no scan has ever run", and the API says which
- * rather than leaving an empty list to imply the flattering one.
+ * a reviewed plan, persistence and a broker-pinned executor. A caller must be
+ * able to tell "no findings because nothing is wrong" apart from "no findings
+ * because no scan has ever run", so readiness and neverScanned are returned
+ * rather than leaving an empty list to imply the flattering interpretation.
  */
 export async function GET(request: Request): Promise<Response> {
   try {
@@ -101,7 +102,14 @@ export async function GET(request: Request): Promise<Response> {
     // Customer comes from the connection Sutra owns, never from the caller.
     const connections = await listConnectionsForOrg(orgId);
     const scoped = connectionId === null
-      ? connections[0] ?? null
+      // Selecting the organization's newest connection would disclose another
+      // customer's account to assigned-customer members. Resolve the first
+      // connection the persisted customer grant actually authorizes instead.
+      ? connections.find((entry) => authorize(authenticated.subject, {
+          orgId,
+          capability: "connection:read",
+          customerId: entry.customerId,
+        }).allowed) ?? null
       : connections.find((entry: { readonly id: string }) => entry.id === connectionId) ?? null;
     if (scoped === null) {
       return jsonResponse({
@@ -151,9 +159,9 @@ export async function GET(request: Request): Promise<Response> {
  *
  * This deliberately does NOT execute. Nothing is created in AWS, no snapshot is
  * taken and no cost is incurred: the row exists so that a later apply is
- * traceable to the exact plan a human approved. Applying is gated on the scanner
- * container existing and on the executor being live-validated — see
- * `readiness` in the response, which states what is still missing.
+ * traceable to the exact plan a human approved. Applying is gated on the
+ * broker's authenticated execution readiness — see `readiness` in the response,
+ * which states the exact configuration or validation gap.
  */
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -172,13 +180,34 @@ export async function POST(request: Request): Promise<Response> {
     };
     if (typeof connectionId !== "string" || !CONNECTION_ID.test(connectionId)) badRequest();
     if (includeUnattached !== undefined && typeof includeUnattached !== "boolean") badRequest();
-    if (maxConcurrentScans !== undefined && (typeof maxConcurrentScans !== "number" || !Number.isInteger(maxConcurrentScans))) badRequest();
-    if (snapshotTtlHours !== undefined && (typeof snapshotTtlHours !== "number" || !Number.isInteger(snapshotTtlHours))) badRequest();
+    if (
+      maxConcurrentScans !== undefined &&
+      (
+        typeof maxConcurrentScans !== "number" ||
+        !Number.isInteger(maxConcurrentScans) ||
+        maxConcurrentScans < 1 ||
+        maxConcurrentScans > 64
+      )
+    ) badRequest();
+    if (
+      snapshotTtlHours !== undefined &&
+      (
+        typeof snapshotTtlHours !== "number" ||
+        !Number.isInteger(snapshotTtlHours) ||
+        snapshotTtlHours < 1 ||
+        snapshotTtlHours > 168
+      )
+    ) badRequest();
     if (requiredTagKey !== undefined && (typeof requiredTagKey !== "string" || !TAG_KEY.test(requiredTagKey))) badRequest();
     if (requiredTagValue !== undefined && (typeof requiredTagValue !== "string" || !TAG_KEY.test(requiredTagValue))) badRequest();
+    if (requiredTagValue !== undefined && requiredTagKey === undefined) badRequest();
     const scannerList = scanners === undefined
       ? undefined
-      : Array.isArray(scanners) && scanners.every((entry) => entry === "vuln" || entry === "secret" || entry === "sbom" || entry === "malware")
+      : Array.isArray(scanners) &&
+          scanners.length >= 1 &&
+          scanners.length <= 4 &&
+          new Set(scanners).size === scanners.length &&
+          scanners.every((entry) => entry === "vuln" || entry === "secret" || entry === "sbom" || entry === "malware")
         ? (scanners as readonly ("vuln" | "secret" | "sbom" | "malware")[])
         : badRequest();
 
@@ -222,7 +251,7 @@ export async function POST(request: Request): Promise<Response> {
     return jsonResponse({
       run,
       plan,
-      // No snapshot exists yet and none will until an apply path exists.
+      // No snapshot exists yet; only an explicit apply can start execution.
       applied: false,
       readiness: await runtimeReadiness(),
       volumesConsidered: volumes.length,
