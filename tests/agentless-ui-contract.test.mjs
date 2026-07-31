@@ -10,7 +10,8 @@ const [route, panel, css] = await Promise.all([
 ]);
 
 test("default agentless connection selection uses persisted customer authorization", () => {
-  assert.match(route, /connections\.find\(\(entry\) => authorize\(authenticated\.subject,/u);
+  assert.match(route, /connections\.find\(\(entry\) =>[\s\S]*authorize\(authenticated\.subject,/u);
+  assert.match(route, /connectionId === null \|\| entry\.id === connectionId/u);
   assert.match(route, /capability: "connection:read"[\s\S]*customerId: entry\.customerId/u);
   assert.doesNotMatch(route, /connections\[0\]/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", scoped\.customerId\)/u);

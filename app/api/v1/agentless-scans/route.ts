@@ -101,16 +101,14 @@ export async function GET(request: Request): Promise<Response> {
 
     // Customer comes from the connection Sutra owns, never from the caller.
     const connections = await listConnectionsForOrg(orgId);
-    const scoped = connectionId === null
-      // Selecting the organization's newest connection would disclose another
-      // customer's account to assigned-customer members. Resolve the first
-      // connection the persisted customer grant actually authorizes instead.
-      ? connections.find((entry) => authorize(authenticated.subject, {
+    const scoped = connections.find((entry) =>
+      (connectionId === null || entry.id === connectionId) &&
+      authorize(authenticated.subject, {
           orgId,
           capability: "connection:read",
           customerId: entry.customerId,
-        }).allowed) ?? null
-      : connections.find((entry: { readonly id: string }) => entry.id === connectionId) ?? null;
+        }).allowed,
+    ) ?? null;
     if (scoped === null) {
       return jsonResponse({
         connectionId: null,

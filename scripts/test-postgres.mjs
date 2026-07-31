@@ -7,7 +7,11 @@ import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const POSTGRES_TEST_PROJECT = "sutra-postgres-test";
-const { environmentPath, ownerPassword, appPassword } = await ensureDockerLocalEnvironment(root);
+const suppliedOwnerUrl = optionalEnvironmentValue("SUTRA_POSTGRES_TEST_URL");
+const suppliedRuntimeUrl = optionalEnvironmentValue("SUTRA_POSTGRES_RUNTIME_TEST_URL");
+if ((suppliedOwnerUrl === undefined) !== (suppliedRuntimeUrl === undefined)) {
+  throw new Error("Provide both SUTRA_POSTGRES_TEST_URL and SUTRA_POSTGRES_RUNTIME_TEST_URL");
+}
 // Keep the isolated verification database separate from the live-demo stack,
 // which intentionally uses the normal local PostgreSQL port while Sutra runs.
 const requestedPort = process.env.SUTRA_POSTGRES_TEST_PORT?.trim();
@@ -15,10 +19,6 @@ if (requestedPort !== undefined && !validPort(requestedPort)) {
   throw new Error("SUTRA_POSTGRES_TEST_PORT must be an integer from 1 through 65535");
 }
 const port = requestedPort ?? String(await findAvailableLoopbackPort());
-const suppliedOwnerUrl = process.env.SUTRA_POSTGRES_TEST_URL?.trim();
-const suppliedRuntimeUrl = process.env.SUTRA_POSTGRES_RUNTIME_TEST_URL?.trim();
-const baseOwnerUrl = `postgresql://sutra_owner:${encodeURIComponent(ownerPassword)}@127.0.0.1:${port}/sutra`;
-const baseRuntimeUrl = `postgresql://sutra_app:${encodeURIComponent(appPassword)}@127.0.0.1:${port}/sutra`;
 
 async function run(command, args, environment = process.env) {
   await new Promise((resolvePromise, reject) => {
@@ -29,6 +29,11 @@ async function run(command, args, environment = process.env) {
       else reject(new Error(`${command} exited ${signal ?? code}`));
     });
   });
+}
+
+function optionalEnvironmentValue(name) {
+  const value = process.env[name]?.trim();
+  return value === undefined || value.length === 0 ? undefined : value;
 }
 
 function validPort(value) {
@@ -55,26 +60,40 @@ async function findAvailableLoopbackPort() {
   });
 }
 
-await run("docker", [
-  "compose",
-  "--project-name",
-  POSTGRES_TEST_PROJECT,
-  "--env-file",
-  environmentPath,
-  "up",
-  "-d",
-  "--wait",
-  "postgres",
-], {
-  ...process.env,
-  SUTRA_POSTGRES_PORT: port,
-});
+let environmentPath;
+let baseOwnerUrl;
+let baseRuntimeUrl;
+if (suppliedOwnerUrl === undefined) {
+  const local = await ensureDockerLocalEnvironment(root);
+  environmentPath = local.environmentPath;
+  baseOwnerUrl =
+    `postgresql://sutra_owner:${encodeURIComponent(local.ownerPassword)}@127.0.0.1:${port}/sutra`;
+  baseRuntimeUrl =
+    `postgresql://sutra_app:${encodeURIComponent(local.appPassword)}@127.0.0.1:${port}/sutra`;
+  await run("docker", [
+    "compose",
+    "--project-name",
+    POSTGRES_TEST_PROJECT,
+    "--env-file",
+    environmentPath,
+    "up",
+    "-d",
+    "--wait",
+    "postgres",
+  ], {
+    ...process.env,
+    SUTRA_POSTGRES_PORT: port,
+  });
+}
 
 let databaseName;
 let databaseUrl = suppliedOwnerUrl;
 let runtimeDatabaseUrl = suppliedRuntimeUrl;
 let adminPool;
 if (!databaseUrl && !runtimeDatabaseUrl) {
+  if (baseOwnerUrl === undefined || baseRuntimeUrl === undefined) {
+    throw new Error("The local PostgreSQL test environment is incomplete");
+  }
   databaseName = `sutra_test_${randomBytes(8).toString("hex")}`;
   const adminUrl = new URL(baseOwnerUrl);
   adminUrl.pathname = "/postgres";
@@ -86,8 +105,6 @@ if (!databaseUrl && !runtimeDatabaseUrl) {
   const runtime = new URL(baseRuntimeUrl);
   runtime.pathname = `/${databaseName}`;
   runtimeDatabaseUrl = runtime.toString();
-} else if (!databaseUrl || !runtimeDatabaseUrl) {
-  throw new Error("Provide both SUTRA_POSTGRES_TEST_URL and SUTRA_POSTGRES_RUNTIME_TEST_URL");
 }
 
 try {
@@ -128,6 +145,9 @@ try {
     await adminPool.end();
   }
   if (!suppliedOwnerUrl && !suppliedRuntimeUrl) {
+    if (environmentPath === undefined) {
+      throw new Error("The local PostgreSQL test environment path is unavailable");
+    }
     await run("docker", [
       "compose",
       "--project-name",

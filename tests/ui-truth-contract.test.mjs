@@ -3,11 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
-const [dashboard, routing, governance, docs, kubernetesSections] = await Promise.all([
+const [dashboard, routing, governance, docs, docsContent, kubernetesSections] = await Promise.all([
   readFile(new URL("app/dashboard/page.tsx", root), "utf8"),
   readFile(new URL("app/cases/routing/routing-workspace.tsx", root), "utf8"),
   readFile(new URL("lib/governance-policy-engine.ts", root), "utf8"),
   readFile(new URL("app/docs/page.tsx", root), "utf8"),
+  readFile(new URL("app/docs/docs-content.ts", root), "utf8"),
   readFile(new URL("app/kubernetes/kubernetes-sections.ts", root), "utf8"),
 ]);
 
@@ -32,6 +33,8 @@ test("documentation and Kubernetes section descriptions match their live wiring"
   assert.match(docs, /<AppShell active="docs">/u);
   assert.match(docs, /account menu owns the real Documentation destination and icon/u);
   assert.doesNotMatch(docs, /NavKey is a placeholder/u);
+  assert.match(docsContent, /Preview tenant-scoped owner, team, and destination routing without changing a case/u);
+  assert.doesNotMatch(docsContent, /Route cases to the right owner and destination automatically/u);
   assert.match(kubernetesSections, /Signed Falco heartbeat and normalized runtime evidence/u);
   assert.doesNotMatch(kubernetesSections, /runtime collection cannot be enabled from this build/u);
   assert.match(kubernetesSections, /applied through customer-controlled GitOps/u);
