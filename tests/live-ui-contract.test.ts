@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { navGroups } from "../app/components/navigation-config.ts";
@@ -16,7 +16,33 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
+async function productionSourceFiles(directory: string): Promise<readonly string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || ["dist", "fixtures", "node_modules", "test", "tests"].includes(entry.name)) {
+      continue;
+    }
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await productionSourceFiles(candidate));
+    else if (/\.(?:mjs|ts|tsx)$/u.test(entry.name)) files.push(candidate);
+  }
+  return files;
+}
+
 describe("hosted live UI contract", () => {
+  it("never emits links for the retired app.sutracmdb.com host", async () => {
+    const files = (
+      await Promise.all(
+        ["app", "db", "lib", "services"].map((directory) =>
+          productionSourceFiles(path.join(root, directory))),
+      )
+    ).flat();
+    const source = (
+      await Promise.all(files.map((file) => readFile(file, "utf8")))
+    ).join("\n");
+    assert.doesNotMatch(source, /https:\/\/app\.sutracmdb\.com/u);
+  });
+
   it("backs every visible navigation destination with a real page", async () => {
     const dynamicKubernetesSections = new Set(KUBERNETES_SECTION_KEYS);
     for (const item of navGroups.flatMap((group) => group.items)) {

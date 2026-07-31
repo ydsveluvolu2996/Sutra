@@ -14,6 +14,7 @@ import type { ApiTokenRepository, AuthenticatedToken, PublicApiScope } from "../
 
 export const PUBLIC_API_MAX_PAGE_SIZE = 100;
 export const PUBLIC_API_DEFAULT_PAGE_SIZE = 50;
+const PUBLIC_API_MAX_CURSOR_BYTES = 4_096;
 
 export class PublicApiError extends Error {
   public readonly status: number;
@@ -108,7 +109,6 @@ export interface PublicCursorContext {
 }
 
 const CURSOR_COLLECTION = /^[a-z][a-z0-9-]{0,63}$/u;
-const PUBLIC_CURSOR_MAX_LENGTH = 4_096;
 
 /**
  * Bind pagination state to the authenticated token and dataset. A cursor from a
@@ -170,7 +170,7 @@ export async function decodeCursor(
   context: PublicCursorContext,
 ): Promise<number> {
   if (cursor === null || cursor === "") return 0;
-  if (cursor.length > PUBLIC_CURSOR_MAX_LENGTH) {
+  if (cursor.length > PUBLIC_API_MAX_CURSOR_BYTES) {
     throw new PublicApiError(400, "INVALID_CURSOR", "The cursor is not valid; restart from the first page");
   }
   try {
@@ -195,7 +195,11 @@ export async function decodeCursor(
       envelope === null ||
       typeof (envelope as { p?: unknown }).p !== "string" ||
       typeof (envelope as { s?: unknown }).s !== "string" ||
-      Object.keys(envelope).length !== 2 ||
+      Object.keys(envelope).length !== 2
+    ) {
+      throw new Error("invalid cursor envelope");
+    }
+    if (
       typeof parsed !== "object" ||
       parsed === null ||
       Object.keys(parsed).length !== 6 ||

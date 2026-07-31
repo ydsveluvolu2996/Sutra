@@ -6,7 +6,11 @@ import {
   recipientsForDestination,
 } from "../../../../../db/finops-alert-service";
 import type { FinopsAlertSeverity } from "../../../../../lib/finops-alerts";
-import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import {
+  assertSessionCapability,
+  requiredConfiguredPublicOrigin,
+  requireApiSession,
+} from "../../../../../lib/api-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -113,7 +117,15 @@ export async function POST(request: Request): Promise<Response> {
     );
     const recipients = recipientsForDestination(destination);
     const dispatched = await Promise.allSettled(result.evaluation.alerts.map((alert) =>
-      enqueueFinopsAlert(notifications, { orgId, customerId, connectionId, destinationId: destination.id, recipients, alert }),
+      enqueueFinopsAlert(notifications, {
+        orgId,
+        customerId,
+        connectionId,
+        destinationId: destination.id,
+        recipients,
+        alert,
+        publicOrigin: requiredConfiguredPublicOrigin(),
+      }),
     ));
 
     return jsonResponse({

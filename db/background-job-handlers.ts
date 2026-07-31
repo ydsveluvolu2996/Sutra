@@ -71,6 +71,7 @@ import {
 } from "./finops-alert-service";
 import type { FinopsAlert } from "../lib/finops-alerts.ts";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
+import { requiredConfiguredPublicOrigin } from "../lib/api-auth";
 import { planVulnFeedRefresh } from "../lib/vuln-feed-refresh-schedule";
 import { refreshBoundedVulnerabilityFeed } from "../lib/vuln-feed-runtime";
 import type { ManagedOutboundEnvironment } from "../lib/managed-outbound-fetch";
@@ -346,8 +347,6 @@ export interface AlertEvaluationSummary {
 }
 
 const MAX_ALERT_MESSAGE = 2_000;
-const ALERT_PUBLIC_ORIGIN = "https://app.sutracmdb.com";
-
 /**
  * Evaluate a tenant's enabled alert rules against freshly assembled metrics,
  * record each firing, and dispatch it through the EXISTING notification system.
@@ -520,6 +519,7 @@ export async function dispatchFiredAlert(input: AlertDispatchInput): Promise<Ale
   const rule = input.evaluation.rule;
   const title = alertText(rule.name, 200);
   const summary = alertText(input.message, 1_000);
+  const publicOrigin = requiredConfiguredPublicOrigin();
   let enqueued = 0;
   for (const destination of targets) {
     const event = normalizeSecurityNotificationEvent({
@@ -532,11 +532,11 @@ export async function dispatchFiredAlert(input: AlertDispatchInput): Promise<Ale
       summary,
       occurredAt: new Date(input.firedAtMs).toISOString(),
       findingCount: 1,
-      reportUrl: `${ALERT_PUBLIC_ORIGIN}/alerts`,
+      reportUrl: `${publicOrigin}/alerts`,
       evidenceSha256: await alertEvidenceHash(
         `${input.scope.orgId}\u0000${input.scope.customerId}\u0000${rule.id}\u0000${input.firedAtMs}\u0000${input.evaluation.observedValue}`,
       ),
-    }, ALERT_PUBLIC_ORIGIN);
+    }, publicOrigin);
     const emailRecipients = destination.configuration.channel === "email"
       ? destination.configuration.recipients
       : ["notifications@sutracmdb.com"];
@@ -810,7 +810,10 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       listDestinations: (orgId, customerId) => new SecurityNotificationRepository().listDestinations(orgId, customerId),
       evaluate: async (orgId, customerId, connectionIds) =>
         (await evaluateFinopsAlertsForCustomer(orgId, customerId, connectionIds)).evaluation,
-      dispatch: (args) => enqueueFinopsAlert(new SecurityNotificationRepository(), args),
+      dispatch: (args) => enqueueFinopsAlert(
+        new SecurityNotificationRepository(),
+        { ...args, publicOrigin: requiredConfiguredPublicOrigin() },
+      ),
       onDispatchError: (alertId, destinationId, error) => {
         // Visible without aborting the sweep; the runner still completes the job.
         console.warn(`finops-alert-sweep dispatch failed for ${alertId} → ${destinationId}: ${String(error)}`);

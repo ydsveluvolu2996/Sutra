@@ -129,6 +129,36 @@ export function configuredPublicOrigin(): string | undefined {
   return value === undefined || value.length === 0 ? undefined : value;
 }
 
+/**
+ * Return the one browser-visible production origin used in generated links.
+ * Never derive this value from a request Host/URL: those values are transport
+ * input and may be rewritten by a proxy or supplied by an attacker.
+ */
+export function requiredConfiguredPublicOrigin(): string {
+  const value = configuredPublicOrigin();
+  try {
+    if (!value || /[\r\n]/u.test(value)) throw new Error("missing origin");
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" ||
+      parsed.username !== "" ||
+      parsed.password !== "" ||
+      parsed.pathname !== "/" ||
+      parsed.search !== "" ||
+      parsed.hash !== "" ||
+      parsed.origin !== value ||
+      isLoopbackHostname(parsed.hostname)
+    ) throw new Error("invalid origin");
+    return parsed.origin;
+  } catch {
+    throw new LocalAuthError(
+      503,
+      "PERSISTENCE_FAILED",
+      "The canonical public origin is not configured",
+    );
+  }
+}
+
 export function localAuthSecrets(): LocalAuthSecrets {
   const config = runtimeEnv();
   const encryptionKey = config.SUTRA_AUTH_ENCRYPTION_KEY?.trim();
