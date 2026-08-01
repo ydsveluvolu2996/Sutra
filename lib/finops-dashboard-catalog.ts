@@ -134,7 +134,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Extended Support",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Projected ElastiCache, EKS, RDS/Aurora, and OpenSearch Extended Support charges from authoritative resource and usage evidence.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/extended-support.html`,

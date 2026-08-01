@@ -170,6 +170,18 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Integrate release migrations and navigation, then continue Extended Support, Graviton, and Health Events |
 
+### 2026-08-01 — Extended Support projection vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-04 / local G1–G6 candidate slice |
+| Maturity transition | ADV-04 `ENGINE_ONLY` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 19 partial pipelines, 2 engine-only, and 2 absent |
+| Delivery | Server-pinned five-service account/Region contract for ElastiCache, EKS, RDS, Aurora and OpenSearch; immutable READY-only accepted history; same-tenant API; exact signed-micro public results; native service, eligibility, effective-date, resource, actual-versus-projection, 3/6/12-month and remediation views |
+| Focused verification | Engine plus vertical 14 passed; full lint, targeted UI lint and diff validation passed; no ADV-04 TypeScript errors |
+| Honest gaps | Production provider adapter/scheduler/IAM are not deployed; provider price/actual inputs still need decimal or micro strings before end-to-end exact-money status; real calendars, rates, CUR2 and live provider/two-tenant acceptance remain |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Integrate Graviton and Health Events, then remove provider activation gaps |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

@@ -60,13 +60,13 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 9 | 3 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 10 | 2 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 9 | 0 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **18** | **3** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **19** | **2** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The eighteen partial pipelines are Trusted
-Advisor Organizational, Compute Optimizer, AWS News Feeds, AWS Budgets, Support Cases Radar,
+Anomaly, Trends, and Data Transfer. The nineteen partial pipelines are Trusted
+Advisor Organizational, Compute Optimizer, Extended Support Cost Projection, AWS News Feeds, AWS Budgets, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -82,7 +82,7 @@ Carbon, and Amazon Connect Cost Insights. Azure CID and GCP CID are absent.
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md); an accepted server-owned Organizations taxonomy manifest and worker activation are still required. Priority API logic remains supplemental. |
 | ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-02-compute-optimizer.md): immutable organization S3-export history, same-tenant API, and native rightsizing/savings/risk/ownership UI exist; production S3 adapter/job binding, real organization-export coverage, and provider acceptance remain. Discovery and direct recommendation APIs are never substituted for export history. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md); exact-tree and controlled payer/two-tenant acceptance remain. |
-| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | [G0/G1/engine evidence](finops-cid-evidence/ADV-04-extended-support.md); concrete multi-account collector, accepted materialization/history, authenticated API, native visual, exact-money review, and provider acceptance remain. |
+| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-04-extended-support.md): five-service multi-account/Region collection contract, immutable READY-only history, same-tenant API, exact signed-micro output, and native 3/6/12-month UI exist; provider adapter/scheduler/IAM, decimal-string provider money inputs, real calendar/rate/CUR2 reconciliation, and live acceptance remain. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-05-graviton-savings.md); add OpenSearch/ElastiCache contracts, export-object recommendation ingestion, compatibility/inventory/pricing joins, accepted history, API/UI, and provider reconciliation. |
 | ADV-06 | Health Events Dashboard | `health_events` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-06-health-events.md); implement concrete scheduled AWS Health collection, immutable event/entity/detail history, authenticated API, planning timeline/UI, and eligible-plan provider acceptance. |
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): immutable accepted history, same-tenant API, and native four-family UI exist; shared worker registration, hardened production XML gateway, and provider acceptance remain. |

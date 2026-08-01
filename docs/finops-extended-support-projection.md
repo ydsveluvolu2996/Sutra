@@ -173,14 +173,12 @@ validated. Failed/partial collection is never displayed as zero resources.
    process.
 2. Add the read operations to the versioned collector policy and broker
    attestation; publish nothing until the exact template diff is reviewed.
-3. Persist immutable captures, source hashes, effective dates, reconciliation
-   generation IDs, and active heads under organization/customer/connection
-   scope.
-4. Add an authenticated tenant-scoped route with response caps, cache
-   isolation, generic errors, and authorization/adversarial tests.
-5. Add separate EKS, RDS, Aurora, OpenSearch, and ElastiCache dashboard views
-   showing lifecycle risk, actual cost, projection coverage, assumptions, and
-   configuration-required states.
+3. Deploy the implemented immutable capture/head repository under exact
+   organization/customer/connection scope and bind it to the source job ledger.
+4. Deploy and signed-in verify the implemented authenticated tenant-scoped
+   aggregate route and exact-money response projection.
+5. Signed-in verify the implemented EKS, RDS, Aurora, OpenSearch, and
+   ElastiCache native lifecycle, cost, projection and evidence views.
 6. Run live collection against an approved AWS account, reconcile actual CUR
    charges, compare effective rates to the AWS bill, verify empty/partial/error
    states, and retain acceptance evidence before production activation.

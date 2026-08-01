@@ -1,57 +1,82 @@
-# ADV-04 — Extended Support Cost Projection evidence record
+# ADV-04 — Extended Support Cost Projection
 
 Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/extended-support.html>
 
-Official visual reference: <https://docs.aws.amazon.com/images/guidance/latest/cloud-intelligence-dashboards/images/rdsxtsuppcp.png>
+## Status
 
-Assessment revision: `17da4c5989b4`
+`PARTIAL_PIPELINE`. The five-service evidence engine, server-owned
+multi-account/Region job contract, immutable accepted-generation repository,
+authenticated same-tenant API and native planning UI are implemented and
+focused-tested. The AWS provider adapter, scheduler, role-policy deployment,
+live authoritative evidence and signed-in production acceptance are pending.
 
-Current maturity: `ENGINE_ONLY`
+## Official coverage
 
-## Official requirement and visual inventory
+- Amazon ElastiCache cache clusters/replication groups
+- Amazon EKS clusters
+- Amazon RDS DB instances
+- Amazon Aurora DB clusters
+- Amazon OpenSearch Service domains
 
-The current official dashboard covers ElastiCache, EKS, RDS, and OpenSearch
-resources that have reached or are approaching Extended Support. It identifies
-resources entering Extended Support in the next 3, 6, 12 months and beyond,
-shows estimated monthly incremental support cost, and drills down to the
-cluster, database instance, or domain. The prerequisites are the Foundational
-dashboards for actual usage/cost and Data Collection Lab Inventory Data 3.2.0
-or later.
+The dashboard provides service/account/Region/engine/version/lifecycle filters,
+3/6/12-month planning horizons, effective support and charge dates, explicit
+enrollment, usage basis, calendar/pricing freshness, resource drilldown,
+projected incremental charge and remediation planning. RDS and Aurora remain
+separate evidence classes even though both use RDS APIs.
 
-Acceptance cases include service/account/Region/resource and engine-version
-coverage, authoritative lifecycle calendars, date- and Region-specific rates,
-explicit enrollment, separate actual versus projected cost, stale/missing
-calendar and price states, signed CUR corrections, horizons, and no-change
-projection assumptions.
+## Implemented chain
 
-## Sutra implementation evidence
+- Engine: `lib/finops-extended-support-projection.ts`
+- Job contract: `lib/finops-extended-support-collector-job.ts`
+- Exact-money projection: `lib/finops-extended-support-dashboard.ts`
+- SQLite: `drizzle/0102_finops_extended_support_projection.sql`
+- PostgreSQL: `postgres/migrations/0097_finops_extended_support_projection.sql`
+- Repository: `db/finops-extended-support-repository.ts`
+- API: `app/api/v1/finops/extended-support-projection/route.ts`
+- UI: `app/costs/finops-extended-support-projection-dashboard.tsx`
+- Tests: `tests/finops-extended-support-projection.test.ts` and
+  `tests/finops-extended-support-vertical.test.mjs`
 
-| Gate | Status | Evidence |
-|---|---|---|
-| G0 requirements | `VERIFIED` | Current AWS guide and official dashboard image above, reviewed 2026-08-01. |
-| G1 source contract | `IMPLEMENTED_UNVERIFIED` | The pure engine pins read-only EKS, RDS/Aurora, OpenSearch, ElastiCache and Price List operations plus authoritative documentation/pricing/CUR2 evidence references. Tenant-owned accounts/Regions and management account are repeated in every capture. |
-| G2 collector | `NOT_STARTED` | The runtime registry exposes a processor contract, but the AWS collector has no concrete multi-account/Region Extended Support runner producing inventory, calendar, rate and reconciled-charge capture. Generic readiness is not collection proof. |
-| G3 persistence | `NOT_STARTED` | Generic source snapshot primitives exist but no Extended Support materialization parser, evidence-object binding, history projection, or capability-specific accepted-head contract is wired. |
-| G4 API | `NOT_STARTED` | No authenticated Extended Support report route currently reads and verifies accepted evidence. |
-| G5 visual UI | `NOT_STARTED` | No native dashboard currently renders horizons, services, lifecycle bands, estimated monthly cost, resource drilldown and evidence states. |
-| G6 focused verification | `VERIFIED` | Exact revision `17da4c5989b4`: 9 engine tests pass with 0 failures/skips, including five-service separation, missing inputs, enrollment, duplicate/history bounds, tenant scope, complete-empty/stale sources, stale calendars/rates, and read-only operations. |
-| G7–G10 | `NOT_STARTED` | Exact-tree, controlled provider, reviewed release, immutable deployment and live acceptance remain. |
+Captures are normalized against a server-pinned organization/customer/
+connection, management account, partition, account set and Region set before
+persistence. Immutable generations are content-addressed. Only `READY`
+evidence can become the head, and the head advances only to a later collection.
 
-## Evidence-honesty limits
+## Projection and exact-money semantics
 
-The engine separates `RECONCILED_ACTUAL_EXTENDED_SUPPORT_COST` from
-`PROJECTED_INCREMENTAL_EXTENDED_SUPPORT_COST_IF_UNCHANGED`. A projection is not
-normal service spend, a quote, or a savings promise. Missing version, calendar,
-rate, basis, enrollment, quantity, or currency evidence stays unavailable; it
-never becomes zero. The current engine uses validated numeric price inputs,
-not an exact-micros monetary representation, which must be reviewed before G7.
+Actual charges retain `RECONCILED_ACTUAL_EXTENDED_SUPPORT_COST`. Forecasts
+retain `PROJECTED_INCREMENTAL_EXTENDED_SUPPORT_COST_IF_UNCHANGED`. A projection
+is not normal service cost, an invoice, quote, realized savings or savings
+promise. Missing evidence stays unavailable rather than becoming zero.
 
-Focused command:
+The legacy engine validates numeric price inputs and seals monetary outputs to
+six decimal places. The public projection converts every sealed amount to a
+signed integer micro-unit string before aggregation or rendering. Adversarial
+tests cover `0.1`, signed one-micro corrections, negative zero, invalid numbers
+and integer-micro addition. Provider capture should ultimately move to decimal
+or micro strings to remove binary floating-point inputs at ingestion.
 
-```text
-node --experimental-strip-types --test tests/finops-extended-support-projection.test.ts
-```
+## Evidence inputs
 
-Result: **9 passed, 0 failed, 0 skipped**.
+- Inventory/version: exact read-only EKS, RDS/Aurora, OpenSearch and
+  ElastiCache APIs over server-pinned account/Region fan-out.
+- Lifecycle: authoritative AWS APIs/documentation with effective dates.
+- Pricing: AWS Price List/public pricing with Region, unit, tier and interval.
+- Usage basis: observed authoritative service configuration/usage evidence.
+- Actual charges: active reconciled CUR2 Extended Support line items only.
+
+## Remaining provider gates
+
+1. Implement the signed bounded multi-account/Region provider adapter.
+2. Deploy and attest least-privilege policies, scheduler and job ledger.
+3. Validate calendar/version mappings, normalized OpenSearch factors,
+   ElastiCache premiums and Region/date-specific rates against live AWS.
+4. Validate real CUR2 charges, corrections, currencies, missing inputs,
+   enrollment/version changes and complete-empty cases.
+5. Complete adversarial, signed-in accessibility and production acceptance.
+6. Move monetary provider fields to signed decimal/micro strings before
+   claiming end-to-end exact-money ingestion.
+
+Until these gates pass, ADV-04 is not `LOCAL_VERIFIED` or `LIVE_VERIFIED`.

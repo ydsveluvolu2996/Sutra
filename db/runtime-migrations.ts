@@ -98,6 +98,7 @@ import finopsScadAllocationSchemaSql from "../drizzle/0098_finops_scad_allocatio
 import finopsSustainabilityCarbonSchemaSql from "../drizzle/0099_finops_sustainability_carbon.sql?raw";
 import finopsAmazonConnectCostInsightsSchemaSql from "../drizzle/0100_finops_amazon_connect_cost_insights.sql?raw";
 import finopsComputeOptimizerExportHistorySchemaSql from "../drizzle/0101_finops_compute_optimizer_export_history.sql?raw";
+import finopsExtendedSupportProjectionSchemaSql from "../drizzle/0102_finops_extended_support_projection.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -213,6 +214,7 @@ const migrations = [
   { id: "0099_finops_sustainability_carbon", statements: statementsFrom(finopsSustainabilityCarbonSchemaSql) },
   { id: "0100_finops_amazon_connect_cost_insights", statements: statementsFrom(finopsAmazonConnectCostInsightsSchemaSql) },
   { id: "0101_finops_compute_optimizer_export_history", statements: statementsFrom(finopsComputeOptimizerExportHistorySchemaSql) },
+  { id: "0102_finops_extended_support_projection", statements: statementsFrom(finopsExtendedSupportProjectionSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
