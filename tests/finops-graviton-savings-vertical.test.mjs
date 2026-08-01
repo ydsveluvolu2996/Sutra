@@ -1,14 +1,389 @@
-import assert from"node:assert/strict";import{readFile}from"node:fs/promises";import path from"node:path";import{createElement}from"react";import{renderToStaticMarkup}from"react-dom/server";import test from"node:test";import react from"@vitejs/plugin-react";import{Miniflare}from"miniflare";import{createServer}from"vite";
-const root=path.resolve(import.meta.dirname,".."),connection=`conn_${"a".repeat(32)}`,account="111122223333",region="us-east-1",scope={orgId:"org_a",customerId:"customer_a",connectionId:connection};
-function opportunity(resourceType="OPENSEARCH_DOMAIN"){return{accountId:account,region,resourceType,resourceArn:`arn:aws:es:${region}:${account}:domain/search-prod`,resourceId:"domain/search-prod",recommendationId:"recommendation-1",recommendationAuthority:"AWS_SERVICE_INVENTORY_PRICING",state:"READY",currentConfiguration:"r6g.large.search",targetConfiguration:"r7g.large.search",migrationEffort:"MEDIUM",performanceRiskBasisPoints:null,refreshedAt:"2026-08-01T00:00:00.000Z",historyCount:1,blockerReasons:[],providerEstimate:null,potentialSavings:{kind:"MODELED_POTENTIAL",periodStartAt:"2026-07-01T00:00:00.000Z",periodEndAt:"2026-08-01T00:00:00.000Z",usageQuantityMicros:"100000000",currentModeledCost:{amountMicros:"10000000",currency:"USD"},targetModeledCost:{amountMicros:"6000000",currency:"USD"},savings:{amountMicros:"4000000",currency:"USD"},currentUnitPriceMicros:"100000",targetUnitPriceMicros:"60000",pricingEffectiveAt:"2026-01-01T00:00:00.000Z",assumptionCodes:["NOT_A_SAVINGS_PROMISE"]},realizedSavings:null,evidenceIds:["inventory","pricing","compatibility"]};}
-function snapshot(){return{schemaVersion:"sutra.graviton-savings.snapshot.v1",scope,collectionId:"collection_1",generatedAt:"2026-08-01T01:00:00.000Z",state:"COMPLETE",summary:{resources:1,ready:1,reviewRequired:0,blocked:0,configurationRequired:0,modeledPotentialByPeriod:[{periodStartAt:"2026-07-01T00:00:00.000Z",periodEndAt:"2026-08-01T00:00:00.000Z",currency:"USD",amountMicros:"4000000"}],measuredRealizedByPeriod:[]},currentUsage:[{periodStartAt:"2026-07-01T00:00:00.000Z",periodEndAt:"2026-08-01T00:00:00.000Z",accountId:account,region,resourceType:"OPENSEARCH_DOMAIN",configuration:"r7g.large.search",architecture:"ARM64",costBasis:"OBSERVED_EFFECTIVE",currency:"USD",usageQuantityMicros:"100000000",costMicros:"6000000",resourceCount:1}],opportunities:[opportunity()]};}
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import test from "node:test";
+import react from "@vitejs/plugin-react";
+import { Miniflare } from "miniflare";
+import { createServer } from "vite";
+const root = path.resolve(import.meta.dirname, ".."),
+  connection = `conn_${"a".repeat(32)}`,
+  account = "111122223333",
+  region = "us-east-1",
+  scope = {
+    orgId: "org_a",
+    customerId: "customer_a",
+    connectionId: connection,
+  };
+function opportunity(resourceType = "OPENSEARCH_DOMAIN") {
+  return {
+    accountId: account,
+    region,
+    resourceType,
+    resourceArn: `arn:aws:es:${region}:${account}:domain/search-prod`,
+    resourceId: "domain/search-prod",
+    recommendationId: "recommendation-1",
+    recommendationAuthority: "AWS_SERVICE_INVENTORY_PRICING",
+    state: "READY",
+    currentConfiguration: "r6g.large.search",
+    targetConfiguration: "r7g.large.search",
+    migrationEffort: "MEDIUM",
+    performanceRiskBasisPoints: null,
+    refreshedAt: "2026-08-01T00:00:00.000Z",
+    historyCount: 1,
+    blockerReasons: [],
+    providerEstimate: null,
+    potentialSavings: {
+      kind: "MODELED_POTENTIAL",
+      periodStartAt: "2026-07-01T00:00:00.000Z",
+      periodEndAt: "2026-08-01T00:00:00.000Z",
+      usageQuantityMicros: "100000000",
+      currentModeledCost: { amountMicros: "10000000", currency: "USD" },
+      targetModeledCost: { amountMicros: "6000000", currency: "USD" },
+      savings: { amountMicros: "4000000", currency: "USD" },
+      currentUnitPriceMicros: "100000",
+      targetUnitPriceMicros: "60000",
+      pricingEffectiveAt: "2026-01-01T00:00:00.000Z",
+      assumptionCodes: ["NOT_A_SAVINGS_PROMISE"],
+    },
+    realizedSavings: null,
+    evidenceIds: ["inventory", "pricing", "compatibility"],
+  };
+}
+function snapshot() {
+  return {
+    schemaVersion: "sutra.graviton-savings.snapshot.v1",
+    scope,
+    collectionId: "collection_1",
+    generatedAt: "2026-08-01T01:00:00.000Z",
+    state: "COMPLETE",
+    summary: {
+      resources: 1,
+      ready: 1,
+      reviewRequired: 0,
+      blocked: 0,
+      configurationRequired: 0,
+      modeledPotentialByPeriod: [
+        {
+          periodStartAt: "2026-07-01T00:00:00.000Z",
+          periodEndAt: "2026-08-01T00:00:00.000Z",
+          currency: "USD",
+          amountMicros: "4000000",
+        },
+      ],
+      measuredRealizedByPeriod: [],
+    },
+    currentUsage: [
+      {
+        periodStartAt: "2026-07-01T00:00:00.000Z",
+        periodEndAt: "2026-08-01T00:00:00.000Z",
+        accountId: account,
+        region,
+        resourceType: "OPENSEARCH_DOMAIN",
+        configuration: "r7g.large.search",
+        architecture: "ARM64",
+        costBasis: "OBSERVED_EFFECTIVE",
+        currency: "USD",
+        usageQuantityMicros: "100000000",
+        costMicros: "6000000",
+        resourceCount: 1,
+      },
+    ],
+    opportunities: [opportunity()],
+  };
+}
 
-test("Graviton dashboard projects exact existing usage, service savings, filters and monthly trends",async()=>{const{buildGravitonDashboard}=await import("../lib/finops-graviton-dashboard.ts"),report=buildGravitonDashboard(snapshot());assert.equal(report.existingUsage.arm64ByService[0].resourceCount,1);assert.equal(report.serviceSummaries[0].modeledPotentialMicros,"4000000");assert.equal(report.summary.modeledPotentialByPeriod[0].amountMicros,"4000000");assert.equal(buildGravitonDashboard(snapshot(),{resourceType:"ELASTICACHE_REPLICATION_GROUP"}).resultCount,0);assert.match(report.disclosures.join(" "),/never inferred/u);});
+test("Graviton dashboard projects exact existing usage, service savings, filters and monthly trends", async () => {
+  const { buildGravitonDashboard } = await import(
+      "../lib/finops-graviton-dashboard.ts"
+    ),
+    report = buildGravitonDashboard(snapshot());
+  assert.equal(report.existingUsage.arm64ByService[0].resourceCount, 1);
+  assert.equal(report.serviceSummaries[0].modeledPotentialMicros, "4000000");
+  assert.equal(
+    report.summary.modeledPotentialByPeriod[0].amountMicros,
+    "4000000",
+  );
+  assert.equal(
+    buildGravitonDashboard(snapshot(), {
+      resourceType: "ELASTICACHE_REPLICATION_GROUP",
+    }).resultCount,
+    0,
+  );
+  assert.match(report.disclosures.join(" "), /never inferred/u);
+});
 
-test("Graviton migrations enforce immutable complete-only monotonic heads",async()=>{const[sqlite,postgres]=await Promise.all([readFile(path.join(root,"drizzle/0103_finops_graviton_savings.sql"),"utf8"),readFile(path.join(root,"postgres/migrations/0098_finops_graviton_savings.sql"),"utf8")]);for(const sql of[sqlite,postgres]){assert.match(sql,/FINOPS_GRAVITON_SNAPSHOT_IMMUTABLE/u);assert.match(sql,/candidate\.?`?source_state`?.*COMPLETE/u);assert.match(sql,/candidate\.?`?generated_at`?>active\.?`?generated_at`?/u);}const mf=new Miniflare({modules:true,script:"export default{fetch(){return new Response('ok')}}",compatibilityDate:"2026-05-22",d1Databases:{DB:`graviton-${crypto.randomUUID()}`},d1Persist:false});try{const db=await mf.getD1Database("DB");await db.prepare("CREATE TABLE organizations(id text PRIMARY KEY)").run();await db.prepare("CREATE TABLE customers(id text PRIMARY KEY)").run();await db.prepare("CREATE TABLE aws_connections(id text PRIMARY KEY)").run();for(const statement of sqlite.split("--> statement-breakpoint").map((value)=>value.trim()).filter(Boolean))await db.prepare(statement).run();await db.batch([db.prepare("INSERT INTO organizations VALUES('org_a')"),db.prepare("INSERT INTO customers VALUES('customer_a')"),db.prepare("INSERT INTO aws_connections VALUES(?)").bind(connection)]);const insert=(id,state,at)=>db.prepare("INSERT INTO finops_graviton_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(`gvg_${id.repeat(64)}`,"org_a","customer_a",connection,account,"aws",`collection_${id}`,state,at,id.repeat(64),"{}",0,0,1);await insert("a","COMPLETE","2026-08-01T00:00:00.000Z").run();await db.prepare("INSERT INTO finops_graviton_snapshot_heads VALUES(?,?,?,?,1)").bind("org_a","customer_a",connection,`gvg_${"a".repeat(64)}`).run();await insert("b","PARTIAL","2026-08-01T01:00:00.000Z").run();await assert.rejects(db.prepare("UPDATE finops_graviton_snapshot_heads SET active_generation_id=?").bind(`gvg_${"b".repeat(64)}`).run(),/FINOPS_GRAVITON_HEAD_REJECTED/u);await assert.rejects(db.prepare("UPDATE finops_graviton_snapshots SET source_state='PARTIAL'").run(),/FINOPS_GRAVITON_SNAPSHOT_IMMUTABLE/u);}finally{await mf.dispose();}});
+test("Graviton migrations enforce immutable complete-only monotonic heads", async () => {
+  const [sqlite, postgres] = await Promise.all([
+    readFile(
+      path.join(root, "drizzle/0103_finops_graviton_savings.sql"),
+      "utf8",
+    ),
+    readFile(
+      path.join(root, "postgres/migrations/0098_finops_graviton_savings.sql"),
+      "utf8",
+    ),
+  ]);
+  for (const sql of [sqlite, postgres]) {
+    assert.match(sql, /FINOPS_GRAVITON_SNAPSHOT_IMMUTABLE/u);
+    assert.match(sql, /candidate\.?`?source_state`?.*COMPLETE/u);
+    assert.match(
+      sql,
+      /candidate\.?`?generated_at`?>active\.?`?generated_at`?/u,
+    );
+  }
+  const mf = new Miniflare({
+    modules: true,
+    script: "export default{fetch(){return new Response('ok')}}",
+    compatibilityDate: "2026-05-22",
+    d1Databases: { DB: `graviton-${crypto.randomUUID()}` },
+    d1Persist: false,
+  });
+  try {
+    const db = await mf.getD1Database("DB");
+    await db.prepare("CREATE TABLE organizations(id text PRIMARY KEY)").run();
+    await db.prepare("CREATE TABLE customers(id text PRIMARY KEY)").run();
+    await db.prepare("CREATE TABLE aws_connections(id text PRIMARY KEY)").run();
+    for (const statement of sqlite
+      .split("--> statement-breakpoint")
+      .map((value) => value.trim())
+      .filter(Boolean))
+      await db.prepare(statement).run();
+    await db.batch([
+      db.prepare("INSERT INTO organizations VALUES('org_a')"),
+      db.prepare("INSERT INTO customers VALUES('customer_a')"),
+      db.prepare("INSERT INTO aws_connections VALUES(?)").bind(connection),
+    ]);
+    const insert = (id, state, at) =>
+      db
+        .prepare(
+          "INSERT INTO finops_graviton_snapshots VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        )
+        .bind(
+          `gvg_${id.repeat(64)}`,
+          "org_a",
+          "customer_a",
+          connection,
+          account,
+          "aws",
+          `collection_${id}`,
+          state,
+          at,
+          id.repeat(64),
+          "{}",
+          0,
+          0,
+          1,
+        );
+    await insert("a", "COMPLETE", "2026-08-01T00:00:00.000Z").run();
+    await db
+      .prepare("INSERT INTO finops_graviton_snapshot_heads VALUES(?,?,?,?,1)")
+      .bind("org_a", "customer_a", connection, `gvg_${"a".repeat(64)}`)
+      .run();
+    await insert("b", "PARTIAL", "2026-08-01T01:00:00.000Z").run();
+    await assert.rejects(
+      db
+        .prepare(
+          "UPDATE finops_graviton_snapshot_heads SET active_generation_id=?",
+        )
+        .bind(`gvg_${"b".repeat(64)}`)
+        .run(),
+      /FINOPS_GRAVITON_HEAD_REJECTED/u,
+    );
+    await assert.rejects(
+      db
+        .prepare("UPDATE finops_graviton_snapshots SET source_state='PARTIAL'")
+        .run(),
+      /FINOPS_GRAVITON_SNAPSHOT_IMMUTABLE/u,
+    );
+  } finally {
+    await mf.dispose();
+  }
+});
 
-test("materialization job pins all four service families and rejects tenant substitution",async()=>{const{runGravitonMaterializationJob,GravitonMaterializationJobError}=await import("../lib/finops-graviton-savings-job.ts"),boundary={scope,managementAccountId:account,partition:"aws",accountIds:[account],regions:[region]},capture={scope,managementAccountId:account,partition:"aws",accountIds:[account],regions:[region],collectionId:"collection_1"},requestIdentity={requestKey:`gvrq_${"1".repeat(64)}`,scheduledWindow:"2026-08-01T00:00:00.000Z"};let request;const result=await runGravitonMaterializationJob({...requestIdentity,boundary,nowMs:1_785_552_000_000,collector:{collect:async(value)=>{request=value;return capture}},store:{recordCapture:async()=>({generation:{generationId:`gvg_${"c".repeat(64)}`,snapshot:{collectionId:"collection_1",state:"COMPLETE"}},becameActive:true})}});assert.equal(request.requestKey,requestIdentity.requestKey);assert.equal(request.scheduledWindow,requestIdentity.scheduledWindow);assert.deepEqual(request.services,["EC2_AND_AUTO_SCALING","RDS_AND_AURORA","OPENSEARCH","ELASTICACHE"]);assert.ok(request.operations.includes("opensearch:DescribeDomain"));assert.ok(request.operations.includes("elasticache:DescribeReplicationGroups"));assert.equal(request.recommendationPolicy.inferCompatibilityFromFamilyName,false);assert.equal(result.becameActive,true);await assert.rejects(runGravitonMaterializationJob({...requestIdentity,boundary,collector:{collect:async()=>({...capture,scope:{...scope,orgId:"org_b"}})},store:{recordCapture:async()=>{throw new Error("must not persist")}}}),(error)=>error instanceof GravitonMaterializationJobError&&!/must not persist/u.test(error.message));});
+test("materialization job pins all four service families and rejects tenant substitution", async () => {
+  const { runGravitonMaterializationJob, GravitonMaterializationJobError } =
+      await import("../lib/finops-graviton-savings-job.ts"),
+    boundary = {
+      scope,
+      managementAccountId: account,
+      partition: "aws",
+      accountIds: [account],
+      regions: [region],
+    },
+    capture = {
+      scope,
+      managementAccountId: account,
+      partition: "aws",
+      accountIds: [account],
+      regions: [region],
+      collectionId: "collection_1",
+    },
+    requestIdentity = {
+      requestKey: `gvrq_${"1".repeat(64)}`,
+      scheduledWindow: "2026-08-01T00:00:00.000Z",
+    };
+  let request;
+  const result = await runGravitonMaterializationJob({
+    ...requestIdentity,
+    boundary,
+    nowMs: 1_785_552_000_000,
+    collector: {
+      collect: async (value) => {
+        request = value;
+        return capture;
+      },
+    },
+    store: {
+      recordCapture: async () => ({
+        generation: {
+          generationId: `gvg_${"c".repeat(64)}`,
+          snapshot: { collectionId: "collection_1", state: "COMPLETE" },
+        },
+        becameActive: true,
+      }),
+    },
+  });
+  assert.equal(request.requestKey, requestIdentity.requestKey);
+  assert.equal(request.scheduledWindow, requestIdentity.scheduledWindow);
+  assert.deepEqual(request.services, [
+    "EC2_AND_AUTO_SCALING",
+    "RDS_AND_AURORA",
+    "OPENSEARCH",
+    "ELASTICACHE",
+  ]);
+  assert.ok(request.operations.includes("opensearch:DescribeDomain"));
+  assert.ok(
+    request.operations.includes("elasticache:DescribeReplicationGroups"),
+  );
+  assert.equal(
+    request.recommendationPolicy.inferCompatibilityFromFamilyName,
+    false,
+  );
+  assert.equal(result.becameActive, true);
+  await assert.rejects(
+    runGravitonMaterializationJob({
+      ...requestIdentity,
+      boundary,
+      collector: {
+        collect: async () => ({
+          ...capture,
+          scope: { ...scope, orgId: "org_b" },
+        }),
+      },
+      store: {
+        recordCapture: async () => {
+          throw new Error("must not persist");
+        },
+      },
+    }),
+    (error) =>
+      error instanceof GravitonMaterializationJobError &&
+      !/must not persist/u.test(error.message),
+  );
+});
 
-test("repository and route enforce normalized complete heads and authenticated same-tenant reads",async()=>{const[repository,route,ui]=await Promise.all([readFile(path.join(root,"db/finops-graviton-savings-repository.ts"),"utf8"),readFile(path.join(root,"app/api/v1/finops/graviton-savings/route.ts"),"utf8"),readFile(path.join(root,"app/costs/finops-graviton-savings-dashboard.tsx"),"utf8")]);assert.match(repository,/buildGravitonSavingsSnapshot\(capture,boundary/u);assert.match(repository,/snapshot\.state==="COMPLETE"/u);assert.match(route,/requireApiSession\(request\)/u);assert.match(route,/getConnectionForOrg\(authenticated\.subject\.orgId/u);assert.match(route,/assertSessionCapability\(authenticated,"connection:read",connection\.customerId\)/u);assert.match(route,/GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED/u);assert.match(ui,/\^\[=\+\\-@\\t\\r\]/u);});
+test("repository and route enforce normalized complete heads and authenticated same-tenant reads", async () => {
+  const [repository, route, ui, css] = await Promise.all([
+    readFile(
+      path.join(root, "db/finops-graviton-savings-repository.ts"),
+      "utf8",
+    ),
+    readFile(
+      path.join(root, "app/api/v1/finops/graviton-savings/route.ts"),
+      "utf8",
+    ),
+    readFile(
+      path.join(root, "app/costs/finops-graviton-savings-dashboard.tsx"),
+      "utf8",
+    ),
+    readFile(
+      path.join(root, "app/costs/finops-graviton-savings-dashboard.module.css"),
+      "utf8",
+    ),
+  ]);
+  assert.match(repository, /buildGravitonSavingsSnapshot\(capture,boundary/u);
+  assert.match(repository, /snapshot\.state==="COMPLETE"/u);
+  assert.match(route, /requireApiSession\(request\)/u);
+  assert.match(route, /getConnectionForOrg\(\s*authenticated\.subject\.orgId/u);
+  assert.match(
+    route,
+    /assertSessionCapability\(\s*authenticated,\s*"connection:read",\s*connection\.customerId/u,
+  );
+  assert.match(route, /GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED/u);
+  assert.match(route, /GRAVITON_SAVINGS_OFFICIAL_DEFINITION/u);
+  assert.match(ui, /\^\[=\+\\-@\\t\\r\]/u);
+  assert.match(ui, /Official Graviton Savings definition coverage/u);
+  assert.match(ui, /Sutra does not claim exact layout parity/u);
+  assert.match(ui, /hasPinnedOfficialDefinition/u);
+  assert.match(css, /\.official button:focus-visible/u);
+  assert.match(css, /@media \(max-width: 720px\)[\s\S]*\.official > article/u);
+});
 
-test("native Graviton UI renders services, usage, trends, evidence classes, drilldown and safe export",async()=>{const vite=await createServer({root,configFile:false,logLevel:"silent",plugins:[react()],server:{middlewareMode:true}});try{const dashboardModule=await vite.ssrLoadModule("/app/costs/finops-graviton-savings-dashboard.tsx"),projection=(await import("../lib/finops-graviton-dashboard.ts")).buildGravitonDashboard(snapshot()),report={...projection,connectionId:connection,sourceState:"partial",history:[],filterOptions:{accounts:[account],regions:[region],resourceTypes:["OPENSEARCH_DOMAIN"],states:["READY"],currencies:["USD"]},freshness:{},evidence:{},collection:{}};const html=renderToStaticMarkup(createElement(dashboardModule.FinopsGravitonSavingsReportView,{report,filters:{},onFiltersChange:()=>undefined}));for(const text of["Evidence-backed migration economics","Existing Graviton usage","EC2, RDS/Aurora, OpenSearch, and ElastiCache","Monthly savings trends","modeled potential","measured realized","Workload drilldown","Export visible rows","Compatibility","Provenance"] )assert.match(html,new RegExp(text,"iu"));assert.doesNotMatch(html,/sample|fixture|placeholder/iu);}finally{await vite.close();}});
+test("native Graviton UI renders services, usage, trends, evidence classes, drilldown and safe export", async () => {
+  const vite = await createServer({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    plugins: [react()],
+    server: { middlewareMode: true },
+  });
+  try {
+    const dashboardModule = await vite.ssrLoadModule(
+        "/app/costs/finops-graviton-savings-dashboard.tsx",
+      ),
+      projection = (
+        await import("../lib/finops-graviton-dashboard.ts")
+      ).buildGravitonDashboard(snapshot()),
+      definition = (
+        await vite.ssrLoadModule(
+          "/lib/finops-graviton-savings-official-definition.ts",
+        )
+      ).GRAVITON_SAVINGS_OFFICIAL_DEFINITION,
+      report = {
+        ...projection,
+        connectionId: connection,
+        sourceState: "partial",
+        officialDefinition: definition,
+        history: [],
+        filterOptions: {
+          accounts: [account],
+          regions: [region],
+          resourceTypes: ["OPENSEARCH_DOMAIN"],
+          states: ["READY"],
+          currencies: ["USD"],
+        },
+        freshness: {},
+        evidence: {},
+        collection: {},
+      };
+    const html = renderToStaticMarkup(
+      createElement(dashboardModule.FinopsGravitonSavingsReportView, {
+        report,
+        filters: {},
+        onFiltersChange: () => undefined,
+      }),
+    );
+    for (const text of [
+      "Evidence-backed migration economics",
+      "7 sheets",
+      "122 upstream visuals mapped",
+      "Graviton Instance Mapping",
+      "Model evidence only",
+      "Existing Graviton usage",
+      "EC2, RDS/Aurora, OpenSearch, and ElastiCache",
+      "Monthly savings trends",
+      "modeled potential",
+      "measured realized",
+      "Workload drilldown",
+      "Export visible rows",
+      "Compatibility",
+      "Provenance",
+    ])
+      assert.match(html, new RegExp(text, "iu"));
+    assert.doesNotMatch(html, /sample|fixture|placeholder/iu);
+  } finally {
+    await vite.close();
+  }
+});
