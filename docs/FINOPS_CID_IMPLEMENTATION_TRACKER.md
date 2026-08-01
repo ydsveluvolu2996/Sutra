@@ -61,15 +61,15 @@ never replace it or masquerade as current success.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Advanced | 13 | 1 | 8 | 4 | 0 | 0 | 0 |
-| Additional | 13 | 2 | 4 | 5 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **12** | **9** | **2** | **0** | **0** |
+| Additional | 13 | 2 | 6 | 3 | 2 | 0 | 0 |
+| **Total** | **29** | **6** | **14** | **7** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The twelve partial pipelines are Trusted
+Anomaly, Trends, and Data Transfer. The fourteen partial pipelines are Trusted
 Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
-Resource Compliance, Pricing Change Analysis, and Media Services Insights.
-Azure CID and GCP CID are absent.
+Resource Compliance, Pricing Change Analysis, Media Services Insights,
+Marketplace SPG, and Kubecost Allocation. Azure CID and GCP CID are absent.
 
 ## Parent capability tracker
 
@@ -95,8 +95,8 @@ Azure CID and GCP CID are absent.
 | ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `ABSENT` | Add Azure billing-export connection, collector, immutable normalized persistence, API, native visual reports, and live Azure validation. |
 | ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `ABSENT` | Add GCP Cloud Billing export connection, collector, immutable normalized persistence, API, native visual reports, and live GCP validation. |
 | ADD-04 | FOCUS Dashboard | `focus` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-04-focus.md): AWS FOCUS 1.2 API/UI is implemented; official multi-version/provider consolidation, tag taxonomy, and effective discount rate remain. |
-| ADD-05 | AWS Marketplace Single Pane of Glass Dashboard | `marketplace_spg` | `ENGINE_ONLY` | Complete spend, subscriptions, offers, agreements, entitlements/licenses/grants collection, API/UI, and procurement drilldowns. |
-| ADD-06 | Kubecost Containers Cost Allocation Dashboard | `kubecost_container_allocation` | `ENGINE_ONLY` | Complete exporter ingestion/persistence, workload allocation, efficiency/right-sizing, showback/chargeback API/UI, and reconciliation. |
+| ADD-05 | AWS Marketplace Single Pane of Glass Dashboard | `marketplace_spg` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-05-marketplace-spg.md): immutable separated CUR2/control-plane history, same-tenant API, and native spend/agreement/entitlement UI exist; signed-broker deployment, richer offer/product typing, and live buyer acceptance remain. |
+| ADD-06 | Kubecost Containers Cost Allocation Dashboard | `kubecost_container_allocation` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-06-kubecost-allocation.md): immutable signed-export/CUR2-pinned history, same-tenant API, and native executive/workload/EKS/showback UI exist; deployed adapter, component-cost/capacity dimensions, retained hourly trends, and live reconciliation remain. |
 | ADD-07 | SCAD Containers Cost Allocation Dashboard | `scad_container_allocation` | `ENGINE_ONLY` | Complete CUR2 SCAD lineage for EKS/ECS, workload allocation, showback/chargeback persistence, API/UI, and reconciliation. |
 | ADD-08 | Sustainability Proxy Metrics and Carbon Emissions Dashboard | `sustainability_proxy` | `ENGINE_ONLY` | Complete durable proxy/provider carbon inputs, clearly separated claims, trends, persistence, API/UI, and reconciliation. |
 | ADD-09 | Trends Dashboard | `trends` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-09-trends.md): bounded CUR2 API/native visuals now cover exact monthly/quarterly/yearly comparisons, interactive contributors, signals, CSV, and lineage; forecast/alerts, service taxonomy/usage, friendly account names, map, exact-tree, and provider acceptance remain. |

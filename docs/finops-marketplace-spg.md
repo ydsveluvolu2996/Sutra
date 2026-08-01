@@ -218,11 +218,12 @@ gates are:
    collector and session ceiling without mutation actions;
 2. implement bounded Agreement, Discovery, License Manager, organization, and
    active-CUR2 adapters that emit this exact minimized schema;
-3. persist immutable generations and source-job attempts under exact
-   organization/customer/connection scope with encrypted contract identifiers;
-4. expose authenticated tenant-scoped APIs and professional SPG views for
-   spend summary/deep dive, invoice tracker, licenses/grants, agreements,
-   accepted terms, deployment state, and expirations;
+3. deploy the implemented immutable-generation repository and source-job
+   contract under exact organization/customer/connection scope with encrypted
+   contract identifiers;
+4. deploy and signed-in verify the implemented authenticated tenant-scoped API
+   and native SPG views for spend/deep dive, invoice tracker, licenses/grants,
+   agreements, accepted terms, deployment metadata, and expirations;
 5. run live buyer tests for single account, complete organization, delegated
    administration, no Marketplace purchases, organization integration absent,
    pagination, mixed currencies, expired/replaced agreements, access denied,

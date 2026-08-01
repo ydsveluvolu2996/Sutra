@@ -510,6 +510,8 @@ export interface AwsMarketplaceSpgSnapshot {
     readonly generationId: string | null;
     readonly predicate: AwsMarketplaceCur2Evidence["predicate"] | null;
     readonly summaries: readonly AwsMarketplaceSpendSummary[];
+    /** Privacy-minimized CUR2 projection; never control-plane entitlement evidence. */
+    readonly rows: readonly AwsMarketplaceCur2SpendRow[];
   };
   readonly counts: {
     readonly expectedAgreementAccounts: number;
@@ -1124,6 +1126,9 @@ export function normalizeAwsMarketplaceSpgCapture(
       generationId: cur2?.generationId ?? null,
       predicate: cur2?.predicate ?? null,
       summaries: spendSummary(cur2),
+      rows: cur2 === null ? [] : [...cur2.rows].sort((left, right) =>
+        `${left.billingPeriod}:${left.linkedAccountId}:${left.invoiceId ?? ""}:${left.productCode ?? ""}`
+          .localeCompare(`${right.billingPeriod}:${right.linkedAccountId}:${right.invoiceId ?? ""}:${right.productCode ?? ""}`)),
     },
     counts: {
       expectedAgreementAccounts: expectedAccounts.length,

@@ -40,8 +40,8 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     ({ currentMaturity }) => currentMaturity,
   );
   assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
-  assert.equal(counts.PARTIAL_PIPELINE?.length, 12);
-  assert.equal(counts.ENGINE_ONLY?.length, 9);
+  assert.equal(counts.PARTIAL_PIPELINE?.length, 14);
+  assert.equal(counts.ENGINE_ONLY?.length, 7);
   assert.equal(counts.ABSENT?.length, 2);
   assert.deepEqual(
     counts.LOCAL_VERTICAL_CANDIDATE?.map(({ id }) => id),
@@ -67,6 +67,8 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
       "media_services_insights",
       "cora",
       "focus",
+      "marketplace_spg",
+      "kubecost_container_allocation",
       "config_resource_compliance",
       "pricing_change",
     ],

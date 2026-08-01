@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Local vertical candidates | 6 of 29 |
-| Partial pipelines | 12 of 29 |
-| Engine-only capabilities | 9 of 29 |
+| Partial pipelines | 14 of 29 |
+| Engine-only capabilities | 7 of 29 |
 | Absent capabilities | 2 of 29: Azure CID and GCP CID |
 | Local verticals fully audited | 0 of 29 |
 | Production accepted | 0 of 29 |

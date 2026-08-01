@@ -17,6 +17,8 @@ import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
+import { FinopsKubecostAllocationDashboard } from "./finops-kubecost-allocation-dashboard";
+import { FinopsMarketplaceSpgDashboard } from "./finops-marketplace-spg-dashboard";
 import { FinopsMediaServicesInsightsDashboard } from "./finops-media-services-insights-dashboard";
 import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
 import { FinopsResilienceVueDashboard } from "./finops-resilience-vue-dashboard";
@@ -205,6 +207,13 @@ export function FinopsDashboardCatalogNav({
             <FinopsEndUserComputingDashboard connectionId={connectionId} />
           ) : selected.id === "media_services_insights" ? (
             <FinopsMediaServicesInsightsDashboard connectionId={connectionId} />
+          ) : selected.id === "marketplace_spg" ? (
+            <FinopsMarketplaceSpgDashboard
+              connectionId={connectionId}
+              dashboard={selected}
+            />
+          ) : selected.id === "kubecost_container_allocation" ? (
+            <FinopsKubecostAllocationDashboard connectionId={connectionId} />
           ) : (
             <FinopsCapabilityShell
               dashboard={selected}

@@ -87,6 +87,8 @@ import postgresFinopsAwsSupportCasesSql from "../postgres/migrations/0087_finops
 import postgresFinopsResilienceVueSql from "../postgres/migrations/0088_finops_resilience_vue.sql?raw";
 import postgresFinopsEndUserComputingSql from "../postgres/migrations/0089_finops_end_user_computing.sql?raw";
 import postgresFinopsMediaServicesInsightsSql from "../postgres/migrations/0090_finops_media_services_insights.sql?raw";
+import postgresFinopsMarketplaceSpgSql from "../postgres/migrations/0091_finops_marketplace_spg.sql?raw";
+import postgresFinopsKubecostAllocationSql from "../postgres/migrations/0092_finops_kubecost_allocation.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -178,6 +180,8 @@ const migrations = [
   { id: "0088_finops_resilience_vue", source: postgresFinopsResilienceVueSql },
   { id: "0089_finops_end_user_computing", source: postgresFinopsEndUserComputingSql },
   { id: "0090_finops_media_services_insights", source: postgresFinopsMediaServicesInsightsSql },
+  { id: "0091_finops_marketplace_spg", source: postgresFinopsMarketplaceSpgSql },
+  { id: "0092_finops_kubecost_allocation", source: postgresFinopsKubecostAllocationSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
