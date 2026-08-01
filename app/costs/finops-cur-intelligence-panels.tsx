@@ -8,6 +8,7 @@ import type {
   DataTransferSnapshot,
 } from "../../lib/finops-data-transfer";
 import { buildDataTransferEvidenceCsv } from "../../lib/finops-data-transfer-export";
+import type { DataTransferOfficialAudit } from "../../lib/finops-data-transfer-official-audit";
 import type {
   FinopsTrendsExactRational,
   FinopsTrendsIntelligenceResult,
@@ -15,6 +16,7 @@ import type {
 } from "../../lib/finops-trends-intelligence";
 import type { FinopsTrendsCapabilityClosure } from "../../lib/finops-trends-capability-closure";
 import { buildTrendsEvidenceCsv } from "../../lib/finops-trends-export";
+import type { FinopsTrendsOfficialDefinition } from "../../lib/finops-trends-official-definition";
 import styles from "./costs.module.css";
 
 type CurIntelligenceSection = "overview" | "services";
@@ -36,6 +38,7 @@ type TrendsSuccessfulReport = Extract<FinopsTrendsIntelligenceResult, { ok: true
 
 interface TrendsEnvelope {
   readonly connectionId: string;
+  readonly officialDefinition: FinopsTrendsOfficialDefinition;
   readonly selectedWindow: {
     readonly fromPeriod: string;
     readonly toPeriod: string;
@@ -47,6 +50,7 @@ interface TrendsEnvelope {
 
 interface TrendsReportProps {
   readonly report: TrendsSuccessfulReport;
+  readonly officialDefinition: FinopsTrendsOfficialDefinition;
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly onFromPeriodChange: (period: string) => void;
   readonly onToPeriodChange: (period: string) => void;
@@ -57,6 +61,7 @@ interface DataTransferEnvelope {
   readonly connectionId: string;
   readonly selectedPeriod: string | null;
   readonly availablePeriods: readonly AvailablePeriod[];
+  readonly officialAudit: DataTransferOfficialAudit;
   readonly report: DataTransferSnapshot | null;
   readonly sourceState: string;
 }
@@ -175,6 +180,7 @@ async function readEnvelope<T>(
   response: Response,
   connectionId: string,
   schema: string,
+  officialAuditSchema: string | null = null,
 ): Promise<T> {
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok || !isRecord(body)) {
@@ -198,6 +204,21 @@ async function readEnvelope<T>(
         && body.report.schemaVersion !== schema)
     )
   ) throw new Error("The CUR2 report schema was not recognized.");
+  if (
+    officialAuditSchema !== null
+    && (
+      !isRecord(body.officialAudit)
+      || body.officialAudit.schema !== officialAuditSchema
+    )
+  ) throw new Error("The official-source audit contract was not recognized.");
+  if (
+    schema === "sutra.finops-trends-intelligence.v1"
+    && (
+      !isRecord(body.officialDefinition)
+      || body.officialDefinition.schema
+        !== "sutra.finops-trends-official-definition.v1"
+    )
+  ) throw new Error("The Trends official-definition audit was not recognized.");
   return body as unknown as T;
 }
 
@@ -236,8 +257,68 @@ function StatusBanner({ state, message }: { readonly state: string; readonly mes
   );
 }
 
+export function TrendsOfficialCoverage({
+  definition,
+}: {
+  readonly definition: FinopsTrendsOfficialDefinition;
+}) {
+  const totals = definition.quickSightDefinition;
+  return (
+    <section className={styles.curSignals} aria-label="Official AWS Trends Dashboard coverage">
+      <div className={styles.curPanelHeading}>
+        <div><small>Immutable AWS source audit · {definition.source.latestDocumentedVersion}</small><h3>Official Trends coverage and evidence boundary</h3></div>
+        <span>{definition.source.category} · {definition.artifacts.length} pinned artifacts</span>
+      </div>
+      <p className={styles.curBoundaryNote}>AWS does not publish the service-hosted QuickSight definition at the pinned framework commit. Exact sheets, visuals, filter controls, parameter controls, parameters and calculated fields are therefore unavailable—not zero. Pixel parity is not claimed.</p>
+      <div className={styles.curKpis}>
+        <article><small>QuickSight sheets</small><strong>{totals.sheetCount ?? "Not published"}</strong><span>{totals.reason.replaceAll("_", " ")}</span></article>
+        <article><small>QuickSight visuals</small><strong>{totals.visualCount ?? "Not published"}</strong><span>No screenshot-derived count</span></article>
+        <article><small>Published datasets</small><strong>{definition.datasets.length}</strong><span>3 Athena views · SPICE definitions</span></article>
+        <article><small>Documented controls</small><strong>{definition.documentedControls.length} named</strong><span>AWS also says other fields exist</span></article>
+      </div>
+      <div className={styles.curGrid}>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Provable labels only</small><h3>Documented controls</h3></div><span>Not an object count</span></div>
+          <ul>{definition.documentedControls.map((control) => <li key={control}>{control}</li>)}</ul>
+          <p className={styles.curBoundaryNote}>The public article does not exhaustively enumerate every control, and the object definition is absent. These names are documented capabilities, not inferred QuickSight control objects.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Deployment contract</small><h3>Published prerequisites and template boundary</h3></div><span>{definition.source.templateId}</span></div>
+          <ul>{definition.prerequisites.map((prerequisite) => <li key={prerequisite}>{prerequisite}</li>)}</ul>
+          <p className={styles.curBoundaryNote}>The changelog documents v5.1.0 while the pinned resource manifest declares minimum template version 1 / description v5.0.0. The absent service-hosted template payload is not reconstructed.</p>
+        </article>
+      </div>
+      <div className={styles.curTableWrap} tabIndex={0}>
+        <table className={styles.curTable}>
+          <caption>Documented AWS Trends feature areas and native evidence coverage</caption>
+          <thead><tr><th>Documented area</th><th>AWS purpose</th><th>Native status</th><th>Evidence and remaining gap</th></tr></thead>
+          <tbody>{definition.documentedFeatureAreas.map((area) => <tr key={area.name}><td><strong>{area.name}</strong></td><td>{area.purpose}</td><td>{area.nativeCoverage}</td><td>{area.evidence}<small>{area.gap ?? "No identified semantic gap; layout parity is still not claimed."}</small></td></tr>)}</tbody>
+        </table>
+      </div>
+      <details className={styles.curEvidenceDrawer}>
+        <summary>Pinned AWS artifact hashes and dataset contracts</summary>
+        <div className={styles.curTableWrap} tabIndex={0}>
+          <table className={styles.curTable}>
+            <caption>Immutable AWS framework artifact inventory</caption>
+            <thead><tr><th>Kind</th><th>Path</th><th>SHA-256</th></tr></thead>
+            <tbody>{definition.artifacts.map((artifact) => <tr key={artifact.path}><td>{artifact.kind.replaceAll("_", " ")}</td><td>{artifact.path}</td><td>{artifact.sha256}</td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className={styles.curTableWrap} tabIndex={0}>
+          <table className={styles.curTable}>
+            <caption>Published Trends SPICE dataset definitions</caption>
+            <thead><tr><th>Dataset</th><th>Athena view</th><th>Columns</th><th>Published window</th></tr></thead>
+            <tbody>{definition.datasets.map((dataset) => <tr key={dataset.id}><td>{dataset.id}</td><td>{dataset.view}</td><td>{dataset.inputColumnCount}</td><td>{dataset.documentedWindow}</td></tr>)}</tbody>
+          </table>
+        </div>
+      </details>
+    </section>
+  );
+}
+
 export function TrendsReport({
   report,
+  officialDefinition,
   availablePeriods,
   onFromPeriodChange,
   onToPeriodChange,
@@ -319,6 +400,7 @@ export function TrendsReport({
         state={report.state}
         message="Missing, current, stale, or partially reconciled periods remain visible and are never interpolated."
       />
+      <TrendsOfficialCoverage definition={officialDefinition} />
       <header className={styles.curHeader}>
         <div><p className="eyebrow">Immutable CUR2 intelligence</p><h2>Enterprise cost trends</h2><p>Exact monthly comparisons, explainable signals, and ranked contributors from active reconciled generations only.</p></div>
         <div className={styles.curFilters}>
@@ -430,7 +512,37 @@ function transferCost(
   return costs.find((cost) => cost.basis === basis)?.totalMicros ?? null;
 }
 
-export function DataTransferReport({ report }: { readonly report: DataTransferSnapshot }) {
+function DataTransferOfficialCoverage({ audit }: {
+  readonly audit: DataTransferOfficialAudit;
+}) {
+  return <details className={styles.curEvidenceDrawer}>
+    <summary>Official AWS Data Transfer coverage · public definition unavailable</summary>
+    <div className={styles.curEvidenceGrid}>
+      <dl>
+        <div><dt>Frozen commit</dt><dd>{audit.source.commit}</dd></div>
+        <div><dt>Manifest SHA-256</dt><dd>{audit.source.manifestSha256}</dd></div>
+        <div><dt>Embedded query SHA-256</dt><dd>{audit.source.embeddedQuerySha256}</dd></div>
+        <div><dt>External template reference</dt><dd>{audit.source.externalTemplateId}</dd></div>
+      </dl>
+      <div><strong>Published artifact boundary</strong><ul><li>Manifest and inline <code>data_transfer_view</code> Athena SQL are published and hash-pinned.</li><li>QuickSight definition: not published.</li><li>QuickSight template body: not published.</li><li>Dashboard changelog: not published.</li></ul></div>
+      <div><strong>Exact object totals</strong><ul><li>Sheets: not available</li><li>Visuals: not available</li><li>Controls: not available</li><li>Parameters, calculated fields, filter groups, and dataset objects: not available</li></ul></div>
+      <div><strong>Control evidence</strong><ul><li>AWS guidance and the pinned public artifact do not enumerate dashboard controls.</li><li>Sutra&apos;s currency, cost-basis, category, direction, account, service, Region, source, destination, and transfer-type filters are native controls—not claimed QuickSight parity.</li></ul></div>
+    </div>
+    <div className={styles.curTableWrap} tabIndex={0}>
+      <table className={styles.curTable}>
+        <caption>Native mapping of the five visual purposes documented by AWS guidance</caption>
+        <thead><tr><th>Documented purpose</th><th>Coverage</th><th>Native evidence</th><th>Remaining gap</th></tr></thead>
+        <tbody>{audit.documentedVisualPurposes.map((item) => <tr key={item.purpose}><th scope="row">{item.purpose}</th><td>{item.coverage.replaceAll("_", " ")}</td><td>{item.nativeEvidence}</td><td>{item.remainingGap}</td></tr>)}</tbody>
+      </table>
+    </div>
+    <p className={styles.curBoundaryNote}>The five AWS guidance bullets are documented purposes, not proof of five QuickSight visual objects. CUR2 provider-field rematerialization, controlled provider reconciliation, two-tenant proof, release-SHA review, immutable image deployment, and production acceptance remain open. No pixel, layout, interaction-tree, or QuickSight runtime parity is claimed.</p>
+  </details>;
+}
+
+export function DataTransferReport({ report, officialAudit }: {
+  readonly report: DataTransferSnapshot;
+  readonly officialAudit: DataTransferOfficialAudit;
+}) {
   const currencies = [...new Set(report.categorySummaries.map((item) => item.currency))];
   const [currency, setCurrency] = useState(currencies[0] ?? "USD");
   const [costBasis, setCostBasis] = useState<DataTransferCostBasis>("amortized");
@@ -468,6 +580,7 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
         state={report.state}
         message={report.source.objectCoverage.status === "unavailable" ? "Row evidence is active and reconciled, but manifest object counts were not retained; completeness remains partial." : "The selected source generation is not fully fresh and ready."}
       />
+      <DataTransferOfficialCoverage audit={officialAudit} />
       <header className={styles.curHeader}>
         <div><p className="eyebrow">AWS Data Transfer</p><h2>Transfer cost intelligence</h2><p>Charged internet, Global Accelerator, inter-Region, inter-AZ, and CloudFront evidence with exact cost, byte, account, service, Region, Availability Zone, and resource drilldowns.</p></div>
         <div className={styles.curFilters}>
@@ -560,6 +673,7 @@ export function FinopsCurIntelligencePanels({
       response,
       connectionId,
       schema,
+      section === "services" ? "sutra.data-transfer-official-audit.v1" : null,
     )).then((envelope) => {
       if (!controller.signal.aborted) setState({ status: "ready", envelope });
     }).catch((error: unknown) => {
@@ -585,16 +699,17 @@ export function FinopsCurIntelligencePanels({
     <label className={styles.curPeriod}>Billing period<select value={period ?? (envelope as DataTransferEnvelope).selectedPeriod ?? ""} onChange={(event) => selectPeriod(event.target.value)}>{periodOptions.map((item) => <option key={item.generationId} value={item.period}>{item.period}</option>)}</select></label>
   ) : null;
   if (envelope.report === null) {
-    return <><SourceState state={envelope.sourceState} title={section === "overview" ? "Enterprise trends are waiting" : "Data-transfer intelligence is waiting"} onRetry={retry} />{periodControl}</>;
+    return <><SourceState state={envelope.sourceState} title={section === "overview" ? "Enterprise trends are waiting" : "Data-transfer intelligence is waiting"} onRetry={retry} />{section === "overview" ? <TrendsOfficialCoverage definition={(envelope as TrendsEnvelope).officialDefinition} /> : <DataTransferOfficialCoverage audit={(envelope as DataTransferEnvelope).officialAudit} />}{periodControl}</>;
   }
   if (section === "overview") {
     const report = (envelope as TrendsEnvelope).report;
     if (report === null || !report.ok) {
-      return <section className={styles.curState} role="alert"><span aria-hidden="true">!</span><div><strong>Trends evidence was rejected</strong><p>{report?.failures.map((failure) => failure.code).join(" · ") ?? "Unknown engine rejection"}</p></div><button type="button" onClick={retry}>Retry</button></section>;
+      return <><section className={styles.curState} role="alert"><span aria-hidden="true">!</span><div><strong>Trends evidence was rejected</strong><p>{report?.failures.map((failure) => failure.code).join(" · ") ?? "Unknown engine rejection"}</p></div><button type="button" onClick={retry}>Retry</button></section><TrendsOfficialCoverage definition={(envelope as TrendsEnvelope).officialDefinition} /></>;
     }
     const trendsEnvelope = envelope as TrendsEnvelope;
     return <TrendsReport
       report={report}
+      officialDefinition={trendsEnvelope.officialDefinition}
       availablePeriods={trendsEnvelope.availablePeriods}
       onFromPeriodChange={(nextPeriod) => {
         setTrendsFromPeriod(nextPeriod);
@@ -614,5 +729,5 @@ export function FinopsCurIntelligencePanels({
     />;
   }
   const transferReport = (envelope as DataTransferEnvelope).report!;
-  return <>{periodControl}<DataTransferReport key={transferReport.scope.generationId} report={transferReport} /></>;
+  return <>{periodControl}<DataTransferReport key={transferReport.scope.generationId} report={transferReport} officialAudit={(envelope as DataTransferEnvelope).officialAudit} /></>;
 }

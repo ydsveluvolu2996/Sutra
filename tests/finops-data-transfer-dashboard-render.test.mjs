@@ -21,6 +21,9 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
       "/app/costs/finops-cur-intelligence-panels.tsx",
     );
     const engine = await vite.ssrLoadModule("/lib/finops-data-transfer.ts");
+    const official = await vite.ssrLoadModule(
+      "/lib/finops-data-transfer-official-audit.ts",
+    );
     const costs = ["unblended", "net", "amortized", "list", "contracted", "public"]
       .map((basis) => ({
         basis,
@@ -130,7 +133,7 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
     };
     const markup = renderToStaticMarkup(createElement(
       panel.DataTransferReport,
-      { report },
+      { report, officialAudit: official.DATA_TRANSFER_OFFICIAL_AUDIT },
     ));
     assert.match(markup, /Transfer cost intelligence/u);
     assert.match(markup, /Global Accelerator/u);
@@ -150,6 +153,15 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
     assert.match(markup, /AWS Outbound/u);
     assert.match(markup, /GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1/u);
     assert.match(markup, /Evidence, lineage, classification, and official parity limits/u);
+    assert.match(markup, /Official AWS Data Transfer coverage/u);
+    assert.match(markup, /public definition unavailable/u);
+    assert.match(markup, /Native mapping of the five visual purposes documented by AWS guidance/u);
+    assert.match(markup, /Data Transfer Summary/u);
+    assert.match(markup, /CloudFront cost and usage analysis/u);
+    assert.match(markup, /85826c34fcd4f9f63599cdb257894eb4afa11bf014c903aad83427fc2704d698/u);
+    assert.match(markup, /Sheets: not available/u);
+    assert.match(markup, /not proof of five QuickSight visual objects/u);
+    assert.match(markup, /rematerialization/u);
     assert.match(markup, new RegExp("b".repeat(64), "u"));
     assert.doesNotMatch(markup, />PARTIAL</u);
   } finally {

@@ -76,6 +76,11 @@ test("Trends GET is an exact bounded immutable-active-CUR2 route", () => {
   );
   assert.match(trendsRoute, /buildFinopsTrendsIntelligence\(\{/u);
   assert.match(trendsRoute, /buildFinopsTrendsCapabilityClosure\(\{/u);
+  assert.match(trendsRoute, /FINOPS_TRENDS_OFFICIAL_DEFINITION/u);
+  assert.equal(
+    trendsRoute.match(/officialDefinition:\s*FINOPS_TRENDS_OFFICIAL_DEFINITION/gu)?.length,
+    5,
+  );
   assert.match(trendsRoute, /trendsAutomationStatus\(/u);
   assert.match(trendsRoute, /loadKind: "UNCLASSIFIED"/u);
   assert.match(trendsRoute, /report: null,[\s\S]*sourceState: "waiting"/u);
@@ -123,6 +128,24 @@ test("Data Transfer GET uses only committed active manifest object coverage", ()
   assert.doesNotMatch(
     transferRoute,
     /manifestObjectCount:\s*dataset\.evidence\.acceptedRows/u,
+  );
+  assert.equal(
+    transferRoute.match(/officialAudit: DATA_TRANSFER_OFFICIAL_AUDIT/gu)?.length,
+    4,
+  );
+});
+
+test("Data Transfer UI requires and exposes the frozen official-source audit", () => {
+  assert.match(panel, /sutra\.data-transfer-official-audit\.v1/u);
+  assert.match(panel, /Official AWS Data Transfer coverage/u);
+  assert.match(panel, /public definition unavailable/u);
+  assert.match(panel, /QuickSight definition: not published/u);
+  assert.match(panel, /QuickSight template body: not published/u);
+  assert.match(panel, /Dashboard changelog: not published/u);
+  assert.match(panel, /not claimed QuickSight parity/u);
+  assert.match(
+    panel,
+    /: <DataTransferOfficialCoverage audit=\{\(envelope as DataTransferEnvelope\)\.officialAudit\}/u,
   );
 });
 
@@ -193,6 +216,11 @@ test("Trends visual exposes bounded period comparisons, drilldowns, export and l
   assert.match(panel, /Account identity evidence/u);
   assert.match(panel, /Geographic cost and usage/u);
   assert.match(panel, /Automation status/u);
+  assert.match(panel, /Official Trends coverage and evidence boundary/u);
+  assert.match(panel, /Exact sheets, visuals, filter controls/u);
+  assert.match(panel, /Pixel parity is not claimed/u);
+  assert.match(panel, /Documented AWS Trends feature areas/u);
+  assert.match(panel, /Pinned AWS artifact hashes and dataset contracts/u);
   assert.match(panel, /AWS Organizations API evidence is not available/u);
   assert.match(panel, /authoritative Region coordinates are not ingested/u);
   assert.match(panel, /Sutra automation is shown separately/u);
@@ -213,6 +241,9 @@ test("Trends report server-renders exact controls, contributors and lineage", as
   try {
     const trendsModule = await vite.ssrLoadModule(
       "/app/costs/finops-cur-intelligence-panels.tsx",
+    );
+    const officialModule = await vite.ssrLoadModule(
+      "/lib/finops-trends-official-definition.ts",
     );
     const lineage = {
       sourceEvidenceId: "s3://billing/manifest.json#v1",
@@ -427,6 +458,7 @@ test("Trends report server-renders exact controls, contributors and lineage", as
     };
     const markup = renderToStaticMarkup(createElement(trendsModule.TrendsReport, {
       report,
+      officialDefinition: officialModule.FINOPS_TRENDS_OFFICIAL_DEFINITION,
       availablePeriods: ["2026-05", "2026-06"].map((period) => ({
         period,
         generationId: lineage.generationId,
@@ -437,6 +469,10 @@ test("Trends report server-renders exact controls, contributors and lineage", as
       onRollingWindowChange() {},
     }));
     assert.match(markup, /Enterprise cost trends/u);
+    assert.match(markup, /Official Trends coverage and evidence boundary/u);
+    assert.match(markup, /Not published/u);
+    assert.match(markup, /cudos-trends-dashboard-template/u);
+    assert.match(markup, /Global usage map/u);
     assert.match(markup, /Export evidence CSV/u);
     assert.match(markup, /AmazonEC2/u);
     assert.match(markup, /Service category cost trends/u);

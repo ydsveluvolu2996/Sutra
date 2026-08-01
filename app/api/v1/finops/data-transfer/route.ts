@@ -11,6 +11,7 @@ import {
   DATA_TRANSFER_ANALYSIS_BOUNDS,
   buildDataTransferAnalysis,
 } from "../../../../../lib/finops-data-transfer";
+import { DATA_TRANSFER_OFFICIAL_AUDIT } from "../../../../../lib/finops-data-transfer-official-audit";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -120,6 +121,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId: query.connectionId,
         selectedPeriod: query.period,
         availablePeriods,
+        officialAudit: DATA_TRANSFER_OFFICIAL_AUDIT,
         report: null,
         sourceState: "waiting",
       });
@@ -139,6 +141,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId: query.connectionId,
         selectedPeriod: selected.scope.billingPeriod,
         availablePeriods,
+        officialAudit: DATA_TRANSFER_OFFICIAL_AUDIT,
         report: null,
         sourceState: dataset.evidence.rejectedRows > 0
           || dataset.evidence.activeFileCount === null
@@ -157,6 +160,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId: query.connectionId,
         selectedPeriod: selected.scope.billingPeriod,
         availablePeriods,
+        officialAudit: DATA_TRANSFER_OFFICIAL_AUDIT,
         report: null,
         sourceState: "source_incomplete",
       });
@@ -207,6 +211,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: query.connectionId,
       selectedPeriod: selected.scope.billingPeriod,
       availablePeriods,
+      officialAudit: DATA_TRANSFER_OFFICIAL_AUDIT,
       report,
       sourceState: report.state.toLowerCase(),
     });

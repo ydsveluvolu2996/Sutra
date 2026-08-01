@@ -22,6 +22,8 @@ import {
   buildFinopsTrendsCapabilityClosure,
   type FinopsTrendsAutomationStatus,
 } from "../../../../../lib/finops-trends-capability-closure";
+import { FINOPS_TRENDS_OFFICIAL_DEFINITION } from
+  "../../../../../lib/finops-trends-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -260,6 +262,7 @@ export async function GET(request: Request): Promise<Response> {
     if (window === null) {
       return jsonResponse({
         connectionId: query.connectionId,
+        officialDefinition: FINOPS_TRENDS_OFFICIAL_DEFINITION,
         selectedWindow: null,
         availablePeriods,
         report: null,
@@ -273,6 +276,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selectedPartitions.length === 0) {
       return jsonResponse({
         connectionId: query.connectionId,
+        officialDefinition: FINOPS_TRENDS_OFFICIAL_DEFINITION,
         selectedWindow: window,
         availablePeriods,
         report: null,
@@ -294,6 +298,7 @@ export async function GET(request: Request): Promise<Response> {
     if (currencies.length === 0) {
       return jsonResponse({
         connectionId: query.connectionId,
+        officialDefinition: FINOPS_TRENDS_OFFICIAL_DEFINITION,
         selectedWindow: window,
         availablePeriods,
         report: null,
@@ -305,6 +310,7 @@ export async function GET(request: Request): Promise<Response> {
     if (!unblendedComplete) {
       return jsonResponse({
         connectionId: query.connectionId,
+        officialDefinition: FINOPS_TRENDS_OFFICIAL_DEFINITION,
         selectedWindow: window,
         availablePeriods,
         report: null,
@@ -388,6 +394,7 @@ export async function GET(request: Request): Promise<Response> {
     } : coreReport;
     return jsonResponse({
       connectionId: query.connectionId,
+      officialDefinition: FINOPS_TRENDS_OFFICIAL_DEFINITION,
       selectedWindow: window,
       availablePeriods,
       report,
