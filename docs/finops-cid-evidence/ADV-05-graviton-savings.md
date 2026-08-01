@@ -4,7 +4,7 @@ Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/graviton-savings-dashboard.html>
 
-Current maturity: `PARTIAL_PIPELINE (local vertical)`
+Current maturity: `PARTIAL_PIPELINE (local runtime candidate)`
 
 ## Official coverage
 
@@ -14,15 +14,37 @@ account, Region, service, eligibility, and currency filters; service summaries;
 monthly usage/potential/realized trends; workload drilldown; evidence lineage;
 and formula-safe CSV export.
 
+The official v3.0.2 definition was audited at CID framework commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`:
+<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/graviton-savings-dashboard/graviton_savings_dashboard-definition.yaml>.
+Its seven sheets are **Summary**, **EC2**, **RDS**, **ElastiCache**,
+**OpenSearch**, **Graviton Instance Mapping**, and **About**. The official
+changelog also identifies performance-based EC2 modeling, Graviton-generation
+selection, cost-allocation tag filters, Reserved Instance analysis, and
+service-specific eligibility/mapping corrections. Sutra does not claim exact
+parity for controls or visuals that its normalized model does not expose.
+
 | Gate | Status | Evidence |
 |---|---|---|
 | Source contract | `LOCAL_COMPLETE` | `lib/finops-graviton-savings.ts` recognizes all six concrete resource types and requires canonical CUR2, versioned pricing, inventory/metadata and five explicit compatibility dimensions. |
 | Collector/materializer contract | `LOCAL_COMPLETE` | `lib/finops-graviton-savings-job.ts` pins tenant accounts/Regions, four service families, read-only operations, bounds, deadline and no-inference policy. |
+| Durable scheduling/replay contract | `LOCAL_COMPLETE` | `lib/finops-graviton-runtime-binding.ts` prevalidates eligible scopes, schedules identity-only daily jobs with five attempts, reloads and validates canonical tenant/account/Region boundaries, derives tenant/window/boundary request identity, passes it to the collector, validates and verifies signed replay receipts, skips provider/store writes on verified replay, and returns an explicit adapter-unavailable state. |
 | Persistence | `LOCAL_COMPLETE` | SQLite 0103, PostgreSQL 0098 and `db/finops-graviton-savings-repository.ts` provide content-addressed immutable history with a newer `COMPLETE`-only head. |
 | API | `LOCAL_COMPLETE` | Authenticated same-tenant `connection:read` API with bounded filters, freshness, accepted/latest lineage and honest configuration state. |
 | Native UI | `LOCAL_COMPLETE` | Existing ARM64 usage, four-service economics, monthly trends, evidence-class separation, blockers, drilldown and safe visible-row export. |
 | Focused verification | `LOCAL_COMPLETE` | Engine and vertical suites cover exact micros, service contracts, provider-estimate restrictions, missing compatibility, reconciliation, adversarial scope, immutable heads, API and SSR UI. |
 | Live provider/deployment | `OPEN` | No production collector adapter, scheduled materialization, provider reconciliation, reviewed release, image or live acceptance is claimed. |
+
+## G1-G6 status
+
+| Gate | Status | Evidence / remaining work |
+|---|---|---|
+| G1 — official requirements and visual inventory | `LOCAL_COMPLETE` | Seven sheets and v3.0.2 feature families audited against the pinned official definition and changelog. |
+| G2 — source/materializer contract | `LOCAL_COMPLETE` | Four service families, canonical CUR2/pricing/inventory/metadata, recommendation authority, compatibility dimensions, bounds and no-inference policy are explicit. |
+| G3 — durable runtime/replay | `PARTIAL` | Prevalidated identity-only daily scheduling, deterministic request identity, strict five-attempt jobs and validated signed receipt verification are implemented and tested. Durable handler registration, real archive/sealer, credential broker and provider adapter remain open. |
+| G4 — persistence/API | `LOCAL_COMPLETE` | Immutable complete-only head, registered SQLite/Postgres migrations, tenant-scoped authenticated API, bounded filters/cursor, history and freshness. |
+| G5 — native UI | `PARTIAL` | Existing usage, service economics, trends, eligibility, blockers and evidence render. Exact seven-sheet layout, Instance Mapping, EC2 generation/performance controls, tags and managed-service RI/purchase-option analysis remain open. |
+| G6 — validation/acceptance | `PARTIAL` | Focused engine, runtime, persistence, route and SSR tests plus lint/type checks pass locally. Live AWS, exact-tree browser/a11y and production smoke evidence remain open. |
 
 ## Evidence-honesty rules
 
@@ -47,27 +69,32 @@ and formula-safe CSV export.
 
 - `lib/finops-graviton-dashboard.ts`
 - `lib/finops-graviton-savings-job.ts`
+- `lib/finops-graviton-runtime-binding.ts`
 - `db/finops-graviton-savings-repository.ts`
 - `drizzle/0103_finops_graviton_savings.sql`
 - `postgres/migrations/0098_finops_graviton_savings.sql`
 - `app/api/v1/finops/graviton-savings/route.ts`
 - `app/costs/finops-graviton-savings-dashboard.tsx`
 - `tests/finops-graviton-savings-vertical.test.mjs`
+- `tests/finops-graviton-runtime-binding.test.ts`
 
 ## Remaining provider and activation gaps
 
-1. Register SQLite 0103, PostgreSQL 0098 and the deploy migrator entry.
-2. Wire the native component and catalog maturity.
-3. Deploy the signed cross-service collector and schedule materialization.
-4. Bind complete Compute Optimizer coverage where AWS publishes it, exact
+1. Register the durable job handler and bind a persistent signed-receipt
+   archive, verifier, sealer and credential-owning collector adapter.
+2. Bind complete Compute Optimizer coverage where AWS publishes it, exact
    OpenSearch/ElastiCache inventory, AWS Price List products, canonical CUR2,
    service metadata and approved workload/license attestations.
-5. Confirm live feature/engine/version compatibility for Aurora, OpenSearch and
+3. Confirm live feature/engine/version compatibility for Aurora, OpenSearch and
    ElastiCache; managed-service inventory alone is not compatibility proof.
-6. Run two-tenant, multi-account/Region, pagination/throttling, history,
+4. Add exact official Instance Mapping, generation/performance, cost-allocation
+   tag, purchase-option/RI and service-specific eligibility controls before
+   claiming visual/control parity.
+5. Run two-tenant, multi-account/Region, pagination/throttling, history,
    reconciliation, empty/partial and provider-correction acceptance.
-7. Complete reviewed release, immutable image deployment and live UI acceptance.
+6. Complete reviewed release, immutable image deployment and live UI acceptance.
 
 Until these gates pass, the API reports
-`GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED`. This vertical is not locally
-verified or live.
+`GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED`. This vertical is locally
+implemented but has not passed the exact-tree, provider, or live acceptance
+gates.
