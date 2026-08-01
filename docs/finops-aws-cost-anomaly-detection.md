@@ -53,14 +53,23 @@ The dynamic `GET /api/v1/finops/cost-anomaly` route:
   all three operation-level coverage records;
 - uses `buildCostAnomalyDashboard` with real persisted AWS findings and the
   existing Sutra statistical engine over at most three billing periods and
-  50,000 normalized lines; and
-- returns explicit `empty`, `ready`, `partial`, `stale` or `failed` state. A
+  50,000 normalized lines;
+- derives a bounded `sutra.aws-cost-anomaly-analysis.v1` view over the accepted
+  provider records: null-aware monthly total/actual/expected values, open and
+  ended windows, assessment counts, ranked provider contribution across
+  service/account/Region/usage-type dimensions, monitor method/dimension
+  coverage and subscription frequency/channel counts; and
+- returns explicit `waiting`, `complete`, `partial`, `stale` or `failed` state. A
   failed refresh never replaces an accepted complete generation.
 
 The Budgets & anomalies workspace presents AWS provider findings and Sutra
 statistical signals in separate labelled cards. No-finding and no-billing-data
 states remain distinct; neither is rendered as proof of correct or optimized
-spend.
+spend. All provider filters cascade over accepted findings and every accepted
+root cause. The UI supports anomaly ID, current score, total impact, service,
+linked account, Region, usage type, assessment, monitor type, overlapping date
+window and derived window-state controls, plus deterministic sorting and safe
+CSV.
 
 ## Evidence semantics
 
@@ -69,17 +78,23 @@ spend.
   Detection and are never claimed as covered.
 - `TotalImpactPercentage` may be absent when expected spend is zero. Sutra
   preserves this as `null`; it does not invent a percentage.
+- `MaxImpact` is retained as a separate provider field and is never substituted
+  for absent `TotalImpact`. Monthly actual, expected and total-impact aggregates
+  disclose observed and unavailable finding counts.
 - `GetAnomalies` can return anomalies that are below every subscription
   notification threshold. A subscription threshold is not used as a finding
   filter.
 - Root-cause evidence is limited to service, linked-account ID, Region, usage
-  type and contribution. Provider account names remain redacted.
+  type and contribution. Provider account names remain redacted. Contribution
+  is ranked only when AWS returned it; whole-anomaly impact is not assigned to a
+  missing root-cause contribution.
 - Source freshness uses the latest returned monitor evaluation timestamp. The
   broker response time is not substituted for provider data freshness.
 
 Authoritative AWS references:
 
 - <https://docs.aws.amazon.com/cost-management/latest/userguide/manage-ad.html>
+- <https://docs.aws.amazon.com/cost-management/latest/userguide/getting-started-ad.html>
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetAnomalies.html>
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetAnomalyMonitors.html>
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_GetAnomalySubscriptions.html>

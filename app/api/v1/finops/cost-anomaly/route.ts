@@ -57,6 +57,8 @@ function parseConnectionId(request: Request): string {
 function publicDashboard(
   dashboard: ReturnType<typeof buildCostAnomalyDashboard>,
 ) {
+  const monitorByArn = new Map(dashboard.aws.collection.monitors.map((monitor) =>
+    [monitor.monitorArn, monitor] as const));
   return {
     aws: {
       source: dashboard.aws.source,
@@ -64,16 +66,27 @@ function publicDashboard(
       windowStartDate: dashboard.aws.collection.windowStartDate,
       windowEndDate: dashboard.aws.collection.windowEndDate,
       coverage: dashboard.aws.collection.coverage,
-      anomalies: dashboard.aws.collection.anomalies.map((anomaly) => ({
-        anomalyId: anomaly.anomalyId,
-        startDate: anomaly.startDate,
-        endDate: anomaly.endDate,
-        feedback: anomaly.feedback,
-        score: anomaly.score,
-        impact: anomaly.impact,
-        rootCauses: anomaly.rootCauses,
-        rootCausesOmitted: anomaly.rootCausesOmitted,
-      })),
+      anomalies: dashboard.aws.collection.anomalies.map((anomaly) => {
+        const monitor = monitorByArn.get(anomaly.monitorArn);
+        return {
+          anomalyId: anomaly.anomalyId,
+          startDate: anomaly.startDate,
+          endDate: anomaly.endDate,
+          feedback: anomaly.feedback,
+          score: anomaly.score,
+          impact: anomaly.impact,
+          rootCauses: anomaly.rootCauses.map((cause) => ({
+            service: cause.service,
+            region: cause.region,
+            linkedAccountId: cause.linkedAccountId,
+            usageType: cause.usageType,
+            contribution: cause.contribution,
+          })),
+          rootCausesOmitted: anomaly.rootCausesOmitted,
+          monitorType: monitor?.type ?? null,
+          monitorDimension: monitor?.dimension ?? null,
+        };
+      }),
       monitors: dashboard.aws.collection.monitors.map((monitor) => ({
         type: monitor.type,
         dimension: monitor.dimension,
@@ -92,6 +105,7 @@ function publicDashboard(
       disclaimer: dashboard.aws.disclaimer,
     },
     sutra: dashboard.sutra,
+    analysis: dashboard.analysis,
     disclaimer: dashboard.disclaimer,
   };
 }

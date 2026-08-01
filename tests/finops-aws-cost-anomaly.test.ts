@@ -398,8 +398,46 @@ test("AWS provider anomalies and Sutra statistical findings remain explicitly se
     dashboard.sutra.source,
     "SUTRA_STATISTICAL_BILLING_SIGNALS",
   );
+  assert.equal(dashboard.analysis.schema, "sutra.aws-cost-anomaly-analysis.v1");
+  assert.equal(dashboard.analysis.summary.findingCount, 1);
+  assert.equal(dashboard.analysis.summary.totalImpact.total, 200);
+  assert.equal(dashboard.analysis.summary.actualSpend.total, 500);
+  assert.equal(dashboard.analysis.summary.expectedSpend.total, 300);
+  assert.equal(dashboard.analysis.summary.assessmentCounts.plannedActivity, 1);
+  assert.equal(dashboard.analysis.movers.service[0]?.contribution.total, 180);
+  assert.equal(dashboard.analysis.movers.linkedAccount[0]?.value, "210987654321");
+  assert.equal(dashboard.analysis.monitorCoverage[0]?.evaluatedMonitorCount, 1);
+  assert.equal(dashboard.analysis.subscriptionCoverage[0]?.confirmedEmailSubscriberCount, 1);
   assert.match(dashboard.sutra.disclaimer, /not an AWS Cost Anomaly/u);
   assert.match(dashboard.disclaimer, /independent sources/u);
+});
+
+test("provider analysis preserves unavailable totals instead of substituting maximum impact", () => {
+  const value = collection();
+  const anomalies = structuredClone(value.anomalies as Array<Record<string, unknown>>);
+  anomalies[0]!.impact = {
+    maximum: 140,
+    total: null,
+    actualSpend: null,
+    expectedSpend: 300,
+    percentage: null,
+  };
+  const parsed = parseAwsCostAnomalyCollection({ ...value, anomalies }, ACCOUNT_ID, NOW);
+  const dashboard = buildCostAnomalyDashboard(parsed, {
+    anomalies: [],
+    evaluatedDays: 0,
+    disclaimer: ANOMALY_DISCLAIMER,
+  });
+
+  assert.deepEqual(dashboard.analysis.summary.totalImpact, {
+    total: null,
+    observedValueCount: 0,
+    unavailableValueCount: 1,
+  });
+  assert.equal(dashboard.analysis.summary.maximumImpact.total, 140);
+  assert.equal(dashboard.analysis.summary.actualSpend.total, null);
+  assert.equal(dashboard.analysis.monthly[0]?.totalImpact.total, null);
+  assert.equal(dashboard.analysis.monthly[0]?.expectedSpend.total, 300);
 });
 
 test("projects explicit source readiness from accepted signed-broker evidence", () => {

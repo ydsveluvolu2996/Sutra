@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { CostAnomalyProviderAnalysis } from "../../lib/finops-aws-cost-anomaly";
 import styles from "./costs.module.css";
 
 /* ----------------------------------------------------------------------------
@@ -93,16 +94,29 @@ interface CostAnomalyResponse {
           readonly contribution: number | null;
         }[];
         readonly rootCausesOmitted: number;
+        readonly monitorType: "CUSTOM" | "DIMENSIONAL" | null;
+        readonly monitorDimension: "SERVICE" | "LINKED_ACCOUNT" | "TAG" | "COST_CATEGORY" | null;
       }[];
       readonly monitors: readonly {
-        readonly type: string;
-        readonly dimension: string | null;
+        readonly type: "CUSTOM" | "DIMENSIONAL";
+        readonly dimension: "SERVICE" | "LINKED_ACCOUNT" | "TAG" | "COST_CATEGORY" | null;
+        readonly specificationPresent: boolean;
+        readonly dimensionalValueCount: number | null;
         readonly lastEvaluatedAt: string | null;
       }[];
       readonly subscriptions: readonly {
-        readonly frequency: string;
+        readonly frequency: "IMMEDIATE" | "DAILY" | "WEEKLY";
         readonly threshold: number | null;
         readonly monitorCount: number;
+        readonly monitorArnsOmitted: number;
+        readonly thresholdExpressionPresent: boolean;
+        readonly subscriberCounts: {
+          readonly emailConfirmed: number;
+          readonly emailDeclined: number;
+          readonly snsConfirmed: number;
+          readonly snsDeclined: number;
+          readonly unknown: number;
+        };
       }[];
       readonly disclaimer: string;
     };
@@ -118,6 +132,7 @@ interface CostAnomalyResponse {
       readonly evaluatedDays: number;
       readonly disclaimer: string;
     };
+    readonly analysis: CostAnomalyProviderAnalysis;
     readonly disclaimer: string;
   };
 }
@@ -141,6 +156,13 @@ function anomalyLifecycle(endDate: string | null, today: string): "Open window" 
   return endDate === null || endDate >= today ? "Open window" : "Window ended";
 }
 
+function anomalyAssessment(value: string | null): string {
+  if (value === "YES") return "Accurate anomaly";
+  if (value === "NO") return "Not an issue";
+  if (value === "PLANNED_ACTIVITY") return "Planned activity";
+  return "Not submitted";
+}
+
 export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
   connectionId: string;
   initialData?: CostAnomalyResponse | null;
@@ -149,10 +171,16 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [minimumImpact, setMinimumImpact] = useState("0");
+  const [minimumScore, setMinimumScore] = useState("0");
   const [serviceFilter, setServiceFilter] = useState("all");
   const [accountFilter, setAccountFilter] = useState("all");
   const [regionFilter, setRegionFilter] = useState("all");
+  const [usageTypeFilter, setUsageTypeFilter] = useState("all");
+  const [assessmentFilter, setAssessmentFilter] = useState("all");
+  const [monitorTypeFilter, setMonitorTypeFilter] = useState("all");
   const [lifecycleFilter, setLifecycleFilter] = useState("all");
+  const [anomalySearch, setAnomalySearch] = useState("");
+  const [sortBy, setSortBy] = useState("impact-desc");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -213,48 +241,119 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
         return value === null ? [] : [value];
       }))].sort((left, right) => left.localeCompare(right));
     return {
-      services: values((anomaly) => anomaly.rootCauses[0]?.service ?? null),
-      accounts: values((anomaly) => anomaly.rootCauses[0]?.linkedAccountId ?? null),
-      regions: values((anomaly) => anomaly.rootCauses[0]?.region ?? null),
+      services: [...new Set(anomalies.flatMap((anomaly) =>
+        anomaly.rootCauses.flatMap((cause) => cause.service === null ? [] : [cause.service])))].sort(),
+      accounts: [...new Set(anomalies.flatMap((anomaly) =>
+        anomaly.rootCauses.flatMap((cause) => cause.linkedAccountId === null ? [] : [cause.linkedAccountId])))].sort(),
+      regions: [...new Set(anomalies.flatMap((anomaly) =>
+        anomaly.rootCauses.flatMap((cause) => cause.region === null ? [] : [cause.region])))].sort(),
+      usageTypes: [...new Set(anomalies.flatMap((anomaly) =>
+        anomaly.rootCauses.flatMap((cause) => cause.usageType === null ? [] : [cause.usageType])))].sort(),
+      monitorTypes: values((anomaly) => anomaly.monitorType ?? null),
     };
   }, [dashboard]);
   const filteredAnomalies = useMemo(() => {
     const threshold = Number(minimumImpact);
     const safeThreshold = Number.isFinite(threshold) && threshold >= 0 ? threshold : 0;
-    return (dashboard?.aws.anomalies ?? []).filter((anomaly) => {
-      const cause = anomaly.rootCauses[0];
-      const impact = anomaly.impact.total ?? anomaly.impact.maximum;
+    const score = Number(minimumScore);
+    const safeScore = Number.isFinite(score) && score >= 0 && score <= 100 ? score : 0;
+    const search = anomalySearch.trim().toLocaleLowerCase("en-US");
+    const selected = (dashboard?.aws.anomalies ?? []).filter((anomaly) => {
       const lifecycle = anomalyLifecycle(anomaly.endDate, today);
-      return impact >= safeThreshold
-        && (serviceFilter === "all" || cause?.service === serviceFilter)
-        && (accountFilter === "all" || cause?.linkedAccountId === accountFilter)
-        && (regionFilter === "all" || cause?.region === regionFilter)
+      const overlapsStart = startDate.length === 0
+        || (anomaly.endDate ?? today) >= startDate;
+      const overlapsEnd = endDate.length === 0
+        || (anomaly.startDate !== null && anomaly.startDate <= endDate);
+      return (safeThreshold === 0
+          || (anomaly.impact.total !== null && anomaly.impact.total >= safeThreshold))
+        && anomaly.score.current >= safeScore
+        && (serviceFilter === "all" || anomaly.rootCauses.some((cause) => cause.service === serviceFilter))
+        && (accountFilter === "all" || anomaly.rootCauses.some((cause) => cause.linkedAccountId === accountFilter))
+        && (regionFilter === "all" || anomaly.rootCauses.some((cause) => cause.region === regionFilter))
+        && (usageTypeFilter === "all" || anomaly.rootCauses.some((cause) => cause.usageType === usageTypeFilter))
+        && (assessmentFilter === "all" || (anomaly.feedback ?? "NOT_SUBMITTED") === assessmentFilter)
+        && (monitorTypeFilter === "all" || anomaly.monitorType === monitorTypeFilter)
         && (lifecycleFilter === "all" || lifecycle === lifecycleFilter)
-        && (startDate.length === 0 || (anomaly.startDate !== null && anomaly.startDate >= startDate))
-        && (endDate.length === 0 || (anomaly.startDate !== null && anomaly.startDate <= endDate));
+        && (search.length === 0 || anomaly.anomalyId.toLocaleLowerCase("en-US").includes(search))
+        && overlapsStart
+        && overlapsEnd;
     });
-  }, [accountFilter, dashboard, endDate, lifecycleFilter, minimumImpact, regionFilter, serviceFilter, startDate, today]);
+    return selected.sort((left, right) => {
+      if (sortBy === "start-desc") return (right.startDate ?? "").localeCompare(left.startDate ?? "");
+      if (sortBy === "score-desc") return right.score.current - left.score.current;
+      if (sortBy === "impact-percent-desc") return (right.impact.percentage ?? -Infinity) - (left.impact.percentage ?? -Infinity);
+      return (right.impact.total ?? -Infinity) - (left.impact.total ?? -Infinity);
+    });
+  }, [accountFilter, anomalySearch, assessmentFilter, dashboard, endDate, lifecycleFilter,
+    minimumImpact, minimumScore, monitorTypeFilter, regionFilter, serviceFilter, sortBy,
+    startDate, today, usageTypeFilter]);
   const impactByMonth = useMemo(() => {
-    const totals = new Map<string, number>();
+    const totals = new Map<string, { total: number; observed: number; unavailable: number }>();
     for (const anomaly of filteredAnomalies) {
       const month = anomaly.startDate?.slice(0, 7) ?? "Unknown";
-      totals.set(month, (totals.get(month) ?? 0) + (anomaly.impact.total ?? anomaly.impact.maximum));
+      const group = totals.get(month) ?? { total: 0, observed: 0, unavailable: 0 };
+      if (anomaly.impact.total === null) group.unavailable += 1;
+      else {
+        group.total += anomaly.impact.total;
+        group.observed += 1;
+      }
+      totals.set(month, group);
     }
     return [...totals].sort(([left], [right]) => left.localeCompare(right));
   }, [filteredAnomalies]);
-  const impactByService = useMemo(() => {
-    const totals = new Map<string, number>();
+
+  const spendByMonth = useMemo(() => {
+    const totals = new Map<string, { actual: number; expected: number; actualCount: number; expectedCount: number }>();
     for (const anomaly of filteredAnomalies) {
-      const service = anomaly.rootCauses[0]?.service ?? "Unattributed service";
-      totals.set(service, (totals.get(service) ?? 0) + (anomaly.impact.total ?? anomaly.impact.maximum));
+      if (anomaly.startDate === null) continue;
+      const month = anomaly.startDate.slice(0, 7);
+      const group = totals.get(month) ?? { actual: 0, expected: 0, actualCount: 0, expectedCount: 0 };
+      if (anomaly.impact.actualSpend !== null) {
+        group.actual += anomaly.impact.actualSpend;
+        group.actualCount += 1;
+      }
+      if (anomaly.impact.expectedSpend !== null) {
+        group.expected += anomaly.impact.expectedSpend;
+        group.expectedCount += 1;
+      }
+      totals.set(month, group);
     }
-    return [...totals].sort((left, right) => right[1] - left[1]).slice(0, 10);
+    return [...totals].sort(([left], [right]) => left.localeCompare(right));
+  }, [filteredAnomalies]);
+
+  const rootCauseMovers = useMemo(() => {
+    const summarize = (select: (cause: (typeof filteredAnomalies)[number]["rootCauses"][number]) => string | null) => {
+      const totals = new Map<string, { contribution: number; observed: number; unavailable: number }>();
+      for (const anomaly of filteredAnomalies) {
+        for (const cause of anomaly.rootCauses) {
+          const value = select(cause);
+          if (value === null) continue;
+          const group = totals.get(value) ?? { contribution: 0, observed: 0, unavailable: 0 };
+          if (cause.contribution === null) group.unavailable += 1;
+          else {
+            group.contribution += cause.contribution;
+            group.observed += 1;
+          }
+          totals.set(value, group);
+        }
+      }
+      return [...totals].sort((left, right) => right[1].contribution - left[1].contribution
+        || left[0].localeCompare(right[0])).slice(0, 10);
+    };
+    return {
+      services: summarize((cause) => cause.service),
+      accounts: summarize((cause) => cause.linkedAccountId),
+      regions: summarize((cause) => cause.region),
+      usageTypes: summarize((cause) => cause.usageType),
+    };
   }, [filteredAnomalies]);
 
   function exportFindings(): void {
     const heading = [
       "Anomaly ID", "Start date", "End date", "Window state", "Service",
-      "Account ID", "Region", "Usage type", "Impact (billing currency units)",
+      "Account ID", "Region", "Usage type", "Total impact (billing currency units)",
+      "Maximum impact (billing currency units)", "Current anomaly score", "Maximum anomaly score",
+      "Monitor type", "Monitor dimension",
       "Actual spend", "Expected spend", "Impact percent", "Feedback",
     ];
     const rows = filteredAnomalies.map((anomaly) => {
@@ -263,7 +362,9 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
         anomaly.anomalyId, anomaly.startDate, anomaly.endDate,
         anomalyLifecycle(anomaly.endDate, today), cause?.service ?? null,
         cause?.linkedAccountId ?? null, cause?.region ?? null,
-        cause?.usageType ?? null, anomaly.impact.total ?? anomaly.impact.maximum,
+        cause?.usageType ?? null, anomaly.impact.total, anomaly.impact.maximum,
+        anomaly.score.current, anomaly.score.maximum,
+        anomaly.monitorType, anomaly.monitorDimension,
         anomaly.impact.actualSpend, anomaly.impact.expectedSpend,
         anomaly.impact.percentage, anomaly.feedback,
       ].map(csvCell).join(",");
@@ -322,11 +423,19 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
             <article><small>Monitors</small><strong>{dashboard.aws.monitors.length}</strong><span>{dashboard.aws.monitors.filter((item) => item.type === "DIMENSIONAL").length} dimensional</span></article>
             <article><small>Subscriptions</small><strong>{dashboard.aws.subscriptions.length}</strong><span>{dashboard.aws.subscriptions.filter((item) => item.frequency === "IMMEDIATE").length} immediate</span></article>
             <article><small>Data through</small><strong>{formatCostAnomalyTime(data?.dataThroughAt ?? null)}</strong><span>{ageHours === null ? "Freshness unavailable" : `${ageHours} hours old`}</span></article>
+            <article><small>Open anomaly windows</small><strong>{dashboard.analysis.summary.openWindowCount}</strong><span>{dashboard.analysis.summary.endedWindowCount} windows ended relative to collection day</span></article>
+            <article><small>Observed total impact</small><strong>{dashboard.analysis.summary.totalImpact.total === null ? "Not available" : money(dashboard.analysis.summary.totalImpact.total, null)}</strong><span>{dashboard.analysis.summary.totalImpact.observedValueCount}/{dashboard.analysis.summary.findingCount} findings report total impact</span></article>
           </div>
 
           <div className={styles.costAnomalyControls} aria-label="AWS Cost Anomaly filters">
             <label>Minimum impact
               <input min="0" step="0.01" type="number" value={minimumImpact} onChange={(event) => setMinimumImpact(event.target.value)} />
+            </label>
+            <label>Minimum current score
+              <input max="100" min="0" step="1" type="number" value={minimumScore} onChange={(event) => setMinimumScore(event.target.value)} />
+            </label>
+            <label>Anomaly ID
+              <input type="search" value={anomalySearch} onChange={(event) => setAnomalySearch(event.target.value)} placeholder="Find anomaly ID" />
             </label>
             <label>Service
               <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
@@ -334,7 +443,7 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
                 {filterOptions.services.map((service) => <option key={service} value={service}>{service}</option>)}
               </select>
             </label>
-            <label>Payer account
+            <label>Linked account
               <select value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)}>
                 <option value="all">All accounts</option>
                 {filterOptions.accounts.map((account) => <option key={account} value={account}>{account}</option>)}
@@ -344,6 +453,27 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
               <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
                 <option value="all">All regions</option>
                 {filterOptions.regions.map((region) => <option key={region} value={region}>{region}</option>)}
+              </select>
+            </label>
+            <label>Usage type
+              <select value={usageTypeFilter} onChange={(event) => setUsageTypeFilter(event.target.value)}>
+                <option value="all">All usage types</option>
+                {filterOptions.usageTypes.map((usageType) => <option key={usageType} value={usageType}>{usageType}</option>)}
+              </select>
+            </label>
+            <label>Assessment
+              <select value={assessmentFilter} onChange={(event) => setAssessmentFilter(event.target.value)}>
+                <option value="all">All assessments</option>
+                <option value="NOT_SUBMITTED">Not submitted</option>
+                <option value="YES">Accurate anomaly</option>
+                <option value="NO">Not an issue</option>
+                <option value="PLANNED_ACTIVITY">Planned activity</option>
+              </select>
+            </label>
+            <label>Monitor type
+              <select value={monitorTypeFilter} onChange={(event) => setMonitorTypeFilter(event.target.value)}>
+                <option value="all">All monitor types</option>
+                {filterOptions.monitorTypes.map((monitorType) => <option key={monitorType} value={monitorType}>{monitorType}</option>)}
               </select>
             </label>
             <label>Window state
@@ -359,6 +489,14 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
             <label>End date
               <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
             </label>
+            <label>Sort findings
+              <select value={sortBy} onChange={(event) => setSortBy(event.target.value)}>
+                <option value="impact-desc">Total impact</option>
+                <option value="score-desc">Current score</option>
+                <option value="impact-percent-desc">Impact percent</option>
+                <option value="start-desc">Start date</option>
+              </select>
+            </label>
             <button className="button button-secondary" disabled={filteredAnomalies.length === 0} onClick={exportFindings} type="button">Export filtered CSV</button>
           </div>
 
@@ -367,18 +505,29 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
               <div className="panel-heading"><div><p className="eyebrow">Trend analysis</p><h3>Impact by anomaly month</h3></div><span className="result-count">{filteredAnomalies.length}</span></div>
               {impactByMonth.length === 0 ? <p className={styles.emptyNote}>No accepted finding matches the current filters.</p> : (
                 <div className={styles.costAnomalyBars}>{impactByMonth.map(([month, impact]) => (
-                  <div key={month}><span>{month}</span><progress max={Math.max(...impactByMonth.map((item) => item[1]), 1)} value={impact} aria-label={`${month}: ${impact.toFixed(2)} billing currency units`} /><strong>{impact.toFixed(2)}</strong></div>
+                  <div key={month}><span>{month}</span><progress max={Math.max(...impactByMonth.map((item) => item[1].total), 1)} value={impact.total} aria-label={`${month}: ${impact.observed === 0 ? "total impact unavailable" : `${impact.total.toFixed(2)} billing currency units`}`} /><strong>{impact.observed === 0 ? "N/A" : impact.total.toFixed(2)}</strong>{impact.unavailable > 0 ? <small>{impact.unavailable} unavailable</small> : null}</div>
                 ))}</div>
               )}
             </article>
             <article>
-              <div className="panel-heading"><div><p className="eyebrow">Top movers</p><h3>Impact by service</h3></div></div>
-              {impactByService.length === 0 ? <p className={styles.emptyNote}>No service contributor is available for this selection.</p> : (
-                <div className={styles.costAnomalyBars}>{impactByService.map(([service, impact]) => (
-                  <div key={service}><span title={service}>{service}</span><progress max={Math.max(...impactByService.map((item) => item[1]), 1)} value={impact} aria-label={`${service}: ${impact.toFixed(2)} billing currency units`} /><strong>{impact.toFixed(2)}</strong></div>
-                ))}</div>
+              <div className="panel-heading"><div><p className="eyebrow">Provider expectation</p><h3>Actual versus expected spend</h3></div></div>
+              {spendByMonth.length === 0 ? <p className={styles.emptyNote}>No dated actual or expected provider values match this selection.</p> : (
+                <div className={styles.costAnomalyTableWrap}><table><caption>Monthly actual and ML-expected spend in billing currency units</caption><thead><tr><th>Month</th><th>Actual</th><th>Expected</th><th>Coverage</th></tr></thead><tbody>{spendByMonth.map(([month, spend]) => <tr key={month}><th scope="row">{month}</th><td>{spend.actualCount === 0 ? "Not available" : spend.actual.toFixed(2)}</td><td>{spend.expectedCount === 0 ? "Not available" : spend.expected.toFixed(2)}</td><td>{spend.actualCount}/{filteredAnomalies.filter((anomaly) => anomaly.startDate?.slice(0, 7) === month).length} actual · {spend.expectedCount} expected</td></tr>)}</tbody></table></div>
               )}
             </article>
+            {([
+              ["Service", rootCauseMovers.services],
+              ["Linked account", rootCauseMovers.accounts],
+              ["Region", rootCauseMovers.regions],
+              ["Usage type", rootCauseMovers.usageTypes],
+            ] as const).map(([label, movers]) => <article key={label}>
+              <div className="panel-heading"><div><p className="eyebrow">Ranked provider root causes</p><h3>{label} contribution</h3></div></div>
+              {movers.length === 0 ? <p className={styles.emptyNote}>No provider-reported {label.toLocaleLowerCase("en-US")} contribution is available for this selection.</p> : (
+                <div className={styles.costAnomalyBars}>{movers.map(([value, contribution]) => (
+                  <div key={value}><span title={value}>{value}</span><progress max={Math.max(...movers.map((item) => item[1].contribution), 1)} value={contribution.contribution} aria-label={`${value}: ${contribution.observed === 0 ? "contribution unavailable" : `${contribution.contribution.toFixed(2)} provider contribution units`}`} /><strong>{contribution.observed === 0 ? "N/A" : contribution.contribution.toFixed(2)}</strong>{contribution.unavailable > 0 ? <small>{contribution.unavailable} unavailable</small> : null}</div>
+                ))}</div>
+              )}
+            </article>)}
           </div>
 
           <div className={styles.costAnomalySources}>
@@ -397,12 +546,13 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
                         <span className={`${styles.severity} ${anomaly.score.current >= 75 ? styles.high : anomaly.score.current >= 50 ? styles.medium : styles.low}`}>{Math.round(anomaly.score.current)}</span>
                         <div>
                           <h3>{primaryCause?.service ?? "AWS cost anomaly"}</h3>
-                          <p>{money(anomaly.impact.total ?? anomaly.impact.maximum, null)} billing currency units total impact{anomaly.impact.percentage === null ? "" : ` · ${anomaly.impact.percentage.toFixed(1)}% above expected`}</p>
-                          <small>{anomaly.startDate ?? "Start unavailable"}{anomaly.endDate ? ` – ${anomaly.endDate}` : ""} · {anomalyLifecycle(anomaly.endDate, today)}{primaryCause?.region ? ` · ${primaryCause.region}` : ""}{primaryCause?.linkedAccountId ? ` · account ${primaryCause.linkedAccountId}` : ""}</small>
+                          <p>{anomaly.impact.total === null ? "Total impact unavailable" : `${money(anomaly.impact.total, null)} billing currency units total impact`}{anomaly.impact.percentage === null ? "" : ` · ${anomaly.impact.percentage.toFixed(1)}% above expected`}</p>
+                          <small>Maximum impact {money(anomaly.impact.maximum, null)} · actual {anomaly.impact.actualSpend === null ? "not available" : money(anomaly.impact.actualSpend, null)} · expected {anomaly.impact.expectedSpend === null ? "not available" : money(anomaly.impact.expectedSpend, null)}</small>
+                          <small>{anomaly.startDate ?? "Start unavailable"}{anomaly.endDate ? ` – ${anomaly.endDate}` : ""} · {anomalyLifecycle(anomaly.endDate, today)} · assessment {anomalyAssessment(anomaly.feedback)} · score {anomaly.score.current.toFixed(1)}/{anomaly.score.maximum.toFixed(1)}{anomaly.monitorType ? ` · ${anomaly.monitorType.toLocaleLowerCase("en-US")} ${anomaly.monitorDimension?.replaceAll("_", " ").toLocaleLowerCase("en-US") ?? "monitor"}` : " · monitor metadata unavailable"}{primaryCause?.region ? ` · ${primaryCause.region}` : ""}{primaryCause?.linkedAccountId ? ` · account ${primaryCause.linkedAccountId}` : ""}</small>
                           <details className={styles.costAnomalyDrilldown}>
                             <summary>Root-cause drilldown</summary>
                             {anomaly.rootCauses.length === 0 ? <p>No provider root cause was accepted for this finding.</p> : (
-                              <ul>{anomaly.rootCauses.map((cause, index) => <li key={`${anomaly.anomalyId}:${index}`}>{cause.service ?? "Service unavailable"}{cause.region ? ` · ${cause.region}` : ""}{cause.usageType ? ` · ${cause.usageType}` : ""}{cause.contribution === null ? "" : ` · ${cause.contribution.toFixed(2)} contribution units`}</li>)}</ul>
+                              <ul>{anomaly.rootCauses.map((cause, index) => <li key={`${anomaly.anomalyId}:${index}`}>{cause.service ?? "Service unavailable"}{cause.linkedAccountId ? ` · account ${cause.linkedAccountId}` : ""}{cause.region ? ` · ${cause.region}` : ""}{cause.usageType ? ` · ${cause.usageType}` : ""}{cause.contribution === null ? " · contribution unavailable" : ` · ${cause.contribution.toFixed(2)} provider contribution units`}</li>)}</ul>
                             )}
                             {anomaly.rootCausesOmitted > 0 ? <p>{anomaly.rootCausesOmitted} additional root causes were omitted by the bounded collector.</p> : null}
                           </details>
@@ -443,6 +593,22 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
                   <tbody>{dashboard.aws.coverage.map((coverage) => <tr key={coverage.operation}><th scope="row">{coverage.operation.replaceAll("_", " ")}</th><td>{coverage.status}</td><td>{coverage.pagesObserved}</td><td>{coverage.recordsObserved}</td><td>{coverage.recordsAccepted}</td><td>{coverage.recordsRejected}</td><td>{coverage.recordsOmitted}</td><td>{coverage.errorCode ?? "None"}</td></tr>)}</tbody>
                 </table>
               </div>
+              <div className={styles.costAnomalyTableWrap}>
+                <table>
+                  <caption>Provider monitor coverage by method and dimension</caption>
+                  <thead><tr><th>Method</th><th>Dimension</th><th>Monitors</th><th>Evaluated timestamp available</th></tr></thead>
+                  <tbody>{dashboard.analysis.monitorCoverage.length === 0 ? <tr><td colSpan={4}>No accepted monitor evidence.</td></tr> : dashboard.analysis.monitorCoverage.map((coverage) => <tr key={`${coverage.type}:${coverage.dimension}`}><th scope="row">{coverage.type}</th><td>{coverage.dimension?.replaceAll("_", " ") ?? "Not reported"}</td><td>{coverage.monitorCount}</td><td>{coverage.evaluatedMonitorCount}/{coverage.monitorCount}</td></tr>)}</tbody>
+                </table>
+              </div>
+              <div className={styles.costAnomalyTableWrap}>
+                <table>
+                  <caption>Provider alert subscription coverage; recipient addresses remain redacted</caption>
+                  <thead><tr><th>Frequency</th><th>Subscriptions</th><th>Threshold evidence</th><th>Confirmed channels</th><th>Declined / unknown</th></tr></thead>
+                  <tbody>{dashboard.analysis.subscriptionCoverage.length === 0 ? <tr><td colSpan={5}>No accepted subscription evidence.</td></tr> : dashboard.analysis.subscriptionCoverage.map((coverage) => <tr key={coverage.frequency}><th scope="row">{coverage.frequency}</th><td>{coverage.subscriptionCount}</td><td>{coverage.numericThresholdCount} numeric · {coverage.expressionThresholdCount} expression</td><td>{coverage.confirmedEmailSubscriberCount} email · {coverage.confirmedSnsSubscriberCount} SNS</td><td>{coverage.declinedSubscriberCount} declined · {coverage.unknownSubscriberCount} unknown</td></tr>)}</tbody>
+                </table>
+              </div>
+              <p><strong>Assessment coverage:</strong> {dashboard.analysis.summary.assessmentCounts.accurateAnomaly} accurate anomaly, {dashboard.analysis.summary.assessmentCounts.notAnIssue} not an issue, {dashboard.analysis.summary.assessmentCounts.plannedActivity} planned activity, and {dashboard.analysis.summary.assessmentCounts.notSubmitted} not submitted.</p>
+              <p><strong>Unavailable provider values:</strong> {dashboard.analysis.summary.totalImpact.unavailableValueCount} total-impact, {dashboard.analysis.summary.actualSpend.unavailableValueCount} actual-spend, {dashboard.analysis.summary.expectedSpend.unavailableValueCount} expected-spend, {dashboard.analysis.summary.missingRootCauseCount} root-cause, and {dashboard.analysis.summary.missingStartDateCount} start-date records remain unavailable and are not inferred.</p>
               <p>{dashboard.aws.disclaimer}</p>
               <p>{dashboard.disclaimer}</p>
             </div>

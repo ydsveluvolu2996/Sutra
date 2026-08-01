@@ -85,7 +85,71 @@ export interface CostAnomalyDashboard {
     readonly evaluatedDays: number;
     readonly disclaimer: string;
   };
+  readonly analysis: CostAnomalyProviderAnalysis;
   readonly disclaimer: string;
+}
+
+export interface CostAnomalyObservedAmount {
+  readonly total: number | null;
+  readonly observedValueCount: number;
+  readonly unavailableValueCount: number;
+}
+
+export interface CostAnomalyProviderMover {
+  readonly value: string;
+  readonly findingCount: number;
+  readonly contribution: CostAnomalyObservedAmount;
+}
+
+export interface CostAnomalyProviderAnalysis {
+  readonly schema: "sutra.aws-cost-anomaly-analysis.v1";
+  readonly lifecycleBasis: "PROVIDER_END_DATE_RELATIVE_TO_COLLECTION_DAY";
+  readonly summary: {
+    readonly findingCount: number;
+    readonly openWindowCount: number;
+    readonly endedWindowCount: number;
+    readonly missingStartDateCount: number;
+    readonly missingRootCauseCount: number;
+    readonly totalImpact: CostAnomalyObservedAmount;
+    readonly maximumImpact: CostAnomalyObservedAmount;
+    readonly actualSpend: CostAnomalyObservedAmount;
+    readonly expectedSpend: CostAnomalyObservedAmount;
+    readonly assessmentCounts: {
+      readonly accurateAnomaly: number;
+      readonly notAnIssue: number;
+      readonly plannedActivity: number;
+      readonly notSubmitted: number;
+    };
+  };
+  readonly monthly: readonly {
+    readonly month: string;
+    readonly findingCount: number;
+    readonly totalImpact: CostAnomalyObservedAmount;
+    readonly actualSpend: CostAnomalyObservedAmount;
+    readonly expectedSpend: CostAnomalyObservedAmount;
+  }[];
+  readonly movers: {
+    readonly service: readonly CostAnomalyProviderMover[];
+    readonly linkedAccount: readonly CostAnomalyProviderMover[];
+    readonly region: readonly CostAnomalyProviderMover[];
+    readonly usageType: readonly CostAnomalyProviderMover[];
+  };
+  readonly monitorCoverage: readonly {
+    readonly type: NormalizedAwsCostAnomalyMonitor["type"];
+    readonly dimension: NormalizedAwsCostAnomalyMonitor["dimension"];
+    readonly monitorCount: number;
+    readonly evaluatedMonitorCount: number;
+  }[];
+  readonly subscriptionCoverage: readonly {
+    readonly frequency: NormalizedAwsCostAnomalySubscription["frequency"];
+    readonly subscriptionCount: number;
+    readonly numericThresholdCount: number;
+    readonly expressionThresholdCount: number;
+    readonly confirmedEmailSubscriberCount: number;
+    readonly confirmedSnsSubscriberCount: number;
+    readonly declinedSubscriberCount: number;
+    readonly unknownSubscriberCount: number;
+  }[];
 }
 
 export interface AwsCostAnomalyDispatchMaterialization {
@@ -533,10 +597,179 @@ export function buildCostAnomalyDashboard(
       source: "SUTRA_STATISTICAL_BILLING_SIGNALS",
       ...sutra,
     },
+    analysis: buildCostAnomalyProviderAnalysis(awsCollection),
     disclaimer:
       "AWS Cost Anomaly Detection findings and Sutra statistical billing signals "
       + "are independent sources. Absence in one source is not evidence that the "
       + "other source is complete or that spend is correct.",
+  };
+}
+
+function observedAmount(values: readonly (number | null)[]): CostAnomalyObservedAmount {
+  let total = 0;
+  let observedValueCount = 0;
+  for (const value of values) {
+    if (value === null) continue;
+    total += value;
+    observedValueCount += 1;
+  }
+  if (!Number.isFinite(total)) invalidBoundary();
+  return {
+    total: observedValueCount === 0 ? null : total,
+    observedValueCount,
+    unavailableValueCount: values.length - observedValueCount,
+  };
+}
+
+function providerMovers(
+  collection: AwsCostAnomalyCollection,
+  select: (cause: NormalizedAwsCostAnomaly["rootCauses"][number]) => string | null,
+): readonly CostAnomalyProviderMover[] {
+  const groups = new Map<string, { findingIds: Set<string>; contributions: (number | null)[] }>();
+  for (const anomaly of collection.anomalies) {
+    for (const cause of anomaly.rootCauses) {
+      const value = select(cause);
+      if (value === null) continue;
+      const group = groups.get(value) ?? { findingIds: new Set<string>(), contributions: [] };
+      group.findingIds.add(anomaly.anomalyId);
+      group.contributions.push(cause.contribution);
+      groups.set(value, group);
+    }
+  }
+  return [...groups].map(([value, group]) => ({
+    value,
+    findingCount: group.findingIds.size,
+    contribution: observedAmount(group.contributions),
+  })).sort((left, right) => {
+    if (left.contribution.total === null && right.contribution.total !== null) return 1;
+    if (left.contribution.total !== null && right.contribution.total === null) return -1;
+    return (right.contribution.total ?? 0) - (left.contribution.total ?? 0)
+      || right.findingCount - left.findingCount
+      || left.value.localeCompare(right.value);
+  });
+}
+
+/**
+ * Builds bounded visual aggregates only from the accepted provider response.
+ * Null provider totals remain null; maximum daily impact is never substituted
+ * for total impact, and root-cause contributions are never inferred.
+ */
+export function buildCostAnomalyProviderAnalysis(
+  collection: AwsCostAnomalyCollection,
+): CostAnomalyProviderAnalysis {
+  const collectionDay = collection.collectedAt.slice(0, 10);
+  const months = new Map<string, NormalizedAwsCostAnomaly[]>();
+  let openWindowCount = 0;
+  let endedWindowCount = 0;
+  let missingStartDateCount = 0;
+  let missingRootCauseCount = 0;
+  const assessmentCounts = {
+    accurateAnomaly: 0,
+    notAnIssue: 0,
+    plannedActivity: 0,
+    notSubmitted: 0,
+  };
+  for (const anomaly of collection.anomalies) {
+    if (anomaly.endDate === null || anomaly.endDate >= collectionDay) openWindowCount += 1;
+    else endedWindowCount += 1;
+    if (anomaly.startDate === null) missingStartDateCount += 1;
+    else {
+      const month = anomaly.startDate.slice(0, 7);
+      const entries = months.get(month) ?? [];
+      entries.push(anomaly);
+      months.set(month, entries);
+    }
+    if (anomaly.rootCauses.length === 0) missingRootCauseCount += 1;
+    if (anomaly.feedback === "YES") assessmentCounts.accurateAnomaly += 1;
+    else if (anomaly.feedback === "NO") assessmentCounts.notAnIssue += 1;
+    else if (anomaly.feedback === "PLANNED_ACTIVITY") assessmentCounts.plannedActivity += 1;
+    else assessmentCounts.notSubmitted += 1;
+  }
+
+  const monitorGroups = new Map<string, {
+    type: NormalizedAwsCostAnomalyMonitor["type"];
+    dimension: NormalizedAwsCostAnomalyMonitor["dimension"];
+    monitorCount: number;
+    evaluatedMonitorCount: number;
+  }>();
+  for (const monitor of collection.monitors) {
+    const key = `${monitor.type}:${monitor.dimension ?? "NOT_REPORTED"}`;
+    const group = monitorGroups.get(key) ?? {
+      type: monitor.type,
+      dimension: monitor.dimension,
+      monitorCount: 0,
+      evaluatedMonitorCount: 0,
+    };
+    group.monitorCount += 1;
+    if (monitor.lastEvaluatedAt !== null) group.evaluatedMonitorCount += 1;
+    monitorGroups.set(key, group);
+  }
+
+  const subscriptionGroups = new Map<NormalizedAwsCostAnomalySubscription["frequency"], {
+    frequency: NormalizedAwsCostAnomalySubscription["frequency"];
+    subscriptionCount: number;
+    numericThresholdCount: number;
+    expressionThresholdCount: number;
+    confirmedEmailSubscriberCount: number;
+    confirmedSnsSubscriberCount: number;
+    declinedSubscriberCount: number;
+    unknownSubscriberCount: number;
+  }>();
+  for (const subscription of collection.subscriptions) {
+    const group = subscriptionGroups.get(subscription.frequency) ?? {
+      frequency: subscription.frequency,
+      subscriptionCount: 0,
+      numericThresholdCount: 0,
+      expressionThresholdCount: 0,
+      confirmedEmailSubscriberCount: 0,
+      confirmedSnsSubscriberCount: 0,
+      declinedSubscriberCount: 0,
+      unknownSubscriberCount: 0,
+    };
+    group.subscriptionCount += 1;
+    if (subscription.threshold !== null) group.numericThresholdCount += 1;
+    if (subscription.thresholdExpressionPresent) group.expressionThresholdCount += 1;
+    group.confirmedEmailSubscriberCount += subscription.subscriberCounts.emailConfirmed;
+    group.confirmedSnsSubscriberCount += subscription.subscriberCounts.snsConfirmed;
+    group.declinedSubscriberCount += subscription.subscriberCounts.emailDeclined
+      + subscription.subscriberCounts.snsDeclined;
+    group.unknownSubscriberCount += subscription.subscriberCounts.unknown;
+    subscriptionGroups.set(subscription.frequency, group);
+  }
+
+  return {
+    schema: "sutra.aws-cost-anomaly-analysis.v1",
+    lifecycleBasis: "PROVIDER_END_DATE_RELATIVE_TO_COLLECTION_DAY",
+    summary: {
+      findingCount: collection.anomalies.length,
+      openWindowCount,
+      endedWindowCount,
+      missingStartDateCount,
+      missingRootCauseCount,
+      totalImpact: observedAmount(collection.anomalies.map((anomaly) => anomaly.impact.total)),
+      maximumImpact: observedAmount(collection.anomalies.map((anomaly) => anomaly.impact.maximum)),
+      actualSpend: observedAmount(collection.anomalies.map((anomaly) => anomaly.impact.actualSpend)),
+      expectedSpend: observedAmount(collection.anomalies.map((anomaly) => anomaly.impact.expectedSpend)),
+      assessmentCounts,
+    },
+    monthly: [...months].sort(([left], [right]) => left.localeCompare(right)).map(([month, anomalies]) => ({
+      month,
+      findingCount: anomalies.length,
+      totalImpact: observedAmount(anomalies.map((anomaly) => anomaly.impact.total)),
+      actualSpend: observedAmount(anomalies.map((anomaly) => anomaly.impact.actualSpend)),
+      expectedSpend: observedAmount(anomalies.map((anomaly) => anomaly.impact.expectedSpend)),
+    })),
+    movers: {
+      service: providerMovers(collection, (cause) => cause.service),
+      linkedAccount: providerMovers(collection, (cause) => cause.linkedAccountId),
+      region: providerMovers(collection, (cause) => cause.region),
+      usageType: providerMovers(collection, (cause) => cause.usageType),
+    },
+    monitorCoverage: [...monitorGroups.values()].sort((left, right) =>
+      left.type.localeCompare(right.type)
+      || (left.dimension ?? "").localeCompare(right.dimension ?? "")),
+    subscriptionCoverage: [...subscriptionGroups.values()].sort((left, right) =>
+      left.frequency.localeCompare(right.frequency)),
   };
 }
 

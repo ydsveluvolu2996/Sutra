@@ -58,5 +58,14 @@ test("API uses canonical dashboard builder and exposes honest bounded states", (
   assert.match(route, /MAX_STATISTICAL_PERIODS = 3/u);
   assert.match(route, /MAX_STATISTICAL_LINES = 50_000/u);
   assert.match(route, /STALE_AFTER_HOURS = 36/u);
+  assert.match(route, /const monitorByArn = new Map/u);
+  assert.match(route, /monitorType: monitor\?\.type \?\? null/u);
+  assert.match(route, /monitorDimension: monitor\?\.dimension \?\? null/u);
+  assert.match(route, /rootCauses: anomaly\.rootCauses\.map\(\(cause\) => \(\{/u);
+  assert.doesNotMatch(route, /rootCauses: anomaly\.rootCauses,/u);
+  assert.doesNotMatch(route, /linkedAccountName: cause\.linkedAccountName/u);
+  assert.match(route, /analysis: dashboard\.analysis/u);
+  assert.match(domain, /sutra\.aws-cost-anomaly-analysis\.v1/u);
+  assert.match(domain, /maximum daily impact is never substituted/u);
   assert.doesNotMatch(route, /fixture|seed|demo|providerMessage|temporaryCredentials|roleArn|objectKey|ciphertext/iu);
 });
