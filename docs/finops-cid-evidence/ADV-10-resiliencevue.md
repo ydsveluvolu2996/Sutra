@@ -1,12 +1,39 @@
 # ADV-10 — ResilienceVue
 
-Status: **PARTIAL_PIPELINE** (local vertical and permanent runtime binding contract complete; authenticated AWS adapter registration and deployed provider evidence are not active)
+Status: **NATIVE_FUNCTIONAL_WITH_PROVIDER_GAPS** (local vertical, exact public-definition mapping, and permanent runtime binding contract complete; authenticated AWS adapter registration and deployed provider evidence are not active)
 
 Official AWS Cloud Intelligence Dashboards scope rechecked 2026-08-01 against the pinned AWS CID Framework definition at commit [`f9e36d88c47709f10e8fa784ad11d5cc0e728021`](https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/resilience-vue/resilience-vue-definition.yaml). ResilienceVue uses daily incremental AWS Resilience Hub assessments across AWS Organizations, linked accounts, Regions, and payer views to expose application resilience posture, RTO/RPO objectives and breaches, infrastructure recommendation trends, and outstanding operational recommendations.
 
 ## Pinned definition audit
 
 The pinned definition contains exactly four sheets: `Organizational Summary`, `Application Resiliency`, `Recommendations`, and `About`.
+
+| Immutable evidence | Pinned value |
+|---|---|
+| Repository | `aws-solutions-library-samples/cloud-intelligence-dashboards-framework` |
+| Commit | `f9e36d88c47709f10e8fa784ad11d5cc0e728021` |
+| Manifest | `dashboards/resilience-vue/resilience-vue.yaml` |
+| Manifest SHA-256 | `9478243fd9da03b4be2813993c98bd3f99970865443b9b11d8b0346de54d380c` |
+| Definition | `dashboards/resilience-vue/resilience-vue-definition.yaml` |
+| Definition SHA-256 | `c0fe7edf8648327ca13a3ad14372ae382b4b9bf42b428aacd0223f8a5575b63b` |
+| Dashboard/version/theme | `resiliencevue` / `v1.0.0` / `MIDNIGHT` |
+
+Independent parsing of that definition produced **4 sheets, 47 visuals, 2
+parameter controls, 7 filter controls, 4 parameter declarations, 37
+calculated fields, 15 filter groups, 7 column configurations, and 9 dataset
+declarations**. The visual histogram is 1 Sankey, 4 bar charts, 15 tables, 9
+KPIs, 6 pie charts, 10 word clouds, 1 gauge, and 1 line chart.
+
+| Official sheet | Exact visual inventory | Exact control placements | Native evidence / explicit gap |
+|---|---:|---|---|
+| Organizational Summary | 23: 1 Sankey, 3 bar, 6 table, 8 KPI, 3 pie, 2 word cloud | 4 filters: Last Assessment Time, Region, Management Account, Resiliency Status | Native account/Region, assessment, policy, breach, drift, backlog, and retained trends. Account scope is not an independently verified multi-payer taxonomy; layout parity is not claimed. |
+| Application Resiliency | 17: 8 word cloud, 5 table, 1 gauge, 1 KPI, 1 line, 1 bar | 1 Application Name filter | Native application posture, latest ten assessments, score, policy objectives, and current/achievable/target RTO/RPO. Provider collection and exact layout parity remain open. |
+| Recommendations | 7: 4 table, 3 pie | 2 parameters: Availability Architecture and Optimization Type; 2 filters: App Component and Application Name | Native configuration/alarm/SOP/FIS evidence, statuses, export, and separated Sutra inference. Estimated cost plus three unavailable dimensions require a versioned schema and provider validation. |
+| About | 0 | None | Native immutable source, freshness, generation/hash, capture identity, activation, and limitations. The upstream sheet contains zero visuals. |
+
+The frozen mapping is exposed by every successful API state and remains visible
+in the UI when collection is unconfigured. These counts describe upstream
+objects; Sutra never claims pixel or QuickSight layout parity.
 
 | Official capability | Sutra local status | Evidence-honest implementation |
 |---|---|---|
@@ -27,12 +54,14 @@ The pinned definition contains exactly four sheets: `Organizational Summary`, `A
 - `drizzle/0093_finops_resilience_vue.sql` and `postgres/migrations/0088_finops_resilience_vue.sql` retain immutable generations and a monotonic accepted head per tenant, connection, account, partition, and Region. Incomplete/configuration generations remain in history and cannot displace a complete head. PostgreSQL revokes `PUBLIC` access.
 - `db/finops-resilience-vue-repository.ts` validates the live AWS connection, normalizes captures against a trusted target, hashes the exact JSON, verifies it again on reads, and exposes tenant-scoped active targets and bounded history.
 - `app/api/v1/finops/resilience-vue/route.ts` requires an authenticated session, resolves the connection inside the authenticated organization, checks `connection:read` for the connection customer, reads only accepted heads, supports bounded account/Region/application/posture/recommendation filters, and discloses freshness, newer incomplete attempts, provenance, and activation state.
-- `app/costs/finops-resilience-vue-dashboard.tsx` is a native accessible visual with account/payer, Region, application, policy-posture, recommendation-kind and last-assessment-time filters; organizational assessed/in-policy/breach/drift cards; daily retained-generation trends; latest-ten assessment score history; application posture and dimension-level current/achievable/target RTO/RPO evidence; SOP/alarm/FIS status panels; unimplemented recommendation drilldowns; formula-safe CSV; immutable evidence identifiers; and honest configuration/partial/stale/empty/failure states.
+- `lib/finops-resilience-vue-official-definition.ts` freezes the exact public manifest/definition hashes, aggregate object counts, per-sheet visual types, control placements, native mappings, and gaps.
+- `app/costs/finops-resilience-vue-dashboard.tsx` is a native accessible visual with all four official sheet contracts, exact object/control counts, account/payer, Region, application, policy-posture, recommendation-kind and last-assessment-time filters; organizational assessed/in-policy/breach/drift cards; daily retained-generation trends; latest-ten assessment score history; application posture and dimension-level current/achievable/target RTO/RPO evidence; SOP/alarm/FIS status panels; unimplemented recommendation drilldowns; formula-safe CSV; immutable evidence identifiers; and honest configuration/partial/stale/empty/failure states.
 
 ## Evidence and tests
 
 - Existing `tests/finops-resilience-vue.test.ts` covers the 14-operation read-only surface, source normalization, tenant/account/partition/Region substitution, pagination replay, duplicate conflict, empty/configuration/partial/stale states, inference separation, bounds, freshness, and query-service source failures.
 - `tests/finops-resilience-vue-vertical.test.mjs` covers immutable complete-only target heads, replay safety, cross-tenant isolation, incomplete-head protection, mutation guards, daily server-owned job inputs/cursors, authenticated route contracts, SQLite/PostgreSQL parity and revokes, and server-rendered visual coverage.
+- `tests/finops-resilience-vue-official-definition.test.ts` verifies immutable source hashes, all aggregate and per-sheet counts, exact control placement, and unavailable versioned-schema dimensions.
 - `tests/finops-resilience-vue-runtime-binding.test.ts` covers identity-only trusted scheduling, exact operations and pagination/timeout/capture bounds, canonical immutable evidence archival and sealing handoff, deterministic at-least-once replay, explicit unregistered state, cross-tenant and capture substitution rejection, archive-hash rejection, and sanitization of raw provider failures.
 
 ## Activation and live gaps
@@ -48,3 +77,28 @@ Exact remaining provider/live gates:
 5. Run controlled live acceptance in every supported partition against representative accounts/Regions: exhaust multi-page applications, policies, assessments, components, recommendations, resources and drift; reproduce the retained record counts independently; prove token replay, timeout, cross-tenant, forged-scope and least-privilege denial behavior; retain signed evidence and exercise rollback.
 
 Until those gates pass, this dashboard is **not** `LOCAL_VERIFIED`, `DEPLOYED`, or `LIVE_VERIFIED`; it must not claim actual tenant resilience posture.
+
+## Focused validation
+
+```text
+node --experimental-strip-types --test --test-concurrency=1 \
+  tests/finops-resilience-vue-official-definition.test.ts \
+  tests/finops-resilience-vue-vertical.test.mjs \
+  tests/finops-resilience-vue.test.ts \
+  tests/finops-resilience-vue-runtime-binding.test.ts
+```
+
+Result: **26 passed, 0 failed, 0 skipped**.
+
+```text
+pnpm typecheck
+pnpm exec eslint \
+  app/api/v1/finops/resilience-vue/route.ts \
+  app/costs/finops-resilience-vue-dashboard.tsx \
+  lib/finops-resilience-vue-official-definition.ts \
+  tests/finops-resilience-vue-official-definition.test.ts \
+  tests/finops-resilience-vue-vertical.test.mjs
+git diff --check
+```
+
+Result: **all passed**.

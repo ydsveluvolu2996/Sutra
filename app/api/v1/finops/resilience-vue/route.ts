@@ -2,6 +2,7 @@ import { ResilienceVueRepository } from "../../../../../db/finops-resilience-vue
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { buildResilienceVueDashboard } from "../../../../../lib/finops-resilience-vue";
+import { RESILIENCE_VUE_OFFICIAL_DEFINITION } from "../../../../../lib/finops-resilience-vue-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -59,9 +60,13 @@ export async function GET(request: Request): Promise<Response> {
       const latest = history[0] ?? null;
       return jsonResponse({ schema: "sutra.finops-resilience-vue.v1", connectionId: connection.id,
         sourceState: latest === null || latest.state === "configuration_required" ? "configuration_required" : latest.state,
+        officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION,
         dashboard: null, latestAttempt: latest,
         collection: { available: false, reason: "RESILIENCE_VUE_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED" },
-        limitations: ["No accepted complete AWS Resilience Hub assessment generation is available for this selection."] });
+        limitations: [
+          "No accepted complete AWS Resilience Hub assessment generation is available for this selection.",
+          "Estimated cost and the official recommendation dimensions require a versioned provider-schema migration; no values are synthesized from v1 evidence.",
+        ] });
     }
     const targets = active.map((stored) => {
       const built = buildResilienceVueDashboard(stored.snapshot);
@@ -108,7 +113,8 @@ export async function GET(request: Request): Promise<Response> {
       : applicationCount === 0 ? "empty" : "complete";
     return jsonResponse({
       schema: "sutra.finops-resilience-vue.v1", connectionId: connection.id, source: "AWS_RESILIENCE_HUB",
-      sourceState, filters: query, freshness: { dataThroughAt: completedAt, ageHours: currentAge, staleAfterHours: FRESH_HOURS },
+      sourceState, officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION,
+      filters: query, freshness: { dataThroughAt: completedAt, ageHours: currentAge, staleAfterHours: FRESH_HOURS },
       summary: { targetCount: targets.length, applicationCount, assessedApplicationCount,
         unassessedApplicationCount: applicationCount - assessedApplicationCount, policyMetApplicationCount,
         policyBreachedApplicationCount, driftedApplicationCount, openRecommendationCount: recommendationCount },
@@ -123,6 +129,7 @@ export async function GET(request: Request): Promise<Response> {
       limitations: [
         "RTO/RPO and recommendation fields are AWS Resilience Hub assessment evidence; Sutra priority scores are visibly labeled inference.",
         "Daily collection activation remains unavailable until the permanent AWS credential broker adapter and job handler are registered and provider-validated.",
+        "Estimated cost, availability architecture, optimization type, and App Component controls require a versioned capture-schema migration and are never inferred from v1 evidence.",
         ...(newerIncomplete ? ["A newer incomplete generation did not replace the last accepted complete target head."] : []),
       ],
     });

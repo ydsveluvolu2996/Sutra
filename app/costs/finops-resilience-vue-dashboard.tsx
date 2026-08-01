@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  RESILIENCE_VUE_OFFICIAL_DEFINITION,
+  type ResilienceVueOfficialDefinition,
+} from "../../lib/finops-resilience-vue-official-definition";
 import type { ResilienceAssessment, ResilienceComponentCompliance, ResilienceDrift,
   ResilienceObjectivePosture, ResiliencePolicyObjective, ResilienceRecommendation,
   ResilienceResource, ResilienceVueInferredPriority } from "../../lib/finops-resilience-vue";
@@ -20,6 +24,7 @@ type Target = { accountId: string; partition: string; region: string; generation
   drifts: readonly ResilienceDrift[]; inferredPrioritization: readonly ResilienceVueInferredPriority[]; limitations: readonly string[] };
 export interface ResilienceVueReport {
   readonly connectionId: string; readonly sourceState: "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
+  readonly officialDefinition: ResilienceVueOfficialDefinition;
   readonly freshness: { readonly dataThroughAt: string | null; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly summary: { readonly targetCount: number; readonly applicationCount: number; readonly assessedApplicationCount: number;
     readonly unassessedApplicationCount: number; readonly policyMetApplicationCount: number;
@@ -76,6 +81,45 @@ function RecommendationStatus({ title, kind, recommendations }: { readonly title
   </span>)}</div></article>;
 }
 
+function officialCoverageLabel(value: string): string {
+  if (value === "NATIVE_EVIDENCE_PARTIAL") return "Native evidence · partial parity";
+  if (value === "VERSIONED_SCHEMA_REQUIRED") return "Versioned schema required";
+  return "Definition and provenance";
+}
+
+function OfficialDefinitionPanel({
+  definition,
+}: {
+  readonly definition: ResilienceVueOfficialDefinition;
+}) {
+  const [selectedId, setSelectedId] = useState(definition.sheets[0]?.id ?? "");
+  const selected = definition.sheets.find((sheet) => sheet.id === selectedId)
+    ?? definition.sheets[0];
+  return <section className={styles.official} aria-label="Official ResilienceVue definition coverage">
+    <header><div><small>AWS CID {definition.version} · immutable definition</small>
+      <h3>{definition.totals.sheets} sheets · {definition.totals.visuals} upstream visuals mapped</h3>
+      <p>Commit <code>{definition.sourceCommit.slice(0, 12)}…</code> · definition SHA-256 <code>{definition.definitionSha256.slice(0, 12)}…</code>. Counts describe the pinned QuickSight source; Sutra does not claim pixel or layout parity.</p></div>
+      <dl><div><dt>Controls</dt><dd>{definition.totals.parameterControls + definition.totals.filterControls}</dd></div>
+        <div><dt>Parameters</dt><dd>{definition.totals.parameterDeclarations}</dd></div>
+        <div><dt>Calculated fields</dt><dd>{definition.totals.calculatedFields}</dd></div>
+        <div><dt>Filter groups</dt><dd>{definition.totals.filterGroups}</dd></div>
+        <div><dt>Datasets</dt><dd>{definition.totals.datasets}</dd></div></dl></header>
+    <nav aria-label="Official ResilienceVue sheets">{definition.sheets.map((sheet) => <button key={sheet.id} aria-current={selected?.id === sheet.id ? "page" : undefined} data-coverage={sheet.coverage} onClick={() => setSelectedId(sheet.id)} type="button"><strong>{sheet.name}</strong><small>{sheet.visualCount} visuals · {officialCoverageLabel(sheet.coverage)}</small></button>)}</nav>
+    {selected === undefined ? null : <article data-coverage={selected.coverage}><div><small>Selected official sheet</small><h4>{selected.name}</h4><p>{selected.evidenceNote}</p><p className={styles.officialGap}><strong>Remaining:</strong> {selected.remainingGap}</p></div>
+      <dl><div><dt>Visual types</dt><dd>{Object.entries(selected.visualTypes).map(([type, count]) => `${count} ${type.replace("Visual", "")}`).join(" · ") || "None"}</dd></div>
+        <div><dt>Native areas</dt><dd>{selected.nativeAreas.join(" · ")}</dd></div>
+        <div><dt>Official controls</dt><dd>{selected.controls.length === 0 ? "None" : selected.controls.map((control) => <span key={`${control.placement}:${control.type}:${control.title}`} data-state={control.nativeState}>{control.title} · {control.placement} · {control.nativeState.toLocaleLowerCase()}</span>)}</dd></div></dl></article>}
+  </section>;
+}
+
+function hasPinnedOfficialDefinition(definition: ResilienceVueOfficialDefinition): boolean {
+  return definition.sourceCommit === RESILIENCE_VUE_OFFICIAL_DEFINITION.sourceCommit
+    && definition.manifestSha256 === RESILIENCE_VUE_OFFICIAL_DEFINITION.manifestSha256
+    && definition.definitionSha256 === RESILIENCE_VUE_OFFICIAL_DEFINITION.definitionSha256
+    && definition.totals.sheets === 4
+    && definition.totals.visuals === 47;
+}
+
 export function ResilienceVueReportView({ report, filters, onFiltersChange }: { readonly report: ResilienceVueReport;
   readonly filters: Filters; readonly onFiltersChange: (filters: Filters) => void }) {
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => onFiltersChange({ ...filters, [key]: value });
@@ -89,6 +133,7 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
     .sort((left, right) => right.assessment.startTime.localeCompare(left.assessment.startTime));
   const maximum = Math.max(1, ...report.history.map((point) => point.recommendationCount));
   return <section className={styles.root} aria-label="ResilienceVue AWS Resilience Hub dashboard">
+    <OfficialDefinitionPanel definition={report.officialDefinition} />
     <div className={styles.notice}><strong>Observed AWS Resilience Hub evidence.</strong> RTO/RPO, posture, breaches, drift, and operational recommendations come from retained assessments. Any Sutra priority is labeled inference, not an AWS finding.</div>
     {message ? <div role="status" className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="ResilienceVue filters">
@@ -142,7 +187,9 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
 
 export function FinopsResilienceVueDashboard({ connectionId }: { readonly connectionId: string | null }) {
   const [filters, setFilters] = useState<Filters>(EMPTY); const [report, setReport] = useState<ResilienceVueReport | null>(null);
-  const [error, setError] = useState<string | null>(null); const query = useMemo(() => {
+  const [error, setError] = useState<string | null>(null);
+  const [configurationDefinition, setConfigurationDefinition] = useState<ResilienceVueOfficialDefinition | null>(null);
+  const query = useMemo(() => {
     const parameters = new URLSearchParams(); if (connectionId !== null) parameters.set("connectionId", connectionId);
     for (const [key, value] of Object.entries(filters)) if (value !== null) parameters.set(key, value); return parameters.toString();
   }, [connectionId, filters]);
@@ -150,12 +197,23 @@ export function FinopsResilienceVueDashboard({ connectionId }: { readonly connec
     if (connectionId === null) return; const controller = new AbortController();
     fetch(`/api/v1/finops/resilience-vue?${query}`, { signal: controller.signal, headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error("ResilienceVue request failed"); return response.json(); })
-      .then((value: ResilienceVueReport | { dashboard: null }) => { if ("dashboard" in value) { setReport(null); setError("AWS Resilience Hub evidence is not configured for this selection."); } else { setReport(value); setError(null); } })
+      .then((value: ResilienceVueReport | { dashboard: null; officialDefinition: ResilienceVueOfficialDefinition }) => {
+        if (!hasPinnedOfficialDefinition(value.officialDefinition)) throw new Error("Sutra returned an unrecognized ResilienceVue definition");
+        if ("dashboard" in value) {
+          setReport(null); setConfigurationDefinition(value.officialDefinition);
+          setError("AWS Resilience Hub evidence is not configured for this selection. No posture, recommendation, or estimated-cost value is synthesized.");
+        } else {
+          setReport(value); setConfigurationDefinition(null); setError(null);
+        }
+      })
       .catch((reason: unknown) => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "ResilienceVue request failed"); });
     return () => controller.abort();
   }, [connectionId, query]);
   if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before configuring ResilienceVue.</div>;
-  if (error !== null) return <div role="alert" className={`${styles.state} ${styles.warning}`}>{error}</div>;
+  if (error !== null) return <section className={styles.root}>
+    {configurationDefinition === null ? null : <OfficialDefinitionPanel definition={configurationDefinition} />}
+    <div role="alert" className={`${styles.state} ${styles.warning}`}>{error}</div>
+  </section>;
   if (report === null || report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading AWS Resilience Hub evidence…</div>;
   return <ResilienceVueReportView report={report} filters={filters} onFiltersChange={setFilters} />;
 }

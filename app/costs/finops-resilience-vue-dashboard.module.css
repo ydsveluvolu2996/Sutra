@@ -1,4 +1,25 @@
 .root { display: grid; gap: 16px; color: #172b2a; }
+.official { min-width: 0; display: grid; gap: 11px; border: 1px solid #9bcfc6; border-radius: 14px; background: linear-gradient(135deg,#effbf8,#f8fbfa); padding: 15px; }
+.official > header { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(330px,.65fr); gap: 15px; }
+.official h3, .official h4 { margin: 4px 0; }
+.official p { margin: 0; color: #526866; font-size: 10px; line-height: 1.55; }
+.official code { color: #075e54; font-size: 9px; }
+.official dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin: 0; }
+.official dl div { min-width: 0; border: 1px solid #d8e5e2; border-radius: 8px; background: rgba(255,255,255,.82); padding: 7px; }
+.official dt { color: #647a77; font-size: 8px; text-transform: uppercase; }
+.official dd { display: grid; gap: 4px; margin: 3px 0 0; overflow-wrap: anywhere; font-size: 10px; font-weight: 750; }
+.official dd span { border-radius: 6px; background: #e8f6f2; padding: 4px 6px; color: #075e54; font-size: 8px; }
+.official dd span[data-state="PARTIAL"] { background: #fff4db; color: #805814; }
+.official dd span[data-state="UNAVAILABLE"] { background: #fff0e5; color: #8a4512; }
+.official > nav { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; }
+.official > nav button { min-width: 205px; display: grid; gap: 4px; border: 1px solid #cbd9d6; border-radius: 9px; background: #fff; padding: 9px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.official > nav button[aria-current="page"] { border-color: #17766b; box-shadow: 0 0 0 2px rgba(23,118,107,.13); }
+.official > nav button[data-coverage="VERSIONED_SCHEMA_REQUIRED"] { border-style: dashed; border-color: #d69b37; background: #fffaf0; }
+.official > nav small, .official > header small, .official > article small { color: #647a77; font-size: 8px; }
+.official > article { display: grid; grid-template-columns: minmax(0,.8fr) minmax(380px,1.2fr); gap: 14px; border-left: 4px solid #17766b; border-radius: 7px; background: rgba(255,255,255,.75); padding: 11px; }
+.official > article[data-coverage="VERSIONED_SCHEMA_REQUIRED"] { border-left-color: #d69b37; }
+.official .officialGap { margin-top: 6px; color: #805814; }
+.official button:focus-visible { outline: 3px solid rgba(23,118,107,.25); outline-offset: 2px; }
 .notice, .state { border: 1px solid #b9d8d2; border-radius: 12px; background: #f2fbf8; padding: 12px 14px; font-size: 13px; }
 .warning { border-color: #e6c982; background: #fff9e8; } .error { border-color: #e5a3a3; background: #fff2f2; }
 .filters { display: grid; grid-template-columns: repeat(7, minmax(140px, 1fr)); gap: 10px; }
@@ -33,5 +54,5 @@
 .section dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px 14px; margin-top: 9px; max-width: 680px; }
 .section dt { color: #6c7c79; font-size: 9px; text-transform: uppercase; } .section dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .evidence { padding: 13px 14px; } .evidence pre { max-height: 320px; overflow: auto; border-radius: 8px; background: #f5f8f7; padding: 10px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 1000px) { .filters { grid-template-columns: repeat(2,minmax(0,1fr)); } .cards { grid-template-columns: repeat(2,minmax(0,1fr)); } .trendRow { grid-template-columns: 80px 1fr; } .statusGrid { grid-template-columns: 1fr; } }
-@media (max-width: 560px) { .filters, .cards { grid-template-columns: 1fr; } .section > header { align-items: flex-start; flex-direction: column; } .section dl { grid-template-columns: 1fr; } .objectives { grid-template-columns: 1fr; min-width: 280px; } }
+@media (max-width: 1000px) { .official > header, .official > article { grid-template-columns: 1fr; } .filters { grid-template-columns: repeat(2,minmax(0,1fr)); } .cards { grid-template-columns: repeat(2,minmax(0,1fr)); } .trendRow { grid-template-columns: 80px 1fr; } .statusGrid { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .official dl, .filters, .cards { grid-template-columns: 1fr; } .official > nav button { min-width: 175px; min-height: 48px; } .section > header { align-items: flex-start; flex-direction: column; } .section dl { grid-template-columns: 1fr; } .objectives { grid-template-columns: 1fr; min-width: 280px; } }
