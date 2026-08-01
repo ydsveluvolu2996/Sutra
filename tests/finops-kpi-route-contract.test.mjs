@@ -38,7 +38,7 @@ test("KPI evaluation uses one exact active generation and persistent tenant goal
   assert.match(route, /resourceAgeEvidence: \[\]/u);
   assert.match(route, /savingsAssumptions: \[\]/u);
   assert.match(route, /sourceState: "waiting"/u);
-  assert.match(route, /sourceState: "ready"/u);
+  assert.match(route, /sourceState: "complete"/u);
   assert.match(route, /goalsConfigured: goals\.length/u);
   assert.doesNotMatch(route, /fixture|demo|sample|finops_cur_lines/iu);
 });

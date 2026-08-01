@@ -353,7 +353,7 @@ export async function GET(request: Request): Promise<Response> {
       availablePeriods: availablePeriods(history),
       report,
       taxonomyConfigured: true,
-      sourceState: "ready",
+      sourceState: "complete",
       sourceEvidence: activeEvidence(history),
     });
   } catch (error) {

@@ -101,7 +101,7 @@ test("missing taxonomy and one-period histories produce honest non-ready states"
     route,
     /report: null,\s*taxonomyConfigured,\s*sourceState/u,
   );
-  assert.match(route, /taxonomyConfigured: true,\s*sourceState: "ready"/u);
+  assert.match(route, /taxonomyConfigured: true,\s*sourceState: "complete"/u);
 });
 
 test("the report receives exact active datasets, bounded options, and conservative commitment coverage", () => {

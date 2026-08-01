@@ -48,7 +48,7 @@ test("CUDOS route invokes only the canonical active-generation engine and has an
     /buildFinopsCudosDashboard\(\{\s*scope: active\.scope,\s*rows: active\.rows,\s*options: query\.options,\s*\}\)/u,
   );
   assert.match(route, /report: null,\s*sourceState: "waiting"/u);
-  assert.match(route, /report,\s*sourceState: "ready"/u);
+  assert.match(route, /report,\s*sourceState: "complete"/u);
   assert.match(
     route,
     /sourceEvidence: \{\s*activeGeneration: \{/u,

@@ -160,7 +160,7 @@ export async function GET(request: Request): Promise<Response> {
       selectedPeriod: active.scope.billingPeriod,
       availablePeriods,
       report,
-      sourceState: "ready",
+      sourceState: "complete",
       sourceEvidence: {
         activeGeneration: {
           manifestSha256: active.evidence.activeManifestSha256,

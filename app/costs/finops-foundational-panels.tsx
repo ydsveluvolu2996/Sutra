@@ -86,7 +86,7 @@ interface CudosEnvelope {
   readonly selectedPeriod: string | null;
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FinopsCudosResult | null;
-  readonly sourceState: "ready" | "waiting";
+  readonly sourceState: "complete" | "waiting";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
 }
 
@@ -96,7 +96,7 @@ interface CostIntelligenceEnvelope {
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FinopsCostIntelligenceResult | null;
   readonly taxonomyConfigured: boolean;
-  readonly sourceState: "ready" | "waiting" | "configuration_required";
+  readonly sourceState: "complete" | "waiting" | "configuration_required";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
 }
 
@@ -106,7 +106,7 @@ interface KpiEnvelope {
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FinopsKpiResult | null;
   readonly goalsConfigured: number;
-  readonly sourceState: "ready" | "waiting";
+  readonly sourceState: "complete" | "waiting";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
 }
 
@@ -322,7 +322,7 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     )
   )
     && validAvailablePeriods(value.availablePeriods)
-    && (value.sourceState === "ready" || value.sourceState === "waiting")
+    && (value.sourceState === "complete" || value.sourceState === "waiting")
     && validSourceEvidence(value.sourceEvidence);
 }
 
@@ -336,7 +336,7 @@ function validCostIntelligenceEnvelope(
     && validAvailablePeriods(value.availablePeriods)
     && typeof value.taxonomyConfigured === "boolean"
     && (
-      value.sourceState === "ready"
+      value.sourceState === "complete"
       || value.sourceState === "waiting"
       || value.sourceState === "configuration_required"
     )
@@ -355,7 +355,7 @@ function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     && typeof value.goalsConfigured === "number"
     && Number.isSafeInteger(value.goalsConfigured)
     && value.goalsConfigured >= 0
-    && (value.sourceState === "ready" || value.sourceState === "waiting")
+    && (value.sourceState === "complete" || value.sourceState === "waiting")
     && validSourceEvidence(value.sourceEvidence);
 }
 
