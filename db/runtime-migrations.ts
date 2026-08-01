@@ -83,6 +83,9 @@ import finopsDataExportObservationsSchemaSql from "../drizzle/0083_finops_data_e
 import finopsTrustedAdvisorOrganizationSchemaSql from "../drizzle/0084_finops_trusted_advisor_organization.sql?raw";
 import finopsComputeOptimizerDiscoverySchemaSql from "../drizzle/0085_finops_compute_optimizer_discovery.sql?raw";
 import finopsActiveFileCountSchemaSql from "../drizzle/0086_finops_active_file_count.sql?raw";
+import finopsAwsConfigComplianceSchemaSql from "../drizzle/0087_finops_aws_config_compliance.sql?raw";
+import finopsPricingChangeMaterializationsSchemaSql from "../drizzle/0088_finops_pricing_change_materializations.sql?raw";
+import finopsCoraSnapshotsSchemaSql from "../drizzle/0089_finops_cora_snapshots.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -183,6 +186,9 @@ const migrations = [
   { id: "0084_finops_trusted_advisor_organization", statements: statementsFrom(finopsTrustedAdvisorOrganizationSchemaSql) },
   { id: "0085_finops_compute_optimizer_discovery", statements: statementsFrom(finopsComputeOptimizerDiscoverySchemaSql) },
   { id: "0086_finops_active_file_count", statements: statementsFrom(finopsActiveFileCountSchemaSql) },
+  { id: "0087_finops_aws_config_compliance", statements: statementsFrom(finopsAwsConfigComplianceSchemaSql) },
+  { id: "0088_finops_pricing_change_materializations", statements: statementsFrom(finopsPricingChangeMaterializationsSchemaSql) },
+  { id: "0089_finops_cora_snapshots", statements: statementsFrom(finopsCoraSnapshotsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

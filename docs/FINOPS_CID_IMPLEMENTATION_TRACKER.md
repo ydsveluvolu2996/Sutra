@@ -61,13 +61,13 @@ never replace it or masquerade as current success.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Advanced | 13 | 1 | 2 | 10 | 0 | 0 | 0 |
-| Additional | 13 | 2 | 1 | 8 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **3** | **18** | **2** | **0** | **0** |
+| Additional | 13 | 2 | 4 | 5 | 2 | 0 | 0 |
+| **Total** | **29** | **6** | **6** | **15** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The three partial pipelines are Trusted
-Advisor Organizational, Data Collection Monitor, and FOCUS. Azure CID and GCP
-CID are absent.
+Anomaly, Trends, and Data Transfer. The six partial pipelines are Trusted
+Advisor Organizational, Data Collection Monitor, CORA, FOCUS, Config Resource
+Compliance, and Pricing Change Analysis. Azure CID and GCP CID are absent.
 
 ## Parent capability tracker
 
@@ -79,9 +79,9 @@ CID are absent.
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md); an accepted server-owned Organizations taxonomy manifest and worker activation are still required. Priority API logic remains supplemental. |
 | ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `ENGINE_ONLY` | Complete organization export/history, savings and under-provisioning risk views, API/UI, and coverage evidence. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md); exact-tree and controlled payer/two-tenant acceptance remain. |
-| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | Complete ElastiCache/EKS/RDS/OpenSearch inventory/history, lifecycle bands, projections, API/UI, and live reconciliation. |
-| ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `ENGINE_ONLY` | Complete compatibility evidence and EC2/RDS/OpenSearch/ElastiCache usage, realized savings, opportunities, persistence, API/UI. |
-| ADV-06 | Health Events Dashboard | `health_events` | `ENGINE_ONLY` | Complete organization event/entity history, past/current/upcoming views, entitlement/retention states, API/UI. |
+| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | [G0/G1/engine evidence](finops-cid-evidence/ADV-04-extended-support.md); concrete multi-account collector, accepted materialization/history, authenticated API, native visual, exact-money review, and provider acceptance remain. |
+| ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-05-graviton-savings.md); add OpenSearch/ElastiCache contracts, export-object recommendation ingestion, compatibility/inventory/pricing joins, accepted history, API/UI, and provider reconciliation. |
+| ADV-06 | Health Events Dashboard | `health_events` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-06-health-events.md); implement concrete scheduled AWS Health collection, immutable event/entity/detail history, authenticated API, planning timeline/UI, and eligible-plan provider acceptance. |
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `ENGINE_ONLY` | Complete governed scheduled persistence and visual What’s New/blog/video/security feeds with provenance and freshness. |
 | ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `ENGINE_ONLY` | Complete provider budgets hierarchy, actual/forecast/status history, API/UI, distinct from Sutra-authored budgets. |
 | ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `ENGINE_ONLY` | Complete privacy-minimized multi-account/org history, API/UI, support-plan states, and optional summary provenance. |
@@ -89,7 +89,7 @@ CID are absent.
 | ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `ENGINE_ONLY` | Complete WorkSpaces/AppStream usage, cost, performance, logon, optimization, persistence, API/UI, and privacy-safe user views. |
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | Replace generic telemetry equivalence with official DCF module instrumentation, execution history, errors, Step Functions links, retries, latency, and coverage. |
 | ADV-13 | Media Services Insights Hub | `media_services_insights` | `ENGINE_ONLY` | Complete AWS Elemental usage/cost/performance collection, persistence, API/UI, and workflow drilldowns. |
-| ADD-01 | CORA Dashboard | `cora` | `ENGINE_ONLY` | Complete Cost Optimization Hub recommendations/history, ownership, status, savings reconciliation, persistence, API/UI. |
+| ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md): immutable projection/history, same-tenant API and native UI exist; permanent Cost Optimization Hub export materialization and provider acceptance remain. |
 | ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `ABSENT` | Add Azure billing-export connection, collector, immutable normalized persistence, API, native visual reports, and live Azure validation. |
 | ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `ABSENT` | Add GCP Cloud Billing export connection, collector, immutable normalized persistence, API, native visual reports, and live GCP validation. |
 | ADD-04 | FOCUS Dashboard | `focus` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-04-focus.md): AWS FOCUS 1.2 API/UI is implemented; official multi-version/provider consolidation, tag taxonomy, and effective discount rate remain. |
@@ -100,8 +100,8 @@ CID are absent.
 | ADD-09 | Trends Dashboard | `trends` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-09-trends.md): bounded CUR2 API/native visuals now cover exact monthly/quarterly/yearly comparisons, interactive contributors, signals, CSV, and lineage; forecast/alerts, service taxonomy/usage, friendly account names, map, exact-tree, and provider acceptance remain. |
 | ADD-10 | Data Transfer Dashboard | `data_transfer` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-10-data-transfer.md): pinned internet/Global Accelerator/inter-Region/inter-AZ/CloudFront taxonomy, exact cost/bytes, filters, drilldowns, safe export and lineage are present; exact-tree/provider/live acceptance remain. |
 | ADD-11 | Amazon Connect Cost Insights Dashboard | `amazon_connect_cost_insights` | `ENGINE_ONLY` | Complete privacy-minimized spend/usage/voice/telecom collection, granular breakdown/search, persistence, API/UI. |
-| ADD-12 | Config Resource Compliance Dashboard | `config_resource_compliance` | `ENGINE_ONLY` | Complete organization aggregator inventory/compliance history, accounts/regions/rules/resources/cost, persistence, API/UI. |
-| ADD-13 | Pricing Change Analysis Dashboard | `pricing_change` | `ENGINE_ONLY` | Complete version-pinned pricing evidence, immutable repricing report, signed impact, API/UI, and actual-usage reconciliation. |
+| ADD-12 | Config Resource Compliance Dashboard | `config_resource_compliance` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-12-config-resource-compliance.md): immutable complete-head persistence, same-tenant API and native UI exist; permanent AWS Config collector activation/provider acceptance remain. |
+| ADD-13 | Pricing Change Analysis Dashboard | `pricing_change` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-13-pricing-change.md): sealed immutable materialization metadata, evidence-rebinding API and native UI exist; server-owned CUR2/historical Price List materializer/provider acceptance remain. |
 
 ## Child-stage gates for every parent row
 

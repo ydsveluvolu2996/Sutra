@@ -10,7 +10,10 @@ import {
   type FinopsSharedAnalysisSection,
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
+import { FinopsAwsConfigResourceComplianceDashboard } from "./finops-aws-config-resource-compliance-dashboard";
+import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
+import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
 import { FinopsTrustedAdvisorOrganizationalDashboard } from "./finops-trusted-advisor-organizational-dashboard";
 import styles from "./costs.module.css";
 
@@ -167,6 +170,19 @@ export function FinopsDashboardCatalogNav({
             <FinopsTrustedAdvisorOrganizationalDashboard
               connectionId={connectionId}
               dashboard={selected}
+            />
+          ) : selected.id === "cora" ? (
+            <FinopsCoraDashboard connectionId={connectionId} />
+          ) : selected.id === "config_resource_compliance" ? (
+            <FinopsAwsConfigResourceComplianceDashboard
+              connectionId={connectionId}
+              dashboard={selected}
+            />
+          ) : selected.id === "pricing_change" ? (
+            <FinopsPricingChangeDashboard
+              connectionId={connectionId}
+              dashboard={selected}
+              onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
             />
           ) : (
             <FinopsCapabilityShell

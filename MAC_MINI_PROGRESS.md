@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Local vertical candidates | 6 of 29 |
-| Partial pipelines | 2 of 29 |
-| Engine-only capabilities | 19 of 29 |
+| Partial pipelines | 6 of 29 |
+| Engine-only capabilities | 15 of 29 |
 | Absent capabilities | 2 of 29: Azure CID and GCP CID |
 | Local verticals fully audited | 0 of 29 |
 | Production accepted | 0 of 29 |
@@ -156,3 +156,20 @@ Next gate:
 | Controlled-live evidence | None; current onboarding roles do not yet activate TA standard checks or Compute Optimizer discovery, and provider/two-tenant acceptance is pending |
 | Release evidence | No image published or deployed; current live digest remains unchanged |
 | Next gate | Push exact commits and continue ADV-01/ADV-02 through API/UI, then complete the remaining engine-only rows |
+
+### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker rows / gates | ADV-01 G4–G6 partial pipeline; ADV-02 G3 discovery foundation; ADD-09 G0/G4–G6 audit; ADD-10 G0–G6 candidate plus committed manifest-object evidence |
+| Maturity transition | ADV-01 `ENGINE_ONLY` → `PARTIAL_PIPELINE`; aggregate is now 6 candidates, 3 partial pipelines, 18 engine-only, and 2 absent |
+| Commit | `17da4c5989b4ec61384d9dce032c77dac00b5d88` pushed to `origin/agent/mac-mini-finops-continuation` and draft PR 26 |
+| Trusted Advisor Organizational | Authenticated bounded same-tenant standard-check API and native organization/account/check/resource/history visual; activation stays configuration-required until server-owned Organizations taxonomy and worker binding exist |
+| Compute Optimizer | Immutable tenant-scoped discovery history, replay/checksum/DB guards, hashed export destinations, complete-head refusal until export-object binding; 8 focused tests passed |
+| Trends | 36-month API, monthly/quarterly/yearly comparisons, interactive movement contributors, exact signals, safe CSV, lineage and actual SSR test; 35 focused tests passed |
+| Data Transfer | Pinned Global Accelerator/internet/inter-Region/inter-AZ/CloudFront taxonomy, five filters, exact cost/bytes, Region/AZ/resource drilldown, safe CSV and rendered UI; active object counts promote only after full manifest exhaustion |
+| Persistence tests | Billing/active-query 8 passed; S3/durable ingestion 14 passed; migration/route/UI 8 passed; FOCUS/source-health affected fixtures 12 passed |
+| Integration gates | Root and collector typechecks, full lint, production build, secret scan of 1,798 files, and `git diff --check` passed |
+| Controlled-live evidence | None. TAO lacks accepted Organizations taxonomy; Compute Optimizer lacks export-object ingestion; provider/two-tenant acceptance remains open |
+| Release evidence | PR checks started for exact head; no image was published or deployed and the current live digest remains unchanged |
+| Next gate | Complete the next engine-only verticals (CORA, Config Resource Compliance, Pricing Change), then exact-tree/provider/release gates |
