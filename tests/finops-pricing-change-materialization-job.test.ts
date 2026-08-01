@@ -3,9 +3,14 @@ import test from "node:test";
 
 import {
   FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND,
+  PRICING_CHANGE_MATERIALIZATION_RUNTIME_BINDING,
   PRICING_CHANGE_MATERIALIZER_ACTIVATION_REASONS,
   PricingChangeMaterializationJobError,
+  PricingChangeMaterializationUnavailableError,
+  createPricingChangeMaterializationJobHandler,
+  pricingChangeMaterializationWindow,
   runPricingChangeMaterializationJob,
+  schedulePricingChangeMaterializations,
   type PricingChangeActiveCur2Source,
   type PricingChangeMaterializationJobDependencies,
   type PricingChangeMaterializerRequest,
@@ -74,7 +79,7 @@ function job(overrides: Partial<RunnableJob> = {}): RunnableJob {
     kind: FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND,
     payload: { connectionId: CONNECTION, policyId: POLICY.policyId },
     attempt: 1,
-    maxAttempts: 6,
+    maxAttempts: 5,
     ...overrides,
   };
 }
@@ -480,4 +485,57 @@ test("at-least-once replay derives identical capture and evidence generations", 
   assert.equal(first.evidenceGenerationId, replay.evidenceGenerationId);
   assert.equal(first.contentSha256, replay.contentSha256);
   assert.equal(context.recorded.length, 2);
+});
+
+test("daily scheduler prevalidates tenant-complete five-attempt policy jobs", async () => {
+  const enqueued: unknown[] = [];
+  const scheduledWindow = pricingChangeMaterializationWindow(NOW);
+  const count = await schedulePricingChangeMaterializations({
+    scheduledWindow,
+    loadEligiblePolicies: async () => [{ scope: SCOPE, policyId: POLICY.policyId }],
+    queue: { async enqueue(value) { enqueued.push(value); } },
+  });
+  assert.equal(count, 1);
+  assert.deepEqual(enqueued, [{
+    orgId: ORG,
+    customerId: CUSTOMER,
+    connectionId: CONNECTION,
+    kind: FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND,
+    payload: { connectionId: CONNECTION, policyId: POLICY.policyId },
+    maxAttempts: 5,
+    idempotencyKey: `pricing-change:${ORG}:${CUSTOMER}:${CONNECTION}:${POLICY.policyId}:${encodeURIComponent("2026-08-01T00:00:00.000Z")}`,
+  }]);
+  assert.equal(PRICING_CHANGE_MATERIALIZATION_RUNTIME_BINDING.registeredInSharedRuntime, false);
+  assert.equal(PRICING_CHANGE_MATERIALIZATION_RUNTIME_BINDING.activationReason,
+    PRICING_CHANGE_MATERIALIZER_ACTIVATION_REASONS.provider);
+});
+
+test("scheduler rejects duplicate policies before any enqueue", async () => {
+  let enqueued = 0;
+  await assert.rejects(schedulePricingChangeMaterializations({
+    scheduledWindow: "2026-08-01T00:00:00.000Z",
+    loadEligiblePolicies: async () => [
+      { scope: SCOPE, policyId: POLICY.policyId },
+      { scope: SCOPE, policyId: POLICY.policyId },
+    ],
+    queue: { async enqueue() { enqueued += 1; } },
+  }), expectCode("INVALID_JOB"));
+  assert.equal(enqueued, 0);
+});
+
+test("shared handler rejects unavailable activation instead of completing the job", async () => {
+  const context = dependencies({ materializer: null });
+  const handler = createPricingChangeMaterializationJobHandler(context.base);
+  await assert.rejects(handler(job()), (error: unknown) =>
+    error instanceof PricingChangeMaterializationUnavailableError
+    && error.reason === PRICING_CHANGE_MATERIALIZER_ACTIVATION_REASONS.provider);
+});
+
+test("job rejects queue retry shapes outside the fixed five-attempt contract", async () => {
+  const context = dependencies();
+  for (const invalidJob of [job({ attempt: 6 }), job({ maxAttempts: 6 })]) {
+    await assert.rejects(runPricingChangeMaterializationJob(invalidJob, context.base),
+      expectCode("INVALID_JOB"));
+  }
+  assert.equal(context.requests.length, 0);
 });

@@ -5,7 +5,7 @@
  * reconciled CUR2 generation, account/Region scope, historical AWS Price List
  * files, evidence storage, and encryption are all resolved by server ports.
  */
-import type { RunnableJob } from "./background-job-runner.ts";
+import type { JobHandler, RunnableJob } from "./background-job-runner.ts";
 import { canonicalJson } from "./canonical-json.ts";
 import {
   buildPricingChangeAnalysis,
@@ -31,6 +31,7 @@ export const PRICING_CHANGE_MATERIALIZER_ACTIVATION_REASONS = Object.freeze({
   cur2: "ACTIVE_RECONCILED_CUR2_GENERATION_NOT_AVAILABLE",
   provider: "AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED",
 } as const);
+export const PRICING_CHANGE_MATERIALIZER_SCHEDULER_CADENCE = "rate(1 day)" as const;
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
@@ -48,6 +49,8 @@ const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const POLICY_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const EXPORT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/u;
 const CLOCK_SKEW_MS = 5 * 60 * 1_000;
+const DAILY_WINDOW = /^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u;
+const MAX_SCHEDULED_POLICIES = 10_000;
 
 export interface PricingChangeJobScope {
   readonly organizationId: string;
@@ -174,6 +177,18 @@ export interface PricingChangeMaterializationJobDependencies {
   readonly now?: () => number;
 }
 
+export interface PricingChangeMaterializationQueue {
+  enqueue(input: {
+    readonly orgId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly kind: typeof FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND;
+    readonly payload: { readonly connectionId: string; readonly policyId: string };
+    readonly maxAttempts: 5;
+    readonly idempotencyKey: string;
+  }): Promise<unknown>;
+}
+
 export type PricingChangeMaterializationJobResult =
   | {
       readonly status: "unavailable";
@@ -203,6 +218,16 @@ export class PricingChangeMaterializationJobError extends Error {
     super("Pricing Change materialization job rejected");
     this.name = "PricingChangeMaterializationJobError";
     this.code = code;
+  }
+}
+
+export class PricingChangeMaterializationUnavailableError extends Error {
+  public constructor(public readonly reason: Extract<
+    PricingChangeMaterializationJobResult,
+    { status: "unavailable" }
+  >["reason"]) {
+    super(reason);
+    this.name = "PricingChangeMaterializationUnavailableError";
   }
 }
 
@@ -258,13 +283,88 @@ function scopeFrom(job: RunnableJob, connectionId: string): PricingChangeJobScop
     || !JOB_ID.test(job.id)
     || !Number.isSafeInteger(job.attempt)
     || job.attempt < 1
-    || job.attempt > 100
+    || job.attempt > 5
+    || job.maxAttempts !== 5
   ) reject("INVALID_JOB");
   return {
     organizationId: job.orgId,
     customerId: job.customerId,
     connectionId,
   };
+}
+
+function validDailyWindow(value: string): boolean {
+  return DAILY_WINDOW.test(value) && Number.isFinite(Date.parse(value))
+    && new Date(Date.parse(value)).toISOString() === value;
+}
+
+export function pricingChangeMaterializationWindow(nowMs = Date.now()): string {
+  if (!Number.isSafeInteger(nowMs) || nowMs < 0) reject("INVALID_JOB");
+  const date = new Date(nowMs);
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()))
+    .toISOString();
+}
+
+export function pricingChangeMaterializationIdempotencyKey(input: {
+  readonly scope: PricingChangeJobScope;
+  readonly policyId: string;
+  readonly scheduledWindow: string;
+}): string {
+  if (!IDENTIFIER.test(input.scope.organizationId)
+    || !IDENTIFIER.test(input.scope.customerId)
+    || !CONNECTION_ID.test(input.scope.connectionId)
+    || !POLICY_ID.test(input.policyId)
+    || !validDailyWindow(input.scheduledWindow)) reject("INVALID_JOB");
+  return `pricing-change:${[
+    input.scope.organizationId,
+    input.scope.customerId,
+    input.scope.connectionId,
+    input.policyId,
+    input.scheduledWindow,
+  ].map(encodeURIComponent).join(":")}`;
+}
+
+/** Enqueue each server-owned pricing policy at most once per UTC day. */
+export async function schedulePricingChangeMaterializations(input: {
+  readonly scheduledWindow: string;
+  readonly loadEligiblePolicies: () => Promise<readonly {
+    readonly scope: PricingChangeJobScope;
+    readonly policyId: string;
+  }[]>;
+  readonly queue: PricingChangeMaterializationQueue;
+}): Promise<number> {
+  if (!validDailyWindow(input.scheduledWindow)) reject("INVALID_JOB");
+  const policies = [...await input.loadEligiblePolicies()].sort((left, right) =>
+    `${left.scope.connectionId}\0${left.policyId}`
+      .localeCompare(`${right.scope.connectionId}\0${right.policyId}`));
+  if (policies.length > MAX_SCHEDULED_POLICIES) reject("INVALID_JOB");
+  const seen = new Set<string>();
+  for (const candidate of policies) {
+    const key = pricingChangeMaterializationIdempotencyKey({
+      ...candidate,
+      scheduledWindow: input.scheduledWindow,
+    });
+    if (seen.has(key)) reject("INVALID_JOB");
+    seen.add(key);
+  }
+  for (const candidate of policies) {
+    await input.queue.enqueue({
+      orgId: candidate.scope.organizationId,
+      customerId: candidate.scope.customerId,
+      connectionId: candidate.scope.connectionId,
+      kind: FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND,
+      payload: Object.freeze({
+        connectionId: candidate.scope.connectionId,
+        policyId: candidate.policyId,
+      }),
+      maxAttempts: 5,
+      idempotencyKey: pricingChangeMaterializationIdempotencyKey({
+        ...candidate,
+        scheduledWindow: input.scheduledWindow,
+      }),
+    });
+  }
+  return policies.length;
 }
 
 function sortedUnique(
@@ -619,3 +719,23 @@ export async function runPricingChangeMaterializationJob(
     becameActive: persisted.becameActive,
   };
 }
+
+/** Shared-runner adapter. Unavailable activation is a failed job, never success. */
+export function createPricingChangeMaterializationJobHandler(
+  dependencies: PricingChangeMaterializationJobDependencies,
+): JobHandler {
+  return async (job) => {
+    const result = await runPricingChangeMaterializationJob(job, dependencies);
+    if (result.status === "unavailable") {
+      throw new PricingChangeMaterializationUnavailableError(result.reason);
+    }
+  };
+}
+
+export const PRICING_CHANGE_MATERIALIZATION_RUNTIME_BINDING = Object.freeze({
+  jobKind: FINOPS_PRICING_CHANGE_MATERIALIZE_JOB_KIND,
+  cadence: PRICING_CHANGE_MATERIALIZER_SCHEDULER_CADENCE,
+  handlerFactory: createPricingChangeMaterializationJobHandler,
+  registeredInSharedRuntime: false,
+  activationReason: PRICING_CHANGE_MATERIALIZER_ACTIVATION_REASONS.provider,
+});

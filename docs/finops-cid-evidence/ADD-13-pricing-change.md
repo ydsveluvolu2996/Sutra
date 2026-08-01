@@ -42,6 +42,11 @@ savings claim:
   archives the canonical capture, seals its managed object reference, and
   persists immutable metadata. Missing policy, CUR2, or provider adapter states
   return explicit unavailable reasons and never fabricate a zero-impact result.
+  It also owns the permanent daily scheduler contract: every eligible server
+  policy is prevalidated before enqueue, idempotency includes the complete
+  organization/customer/connection/policy/window tuple, jobs have exactly five
+  attempts, and the shared-runner adapter treats unavailable activation as a
+  failed job instead of silently completing it.
 - `drizzle/0088_finops_pricing_change_materializations.sql` and
   `postgres/migrations/0083_finops_pricing_change_materializations.sql` add
   append-only lineage/count metadata and complete-only monotonic active heads.
@@ -113,8 +118,9 @@ No state treats missing delivery as zero usage or zero impact.
 
 ## Remaining production gates
 
-1. Register a durable handler for `finops-pricing-change-materialize` and bind
-   its server policy and active-CUR2 loaders. The existing billing repository is
+1. Register the existing durable handler for
+   `finops-pricing-change-materialize`, its daily scheduler, and its server
+   policy and active-CUR2 loaders. The existing billing repository is
    authoritative, but a bounded materializer reader must page the complete
    selected `fbg_` generation rather than using its 1,000-row UI query ceiling.
 2. Implement and register the timeout/page/byte-bounded authenticated AWS
