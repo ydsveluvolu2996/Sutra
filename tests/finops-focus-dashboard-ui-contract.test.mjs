@@ -31,7 +31,7 @@ test("FOCUS catalog entry is wired to its tenant-resolved GET report", () => {
   assert.match(component, /credentials: "same-origin"/u);
   assert.match(
     catalog,
-    /id: "focus"[\s\S]*currentMaturity: "LOCAL_VERTICAL_CANDIDATE"/u,
+    /id: "focus"[\s\S]*currentMaturity: "PARTIAL_PIPELINE"/u,
   );
 });
 

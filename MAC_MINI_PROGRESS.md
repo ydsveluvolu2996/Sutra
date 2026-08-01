@@ -140,3 +140,19 @@ Next gate:
 | Tests | 9 passed, 0 failed, 0 skipped; root typecheck and focused ESLint passed |
 | Limitations | `conformanceClaim:false`; no invoice-reconciliation claim; dedicated visual dashboard not yet connected |
 | Next gate | ADD-04 G5 visual report with filters, trends, dimension charts/table, drilldown, quality and evidence drawer |
+
+### 2026-08-01 — four-slice FinOps integration checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker rows / gates | ADV-01 G3 foundation; ADV-02 G2 discovery; ADV-03 audited G0–G6 candidate; ADD-04 AWS FOCUS 1.2 G5 slice |
+| Code commit | `a9f7cb7` on `agent/mac-mini-finops-continuation`; push follows the evidence commit |
+| Cost Anomaly | Official-style account/service/region/date/impact controls, trends, safe CSV, root-cause drilldown, evidence coverage, honest lifecycle/currency labels; 43 application and 24 collector tests passed |
+| FOCUS | Exact per-currency bigint-micros KPIs, month trend, bounded dimensions/line drilldown, quality and evidence drawers, all delivery states; direct suite 14 passed |
+| Trusted Advisor Organizational | Frozen manifest/account orchestration plus immutable SQLite/PostgreSQL account/check/resource/organization history and complete-only monotonic head; focused integrated suite passed |
+| Compute Optimizer | Exact read-only enrollment/member/export-job discovery; bounded pagination/output/deadlines, deterministic evidence, hashed provider destinations, no export/S3 authority; 19 collector/dispatch tests passed |
+| Integration gates | Root and collector typechecks, changed-file ESLint, secret scan of 1,775 files, `git diff --check`, collector build, and production app build passed |
+| Maturity audit | FOCUS remains `PARTIAL_PIPELINE`: official multi-version/provider consolidation, tag taxonomy, and effective discount rate are not yet implemented; no optimistic elevation |
+| Controlled-live evidence | None; current onboarding roles do not yet activate TA standard checks or Compute Optimizer discovery, and provider/two-tenant acceptance is pending |
+| Release evidence | No image published or deployed; current live digest remains unchanged |
+| Next gate | Push exact commits and continue ADV-01/ADV-02 through API/UI, then complete the remaining engine-only rows |
