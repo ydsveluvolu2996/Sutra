@@ -89,6 +89,8 @@ import finopsCoraSnapshotsSchemaSql from "../drizzle/0089_finops_cora_snapshots.
 import finopsAwsNewsFeedSnapshotsSchemaSql from "../drizzle/0090_finops_aws_news_feed_snapshots.sql?raw";
 import finopsAwsBudgetsOrganizationSchemaSql from "../drizzle/0091_finops_aws_budgets_organization.sql?raw";
 import finopsAwsSupportCasesSchemaSql from "../drizzle/0092_finops_aws_support_cases.sql?raw";
+import finopsResilienceVueSchemaSql from "../drizzle/0093_finops_resilience_vue.sql?raw";
+import finopsEndUserComputingSchemaSql from "../drizzle/0094_finops_end_user_computing.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -195,6 +197,8 @@ const migrations = [
   { id: "0090_finops_aws_news_feed_snapshots", statements: statementsFrom(finopsAwsNewsFeedSnapshotsSchemaSql) },
   { id: "0091_finops_aws_budgets_organization", statements: statementsFrom(finopsAwsBudgetsOrganizationSchemaSql) },
   { id: "0092_finops_aws_support_cases", statements: statementsFrom(finopsAwsSupportCasesSchemaSql) },
+  { id: "0093_finops_resilience_vue", statements: statementsFrom(finopsResilienceVueSchemaSql) },
+  { id: "0094_finops_end_user_computing", statements: statementsFrom(finopsEndUserComputingSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

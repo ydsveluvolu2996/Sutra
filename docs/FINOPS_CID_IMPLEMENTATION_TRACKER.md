@@ -60,15 +60,16 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 5 | 7 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 7 | 5 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 4 | 5 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **9** | **12** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **11** | **10** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The nine partial pipelines are Trusted
-Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar, Data
-Collection Monitor, CORA, FOCUS, Config Resource Compliance, and Pricing Change
-Analysis. Azure CID and GCP CID are absent.
+Anomaly, Trends, and Data Transfer. The eleven partial pipelines are Trusted
+Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar,
+ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
+Resource Compliance, and Pricing Change Analysis. Azure CID and GCP CID are
+absent.
 
 ## Parent capability tracker
 
@@ -86,8 +87,8 @@ Analysis. Azure CID and GCP CID are absent.
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): immutable accepted history, same-tenant API, and native four-family UI exist; shared worker registration, hardened production XML gateway, and provider acceptance remain. |
 | ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-08-aws-budgets.md): immutable hierarchy/actual/forecast history, same-tenant API, and native UI exist; signed-broker scheduler binding and provider acceptance remain. |
 | ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): privacy-minimized immutable incremental history, same-tenant API, native UI, plan states, and explicit optional-summary state exist; live Support adapter/entitlement probe and provider acceptance remain. |
-| ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `ENGINE_ONLY` | Complete Resilience Hub application/assessment/drift history across accounts/regions and visual recommendations. |
-| ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `ENGINE_ONLY` | Complete WorkSpaces/AppStream usage, cost, performance, logon, optimization, persistence, API/UI, and privacy-safe user views. |
+| ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-10-resiliencevue.md): immutable multi-account/Region assessment history, same-tenant API, and native posture/RTO-RPO/breach/recommendation UI exist; permanent AWS adapter/job registration and provider acceptance remain. |
+| ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-11-end-user-computing.md): privacy-safe immutable WorkSpaces/AppStream/metrics/CUR2 projection, same-tenant API, and six-area native UI exist; broker binding, rolling three-month/provider dimensions, and live acceptance remain. |
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | Replace generic telemetry equivalence with official DCF module instrumentation, execution history, errors, Step Functions links, retries, latency, and coverage. |
 | ADV-13 | Media Services Insights Hub | `media_services_insights` | `ENGINE_ONLY` | Complete AWS Elemental usage/cost/performance collection, persistence, API/UI, and workflow drilldowns. |
 | ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md): immutable projection/history, same-tenant API and native UI exist; permanent Cost Optimization Hub export materialization and provider acceptance remain. |

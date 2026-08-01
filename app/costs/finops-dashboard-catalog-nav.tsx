@@ -14,9 +14,11 @@ import { FinopsAwsConfigResourceComplianceDashboard } from "./finops-aws-config-
 import { FinopsAwsBudgetsOrganizationDashboard } from "./finops-aws-budgets-organization-dashboard";
 import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
 import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
+import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
 import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
+import { FinopsResilienceVueDashboard } from "./finops-resilience-vue-dashboard";
 import { FinopsTrustedAdvisorOrganizationalDashboard } from "./finops-trusted-advisor-organizational-dashboard";
 import styles from "./costs.module.css";
 
@@ -196,6 +198,10 @@ export function FinopsDashboardCatalogNav({
               connectionId={connectionId}
               dashboard={selected}
             />
+          ) : selected.id === "resiliencevue" ? (
+            <FinopsResilienceVueDashboard connectionId={connectionId} />
+          ) : selected.id === "end_user_computing" ? (
+            <FinopsEndUserComputingDashboard connectionId={connectionId} />
           ) : (
             <FinopsCapabilityShell
               dashboard={selected}

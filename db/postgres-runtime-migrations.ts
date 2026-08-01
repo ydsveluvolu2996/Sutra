@@ -84,6 +84,8 @@ import postgresFinopsCoraSnapshotsSql from "../postgres/migrations/0084_finops_c
 import postgresFinopsAwsNewsFeedSnapshotsSql from "../postgres/migrations/0085_finops_aws_news_feed_snapshots.sql?raw";
 import postgresFinopsAwsBudgetsOrganizationSql from "../postgres/migrations/0086_finops_aws_budgets_organization.sql?raw";
 import postgresFinopsAwsSupportCasesSql from "../postgres/migrations/0087_finops_aws_support_cases.sql?raw";
+import postgresFinopsResilienceVueSql from "../postgres/migrations/0088_finops_resilience_vue.sql?raw";
+import postgresFinopsEndUserComputingSql from "../postgres/migrations/0089_finops_end_user_computing.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -172,6 +174,8 @@ const migrations = [
   { id: "0085_finops_aws_news_feed_snapshots", source: postgresFinopsAwsNewsFeedSnapshotsSql },
   { id: "0086_finops_aws_budgets_organization", source: postgresFinopsAwsBudgetsOrganizationSql },
   { id: "0087_finops_aws_support_cases", source: postgresFinopsAwsSupportCasesSql },
+  { id: "0088_finops_resilience_vue", source: postgresFinopsResilienceVueSql },
+  { id: "0089_finops_end_user_computing", source: postgresFinopsEndUserComputingSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
