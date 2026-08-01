@@ -55,7 +55,7 @@ test("native report renders plan states, filters, trends, provenance and privacy
       cases: [{ accountId: "111111111111", caseReference: "case-…1001", serviceCode: "amazon-ec2", categoryCode: "performance", severity: "high", status: "pending-customer-action", createdAt: "2026-07-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", resolvedObservedAt: null, submittedByKind: "CUSTOMER", communicationCount: 2, attachmentCount: 0, observationCount: 2, communicationsComplete: true }],
       casesTruncated: false, disclosure: "Privacy minimized", history: [{ generationId: `supg_${"1".repeat(64)}`, observedAt: "2026-08-01T00:00:00.000Z", dataThroughAt: "2026-08-01T00:00:00.000Z", collectionState: "complete", intendedAccountCount: 1, completeAccountCount: 1, caseCount: 1, openCount: 1, highUrgentCriticalCount: 1 }],
       provenance: { activeGenerationId: `supg_${"1".repeat(64)}`, latestGenerationId: `supg_${"2".repeat(64)}`, newerIncomplete: true, contentSha256: "1".repeat(64), latestAttemptContentSha256: "2".repeat(64), captureId: `support_${"2".repeat(64)}`, observedAt: "2026-08-01T00:00:00.000Z", dataThroughAt: "2026-08-01T00:00:00.000Z", organizationCoverageClaimed: false },
-      collection: { available: false, reason: "AWS_SUPPORT_CASES_COLLECTOR_NOT_BOUND" }, summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
+      collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" }, summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesRadarReportView, { report, filters: { accountId: "", status: "", severity: "", serviceCode: "", categoryCode: "" }, onFiltersChange: () => undefined }));
     for (const text of ["Privacy-minimized", "Support-plan readiness", "Case history", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.match(html, new RegExp(text, "iu"));
@@ -69,4 +69,16 @@ test("job resolves targets server-side and persists only the normalized engine s
   assert.match(source, /SERVER_RESOLVED_CONNECTIONS/u);
   assert.match(source, /createAwsSupportCasesQueryService/u);
   assert.match(source, /snapshots\.record\(scope, snapshot\)/u);
+});
+
+test("production binding is signed, entitlement-aware, and honestly inactive", async () => {
+  const [broker, runtime, route] = await Promise.all([
+    readFile(new URL("../lib/finops-aws-support-cases-signed-broker.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/finops-aws-support-cases-runtime-binding.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/v1/finops/aws-support-cases-radar/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(broker, /signHostedBrokerRequest/u);
+  assert.match(broker, /verifyHostedBrokerResponse/u);
+  assert.match(runtime, /registeredInSharedRuntime: false/u);
+  assert.match(route, /AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED/u);
 });

@@ -258,6 +258,18 @@ Next gate:
 | Release evidence | Source contract only; no image published or deployed |
 | Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
 
+### 2026-08-01 — AWS Support Cases signed runtime contract
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-09 / local signed transport and scheduler/handler binding advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Daily server-resolved scheduling; deterministic collection identity; exact DescribeCases authorization-outcome entitlement probe; Ed25519-signed bounded broker request/response; immutable normalized snapshot handoff |
+| Security | Browser scope, raw correspondence/contact/attachments/provider messages/tokens, unsigned or oversized responses, origin/path substitution and cross-tenant evidence fail closed |
+| Focused verification | Runtime/broker tests plus existing engine, persistence, API and native UI suites; full typecheck, touched lint and diff checks pass in the integrated tree |
+| Remaining gates | Register the shared handler and credential-owning AWS adapter, validate qualifying/non-qualifying plans and pagination in controlled accounts, then exact-tree/two-tenant/live acceptance |
+| Release evidence | Source contract only; no image published or deployed |
+| Next gate | Continue remaining dashboard production bindings before the release image gate |
+
 ### 2026-08-01 — CORA execution-specific export activation
 
 | Field | Evidence |

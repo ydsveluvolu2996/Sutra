@@ -15,6 +15,12 @@ This vertical adds:
 - a server-owned collection-job boundary that resolves account targets from
   trusted persistence, uses the engine's signed privacy-minimized broker
   contract, and persists only an engine-normalized snapshot;
+- an Ed25519-authenticated broker transport that pins the private HTTPS origin,
+  exact path/body/tenant headers, request nonce, response signature, content
+  type, byte bound, request digest, job identity, scope, and normalized capture;
+- a daily server-owned scheduler/runtime handler contract with deterministic
+  collection identity and an explicit `DescribeCases` authorization-outcome
+  entitlement probe;
 - immutable tenant/customer/anchor-connection persistence in SQLite migration
   `0092` and PostgreSQL migration `0087`, with failed/partial attempts retained
   and a complete-only monotonic accepted head;
@@ -75,10 +81,12 @@ the pure engine.
 
 Focused tests cover engine privacy/bounds, immutable migrations, tenant-scoped
 repository and route contracts, browser-safe projection, accessible native
-rendering, plan/configuration states, history/provenance, and the server-owned
-job boundary. The implementation remains `PARTIAL_PIPELINE`, not live-verified:
-the durable scheduler, credential broker transport, AWS SDK Support adapter,
-plan-entitlement probe, and provider accounts are not bound in this repository.
+rendering, plan/configuration states, history/provenance, the server-owned job
+boundary, signed transport rejection, and scheduler isolation. The
+implementation remains `PARTIAL_PIPELINE`, not live-verified: the shared
+runtime registration, credential-owning AWS SDK Support adapter, and provider
+accounts are not bound in this repository. Activation therefore remains false
+with `AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED`.
 
 Production activation requires controlled qualifying and non-qualifying linked
 accounts to validate IAM, endpoint partitioning, pagination, throttling,

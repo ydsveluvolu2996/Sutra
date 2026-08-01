@@ -84,7 +84,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null,
-      collection: { available: false, reason: "AWS_SUPPORT_CASES_COLLECTOR_NOT_BOUND" },
+      collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
       supportPlanState: "UNKNOWN",
     });
     const cohortKey = JSON.stringify((active?.snapshot ?? selected.snapshot).intendedAccounts);
@@ -123,7 +123,7 @@ export async function GET(request: Request): Promise<Response> {
         dataThroughAt: (active ?? selected).snapshot.window.nextWatermark,
         historyCoverage: dashboard.source.historyCoverage, watermarkCoverage: dashboard.source.watermarkCoverage,
         organizationCoverageClaimed: false },
-      collection: { available: false, reason: "AWS_SUPPORT_CASES_COLLECTOR_NOT_BOUND" },
+      collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
       summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
     });
   } catch (error) { return errorResponse(error); }

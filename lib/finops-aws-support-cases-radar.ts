@@ -1986,6 +1986,9 @@ export interface AwsSupportCasesBrokerRequest {
   readonly jobId: string;
   readonly window: AwsSupportCollectionWindow;
   readonly intendedAccounts: readonly AwsSupportIntendedAccount[];
+  readonly readOperations: typeof AWS_SUPPORT_CASES_READ_OPERATIONS;
+  readonly entitlementProbe: "DESCRIBE_CASES_AUTHORIZATION_OUTCOME";
+  readonly credentials: "SERVER_OWNED_TRUST_ROLE_SESSIONS";
   readonly sanitizeBeforeBroker: true;
   readonly includeRawSubjects: false;
   readonly includeRawCommunications: false;
@@ -2080,6 +2083,9 @@ export function createAwsSupportCasesQueryService(
         intendedAccounts: pinnedBoundary.intendedAccounts.map((account) => ({
           ...account,
         })),
+        readOperations: AWS_SUPPORT_CASES_READ_OPERATIONS,
+        entitlementProbe: "DESCRIBE_CASES_AUTHORIZATION_OUTCOME",
+        credentials: "SERVER_OWNED_TRUST_ROLE_SESSIONS",
         sanitizeBeforeBroker: true,
         includeRawSubjects: false,
         includeRawCommunications: false,
