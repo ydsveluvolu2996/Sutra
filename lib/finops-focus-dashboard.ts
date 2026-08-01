@@ -25,6 +25,9 @@ export const FINOPS_FOCUS_DASHBOARD_BOUNDS = Object.freeze({
   maximumPeriods: 36,
   maximumTotalRows: 250_000,
   dimensionValueLimit: 25,
+  monthlyDimensionValueLimit: 15,
+  dailyTrendBucketsPerCurrency: 90,
+  filterValueLimit: 500,
   drilldownLimit: 100,
 });
 
@@ -32,10 +35,13 @@ export const FINOPS_FOCUS_DIMENSIONS = [
   "billing_account",
   "sub_account",
   "provider",
+  "publisher",
   "service",
   "service_category",
   "region",
   "charge_category",
+  "invoice",
+  "resource",
   "resource_type",
 ] as const;
 
@@ -46,6 +52,15 @@ export interface FinopsFocusDashboardInput {
   readonly scope: FinopsActiveBillingScope;
   readonly datasets: readonly FinopsActiveBillingDataset[];
   readonly tagTaxonomy?: FinopsFocusTagTaxonomyPolicy | null;
+  readonly filters?: FinopsFocusDashboardFilters | null;
+}
+
+export interface FinopsFocusDashboardFilters {
+  readonly billingAccount: string | null;
+  readonly subAccount: string | null;
+  readonly provider: string | null;
+  readonly publisher: string | null;
+  readonly chargeCategory: string | null;
 }
 
 export type FinopsFocusDashboardFailureCode =
@@ -80,6 +95,8 @@ export interface FinopsFocusCostCoverage {
 export interface FinopsFocusCostSummary {
   readonly billedCostMicros: string;
   readonly effectiveCost: FinopsFocusCostCoverage;
+  readonly contractedCost: FinopsFocusCostCoverage;
+  readonly listCost: FinopsFocusCostCoverage;
 }
 
 export interface FinopsFocusDimensionEntry extends FinopsFocusCostSummary {
@@ -115,6 +132,26 @@ export interface FinopsFocusTrendBucket extends FinopsFocusCostSummary {
   readonly period: string;
   readonly currency: string;
   readonly lineCount: number;
+}
+
+export interface FinopsFocusDailyTrendBucket extends FinopsFocusCostSummary {
+  readonly day: string;
+  readonly currency: string;
+  readonly lineCount: number;
+}
+
+export interface FinopsFocusMonthlyDimensionBucket {
+  readonly period: string;
+  readonly currency: string;
+  readonly dimension: FinopsFocusDimension;
+  readonly entries: readonly FinopsFocusDimensionEntry[];
+  readonly truncated: boolean;
+}
+
+export interface FinopsFocusFilterOption {
+  readonly values: readonly string[];
+  readonly missingLineCount: number;
+  readonly truncated: boolean;
 }
 
 export interface FinopsFocusDrilldownRow {
@@ -163,6 +200,7 @@ export type FinopsFocusDashboardResult =
         readonly sourceVersion: "1.2";
         readonly schemaCoverageBasis: "canonical_non_null_field_presence";
         readonly acceptedLineCount: number;
+        readonly selectedLineCount: number;
         readonly rejectedSourceRowCount: number;
         readonly ingestionCoverage: "complete" | "partial";
         readonly rejectionRatio: {
@@ -173,6 +211,20 @@ export type FinopsFocusDashboardResult =
       };
       readonly currencies: readonly FinopsFocusCurrencyReport[];
       readonly trends: readonly FinopsFocusTrendBucket[];
+      readonly dailyTrends: readonly FinopsFocusDailyTrendBucket[];
+      readonly monthlyDimensions: readonly FinopsFocusMonthlyDimensionBucket[];
+      readonly selection: {
+        readonly filters: FinopsFocusDashboardFilters;
+        readonly sourceAcceptedLineCount: number;
+        readonly matchedLineCount: number;
+        readonly filterOptions: {
+          readonly billingAccounts: FinopsFocusFilterOption;
+          readonly subAccounts: FinopsFocusFilterOption;
+          readonly providers: FinopsFocusFilterOption;
+          readonly publishers: FinopsFocusFilterOption;
+          readonly chargeCategories: FinopsFocusFilterOption;
+        };
+      };
       readonly drilldowns: {
         readonly totalRows: number;
         readonly returnedRows: number;
@@ -192,8 +244,12 @@ export type FinopsFocusDashboardResult =
 interface MutableCost {
   billed: bigint;
   effectiveObserved: bigint;
+  contractedObserved: bigint;
+  listObserved: bigint;
   lineCount: number;
   effectivePresent: number;
+  contractedPresent: number;
+  listPresent: number;
 }
 
 interface MutableDimension extends MutableCost {
@@ -258,8 +314,12 @@ function emptyCost(): MutableCost {
   return {
     billed: BigInt(0),
     effectiveObserved: BigInt(0),
+    contractedObserved: BigInt(0),
+    listObserved: BigInt(0),
     lineCount: 0,
     effectivePresent: 0,
+    contractedPresent: 0,
+    listPresent: 0,
   };
 }
 
@@ -270,19 +330,32 @@ function addCost(target: MutableCost, line: CanonicalCurLine): void {
     target.effectiveObserved += BigInt(line.amortizedMicros);
     target.effectivePresent += 1;
   }
+  if (line.contractedCostMicros !== null) {
+    target.contractedObserved += BigInt(line.contractedCostMicros);
+    target.contractedPresent += 1;
+  }
+  if (line.listCostMicros !== null) {
+    target.listObserved += BigInt(line.listCostMicros);
+    target.listPresent += 1;
+  }
 }
 
 function costSummary(value: MutableCost): FinopsFocusCostSummary {
-  const missingLineCount = value.lineCount - value.effectivePresent;
+  const costCoverage = (observed: bigint, presentLines: number): FinopsFocusCostCoverage => {
+    const missingLineCount = value.lineCount - presentLines;
+    return {
+      totalMicros: missingLineCount === 0 ? observed.toString() : null,
+      observedMicros: observed.toString(),
+      presentLineCount: presentLines,
+      missingLineCount,
+      coverage: coverage(presentLines, value.lineCount),
+    };
+  };
   return {
     billedCostMicros: value.billed.toString(),
-    effectiveCost: {
-      totalMicros: missingLineCount === 0 ? value.effectiveObserved.toString() : null,
-      observedMicros: value.effectiveObserved.toString(),
-      presentLineCount: value.effectivePresent,
-      missingLineCount,
-      coverage: coverage(value.effectivePresent, value.lineCount),
-    },
+    effectiveCost: costCoverage(value.effectiveObserved, value.effectivePresent),
+    contractedCost: costCoverage(value.contractedObserved, value.contractedPresent),
+    listCost: costCoverage(value.listObserved, value.listPresent),
   };
 }
 
@@ -294,10 +367,13 @@ function dimensionValue(
     case "billing_account": return line.payerAccountId;
     case "sub_account": return line.usageAccountId;
     case "provider": return line.billingEntity;
+    case "publisher": return line.legalEntity;
     case "service": return line.service;
     case "service_category": return line.serviceCategory;
     case "region": return line.region;
     case "charge_category": return line.chargeCategory;
+    case "invoice": return line.invoiceId;
+    case "resource": return line.resourceId;
     case "resource_type": return line.resourceType;
   }
 }
@@ -355,13 +431,63 @@ function validCanonicalFocusLine(line: unknown): line is CanonicalCurLine {
       line.amortizedMicros === null
       || (typeof line.amortizedMicros === "string" && INTEGER_MICROS.test(line.amortizedMicros))
     )
+    && (
+      line.contractedCostMicros === null
+      || (typeof line.contractedCostMicros === "string" && INTEGER_MICROS.test(line.contractedCostMicros))
+    )
+    && (
+      line.listCostMicros === null
+      || (typeof line.listCostMicros === "string" && INTEGER_MICROS.test(line.listCostMicros))
+    )
     && validText(line.payerAccountId, true)
     && validText(line.billingEntity, true)
+    && validText(line.legalEntity, true)
     && validText(line.serviceCategory, true)
     && validText(line.region, true)
     && validText(line.resourceId, true)
     && validText(line.resourceType, true)
     && validText(line.invoiceId, true);
+}
+
+const EMPTY_FILTERS: FinopsFocusDashboardFilters = Object.freeze({
+  billingAccount: null,
+  subAccount: null,
+  provider: null,
+  publisher: null,
+  chargeCategory: null,
+});
+
+function dashboardFilters(value: unknown): FinopsFocusDashboardFilters | null {
+  if (value === undefined || value === null) return EMPTY_FILTERS;
+  if (!isRecord(value)) return null;
+  const expected = Object.keys(EMPTY_FILTERS).sort();
+  if (JSON.stringify(Object.keys(value).sort()) !== JSON.stringify(expected)) return null;
+  const parsed = { ...value } as unknown as FinopsFocusDashboardFilters;
+  return Object.values(parsed).every((entry) => entry === null || validText(entry)) ? parsed : null;
+}
+
+function matchesFilters(line: CanonicalCurLine, filters: FinopsFocusDashboardFilters): boolean {
+  return (filters.billingAccount === null || line.payerAccountId === filters.billingAccount)
+    && (filters.subAccount === null || line.usageAccountId === filters.subAccount)
+    && (filters.provider === null || line.billingEntity === filters.provider)
+    && (filters.publisher === null || line.legalEntity === filters.publisher)
+    && (filters.chargeCategory === null || line.chargeCategory === filters.chargeCategory);
+}
+
+function filterOption(lines: readonly CanonicalCurLine[], value: (line: CanonicalCurLine) => string | null): FinopsFocusFilterOption {
+  const supplied = new Set<string>();
+  let missingLineCount = 0;
+  for (const line of lines) {
+    const item = value(line);
+    if (item === null) missingLineCount += 1;
+    else supplied.add(item);
+  }
+  const all = [...supplied].sort();
+  return {
+    values: all.slice(0, FINOPS_FOCUS_DASHBOARD_BOUNDS.filterValueLimit),
+    missingLineCount,
+    truncated: all.length > FINOPS_FOCUS_DASHBOARD_BOUNDS.filterValueLimit,
+  };
 }
 
 function fail(
@@ -396,6 +522,8 @@ export function buildFinopsFocusDashboard(
     || !Array.isArray(input.datasets)
     || input.datasets.length === 0
   ) return fail("INVALID_INPUT", "input");
+  const selectedFilters = dashboardFilters(input.filters);
+  if (selectedFilters === null) return fail("INVALID_INPUT", "filters");
   if (input.datasets.length > FINOPS_FOCUS_DASHBOARD_BOUNDS.maximumPeriods) {
     return fail("PERIOD_LIMIT_EXCEEDED", "datasets");
   }
@@ -476,10 +604,13 @@ export function buildFinopsFocusDashboard(
   const sortedDatasets = [...input.datasets].sort((left, right) =>
     left.scope.billingPeriod.localeCompare(right.scope.billingPeriod));
   const allRows = sortedDatasets.flatMap((dataset) => dataset.rows);
+  const selectedRows = allRows.filter((row) => matchesFilters(row.line, selectedFilters));
   const currencies = new Map<string, MutableCurrency>();
   const trends = new Map<string, MutableCost & { period: string; currency: string }>();
+  const dailyTrends = new Map<string, MutableCost & { day: string; currency: string }>();
+  const monthlyDimensions = new Map<string, MutableDimension>();
 
-  for (const row of allRows) {
+  for (const row of selectedRows) {
     const line = row.line;
     let currency = currencies.get(line.currency);
     if (currency === undefined) {
@@ -513,6 +644,25 @@ export function buildFinopsFocusDashboard(
       trends.set(trendKey, trend);
     }
     addCost(trend, line);
+    const day = new Date(Date.parse(line.usageStartIso)).toISOString().slice(0, 10);
+    const dailyKey = `${day}\0${line.currency}`;
+    let dailyTrend = dailyTrends.get(dailyKey);
+    if (dailyTrend === undefined) {
+      dailyTrend = { day, currency: line.currency, ...emptyCost() };
+      dailyTrends.set(dailyKey, dailyTrend);
+    }
+    addCost(dailyTrend, line);
+    for (const dimension of FINOPS_FOCUS_DIMENSIONS) {
+      const value = dimensionValue(dimension, line);
+      const valueKey = value === null ? "\0missing" : `\0value:${value}`;
+      const monthlyKey = `${row.billingPeriod}\0${line.currency}\0${dimension}${valueKey}`;
+      let monthly = monthlyDimensions.get(monthlyKey);
+      if (monthly === undefined) {
+        monthly = { value, ...emptyCost() };
+        monthlyDimensions.set(monthlyKey, monthly);
+      }
+      addCost(monthly, line);
+    }
   }
 
   const currencyReports = [...currencies.values()]
@@ -540,7 +690,7 @@ export function buildFinopsFocusDashboard(
       }),
     }));
 
-  const sortedDrilldownRows = [...allRows].sort((left, right) => {
+  const sortedDrilldownRows = [...selectedRows].sort((left, right) => {
     const leftAbsolute = absolute(BigInt(left.line.amountMicros));
     const rightAbsolute = absolute(BigInt(right.line.amountMicros));
     if (leftAbsolute !== rightAbsolute) return leftAbsolute > rightAbsolute ? -1 : 1;
@@ -554,7 +704,7 @@ export function buildFinopsFocusDashboard(
   );
 
   const fieldCoverage = FIELD_COVERAGE.map((field): FinopsFocusSchemaFieldCoverage => {
-    const presentLineCount = allRows.reduce(
+    const presentLineCount = selectedRows.reduce(
       (count, row) => count + (present(field.value(row.line)) ? 1 : 0),
       0,
     );
@@ -562,9 +712,9 @@ export function buildFinopsFocusDashboard(
       field: field.field,
       requirement: field.requirement,
       presentLineCount,
-      missingLineCount: totalRows - presentLineCount,
-      coverageBasisPoints: basisPoints(presentLineCount, totalRows),
-      coverage: coverage(presentLineCount, totalRows),
+      missingLineCount: selectedRows.length - presentLineCount,
+      coverageBasisPoints: basisPoints(presentLineCount, selectedRows.length),
+      coverage: coverage(presentLineCount, selectedRows.length),
     };
   });
   const neutralSourceId = (dataset: FinopsActiveBillingDataset) => `${input.scope.connectionId}:${dataset.scope.billingPeriod}`;
@@ -572,9 +722,32 @@ export function buildFinopsFocusDashboard(
   const neutral = buildProviderNeutralFocusReport({
     scope: { orgId: input.scope.orgId, customerId: input.scope.customerId },
     sources: sortedDatasets.map((dataset) => ({ orgId: input.scope.orgId, customerId: input.scope.customerId, sourceId: neutralSourceId(dataset), provider: "AWS", focusVersion: "1.2", datasetName: dataset.evidence.activeSourceTable, generationId: dataset.scope.generationId, contentSha256: dataset.evidence.activeManifestSha256, collectedAt: dataset.evidence.activeCommittedAtIso, dataThroughAt: dataset.evidence.activeSourceUpdatedAtIso ?? dataset.evidence.activeObservedAtIso, normalizedSchema: "sutra.focus-neutral-line.v1" })),
-    rows: sortedDatasets.flatMap((dataset) => dataset.rows.map(({ line }: { readonly line: CanonicalCurLine }) => ({ sourceId: neutralSourceId(dataset), lineId: line.lineItemId, billingPeriod: dataset.scope.billingPeriod, billingCurrency: line.currency, billedCostMicros: line.amountMicros, effectiveCostMicros: line.amortizedMicros, listCostMicros: line.listCostMicros, contractedCostMicros: line.contractedCostMicros, providerName: line.billingEntity ?? "AWS", serviceName: line.service, chargeCategory: line.chargeCategory, chargeClass: line.chargeClass, chargeClassEvidence: "NOT_PROVIDED" as const, tags: neutralTags(line) }))),
+    rows: sortedDatasets.flatMap((dataset) => dataset.rows.filter((row: FinopsActiveBillingDataset["rows"][number]) => matchesFilters(row.line, selectedFilters)).map(({ line }: { readonly line: CanonicalCurLine }) => ({ sourceId: neutralSourceId(dataset), lineId: line.lineItemId, billingPeriod: dataset.scope.billingPeriod, billingCurrency: line.currency, billedCostMicros: line.amountMicros, effectiveCostMicros: line.amortizedMicros, listCostMicros: line.listCostMicros, contractedCostMicros: line.contractedCostMicros, providerName: line.billingEntity ?? "AWS", serviceName: line.service, chargeCategory: line.chargeCategory, chargeClass: line.chargeClass, chargeClassEvidence: "NOT_PROVIDED" as const, tags: neutralTags(line) }))),
     taxonomy: input.tagTaxonomy ?? null,
   });
+  const monthlyGroups = new Map<string, { period: string; currency: string; dimension: FinopsFocusDimension; entries: MutableDimension[] }>();
+  for (const [key, entry] of monthlyDimensions) {
+    const [period, currency, dimension] = key.split("\0");
+    if (period === undefined || currency === undefined || dimension === undefined) continue;
+    const groupKey = `${period}\0${currency}\0${dimension}`;
+    let group = monthlyGroups.get(groupKey);
+    if (group === undefined) {
+      group = { period, currency, dimension: dimension as FinopsFocusDimension, entries: [] };
+      monthlyGroups.set(groupKey, group);
+    }
+    group.entries.push(entry);
+  }
+  const sourceLines = allRows.map(({ line }) => line);
+  const dailyTrendCounts = new Map<string, number>();
+  const dailyTrendReports = [...dailyTrends.values()]
+    .sort((left, right) => left.currency.localeCompare(right.currency) || right.day.localeCompare(left.day))
+    .flatMap((trend) => {
+      const count = dailyTrendCounts.get(trend.currency) ?? 0;
+      if (count >= FINOPS_FOCUS_DASHBOARD_BOUNDS.dailyTrendBucketsPerCurrency) return [];
+      dailyTrendCounts.set(trend.currency, count + 1);
+      return [{ day: trend.day, currency: trend.currency, lineCount: trend.lineCount, ...costSummary(trend) }];
+    })
+    .sort((left, right) => left.day.localeCompare(right.day) || left.currency.localeCompare(right.currency));
 
   return {
     ok: true,
@@ -601,6 +774,7 @@ export function buildFinopsFocusDashboard(
       sourceVersion: "1.2",
       schemaCoverageBasis: "canonical_non_null_field_presence",
       acceptedLineCount: totalRows,
+      selectedLineCount: selectedRows.length,
       rejectedSourceRowCount: rejectedSourceRows,
       ingestionCoverage: rejectedSourceRows === 0 ? "complete" : "partial",
       rejectionRatio: {
@@ -619,10 +793,39 @@ export function buildFinopsFocusDashboard(
         lineCount: trend.lineCount,
         ...costSummary(trend),
       })),
+    dailyTrends: dailyTrendReports,
+    monthlyDimensions: [...monthlyGroups.values()]
+      .sort((left, right) => left.period.localeCompare(right.period)
+        || left.currency.localeCompare(right.currency)
+        || left.dimension.localeCompare(right.dimension))
+      .map((group) => {
+        const sorted = group.entries.sort(compareMutableCost);
+        const entries = sorted.slice(0, FINOPS_FOCUS_DASHBOARD_BOUNDS.monthlyDimensionValueLimit);
+        return {
+          period: group.period,
+          currency: group.currency,
+          dimension: group.dimension,
+          entries: entries.map((entry, index) => ({ rank: index + 1, value: entry.value,
+            lineCount: entry.lineCount, ...costSummary(entry) })),
+          truncated: entries.length < sorted.length,
+        };
+      }),
+    selection: {
+      filters: selectedFilters,
+      sourceAcceptedLineCount: totalRows,
+      matchedLineCount: selectedRows.length,
+      filterOptions: {
+        billingAccounts: filterOption(sourceLines, (line) => line.payerAccountId),
+        subAccounts: filterOption(sourceLines, (line) => line.usageAccountId),
+        providers: filterOption(sourceLines, (line) => line.billingEntity),
+        publishers: filterOption(sourceLines, (line) => line.legalEntity),
+        chargeCategories: filterOption(sourceLines, (line) => line.chargeCategory),
+      },
+    },
     drilldowns: {
-      totalRows,
+      totalRows: selectedRows.length,
       returnedRows: drilldownRows.length,
-      truncated: drilldownRows.length < totalRows,
+      truncated: drilldownRows.length < selectedRows.length,
       rows: drilldownRows.map(({ billingPeriod, line }) => ({
         period: billingPeriod,
         lineItemId: line.lineItemId,

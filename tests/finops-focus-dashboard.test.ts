@@ -95,6 +95,47 @@ describe("FOCUS 1.2 report projection", () => {
     assert.equal(result.invariants.includes("money_uses_signed_bigint_micros"), true);
   });
 
+  it("projects official cost bases, controls, extended dimensions, and bounded monthly groups", () => {
+    const june = focusLine("june", "1000000", "USD", {
+      amortizedMicros: "800000", contractedCostMicros: "900000", listCostMicros: "1200000",
+      payerAccountId: "111111111111", usageAccountId: "222222222222", billingEntity: "AWS",
+      legalEntity: "AWS Marketplace", chargeCategory: "Usage", invoiceId: "invoice-june", resourceId: "i-june",
+    });
+    const july = focusLine("july", "2000000", "USD", {
+      amortizedMicros: "1500000", contractedCostMicros: "1700000", listCostMicros: "2500000",
+      payerAccountId: "111111111111", usageAccountId: "333333333333", billingEntity: "AWS",
+      legalEntity: "AWS Marketplace", chargeCategory: "Credit", invoiceId: "invoice-july", resourceId: "i-july",
+    });
+    const result = buildFinopsFocusDashboard({ scope: OWNER,
+      datasets: [dataset([june], "2026-06", "a"), dataset([july], "2026-07", "b")],
+      filters: { billingAccount: "111111111111", subAccount: "333333333333", provider: "AWS",
+        publisher: "AWS Marketplace", chargeCategory: "Credit" } });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.quality.acceptedLineCount, 2);
+    assert.equal(result.quality.selectedLineCount, 1);
+    assert.equal(result.selection.matchedLineCount, 1);
+    assert.deepEqual(result.selection.filterOptions.subAccounts.values, ["222222222222", "333333333333"]);
+    assert.equal(result.currencies[0]?.effectiveCost.totalMicros, "1500000");
+    assert.equal(result.currencies[0]?.contractedCost.totalMicros, "1700000");
+    assert.equal(result.currencies[0]?.listCost.totalMicros, "2500000");
+    assert.equal(result.dailyTrends[0]?.effectiveCost.totalMicros, "1500000");
+    for (const dimension of ["publisher", "invoice", "resource"] as const) {
+      assert.equal(result.currencies[0]?.dimensions.find((item) => item.dimension === dimension)?.distinctValueCount, 1);
+    }
+    assert.equal(result.monthlyDimensions.find((item) => item.period === "2026-07" && item.dimension === "resource")?.entries[0]?.value, "i-july");
+  });
+
+  it("rejects malformed or non-exact dashboard filters", () => {
+    const base = { scope: OWNER, datasets: [dataset([focusLine("line", "1")])] };
+    for (const filters of [{ billingAccount: "x" }, { billingAccount: null, subAccount: null, provider: null,
+      publisher: null, chargeCategory: "bad\0value" }]) {
+      const result = buildFinopsFocusDashboard({ ...base, filters } as never);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.failures[0]?.field, "filters");
+    }
+  });
+
   it("rejects CUR and FOCUS 1.0 at both evidence and canonical-row boundaries", () => {
     const line = focusLine("focus", "1000000");
     for (const substitution of [

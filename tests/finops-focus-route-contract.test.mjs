@@ -34,7 +34,7 @@ test("FOCUS GET is authenticated, same-tenant, and read-only", () => {
 test("FOCUS GET has an exact query allowlist and fixed history bounds", () => {
   assert.match(
     route,
-    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"providerSourceId",\s*"fromPeriod",\s*"toPeriod",\s*\]\)/u,
+    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"providerSourceId",\s*"fromPeriod",\s*"toPeriod",\s*"billingAccount",\s*"subAccount",\s*"provider",\s*"publisher",\s*"chargeCategory",\s*\]\)/u,
   );
   assert.match(route, /parameters\.keys\(\)/u);
   assert.match(route, /!ALLOWED_QUERY_PARAMETERS\.has\(key\)/u);
@@ -44,6 +44,9 @@ test("FOCUS GET has an exact query allowlist and fixed history bounds", () => {
   assert.match(route, /const FRESHNESS_SLA_HOURS = 48/u);
   assert.match(route, /ageHours > FRESHNESS_SLA_HOURS/u);
   assert.match(route, /freshness\.state/u);
+  assert.match(route, /const FILTER_VALUE/u);
+  assert.match(route, /filters: \{ billingAccount: query\.billingAccount/u);
+  assert.match(route, /report\.quality\.selectedLineCount === 0/u);
 });
 
 test("FOCUS GET cannot substitute CUR or FOCUS 1.0", () => {

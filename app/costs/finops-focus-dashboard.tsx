@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
 import type {
   FinopsFocusCurrencyReport,
+  FinopsFocusCostSummary,
   FinopsFocusDashboardResult,
   FinopsFocusDimension,
 } from "../../lib/finops-focus-dashboard";
@@ -22,6 +23,8 @@ interface AvailablePeriod {
   readonly committedAtIso: string;
 }
 interface FocusProviderSource { readonly provider: "AWS" | "AZURE" | "GCP"; readonly sourceId: string; readonly focusVersion: string | null; readonly state: string; readonly selectable: boolean }
+interface FocusFilters { readonly billingAccount: string; readonly subAccount: string; readonly provider: string; readonly publisher: string; readonly chargeCategory: string }
+const EMPTY_FOCUS_FILTERS: FocusFilters = { billingAccount: "", subAccount: "", provider: "", publisher: "", chargeCategory: "" };
 
 interface FocusEnvelope {
   readonly connectionId: string;
@@ -65,12 +68,31 @@ const FOCUS_DIMENSION_LABELS: Readonly<Record<FinopsFocusDimension, string>> = {
   billing_account: "Billing account",
   sub_account: "Subaccount",
   provider: "Provider",
+  publisher: "Publisher",
   service: "Service",
   service_category: "Service category",
   region: "Region",
   charge_category: "Charge category",
+  invoice: "Invoice",
+  resource: "Resource",
   resource_type: "Resource type",
 };
+type FocusCostBasis = "billed" | "effective" | "contracted" | "list";
+const FOCUS_COST_LABELS: Readonly<Record<FocusCostBasis, string>> = {
+  billed: "Billed Cost", effective: "Effective Cost", contracted: "Contracted Cost", list: "List Cost",
+};
+function focusCostMicros(summary: FinopsFocusCostSummary, basis: FocusCostBasis): string | null {
+  if (basis === "billed") return summary.billedCostMicros;
+  if (basis === "effective") return summary.effectiveCost?.totalMicros ?? null;
+  if (basis === "contracted") return summary.contractedCost?.totalMicros ?? null;
+  return summary.listCost?.totalMicros ?? null;
+}
+function focusCostCoverage(summary: FinopsFocusCostSummary, basis: FocusCostBasis): string {
+  if (basis === "billed") return "complete";
+  if (basis === "effective") return summary.effectiveCost?.coverage ?? "unavailable";
+  if (basis === "contracted") return summary.contractedCost?.coverage ?? "unavailable";
+  return summary.listCost?.coverage ?? "unavailable";
+}
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -293,8 +315,14 @@ function evidenceFor(report: FocusReport | null): FinopsCapabilityEvidence | nul
 }
 
 function percentFromBasisPoints(value: string | null): string { if (value === null || !INTEGER_MICROS.test(value)) return "Not available"; const amount=BigInt(value),negative=amount<BigInt(0),absolute=negative?-amount:amount;return `${negative?"−":""}${absolute/BigInt(100)}.${(absolute%BigInt(100)).toString().padStart(2,"0")}%`; }
+function focusDelta(current: string | null, previous: string | null): { readonly amount: string | null; readonly basisPoints: string | null } {
+  if (current === null || previous === null || !INTEGER_MICROS.test(current) || !INTEGER_MICROS.test(previous)) return { amount: null, basisPoints: null };
+  const currentValue = BigInt(current); const previousValue = BigInt(previous); const amount = currentValue - previousValue;
+  return { amount: amount.toString(), basisPoints: previousValue === BigInt(0) ? null : ((amount * BigInt(10_000)) / (previousValue < BigInt(0) ? -previousValue : previousValue)).toString() };
+}
 
 function CurrencyKpis({ currency, neutralCurrency }: { readonly currency: FinopsFocusCurrencyReport; readonly neutralCurrency: FocusReport["neutral"]["currencies"][number] | null }) {
+  const distinct = (dimension: FinopsFocusDimension) => currency.dimensions.find((item) => item.dimension === dimension)?.distinctValueCount ?? 0;
   return (
     <div className={styles.focusKpis} aria-label={`${currency.currency} FOCUS key metrics`}>
       <article>
@@ -308,6 +336,16 @@ function CurrencyKpis({ currency, neutralCurrency }: { readonly currency: Finops
         <span>{currency.effectiveCost.coverage} · {currency.effectiveCost.missingLineCount} missing rows</span>
       </article>
       <article>
+        <small>Contracted cost</small>
+        <strong>{formatFocusMicrosExact(currency.contractedCost?.totalMicros ?? null, currency.currency)}</strong>
+        <span>{currency.contractedCost?.coverage ?? "unavailable"} source coverage</span>
+      </article>
+      <article>
+        <small>List cost</small>
+        <strong>{formatFocusMicrosExact(currency.listCost?.totalMicros ?? null, currency.currency)}</strong>
+        <span>{currency.listCost?.coverage ?? "unavailable"} source coverage</span>
+      </article>
+      <article>
         <small>Accepted lines</small>
         <strong>{currency.lineCount.toLocaleString("en-US")}</strong>
         <span>Current currency only</span>
@@ -317,6 +355,9 @@ function CurrencyKpis({ currency, neutralCurrency }: { readonly currency: Finops
         <strong>{percentFromBasisPoints(neutralCurrency?.effectiveDiscountRate.basisPoints ?? null)}</strong>
         <span>{neutralCurrency?.effectiveDiscountRate.reason.replaceAll("_", " ") ?? "No denominator evidence"}</span>
       </article>
+      <article><small>Total providers</small><strong>{distinct("provider")}</strong><span>Supplied provider values</span></article>
+      <article><small>Total services</small><strong>{distinct("service")}</strong><span>Supplied service values</span></article>
+      <article><small>Total accounts</small><strong>{distinct("sub_account")}</strong><span>Supplied subaccount values</span></article>
     </div>
   );
 }
@@ -324,25 +365,46 @@ function CurrencyKpis({ currency, neutralCurrency }: { readonly currency: Finops
 export function FinopsFocusReportView({ report }: { readonly report: FocusReport }) {
   const [currencyCode, setCurrencyCode] = useState(report.currencies[0]?.currency ?? "");
   const [dimension, setDimension] = useState<FinopsFocusDimension>("service");
+  const [secondaryDimension, setSecondaryDimension] = useState<FinopsFocusDimension>("provider");
+  const [costBasis, setCostBasis] = useState<FocusCostBasis>("effective");
   const selectedCurrency = report.currencies.find(({ currency }) =>
     currency === currencyCode) ?? report.currencies[0] ?? null;
   const selectedDimension = selectedCurrency?.dimensions.find((entry) =>
     entry.dimension === dimension) ?? null;
+  const selectedSecondaryDimension = selectedCurrency?.dimensions.find((entry) => entry.dimension === secondaryDimension) ?? null;
   const maximumDimensionCost = selectedDimension?.entries.reduce(
     (maximum, entry) => {
-      const value = absoluteMicros(entry.billedCostMicros);
-      return value > maximum ? value : maximum;
+      const selected = focusCostMicros(entry, costBasis);
+      if (selected === null) return maximum;
+      const selectedAbsolute = absoluteMicros(selected);
+      return selectedAbsolute > maximum ? selectedAbsolute : maximum;
     },
     BigInt(1),
   ) ?? BigInt(1);
+  const maximumSecondaryCost = selectedSecondaryDimension?.entries.reduce((maximum, entry) => {
+    const selected = focusCostMicros(entry, costBasis); if (selected === null) return maximum;
+    const value = absoluteMicros(selected); return value > maximum ? value : maximum;
+  }, BigInt(1)) ?? BigInt(1);
   const trend = report.trends.filter(({ currency }) => currency === selectedCurrency?.currency);
   const maximumTrendCost = trend.reduce((maximum, entry) => {
-    const value = absoluteMicros(entry.billedCostMicros);
+    const selected = focusCostMicros(entry, costBasis);
+    const value = selected === null ? BigInt(0) : absoluteMicros(selected);
     return value > maximum ? value : maximum;
   }, BigInt(1));
   const drilldowns = report.drilldowns.rows.filter(({ currency }) =>
     currency === selectedCurrency?.currency);
   const neutralCurrency = report.neutral.currencies.find(({ currency }) => currency === selectedCurrency?.currency) ?? null;
+  const periods = [...new Set(trend.map(({ period }) => period))].sort();
+  const dailyTrend = (report.dailyTrends ?? []).filter(({ currency }) => currency === selectedCurrency?.currency).slice(-31);
+  const maximumDailyCost = dailyTrend.reduce((maximum, entry) => {
+    const selected = focusCostMicros(entry, costBasis); const value = selected === null ? BigInt(0) : absoluteMicros(selected);
+    return value > maximum ? value : maximum;
+  }, BigInt(1));
+  const latestPeriod = periods.at(-1) ?? null; const previousPeriod = periods.at(-2) ?? null;
+  const monthlyBucket = (period: string | null) => period === null ? null : report.monthlyDimensions?.find((item) =>
+    item.currency === selectedCurrency?.currency && item.dimension === dimension && item.period === period) ?? null;
+  const latestDimension = monthlyBucket(latestPeriod); const previousDimension = monthlyBucket(previousPeriod);
+  const previousEntries = new Map(previousDimension?.entries.map((entry) => [entry.value, entry]) ?? []);
 
   return (
     <div className={styles.focusWorkspace} aria-label="FOCUS 1.2 cost projection">
@@ -363,6 +425,7 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
               {currency}
             </button>
           ))}
+          <label>Cost<select value={costBasis} onChange={(event) => setCostBasis(event.target.value as FocusCostBasis)}>{(Object.keys(FOCUS_COST_LABELS) as FocusCostBasis[]).map((basis) => <option key={basis} value={basis}>{FOCUS_COST_LABELS[basis]}</option>)}</select></label>
         </div>
       </header>
 
@@ -373,15 +436,15 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
           <CurrencyKpis currency={selectedCurrency} neutralCurrency={neutralCurrency} />
           <div className={styles.focusSplitGrid}>
             <section className={styles.focusPanel} aria-labelledby="focus-trend-heading">
-              <header><div><small>Monthly evidence</small><h4 id="focus-trend-heading">{selectedCurrency.currency} billed-cost trend</h4></div><span>{trend.length} periods</span></header>
+              <header><div><small>Monthly evidence</small><h4 id="focus-trend-heading">{selectedCurrency.currency} {FOCUS_COST_LABELS[costBasis]} trend</h4></div><span>{trend.length} periods</span></header>
               {trend.length === 0 ? <p className={styles.focusEmpty}>No trend buckets are available.</p> : (
-                <div className={styles.focusTrendChart} role="img" aria-label={`${selectedCurrency.currency} exact billed-cost trend`}>
+                <div className={styles.focusTrendChart} role="img" aria-label={`${selectedCurrency.currency} exact ${FOCUS_COST_LABELS[costBasis]} trend`}>
                   {trend.map((entry) => (
                     <div key={`${entry.period}-${entry.currency}`}>
-                      <span>{formatFocusMicrosExact(entry.billedCostMicros, entry.currency)}</span>
-                      <i style={{ height: `${Math.max(4, relativeHeight(entry.billedCostMicros, maximumTrendCost))}%` }} />
+                      <span>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), entry.currency)}</span>
+                      <i style={{ height: `${Math.max(4, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumTrendCost))}%` }} />
                       <b>{entry.period}</b>
-                      <small>{entry.lineCount.toLocaleString("en-US")} lines</small>
+                      <small>{entry.lineCount.toLocaleString("en-US")} lines · {focusCostCoverage(entry, costBasis)}</small>
                     </div>
                   ))}
                 </div>
@@ -402,12 +465,12 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
               </header>
               {selectedDimension === null ? <p className={styles.focusEmpty}>No dimension evidence is available.</p> : (
                 <>
-                  <div className={styles.focusDimensionBars} aria-label={`${FOCUS_DIMENSION_LABELS[dimension]} billed-cost ranking`}>
+                  <div className={styles.focusDimensionBars} aria-label={`${FOCUS_DIMENSION_LABELS[dimension]} ${FOCUS_COST_LABELS[costBasis]} ranking`}>
                     {selectedDimension.entries.map((entry) => (
                       <article key={entry.value ?? "missing"}>
                         <div><strong>{entry.value ?? "Not provided"}</strong><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div>
-                        <span><i style={{ width: `${Math.max(1, relativeHeight(entry.billedCostMicros, maximumDimensionCost))}%` }} /></span>
-                        <b>{formatFocusMicrosExact(entry.billedCostMicros, selectedCurrency.currency)}</b>
+                        <span><i style={{ width: `${Math.max(1, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumDimensionCost))}%` }} /></span>
+                        <b>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), selectedCurrency.currency)}</b>
                       </article>
                     ))}
                   </div>
@@ -416,6 +479,24 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
               )}
             </section>
           </div>
+
+          <section className={styles.focusPanel} aria-labelledby="focus-daily-heading">
+            <header><div><small>Daily billing summary</small><h4 id="focus-daily-heading">Daily {FOCUS_COST_LABELS[costBasis]} in {selectedCurrency.currency}</h4></div><span>Latest {dailyTrend.length} retained days</span></header>
+            {dailyTrend.length === 0 ? <p className={styles.focusEmpty}>No daily charge-period evidence is available.</p> : <div className={styles.focusTrendChart} role="img" aria-label={`${selectedCurrency.currency} exact daily ${FOCUS_COST_LABELS[costBasis]} trend`}>{dailyTrend.map((entry) => <div key={`${entry.day}-${entry.currency}`}><span>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), entry.currency)}</span><i style={{ height: `${Math.max(4, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumDailyCost))}%` }} /><b>{entry.day.slice(5)}</b><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div>)}</div>}
+          </section>
+
+          <section className={styles.focusPanel} aria-labelledby="focus-secondary-heading"><header><div><small>Second Group By</small><h4 id="focus-secondary-heading">Secondary dimension analysis</h4></div><label><span className={styles.focusVisuallyHidden}>Second dimension</span><select value={secondaryDimension} onChange={(event) => setSecondaryDimension(event.target.value as FinopsFocusDimension)}>{selectedCurrency.dimensions.map(({ dimension: item }) => <option key={item} value={item}>{FOCUS_DIMENSION_LABELS[item]}</option>)}</select></label></header>
+            {selectedSecondaryDimension === null ? <p className={styles.focusEmpty}>No secondary dimension evidence is available.</p> : <div className={styles.focusDimensionBars} aria-label={`${FOCUS_DIMENSION_LABELS[secondaryDimension]} secondary ${FOCUS_COST_LABELS[costBasis]} ranking`}>{selectedSecondaryDimension.entries.map((entry) => <article key={entry.value ?? "missing"}><div><strong>{entry.value ?? "Not provided"}</strong><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div><span><i style={{ width: `${Math.max(1, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumSecondaryCost))}%` }} /></span><b>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), selectedCurrency.currency)}</b></article>)}</div>}
+          </section>
+
+          <section className={styles.focusPanel} aria-labelledby="focus-mom-heading">
+            <header><div><small>Month over month trends</small><h4 id="focus-mom-heading">{FOCUS_COST_LABELS[costBasis]} by {FOCUS_DIMENSION_LABELS[dimension]}</h4></div><span>{previousPeriod ?? "No prior period"} → {latestPeriod ?? "No current period"}</span></header>
+            {latestDimension === null ? <p className={styles.focusEmpty}>No monthly dimension evidence is available for this selection.</p> : <div className={styles.focusTableWrap} tabIndex={0} role="region" aria-label="Scrollable FOCUS month over month table"><table className={styles.focusTable}><caption>Month over month exact cost change</caption><thead><tr><th>{FOCUS_DIMENSION_LABELS[dimension]}</th><th>Previous</th><th>Current</th><th>MoM change</th><th>MoM %</th></tr></thead><tbody>{latestDimension.entries.map((entry) => {
+              const previous = previousEntries.get(entry.value) ?? null; const currentMicros = focusCostMicros(entry, costBasis); const previousMicros = previous === null ? null : focusCostMicros(previous, costBasis); const delta = focusDelta(currentMicros, previousMicros);
+              return <tr key={entry.value ?? "missing"}><th scope="row">{entry.value ?? "Not provided"}</th><td>{formatFocusMicrosExact(previousMicros, selectedCurrency.currency)}</td><td>{formatFocusMicrosExact(currentMicros, selectedCurrency.currency)}</td><td>{formatFocusMicrosExact(delta.amount, selectedCurrency.currency)}</td><td>{percentFromBasisPoints(delta.basisPoints)}</td></tr>;
+            })}</tbody></table></div>}
+            <p className={styles.focusFootnote}>Changes are calculated only when both retained periods have complete coverage for the selected cost column. Missing or zero denominators remain unavailable.</p>
+          </section>
 
           <section className={styles.focusPanel} aria-labelledby="focus-drilldown-heading">
             <header><div><small>Canonical line evidence</small><h4 id="focus-drilldown-heading">Bounded billing-line drilldown</h4></div><span>{drilldowns.length} of {report.drilldowns.totalRows.toLocaleString("en-US")} report rows</span></header>
@@ -499,6 +580,8 @@ export function FinopsFocusDashboard({
   const [fromPeriod, setFromPeriod] = useState("");
   const [toPeriod, setToPeriod] = useState("");
   const [providerSourceId, setProviderSourceId] = useState(connectionId ?? "");
+  const [draftFilters, setDraftFilters] = useState<FocusFilters>(EMPTY_FOCUS_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<FocusFilters>(EMPTY_FOCUS_FILTERS);
   const requestSequence = useRef(0);
 
   useEffect(() => { const frame = window.requestAnimationFrame(() => setProviderSourceId(connectionId ?? "")); return () => window.cancelAnimationFrame(frame); }, [connectionId]);
@@ -515,6 +598,7 @@ export function FinopsFocusDashboard({
     setRequestState({ status: "loading", connectionId });
     const parameters = new URLSearchParams({ connectionId });
     if (providerSourceId !== "" && providerSourceId !== connectionId) parameters.set("providerSourceId", providerSourceId);
+    for (const [key, value] of Object.entries(appliedFilters)) if (value !== "") parameters.set(key, value);
     if (selectedFrom !== undefined && selectedTo !== undefined) {
       parameters.set("fromPeriod", selectedFrom);
       parameters.set("toPeriod", selectedTo);
@@ -539,7 +623,7 @@ export function FinopsFocusDashboard({
           : "Sutra could not load the active FOCUS 1.2 report.",
       });
     }
-  }, [connectionId, providerSourceId]);
+  }, [appliedFilters, connectionId, providerSourceId]);
 
   useEffect(() => {
     requestSequence.current += 1;
@@ -596,6 +680,21 @@ export function FinopsFocusDashboard({
           <button className="button button-secondary" disabled={invalidWindow || requestState.status === "loading"} type="submit">Apply period window</button>
           <button className="button button-secondary" disabled={requestState.status === "loading"} onClick={() => void load()} type="button">All available periods</button>
           {fromPeriod !== "" && toPeriod !== "" && fromPeriod > toPeriod ? <span role="alert">From period must not be after to period.</span> : null}
+        </form>
+      )}
+      {report === null || report.selection === undefined ? null : (
+        <form className={styles.focusPeriodFilters} aria-label="FOCUS billing controls" onSubmit={(event) => { event.preventDefault(); setAppliedFilters(draftFilters); }}>
+          {([
+            ["billingAccount", "Billing Account", report.selection.filterOptions.billingAccounts.values],
+            ["subAccount", "Sub Account", report.selection.filterOptions.subAccounts.values],
+            ["publisher", "Publisher", report.selection.filterOptions.publishers.values],
+            ["provider", "Provider", report.selection.filterOptions.providers.values],
+            ["chargeCategory", "Charge Category", report.selection.filterOptions.chargeCategories.values],
+          ] as const).map(([key, label, options]) => <label key={key}>{label}<select value={draftFilters[key]} onChange={(event) => setDraftFilters({ ...draftFilters, [key]: event.target.value })}><option value="">All</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</select></label>)}
+          <button className="button button-secondary" disabled={requestState.status === "loading"} type="submit">Apply billing controls</button>
+          <button className="button button-secondary" disabled={requestState.status === "loading"} onClick={() => { setDraftFilters(EMPTY_FOCUS_FILTERS); setAppliedFilters(EMPTY_FOCUS_FILTERS); }} type="button">Clear billing controls</button>
+          <small>{report.selection.matchedLineCount.toLocaleString("en-US")} of {report.selection.sourceAcceptedLineCount.toLocaleString("en-US")} accepted lines match</small>
+          {Object.values(report.selection.filterOptions).some((option) => option.truncated) ? <small>One or more filter lists reached the 500-value display bound; omitted values are not grouped or relabeled.</small> : null}
         </form>
       )}
       {report === null ? null : <FinopsFocusReportView report={report} />}

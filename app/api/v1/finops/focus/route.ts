@@ -20,12 +20,18 @@ export const dynamic = "force-dynamic";
 
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
+const FILTER_VALUE = /^[^\u0000-\u001f\u007f<>]{1,256}$/u;
 const FRESHNESS_SLA_HOURS = 48;
 const ALLOWED_QUERY_PARAMETERS = new Set([
   "connectionId",
   "providerSourceId",
   "fromPeriod",
   "toPeriod",
+  "billingAccount",
+  "subAccount",
+  "provider",
+  "publisher",
+  "chargeCategory",
 ]);
 
 interface FocusQuery {
@@ -33,6 +39,11 @@ interface FocusQuery {
   readonly providerSourceId: string | null;
   readonly fromPeriod: string | null;
   readonly toPeriod: string | null;
+  readonly billingAccount: string | null;
+  readonly subAccount: string | null;
+  readonly provider: string | null;
+  readonly publisher: string | null;
+  readonly chargeCategory: string | null;
 }
 
 function invalidRequest(): never {
@@ -54,19 +65,27 @@ function parseQuery(request: Request): FocusQuery {
   const providerSourceId = parameters.get("providerSourceId");
   const fromPeriod = parameters.get("fromPeriod");
   const toPeriod = parameters.get("toPeriod");
+  const billingAccount = parameters.get("billingAccount");
+  const subAccount = parameters.get("subAccount");
+  const provider = parameters.get("provider");
+  const publisher = parameters.get("publisher");
+  const chargeCategory = parameters.get("chargeCategory");
+  const filterValues = [billingAccount, subAccount, provider, publisher, chargeCategory];
   if (
     !CONNECTION_ID.test(connectionId)
     || (providerSourceId !== null && !/^(?:conn_|azsrc_|gcpconn_)[a-f0-9]{32}$/u.test(providerSourceId))
     || (fromPeriod === null) !== (toPeriod === null)
     || (fromPeriod !== null && !PERIOD.test(fromPeriod))
     || (toPeriod !== null && !PERIOD.test(toPeriod))
+    || filterValues.some((value) => value !== null && !FILTER_VALUE.test(value))
     || (
       fromPeriod !== null
       && toPeriod !== null
       && fromPeriod > toPeriod
     )
   ) invalidRequest();
-  return { connectionId, providerSourceId, fromPeriod, toPeriod };
+  return { connectionId, providerSourceId, fromPeriod, toPeriod,
+    billingAccount, subAccount, provider, publisher, chargeCategory };
 }
 
 const GOVERNED_TAG_TAXONOMY = Object.freeze({ policyId: "sutra-focus-baseline-v1", governedKeys: Object.freeze([{ key: "team", label: "Team" }, { key: "environment", label: "Environment" }, { key: "cost-center", label: "Cost center" }, { key: "business-unit", label: "Business unit" }, { key: "owner", label: "Owner" }, { key: "application", label: "Application" }]), providerTagPrefixes: Object.freeze({ AWS: Object.freeze(["aws:"]), AZURE: Object.freeze(["microsoft:"]), GCP: Object.freeze(["goog-"]) }) });
@@ -302,7 +321,9 @@ export async function GET(request: Request): Promise<Response> {
     for (const partition of selectedPartitions) {
       datasets.push(await repository.loadActivePartition(owner, partition));
     }
-    const report = buildFinopsFocusDashboard({ scope: owner, datasets, tagTaxonomy: GOVERNED_TAG_TAXONOMY });
+    const report = buildFinopsFocusDashboard({ scope: owner, datasets, tagTaxonomy: GOVERNED_TAG_TAXONOMY,
+      filters: { billingAccount: query.billingAccount, subAccount: query.subAccount, provider: query.provider,
+        publisher: query.publisher, chargeCategory: query.chargeCategory } });
     if (!report.ok) {
       return jsonResponse({
         connectionId: query.connectionId,
@@ -319,7 +340,7 @@ export async function GET(request: Request): Promise<Response> {
       ? "partial"
       : freshness.state !== "complete"
         ? freshness.state
-        : report.quality.acceptedLineCount === 0
+        : report.quality.selectedLineCount === 0
           ? "empty"
           : "complete";
     return jsonResponse({
