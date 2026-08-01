@@ -182,6 +182,19 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Integrate Graviton and Health Events, then remove provider activation gaps |
 
+### 2026-08-01 — Graviton Savings cross-service vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-05 / local G1–G6 candidate slice |
+| Maturity transition | ADV-05 `ENGINE_ONLY` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 20 partial pipelines, 1 engine-only, and 2 absent |
+| Delivery | EC2/Auto Scaling, RDS/Aurora, OpenSearch and ElastiCache collection/evidence contracts; immutable COMPLETE-only accepted history; authenticated same-tenant API; existing Arm usage; service summaries; modeled-potential versus measured-realized monthly trends; blockers, provenance, resource drilldown and formula-safe CSV |
+| Evidence safety | Managed-service opportunities require explicit inventory/pricing authority plus compatibility, CUR2, pricing and metadata; family-name inference and fabricated Compute Optimizer estimates are rejected |
+| Focused verification | Engine plus vertical 17 passed; full TypeScript, targeted ESLint and diff validation passed before shared integration |
+| Remaining gates | Deploy the production collector/materializer; bind live OpenSearch/ElastiCache compatibility, pricing and workload/license attestations; confirm Compute Optimizer provider coverage; complete multi-account/two-tenant/provider/visual/live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Complete Health Events, Azure CID and GCP CID, then close every activation and acceptance gap |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

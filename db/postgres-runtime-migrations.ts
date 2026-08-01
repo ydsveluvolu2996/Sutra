@@ -94,6 +94,7 @@ import postgresFinopsSustainabilityCarbonSql from "../postgres/migrations/0094_f
 import postgresFinopsAmazonConnectCostInsightsSql from "../postgres/migrations/0095_finops_amazon_connect_cost_insights.sql?raw";
 import postgresFinopsComputeOptimizerExportHistorySql from "../postgres/migrations/0096_finops_compute_optimizer_export_history.sql?raw";
 import postgresFinopsExtendedSupportProjectionSql from "../postgres/migrations/0097_finops_extended_support_projection.sql?raw";
+import postgresFinopsGravitonSavingsSql from "../postgres/migrations/0098_finops_graviton_savings.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -192,6 +193,7 @@ const migrations = [
   { id: "0095_finops_amazon_connect_cost_insights", source: postgresFinopsAmazonConnectCostInsightsSql },
   { id: "0096_finops_compute_optimizer_export_history", source: postgresFinopsComputeOptimizerExportHistorySql },
   { id: "0097_finops_extended_support_projection", source: postgresFinopsExtendedSupportProjectionSql },
+  { id: "0098_finops_graviton_savings", source: postgresFinopsGravitonSavingsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

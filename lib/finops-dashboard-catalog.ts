@@ -147,7 +147,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Graviton Savings",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Graviton usage and compatible migration opportunities across EC2, RDS, OpenSearch, and ElastiCache.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/graviton-savings-dashboard.html`,

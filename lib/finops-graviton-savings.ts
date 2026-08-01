@@ -55,6 +55,10 @@ export const GRAVITON_SAVINGS_READ_OPERATIONS = Object.freeze([
   "autoscaling:DescribeAutoScalingGroups",
   "rds:DescribeDBInstances",
   "rds:DescribeDBClusters",
+  "opensearch:ListDomainNames",
+  "opensearch:DescribeDomain",
+  "elasticache:DescribeCacheClusters",
+  "elasticache:DescribeReplicationGroups",
   "pricing:ListPriceLists",
   "pricing:GetPriceListFileUrl",
 ] as const);
@@ -62,7 +66,10 @@ export const GRAVITON_SAVINGS_READ_OPERATIONS = Object.freeze([
 export type GravitonResourceType =
   | "EC2_INSTANCE"
   | "AUTO_SCALING_GROUP"
-  | "RDS_DB_INSTANCE";
+  | "RDS_DB_INSTANCE"
+  | "AURORA_DB_INSTANCE"
+  | "OPENSEARCH_DOMAIN"
+  | "ELASTICACHE_REPLICATION_GROUP";
 export type GravitonCompatibilityDimension =
   | "ARCHITECTURE"
   | "OS_AMI"
@@ -127,6 +134,10 @@ interface ScopedResource {
 
 export interface GravitonComputeOptimizerRecommendation extends ScopedResource {
   readonly recommendationId: string;
+  /** Optional only for backward-compatible Compute Optimizer captures. */
+  readonly recommendationAuthority?:
+    | "AWS_COMPUTE_OPTIMIZER"
+    | "AWS_SERVICE_INVENTORY_PRICING";
   readonly refreshedAt: string;
   readonly lookbackPeriodDays: number;
   readonly currentConfiguration: string;
@@ -303,6 +314,9 @@ export interface GravitonRealizedSavings {
 
 export interface GravitonOpportunity extends ScopedResource {
   readonly recommendationId: string;
+  readonly recommendationAuthority:
+    | "AWS_COMPUTE_OPTIMIZER"
+    | "AWS_SERVICE_INVENTORY_PRICING";
   readonly state: GravitonOpportunityState;
   readonly currentConfiguration: string;
   readonly targetConfiguration: string;
@@ -324,6 +338,21 @@ export interface GravitonPeriodTotal {
   readonly amountMicros: string;
 }
 
+export interface GravitonUsagePeriod {
+  readonly periodStartAt: string;
+  readonly periodEndAt: string;
+  readonly accountId: string;
+  readonly region: string;
+  readonly resourceType: GravitonResourceType;
+  readonly configuration: string;
+  readonly architecture: "X86_64" | "ARM64";
+  readonly costBasis: GravitonCur2CostRecord["costBasis"];
+  readonly currency: string;
+  readonly usageQuantityMicros: string;
+  readonly costMicros: string;
+  readonly resourceCount: number;
+}
+
 export interface GravitonSavingsSnapshot {
   readonly schemaVersion: "sutra.graviton-savings.snapshot.v1";
   readonly scope: FinopsSourceScope;
@@ -339,6 +368,8 @@ export interface GravitonSavingsSnapshot {
     readonly modeledPotentialByPeriod: readonly GravitonPeriodTotal[];
     readonly measuredRealizedByPeriod: readonly GravitonPeriodTotal[];
   };
+  /** Canonical CUR2 usage only; ARM64 rows quantify existing Graviton usage. */
+  readonly currentUsage: readonly GravitonUsagePeriod[];
   readonly opportunities: readonly GravitonOpportunity[];
 }
 
@@ -357,6 +388,9 @@ const RESOURCE_TYPES = new Set<GravitonResourceType>([
   "EC2_INSTANCE",
   "AUTO_SCALING_GROUP",
   "RDS_DB_INSTANCE",
+  "AURORA_DB_INSTANCE",
+  "OPENSEARCH_DOMAIN",
+  "ELASTICACHE_REPLICATION_GROUP",
 ]);
 const DIMENSIONS: readonly GravitonCompatibilityDimension[] = [
   "ARCHITECTURE",
@@ -617,6 +651,7 @@ function recommendation(
   boundary: GravitonTenantBoundary,
   completedAtMs: number,
 ): GravitonComputeOptimizerRecommendation {
+  const authoritySupplied = isRecord(value) && Object.hasOwn(value, "recommendationAuthority");
   const record = exactRecord(value, [
     "recommendationId", "accountId", "region", "resourceType", "resourceArn",
     "resourceId", "refreshedAt", "lookbackPeriodDays", "currentConfiguration",
@@ -625,6 +660,7 @@ function recommendation(
     "estimatedSavingsCurrency", "inventoryObservationId", "targetMetadataId",
     "compatibilityEvidenceIds", "baselineCostRecordId", "currentPriceId",
     "targetPriceId", "realizationId", "source",
+    ...(authoritySupplied ? ["recommendationAuthority"] : []),
   ]);
   const resource = scopedResource(record, boundary);
   const recommendationId = identifier(record.recommendationId);
@@ -650,17 +686,32 @@ function recommendation(
     0,
   );
   const source = evidenceReference(record.source, completedAtMs);
+  const computeOptimizerSource = source.operation.startsWith("compute-optimizer:Get");
+  const managedServiceAuthoritativeSource =
+    (resource.resourceType === "OPENSEARCH_DOMAIN"
+      && source.operation === "opensearch:DescribeDomain")
+    || (resource.resourceType === "ELASTICACHE_REPLICATION_GROUP"
+      && source.operation === "elasticache:DescribeReplicationGroups");
+  const recommendationAuthority = authoritySupplied
+    ? text(record.recommendationAuthority) as NonNullable<GravitonComputeOptimizerRecommendation["recommendationAuthority"]>
+    : "AWS_COMPUTE_OPTIMIZER";
   if (
     record.cpuVendorArchitecture !== "AWS_ARM64"
     || !new Set(["VERY_LOW", "LOW", "MEDIUM", "HIGH"]).has(migrationEffort)
     || (estimatedMonthlySavingsMicros === null) !== (estimatedSavingsCurrency === null)
     || (estimatedSavingsCurrency !== null && !CURRENCY.test(estimatedSavingsCurrency))
     || source.kind !== "AWS_API"
-    || !source.operation.startsWith("compute-optimizer:Get")
+    || (!computeOptimizerSource && !managedServiceAuthoritativeSource)
+    || (computeOptimizerSource && recommendationAuthority !== "AWS_COMPUTE_OPTIMIZER")
+    || (managedServiceAuthoritativeSource
+      && recommendationAuthority !== "AWS_SERVICE_INVENTORY_PRICING")
+    || (!computeOptimizerSource
+      && (estimatedMonthlySavingsMicros !== null || estimatedSavingsCurrency !== null))
   ) reject("INVALID_INPUT");
   return {
     ...resource,
     recommendationId,
+    recommendationAuthority,
     refreshedAt,
     lookbackPeriodDays,
     currentConfiguration,
@@ -1166,7 +1217,8 @@ function projectOpportunity(
         : hasReview
           ? "REVIEW_REQUIRED"
           : "BLOCKED";
-  const providerEstimate = latest.estimatedMonthlySavingsMicros === null
+  const providerEstimate = latest.recommendationAuthority !== "AWS_COMPUTE_OPTIMIZER"
+    || latest.estimatedMonthlySavingsMicros === null
     || latest.estimatedSavingsCurrency === null
     ? null
     : {
@@ -1206,6 +1258,7 @@ function projectOpportunity(
     resourceArn: latest.resourceArn,
     resourceId: latest.resourceId,
     recommendationId: latest.recommendationId,
+    recommendationAuthority: latest.recommendationAuthority ?? "AWS_COMPUTE_OPTIMIZER",
     state,
     currentConfiguration: latest.currentConfiguration,
     targetConfiguration: latest.targetConfiguration,
@@ -1238,6 +1291,36 @@ function periodTotals(
       const [periodStartAt, periodEndAt, currency] = key.split("|") as [string, string, string];
       return { periodStartAt, periodEndAt, currency, amountMicros: amount.toString() };
     });
+}
+
+function usagePeriods(costs: Iterable<GravitonCur2CostRecord>): readonly GravitonUsagePeriod[] {
+  const groups = new Map<string, {
+    usage: bigint; cost: bigint; resources: Set<string>; sample: GravitonCur2CostRecord;
+  }>();
+  for (const item of costs) {
+    const key = [item.periodStartAt, item.periodEndAt, item.accountId, item.region,
+      item.resourceType, item.configuration, item.architecture, item.costBasis,
+      item.currency].join("|");
+    const group = groups.get(key) ?? { usage: ZERO, cost: ZERO, resources: new Set<string>(), sample: item };
+    group.usage += BigInt(item.usageQuantityMicros);
+    group.cost += BigInt(item.costMicros);
+    group.resources.add(item.resourceArn);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, value]) => ({
+    periodStartAt: value.sample.periodStartAt,
+    periodEndAt: value.sample.periodEndAt,
+    accountId: value.sample.accountId,
+    region: value.sample.region,
+    resourceType: value.sample.resourceType,
+    configuration: value.sample.configuration,
+    architecture: value.sample.architecture,
+    costBasis: value.sample.costBasis,
+    currency: value.sample.currency,
+    usageQuantityMicros: value.usage.toString(),
+    costMicros: value.cost.toString(),
+    resourceCount: value.resources.size,
+  }));
 }
 
 function containsSensitiveKey(value: unknown): boolean {
@@ -1404,6 +1487,7 @@ export function buildGravitonSavingsSnapshot(
         }]
       )),
     },
+    currentUsage: usagePeriods(costMap.values()),
     opportunities,
   };
   const outputBytes = new TextEncoder().encode(JSON.stringify(snapshot)).byteLength;

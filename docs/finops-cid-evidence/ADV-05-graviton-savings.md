@@ -4,45 +4,70 @@ Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/graviton-savings-dashboard.html>
 
-Assessment revision: `17da4c5989b4`
+Current maturity: `PARTIAL_PIPELINE (local vertical)`
 
-Current maturity: `ENGINE_ONLY`
+## Official coverage
 
-## Official requirement and visual inventory
-
-The official dashboard covers current Graviton usage, realized savings and
-potential migration savings across EC2, RDS, OpenSearch and ElastiCache. It
-tracks multiple AWS Organizations/payers and provides dedicated service tabs,
-monthly coverage, account/instance-family/engine breakdowns, unit-cost trends,
-eligibility, resource-level opportunities, filters and export. It depends on
-Foundational CUR plus AWS Pricing and Inventory Data Collection modules.
-
-## Sutra implementation evidence
+The local model now covers existing Graviton usage and migration opportunities
+across EC2/Auto Scaling, RDS/Aurora, OpenSearch, and ElastiCache. It provides
+account, Region, service, eligibility, and currency filters; service summaries;
+monthly usage/potential/realized trends; workload drilldown; evidence lineage;
+and formula-safe CSV export.
 
 | Gate | Status | Evidence |
 |---|---|---|
-| G0 requirements | `VERIFIED` | Current AWS guide and usage inventory above, reviewed 2026-08-01. |
-| G1 source contract | `PARTIAL` | The engine requires explicit AWS_ARM64 Compute Optimizer evidence, canonical CUR2, versioned Price List data, inventory/instance metadata and affirmative architecture/OS/licensing/workload/service compatibility. Exact BigInt micros and tenant account/Region scope are enforced. OpenSearch and ElastiCache resource/source contracts are absent. |
-| G2 collector | `PARTIAL` | Compute Optimizer enrollment/export-job discovery exists but export objects and recommendations are not ingested; inventory, pricing, compatibility attestations and cross-service materialization are not joined into the engine capture. |
-| G3 persistence | `NOT_STARTED` | No complete Graviton accepted snapshot/history and active report head exists. Compute Optimizer discovery history is deliberately partial and cannot substitute for recommendation coverage. |
-| G4 API | `NOT_STARTED` | No authenticated Graviton report API verifies and serves accepted evidence. |
-| G5 visual UI | `NOT_STARTED` | No native current usage/realized/potential savings visual, service tabs, monthly coverage, eligibility/resource drilldown or safe export. |
-| G6 focused verification | `VERIFIED` | Exact revision `17da4c5989b4`: 10 engine tests pass with 0 failures/skips, covering potential/provider/realized separation, compatibility, blockers, period reconciliation, currency isolation, duplicates, tenant/credential rejection, bounds and no-recommendation configuration state. |
-| G7–G10 | `NOT_STARTED` | Exact-tree, provider/two-tenant reconciliation, reviewed release, immutable deployment and live acceptance remain. |
+| Source contract | `LOCAL_COMPLETE` | `lib/finops-graviton-savings.ts` recognizes all six concrete resource types and requires canonical CUR2, versioned pricing, inventory/metadata and five explicit compatibility dimensions. |
+| Collector/materializer contract | `LOCAL_COMPLETE` | `lib/finops-graviton-savings-job.ts` pins tenant accounts/Regions, four service families, read-only operations, bounds, deadline and no-inference policy. |
+| Persistence | `LOCAL_COMPLETE` | SQLite 0103, PostgreSQL 0098 and `db/finops-graviton-savings-repository.ts` provide content-addressed immutable history with a newer `COMPLETE`-only head. |
+| API | `LOCAL_COMPLETE` | Authenticated same-tenant `connection:read` API with bounded filters, freshness, accepted/latest lineage and honest configuration state. |
+| Native UI | `LOCAL_COMPLETE` | Existing ARM64 usage, four-service economics, monthly trends, evidence-class separation, blockers, drilldown and safe visible-row export. |
+| Focused verification | `LOCAL_COMPLETE` | Engine and vertical suites cover exact micros, service contracts, provider-estimate restrictions, missing compatibility, reconciliation, adversarial scope, immutable heads, API and SSR UI. |
+| Live provider/deployment | `OPEN` | No production collector adapter, scheduled materialization, provider reconciliation, reviewed release, image or live acceptance is claimed. |
 
-## Evidence-honesty limits
+## Evidence-honesty rules
 
-Sutra never infers Arm compatibility from a target family name. Provider
-estimated savings, Sutra potential savings and realized post-migration savings
-remain distinct. Missing compatibility or period-matched CUR/pricing evidence
-blocks a savings value instead of producing zero. Current engine coverage is
-EC2, Auto Scaling and RDS only, so it does not yet meet official OpenSearch and
-ElastiCache parity.
+- ARM64 CUR2 rows quantify existing Graviton usage; an instance-family suffix is
+  never interpreted as architecture.
+- EC2/Auto Scaling and RDS/Aurora can carry an AWS Compute Optimizer estimate
+  only when the recommendation source is the exact Compute Optimizer API.
+- OpenSearch and ElastiCache may enter the opportunity pipeline from exact
+  service inventory evidence, but that evidence cannot carry a fabricated
+  Compute Optimizer estimate.
+- All services require affirmative architecture, OS/managed-runtime, licensing,
+  workload and service-feature compatibility. Missing or review-required
+  evidence blocks modeled savings.
+- Modeled potential requires one period-matched public-on-demand CUR2 baseline,
+  current and target price-list records, and ARM64 target metadata. Exact BigInt
+  micro-unit reconciliation must succeed.
+- Provider estimate, modeled potential, and measured realized savings remain
+  separate. Missing evidence is unavailable, never zero.
+- Currency and billing periods never combine.
 
-Focused command:
+## New assets
 
-```text
-node --experimental-strip-types --test tests/finops-graviton-savings.test.ts
-```
+- `lib/finops-graviton-dashboard.ts`
+- `lib/finops-graviton-savings-job.ts`
+- `db/finops-graviton-savings-repository.ts`
+- `drizzle/0103_finops_graviton_savings.sql`
+- `postgres/migrations/0098_finops_graviton_savings.sql`
+- `app/api/v1/finops/graviton-savings/route.ts`
+- `app/costs/finops-graviton-savings-dashboard.tsx`
+- `tests/finops-graviton-savings-vertical.test.mjs`
 
-Result: **10 passed, 0 failed, 0 skipped**.
+## Remaining provider and activation gaps
+
+1. Register SQLite 0103, PostgreSQL 0098 and the deploy migrator entry.
+2. Wire the native component and catalog maturity.
+3. Deploy the signed cross-service collector and schedule materialization.
+4. Bind complete Compute Optimizer coverage where AWS publishes it, exact
+   OpenSearch/ElastiCache inventory, AWS Price List products, canonical CUR2,
+   service metadata and approved workload/license attestations.
+5. Confirm live feature/engine/version compatibility for Aurora, OpenSearch and
+   ElastiCache; managed-service inventory alone is not compatibility proof.
+6. Run two-tenant, multi-account/Region, pagination/throttling, history,
+   reconciliation, empty/partial and provider-correction acceptance.
+7. Complete reviewed release, immutable image deployment and live UI acceptance.
+
+Until these gates pass, the API reports
+`GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED`. This vertical is not locally
+verified or live.

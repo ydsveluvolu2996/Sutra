@@ -397,10 +397,65 @@ test("enforces deterministic history and response bounds", () => {
   );
 });
 
-test("returns configuration-required when no Compute Optimizer evidence exists", () => {
+test("returns configuration-required when no recommendation evidence exists", () => {
   const value = mutable(capture());
   value.recommendations = [];
   const result = buildGravitonSavingsSnapshot(value, boundary, NOW);
   assert.equal(result.state, "CONFIGURATION_REQUIRED");
   assert.equal(result.summary.resources, 0);
+});
+
+function managedServiceCapture(
+  resourceType: "OPENSEARCH_DOMAIN" | "ELASTICACHE_REPLICATION_GROUP",
+): Mutable<GravitonSavingsCapture> {
+  const value = mutable(capture());
+  const service = resourceType === "OPENSEARCH_DOMAIN" ? "es" : "elasticache";
+  const resourceId = resourceType === "OPENSEARCH_DOMAIN" ? "domain/search-prod" : "replicationgroup/cache-prod";
+  const resourceArn = `arn:aws:${service}:${REGION}:${MEMBER_ACCOUNT}:${resourceId}`;
+  for (const item of [
+    ...value.recommendations, ...value.inventory, ...value.compatibility,
+    ...value.costs, ...value.realizations,
+  ]) {
+    item.resourceType = resourceType;
+    item.resourceArn = resourceArn;
+    item.resourceId = resourceId;
+  }
+  for (const item of [...value.instanceMetadata, ...value.pricing]) {
+    item.resourceType = resourceType;
+  }
+  const recommendation = value.recommendations[0]!;
+  recommendation.recommendationAuthority = "AWS_SERVICE_INVENTORY_PRICING";
+  recommendation.source.operation = resourceType === "OPENSEARCH_DOMAIN"
+    ? "opensearch:DescribeDomain"
+    : "elasticache:DescribeReplicationGroups";
+  recommendation.estimatedMonthlySavingsMicros = null;
+  recommendation.estimatedSavingsCurrency = null;
+  return value;
+}
+
+test("supports OpenSearch and ElastiCache only with full compatibility and exact modeled economics", () => {
+  for (const resourceType of ["OPENSEARCH_DOMAIN", "ELASTICACHE_REPLICATION_GROUP"] as const) {
+    const result = buildGravitonSavingsSnapshot(managedServiceCapture(resourceType), boundary, NOW);
+    assert.equal(result.opportunities[0]!.resourceType, resourceType);
+    assert.equal(result.opportunities[0]!.state, "READY");
+    assert.equal(result.opportunities[0]!.providerEstimate, null);
+    assert.equal(result.opportunities[0]!.potentialSavings?.savings.amountMicros, "4000000");
+    assert.ok(result.currentUsage.every((item) => item.resourceType === resourceType));
+  }
+});
+
+test("rejects a fabricated Compute Optimizer estimate on managed-service inventory evidence", () => {
+  const value = managedServiceCapture("OPENSEARCH_DOMAIN");
+  value.recommendations[0]!.estimatedMonthlySavingsMicros = "1";
+  value.recommendations[0]!.estimatedSavingsCurrency = "USD";
+  assert.throws(
+    () => buildGravitonSavingsSnapshot(value, boundary, NOW),
+    (error: unknown) => error instanceof GravitonSavingsError && error.code === "INVALID_INPUT",
+  );
+  const missingAuthority = managedServiceCapture("ELASTICACHE_REPLICATION_GROUP");
+  delete missingAuthority.recommendations[0]!.recommendationAuthority;
+  assert.throws(
+    () => buildGravitonSavingsSnapshot(missingAuthority, boundary, NOW),
+    (error: unknown) => error instanceof GravitonSavingsError && error.code === "INVALID_INPUT",
+  );
 });
