@@ -886,7 +886,34 @@
 
 /* Trusted Advisor Organizational standard-check dashboard. */
 .taoWorkspace { min-width: 0; display: grid; gap: 14px; padding: 0 18px 18px; }
-.taoFilters { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)) auto; align-items: end; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8faf9; }
+.taoOfficialHeader { min-width: 0; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(260px, .5fr); gap: 16px; padding: 17px; border: 1px solid #99f6e4; border-radius: 14px; background: linear-gradient(135deg, #f0fdfa, #f8fafc); }
+.taoOfficialHeader h3 { margin: 4px 0 6px; font-size: 15px; }
+.taoOfficialHeader p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.55; }
+.taoOfficialHeader code { color: #0f766e; font-size: 8px; }
+.taoOfficialHeader dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin: 0; }
+.taoOfficialHeader dl div { min-width: 0; display: grid; align-content: center; gap: 3px; padding: 9px; border: 1px solid rgba(15, 118, 110, .16); border-radius: 9px; background: rgba(255, 255, 255, .8); }
+.taoOfficialHeader dt { color: var(--muted); font-size: 7px; font-weight: 850; text-transform: uppercase; }
+.taoOfficialHeader dd { margin: 0; color: #0f766e; font-size: 15px; font-weight: 850; }
+.taoSheetNav { display: flex; gap: 7px; overflow-x: auto; padding: 2px 2px 7px; }
+.taoSheetNav button { min-width: 172px; display: grid; gap: 4px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: white; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.taoSheetNav button[aria-current="page"] { border-color: #0f766e; box-shadow: 0 0 0 2px rgba(15, 118, 110, .12); background: #f0fdfa; }
+.taoSheetNav button[data-coverage="PROVIDER_SOURCE_REQUIRED"] { border-style: dashed; background: #fffbeb; }
+.taoSheetNav strong { font-size: 9.5px; }
+.taoSheetNav small { color: var(--muted); font-size: 7.5px; line-height: 1.4; }
+.taoSheetEvidence { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr); gap: 15px; padding: 14px 16px; border: 1px solid var(--line); border-left: 4px solid #0f766e; border-radius: 11px; background: white; }
+.taoSheetEvidence[data-coverage="PROVIDER_SOURCE_REQUIRED"] { border-left-color: #d97706; background: #fffbeb; }
+.taoSheetEvidence h3 { margin: 3px 0 4px; font-size: 13px; }
+.taoSheetEvidence p { margin: 0; color: var(--muted); font-size: 8.5px; line-height: 1.5; }
+.taoSheetEvidence dl { display: grid; gap: 5px; margin: 0; }
+.taoSheetEvidence dl div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 8px; }
+.taoSheetEvidence dt { color: var(--muted); font-size: 7.5px; text-transform: uppercase; }
+.taoSheetEvidence dd { margin: 0; font-size: 8px; font-weight: 750; }
+.taoProviderGap { padding: 18px; border: 1px dashed #d97706; border-radius: 12px; background: #fffbeb; color: #78350f; }
+.taoProviderGap strong { font-size: 11px; }
+.taoProviderGap p { margin: 5px 0 0; font-size: 9px; line-height: 1.55; }
+.taoNativeEvidence { min-width: 0; display: grid; gap: 14px; }
+.taoNativeEvidence[hidden] { display: none; }
+.taoFilters { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)) auto; align-items: end; gap: 8px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8faf9; }
 .taoFilters label { min-width: 0; display: grid; gap: 4px; color: var(--muted); font-size: 8px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
 .taoFilters select { min-width: 0; min-height: 38px; padding: 0 30px 0 9px; border: 1px solid var(--line-dark); border-radius: 9px; background: white; color: var(--ink); font: inherit; font-size: 10px; font-weight: 750; text-transform: none; }
 .taoFilters :global(.button) { min-height: 38px; }
@@ -895,6 +922,18 @@
 .taoKpis span { color: #0f766e; font-size: 8px; font-weight: 850; letter-spacing: .055em; text-transform: uppercase; }
 .taoKpis strong { overflow-wrap: anywhere; font-size: 17px; letter-spacing: -.025em; }
 .taoKpis small { color: var(--muted); font-size: 8.5px; line-height: 1.4; }
+.taoInsightGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.taoHorizontalBars { display: grid; gap: 8px; }
+.taoHorizontalBars > div { display: grid; grid-template-columns: minmax(78px, .7fr) minmax(80px, 1fr) auto; align-items: center; gap: 7px; }
+.taoHorizontalBars span { overflow: hidden; color: var(--muted); font-size: 7.5px; font-weight: 800; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.taoHorizontalBars i { height: 7px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.taoHorizontalBars b { height: 100%; display: block; border-radius: inherit; background: #0f766e; }
+.taoHorizontalBars b[data-status="error"] { background: #dc2626; }
+.taoHorizontalBars b[data-status="warning"] { background: #d97706; }
+.taoHorizontalBars b[data-status="ok"] { background: #059669; }
+.taoHorizontalBars strong { font-size: 8px; font-variant-numeric: tabular-nums; }
+.taoHorizontalBars small { grid-column: 2 / -1; margin-top: -5px; color: var(--muted); font-size: 7px; }
+.taoHorizontalBars p { margin: 18px 0; color: var(--muted); font-size: 9px; }
 .taoSplitGrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); gap: 11px; }
 .taoPanel { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: white; }
 .taoPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
@@ -939,17 +978,19 @@
 .taoActivationNote { padding: 13px 15px; border: 1px solid #fde68a; border-radius: 11px; background: #fffbeb; color: #78350f; }
 .taoActivationNote strong { font-size: 10px; }
 .taoActivationNote p { margin: 4px 0 0; font-size: 9px; line-height: 1.5; }
-.taoFilters select:focus-visible, .taoFilters button:focus-visible, .taoAccountList:focus-visible, .taoAccountList button:focus-visible, .taoCheckGrid button:focus-visible, .taoTableWrap:focus-visible, .taoTableWrap summary:focus-visible { border-radius: 7px; outline: 3px solid rgba(15, 118, 110, .25); outline-offset: 2px; }
+.taoSheetNav button:focus-visible, .taoFilters select:focus-visible, .taoFilters button:focus-visible, .taoAccountList:focus-visible, .taoAccountList button:focus-visible, .taoCheckGrid button:focus-visible, .taoTableWrap:focus-visible, .taoTableWrap summary:focus-visible { border-radius: 7px; outline: 3px solid rgba(15, 118, 110, .25); outline-offset: 2px; }
 
 @media screen and (max-width: 1120px) {
   .taoFilters { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .taoOfficialHeader, .taoSheetEvidence { grid-template-columns: 1fr; }
   .taoKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .taoSplitGrid { grid-template-columns: 1fr; }
+  .taoSplitGrid, .taoInsightGrid { grid-template-columns: 1fr; }
   .taoCheckGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media screen and (max-width: 760px) {
   .taoWorkspace { padding: 0 12px 14px; }
+  .taoOfficialHeader dl { grid-template-columns: 1fr; }
   .taoFilters, .taoKpis, .taoCheckGrid { grid-template-columns: 1fr; }
   .taoFilters select, .taoFilters :global(.button) { width: 100%; min-height: 44px; font-size: 16px; }
   .taoPanel { padding: 14px 11px; }

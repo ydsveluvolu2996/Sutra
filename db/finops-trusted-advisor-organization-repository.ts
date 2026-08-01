@@ -135,6 +135,8 @@ export interface TrustedAdvisorOrganizationDashboardFilters {
   readonly checkId: string | null;
   readonly status: "ok" | "warning" | "error" | null;
   readonly region: string | null;
+  readonly category: string | null;
+  readonly suppressed: boolean | null;
 }
 
 export interface TrustedAdvisorOrganizationDashboardAccount {
@@ -163,6 +165,7 @@ export interface TrustedAdvisorOrganizationDashboardResource {
   readonly accountId: string;
   readonly checkId: string;
   readonly checkName: string;
+  readonly checkCategory: string;
   readonly resourceId: string;
   readonly region: string | null;
   readonly status: "ok" | "warning" | "error";
@@ -269,6 +272,7 @@ interface DashboardResourceRow {
   account_id: string;
   check_id: string;
   check_name: string;
+  check_category: string;
   resource_id: string;
   region: string | null;
   status: "ok" | "warning" | "error";
@@ -943,6 +947,8 @@ export class TrustedAdvisorOrganizationRepository {
       || (filters.checkId !== null && !IDENTIFIER.test(filters.checkId))
       || (filters.status !== null && !new Set(["ok", "warning", "error"]).has(filters.status))
       || (filters.region !== null && !/^[a-z0-9-]{1,128}$/u.test(filters.region))
+      || (filters.category !== null && !/^[a-z][a-z0-9_]{0,63}$/u.test(filters.category))
+      || (filters.suppressed !== null && typeof filters.suppressed !== "boolean")
     ) reject();
     const database = await this.assertLiveScope(scope);
     const snapshotRow = await database.prepare(
@@ -990,6 +996,18 @@ export class TrustedAdvisorOrganizationRepository {
       checkClauses.push("c.status = ?");
       checkBindings.push(filters.status);
     }
+    if (filters.category !== null) {
+      checkClauses.push("c.category = ?");
+      checkBindings.push(filters.category);
+    }
+    if (filters.suppressed !== null) {
+      checkClauses.push(`EXISTS (
+        SELECT 1 FROM finops_ta_resource_snapshots rf
+        WHERE rf.account_snapshot_id = c.account_snapshot_id
+          AND rf.check_id = c.check_id AND rf.suppressed = ?
+      )`);
+      checkBindings.push(filters.suppressed ? 1 : 0);
+    }
     checkBindings.push(MAX_DASHBOARD_CHECKS + 1);
     const checkWhere = checkClauses.length === 0 ? "" : ` AND ${checkClauses.join(" AND ")}`;
     const checkRows = await database.prepare(
@@ -1030,10 +1048,19 @@ export class TrustedAdvisorOrganizationRepository {
       resourceClauses.push("r.region = ?");
       resourceBindings.push(filters.region);
     }
+    if (filters.category !== null) {
+      resourceClauses.push("c.category = ?");
+      resourceBindings.push(filters.category);
+    }
+    if (filters.suppressed !== null) {
+      resourceClauses.push("r.suppressed = ?");
+      resourceBindings.push(filters.suppressed ? 1 : 0);
+    }
     resourceBindings.push(MAX_DASHBOARD_RESOURCES + 1);
     const resourceWhere = resourceClauses.length === 0 ? "" : ` AND ${resourceClauses.join(" AND ")}`;
     const resourceRows = await database.prepare(
       `SELECT r.resource_key, a.account_id, r.check_id, c.name AS check_name,
+              c.category AS check_category,
               r.resource_id, r.region, r.status, r.suppressed,
               r.metadata_json, r.metadata_sha256
        FROM finops_ta_account_snapshots a
@@ -1084,6 +1111,7 @@ export class TrustedAdvisorOrganizationRepository {
         accountId: row.account_id,
         checkId: row.check_id,
         checkName: row.check_name,
+        checkCategory: row.check_category,
         resourceId: row.resource_id,
         region: row.region,
         status: row.status,

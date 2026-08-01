@@ -236,6 +236,8 @@ test("active dashboard reads bounded standard-check account, check, resource, an
       checkId: "check-1",
       status: "warning",
       region: "us-east-1",
+      category: "cost_optimizing",
+      suppressed: false,
     });
     assert.equal(dashboard?.snapshot.generationId, generation.generationId);
     assert.equal(dashboard?.snapshot.status, "complete");
@@ -249,9 +251,10 @@ test("active dashboard reads bounded standard-check account, check, resource, an
     assert.deepEqual(dashboard?.resources.map((resource) => ({
       accountId: resource.accountId,
       checkId: resource.checkId,
+      checkCategory: resource.checkCategory,
       region: resource.region,
       status: resource.status,
-    })), [{ accountId: ACCOUNT_A, checkId: "check-1", region: "us-east-1", status: "warning" }]);
+    })), [{ accountId: ACCOUNT_A, checkId: "check-1", checkCategory: "cost_optimizing", region: "us-east-1", status: "warning" }]);
     assert.equal(dashboard?.resources[0]?.metadataJson, JSON.stringify({ service: "ec2", reason: "idle" }));
     assert.deepEqual(dashboard?.history.map((entry) => entry.generationId), [generation.generationId]);
     assert.equal(await repository.getActiveDashboard(SCOPE_B, {
@@ -259,12 +262,16 @@ test("active dashboard reads bounded standard-check account, check, resource, an
       checkId: null,
       status: null,
       region: null,
+      category: null,
+      suppressed: null,
     }), null);
     await assert.rejects(repository.getActiveDashboard(SCOPE_A, {
       accountId: "not-an-account",
       checkId: null,
       status: null,
       region: null,
+      category: null,
+      suppressed: null,
     }), expectCode("INVALID_INPUT"));
   });
 });

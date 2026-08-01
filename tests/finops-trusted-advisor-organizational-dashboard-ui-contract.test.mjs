@@ -27,8 +27,8 @@ test("TAO catalog entry is wired to its authenticated same-tenant standard-check
   assert.match(repository, /WHERE h\.org_id = \? AND h\.customer_id = \? AND h\.anchor_connection_id = \?/u);
 });
 
-test("TAO API accepts only bounded filters and never reads or substitutes Priority recommendations", () => {
-  assert.match(route, /"connectionId", "accountId", "checkId", "status", "region"/u);
+test("TAO API accepts only bounded official controls and never reads or substitutes Priority recommendations", () => {
+  assert.match(route, /"connectionId", "accountId", "checkId", "status", "region", "category", "suppressed"/u);
   assert.match(route, /parameters\.getAll\(key\)\.length > 1/u);
   assert.match(route, /AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS/u);
   assert.match(route, /Priority recommendations are supplemental and are never substituted/u);
@@ -50,10 +50,15 @@ test("TAO UI exposes honest states, activation gap, filters, and drilldowns", ()
     "Check drilldown",
     "Resource drilldown",
     "Trusted Advisor organization filters",
+    "Official AWS TAO definition coverage",
+    "Official Trusted Advisor dashboard sheets",
+    "Evidence-backed Trusted Advisor visual summaries",
   ]) assert.match(component, new RegExp(label, "u"), label);
   assert.match(component, /signed server-owned AWS Organizations taxonomy|signed Organizations adapter/iu);
   assert.match(component, /browser-provided account list/iu);
   assert.match(component, /Priority is never substituted|Priority recommendations are supplemental only/iu);
+  assert.match(component, /IsSuppressed/u);
+  assert.match(component, /PROVIDER_SOURCE_REQUIRED/u);
   assert.match(component, /aria-pressed=\{filters\.accountId === account\.accountId\}/u);
   assert.match(component, /aria-pressed=\{filters\.checkId === check\.checkId\}/u);
   assert.match(component, /tabIndex=\{0\} role="region"/u);
@@ -62,11 +67,11 @@ test("TAO UI exposes honest states, activation gap, filters, and drilldowns", ()
 
 test("TAO layout is responsive and has visible keyboard focus", () => {
   for (const selector of [
-    ".taoWorkspace", ".taoFilters", ".taoKpis", ".taoSplitGrid", ".taoCheckGrid", ".taoTableWrap", ".taoActivationNote",
+    ".taoWorkspace", ".taoOfficialHeader", ".taoSheetNav", ".taoSheetEvidence", ".taoFilters", ".taoKpis", ".taoInsightGrid", ".taoSplitGrid", ".taoCheckGrid", ".taoTableWrap", ".taoActivationNote",
   ]) assert.match(css, new RegExp(selector.replace(".", "\\."), "u"), selector);
   assert.match(css, /\.taoFilters select:focus-visible/u);
   assert.match(css, /\.taoCheckGrid button:focus-visible/u);
-  assert.match(css, /@media screen and \(max-width: 1120px\)[\s\S]*\.taoSplitGrid \{ grid-template-columns: 1fr;/u);
+  assert.match(css, /@media screen and \(max-width: 1120px\)[\s\S]*\.taoSplitGrid, \.taoInsightGrid \{ grid-template-columns: 1fr;/u);
   assert.match(css, /@media screen and \(max-width: 760px\)[\s\S]*\.taoFilters, \.taoKpis, \.taoCheckGrid \{ grid-template-columns: 1fr;/u);
   assert.match(css, /min-height: 44px/u);
 });
@@ -81,16 +86,18 @@ test("TAO report renders accepted account, check, resource, history, and evidenc
   });
   try {
     const taoModule = await vite.ssrLoadModule("/app/costs/finops-trusted-advisor-organizational-dashboard.tsx");
+    const definitionModule = await vite.ssrLoadModule("/lib/finops-trusted-advisor-organizational-official-definition.ts");
     const report = {
       schema: "sutra.finops-trusted-advisor-organizational-dashboard.v1",
       connectionId: `conn_${"a".repeat(32)}`,
       source: "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS",
       sourceState: "complete",
+      officialDefinition: definitionModule.TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION,
       freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", collectedAt: "2026-08-01T01:00:00.000Z", ageHours: 1, staleAfterHours: 24 },
       coverage: { expectedAccounts: 1, acceptedAccounts: 1, rejectedAccounts: 0, acceptedChecks: 1, acceptedResources: 1, rejectedRecords: 0 },
       accounts: [{ accountId: "111122223333", collectedAtIso: "2026-08-01T01:00:00.000Z", dataThroughAtIso: "2026-08-01T00:00:00.000Z", checkCount: 1, resourceCount: 1, rejectedRecordCount: 0 }],
       checks: [{ checkId: "check-1", name: "Idle EC2 instances", category: "cost_optimizing", status: "warning", accountCount: 1, processedCount: 1, flaggedCount: 1, ignoredCount: 0, suppressedCount: 0 }],
-      resources: [{ resourceKey: "a".repeat(64), accountId: "111122223333", checkId: "check-1", checkName: "Idle EC2 instances", resourceId: "i-render", region: "us-east-1", status: "warning", suppressed: false, metadata: [{ name: "reason", value: "idle" }], metadataSha256: "b".repeat(64) }],
+      resources: [{ resourceKey: "a".repeat(64), accountId: "111122223333", checkId: "check-1", checkName: "Idle EC2 instances", checkCategory: "cost_optimizing", resourceId: "i-render", region: "us-east-1", status: "warning", suppressed: false, metadata: [{ name: "reason", value: "idle" }], metadataSha256: "b".repeat(64) }],
       history: [{ generationId: `tao_${"c".repeat(64)}`, status: "complete", collectedAtIso: "2026-08-01T01:00:00.000Z", expectedAccountCount: 1, acceptedAccountCount: 1, rejectedAccountCount: 0, checkCount: 1, resourceCount: 1 }],
       evidence: { generationId: `tao_${"c".repeat(64)}`, manifestId: `tam_${"d".repeat(64)}`, contentSha256: "e".repeat(64) },
       activation: { available: false, reason: "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED" },
@@ -98,7 +105,7 @@ test("TAO report renders accepted account, check, resource, history, and evidenc
     };
     const markup = renderToStaticMarkup(createElement(
       taoModule.FinopsTrustedAdvisorOrganizationalReportView,
-      { report, filters: { accountId: "", checkId: "", status: "", region: "" }, onFiltersChange: () => undefined },
+      { report, filters: { accountId: "", checkId: "", status: "", region: "", category: "", suppressed: "" }, onFiltersChange: () => undefined },
     ));
     assert.match(markup, /111122223333/u);
     assert.match(markup, /Idle EC2 instances/u);
@@ -106,6 +113,10 @@ test("TAO report renders accepted account, check, resource, history, and evidenc
     assert.match(markup, /us-east-1/u);
     assert.match(markup, /reason/u);
     assert.match(markup, /server-owned/u);
+    assert.match(markup, /TA Priority/u);
+    assert.match(markup, /Well-Architected Reviews/u);
+    assert.match(markup, /147 upstream visuals mapped/u);
+    assert.match(markup, /IsSuppressed/u);
     assert.doesNotMatch(markup, /fixture|sample|placeholder/iu);
   } finally {
     await vite.close();

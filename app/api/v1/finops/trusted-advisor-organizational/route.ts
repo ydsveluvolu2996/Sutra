@@ -1,6 +1,7 @@
 import { TrustedAdvisorOrganizationRepository } from "../../../../../db/finops-trusted-advisor-organization-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION } from "../../../../../lib/finops-trusted-advisor-organizational-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +10,10 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^[0-9]{12}$/u;
 const CHECK_ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const REGION = /^[a-z0-9-]{1,128}$/u;
+const CATEGORY = new Set(["security", "cost_optimizing", "fault_tolerance", "performance", "service_limits"]);
 const STALE_AFTER_HOURS = 24;
 const ALLOWED_PARAMETERS = new Set([
-  "connectionId", "accountId", "checkId", "status", "region",
+  "connectionId", "accountId", "checkId", "status", "region", "category", "suppressed",
 ]);
 
 interface Query {
@@ -20,6 +22,8 @@ interface Query {
   readonly checkId: string | null;
   readonly status: "ok" | "warning" | "error" | null;
   readonly region: string | null;
+  readonly category: string | null;
+  readonly suppressed: boolean | null;
 }
 
 function invalidRequest(): never {
@@ -49,14 +53,21 @@ function parseQuery(request: Request): Query {
   const checkId = parameters.get("checkId");
   const status = parameters.get("status");
   const region = parameters.get("region");
+  const category = parameters.get("category");
+  const suppressedParameter = parameters.get("suppressed");
   if (
     !CONNECTION_ID.test(connectionId)
     || (accountId !== null && !ACCOUNT_ID.test(accountId))
     || (checkId !== null && !CHECK_ID.test(checkId))
     || (status !== null && status !== "ok" && status !== "warning" && status !== "error")
     || (region !== null && !REGION.test(region))
+    || (category !== null && !CATEGORY.has(category))
+    || (suppressedParameter !== null && suppressedParameter !== "true" && suppressedParameter !== "false")
   ) invalidRequest();
-  return { connectionId, accountId, checkId, status, region };
+  return {
+    connectionId, accountId, checkId, status, region, category,
+    suppressed: suppressedParameter === null ? null : suppressedParameter === "true",
+  };
 }
 
 function safeMetadata(value: string): readonly { readonly name: string; readonly value: string }[] {
@@ -109,6 +120,8 @@ export async function GET(request: Request): Promise<Response> {
         checkId: query.checkId,
         status: query.status,
         region: query.region,
+        category: query.category,
+        suppressed: query.suppressed,
       }),
     ]);
     if (dashboard === null) {
@@ -122,6 +135,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId: connection.id,
         source: "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS",
         sourceState,
+        officialDefinition: TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION,
         dashboard: null,
         latestManifest: latestManifest === null ? null : {
           manifestId: latestManifest.manifestId,
@@ -138,7 +152,8 @@ export async function GET(request: Request): Promise<Response> {
 
     const freshnessAgeHours = ageHours(dashboard.snapshot.dataThroughAtIso);
     const aFilterIsActive = query.accountId !== null || query.checkId !== null
-      || query.status !== null || query.region !== null;
+      || query.status !== null || query.region !== null || query.category !== null
+      || query.suppressed !== null;
     const newerManifestIncomplete = latestManifest !== null
       && latestManifest.manifestId !== dashboard.snapshot.manifestId
       && latestManifest.status !== "complete";
@@ -156,6 +171,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       source: "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS",
       sourceState,
+      officialDefinition: TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION,
       freshness: {
         dataThroughAt: dashboard.snapshot.dataThroughAtIso,
         collectedAt: dashboard.snapshot.collectedAtIso,
@@ -199,6 +215,7 @@ export async function GET(request: Request): Promise<Response> {
       limitations: [
         "Standard checks are collected independently for each configured account.",
         "Trusted Advisor Priority recommendations are supplemental and are never substituted for standard checks.",
+        "The official TA Priority and Well-Architected sheets require separate authoritative provider datasets and remain visibly unavailable when those datasets are absent.",
         "Only the immutable accepted complete generation is rendered; incomplete generations never advance the active head.",
         "Account discovery activation remains unavailable until the signed server-owned AWS Organizations taxonomy adapter and durable orchestration handlers are registered.",
       ],

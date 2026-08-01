@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
 import {
+  TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION,
+  type TrustedAdvisorOrganizationalOfficialDefinition,
+} from "../../lib/finops-trusted-advisor-organizational-official-definition";
+import {
   FinopsCapabilityShell,
   type FinopsCapabilityEvidence,
   type FinopsCapabilityViewState,
@@ -17,6 +21,7 @@ interface TrustedAdvisorDashboardEnvelope {
   readonly connectionId: string;
   readonly source: "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS";
   readonly sourceState: SourceState;
+  readonly officialDefinition: TrustedAdvisorOrganizationalOfficialDefinition;
   readonly freshness?: {
     readonly dataThroughAt: string | null;
     readonly collectedAt: string;
@@ -36,6 +41,8 @@ interface TrustedAdvisorDashboardEnvelope {
     readonly checkId: string | null;
     readonly status: ResourceStatus | null;
     readonly region: string | null;
+    readonly category: string | null;
+    readonly suppressed: boolean | null;
   };
   readonly accounts?: readonly {
     readonly accountId: string;
@@ -63,6 +70,7 @@ interface TrustedAdvisorDashboardEnvelope {
     readonly accountId: string;
     readonly checkId: string;
     readonly checkName: string;
+    readonly checkCategory: string;
     readonly resourceId: string;
     readonly region: string | null;
     readonly status: ResourceStatus;
@@ -95,6 +103,8 @@ interface Filters {
   readonly checkId: string;
   readonly status: string;
   readonly region: string;
+  readonly category: string;
+  readonly suppressed: string;
 }
 
 type RequestState =
@@ -102,7 +112,9 @@ type RequestState =
   | { readonly status: "failed"; readonly connectionId: string; readonly message: string }
   | { readonly status: "loaded"; readonly envelope: TrustedAdvisorDashboardEnvelope };
 
-const EMPTY_FILTERS: Filters = { accountId: "", checkId: "", status: "", region: "" };
+const EMPTY_FILTERS: Filters = {
+  accountId: "", checkId: "", status: "", region: "", category: "", suppressed: "",
+};
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -132,6 +144,15 @@ function parseEnvelope(value: unknown, connectionId: string): TrustedAdvisorDash
     || value.schema !== "sutra.finops-trusted-advisor-organizational-dashboard.v1"
     || value.connectionId !== connectionId
     || value.source !== "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS"
+    || !isRecord(value.officialDefinition)
+    || value.officialDefinition.sourceCommit !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.sourceCommit
+    || value.officialDefinition.manifestSha256 !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.manifestSha256
+    || value.officialDefinition.definitionSha256 !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.definitionSha256
+    || !isRecord(value.officialDefinition.totals)
+    || value.officialDefinition.totals.sheets !== 11
+    || value.officialDefinition.totals.visuals !== 147
+    || !Array.isArray(value.officialDefinition.sheets)
+    || value.officialDefinition.sheets.length !== 11
     || typeof value.sourceState !== "string"
     || !new Set(["configuration_required", "waiting", "empty", "partial", "stale", "failed", "complete"])
       .has(value.sourceState)
@@ -161,6 +182,7 @@ function parseEnvelope(value: unknown, connectionId: string): TrustedAdvisorDash
     || !validArray(value.resources, (entry) =>
       typeof entry.resourceKey === "string" && typeof entry.accountId === "string"
       && typeof entry.checkId === "string" && typeof entry.checkName === "string"
+      && typeof entry.checkCategory === "string"
       && typeof entry.resourceId === "string" && (entry.region === null || typeof entry.region === "string")
       && typeof entry.status === "string" && ["ok", "warning", "error"].includes(entry.status)
       && typeof entry.suppressed === "boolean" && typeof entry.metadataSha256 === "string"
@@ -182,6 +204,8 @@ async function loadReport(connectionId: string, filters: Filters, signal: AbortS
   if (filters.checkId !== "") parameters.set("checkId", filters.checkId);
   if (filters.status !== "") parameters.set("status", filters.status);
   if (filters.region !== "") parameters.set("region", filters.region);
+  if (filters.category !== "") parameters.set("category", filters.category);
+  if (filters.suppressed !== "") parameters.set("suppressed", filters.suppressed);
   const response = await fetch(
     `/api/v1/finops/trusted-advisor-organizational?${parameters.toString()}`,
     { credentials: "same-origin", signal },
@@ -242,7 +266,7 @@ function statePresentation(
   if (sourceState === "empty") return {
     view: "empty",
     title: "No resources match the selected filters",
-    detail: "The accepted generation is complete, but the account, check, status, and region filters produced no matching resource rows.",
+    detail: "The accepted generation is complete, but the selected account, check, status, Region, category, or suppression filters produced no matching resource rows.",
   };
   if (sourceState === "partial") return {
     view: "partial",
@@ -282,6 +306,13 @@ function evidenceFor(envelope: TrustedAdvisorDashboardEnvelope | null): FinopsCa
   };
 }
 
+function officialCoverageLabel(value: string): string {
+  if (value === "NATIVE_STANDARD_CHECKS") return "Native standard checks";
+  if (value === "CONDITIONAL_STANDARD_CHECKS") return "Conditional evidence";
+  if (value === "PROVIDER_SOURCE_REQUIRED") return "Provider source required";
+  return "Definition evidence";
+}
+
 export function FinopsTrustedAdvisorOrganizationalReportView({
   report,
   filters,
@@ -291,6 +322,7 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
   readonly filters: Filters;
   readonly onFiltersChange: (filters: Filters) => void;
 }) {
+  const [activeSheetId, setActiveSheetId] = useState(report.officialDefinition.sheets[0]?.id ?? "");
   const accounts = report.accounts ?? [];
   const checks = report.checks ?? [];
   const resources = report.resources ?? [];
@@ -311,9 +343,83 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
     ...(filters.region === "" ? [] : [filters.region]),
   ])].sort();
   const maximumHistoryResources = Math.max(1, ...history.map((entry) => entry.resourceCount));
+  const activeSheet = report.officialDefinition.sheets.find((sheet) => sheet.id === activeSheetId)
+    ?? report.officialDefinition.sheets[0];
+  const categorySummary = [...checks.reduce((summary, check) => {
+    const current = summary.get(check.category) ?? { category: check.category, checks: 0, flagged: 0, processed: 0 };
+    current.checks += 1;
+    current.flagged += check.flaggedCount;
+    current.processed += check.processedCount;
+    summary.set(check.category, current);
+    return summary;
+  }, new Map<string, { category: string; checks: number; flagged: number; processed: number }>()).values()]
+    .sort((left, right) => right.flagged - left.flagged || left.category.localeCompare(right.category));
+  const statusSummary = (["error", "warning", "ok"] as const).map((status) => ({
+    status,
+    count: resources.filter((resource) => resource.status === status).length,
+  }));
+  const regionSummary = [...resources.reduce((summary, resource) => {
+    const region = resource.region ?? "Global";
+    summary.set(region, (summary.get(region) ?? 0) + 1);
+    return summary;
+  }, new Map<string, number>()).entries()]
+    .map(([region, count]) => ({ region, count }))
+    .sort((left, right) => right.count - left.count || left.region.localeCompare(right.region))
+    .slice(0, 12);
+  const maximumCategoryFlagged = Math.max(1, ...categorySummary.map((entry) => entry.flagged));
+  const maximumStatusCount = Math.max(1, ...statusSummary.map((entry) => entry.count));
+  const maximumRegionCount = Math.max(1, ...regionSummary.map((entry) => entry.count));
+
+  function selectOfficialSheet(sheetId: string, category: string | null): void {
+    setActiveSheetId(sheetId);
+    onFiltersChange({ ...filters, category: category ?? "", checkId: "" });
+  }
 
   return (
     <div className={styles.taoWorkspace}>
+      <section className={styles.taoOfficialHeader} aria-label="Official AWS TAO definition coverage">
+        <div>
+          <p className="eyebrow">AWS CID TAO {report.officialDefinition.version} · immutable definition</p>
+          <h3>{report.officialDefinition.totals.sheets} sheets · {report.officialDefinition.totals.visuals} upstream visuals mapped</h3>
+          <p>Definition <code>{report.officialDefinition.definitionSha256.slice(0, 12)}…</code> at commit <code>{report.officialDefinition.sourceCommit.slice(0, 12)}…</code>. Counts below describe AWS’s source dashboard; native results remain bounded to accepted Sutra evidence.</p>
+        </div>
+        <dl><div><dt>Controls</dt><dd>{report.officialDefinition.totals.parameterControls + report.officialDefinition.totals.filterControls}</dd></div><div><dt>Calculated fields</dt><dd>{report.officialDefinition.totals.calculatedFields}</dd></div><div><dt>Filter groups</dt><dd>{report.officialDefinition.totals.filterGroups}</dd></div></dl>
+      </section>
+
+      <nav className={styles.taoSheetNav} aria-label="Official Trusted Advisor dashboard sheets">
+        {report.officialDefinition.sheets.map((sheet) => (
+          <button
+            key={sheet.id}
+            aria-current={activeSheet?.id === sheet.id ? "page" : undefined}
+            data-coverage={sheet.coverage}
+            onClick={() => selectOfficialSheet(sheet.id, sheet.category)}
+            type="button"
+          >
+            <strong>{sheet.name}</strong>
+            <small>{sheet.visualCount} visual{sheet.visualCount === 1 ? "" : "s"} · {officialCoverageLabel(sheet.coverage)}</small>
+          </button>
+        ))}
+      </nav>
+
+      {activeSheet === undefined ? null : (
+        <section className={styles.taoSheetEvidence} data-coverage={activeSheet.coverage} aria-live="polite">
+          <div><p className="eyebrow">Selected official sheet</p><h3>{activeSheet.name}</h3><p>{activeSheet.evidenceNote}</p></div>
+          <dl>
+            <div><dt>Upstream visuals</dt><dd>{activeSheet.visualCount}</dd></div>
+            <div><dt>Types</dt><dd>{Object.entries(activeSheet.visualTypes).map(([name, count]) => `${count} ${name}`).join(" · ")}</dd></div>
+            <div><dt>Controls</dt><dd>{[...activeSheet.parameterControls, ...activeSheet.filterControls].join(" · ") || "None"}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      {activeSheet?.coverage === "PROVIDER_SOURCE_REQUIRED" ? (
+        <section className={styles.taoProviderGap} role="status">
+          <strong>{activeSheet.name} is not available from the active standard-check source</strong>
+          <p>{activeSheet.evidenceNote} No standard-check chart or resource is displayed as a substitute for this sheet.</p>
+        </section>
+      ) : null}
+
+      <div className={styles.taoNativeEvidence} hidden={activeSheet?.coverage === "PROVIDER_SOURCE_REQUIRED"}>
       <section className={styles.taoFilters} aria-label="Trusted Advisor organization filters">
         <label>Account<select value={filters.accountId} onChange={(event) => onFiltersChange({ ...filters, accountId: event.target.value })}>
           <option value="">All accepted accounts</option>
@@ -330,6 +436,13 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
           <option value="">All regions</option>
           {regionOptions.map((region) => <option key={region} value={region}>{region}</option>)}
         </select></label>
+        <label>Category<select value={filters.category} onChange={(event) => onFiltersChange({ ...filters, category: event.target.value, checkId: "" })}>
+          <option value="">All categories</option>
+          <option value="security">Security</option><option value="cost_optimizing">Cost optimization</option><option value="fault_tolerance">Fault tolerance</option><option value="performance">Performance</option><option value="service_limits">Service limits</option>
+        </select></label>
+        <label>IsSuppressed<select value={filters.suppressed} onChange={(event) => onFiltersChange({ ...filters, suppressed: event.target.value })}>
+          <option value="">All resources</option><option value="false">Not suppressed</option><option value="true">Suppressed</option>
+        </select></label>
         <button className="button button-secondary" onClick={() => onFiltersChange(EMPTY_FILTERS)} type="button">Clear filters</button>
       </section>
 
@@ -341,6 +454,21 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
           <article><span>Data through</span><strong>{report.freshness?.ageHours === null ? "Unknown" : `${report.freshness?.ageHours ?? 0}h ago`}</strong><small>{timestamp(report.freshness?.dataThroughAt)}</small></article>
         </section>
       )}
+
+      <section className={styles.taoInsightGrid} aria-label="Evidence-backed Trusted Advisor visual summaries">
+        <article className={styles.taoPanel}>
+          <header><div><p className="eyebrow">Category summary</p><h3>Flagged checks by pillar</h3></div><span>{categorySummary.length} categories</span></header>
+          <div className={styles.taoHorizontalBars}>{categorySummary.length === 0 ? <p>No category evidence is available.</p> : categorySummary.map((entry) => <div key={entry.category}><span>{entry.category.replaceAll("_", " ")}</span><i><b style={{ width: `${Math.max(2, Math.round((entry.flagged / maximumCategoryFlagged) * 100))}%` }} /></i><strong>{entry.flagged.toLocaleString()}</strong><small>{entry.checks} checks · {entry.processed.toLocaleString()} processed</small></div>)}</div>
+        </article>
+        <article className={styles.taoPanel}>
+          <header><div><p className="eyebrow">Resource status</p><h3>Accepted rows by status</h3></div><span>Bounded view</span></header>
+          <div className={styles.taoHorizontalBars}>{statusSummary.map((entry) => <div key={entry.status}><span>{entry.status}</span><i><b data-status={entry.status} style={{ width: `${Math.max(entry.count === 0 ? 0 : 2, Math.round((entry.count / maximumStatusCount) * 100))}%` }} /></i><strong>{entry.count.toLocaleString()}</strong></div>)}</div>
+        </article>
+        <article className={styles.taoPanel}>
+          <header><div><p className="eyebrow">Region distribution</p><h3>Flagged resources by Region</h3></div><span>Top 12</span></header>
+          <div className={styles.taoHorizontalBars}>{regionSummary.length === 0 ? <p>No regional resource evidence is available.</p> : regionSummary.map((entry) => <div key={entry.region}><span>{entry.region}</span><i><b style={{ width: `${Math.max(2, Math.round((entry.count / maximumRegionCount) * 100))}%` }} /></i><strong>{entry.count.toLocaleString()}</strong></div>)}</div>
+        </article>
+      </section>
 
       <section className={styles.taoSplitGrid}>
         <article className={styles.taoPanel}>
@@ -387,6 +515,7 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
           </table>
         </div>
       </section>
+      </div>
 
       <aside className={styles.taoActivationNote} role="note">
         <strong>Collection activation is intentionally server-owned</strong>
