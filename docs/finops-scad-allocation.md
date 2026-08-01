@@ -106,6 +106,35 @@ earlier periods. The CID prerequisites are more explicit that SCAD fields are
 not populated by a CUR backfill. See [enabling SCAD](https://docs.aws.amazon.com/cur/latest/userguide/enabling-split-cost-allocation-data.html)
 and the [CID SCAD prerequisites](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/scad-containers-dashboard-prerequisites.html).
 
+A complete correction can be `STALE` when it is collected or replayed after the
+48-hour freshness window. Freshness does not make immutable source evidence
+incomplete: that correction can atomically replace an older complete period,
+while the UI still reports the period as stale and a corrected delivery.
+
+## Runtime activation boundary
+
+`lib/finops-scad-cur2-runtime-adapter.ts` defines the production-facing boundary
+without pretending a provider is already active. Its input is a server-resolved
+tenant, export ARN, bucket/prefix and billing period. The provider can be backed
+by the AWS S3 SDK or Sutra's signed object broker, but browser input cannot
+select any of those values.
+
+The adapter verifies that the CUR2 generation equals the manifest SHA-256,
+enumerates the exact manifest objects, and pins key, ETag, version ID, SHA-256
+and byte size on every row read. Pagination tokens must be well formed, cannot
+repeat, are never stored, and are discarded after use. A duplicate generation
+is returned before data-object reads. Rows are accepted only after every page
+of their immutable object is exhausted; a failed object contributes no rows and
+the capture stays `PARTIAL`.
+
+Collection is bounded to 20,000 objects, 750,000 rows, 25,000 attempted
+requests, three attempts per request and 30 minutes. Stable failure codes cross
+the boundary; raw provider messages and credentials do not. The independent
+daily runtime binding uses tenant/window idempotency, a 31-minute durable lease,
+content-hashed completion receipts and immutable repository verification. It is
+deliberately exported with `registeredInSharedRuntime: false` until production
+bindings and live evidence are approved.
+
 ## Permission design
 
 ### Permanent runtime collector
@@ -162,5 +191,6 @@ role.
 - Resource-request mode does not prove actual utilization.
 - No pre-enable period is represented as covered, and no absent row is inferred
   to be zero usage.
-- The pure engine does not create routes, UI, persistence, an AWS role, an
-  export, or a production deployment.
+- The pure engine does not create an AWS role, an export, or a production
+  deployment. The local API, UI, repository, adapter and unregistered runtime
+  binding do not constitute live AWS activation.

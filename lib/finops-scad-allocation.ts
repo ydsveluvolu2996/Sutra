@@ -871,7 +871,11 @@ export function buildScadAllocationSnapshot(
     .sort(([left], [right]) => left.localeCompare(right, "en-US"))
     .map(([, group]) => buildGroup(group));
   const state = snapshotState(capture, now);
-  const complete = state === "READY" || state === "NO_USAGE";
+  // Freshness is independent from evidence completeness. A fully reconciled
+  // correction for a historical billing period is expected to be STALE by the
+  // current clock, but it must still be eligible to atomically replace that
+  // period's prior complete generation.
+  const complete = state === "READY" || state === "NO_USAGE" || state === "STALE";
   const partialHistory = !captureComplete(capture);
 
   return {
