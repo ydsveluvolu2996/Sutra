@@ -104,6 +104,9 @@ const migrationFiles = [
   "0090_finops_media_services_insights.sql",
   "0091_finops_marketplace_spg.sql",
   "0092_finops_kubecost_allocation.sql",
+  "0093_finops_scad_allocation.sql",
+  "0094_finops_sustainability_carbon.sql",
+  "0095_finops_amazon_connect_cost_insights.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

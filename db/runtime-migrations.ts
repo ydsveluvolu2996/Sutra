@@ -94,6 +94,9 @@ import finopsEndUserComputingSchemaSql from "../drizzle/0094_finops_end_user_com
 import finopsMediaServicesInsightsSchemaSql from "../drizzle/0095_finops_media_services_insights.sql?raw";
 import finopsMarketplaceSpgSchemaSql from "../drizzle/0096_finops_marketplace_spg.sql?raw";
 import finopsKubecostAllocationSchemaSql from "../drizzle/0097_finops_kubecost_allocation.sql?raw";
+import finopsScadAllocationSchemaSql from "../drizzle/0098_finops_scad_allocation.sql?raw";
+import finopsSustainabilityCarbonSchemaSql from "../drizzle/0099_finops_sustainability_carbon.sql?raw";
+import finopsAmazonConnectCostInsightsSchemaSql from "../drizzle/0100_finops_amazon_connect_cost_insights.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -205,6 +208,9 @@ const migrations = [
   { id: "0095_finops_media_services_insights", statements: statementsFrom(finopsMediaServicesInsightsSchemaSql) },
   { id: "0096_finops_marketplace_spg", statements: statementsFrom(finopsMarketplaceSpgSchemaSql) },
   { id: "0097_finops_kubecost_allocation", statements: statementsFrom(finopsKubecostAllocationSchemaSql) },
+  { id: "0098_finops_scad_allocation", statements: statementsFrom(finopsScadAllocationSchemaSql) },
+  { id: "0099_finops_sustainability_carbon", statements: statementsFrom(finopsSustainabilityCarbonSchemaSql) },
+  { id: "0100_finops_amazon_connect_cost_insights", statements: statementsFrom(finopsAmazonConnectCostInsightsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

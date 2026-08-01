@@ -241,6 +241,8 @@ export interface ScadLineage {
   readonly batchJobDefinition: string | null;
   readonly batchJobQueue: string | null;
   readonly batchComputeEnvironment: string | null;
+  /** Exact sorted CUR2 resource tag dimensions retained for governed allocation. */
+  readonly businessTags: readonly { readonly key: string; readonly value: string }[];
   readonly podOrTaskId: string;
   readonly parentResourceId: string | null;
   /** Base SCAD publishes pod/task rows. It does not publish a container ID. */
@@ -560,6 +562,10 @@ function lineage(row: ScadCur2Row): ScadLineage {
     batchJobDefinition,
     batchJobQueue,
     batchComputeEnvironment,
+    businessTags: Object.entries(row.resourceTags)
+      .map(([key, value]) => ({ key, value }))
+      .sort((left, right) => left.key.localeCompare(right.key)
+        || left.value.localeCompare(right.value)),
     podOrTaskId: row.resourceId,
     parentResourceId: row.parentResourceId,
     containerId: null,

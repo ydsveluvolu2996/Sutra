@@ -14,6 +14,7 @@ import { FinopsAwsConfigResourceComplianceDashboard } from "./finops-aws-config-
 import { FinopsAwsBudgetsOrganizationDashboard } from "./finops-aws-budgets-organization-dashboard";
 import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
 import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
+import { FinopsAmazonConnectCostInsightsDashboard } from "./finops-amazon-connect-cost-insights-dashboard";
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
@@ -22,6 +23,8 @@ import { FinopsMarketplaceSpgDashboard } from "./finops-marketplace-spg-dashboar
 import { FinopsMediaServicesInsightsDashboard } from "./finops-media-services-insights-dashboard";
 import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
 import { FinopsResilienceVueDashboard } from "./finops-resilience-vue-dashboard";
+import { FinopsScadAllocationDashboard } from "./finops-scad-allocation-dashboard";
+import { FinopsSustainabilityCarbonDashboard } from "./finops-sustainability-carbon-dashboard";
 import { FinopsTrustedAdvisorOrganizationalDashboard } from "./finops-trusted-advisor-organizational-dashboard";
 import styles from "./costs.module.css";
 
@@ -214,6 +217,15 @@ export function FinopsDashboardCatalogNav({
             />
           ) : selected.id === "kubecost_container_allocation" ? (
             <FinopsKubecostAllocationDashboard connectionId={connectionId} />
+          ) : selected.id === "scad_container_allocation" ? (
+            <FinopsScadAllocationDashboard connectionId={connectionId} />
+          ) : selected.id === "sustainability_proxy" ? (
+            <FinopsSustainabilityCarbonDashboard connectionId={connectionId} />
+          ) : selected.id === "amazon_connect_cost_insights" ? (
+            <FinopsAmazonConnectCostInsightsDashboard
+              connectionId={connectionId}
+              dashboard={selected}
+            />
           ) : (
             <FinopsCapabilityShell
               dashboard={selected}

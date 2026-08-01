@@ -185,11 +185,12 @@ requires:
 4. prove that raw Connect/phone responses, CUR resource IDs, system endpoint
    tags, and arbitrary tag values never cross the normalization boundary or
    appear in errors, traces, metrics, logs, caches, exports, or support tools;
-5. durably retain scoped source attempts, immutable active-generation lineage,
+5. deploy the implemented immutable active-generation persistence and retain
    permission attestation, pagination completeness, aggregate reconciliation,
-   token key version, and safe failures;
-6. implement an authorization-derived route for aggregate views and a separate
-   policy/approval/audit route for tokenized contact drilldown;
+   token key version, and safe attempts in the permanent job ledger;
+6. deploy and signed-in verify the implemented authorization-derived aggregate
+   route; separately design the policy/approval/audit route for tokenized
+   contact drilldown before enabling privileged lookup;
 7. establish customer retention, DSAR/deletion, legal basis, residency,
    incident-response, and privileged-access policies for HMAC tokens and audit
    events;
@@ -202,5 +203,5 @@ requires:
    leakage, pagination/throttling, unsupported Regions, stale data, and high-
    volume granular billing.
 
-This slice adds no central IAM policy, broker implementation, route, database,
-UI, customer AWS resource, deployment, or production access.
+This slice still adds no central IAM policy, provider adapter, customer AWS
+resource, deployment, privileged token-lookup route, or production access.

@@ -89,6 +89,9 @@ import postgresFinopsEndUserComputingSql from "../postgres/migrations/0089_finop
 import postgresFinopsMediaServicesInsightsSql from "../postgres/migrations/0090_finops_media_services_insights.sql?raw";
 import postgresFinopsMarketplaceSpgSql from "../postgres/migrations/0091_finops_marketplace_spg.sql?raw";
 import postgresFinopsKubecostAllocationSql from "../postgres/migrations/0092_finops_kubecost_allocation.sql?raw";
+import postgresFinopsScadAllocationSql from "../postgres/migrations/0093_finops_scad_allocation.sql?raw";
+import postgresFinopsSustainabilityCarbonSql from "../postgres/migrations/0094_finops_sustainability_carbon.sql?raw";
+import postgresFinopsAmazonConnectCostInsightsSql from "../postgres/migrations/0095_finops_amazon_connect_cost_insights.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -182,6 +185,9 @@ const migrations = [
   { id: "0090_finops_media_services_insights", source: postgresFinopsMediaServicesInsightsSql },
   { id: "0091_finops_marketplace_spg", source: postgresFinopsMarketplaceSpgSql },
   { id: "0092_finops_kubecost_allocation", source: postgresFinopsKubecostAllocationSql },
+  { id: "0093_finops_scad_allocation", source: postgresFinopsScadAllocationSql },
+  { id: "0094_finops_sustainability_carbon", source: postgresFinopsSustainabilityCarbonSql },
+  { id: "0095_finops_amazon_connect_cost_insights", source: postgresFinopsAmazonConnectCostInsightsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
