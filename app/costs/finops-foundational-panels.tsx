@@ -57,6 +57,8 @@ interface ActiveGenerationEvidence {
   readonly committedAtIso: string;
   readonly acceptedRows: number;
   readonly rejectedRows: number;
+  readonly activeFileCount?: number | null;
+  readonly incompleteReasons?: readonly string[];
 }
 
 interface SingleGenerationSourceEvidence {
@@ -86,7 +88,7 @@ interface CudosEnvelope {
   readonly selectedPeriod: string | null;
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FinopsCudosResult | null;
-  readonly sourceState: "complete" | "waiting";
+  readonly sourceState: "complete" | "partial" | "waiting";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
 }
 
@@ -282,7 +284,25 @@ function validActiveGeneration(value: unknown): boolean {
     && value.acceptedRows >= 0
     && typeof value.rejectedRows === "number"
     && Number.isSafeInteger(value.rejectedRows)
-    && value.rejectedRows >= 0;
+    && value.rejectedRows >= 0
+    && (
+      value.activeFileCount === undefined
+      || value.activeFileCount === null
+      || (
+        typeof value.activeFileCount === "number"
+        && Number.isSafeInteger(value.activeFileCount)
+        && value.activeFileCount > 0
+      )
+    )
+    && (
+      value.incompleteReasons === undefined
+      || (
+        Array.isArray(value.incompleteReasons)
+        && value.incompleteReasons.length <= 8
+        && value.incompleteReasons.every((reason) =>
+          typeof reason === "string" && /^[A-Z][A-Z0-9_]{0,127}$/u.test(reason))
+      )
+    );
 }
 
 function validSourceEvidence(value: unknown): boolean {
@@ -314,6 +334,17 @@ function validAvailablePeriods(value: unknown): boolean {
 }
 
 function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
+  const sourceState = value.sourceState;
+  const sourceEvidence = value.sourceEvidence;
+  const stateMatchesEvidence = sourceState === "waiting"
+    ? sourceEvidence === null
+    : isRecord(sourceEvidence)
+      && "activeGeneration" in sourceEvidence
+      && isRecord(sourceEvidence.activeGeneration)
+      && Array.isArray(sourceEvidence.activeGeneration.incompleteReasons)
+      && (sourceState === "partial"
+        ? sourceEvidence.activeGeneration.incompleteReasons.length > 0
+        : sourceEvidence.activeGeneration.incompleteReasons.length === 0);
   return (
     value.selectedPeriod === null
     || (
@@ -322,8 +353,13 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     )
   )
     && validAvailablePeriods(value.availablePeriods)
-    && (value.sourceState === "complete" || value.sourceState === "waiting")
-    && validSourceEvidence(value.sourceEvidence);
+    && (
+      value.sourceState === "complete"
+      || value.sourceState === "partial"
+      || value.sourceState === "waiting"
+    )
+    && stateMatchesEvidence
+    && validSourceEvidence(sourceEvidence);
 }
 
 function validCostIntelligenceEnvelope(
@@ -558,6 +594,13 @@ function EvidenceStrip({
         <p role="status">
           Source provenance is incomplete. Freshness is withheld until active
           generation evidence is supplied.
+        </p>
+      ) : null}
+      {active?.incompleteReasons !== undefined
+      && active.incompleteReasons.length > 0 ? (
+        <p role="status">
+          Source evidence is partial: {active.incompleteReasons
+            .map(readableToken).join(" · ")}.
         </p>
       ) : null}
     </section>
@@ -849,7 +892,23 @@ function CudosOverview({
         </div>
       ) : null}
       <CurrencyKpis summaries={report.executive} basis={report.selectedCostBasis} />
-      <section className={styles.foundationalTwoColumn}>
+      <section className={styles.foundationalThreeColumn}>
+        <article className={styles.foundationalPanel}>
+          <PanelHeading eyebrow="Monthly evidence" title="Billing trend" meta={`${report.trends.monthly.length} buckets`} />
+          <TrendChart
+            points={report.trends.monthly}
+            basis={report.selectedCostBasis}
+            title="Monthly CUDOS billing trend"
+          />
+        </article>
+        <article className={styles.foundationalPanel}>
+          <PanelHeading eyebrow="Weekly evidence" title="Billing trend" meta={`${report.trends.weekly.length} buckets`} />
+          <TrendChart
+            points={report.trends.weekly}
+            basis={report.selectedCostBasis}
+            title="Weekly CUDOS billing trend with UTC Monday week starts"
+          />
+        </article>
         <article className={styles.foundationalPanel}>
           <PanelHeading eyebrow="Daily evidence" title="Billing trend" meta={`${report.trends.daily.length} buckets`} />
           <TrendChart
@@ -858,9 +917,15 @@ function CudosOverview({
             title="Daily CUDOS billing trend"
           />
         </article>
+      </section>
+      <section className={styles.foundationalTwoColumn}>
         <article className={styles.foundationalPanel}>
           <PanelHeading eyebrow="Spend concentration" title="Top services" meta="Per currency" />
           <RankingBars entries={report.rankings.services} title="CUDOS service rankings" />
+        </article>
+        <article className={styles.foundationalPanel}>
+          <PanelHeading eyebrow="FOCUS taxonomy" title="Service categories" meta="Missing values remain explicit" />
+          <RankingBars entries={report.rankings.serviceCategories} title="FOCUS service category rankings" />
         </article>
       </section>
       <section className={styles.foundationalPanel}>

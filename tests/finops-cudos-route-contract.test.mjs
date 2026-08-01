@@ -48,13 +48,18 @@ test("CUDOS route invokes only the canonical active-generation engine and has an
     /buildFinopsCudosDashboard\(\{\s*scope: active\.scope,\s*rows: active\.rows,\s*options: query\.options,\s*\}\)/u,
   );
   assert.match(route, /report: null,\s*sourceState: "waiting"/u);
-  assert.match(route, /report,\s*sourceState: "complete"/u);
+  assert.match(route, /sourceState: sourceIncompleteReasons\.length === 0\s*\? "complete"\s*:\s*"partial"/u);
+  assert.match(route, /active\.evidence\.rejectedRows > 0/u);
+  assert.match(route, /active\.evidence\.activeFileCount === null/u);
+  assert.match(route, /active\.evidence\.activeSourceUpdatedAtIso === null/u);
   assert.match(
     route,
     /sourceEvidence: \{\s*activeGeneration: \{/u,
   );
   assert.match(route, /sourceUpdatedAtIso: active\.evidence\.activeSourceUpdatedAtIso/u);
   assert.match(route, /observedAtIso: active\.evidence\.activeObservedAtIso/u);
+  assert.match(route, /activeFileCount: active\.evidence\.activeFileCount/u);
+  assert.match(route, /incompleteReasons: sourceIncompleteReasons/u);
   assert.doesNotMatch(route, /partitionFreshness|matchesActiveManifest/u);
   assert.doesNotMatch(route, /fixture|demo|sample/iu);
   assert.doesNotMatch(route, /finops_cur_lines|FinopsWorkspaceRepository/u);

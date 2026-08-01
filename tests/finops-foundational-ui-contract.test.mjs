@@ -63,6 +63,11 @@ test("every honest canonical source state is visible and actionable", () => {
   assert.match(panel, /Source evidence is incomplete/u);
   assert.match(panel, /Organization taxonomy is required/u);
   assert.match(panel, /At least one selected cost basis is incomplete/u);
+  assert.match(panel, /Source evidence is partial/u);
+  assert.match(panel, /report\.trends\.monthly/u);
+  assert.match(panel, /report\.trends\.weekly/u);
+  assert.match(panel, /report\.trends\.daily/u);
+  assert.match(panel, /report\.rankings\.serviceCategories/u);
   assert.match(panel, /Resource: \{report\.drilldowns\.resource\.status\}/u);
   assert.match(panel, /Hourly: \{report\.drilldowns\.hourly\.status\}/u);
   assert.match(panel, /active\.sourceUpdatedAtIso/u);

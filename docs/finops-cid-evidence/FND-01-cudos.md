@@ -4,7 +4,9 @@ Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cudos-dashboard>
 
-Assessment revision: `0fa8d769d4`
+Official implementation inventory: <https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/cudos/CUDOS-v5-definition.yaml>
+
+Assessment revision: `b45a232d2b` plus the local FND-01 candidate diff described below
 
 Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 
@@ -18,17 +20,39 @@ Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 - Compute, databases, storage, AI/ML, analytics, security, and data-transfer modules.
 - Resource/hourly drilldowns and organizational taxonomy filters.
 
+The current official CUDOS v5 definition contains these interactive sheets:
+Executive Billing Summary, Executive RI/SP Summary, Executive Trends, Compute,
+Storage & Backup, Amazon S3, Databases, Amazon DynamoDB, AI/ML, Data Transfer &
+Networking, Messaging and Streaming, Monitoring & Observability, Analytics,
+Security, End User Computing, GameTech & Media, Taxonomy Explorer, and OPTICS
+Explorer. `About` is documentation rather than a billing projection.
+
+## Local capability comparison
+
+| Official capability | Local state | Evidence-honesty boundary |
+|---|---|---|
+| Executive billing and signed charge disclosure | `IMPLEMENTED` | Exact integer micros; currencies never combined; missing bases are labelled. |
+| Monthly, weekly, and daily trends | `IMPLEMENTED` | Weekly periods are deterministic UTC Monday week starts. |
+| FOCUS Service Category grouping | `IMPLEMENTED` | Null category is retained as an explicit missing-dimension bucket. |
+| RI/SP coverage, utilization, unused cost, true-up | `IMPLEMENTED_PARTIAL` | Expiry and purchase recommendations remain unavailable without source term evidence. |
+| Compute, Storage & Backup, S3, Databases, DynamoDB | `IMPLEMENTED` | Modules appear only when canonical rows match. |
+| AI/ML, Data Transfer & Networking, Messaging, Monitoring, Analytics, Security | `IMPLEMENTED_PARTIAL` | Billing classification and compatible unit-cost evidence are local; AWS telemetry-specific visuals are not inferred. |
+| End User Computing and GameTech & Media | `IMPLEMENTED` | Evidence-backed service-family classification added from the official sheet inventory. |
+| Taxonomy Explorer | `IMPLEMENTED_PARTIAL` | Tenant-owned taxonomy allocation is served by the Cost Intelligence vertical; QuickSight visual parity is not claimed. |
+| OPTICS Explorer | `IMPLEMENTED_PARTIAL` | Account/service/region/category rankings, unit cost, drilldown availability, and review candidates exist; arbitrary QuickSight field parity is not claimed. |
+| Source completeness disclosure | `IMPLEMENTED` | Rejected rows, missing manifest object coverage, or missing source freshness change the API state to `partial` and are visible in every CUDOS surface. |
+
 ## Sutra implementation evidence
 
 | Gate | Status | Evidence |
 |---|---|---|
-| G0 requirements | `VERIFIED` | Official inventory above, reviewed 2026-08-01. |
+| G0 requirements | `VERIFIED` | AWS guidance and the commit-pinned official CUDOS v5 definition above, reviewed 2026-08-01. |
 | G1 source contract | `IMPLEMENTED_UNVERIFIED` | CUR2 export/add-on templates and exact-prefix read/decrypt/status policy tests; controlled AWS activation remains gated. |
 | G2 collector | `IMPLEMENTED_UNVERIFIED` | Data Export manifest/object ingestion and correction-safe generation path; no claim that every official supplemental resource source is collected. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Active billing generation repository, tenant/export/period/generation scope, immutable canonical rows, correction head. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | `GET /api/v1/finops/cudos`; exact query allowlist, authenticated live AWS connection, active-generation-only reads. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Executive, explorer, commitment, and service projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. |
-| G6 focused verification | `VERIFIED` | Included in the 67-test Foundational set below; no failures/skips. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, and all official service-family projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. |
+| G6 focused verification | `VERIFIED` | Included in the 69-test Foundational set below; no failures/skips. |
 | G7 exact-tree gate | `NOT_STARTED` | Must be rerun on the eventual release SHA with PostgreSQL, Docker, rendered, and full repository gates. |
 | G8–G10 | `NOT_STARTED` | Controlled source reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
 
@@ -46,4 +70,4 @@ Focused command:
 node --experimental-strip-types --test tests/finops-cost-intelligence-route-contract.test.mjs tests/finops-cost-intelligence.test.ts tests/finops-cudos-route-contract.test.mjs tests/finops-cudos.test.ts tests/finops-foundational-config-migration-contract.test.mjs tests/finops-foundational-config-repository.test.mjs tests/finops-foundational-config-route-contract.test.mjs tests/finops-foundational-cur2-export-template.test.mjs tests/finops-foundational-focus12-export-template.test.mjs tests/finops-foundational-ui-contract.test.mjs tests/finops-kpi-route-contract.test.mjs tests/finops-kpi.test.ts
 ```
 
-Result: **67 passed, 0 failed, 0 skipped**.
+Result: **69 passed, 0 failed, 0 skipped**.

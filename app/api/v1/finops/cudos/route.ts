@@ -155,12 +155,25 @@ export async function GET(request: Request): Promise<Response> {
       rows: active.rows,
       options: query.options,
     });
+    const sourceIncompleteReasons = [
+      ...(active.evidence.rejectedRows > 0
+        ? ["SOURCE_ROWS_REJECTED"]
+        : []),
+      ...(active.evidence.activeFileCount === null
+        ? ["MANIFEST_OBJECT_COVERAGE_UNAVAILABLE"]
+        : []),
+      ...(active.evidence.activeSourceUpdatedAtIso === null
+        ? ["SOURCE_FRESHNESS_UNAVAILABLE"]
+        : []),
+    ];
     return jsonResponse({
       connectionId: query.connectionId,
       selectedPeriod: active.scope.billingPeriod,
       availablePeriods,
       report,
-      sourceState: "complete",
+      sourceState: sourceIncompleteReasons.length === 0
+        ? "complete"
+        : "partial",
       sourceEvidence: {
         activeGeneration: {
           manifestSha256: active.evidence.activeManifestSha256,
@@ -170,6 +183,8 @@ export async function GET(request: Request): Promise<Response> {
           committedAtIso: active.evidence.activeCommittedAtIso,
           acceptedRows: active.evidence.acceptedRows,
           rejectedRows: active.evidence.rejectedRows,
+          activeFileCount: active.evidence.activeFileCount,
+          incompleteReasons: sourceIncompleteReasons,
         },
       },
     });

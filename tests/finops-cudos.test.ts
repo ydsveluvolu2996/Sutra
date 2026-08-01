@@ -249,6 +249,88 @@ describe("Foundational CUDOS pure engine", () => {
     );
   });
 
+  it("uses deterministic UTC Monday weekly buckets and exposes FOCUS service categories", () => {
+    const [compute] = baseLines();
+    const sunday: CanonicalCurLine = {
+      ...compute,
+      lineItemId: "sunday",
+      usageStartIso: "2026-07-05T23:59:59.000Z",
+      usageEndIso: "2026-07-06T00:00:00.000Z",
+      serviceCategory: "Compute",
+    };
+    const monday: CanonicalCurLine = {
+      ...compute,
+      lineItemId: "monday",
+      usageStartIso: "2026-07-06T00:00:00.000Z",
+      usageEndIso: "2026-07-06T01:00:00.000Z",
+      amountMicros: "2000000",
+      amortizedMicros: "2000000",
+      serviceCategory: "Developer Services",
+    };
+    const missingCategory: CanonicalCurLine = {
+      ...compute,
+      lineItemId: "missing-category",
+      usageStartIso: "2026-07-06T02:00:00.000Z",
+      usageEndIso: "2026-07-06T03:00:00.000Z",
+      amountMicros: "1000000",
+      amortizedMicros: "1000000",
+      serviceCategory: null,
+    };
+    const result = build(scoped([monday, missingCategory, sunday]));
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      result.trends.weekly.map((bucket) => [
+        bucket.currency,
+        bucket.period,
+        bucket.costs.find(({ basis }) => basis === "amortized")?.totalMicros,
+      ]),
+      [
+        ["USD", "2026-06-29", "9000000"],
+        ["USD", "2026-07-06", "3000000"],
+      ],
+    );
+    assert.deepEqual(
+      result.rankings.serviceCategories.map((entry) => [
+        entry.dimension,
+        entry.value,
+        entry.selectedTotalMicros,
+      ]),
+      [
+        ["service_category", "Compute", "10000000"],
+        ["service_category", "Developer Services", "2000000"],
+        ["service_category", null, "1000000"],
+      ],
+    );
+  });
+
+  it("recognizes the official End User Computing and GameTech / Media families", () => {
+    const [compute] = baseLines();
+    const workspaces: CanonicalCurLine = {
+      ...compute,
+      lineItemId: "workspaces",
+      service: "Amazon WorkSpaces",
+      productCode: "AmazonWorkSpaces",
+      productName: "Amazon WorkSpaces",
+      resourceType: "Virtual Desktop",
+      usageType: null,
+    };
+    const gamelift: CanonicalCurLine = {
+      ...compute,
+      lineItemId: "gamelift",
+      service: "Amazon GameLift Servers",
+      productCode: "AmazonGameLift",
+      productName: "Amazon GameLift Servers",
+      resourceType: "Game Server",
+      usageType: null,
+    };
+    const result = build(scoped([gamelift, workspaces]));
+    assert.equal(result.ok, true);
+    assert.deepEqual(
+      result.modules.map(({ moduleId }) => moduleId),
+      ["end_user_computing", "gametech_media"],
+    );
+  });
+
   it("labels every estimate with bounded evidence and no savings/remediation claim", () => {
     const [onDemand, , , , , fee] = baseLines();
     const unused: CanonicalCurLine = {

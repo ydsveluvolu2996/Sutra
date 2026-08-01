@@ -73,6 +73,8 @@ export const FINOPS_CUDOS_MODULE_IDS = [
   "monitoring",
   "analytics",
   "security",
+  "end_user_computing",
+  "gametech_media",
 ] as const;
 
 export type FinopsCudosModuleId =
@@ -152,7 +154,8 @@ export interface FinopsCudosTrendBucket {
 export type FinopsCudosRankingDimension =
   | "account"
   | "service"
-  | "region";
+  | "region"
+  | "service_category";
 
 export interface FinopsCudosRankingEntry {
   readonly currency: string;
@@ -322,12 +325,15 @@ export type FinopsCudosResult =
       readonly executive: readonly FinopsCudosCurrencyExecutiveSummary[];
       readonly trends: {
         readonly daily: readonly FinopsCudosTrendBucket[];
+        /** UTC Monday week-start buckets. */
+        readonly weekly: readonly FinopsCudosTrendBucket[];
         readonly monthly: readonly FinopsCudosTrendBucket[];
       };
       readonly rankings: {
         readonly accounts: readonly FinopsCudosRankingEntry[];
         readonly services: readonly FinopsCudosRankingEntry[];
         readonly regions: readonly FinopsCudosRankingEntry[];
+        readonly serviceCategories: readonly FinopsCudosRankingEntry[];
       };
       readonly commitments: readonly FinopsCudosCommitmentSummary[];
       readonly modules: readonly FinopsCudosModule[];
@@ -474,6 +480,16 @@ const MODULE_MATCHERS: Readonly<
     "guardduty", "web application firewall", "aws waf", "aws shield",
     "security hub", "inspector", "macie", "key management service",
     "secrets manager", "firewall manager", "network firewall", "cognito",
+  ]),
+  end_user_computing: (text) => includesAny(text, [
+    "workspaces", "appstream", "workdocs", "workmail", "worklink",
+    "nice dcv", "nimble studio", "end user computing",
+  ]),
+  gametech_media: (text) => includesAny(text, [
+    "gamelift", "gamesparks", "deadline cloud", "elemental medialive",
+    "elemental mediaconvert", "elemental mediapackage", "elemental mediastore",
+    "elemental mediatailor", "interactive video service", "amazon ivs",
+    "elastic transcoder", "game tech", "gametech", "media services",
   ]),
 };
 
@@ -843,6 +859,13 @@ function isHourly(line: CanonicalCurLine): boolean {
   const start = Date.parse(line.usageStartIso);
   const end = Date.parse(line.usageEndIso);
   return end > start && end - start <= 60 * 60 * 1_000;
+}
+
+function utcMondayWeekStart(dayIso: string): string {
+  const date = new Date(`${dayIso}T00:00:00.000Z`);
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  date.setUTCDate(date.getUTCDate() - daysSinceMonday);
+  return date.toISOString().slice(0, 10);
 }
 
 function lineComparator(
@@ -1343,6 +1366,10 @@ export function buildFinopsCudosDashboard(
     readonly currency: string;
     readonly period: string;
   }>();
+  const weekly = new Map<string, MutableAggregate & {
+    readonly currency: string;
+    readonly period: string;
+  }>();
   const monthly = new Map<string, MutableAggregate & {
     readonly currency: string;
     readonly period: string;
@@ -1350,6 +1377,7 @@ export function buildFinopsCudosDashboard(
   const accountRankings = new Map<string, MutableRanking>();
   const serviceRankings = new Map<string, MutableRanking>();
   const regionRankings = new Map<string, MutableRanking>();
+  const serviceCategoryRankings = new Map<string, MutableRanking>();
   const modules = new Map<FinopsCudosModuleId, MutableModule>();
   const unitCosts = new Map<string, MutableUnitCost>();
   const opportunityCandidates = new Map<string, MutableOpportunity>();
@@ -1382,8 +1410,10 @@ export function buildFinopsCudosDashboard(
     disclosure.sourceChargeKinds.add(line.chargeKind);
 
     const day = new Date(line.usageStartIso).toISOString().slice(0, 10);
+    const week = utcMondayWeekStart(day);
     const month = day.slice(0, 7);
     const dailyKey = `${line.currency}\0${day}`;
+    const weeklyKey = `${line.currency}\0${week}`;
     const monthlyKey = `${line.currency}\0${month}`;
     let dailyBucket = daily.get(dailyKey);
     if (dailyBucket === undefined) {
@@ -1395,6 +1425,16 @@ export function buildFinopsCudosDashboard(
       daily.set(dailyKey, dailyBucket);
     }
     addLineToAggregate(dailyBucket, line);
+    let weeklyBucket = weekly.get(weeklyKey);
+    if (weeklyBucket === undefined) {
+      weeklyBucket = {
+        ...newAggregate(),
+        currency: line.currency,
+        period: week,
+      };
+      weekly.set(weeklyKey, weeklyBucket);
+    }
+    addLineToAggregate(weeklyBucket, line);
     let monthlyBucket = monthly.get(monthlyKey);
     if (monthlyBucket === undefined) {
       monthlyBucket = {
@@ -1420,6 +1460,12 @@ export function buildFinopsCudosDashboard(
       ],
       [serviceRankings, "service", line.service, line.productName],
       [regionRankings, "region", line.region, line.region],
+      [
+        serviceCategoryRankings,
+        "service_category",
+        line.serviceCategory,
+        line.serviceCategory,
+      ],
     ];
     for (const [map, dimension, value, label] of rankingInputs) {
       const key = JSON.stringify([line.currency, dimension, value, label]);
@@ -1531,10 +1577,12 @@ export function buildFinopsCudosDashboard(
     }
 
     const totalBucketCount = daily.size
+      + weekly.size
       + monthly.size
       + accountRankings.size
       + serviceRankings.size
       + regionRankings.size
+      + serviceCategoryRankings.size
       + unitCosts.size
       + noUsageResources.size
       + opportunityCandidates.size;
@@ -1707,6 +1755,7 @@ export function buildFinopsCudosDashboard(
     executive,
     trends: {
       daily: materializeTrend(daily),
+      weekly: materializeTrend(weekly),
       monthly: materializeTrend(monthly),
     },
     rankings: {
@@ -1725,6 +1774,12 @@ export function buildFinopsCudosDashboard(
       regions: materializeRankings(
         regionRankings,
         "region",
+        options.costBasis,
+        options.rankingLimit,
+      ),
+      serviceCategories: materializeRankings(
+        serviceCategoryRankings,
+        "service_category",
         options.costBasis,
         options.rankingLimit,
       ),
