@@ -260,6 +260,15 @@ export async function runFinopsSourceCollectJob(
       accountId: connection.awsAccountId,
       partition: connection.partition,
     });
+    if (
+      result.tenantId !== scope.organizationId ||
+      result.connectionId !== scope.connectionId ||
+      result.jobId !== job.id ||
+      result.contractId !== payload.contractId ||
+      result.sourceId !== payload.sourceId ||
+      result.accountId !== connection.awsAccountId ||
+      result.partition !== connection.partition
+    ) reject("COLLECTION_REJECTED");
     if (result.collectionStatus === "UNAVAILABLE" || result.evidence === null) {
       await dependencies.ledger.finishAttempt(scope, identity, {
         status: "failed",

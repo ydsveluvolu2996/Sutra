@@ -226,6 +226,15 @@ export async function GET(request: Request): Promise<Response> {
       const period = partition.scope.billingPeriod;
       return period >= window.fromPeriod && period <= window.toPeriod;
     });
+    if (selectedPartitions.length === 0) {
+      return jsonResponse({
+        connectionId: query.connectionId,
+        selectedWindow: window,
+        availablePeriods,
+        report: null,
+        sourceState: "waiting",
+      });
+    }
     const acceptedRows = selectedPartitions.reduce(
       (total, partition) => total + partition.evidence.acceptedRows,
       0,

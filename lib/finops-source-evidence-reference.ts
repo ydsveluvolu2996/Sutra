@@ -104,11 +104,19 @@ function decodeConfiguredKey(value: string): Uint8Array {
 }
 
 export class FinopsEvidenceReferenceSealer {
+  private readonly key: CryptoKey;
+  public readonly keyVersion: string;
+  private readonly provider: Crypto;
+
   private constructor(
-    private readonly key: CryptoKey,
-    public readonly keyVersion: string,
-    private readonly provider: Crypto,
-  ) {}
+    key: CryptoKey,
+    keyVersion: string,
+    provider: Crypto,
+  ) {
+    this.key = key;
+    this.keyVersion = keyVersion;
+    this.provider = provider;
+  }
 
   public static async fromRawKey(input: {
     readonly rawKey: Uint8Array;

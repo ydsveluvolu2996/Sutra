@@ -1522,6 +1522,7 @@ export function FinopsFoundationalPanels({
       {section === "overview" || section === "services" ? (
         <FinopsCurIntelligencePanels
           connectionId={connectionId}
+          key={`${connectionId}:${section}`}
           section={section}
         />
       ) : null}

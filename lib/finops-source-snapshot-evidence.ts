@@ -132,6 +132,13 @@ function newestEvidenceTime(evidence: FinopsSourceEvidence): number {
   );
 }
 
+function newestAcceptedEventTime(evidence: FinopsSourceEvidence): number {
+  return Math.max(
+    evidence.lastSuccessAt === null ? -1 : Date.parse(evidence.lastSuccessAt),
+    evidence.lastAttemptAt === null ? -1 : Date.parse(evidence.lastAttemptAt),
+  );
+}
+
 function snapshotEvidence(
   scope: FinopsSourceScope,
   snapshot: StoredFinopsSourceSnapshot,
@@ -237,12 +244,11 @@ function evidenceWithAttempt(
   const representedByActiveSnapshot = acceptedSnapshot !== null
     && acceptedSnapshot.jobId === attempt.jobId
     && acceptedSnapshot.attempt === attempt.attempt;
-  const acceptedAttemptAt = accepted?.lastAttemptAt === null
-    || accepted?.lastAttemptAt === undefined
+  const acceptedEventAt = accepted === null
     ? -1
-    : Date.parse(accepted.lastAttemptAt);
+    : newestAcceptedEventTime(accepted);
   const newerAttempt = accepted === null
-    || (!representedByActiveSnapshot && Date.parse(at) > acceptedAttemptAt);
+    || (!representedByActiveSnapshot && Date.parse(at) > acceptedEventAt);
   if (!newerAttempt && accepted !== null) return accepted;
 
   const outcome = attemptOutcome(attempt);

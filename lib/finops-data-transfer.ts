@@ -244,7 +244,7 @@ export interface DataTransferSnapshot {
     readonly freshnessSlaHours: number;
     readonly errorCode: string | null;
     readonly objectCoverage: {
-      readonly status: "complete" | "unavailable";
+      readonly status: "complete" | "partial" | "unavailable";
       readonly manifestObjectCount: number | null;
       readonly processedObjectCount: number | null;
     };
@@ -741,8 +741,11 @@ function emptySnapshot(
       errorCode: evidence?.errorCode ?? null,
       objectCoverage: {
         status: evidence === null || evidence.manifestObjectCount === null
+          || evidence.processedObjectCount === null
           ? "unavailable"
-          : "complete",
+          : evidence.processedObjectCount === evidence.manifestObjectCount
+            ? "complete"
+            : "partial",
         manifestObjectCount: evidence?.manifestObjectCount ?? null,
         processedObjectCount: evidence?.processedObjectCount ?? null,
       },
@@ -996,8 +999,12 @@ export function buildDataTransferAnalysis(
       errorCode: capture.evidence.errorCode,
       objectCoverage: {
         status: capture.evidence.manifestObjectCount === null
+          || capture.evidence.processedObjectCount === null
           ? "unavailable"
-          : "complete",
+          : capture.evidence.processedObjectCount
+              === capture.evidence.manifestObjectCount
+            ? "complete"
+            : "partial",
         manifestObjectCount: capture.evidence.manifestObjectCount,
         processedObjectCount: capture.evidence.processedObjectCount,
       },

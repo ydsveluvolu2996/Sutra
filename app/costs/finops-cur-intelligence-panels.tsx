@@ -192,6 +192,14 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
       return absolute > largest ? absolute : largest;
     }, BigInt(1));
   const current = selected?.points.at(-1) ?? null;
+  const monthOverMonthDetail = current === null
+    ? "No period"
+    : current.monthOverMonth.available
+      ? formatCurMicrosExact(
+        current.monthOverMonth.deltaMicros,
+        selected?.currency ?? currency,
+      )
+      : current.monthOverMonth.reason.replaceAll("_", " ");
   const contributors = current?.contributors.flatMap((group) =>
     group.contributors.map((entry) => ({ ...entry, dimension: group.dimension }))) ?? [];
   return (
@@ -209,7 +217,7 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
       </header>
       <div className={styles.curKpis}>
         <article><small>Current period</small><strong>{formatCurMicrosExact(current?.totalMicros ?? null, selected?.currency ?? currency)}</strong><span>{current?.period ?? "Not available"}</span></article>
-        <article><small>Month over month</small><strong>{current?.monthOverMonth.available ? formatCurRationalPercentExact(current.monthOverMonth.percent) : "Not available"}</strong><span>{current?.monthOverMonth.available ? formatCurMicrosExact(current.monthOverMonth.deltaMicros, selected?.currency ?? currency) : current?.monthOverMonth.reason.replaceAll("_", " ") ?? "No period"}</span></article>
+        <article><small>Month over month</small><strong>{current?.monthOverMonth.available ? formatCurRationalPercentExact(current.monthOverMonth.percent) : "Not available"}</strong><span>{monthOverMonthDetail}</span></article>
         <article><small>Evidence coverage</small><strong>{report.summary.completePeriodCount}/{report.window.periodCount}</strong><span>{report.summary.sourceRowCount.toLocaleString("en-US")} accepted rows</span></article>
         <article><small>Explainable signals</small><strong>{report.summary.signalCount}</strong><span>pinned thresholds · no forecast</span></article>
       </div>
@@ -299,10 +307,16 @@ export function FinopsCurIntelligencePanels({
   const [reloadToken, setReloadToken] = useState(0);
   const [period, setPeriod] = useState<string | null>(null);
   const [state, setState] = useState<LoadState<TrendsEnvelope | DataTransferEnvelope>>({ status: "loading" });
-  const retry = useCallback(() => setReloadToken((current) => current + 1), []);
+  const retry = useCallback(() => {
+    setState({ status: "loading" });
+    setReloadToken((current) => current + 1);
+  }, []);
+  const selectPeriod = useCallback((nextPeriod: string) => {
+    setState({ status: "loading" });
+    setPeriod(nextPeriod);
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
-    setState({ status: "loading" });
     const query = new URLSearchParams({ connectionId });
     if (section === "overview") {
       query.set("costBases", "unblended,amortized");
@@ -346,7 +360,7 @@ export function FinopsCurIntelligencePanels({
   }
   const envelope = state.envelope;
   const periodControl = section === "services" && periodOptions.length > 0 ? (
-    <label className={styles.curPeriod}>Billing period<select value={period ?? (envelope as DataTransferEnvelope).selectedPeriod ?? ""} onChange={(event) => setPeriod(event.target.value)}>{periodOptions.map((item) => <option key={item.generationId} value={item.period}>{item.period}</option>)}</select></label>
+    <label className={styles.curPeriod}>Billing period<select value={period ?? (envelope as DataTransferEnvelope).selectedPeriod ?? ""} onChange={(event) => selectPeriod(event.target.value)}>{periodOptions.map((item) => <option key={item.generationId} value={item.period}>{item.period}</option>)}</select></label>
   ) : null;
   if (envelope.report === null) {
     return <><SourceState state={envelope.sourceState} title={section === "overview" ? "Enterprise trends are waiting" : "Data-transfer intelligence is waiting"} onRetry={retry} />{periodControl}</>;
@@ -358,5 +372,6 @@ export function FinopsCurIntelligencePanels({
     }
     return <TrendsReport report={report} />;
   }
-  return <>{periodControl}<DataTransferReport report={(envelope as DataTransferEnvelope).report!} /></>;
+  const transferReport = (envelope as DataTransferEnvelope).report!;
+  return <>{periodControl}<DataTransferReport key={transferReport.scope.generationId} report={transferReport} /></>;
 }

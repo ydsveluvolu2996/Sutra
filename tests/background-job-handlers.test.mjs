@@ -28,6 +28,7 @@ test("every job kind emitted by the production ticks has a real handler", () => 
     "alert-evaluation",
     "finops-alert-sweep",
     "finops.data-export.ingest",
+    "finops-source-collect",
     "agentless-teardown-sweep",
     "vuln-feed-refresh",
     "itsm-secret-cleanup",

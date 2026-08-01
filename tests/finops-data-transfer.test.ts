@@ -347,6 +347,11 @@ describe("AWS Data Transfer analysis", () => {
     );
     assert.equal(partial.state, "PARTIAL");
     assert.equal(partial.complete, false);
+    assert.deepEqual(partial.source.objectCoverage, {
+      status: "partial",
+      manifestObjectCount: 2,
+      processedObjectCount: 1,
+    });
 
     const staleRows = [scoped(line("stale", "USE1-DataTransfer-Out-Bytes"))];
     const staleEvidence = evidence(staleRows, {
@@ -359,6 +364,46 @@ describe("AWS Data Transfer analysis", () => {
       capture(staleRows, { evidence: staleEvidence }),
       NOW,
     ).state, "STALE");
+  });
+
+  it("keeps unavailable manifest object coverage null and forces a partial result", () => {
+    const rows = [scoped(line(
+      "object-coverage-unavailable",
+      "USE1-DataTransfer-Out-Bytes",
+    ))];
+    const unavailable = evidence(rows, {
+      status: "PARTIAL",
+      generatedAtIso: null,
+      dataThroughAtIso: null,
+      manifestObjectCount: null,
+      processedObjectCount: null,
+      errorCode: "MANIFEST_OBJECT_COVERAGE_UNAVAILABLE",
+    });
+    const result = buildDataTransferAnalysis(
+      BOUNDARY,
+      capture(rows, { evidence: unavailable }),
+      NOW,
+    );
+
+    assert.equal(result.state, "PARTIAL");
+    assert.equal(result.complete, false);
+    assert.equal(result.source.ageHours, null);
+    assert.deepEqual(result.source.objectCoverage, {
+      status: "unavailable",
+      manifestObjectCount: null,
+      processedObjectCount: null,
+    });
+
+    const dishonestSuccess = {
+      ...unavailable,
+      status: "SUCCEEDED" as const,
+      errorCode: null,
+    };
+    expectCode("SOURCE_MISMATCH", () => buildDataTransferAnalysis(
+      BOUNDARY,
+      capture(rows, { evidence: dishonestSuccess }),
+      NOW,
+    ));
   });
 
   it("rejects cross-tenant scope and account substitutions", () => {

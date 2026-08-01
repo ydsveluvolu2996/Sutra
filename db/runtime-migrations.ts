@@ -222,8 +222,15 @@ export function ensureRuntimeSchema(db: D1Database): Promise<void> {
         `SELECT migration_id FROM sutra_runtime_migrations WHERE migration_id = ? LIMIT 1`,
       ).bind(migration.id).first<{ migration_id: string }>();
       if (applied !== null) continue;
-      for (const statement of migration.statements) {
-        await applyStatement(db, statement);
+      if (migration.id === "0082_finops_source_evidence_artifact") {
+        // Rebuilding the checked evidence table also rebuilds its two FK child
+        // tables. D1 batch is transactional, so a replica cannot be left with
+        // immutability triggers removed or a half-copied evidence graph.
+        await db.batch(migration.statements.map((statement) => db.prepare(statement)));
+      } else {
+        for (const statement of migration.statements) {
+          await applyStatement(db, statement);
+        }
       }
       await db.prepare(
         `INSERT OR IGNORE INTO sutra_runtime_migrations (migration_id) VALUES (?)`,

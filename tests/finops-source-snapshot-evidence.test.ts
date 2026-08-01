@@ -199,6 +199,49 @@ test("new partial and failed attempts update public attempt state without replac
   });
 });
 
+test("an attempt that predates the active snapshot commit cannot override that accepted delivery", () => {
+  const source = stateFor({
+    snapshots: [snapshot("aws_budgets", {
+      committedAtIso: "2026-07-31T11:30:00.000Z",
+    })],
+    attempts: [attempt("aws_budgets", "failed")],
+  });
+  assert.equal(source.state, "healthy");
+  assert.equal(source.lastAttemptOutcome, "succeeded");
+  assert.equal(source.lastAttemptAt, "2026-07-31T10:00:00.000Z");
+  assert.equal(source.freshness.lastSuccessAt, "2026-07-31T11:30:00.000Z");
+  assert.equal(source.lastError, null);
+});
+
+test("source data-through freshness never suppresses a newer operational failure", () => {
+  const baseline: FinopsSourceEvidence = {
+    scope: SCOPE,
+    sourceId: "aws_budgets",
+    configured: true,
+    deliveryObserved: true,
+    lastAttemptAt: "2026-07-31T10:00:00.000Z",
+    lastAttemptOutcome: "succeeded",
+    lastSuccessAt: "2026-07-31T10:01:00.000Z",
+    dataThroughAt: "2026-07-31T11:45:00.000Z",
+    coverage: {
+      assessment: "complete",
+      acceptedRecords: 100,
+      expectedRecords: 100,
+      rejectedRecords: 0,
+    },
+    lastError: null,
+    evidenceBasis: "Existing accepted source evidence.",
+  };
+  const source = stateFor({
+    baseline: [baseline],
+    attempts: [attempt("aws_budgets", "failed")],
+  });
+  assert.equal(source.state, "failed");
+  assert.equal(source.lastAttemptAt, "2026-07-31T11:02:00.000Z");
+  assert.equal(source.freshness.lastSuccessAt, "2026-07-31T10:01:00.000Z");
+  assert.equal(source.freshness.dataThroughAt, "2026-07-31T11:45:00.000Z");
+});
+
 test("the adapter projects all 24 registered sources from active immutable metadata", () => {
   const activeSnapshots = FINOPS_SOURCE_DEFINITIONS.map((source, index) => {
     const generationId = `fss_${index.toString(16).padStart(64, "0")}`;

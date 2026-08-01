@@ -960,6 +960,8 @@ const FINOPS_SOURCE_COVERAGE_KEYS = [
 const FINOPS_SOURCE_ACCOUNT_ID = /^\d{12}$/u;
 const FINOPS_SOURCE_REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
 const FINOPS_SOURCE_CODE = /^[A-Z][A-Z0-9_]{0,127}$/u;
+const FINOPS_SOURCE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
+const FINOPS_SOURCE_CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 
 function exactFinopsRecord(
   value: unknown,
@@ -981,6 +983,15 @@ function normalizedFinopsIso(value: unknown): string | null {
 
 function boundedFinopsCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+function finopsRegionMatchesPartition(
+  region: string,
+  partition: AwsPartition,
+): boolean {
+  if (partition === "aws-cn") return region.startsWith("cn-");
+  if (partition === "aws-us-gov") return region.startsWith("us-gov-");
+  return !region.startsWith("cn-") && !region.startsWith("us-gov-");
 }
 
 function safeFinopsJson(
@@ -1043,7 +1054,11 @@ export function parseFinopsSourceCollectionResult(
     typeof record.configured !== "boolean" ||
     !new Set(["NOT_CONFIGURED", "NOT_IMPLEMENTED", "IMPLEMENTED"]).has(String(record.implementationState)) ||
     !new Set(["COMPLETE", "PARTIAL", "UNAVAILABLE"]).has(String(record.collectionStatus)) ||
-    (region !== null && (typeof region !== "string" || !FINOPS_SOURCE_REGION.test(region))) ||
+    (region !== null && (
+      typeof region !== "string" ||
+      !FINOPS_SOURCE_REGION.test(region) ||
+      !finopsRegionMatchesPartition(region, expected.partition)
+    )) ||
     collectedAt === null ||
     (record.dataThroughAt !== null && dataThroughAt === null) ||
     (dataThroughAt !== null && dataThroughAt > collectedAt) ||
@@ -1091,6 +1106,21 @@ export async function runFinopsSourceCollection(input: {
   readonly accountId: string;
   readonly partition: AwsPartition;
 }): Promise<FinopsSourceCollectionResult> {
+  if (
+    !FINOPS_SOURCE_IDENTIFIER.test(input.tenantId) ||
+    !FINOPS_SOURCE_CONNECTION_ID.test(input.connectionId) ||
+    !FINOPS_SOURCE_IDENTIFIER.test(input.jobId) ||
+    !FINOPS_SOURCE_IDENTIFIER.test(input.contractId) ||
+    !FINOPS_SOURCE_IDENTIFIER.test(input.sourceId) ||
+    !FINOPS_SOURCE_ACCOUNT_ID.test(input.accountId) ||
+    !new Set<AwsPartition>(["aws", "aws-us-gov", "aws-cn"]).has(input.partition)
+  ) {
+    throw new PilotServerError(
+      400,
+      "INVALID_INPUT",
+      "The FinOps source collection identity is invalid",
+    );
+  }
   const value = await brokerFetch<unknown>(
     `/v1/connections/${input.connectionId}/finops-source`,
     "POST",
