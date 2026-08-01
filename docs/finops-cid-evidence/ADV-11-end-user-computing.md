@@ -21,6 +21,14 @@ live customer evidence.
 - Pure fail-closed evidence engine: `lib/finops-end-user-computing.ts`
 - Credential-free signed-broker job contract:
   `lib/finops-end-user-computing-collector-job.ts`
+- Permanent server runtime/scheduler binding:
+  `lib/finops-end-user-computing-runtime-binding.ts`
+- Exact-byte Ed25519 transport:
+  `lib/finops-end-user-computing-signed-broker.ts`
+- Immutable runtime attempt ledger:
+  `db/finops-end-user-computing-runtime-attempt-repository.ts`,
+  `drizzle/0110_finops_euc_runtime_attempts.sql`, and
+  `postgres/migrations/0105_finops_euc_runtime_attempts.sql`
 - Immutable repository: `db/finops-end-user-computing-repository.ts`
 - SQLite migration: `drizzle/0094_finops_end_user_computing.sql`
 - PostgreSQL migration: `postgres/migrations/0089_finops_end_user_computing.sql`
@@ -51,19 +59,31 @@ evidence, and cost is one active exactly reconciled CUR2 generation. The engine
 sets `crossSourceInference: false`; a disconnected resource is not called
 unused and a missing metric is never displayed as zero.
 
+The runtime queue contains only a scheduler-owned window. The app reloads the
+exact tenant, connection, partition, account/Region boundary, and active CUR2
+lineage from server state. The signed request pins the CUR2 generation,
+manifest, billing period, row counts, and SHA-256 of the ordered
+privacy-minimized EUC cost projection. When CUR2 is unavailable, the response
+must contain null billing evidence and no cost rows; unavailable is never
+converted into zero cost. Broker responses are verified over their exact bytes
+before parsing and normalized again before immutable publication.
+
 ## Activation gates still open
 
-1. Register SQLite 0094 and PostgreSQL 0089 in shared runtime migration lists.
-2. Register PostgreSQL 0089 in the deployment migrator.
-3. Wire the component and catalog maturity in the shared FinOps navigation.
-4. Deploy a signed temporary-credential AWS broker implementing the eight
+1. Register `finops.end-user-computing.collect`, the durable handler factory,
+   and six-hour scheduler. Until then the binding reports
+   `EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED`.
+2. Provision the managed HTTPS broker origin, application signing key, broker
+   response verification key, replay store, and rotation identifiers.
+3. Deploy a signed temporary-credential AWS broker implementing the eight
    bounded read operations and live-simulate unavoidable wildcard permissions.
-5. Bind canonical CUR2 EUC classification and schedule collection.
-6. Add the rolling three-month aggregate store and approved privacy-preserving
+4. Bind and acceptance-test the active reconciled CUR2 EUC projection loader,
+   including its ordered cost digest and unavailable state.
+5. Add the rolling three-month aggregate store and approved privacy-preserving
    protocol/OS/logon aggregate contract (or retain the explicit unavailable UI).
-7. Run multi-account/Region live acceptance, including pagination, throttling,
+6. Run multi-account/Region live acceptance, including pagination, throttling,
    denied optional metrics, empty fleets, stale evidence, and tenant attacks.
 
-Until those gates pass, `collection.providerAdapterAvailable` is `false` with
-reason `EUC_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED`; this vertical must not be
-reported as locally verified or live.
+Until those gates pass, the existing API and runtime binding remain honestly
+unavailable with `EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED`. This vertical must
+not be reported as deployed or live verified.

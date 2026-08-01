@@ -50,7 +50,7 @@ test("EUC repository and API enforce normalized persistence and same-tenant read
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /getConnectionForOrg\(authenticated\.subject\.orgId/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
-  assert.match(route, /EUC_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED/u);
+  assert.match(route, /EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED/u);
   assert.match(route, /userIdentifiersStored: false, sessionIdentifiersStored: false/u);
   assert.doesNotMatch(route, /ALLOWED[^\n]*(?:user|session|ipAddress|clientIp)/u);
 });
@@ -91,7 +91,7 @@ test("native EUC report renders all six official areas with explicit privacy and
     };
     const report = { schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: `conn_${"a".repeat(32)}`, sourceState: "partial", dashboard,
       history: [{ generationId: `eucg_${"c".repeat(64)}`, sourceState: "PARTIAL", observedAtIso: "2026-08-01T01:00:00.000Z", workspaceCount: 1, fleetCount: 1, metricCount: 1, costLineCount: 1 }],
-      freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", ageHours: 1, staleAfterHours: 48 }, evidence: {}, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" },
+      freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", ageHours: 1, staleAfterHours: 48 }, evidence: {}, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
       privacy: { userIdentifiersStored: false }, unsupportedOfficialViews: ["Protocol unavailable"],
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.FinopsEndUserComputingReportView, { report, service: "ALL", onServiceChange: () => undefined }));

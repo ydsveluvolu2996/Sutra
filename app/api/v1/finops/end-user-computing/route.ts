@@ -68,7 +68,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null,
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
     });
     const dashboard = buildEndUserComputingDashboard(selected.snapshot, parsed.query);
     const through = dataThrough(selected.snapshot);
@@ -84,7 +84,7 @@ export async function GET(request: Request): Promise<Response> {
       evidence: { generationId: selected.generationId, activeGenerationId: active?.generationId ?? null,
         latestGenerationId: latest?.generationId ?? null, contentSha256: selected.contentSha256,
         sourceCaptureId: selected.snapshot.captureId, newerIncomplete },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
       privacy: { userIdentifiersStored: false, sessionIdentifiersStored: false, instanceIdentifiersStored: false, networkAddressesStored: false },
       unsupportedOfficialViews: [
         "WorkSpaces protocol and operating-system dimensions are not present in the current privacy-minimized collector contract.",
