@@ -225,6 +225,18 @@ const SOURCE_RUNTIME_BINDINGS = {
     ),
     PERSISTED_EVIDENCE_ADAPTER,
   ),
+  trusted_advisor_standard_checks: source(
+    "trusted_advisor_standard_checks",
+    query(
+      "sutra.finops.source.trusted_advisor_standard_checks.v1",
+      "aws_api_broker",
+      fixedOperationSet(
+        "support:DescribeTrustedAdvisorCheckResult",
+        "support:DescribeTrustedAdvisorChecks",
+      ),
+    ),
+    PERSISTED_EVIDENCE_ADAPTER,
+  ),
   trusted_advisor_organization: source(
     "trusted_advisor_organization",
     query(

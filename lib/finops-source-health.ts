@@ -8,6 +8,10 @@
  * complete coverage under Sutra's acceptance policy. It does not mean that an
  * AWS service is enabled merely because a related Sutra feature exists.
  */
+import {
+  FINOPS_DASHBOARD_MATURITY_BY_ID,
+  type FinopsDashboardMaturity,
+} from "./finops-dashboard-catalog.ts";
 
 export type FinopsSourceState =
   | "not_configured"
@@ -47,7 +51,13 @@ export const FINOPS_SOURCE_DEFINITIONS = [
   },
   {
     id: "trusted_advisor_organization",
-    name: "AWS Trusted Advisor organizational checks",
+    name: "AWS Trusted Advisor Priority organization recommendations",
+    kind: "recommendations",
+    freshnessSlaHours: 48,
+  },
+  {
+    id: "trusted_advisor_standard_checks",
+    name: "AWS Trusted Advisor standard account checks",
     kind: "recommendations",
     freshnessSlaHours: 48,
   },
@@ -271,8 +281,11 @@ export const FINOPS_CAPABILITY_DEFINITIONS = [
     name: "Trusted Advisor Organizational Dashboard",
     level: "advanced",
     documentationUrl: `${AWS_CID_ROOT}/trusted-advisor-dashboard.html`,
-    requiredSourceIds: ["trusted_advisor_organization"],
-    supplementalSourceIds: [],
+    requiredSourceIds: [
+      "aws_organizations_taxonomy",
+      "trusted_advisor_standard_checks",
+    ],
+    supplementalSourceIds: ["trusted_advisor_organization"],
   },
   {
     id: "compute_optimizer",
@@ -474,7 +487,12 @@ export interface FinopsCapabilityReadiness {
   readonly name: string;
   readonly level: FinopsDashboardLevel;
   readonly documentationUrl: string;
+  /** Authoritative provider-input health only. */
   readonly state: FinopsSourceState;
+  readonly sourceReady: boolean;
+  readonly implementationMaturity: FinopsDashboardMaturity;
+  readonly implementationReady: boolean;
+  /** True only when provider inputs are healthy and the local vertical is verified. */
   readonly ready: boolean;
   readonly requiredSources: readonly {
     readonly sourceId: FinopsSourceId;
@@ -495,6 +513,7 @@ export interface FinopsSourceReadinessReport {
   readonly summary: {
     readonly sources: Readonly<Record<FinopsSourceState, number>>;
     readonly capabilities: Readonly<Record<FinopsSourceState, number>>;
+    readonly sourceReadyCapabilities: number;
     readonly readyCapabilities: number;
     readonly totalCapabilities: number;
   };
@@ -676,13 +695,21 @@ export function buildFinopsSourceReadiness(input: {
     const supplementalSources = definition.supplementalSourceIds.map((sourceId) => sourceById.get(sourceId))
       .filter((source): source is FinopsSourceHealth => source !== undefined);
     const state = capabilityState(requiredSources, supplementalSources);
+    const sourceReady = state === "healthy";
+    const implementationMaturity = FINOPS_DASHBOARD_MATURITY_BY_ID[definition.id]
+      ?? "ABSENT";
+    const implementationReady = implementationMaturity === "LOCAL_VERTICAL_VERIFIED"
+      || implementationMaturity === "LIVE_ACCEPTED";
     return {
       id: definition.id,
       name: definition.name,
       level: definition.level,
       documentationUrl: definition.documentationUrl,
       state,
-      ready: state === "healthy",
+      sourceReady,
+      implementationMaturity,
+      implementationReady,
+      ready: sourceReady && implementationReady,
       requiredSources: requiredSources.map((source) => ({ sourceId: source.id, state: source.state })),
       supplementalSources: supplementalSources.map((source) => ({ sourceId: source.id, state: source.state })),
       blockingSourceIds: requiredSources.filter((source) => source.state !== "healthy").map((source) => source.id),
@@ -698,12 +725,13 @@ export function buildFinopsSourceReadiness(input: {
     summary: {
       sources: countsFor(sources.map((source) => source.state)),
       capabilities: countsFor(capabilities.map((capability) => capability.state)),
+      sourceReadyCapabilities: capabilities.filter((capability) => capability.sourceReady).length,
       readyCapabilities: capabilities.filter((capability) => capability.ready).length,
       totalCapabilities: capabilities.length,
     },
     sources,
     capabilities,
     disclaimer:
-      "Readiness is derived only from persisted, tenant-scoped source evidence. Missing evidence is never treated as configured; partial or supplemental data does not prove invoice reconciliation or AWS export completeness.",
+      "Source health is derived only from persisted, tenant-scoped evidence and is reported separately from implementation maturity. A healthy source never makes an incomplete dashboard ready; partial or supplemental data does not prove invoice reconciliation or export completeness.",
   };
 }

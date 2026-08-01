@@ -162,7 +162,7 @@ test("canonical source health drives readiness while supplemental rows only esta
   assert.equal(canonical.capabilities.find((entry) => entry.id === "pricing_change")?.state, "partial");
 });
 
-test("collection monitor is ready only from healthy scoped collection telemetry", () => {
+test("healthy collection telemetry does not promote an incomplete monitor to ready", () => {
   const report = buildFinopsSourceReadiness({
     scope,
     nowMs: NOW,
@@ -170,7 +170,56 @@ test("collection monitor is ready only from healthy scoped collection telemetry"
   });
   const monitor = report.capabilities.find((entry) => entry.id === "data_collection_monitor");
   assert.equal(monitor?.state, "healthy");
-  assert.equal(monitor?.ready, true);
+  assert.equal(monitor?.sourceReady, true);
+  assert.equal(monitor?.implementationMaturity, "PARTIAL_PIPELINE");
+  assert.equal(monitor?.implementationReady, false);
+  assert.equal(monitor?.ready, false);
   assert.deepEqual(monitor?.blockingSourceIds, []);
   assert.equal(report.capabilities.find((entry) => entry.id === "compute_optimizer")?.state, "partial");
+});
+
+test("Trusted Advisor readiness requires taxonomy plus standard checks and treats Priority as supplemental", () => {
+  const priorityOnly = buildFinopsSourceReadiness({
+    scope,
+    nowMs: NOW,
+    evidence: [evidence("trusted_advisor_organization")],
+  }).capabilities.find((entry) => entry.id === "trusted_advisor_organizational");
+  assert.equal(priorityOnly?.ready, false);
+  assert.equal(priorityOnly?.state, "partial");
+  assert.deepEqual(priorityOnly?.blockingSourceIds, [
+    "aws_organizations_taxonomy",
+    "trusted_advisor_standard_checks",
+  ]);
+
+  const standardWithoutTaxonomy = buildFinopsSourceReadiness({
+    scope,
+    nowMs: NOW,
+    evidence: [evidence("trusted_advisor_standard_checks")],
+  }).capabilities.find((entry) => entry.id === "trusted_advisor_organizational");
+  assert.equal(standardWithoutTaxonomy?.ready, false);
+  assert.deepEqual(standardWithoutTaxonomy?.blockingSourceIds, [
+    "aws_organizations_taxonomy",
+  ]);
+
+  const completeStandard = buildFinopsSourceReadiness({
+    scope,
+    nowMs: NOW,
+    evidence: [
+      evidence("aws_organizations_taxonomy"),
+      evidence("trusted_advisor_standard_checks"),
+    ],
+  }).capabilities.find((entry) => entry.id === "trusted_advisor_organizational");
+  assert.equal(completeStandard?.sourceReady, true);
+  assert.equal(completeStandard?.implementationMaturity, "ENGINE_ONLY");
+  assert.equal(completeStandard?.ready, false);
+  assert.equal(completeStandard?.state, "healthy");
+  assert.deepEqual(completeStandard?.blockingSourceIds, []);
+  assert.equal(buildFinopsSourceReadiness({
+    scope,
+    nowMs: NOW,
+    evidence: [
+      evidence("aws_organizations_taxonomy"),
+      evidence("trusted_advisor_standard_checks"),
+    ],
+  }).summary.sourceReadyCapabilities, 1);
 });

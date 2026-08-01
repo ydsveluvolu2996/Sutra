@@ -205,6 +205,9 @@ function CapabilityRow({
   readonly capability: FinopsCapabilityReadiness;
   readonly sourceNames: ReadonlyMap<string, string>;
 }) {
+  const maturityLabel = capability.implementationMaturity
+    .toLowerCase()
+    .replaceAll("_", " ");
   return (
     <article className={styles.capabilityRow}>
       <div className={styles.capabilityName}>
@@ -246,6 +249,12 @@ function CapabilityRow({
         <p className={styles.capabilityBlocker}>
           <b>Blocked by:</b>{" "}
           {capability.blockingSourceIds.map((sourceId) => sourceNames.get(sourceId) ?? sourceId).join(" · ")}
+        </p>
+      ) : null}
+      {capability.sourceReady && !capability.implementationReady ? (
+        <p className={styles.capabilityBlocker}>
+          <b>Implementation not verified:</b>{" "}
+          Authoritative inputs are healthy, but maturity remains {maturityLabel}.
         </p>
       ) : null}
     </article>
@@ -345,9 +354,10 @@ export function FinopsSourcesPanel({ connectionId }: FinopsSourcesPanelProps) {
           <p>{report.disclaimer}</p>
           <small>Assessed {formatTimestamp(report.generatedAt)}</small>
         </div>
-        <div className={styles.capabilityScore} aria-label={`${report.summary.readyCapabilities} of ${report.summary.totalCapabilities} capabilities ready`}>
-          <span>Capabilities ready</span>
+        <div className={styles.capabilityScore} aria-label={`${report.summary.readyCapabilities} of ${report.summary.totalCapabilities} capabilities implementation ready`}>
+          <span>Verified capabilities ready</span>
           <strong>{report.summary.readyCapabilities}<i>/ {report.summary.totalCapabilities}</i></strong>
+          <small>{report.summary.sourceReadyCapabilities} have healthy authoritative inputs</small>
           <button disabled={loading} onClick={() => void load()} type="button">
             {loading ? "Refreshing…" : "Refresh assessment"}
           </button>
@@ -386,7 +396,7 @@ export function FinopsSourcesPanel({ connectionId }: FinopsSourcesPanelProps) {
           <div>
             <p className="eyebrow">Enterprise capability tracker</p>
             <h2 id="capability-readiness-heading">Capability readiness</h2>
-            <p>Every capability stays blocked until all authoritative prerequisites are healthy.</p>
+            <p>Provider-input health and local implementation maturity are independent. Both must pass before a capability is ready.</p>
           </div>
           <span className="result-count">{report.summary.totalCapabilities} capabilities assessed</span>
         </header>

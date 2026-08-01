@@ -296,8 +296,14 @@ test("normalizes complete current and immutable historical AWS evidence", () => 
   assert.equal(
     readiness.capabilities.find((capability) =>
       capability.id === "compute_optimizer"
-    )?.ready,
+    )?.sourceReady,
     true,
+  );
+  assert.equal(
+    readiness.capabilities.find((capability) =>
+      capability.id === "compute_optimizer"
+    )?.ready,
+    false,
   );
 
   const dashboard = buildComputeOptimizerDashboard({ snapshot });

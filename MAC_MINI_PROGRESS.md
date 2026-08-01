@@ -103,3 +103,40 @@ Limitations/blockers:
 PR/check/image/deploy evidence:
 Next gate:
 ```
+
+### 2026-08-01 — catalog and shared evidence shell
+
+| Field | Evidence |
+|---|---|
+| Tracker rows / gates | All 29 / presentation inventory and shared G5 foundation |
+| Maturity transition | None; 6 candidate, 2 partial, 19 engine-only, and 2 absent remain truthful |
+| Commit | `6efe74b6b0` pushed to `origin/agent/mac-mini-finops-continuation` |
+| Files | Canonical catalog, responsive level navigation, reusable evidence shell, cost-workspace integration, focused tests |
+| Tests | 10 passed, 0 failed, 0 skipped; touched-file ESLint and `git diff --check` passed |
+| Correctness audit | Exact 3/13/13 counts; official names/audiences; Azure/GCP remain outside AWS runtime bindings; no false ready/live labels; shared-analysis action receives a real focus/scroll target |
+| Visual acceptance | Source/render contracts complete; signed-in Chrome behavior run is pending because the installed Browser plugin control channel cannot attach |
+| Release evidence | Commit pushed; no image published and current live digest remains unchanged |
+| Next gate | Complete authoritative collectors/APIs, bind per-dashboard live data to the shared shell, then run browser and exact-tree acceptance |
+
+### 2026-08-01 — Trusted Advisor standard-check collector
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-01 / G1 complete locally; first bounded portion of G2 implemented and focused-tested |
+| Maturity transition | None; remains `ENGINE_ONLY` until organization fan-out, persistence, API, and visual UI are complete |
+| Collector evidence | Exact read-only `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult`; commercial partition and `us-east-1`; no refresh; deterministic 512-check/25,000-resource/8-MiB limits |
+| Readiness correction | Organizations taxonomy and standard checks are required; Priority organization recommendations remain supplemental |
+| Tests | Collector runner/dispatch 18 passed; source-health/compute/TA/FOCUS/UI integration set 44 passed; registry/permissions 16 passed; root and collector typechecks, changed-file ESLint, and `git diff --check` passed |
+| Limitations | Organization fan-out, immutable organization history, authenticated TAO API/UI, and deployable onboarding policy are not in this slice |
+| Next gate | ADV-01 G2 organization orchestration, then G3 immutable manifest/account/organization persistence |
+
+### 2026-08-01 — dedicated FOCUS 1.2 report API
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-04 / bounded G4 report/API foundation over the existing active immutable billing generations |
+| Maturity transition | None; remains `PARTIAL_PIPELINE` until its complete visual dashboard and acceptance gates pass |
+| Engine/API evidence | FOCUS 1.2 only; CUR/FOCUS 1.0 substitution rejected; same-tenant active AWS connection; 36 periods/250,000 rows; signed bigint micros; currencies separate; schema quality, source rejections, freshness, bounded dimensions and drilldowns |
+| Tests | 9 passed, 0 failed, 0 skipped; root typecheck and focused ESLint passed |
+| Limitations | `conformanceClaim:false`; no invoice-reconciliation claim; dedicated visual dashboard not yet connected |
+| Next gate | ADD-04 G5 visual report with filters, trends, dimension charts/table, drilldown, quality and evidence drawer |

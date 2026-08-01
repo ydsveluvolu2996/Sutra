@@ -1,0 +1,60 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import test from "node:test";
+
+const root = path.resolve(import.meta.dirname, "..");
+const route = await readFile(
+  path.join(root, "app/api/v1/finops/focus/route.ts"),
+  "utf8",
+);
+
+test("FOCUS GET is authenticated, same-tenant, and read-only", () => {
+  assert.match(route, /export const dynamic = "force-dynamic"/u);
+  assert.match(route, /requireApiSession\(request\)/u);
+  assert.match(
+    route,
+    /getConnectionForOrg\(\s*authenticated\.subject\.orgId,\s*query\.connectionId,\s*\)/u,
+  );
+  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /connection\.status !== "active"/u);
+  assert.match(
+    route,
+    /assertSessionCapability\(\s*authenticated,\s*"connection:read",\s*connection\.customerId,\s*\)/u,
+  );
+  assert.match(route, /repository\.listActivePartitions\(owner\)/u);
+  assert.match(route, /repository\.loadActivePartition\(owner, partition\)/u);
+  assert.doesNotMatch(route, /export async function (?:POST|PUT|PATCH|DELETE)/u);
+  assert.doesNotMatch(
+    route,
+    /\.get\("(?:orgId|organizationId|customerId|tenantId|accountId|exportName|generationId)"\)/u,
+  );
+});
+
+test("FOCUS GET has an exact query allowlist and fixed history bounds", () => {
+  assert.match(
+    route,
+    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"fromPeriod",\s*"toPeriod",\s*\]\)/u,
+  );
+  assert.match(route, /parameters\.keys\(\)/u);
+  assert.match(route, /!ALLOWED_QUERY_PARAMETERS\.has\(key\)/u);
+  assert.match(route, /parameters\.getAll\(key\)\.length > 1/u);
+  assert.match(route, /FINOPS_FOCUS_DASHBOARD_BOUNDS\.maximumPeriods/u);
+  assert.match(route, /FINOPS_FOCUS_DASHBOARD_BOUNDS\.maximumTotalRows/u);
+  assert.match(route, /const FRESHNESS_SLA_HOURS = 48/u);
+  assert.match(route, /ageHours > FRESHNESS_SLA_HOURS/u);
+  assert.match(route, /freshness\.state/u);
+});
+
+test("FOCUS GET cannot substitute CUR or FOCUS 1.0", () => {
+  assert.match(
+    route,
+    /activeSourceFormat === "focus"[\s\S]*activeSourceVersion === "1\.2"/u,
+  );
+  assert.match(route, /substitutionAllowed: false/u);
+  assert.match(route, /sourceState: allActivePartitions\.length === 0[\s\S]*"configuration_required"/u);
+  assert.doesNotMatch(route, /activeSourceFormat === "aws-cur"/u);
+  assert.doesNotMatch(route, /activeSourceVersion === "1\.0"/u);
+  assert.doesNotMatch(route, /CostExplorer|fixture|simulated|sample/iu);
+  assert.doesNotMatch(route, /sourceState: "ready"|source_incomplete/u);
+});

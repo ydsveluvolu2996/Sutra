@@ -150,6 +150,15 @@ const SOURCE_PERMISSIONS: Readonly<Record<FinopsSourceId, SourcePermissionDefini
       "Trusted Advisor Priority organization APIs require a qualifying AWS Support plan, Trusted Advisor Priority activation, and management or delegated-administrator access; they do not represent every standard Trusted Advisor check.",
     ],
   },
+  trusted_advisor_standard_checks: {
+    actions: [
+      "support:DescribeTrustedAdvisorCheckResult",
+      "support:DescribeTrustedAdvisorChecks",
+    ],
+    prerequisites: [
+      "Standard Trusted Advisor checks are collected per account through the AWS Support API in us-east-1 and require a qualifying AWS Support plan.",
+    ],
+  },
   compute_optimizer_organization_export: {
     actions: [
       "autoscaling:DescribeAutoScalingGroups",

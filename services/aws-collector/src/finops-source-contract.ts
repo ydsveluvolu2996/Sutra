@@ -10,6 +10,7 @@ const IAM_POLICY_NAME = /^[\w+=,.@-]{1,128}$/u;
 export const FINOPS_COLLECTOR_SOURCE_IDS = Object.freeze([
   "aws_cur2_data_export",
   "aws_focus_1_2_data_export",
+  "trusted_advisor_standard_checks",
   "trusted_advisor_organization",
   "compute_optimizer_organization_export",
   "cost_anomaly_detection",
@@ -47,6 +48,15 @@ export const COST_ANOMALY_SOURCE_ACTIONS = Object.freeze([
   "ce:GetAnomalySubscriptions",
 ] as const);
 
+export const TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID =
+  "aws-trusted-advisor-standard-checks-read-v1" as const;
+export const TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME =
+  "SutraFinopsTrustedAdvisorStandardReadV1" as const;
+export const TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS = Object.freeze([
+  "support:DescribeTrustedAdvisorCheckResult",
+  "support:DescribeTrustedAdvisorChecks",
+] as const);
+
 export interface FinopsSourceDefinition {
   readonly implementationState: "IMPLEMENTED" | "NOT_IMPLEMENTED";
   readonly permissionContractId: string | null;
@@ -61,17 +71,29 @@ const NOT_IMPLEMENTED_SOURCE: FinopsSourceDefinition = Object.freeze({
   actions: Object.freeze([]),
 });
 
+const IMPLEMENTED_SOURCE_DEFINITIONS = Object.freeze({
+  cost_anomaly_detection: Object.freeze({
+    implementationState: "IMPLEMENTED" as const,
+    permissionContractId: COST_ANOMALY_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COST_ANOMALY_SOURCE_POLICY_NAME,
+    actions: COST_ANOMALY_SOURCE_ACTIONS,
+  }),
+  trusted_advisor_standard_checks: Object.freeze({
+    implementationState: "IMPLEMENTED" as const,
+    permissionContractId: TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
+    actions: TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
+  }),
+});
+
 export const FINOPS_SOURCE_DEFINITIONS: Readonly<
   Record<FinopsCollectorSourceId, FinopsSourceDefinition>
 > = Object.freeze(Object.fromEntries(FINOPS_COLLECTOR_SOURCE_IDS.map((sourceId) => [
   sourceId,
-  sourceId === "cost_anomaly_detection"
-    ? Object.freeze({
-        implementationState: "IMPLEMENTED" as const,
-        permissionContractId: COST_ANOMALY_SOURCE_PERMISSION_CONTRACT_ID,
-        policyName: COST_ANOMALY_SOURCE_POLICY_NAME,
-        actions: COST_ANOMALY_SOURCE_ACTIONS,
-      })
+  sourceId in IMPLEMENTED_SOURCE_DEFINITIONS
+    ? IMPLEMENTED_SOURCE_DEFINITIONS[
+        sourceId as keyof typeof IMPLEMENTED_SOURCE_DEFINITIONS
+      ]
     : NOT_IMPLEMENTED_SOURCE,
 ])) as unknown as Readonly<
   Record<FinopsCollectorSourceId, FinopsSourceDefinition>
@@ -162,7 +184,8 @@ function parseContract(
     record.policyName !== definition.policyName ||
     (record.policyName !== null &&
       (typeof record.policyName !== "string" || !IAM_POLICY_NAME.test(record.policyName))) ||
-    (record.sourceId === "cost_anomaly_detection" &&
+    (new Set(["cost_anomaly_detection", "trusted_advisor_standard_checks"])
+      .has(record.sourceId) &&
       (owner.partition !== "aws" || record.region !== "us-east-1"))
   ) failContract();
   return {

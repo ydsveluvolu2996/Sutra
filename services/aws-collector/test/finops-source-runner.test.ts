@@ -8,6 +8,7 @@ import type {
   AnomalyMonitor,
   AnomalySubscription,
 } from "@aws-sdk/client-cost-explorer";
+import type { TrustedAdvisorStandardReader } from "../src/trusted-advisor-standard-runner.js";
 import type {
   AssumeRoleCommand,
   AssumeRoleCommandInput,
@@ -18,12 +19,16 @@ import type {
 import { COST_ANOMALY_OFFICIAL_ENDPOINT } from "../src/cost-anomaly-runner.js";
 
 import {
+  FINOPS_SOURCE_DISPATCH_LIMITS,
   COST_ANOMALY_SOURCE_ACTIONS,
   COST_ANOMALY_SOURCE_PERMISSION_CONTRACT_ID,
   COST_ANOMALY_SOURCE_POLICY_NAME,
   FINOPS_SOURCE_DEFINITIONS,
   FINOPS_SOURCE_MAX_CONCURRENT_DISPATCHES,
   FINOPS_SOURCE_MAX_OPERATION_CONCURRENCY,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
   executeFinopsSourceDispatch,
   parseFinopsSourceContracts,
   parseFinopsSourceDispatchRequest,
@@ -414,6 +419,119 @@ test("dispatches a persisted Cost Anomaly contract and removes caller-defined PI
   assert.equal(serialized.includes("ASIASOURCE"), false);
 });
 
+test("dispatches only the exact persisted standard Trusted Advisor Support contract", async () => {
+  const contract = sourceContract({
+    contractId: "contract-ta-standard-v1",
+    sourceId: "trusted_advisor_standard_checks",
+    permissionContractId: TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
+  });
+  assert.throws(() => parseFinopsSourceContracts([{ ...contract, region: "us-west-2" }], {
+    tenantId: TENANT_ID,
+    connectionId: CONNECTION_ID,
+    expectedAccountId: ACCOUNT_ID,
+    partition: "aws",
+  }));
+  assert.throws(() => parseFinopsSourceContracts([{
+    ...contract,
+    permissionContractId: "broader-contract",
+  }], {
+    tenantId: TENANT_ID,
+    connectionId: CONNECTION_ID,
+    expectedAccountId: ACCOUNT_ID,
+    partition: "aws",
+  }));
+  const supportReader: TrustedAdvisorStandardReader = {
+    async describeTrustedAdvisorChecks(input) {
+      assert.deepEqual(input, { language: "en" });
+      return {
+        checks: [{
+          id: "check-one",
+          name: "Idle resource check",
+          description: "Finds an idle resource",
+          category: "cost_optimizing",
+          metadata: ["Resource", "Savings"],
+        }],
+      };
+    },
+    async describeTrustedAdvisorCheckResult(input) {
+      assert.deepEqual(input, { checkId: "check-one", language: "en" });
+      return {
+        result: {
+          checkId: "check-one",
+          timestamp: "2026-07-31T08:00:00Z",
+          status: "warning",
+          resourcesSummary: {
+            resourcesProcessed: 1,
+            resourcesFlagged: 1,
+            resourcesIgnored: 0,
+            resourcesSuppressed: 0,
+          },
+          categorySpecificSummary: {},
+          flaggedResources: [{
+            resourceId: "i-0123456789abcdef0",
+            region: "us-east-1",
+            status: "warning",
+            isSuppressed: false,
+            metadata: ["i-0123456789abcdef0", "20"],
+          }],
+        },
+      };
+    },
+  };
+  const deps = {
+    ...dependencies(new Registry(connection([contract]))),
+    trustedAdvisorStandardReader: supportReader,
+  };
+  const dispatched = await executeFinopsSourceDispatch({
+    ...request("ta-standard"),
+    contractId: contract.contractId,
+  }, deps);
+
+  assert.equal(dispatched.sourceId, "trusted_advisor_standard_checks");
+  assert.equal(dispatched.collectionStatus, "COMPLETE");
+  assert.equal(dispatched.dataThroughAt, "2026-07-31T08:00:00.000Z");
+  assert.equal(dispatched.coverage.pagesObserved, 2);
+  assert.equal(dispatched.coverage.recordsAccepted, 3);
+  assert.deepEqual(
+    FINOPS_SOURCE_DEFINITIONS.trusted_advisor_standard_checks.actions,
+    TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
+  );
+  assert.equal(JSON.stringify(dispatched).includes("ASIASOURCE"), false);
+  assert.equal(JSON.stringify(dispatched).includes("secret"), false);
+});
+
+test("returns sanitized unavailable standard-check evidence when AWS Support access is absent", async () => {
+  const contract = sourceContract({
+    contractId: "contract-ta-standard-unavailable-v1",
+    sourceId: "trusted_advisor_standard_checks",
+    permissionContractId: TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
+  });
+  const deps = {
+    ...dependencies(new Registry(connection([contract]))),
+    trustedAdvisorStandardReader: {
+      async describeTrustedAdvisorChecks() {
+        throw Object.assign(new Error("private AWS error body"), {
+          name: "SubscriptionRequiredException",
+        });
+      },
+      async describeTrustedAdvisorCheckResult() {
+        throw new Error("must not be called");
+      },
+    } satisfies TrustedAdvisorStandardReader,
+  };
+  const dispatched = await executeFinopsSourceDispatch({
+    ...request("ta-standard-unavailable"),
+    contractId: contract.contractId,
+  }, deps);
+
+  assert.equal(dispatched.collectionStatus, "UNAVAILABLE");
+  assert.equal(dispatched.errorCode, "SUPPORT_PLAN_REQUIRED");
+  assert.equal(dispatched.evidence, null);
+  assert.equal(JSON.stringify(dispatched).includes("private AWS error body"), false);
+});
+
 test("returns honest not-configured and not-implemented envelopes without assuming a role", async () => {
   const missingDeps = dependencies(new Registry(connection(null)));
   const missing = await executeFinopsSourceDispatch(request("missing"), missingDeps);
@@ -549,6 +667,17 @@ test("the source catalog and exact action arrays are deeply immutable", () => {
   assert.equal(Object.isFrozen(FINOPS_SOURCE_DEFINITIONS), true);
   assert.equal(Object.isFrozen(FINOPS_SOURCE_DEFINITIONS.cost_anomaly_detection), true);
   assert.equal(Object.isFrozen(COST_ANOMALY_SOURCE_ACTIONS), true);
+  assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS), true);
+  assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS.cost_anomaly_detection), true);
+  assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS.trusted_advisor_standard_checks), true);
+  assert.ok(
+    FINOPS_SOURCE_DISPATCH_LIMITS.cost_anomaly_detection.maximumBytes
+      < FINOPS_SOURCE_DISPATCH_LIMITS.trusted_advisor_standard_checks.maximumBytes,
+  );
+  assert.ok(
+    FINOPS_SOURCE_DISPATCH_LIMITS.cost_anomaly_detection.deadlineMs
+      < FINOPS_SOURCE_DISPATCH_LIMITS.trusted_advisor_standard_checks.deadlineMs,
+  );
   assert.throws(() => {
     (FINOPS_SOURCE_DEFINITIONS.cost_anomaly_detection.actions as string[])
       .push("ce:DeleteAnomalyMonitor");

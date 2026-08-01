@@ -45,6 +45,7 @@ test("source health exposes every honest state and required evidence dimension",
 
 test("capability tracker renders API-derived totals and all enterprise levels", () => {
   assert.match(panel, /report\.summary\.readyCapabilities/u);
+  assert.match(panel, /report\.summary\.sourceReadyCapabilities/u);
   assert.match(panel, /report\.summary\.totalCapabilities/u);
   assert.match(panel, /report\.summary\.sources\[state\]/u);
   assert.match(panel, /report\.summary\.capabilities\[state\]/u);
@@ -52,6 +53,8 @@ test("capability tracker renders API-derived totals and all enterprise levels", 
   assert.match(panel, /"foundational"/u);
   assert.match(panel, /"advanced"/u);
   assert.match(panel, /"additional"/u);
+  assert.match(panel, /Implementation not verified:/u);
+  assert.match(panel, /capability\.sourceReady && !capability\.implementationReady/u);
 });
 
 test("source readiness layout preserves accessible labels and responsive cards", () => {

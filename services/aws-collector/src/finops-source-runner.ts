@@ -19,6 +19,18 @@ import {
   type CostAnomalyReader,
 } from "./cost-anomaly-runner.js";
 import {
+  collectTrustedAdvisorStandardChecks,
+  TRUSTED_ADVISOR_STANDARD_COMMAND_DEADLINE_MS,
+  TRUSTED_ADVISOR_STANDARD_MAX_CHECKS,
+  TRUSTED_ADVISOR_STANDARD_MAX_CONCURRENCY,
+  TRUSTED_ADVISOR_STANDARD_MAX_METADATA_FIELDS,
+  TRUSTED_ADVISOR_STANDARD_MAX_OUTPUT_BYTES,
+  TRUSTED_ADVISOR_STANDARD_MAX_RESOURCES,
+  TRUSTED_ADVISOR_STANDARD_OVERALL_DEADLINE_MS,
+  type TrustedAdvisorStandardCollection,
+  type TrustedAdvisorStandardReader,
+} from "./trusted-advisor-standard-runner.js";
+import {
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   type AwsPartition,
   type FinopsSourceContract,
@@ -43,6 +55,9 @@ export {
   actionsForFinopsSourceContracts,
   parseFinopsSourceContracts,
   resolveFinopsSourceContract,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
   type FinopsCollectorSourceId,
   type FinopsSourceContractOwner,
 } from "./finops-source-contract.js";
@@ -51,10 +66,16 @@ const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const DAY_MS = 86_400_000;
 
-export const FINOPS_SOURCE_DISPATCH_MAX_BYTES =
-  COST_ANOMALY_MAX_OUTPUT_BYTES + 64 * 1_024;
-export const FINOPS_SOURCE_DISPATCH_DEADLINE_MS =
-  COST_ANOMALY_OVERALL_DEADLINE_MS;
+export const FINOPS_SOURCE_DISPATCH_LIMITS = Object.freeze({
+  cost_anomaly_detection: Object.freeze({
+    maximumBytes: COST_ANOMALY_MAX_OUTPUT_BYTES + 64 * 1_024,
+    deadlineMs: COST_ANOMALY_OVERALL_DEADLINE_MS,
+  }),
+  trusted_advisor_standard_checks: Object.freeze({
+    maximumBytes: TRUSTED_ADVISOR_STANDARD_MAX_OUTPUT_BYTES + 64 * 1_024,
+    deadlineMs: TRUSTED_ADVISOR_STANDARD_OVERALL_DEADLINE_MS,
+  }),
+});
 export const FINOPS_SOURCE_MAX_OPERATION_CONCURRENCY = 3;
 export const FINOPS_SOURCE_MAX_CONCURRENT_DISPATCHES = 3;
 
@@ -86,6 +107,8 @@ export interface FinopsSourceDispatchDependencies {
   readonly now?: () => Date;
   /** Tests only. Production uses the fixed AWS SDK Cost Explorer endpoint. */
   readonly costAnomalyReader?: CostAnomalyReader;
+  /** Tests only. Production uses the fixed AWS Support us-east-1 endpoint. */
+  readonly trustedAdvisorStandardReader?: TrustedAdvisorStandardReader;
 }
 
 export interface FinopsSourceDispatchCoverage {
@@ -160,7 +183,6 @@ export async function executeFinopsSourceDispatch(
   unsafeRequest: FinopsSourceDispatchRequest,
   dependencies: FinopsSourceDispatchDependencies,
 ): Promise<FinopsSourceDispatchResult> {
-  const dispatchDeadlineAt = Date.now() + FINOPS_SOURCE_DISPATCH_DEADLINE_MS;
   const request = parseFinopsSourceDispatchRequest(unsafeRequest);
   const collectedAtDate = dependencies.now?.() ?? new Date();
   if (!Number.isFinite(collectedAtDate.getTime())) throw new FinopsSourceDispatchError();
@@ -230,9 +252,86 @@ export async function executeFinopsSourceDispatch(
     session.expiresAt.getTime() <= collectedAtDate.getTime()
   ) throw new FinopsSourceDispatchError();
 
-  if (contract.sourceId !== "cost_anomaly_detection") {
-    throw new FinopsSourceDispatchError();
+  const dispatchLimits = FINOPS_SOURCE_DISPATCH_LIMITS[
+    contract.sourceId as keyof typeof FINOPS_SOURCE_DISPATCH_LIMITS
+  ];
+  if (dispatchLimits === undefined) throw new FinopsSourceDispatchError();
+  const dispatchDeadlineAt = Date.now() + dispatchLimits.deadlineMs;
+
+  if (contract.sourceId === "trusted_advisor_standard_checks") {
+    let collection: TrustedAdvisorStandardCollection;
+    try {
+      collection = await withSourceDispatchPermit(
+        (remainingMs) => collectTrustedAdvisorStandardChecks({
+          accountId: session.accountId,
+          partition: session.partition,
+          credentials: session.credentials,
+          now: () => collectedAtDate,
+          ...(dependencies.trustedAdvisorStandardReader === undefined
+            ? {}
+            : { client: dependencies.trustedAdvisorStandardReader }),
+          maximumChecks: TRUSTED_ADVISOR_STANDARD_MAX_CHECKS,
+          maximumResources: TRUSTED_ADVISOR_STANDARD_MAX_RESOURCES,
+          maximumMetadataFields: TRUSTED_ADVISOR_STANDARD_MAX_METADATA_FIELDS,
+          maximumOutputBytes: TRUSTED_ADVISOR_STANDARD_MAX_OUTPUT_BYTES,
+          concurrency: TRUSTED_ADVISOR_STANDARD_MAX_CONCURRENCY,
+          overallDeadlineMs: Math.min(
+            TRUSTED_ADVISOR_STANDARD_OVERALL_DEADLINE_MS,
+            remainingMs,
+          ),
+          commandDeadlineMs: Math.min(
+            TRUSTED_ADVISOR_STANDARD_COMMAND_DEADLINE_MS,
+            remainingMs,
+          ),
+        }),
+        dispatchDeadlineAt,
+      );
+    } catch {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: "COLLECTION_FAILED",
+        limitations: ["COLLECTION_FAILED", "NO_PROVIDER_DATA_RETURNED"],
+      });
+    }
+    if (collection.status === "UNAVAILABLE") {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: collection.coverage.find((entry) => entry.errorCode !== null)
+          ?.errorCode ?? "SOURCE_UNAVAILABLE",
+        limitations: collection.limitations,
+        coverage: aggregateTrustedAdvisorCoverage(collection),
+      });
+    }
+    const result = trustedAdvisorStandardResult(request, contract, collection);
+    if (Buffer.byteLength(JSON.stringify(result), "utf8") > dispatchLimits.maximumBytes) {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: "OUTPUT_SIZE_LIMIT_REACHED",
+        limitations: ["OUTPUT_SIZE_LIMIT_REACHED", "NO_PROVIDER_DATA_RETURNED"],
+        coverage: aggregateTrustedAdvisorCoverage(collection),
+      });
+    }
+    return result;
   }
+  if (contract.sourceId !== "cost_anomaly_detection") throw new FinopsSourceDispatchError();
   const windowEnd = collectedAtDate;
   const windowStart = new Date(
     windowEnd.getTime() - COST_ANOMALY_MAX_LOOKBACK_DAYS * DAY_MS,
@@ -280,7 +379,7 @@ export async function executeFinopsSourceDispatch(
   }
 
   const result = costAnomalyResult(request, contract, collection);
-  if (Buffer.byteLength(JSON.stringify(result), "utf8") > FINOPS_SOURCE_DISPATCH_MAX_BYTES) {
+  if (Buffer.byteLength(JSON.stringify(result), "utf8") > dispatchLimits.maximumBytes) {
     return emptyResult({
       request,
       connection,
@@ -295,6 +394,79 @@ export async function executeFinopsSourceDispatch(
     });
   }
   return result;
+}
+
+function trustedAdvisorStandardResult(
+  request: FinopsSourceDispatchRequest,
+  contract: FinopsSourceContract,
+  collection: TrustedAdvisorStandardCollection,
+): FinopsSourceDispatchResult {
+  return {
+    schemaVersion: "sutra.finops-source-dispatch.v1",
+    tenantId: request.tenantId,
+    connectionId: request.connectionId,
+    jobId: request.jobId,
+    contractId: request.contractId,
+    sourceId: "trusted_advisor_standard_checks",
+    configured: true,
+    implementationState: "IMPLEMENTED",
+    collectionStatus: collection.status,
+    accountId: collection.accountId,
+    partition: contract.partition,
+    region: contract.region,
+    collectedAt: collection.collectedAt,
+    dataThroughAt: collection.dataThroughAt,
+    coverage: aggregateTrustedAdvisorCoverage(collection),
+    evidence: minimizeTrustedAdvisorStandardEvidence(collection),
+    errorCode: collection.status === "COMPLETE"
+      ? null
+      : collection.coverage.find((entry) => entry.errorCode !== null)?.errorCode
+        ?? "SOURCE_COVERAGE_INCOMPLETE",
+    limitations: [...new Set([
+      ...collection.limitations,
+      `MAX_OPERATION_CONCURRENCY_${TRUSTED_ADVISOR_STANDARD_MAX_CONCURRENCY}`,
+    ])],
+  };
+}
+
+function minimizeTrustedAdvisorStandardEvidence(
+  collection: TrustedAdvisorStandardCollection,
+): SafeJsonObject {
+  return {
+    schemaVersion: collection.schemaVersion,
+    source: collection.source,
+    coverage: collection.coverage.map((entry) => ({ ...entry })),
+    checks: collection.checks.map((check) => ({
+      checkId: check.checkId,
+      name: check.name,
+      description: check.description,
+      category: check.category,
+      metadataSchema: check.metadataSchema,
+      status: check.status,
+      dataThroughAt: check.dataThroughAt,
+      resourcesSummary: check.resourcesSummary,
+      costOptimizingSummary: check.costOptimizingSummary,
+      flaggedResources: check.flaggedResources.map((resource) => ({
+        resourceId: resource.resourceId,
+        region: resource.region,
+        status: resource.status,
+        suppressed: resource.suppressed,
+        metadata: resource.metadata.map((entry) => ({ ...entry })),
+      })),
+    })),
+  };
+}
+
+function aggregateTrustedAdvisorCoverage(
+  collection: TrustedAdvisorStandardCollection,
+): FinopsSourceDispatchCoverage {
+  return collection.coverage.reduce<FinopsSourceDispatchCoverage>((total, entry) => ({
+    pagesObserved: total.pagesObserved + entry.requestsObserved,
+    recordsObserved: total.recordsObserved + entry.recordsObserved,
+    recordsAccepted: total.recordsAccepted + entry.recordsAccepted,
+    recordsRejected: total.recordsRejected + entry.recordsRejected,
+    recordsOmitted: total.recordsOmitted + entry.recordsOmitted,
+  }), emptyCoverage());
 }
 
 function costAnomalyResult(
