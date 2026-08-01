@@ -6,6 +6,7 @@ import {
   type MediaServicesDashboardFilters,
 } from "../../../../../lib/finops-media-services-dashboard";
 import type { MediaCostService, MediaProvider, MediaResourceType } from "../../../../../lib/finops-media-services-insights";
+import { MEDIA_SERVICES_OFFICIAL_DEFINITION } from "../../../../../lib/finops-media-services-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -56,6 +57,7 @@ export async function GET(request: Request): Promise<Response> {
     if (relevantHeads.length === 0) {
       return jsonResponse({ schema: "sutra.finops-media-services-insights.v1", connectionId: connection.id,
         sourceState: relevantHistory[0]?.state ?? "configuration_required", dashboard: null,
+        officialDefinition: MEDIA_SERVICES_OFFICIAL_DEFINITION,
         latestAttempt: relevantHistory[0] ?? null,
         collection: { available: false, reason: "MEDIA_SERVICES_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED" },
         limitations: ["No complete accepted Media Services/CUR2 generation is available for this account and Region selection."] });
@@ -70,6 +72,7 @@ export async function GET(request: Request): Promise<Response> {
     return jsonResponse({
       schema: "sutra.finops-media-services-insights.v1", connectionId: connection.id,
       source: "AWS_MEDIA_SERVICES_INVENTORY_AND_CUR2_ACTIVE_GENERATION", sourceState,
+      officialDefinition: MEDIA_SERVICES_OFFICIAL_DEFINITION,
       freshness: { dataThroughAt: oldestDataThrough, ageHours: currentAge, staleAfterHours: FRESH_HOURS },
       ...portfolio, history: relevantHistory.slice(0,180),
       evidence: { acceptedHeads: relevantHeads.map((item) => ({ generationId: item.generationId,

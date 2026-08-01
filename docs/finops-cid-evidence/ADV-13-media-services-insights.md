@@ -1,20 +1,79 @@
 # ADV-13 — Media Services Insights
 
+Reviewed: **2026-08-01** against current AWS Guidance and immutable public AWS
+source commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`.
+
 Status: `PARTIAL_PIPELINE` (local vertical and permanent runtime binding contract complete; provider activation not claimed)
 
 ## Official capability mapping
 
-Pinned definition audit: CID framework commit
-`f9e36d88c47709f10e8fa784ad11d5cc0e728021`,
-<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/media-services-insights/msih-definition.yaml>.
-The nine official sheets are **Executive Summary**, **MediaLive Reservation &
-Savings**, **MediaConvert**, **MediaConnect**, **MediaLive**, **MediaTailor**,
-**MediaPackage**, **Raw Data**, and **About**. Sutra exposes these navigation
-areas as evidence views while marking reservation savings partial until governed
-comparison prices exist. Official service-specific controls (including Flow,
+AWS Guidance describes usage, cost and performance lenses for five Elemental
+services and seven user-facing tabs:
+
+- [Media Services Insights Hub — AWS Cloud Intelligence Dashboards](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/media-services-insights.html)
+
+The complete v2.2.1 definition links the legacy
+`aws-samples/aws-cudos-framework-deployment` repository URL. Both that linked
+URL and the primary `aws-solutions-library-samples/cloud-intelligence-dashboards-framework`
+URL resolve to commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`; their MSIH manifest, definition
+and changelog are byte-identical. The audit does not follow a mutable `main`
+branch after recording that SHA.
+
+### Pinned public artifacts
+
+| Artifact | Path / hash basis | SHA-256 |
+|---|---|---|
+| Dashboard catalog | `dashboards/catalog.yaml`, raw bytes | `169a37fb7be4660e96a1fa258d0f95d4cef597f4294c0c27cfda101dfbdb197d` |
+| MSIH manifest | `dashboards/media-services-insights/msih.yaml`, raw bytes | `ab485a191da780a262b09d133731095c19720de4d3827a74dd42b454d974867a` |
+| Complete QuickSight definition | `dashboards/media-services-insights/msih-definition.yaml`, raw bytes | `a29384174b7eafb599c3ca3734a8a7f4954b8e057f716e6d79e8750cee88fe4d` |
+| Changelog | `changes/CHANGELOG-media-services-insights.md`, raw bytes | `c489667883cbf69a92144f592d3b4d50ad8fae59420833e8dd1a7ad24e043a53` |
+| Shared deployment template | `cfn-templates/cid-plugin.yml`, raw bytes | `b96a47e6b53418293ec7127d0a95f96f2ffdae2781cde2b2dffcabad926a713d` |
+| Reservation-optimization dataset | `datasets.msih_reservation_optimize.data`, canonical JSON | `86dbd25fc53dd7db2c121465371bc2e33621bbbb761f3391bac1a5e09beb00a4` |
+| Reservations dataset | `datasets.msih_reservations.data`, canonical JSON | `7332380211b604b6727c9cbab7292ba61539ac8402a88668a41e8be939fb6ab0` |
+| Main dataset | `datasets.msih_view.data`, canonical JSON | `690b21cc539aad83ceffe7f1fc933c6bc59eaed40a5619bd09a911ecaf99e8e5` |
+| Reservation-optimization Athena view | `views.msih_reservation_optimize.data`, decoded scalar bytes | `e35911d887dcccca397693a7bc390c6f9539e0aa2c0e2d2e5e1e0c9944517a45` |
+| Reservations Athena view | `views.msih_reservations.data`, decoded scalar bytes | `9a8ba7f427db59e695b4f83b61ebed672280f5c7e51d371493e91d1196ccb0f2` |
+| Main Athena view | `views.msih_view.data`, decoded scalar bytes | `c53c3ae61c5cc47181c29c2c6ca6cd393796d3c4f5e8f6f6805d5dfd5bee616a` |
+
+The CloudFormation launch uses the shared CID plugin template; no separate
+dashboard-specific template is published.
+
+### Exact QuickSight inventory
+
+| Sheet | Visuals | Exact visual-type inventory | Control placements |
+|---|---:|---|---:|
+| Executive Summary | 20 | 3 bar, 11 KPI, 2 insight, 2 line, 1 table, 1 heat map | 7 |
+| MediaLive Reservation & Savings | 27 | 4 table, 1 insight, 1 scatter, 8 bar, 7 line, 4 KPI, 2 combo | 16 |
+| MediaConvert | 17 | 1 combo, 4 line, 1 pivot, 2 insight, 6 bar, 3 KPI | 12 |
+| MediaConnect | 14 | 1 combo, 2 Sankey, 2 line, 2 insight, 1 pivot, 4 bar, 2 KPI | 8 |
+| MediaLive | 35 | 18 bar, 3 combo, 6 line, 2 pivot, 3 insight, 3 KPI | 20 |
+| MediaTailor | 16 | 2 pivot, 2 Sankey, 3 KPI, 5 bar, 2 insight, 2 line | 8 |
+| MediaPackage | 14 | 1 pivot, 3 KPI, 2 Sankey, 2 insight, 4 bar, 2 line | 8 |
+| Raw Data | 1 | 1 table | 13 |
+| About | 0 | None | 0 |
+| **Total** | **144** | **48 bar, 29 KPI, 14 insight, 25 line, 6 table, 1 heat map, 1 scatter, 7 combo, 7 pivot, 6 Sankey** | **92** |
+
+The definition additionally proves 59 parameter-control placements, 33
+filter-control placements, 44 parameter declarations, 175 calculated fields,
+241 filter groups, 2 column configurations, and 3 SPICE datasets. The manifest
+publishes three Athena views containing 151, 123 and 128 lines respectively.
+
+`lib/finops-media-services-official-definition.ts` maps all 52 documented
+sheet purposes and every control placement to supported, partial,
+server-pinned, unavailable, or About-evidence states. This includes Flow,
 Pipeline, Codec, Resolution, Bit Rate, Frame Rate, Quality, transcoding profile,
-usage category, cost model, pricing adjustments, lookback and Top N) remain
-exact-tree gaps where the normalized projection has no equivalent dimension.
+usage categories, account controls, cost model, pricing adjustments, lookback,
+Top N, reservation scenario and raw-data controls. The report-independent UI
+panel renders this inventory in ready, loading, failed, disconnected and
+configuration-required states.
+
+AWS recommendation language—especially the statement that MediaLive reserved
+instances can save up to 75 percent—is guidance, not evidence that a tenant has
+realized or can realize that amount. Sutra therefore marks all reservation
+savings, scenario and term recommendations unavailable until versioned prices,
+allocation, historical utilization and future-use evidence are independently
+reconciled.
 
 G1/G2/G3/G4 are local-complete contracts for inventory, source boundaries,
 durable runtime and persistence/API. G5 remains partial for exact service-sheet
@@ -40,14 +99,21 @@ acceptance.
 
 - Source engine: `lib/finops-media-services-insights.ts`
 - Portfolio projection: `lib/finops-media-services-dashboard.ts`
+- Frozen official-source audit: `lib/finops-media-services-official-definition.ts`
 - Server-owned job contract: `lib/finops-media-services-collector-job.ts`
 - Permanent scheduler/runtime boundary: `lib/finops-media-services-runtime-binding.ts`
 - Persistence: `db/finops-media-services-repository.ts`
 - SQLite: `drizzle/0095_finops_media_services_insights.sql`
 - PostgreSQL: `postgres/migrations/0090_finops_media_services_insights.sql`
-- Same-tenant API: `app/api/v1/finops/media-services-insights/route.ts`
-- Native UI: `app/costs/finops-media-services-insights-dashboard.tsx`
-- Focused verification: `tests/finops-media-services-insights.test.ts`, `tests/finops-media-services-vertical.test.mjs`, `tests/finops-media-services-runtime-binding.test.ts`
+- Same-tenant API: `app/api/v1/finops/media-services-insights/route.ts`. Every
+  HTTP-200 state includes the pinned official definition.
+- Native UI: `app/costs/finops-media-services-insights-dashboard.tsx`, including
+  report-independent official artifact/sheet/purpose/control coverage.
+- Focused verification: `tests/finops-media-services-insights.test.ts`,
+  `tests/finops-media-services-vertical.test.mjs`,
+  `tests/finops-media-services-runtime-binding.test.ts`,
+  `tests/finops-media-services-official-definition.test.ts`, and
+  `tests/finops-media-services-official-ui.test.mjs`
 
 ## Controls and failure semantics
 
