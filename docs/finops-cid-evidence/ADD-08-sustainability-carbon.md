@@ -20,9 +20,21 @@ MBM are not added together, and totals are not added to scopes.
 
 ## Official scope coverage
 
+The complete embedded QuickSight definition was audited 2026-08-01 at pinned
+CID framework commit
+[`f9e36d88c47709f10e8fa784ad11d5cc0e728021`](https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/sustainability-proxy-metrics/sustainability-proxy-metrics.yaml).
+The artifact SHA-256 is
+`dff730465da14a7278dfa722340026265d5a16ec0a824fb310cbd6c89004e269`.
+It contains exactly **6 sheets, 25 visuals, and 17 controls**: Regional
+Footprint (3/0), Compute Proxies (5/4), Storage Proxies (4/4), Data Transfer /
+Networking Proxies (4/4), Carbon Emissions (7/5), and About (2/0).
+
 | Capability | Local implementation | Honest gap |
 |---|---|---|
-| vCPU, storage and data-transfer proxies | Exact normalized monthly series with account, Region, service, metric and workload-tag filters | Depends on deployed CUR2 classifier/materializer |
+| Regional Footprint | Region-filtered resource proxy evidence | Renewable-energy classification and map coordinates are absent from v1 and are not inferred |
+| Compute proxies | Exact normalized vCPU/resource monthly series with account, Region, service, metric and workload-tag filters | Processor architecture, EC2 instance family and official business-KPI denominator controls require a versioned schema |
+| Storage proxies | Exact normalized storage monthly series | EBS volume type and S3 storage class require a versioned schema |
+| Data-transfer/networking proxies | Exact normalized data-transfer monthly series | Transfer-path type and idle NAT Gateway/ELB resource evidence require a versioned schema |
 | Provider carbon export | Complete 23-column schema, objects/periods/model/publication lineage and separate monthly trends | Version-pinned export and S3 adapter not deployed |
 | Trends | Independent exact proxy and provider-carbon trends | No mathematical combination or correlation claim |
 | Targets/workload-tag goals | Workload-tag goal inventory and explicit `NOT_CONFIGURED` states | Durable server-owned target configuration/write workflow remains open |
@@ -33,6 +45,7 @@ MBM are not added together, and totals are not added to scopes.
 
 - Engine: `lib/finops-sustainability-carbon.ts`
 - Projection: `lib/finops-sustainability-dashboard.ts`
+- Pinned official inventory: `lib/finops-sustainability-official-definition.ts`
 - Materialization contract: `lib/finops-sustainability-carbon-job.ts`
 - Permanent runtime boundary: `lib/finops-sustainability-carbon-runtime-binding.ts`
 - Repository: `db/finops-sustainability-carbon-repository.ts`
