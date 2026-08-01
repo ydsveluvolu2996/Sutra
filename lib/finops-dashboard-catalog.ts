@@ -251,7 +251,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Media Services",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "AWS Elemental Media Services usage, cost, performance, and workflow optimization insights.",
     targetAudience: ["Product owners", "DevOps", "Engineering", "SRE"],
     documentationUrl: `${AWS_CID_ROOT}/media-services-insights.html`,

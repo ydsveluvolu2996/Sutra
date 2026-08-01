@@ -91,6 +91,7 @@ import finopsAwsBudgetsOrganizationSchemaSql from "../drizzle/0091_finops_aws_bu
 import finopsAwsSupportCasesSchemaSql from "../drizzle/0092_finops_aws_support_cases.sql?raw";
 import finopsResilienceVueSchemaSql from "../drizzle/0093_finops_resilience_vue.sql?raw";
 import finopsEndUserComputingSchemaSql from "../drizzle/0094_finops_end_user_computing.sql?raw";
+import finopsMediaServicesInsightsSchemaSql from "../drizzle/0095_finops_media_services_insights.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -199,6 +200,7 @@ const migrations = [
   { id: "0092_finops_aws_support_cases", statements: statementsFrom(finopsAwsSupportCasesSchemaSql) },
   { id: "0093_finops_resilience_vue", statements: statementsFrom(finopsResilienceVueSchemaSql) },
   { id: "0094_finops_end_user_computing", statements: statementsFrom(finopsEndUserComputingSchemaSql) },
+  { id: "0095_finops_media_services_insights", statements: statementsFrom(finopsMediaServicesInsightsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

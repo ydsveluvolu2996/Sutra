@@ -60,16 +60,16 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 7 | 5 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 8 | 4 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 4 | 5 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **11** | **10** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **12** | **9** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The eleven partial pipelines are Trusted
+Anomaly, Trends, and Data Transfer. The twelve partial pipelines are Trusted
 Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
-Resource Compliance, and Pricing Change Analysis. Azure CID and GCP CID are
-absent.
+Resource Compliance, Pricing Change Analysis, and Media Services Insights.
+Azure CID and GCP CID are absent.
 
 ## Parent capability tracker
 
@@ -90,7 +90,7 @@ absent.
 | ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-10-resiliencevue.md): immutable multi-account/Region assessment history, same-tenant API, and native posture/RTO-RPO/breach/recommendation UI exist; permanent AWS adapter/job registration and provider acceptance remain. |
 | ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-11-end-user-computing.md): privacy-safe immutable WorkSpaces/AppStream/metrics/CUR2 projection, same-tenant API, and six-area native UI exist; broker binding, rolling three-month/provider dimensions, and live acceptance remain. |
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | Replace generic telemetry equivalence with official DCF module instrumentation, execution history, errors, Step Functions links, retries, latency, and coverage. |
-| ADV-13 | Media Services Insights Hub | `media_services_insights` | `ENGINE_ONLY` | Complete AWS Elemental usage/cost/performance collection, persistence, API/UI, and workflow drilldowns. |
+| ADV-13 | Media Services Insights Hub | `media_services_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-13-media-services-insights.md): immutable CUR2-pinned history, same-tenant API, executive and five-service native workflow UI exist; AWS adapter/job registration, governed budgets/reservation evidence, and provider acceptance remain. |
 | ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md): immutable projection/history, same-tenant API and native UI exist; permanent Cost Optimization Hub export materialization and provider acceptance remain. |
 | ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `ABSENT` | Add Azure billing-export connection, collector, immutable normalized persistence, API, native visual reports, and live Azure validation. |
 | ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `ABSENT` | Add GCP Cloud Billing export connection, collector, immutable normalized persistence, API, native visual reports, and live GCP validation. |
