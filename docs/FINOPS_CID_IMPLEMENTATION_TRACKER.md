@@ -72,9 +72,9 @@ Collection Monitor and FOCUS. Azure CID and GCP CID are absent.
 
 | ID | Official dashboard | Sutra ID | Current maturity | Immediate proof or gap |
 |---|---|---|---|---|
-| FND-01 | CUDOS Dashboard | `cudos` | `LOCAL_VERTICAL_CANDIDATE` | Audit CUR2 collection, reconciliation, resource drilldowns, recommendations, evidence states, accessibility, and two-tenant isolation. |
-| FND-02 | Cost Intelligence Dashboard | `cost_intelligence_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | Audit configurable allocation/showback, forecasts, commitment/savings attribution, executive visuals, and tenant isolation. |
-| FND-03 | KPI and Modernization Dashboard | `kpi_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | Correct the user-facing name; audit goal editing/history and On-Demand, Spot, Graviton, and modernization trends. |
+| FND-01 | CUDOS Dashboard | `cudos` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-01-cudos.md); exact-tree and controlled two-tenant/provider acceptance remain. |
+| FND-02 | Cost Intelligence Dashboard | `cost_intelligence_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-02-cost-intelligence.md); exact-tree and controlled two-tenant/provider acceptance remain. |
+| FND-03 | KPI and Modernization Dashboard | `kpi_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-03-kpi-modernization.md); exact-tree and controlled two-tenant/provider acceptance remain. |
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `ENGINE_ONLY` | Add authoritative standard-check organizational-view export collection/history/API/UI. Existing Priority API logic is supplemental and cannot prove full TAO coverage. |
 | ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `ENGINE_ONLY` | Complete organization export/history, savings and under-provisioning risk views, API/UI, and coverage evidence. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | Audit findings, monitors/subscriptions, time series, root cause, last-good evidence, and cross-tenant behavior. |
