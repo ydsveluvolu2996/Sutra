@@ -3,10 +3,11 @@
 ## Status
 
 `PARTIAL_PIPELINE` — the normalized buyer engine, server-owned job contract,
-immutable tenant-scoped persistence, authenticated same-tenant API, and native
-dashboard are implemented. The signed AWS provider adapter, reviewed role
-policy deployment, scheduler binding, and live buyer-account evidence have not
-been deployed or accepted. The UI therefore reports configuration required
+permanent scheduler/runtime boundary, immutable tenant-scoped persistence,
+authenticated same-tenant API, and native dashboard are implemented. The
+signed AWS provider adapter, reviewed role-policy deployment, shared scheduler
+registration, and live buyer-account evidence have not been deployed or
+accepted. The UI therefore reports configuration required
 when no generation exists and the API reports
 `MARKETPLACE_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED`; this vertical is not live
 verified.
@@ -53,13 +54,15 @@ claims:
 
 - Engine: `lib/finops-marketplace-spg.ts`
 - Permanent job contract: `lib/finops-marketplace-spg-collector-job.ts`
+- Permanent scheduler/runtime boundary: `lib/finops-marketplace-spg-runtime-binding.ts`
 - SQLite migration: `drizzle/0096_finops_marketplace_spg.sql`
 - PostgreSQL migration: `postgres/migrations/0091_finops_marketplace_spg.sql`
 - Repository: `db/finops-marketplace-spg-repository.ts`
 - API: `app/api/v1/finops/marketplace-spg/route.ts`
 - UI: `app/costs/finops-marketplace-spg-dashboard.tsx`
-- Focused tests: `tests/finops-marketplace-spg.test.ts` and
-  `tests/finops-marketplace-spg-vertical.test.mjs`
+- Focused tests: `tests/finops-marketplace-spg.test.ts`,
+  `tests/finops-marketplace-spg-vertical.test.mjs`, and
+  `tests/finops-marketplace-spg-runtime-binding.test.ts`
 
 The repository normalizes the exact capture before persistence. Snapshot rows
 are immutable and content-addressed; the mutable head can advance only to a
@@ -67,6 +70,34 @@ newer generation with complete organization coverage and READY/EMPTY states
 for agreements, licenses, and CUR2 spend. Partial, configuration-required, and
 failed correction attempts remain immutable history and cannot replace the
 last complete accepted head.
+
+The permanent runtime boundary reloads the organization/customer/connection,
+management account, AWS Organization, sorted active-account coverage evidence,
+License Manager organization-integration requirements, and one active
+reconciled CUR2 generation from server state. The queue payload contains only
+the daily UTC window. The deterministic broker request pins the six buyer
+operations, five License Manager operations, two Organizations coverage
+actions, Agreement/Discovery endpoint Regions, acceptor party, 50/100 page
+sizes, 5,000-page sequence ceiling, 15-minute abort, all collection bounds,
+an 11 MiB evidence-archive ceiling, and every false-valued privacy control.
+
+The CUR2 boundary retains its `fbg_...` generation, immutable source-evidence
+generation, manifest SHA, data-through timestamp, reconciliation/predicate,
+complete linked-account set, exhaustive-row state, separate billed/amortized
+columns, and row-level currency separation. The returned capture must reproduce
+the fields it can carry exactly; the full server boundary is included in the
+canonical archived evidence and its digest is bound to replay and persistence.
+
+The broker port must return an Ed25519-verified response with exact request and
+capture hashes. The runtime archives the canonical boundary/request/
+verification/capture as `finops_source_snapshot`, derives a deterministic
+`fss_...` evidence generation, seals it with tenant/customer/connection/source/
+generation AAD, and requires an application handoff to bind that evidence to
+the normalized `mspg_...` snapshot. Accepted replay identities perform no
+second provider call, archive, or persistence write; replay recomputes both the
+snapshot generation digest and the evidence-generation digest before accepting
+the receipt. Only generic failure codes are handed off; provider text is never
+retained.
 
 ## Privacy and security boundary
 
@@ -79,18 +110,32 @@ connection, and `connection:read` capability for the same customer.
 
 ## Remaining live gates
 
-1. Implement and review the signed provider adapter for bounded Agreement,
-   Discovery, License Manager, organization-account and active-CUR2 reads.
-2. Bind its schedule, retry/timeout/job-ledger behavior, and deploy its exact
-   least-privilege role/session ceiling.
-3. Add an approved source for offer and product-type classification, or keep
-   those official views unavailable.
-4. Validate complete organization, single-account, no-purchase, missing
+1. Implement and review the authenticated Ed25519 broker transport and provider
+   adapter for bounded Agreement, Discovery, License Manager, organization-
+   account and active-CUR2 reads. Provider-validate exact pagination tokens,
+   throttling/retries, response-size enforcement, endpoint routing, and the
+   buyer-only operation ceiling.
+2. Bind the trusted eligible-connection resolver and permanent server-boundary
+   resolver for AWS Organizations coverage, License Manager organization
+   settings, and the atomically active reconciled CUR2 generation.
+3. Implement the atomic or recoverable immutable-handoff port that binds the
+   sealed `fss_...` object, source-boundary hash, and normalized `mspg_...`
+   generation under one request identity.
+4. Register `finops-marketplace-spg-daily-collect` in the shared durable handler
+   registry and bind the scheduler, queue, attempt ledger, evidence archive,
+   key service, role sessions and observability. The isolated binding remains
+   `registeredInSharedRuntime: false`; shared registries were not edited.
+5. Add an approved source for offer and product-type classification, or keep
+   those official views unavailable. A seller API, embed URL, spend row, or
+   offer ID must not be used to infer the missing dimension.
+6. Validate complete organization, single-account, no-purchase, missing
    License Manager integration, mixed currencies, pagination, expired/replaced
    agreement, denied access, stale source and cross-tenant rejection cases in
    real buyer accounts.
-5. Verify accessibility and signed-in dashboard behavior against the deployed
-   site and attach immutable live evidence.
+7. Verify signed response/capture hashes, independent CUR2 total reproduction,
+   immutable lineage, accessibility and signed-in dashboard behavior against
+   the deployed site; attach live evidence, rollback and post-deploy smoke
+   results.
 
 Until these gates pass, this vertical must not be marked `LOCAL_VERIFIED` or
 `LIVE_VERIFIED`.
