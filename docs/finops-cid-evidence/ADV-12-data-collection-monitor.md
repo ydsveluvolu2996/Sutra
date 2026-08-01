@@ -1,6 +1,6 @@
 # ADV-12 — Data Collection Monitor
 
-Status: `NATIVE_FUNCTIONAL_WITH_PROVIDER_GAPS`; runtime activation is not claimed.
+Status: `PARTIAL_PIPELINE`; runtime activation is not claimed.
 
 Reviewed 2026-08-01 against the official AWS
 [Data Collection Monitor](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/data-collection-monitor.html),
