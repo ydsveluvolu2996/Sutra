@@ -1,6 +1,6 @@
 # ADV-13 — Media Services Insights
 
-Status: `PARTIAL_PIPELINE` (local implementation; provider activation not claimed)
+Status: `PARTIAL_PIPELINE` (local vertical and permanent runtime binding contract complete; provider activation not claimed)
 
 ## Official capability mapping
 
@@ -24,18 +24,24 @@ Status: `PARTIAL_PIPELINE` (local implementation; provider activation not claime
 - Source engine: `lib/finops-media-services-insights.ts`
 - Portfolio projection: `lib/finops-media-services-dashboard.ts`
 - Server-owned job contract: `lib/finops-media-services-collector-job.ts`
+- Permanent scheduler/runtime boundary: `lib/finops-media-services-runtime-binding.ts`
 - Persistence: `db/finops-media-services-repository.ts`
 - SQLite: `drizzle/0095_finops_media_services_insights.sql`
 - PostgreSQL: `postgres/migrations/0090_finops_media_services_insights.sql`
 - Same-tenant API: `app/api/v1/finops/media-services-insights/route.ts`
 - Native UI: `app/costs/finops-media-services-insights-dashboard.tsx`
-- Focused verification: `tests/finops-media-services-insights.test.ts`, `tests/finops-media-services-vertical.test.mjs`
+- Focused verification: `tests/finops-media-services-insights.test.ts`, `tests/finops-media-services-vertical.test.mjs`, `tests/finops-media-services-runtime-binding.test.ts`
 
 ## Controls and failure semantics
 
 - Session organization is server-derived. The API never accepts `orgId` or `customerId`.
 - The selected connection must be an active AWS trust-role connection and the session must have `connection:read` for its customer.
 - The collector payload contains only a server scheduling window. Account, partition, Region, active CUR2 generation, operations and bounds are server-resolved.
+- The permanent daily scheduler enumerates eligible connections only from trusted server state and enqueues exactly `{ scheduledWindow }`. The handler reloads the connection and every account/partition/Region target, incremental cursor, active reconciled CUR2 generation, manifest SHA, data-through timestamp, cost basis, currency, and governed planning-evidence reference before any adapter call.
+- Every deterministic target/window/billing/planning request stays stable when its incremental cursor advances during queue replay and freezes the five official workflow definitions and all 46 declared reads, a 100-item page size, 20,000-call ceiling per provider, token-replay rejection, exhaustion evidence, four-worker concurrency, archive-safe 11 MiB runtime capture ceiling, and one 15-minute abort window. MediaPackage v1/v2 remain separate provider contracts inside the single packaging/origination workflow.
+- The adapter result must reproduce the exact server-selected CUR2 generation, manifest, data-through time, cost basis, currency, and exhaustive-row state. Exact-ARN resource attribution remains separate from service-level unattributed spend.
+- Governed Budget and MediaLive on-demand-price inputs are accepted only as pinned immutable generation/hash/date/currency references. When missing they carry explicit unavailable reason codes. The runtime contract accepts no threshold, price, amount, or savings value, and the existing visual continues to report budget variance and reservation savings as unavailable until a separately validated projection consumes governed values.
+- The canonical request and capture are archived as `finops_source_snapshot`, assigned a deterministic `fss_...` generation, sealed with tenant/customer/connection/source/generation AAD, and handed to an application port that must durably bind the evidence lineage to the normalized `msg_...` snapshot. Accepted replay identities bypass repeat AWS, archive, and persistence calls. Only generic failure codes are handed off; raw provider messages are not persisted.
 - Normalization validates exact tenant/AWS scope, provider cardinality, pagination/exhaustion, ARN service/account/Region, byte/count/time/concurrency limits, unique identifiers, timestamps, signed decimal micros, currency and active-CUR2 lineage.
 - Snapshot JSON is content-addressed. SQLite and PostgreSQL reject snapshot updates/deletes and only permit a complete, newer same-target generation to advance a head.
 - Failed, partial and configuration-required attempts remain in immutable history and do not replace an accepted complete head.
@@ -43,11 +49,12 @@ Status: `PARTIAL_PIPELINE` (local implementation; provider activation not claime
 
 ## Remaining provider gates
 
-1. Register the production credential-broker adapter for the allowlisted Media Services operations.
-2. Register the durable daily job handler and target enumerator.
-3. Bind every collection to the server-selected active CUR2 generation and prove pagination, throttling, timeout and unsupported-Region behavior against AWS accounts.
-4. Apply both migrations through the release path and complete PostgreSQL parity verification.
-5. Obtain real multi-account/Region evidence, visual acceptance, negative tenant-isolation evidence, provider validation and live post-deploy smoke evidence.
-6. Add governed AWS Budgets and versioned on-demand pricing joins before enabling budget variance or reservation-savings claims.
+1. Implement and register the authenticated credential-broker adapter for the exact 46 reads, including service-specific resource scoping, regional availability, retry/throttling behavior, token handling and byte/call/time enforcement.
+2. Bind the trusted eligible-connection resolver and Organizations-aware account/partition/Region target resolver, plus the active reconciled CUR2 selector that returns complete generation, manifest, data-through, cost-basis and currency lineage.
+3. Implement the permanent immutable-handoff port so archived/sealed `fss_...` evidence, governed planning references, and normalized `msg_...` snapshot are committed atomically or recoverably under the deterministic request identity.
+4. Register `finops-media-services-insights-daily-collect` in the shared durable handler registry and bind the scheduler, queue, evidence archive, key service, role-session broker and observability. `MEDIA_SERVICES_RUNTIME_BINDING.registeredInSharedRuntime` intentionally remains `false`; shared registry files were not changed by this isolated closure.
+5. Apply the existing SQLite/PostgreSQL snapshot migrations through the release path and complete PostgreSQL parity verification.
+6. Provider-validate governed AWS Budgets and versioned on-demand Price List joins before changing the existing unavailable budget or reservation-savings visual. Independently reproduce any future amounts and retain currency/effective-date lineage; absence must remain unavailable.
+7. Run controlled live multi-account/Region acceptance for all five workflows and six provider contracts, including pagination exhaustion, throttling, timeouts, unsupported Regions, partial captures, exact CUR2 lineage substitution, cross-tenant denial, resources without CUR ARNs, credits and unlike units. Retain signed evidence, complete visual acceptance, rollback and post-deploy smoke results.
 
 Until all provider gates pass, the catalog maturity must not exceed `PARTIAL_PIPELINE`, the route returns `MEDIA_SERVICES_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED`, and production activation must remain false.
