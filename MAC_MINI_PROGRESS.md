@@ -195,6 +195,19 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Complete Health Events, Azure CID and GCP CID, then close every activation and acceptance gap |
 
+### 2026-08-01 — AWS Health Events planning vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-06 / local G1–G6 candidate slice |
+| Maturity transition | ADV-06 `ENGINE_ONLY` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 21 partial pipelines, 0 engine-only, and 2 absent |
+| Delivery | Server-owned organization collection contract; past/current/upcoming events; affected accounts/entities/details; immutable status-transition and generation history; same-tenant API; prerequisite and provider-disabled states; privacy disclosure; formula-safe export |
+| Planning semantics | The dashboard prominently documents a 48-hour-or-greater lag and is never labelled real-time |
+| Focused verification | Engine plus vertical 15 passed; targeted ESLint and diff validation passed; full TypeScript passed before unrelated concurrent Azure work introduced a temporary type error |
+| Remaining gates | Deploy credential-broker adapter/durable handler; validate eligible support, Organizations access, provider pagination/retention/initial load; complete signed-in, negative-tenant, provider and live smoke acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Build Azure CID and GCP CID, then finish each partial pipeline’s production activation and acceptance gates |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

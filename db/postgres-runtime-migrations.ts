@@ -95,6 +95,7 @@ import postgresFinopsAmazonConnectCostInsightsSql from "../postgres/migrations/0
 import postgresFinopsComputeOptimizerExportHistorySql from "../postgres/migrations/0096_finops_compute_optimizer_export_history.sql?raw";
 import postgresFinopsExtendedSupportProjectionSql from "../postgres/migrations/0097_finops_extended_support_projection.sql?raw";
 import postgresFinopsGravitonSavingsSql from "../postgres/migrations/0098_finops_graviton_savings.sql?raw";
+import postgresFinopsAwsHealthEventsSql from "../postgres/migrations/0099_finops_aws_health_events.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -194,6 +195,7 @@ const migrations = [
   { id: "0096_finops_compute_optimizer_export_history", source: postgresFinopsComputeOptimizerExportHistorySql },
   { id: "0097_finops_extended_support_projection", source: postgresFinopsExtendedSupportProjectionSql },
   { id: "0098_finops_graviton_savings", source: postgresFinopsGravitonSavingsSql },
+  { id: "0099_finops_aws_health_events", source: postgresFinopsAwsHealthEventsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

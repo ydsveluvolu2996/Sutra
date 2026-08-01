@@ -160,7 +160,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Health Events",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Past, active, and upcoming AWS Health events across organization accounts and affected entities.",
     targetAudience: ["Product owners", "DevOps", "Engineering", "SRE", "Security"],
     documentationUrl: `${AWS_CID_ROOT}/health-events-dashboard.html`,

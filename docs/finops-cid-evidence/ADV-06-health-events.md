@@ -4,9 +4,9 @@ Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/health-events-dashboard.html>
 
-Assessment revision: `17da4c5989b4`
+Assessment revision: local ADV-06 vertical (not yet committed or provider-validated)
 
-Current maturity: `ENGINE_ONLY`
+Current maturity: `PARTIAL_PIPELINE`
 
 ## Official requirement and visual inventory
 
@@ -25,11 +25,11 @@ Organizational View can be absent.
 |---|---|---|
 | G0 requirements | `VERIFIED` | Current AWS guide above, reviewed 2026-08-01. |
 | G1 source contract | `IMPLEMENTED_UNVERIFIED` | Bounded read-only organization event/account/entity/detail operations; support-plan, Organization View, partition/endpoint, account and initial-load states; replay/concurrency controls; server-derived query scope. |
-| G2 collector | `NOT_STARTED` | A pure capture normalizer/query transport exists, but the collector service has no concrete paginated AWS Health runner and durable scheduled dispatch. |
-| G3 persistence | `NOT_STARTED` | No immutable accepted Health event/entity/detail history and complete-only dashboard head is bound. |
-| G4 API | `NOT_STARTED` | No authenticated application route reads accepted Health generations. |
-| G5 visual UI | `NOT_STARTED` | No native past/current/upcoming summary, timeline, deprecation view or affected-resource drilldown exists. |
-| G6 focused verification | `VERIFIED` | Exact revision `17da4c5989b4`: 9 engine/query tests pass with 0 failures/skips for scope, pagination, partial/stale, generic failures, drilldowns and server-side query bounds. |
+| G2 collector | `IMPLEMENTED_UNVERIFIED` | `lib/finops-aws-health-collector-job.ts` pins organization scope, the exact organization event/account/entity/detail operations, management-only configuration status operation, unfiltered planning capture and declared bounds. The production credential adapter/job-handler binding remains absent. |
+| G3 persistence | `IMPLEMENTED_UNVERIFIED` | `db/finops-aws-health-repository.ts`, SQLite `0104` and PostgreSQL `0099` persist every attempt immutably, retain all complete history, and advance only a newer complete head. Disabled, ineligible, pending and partial attempts cannot displace accepted history. |
+| G4 API | `IMPLEMENTED_UNVERIFIED` | Authenticated same-tenant `app/api/v1/finops/health-events/route.ts` reads accepted history and exposes distinct eligible-support, Organizations access, Organizational View, delegated-admin, initial-load and provider states. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Native accessible planning UI shows a prominent 48-hour-or-greater/not-real-time warning, past/current/upcoming summaries, affected entities/details, immutable transitions, privacy notice, filters, evidence hashes and formula-safe CSV. |
+| G6 focused verification | `VERIFIED_LOCAL` | 15 engine + vertical tests pass with 0 failures/skips; repository immutability, partial-safe heads, event transitions, collector contract, route, migrations and SSR visual contract are covered. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled eligible-plan/provider, two-tenant, reviewed release, deployment and live acceptance remain. |
 
 ## Evidence-honesty limits
@@ -46,4 +46,21 @@ Focused command:
 node --experimental-strip-types --test tests/finops-aws-health-organization.test.ts
 ```
 
-Result: **9 passed, 0 failed, 0 skipped**.
+Result: **15 passed, 0 failed, 0 skipped**.
+
+## Vertical files and remaining live gates
+
+- Projection: `lib/finops-aws-health-dashboard.ts`
+- Scheduled collection contract: `lib/finops-aws-health-collector-job.ts`
+- Persistence: `db/finops-aws-health-repository.ts`
+- Migrations: `drizzle/0104_finops_aws_health_events.sql`, `postgres/migrations/0099_finops_aws_health_events.sql`
+- API/UI: `app/api/v1/finops/health-events/route.ts`, `app/costs/finops-health-events-dashboard.tsx`
+- Vertical tests: `tests/finops-aws-health-vertical.test.mjs`
+
+Remaining gates are the permanent credential-broker adapter and durable job
+handler, controlled validation in an organization with an eligible Support
+plan and Organizational View, real provider pagination/retention/initial-load
+evidence, release migration/PostgreSQL parity, signed-in visual and negative
+tenant-isolation review, and live post-deploy smoke evidence. Until those pass,
+the API reports `AWS_HEALTH_ORGANIZATION_JOB_HANDLER_NOT_REGISTERED`, catalog
+maturity must remain `PARTIAL_PIPELINE`, and production activation stays false.
