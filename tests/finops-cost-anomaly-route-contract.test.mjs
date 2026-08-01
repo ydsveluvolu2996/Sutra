@@ -52,7 +52,7 @@ test("API uses canonical dashboard builder and exposes honest bounded states", (
   assert.match(route, /buildCostAnomalyDashboard/u);
   assert.match(route, /parsePersistedAwsCostAnomalyMaterialization/u);
   assert.match(domain, /sutra\.finops-source-evidence\.v2/u);
-  for (const state of ["empty", "ready", "partial", "stale", "failed"]) {
+  for (const state of ["waiting", "complete", "partial", "stale", "failed"]) {
     assert.match(route, new RegExp(`"${state}"`, "u"));
   }
   assert.match(route, /MAX_STATISTICAL_PERIODS = 3/u);

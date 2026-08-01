@@ -9,6 +9,7 @@ import type {
   AnomalySubscription,
 } from "@aws-sdk/client-cost-explorer";
 import type { TrustedAdvisorStandardReader } from "../src/trusted-advisor-standard-runner.js";
+import type { ComputeOptimizerExportDiscoveryReader } from "../src/compute-optimizer-export-runner.js";
 import type {
   AssumeRoleCommand,
   AssumeRoleCommandInput,
@@ -23,6 +24,9 @@ import {
   COST_ANOMALY_SOURCE_ACTIONS,
   COST_ANOMALY_SOURCE_PERMISSION_CONTRACT_ID,
   COST_ANOMALY_SOURCE_POLICY_NAME,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
   FINOPS_SOURCE_DEFINITIONS,
   FINOPS_SOURCE_MAX_CONCURRENT_DISPATCHES,
   FINOPS_SOURCE_MAX_OPERATION_CONCURRENCY,
@@ -532,6 +536,122 @@ test("returns sanitized unavailable standard-check evidence when AWS Support acc
   assert.equal(JSON.stringify(dispatched).includes("private AWS error body"), false);
 });
 
+test("dispatches the exact Compute Optimizer export-discovery contract without caller AWS controls", async () => {
+  const contract = sourceContract({
+    contractId: "contract-compute-optimizer-export-v1",
+    sourceId: "compute_optimizer_organization_export",
+    region: "us-west-2",
+    permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+  });
+  const inputs: unknown[] = [];
+  const computeOptimizerExportReader: ComputeOptimizerExportDiscoveryReader = {
+    async getEnrollmentStatus(input) {
+      inputs.push(input);
+      return {
+        status: "Active",
+        memberAccountsEnrolled: true,
+        numberOfMemberAccountsOptedIn: 1,
+        lastUpdatedTimestamp: new Date("2026-07-31T08:00:00.000Z"),
+      };
+    },
+    async getEnrollmentStatusesForOrganization(input) {
+      inputs.push(input);
+      return {
+        accountEnrollmentStatuses: [{
+          accountId: "111122223333",
+          status: "Active",
+          lastUpdatedTimestamp: new Date("2026-07-31T08:30:00.000Z"),
+        }],
+      };
+    },
+    async describeRecommendationExportJobs(input) {
+      inputs.push(input);
+      return {
+        recommendationExportJobs: [{
+          jobId: "export-one",
+          resourceType: "Ec2Instance",
+          status: "Complete",
+          creationTimestamp: new Date("2026-07-31T09:00:00.000Z"),
+          lastUpdatedTimestamp: new Date("2026-07-31T10:00:00.000Z"),
+          destination: {
+            s3: {
+              bucket: "private-compute-optimizer-bucket",
+              key: "private-prefix/export.csv",
+              metadataKey: "private-prefix/export-metadata.json",
+            },
+          },
+        }],
+      };
+    },
+  };
+  const dispatched = await executeFinopsSourceDispatch({
+    ...request("compute-optimizer-export"),
+    contractId: contract.contractId,
+  }, {
+    ...dependencies(new Registry(connection([contract]))),
+    computeOptimizerExportReader,
+  });
+
+  assert.equal(dispatched.sourceId, "compute_optimizer_organization_export");
+  assert.equal(dispatched.collectionStatus, "PARTIAL");
+  assert.equal(dispatched.errorCode, "EXPORT_OBJECT_BINDING_REQUIRED");
+  assert.equal(dispatched.region, "us-west-2");
+  assert.equal(dispatched.dataThroughAt, "2026-07-31T10:00:00.000Z");
+  assert.deepEqual(inputs, [{}, { maxResults: 100 }, { maxResults: 1_000 }]);
+  assert.deepEqual(
+    FINOPS_SOURCE_DEFINITIONS.compute_optimizer_organization_export.actions,
+    COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
+  );
+  const serialized = JSON.stringify(dispatched);
+  assert.equal(serialized.includes("private-compute-optimizer-bucket"), false);
+  assert.equal(serialized.includes("private-prefix"), false);
+  assert.equal(serialized.includes("ASIASOURCE"), false);
+  assert.equal(serialized.includes("secret"), false);
+});
+
+test("Compute Optimizer dispatch sanitizes provider failures and rejects broader persisted policy bindings", async () => {
+  const contract = sourceContract({
+    contractId: "contract-compute-optimizer-unavailable-v1",
+    sourceId: "compute_optimizer_organization_export",
+    region: "us-west-2",
+    permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+  });
+  assert.throws(() => parseFinopsSourceContracts([{
+    ...contract,
+    permissionContractId: "broader-compute-optimizer-policy",
+  }], {
+    tenantId: TENANT_ID,
+    connectionId: CONNECTION_ID,
+    expectedAccountId: ACCOUNT_ID,
+    partition: "aws",
+  }));
+  const dispatched = await executeFinopsSourceDispatch({
+    ...request("compute-optimizer-unavailable"),
+    contractId: contract.contractId,
+  }, {
+    ...dependencies(new Registry(connection([contract]))),
+    computeOptimizerExportReader: {
+      async getEnrollmentStatus() {
+        throw Object.assign(new Error("private AWS provider body"), {
+          name: "AccessDeniedException",
+        });
+      },
+      async getEnrollmentStatusesForOrganization() {
+        throw new Error("must not be called");
+      },
+      async describeRecommendationExportJobs() {
+        throw new Error("must not be called");
+      },
+    },
+  });
+  assert.equal(dispatched.collectionStatus, "UNAVAILABLE");
+  assert.equal(dispatched.errorCode, "ACCESS_DENIED");
+  assert.equal(dispatched.evidence, null);
+  assert.equal(JSON.stringify(dispatched).includes("private AWS provider body"), false);
+});
+
 test("returns honest not-configured and not-implemented envelopes without assuming a role", async () => {
   const missingDeps = dependencies(new Registry(connection(null)));
   const missing = await executeFinopsSourceDispatch(request("missing"), missingDeps);
@@ -624,6 +744,22 @@ test("rejects caller-supplied AWS controls and cross-boundary persisted contract
     ...request(),
     query: { arbitrary: true },
   }));
+  assert.throws(() => parseFinopsSourceDispatchRequest({
+    ...request(),
+    accounts: ["999988887777"],
+  }));
+  assert.throws(() => parseFinopsSourceDispatchRequest({
+    ...request(),
+    filters: [{ name: "JobStatus", values: ["Complete"] }],
+  }));
+  assert.throws(() => parseFinopsSourceDispatchRequest({
+    ...request(),
+    bucket: "caller-controlled-export-bucket",
+  }));
+  assert.throws(() => parseFinopsSourceDispatchRequest({
+    ...request(),
+    regions: ["us-west-2"],
+  }));
   assert.throws(() => parseFinopsSourceContracts([
     sourceContract({ accountId: "999988887777" }),
   ], {
@@ -670,6 +806,7 @@ test("the source catalog and exact action arrays are deeply immutable", () => {
   assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS), true);
   assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS.cost_anomaly_detection), true);
   assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS.trusted_advisor_standard_checks), true);
+  assert.equal(Object.isFrozen(FINOPS_SOURCE_DISPATCH_LIMITS.compute_optimizer_organization_export), true);
   assert.ok(
     FINOPS_SOURCE_DISPATCH_LIMITS.cost_anomaly_detection.maximumBytes
       < FINOPS_SOURCE_DISPATCH_LIMITS.trusted_advisor_standard_checks.maximumBytes,
@@ -701,6 +838,29 @@ test("mints an exact source session policy with no wildcard actions or caller en
   );
   assert.equal(actions.some((action) => action.includes("*")), false);
   assert.equal(JSON.stringify(policy).includes("endpoint"), false);
+});
+
+test("mints a read-only Compute Optimizer discovery session with no export or S3 authority", () => {
+  const contract = sourceContract({
+    contractId: "contract-compute-optimizer-policy-v1",
+    sourceId: "compute_optimizer_organization_export",
+    region: "us-west-2",
+    permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+  });
+  const policy = JSON.parse(finopsSourceSessionPolicy(ROLE_ARN, contract)) as {
+    Statement: Array<{ Action: string | string[]; Resource: string }>;
+  };
+  const actions = policy.Statement.flatMap(({ Action }) =>
+    typeof Action === "string" ? [Action] : Action
+  );
+  assert.deepEqual(
+    actions.filter((action) => action.startsWith("compute-optimizer:")),
+    [...COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS],
+  );
+  assert.equal(actions.some((action) => /^compute-optimizer:Export/u.test(action)), false);
+  assert.equal(actions.some((action) => action.startsWith("s3:")), false);
+  assert.equal(actions.some((action) => action.includes("*")), false);
 });
 
 test("the broker re-resolves and attests the exact persisted source policy before collection", async () => {

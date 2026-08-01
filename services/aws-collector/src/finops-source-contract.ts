@@ -57,6 +57,16 @@ export const TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS = Object.freeze([
   "support:DescribeTrustedAdvisorChecks",
 ] as const);
 
+export const COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID =
+  "aws-compute-optimizer-organization-export-read-v1" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME =
+  "SutraFinopsComputeOptimizerExportReadV1" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS = Object.freeze([
+  "compute-optimizer:DescribeRecommendationExportJobs",
+  "compute-optimizer:GetEnrollmentStatus",
+  "compute-optimizer:GetEnrollmentStatusesForOrganization",
+] as const);
+
 export interface FinopsSourceDefinition {
   readonly implementationState: "IMPLEMENTED" | "NOT_IMPLEMENTED";
   readonly permissionContractId: string | null;
@@ -83,6 +93,12 @@ const IMPLEMENTED_SOURCE_DEFINITIONS = Object.freeze({
     permissionContractId: TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
     policyName: TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
     actions: TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
+  }),
+  compute_optimizer_organization_export: Object.freeze({
+    implementationState: "IMPLEMENTED" as const,
+    permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+    actions: COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
   }),
 });
 

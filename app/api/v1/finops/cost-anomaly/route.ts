@@ -138,7 +138,7 @@ export async function GET(request: Request): Promise<Response> {
       ? "failed"
       : latestAttempt?.status === "partial"
         ? "partial"
-        : "empty";
+        : "waiting";
     if (selectedSnapshot === null) {
       return jsonResponse({
         source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
@@ -234,9 +234,12 @@ export async function GET(request: Request): Promise<Response> {
         ? "failed"
         : latestAttempt?.status === "partial"
           ? "partial"
+          : latestAttempt?.status === "queued"
+            || latestAttempt?.status === "running"
+            ? "waiting"
           : ageHours === null || ageHours > STALE_AFTER_HOURS
             ? "stale"
-            : "ready";
+            : "complete";
       return jsonResponse({
         source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
         state,

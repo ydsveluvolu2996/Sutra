@@ -10,9 +10,11 @@ import {
   type FinopsSharedAnalysisSection,
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
+import { FinopsFocusDashboard } from "./finops-focus-dashboard";
 import styles from "./costs.module.css";
 
 interface FinopsDashboardCatalogNavProps {
+  readonly connectionId: string | null;
   readonly onOpenSharedAnalysis: (section: FinopsSharedAnalysisSection) => void;
 }
 
@@ -77,6 +79,7 @@ function dashboardFromHash(): FinopsDashboardCatalogEntry | null {
 }
 
 export function FinopsDashboardCatalogNav({
+  connectionId,
   onOpenSharedAnalysis,
 }: FinopsDashboardCatalogNavProps) {
   const [selectedId, setSelectedId] = useState<string>(FINOPS_DASHBOARD_CATALOG[0].id);
@@ -153,27 +156,35 @@ export function FinopsDashboardCatalogNav({
         </nav>
 
         <div className={styles.dashboardCatalogDetail}>
-          <FinopsCapabilityShell
-            dashboard={selected}
-            state={selectedState.state}
-            stateTitle={selectedState.title}
-            stateDetail={selectedState.detail}
-            actions={(
-              <>
-                {selected.relatedSharedAnalysis === null ? null : (
-                  <button
-                    aria-controls={`finops-${selected.relatedSharedAnalysis}`}
-                    className="button button-secondary"
-                    onClick={() => onOpenSharedAnalysis(selected.relatedSharedAnalysis as FinopsSharedAnalysisSection)}
-                    type="button"
-                  >
-                    Open related shared analysis
-                  </button>
-                )}
-                <a className="button button-secondary" href={selected.documentationUrl} rel="noreferrer" target="_blank">AWS guidance</a>
-              </>
-            )}
-          />
+          {selected.id === "focus" ? (
+            <FinopsFocusDashboard
+              connectionId={connectionId}
+              dashboard={selected}
+              onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
+            />
+          ) : (
+            <FinopsCapabilityShell
+              dashboard={selected}
+              state={selectedState.state}
+              stateTitle={selectedState.title}
+              stateDetail={selectedState.detail}
+              actions={(
+                <>
+                  {selected.relatedSharedAnalysis === null ? null : (
+                    <button
+                      aria-controls={`finops-${selected.relatedSharedAnalysis}`}
+                      className="button button-secondary"
+                      onClick={() => onOpenSharedAnalysis(selected.relatedSharedAnalysis as FinopsSharedAnalysisSection)}
+                      type="button"
+                    >
+                      Open related shared analysis
+                    </button>
+                  )}
+                  <a className="button button-secondary" href={selected.documentationUrl} rel="noreferrer" target="_blank">AWS guidance</a>
+                </>
+              )}
+            />
+          )}
           <section className={styles.dashboardAudience} aria-label={`${selected.name} target audience`}>
             <strong>Target audience</strong>
             <div>{selected.targetAudience.map((audience) => <span key={audience}>{audience}</span>)}</div>

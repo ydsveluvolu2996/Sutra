@@ -39,8 +39,8 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     FINOPS_DASHBOARD_CATALOG,
     ({ currentMaturity }) => currentMaturity,
   );
-  assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
-  assert.equal(counts.PARTIAL_PIPELINE?.length, 2);
+  assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 7);
+  assert.equal(counts.PARTIAL_PIPELINE?.length, 1);
   assert.equal(counts.ENGINE_ONLY?.length, 19);
   assert.equal(counts.ABSENT?.length, 2);
   assert.deepEqual(
@@ -50,13 +50,14 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
       "cost_intelligence_dashboard",
       "kpi_dashboard",
       "cost_anomaly",
+      "focus",
       "trends",
       "data_transfer",
     ],
   );
   assert.deepEqual(
     counts.PARTIAL_PIPELINE?.map(({ id }) => id),
-    ["data_collection_monitor", "focus"],
+    ["data_collection_monitor"],
   );
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("COMPLETE" as never), false);
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("READY" as never), false);

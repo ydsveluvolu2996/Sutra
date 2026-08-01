@@ -10,7 +10,7 @@ const [browser, navigation, shell, css] = await Promise.all([
 ]);
 
 test("cost workspace adds the 29-dashboard catalog without replacing shared analysis", () => {
-  assert.match(browser, /<FinopsDashboardCatalogNav onOpenSharedAnalysis=\{navigateToSection\} \/>/u);
+  assert.match(browser, /<FinopsDashboardCatalogNav[\s\S]*connectionId=\{connectionId\}[\s\S]*onOpenSharedAnalysis=\{navigateToSection\}/u);
   assert.match(browser, /FINOPS_SECTIONS\.map/u);
   assert.match(browser, /<FinopsFoundationalPanels/u);
   assert.match(browser, /<FinopsWave3Panels/u);

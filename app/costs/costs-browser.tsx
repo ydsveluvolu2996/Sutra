@@ -228,7 +228,10 @@ export function CostsBrowser() {
         <a href="/onboard">Review role</a>
       </div>
 
-      <FinopsDashboardCatalogNav onOpenSharedAnalysis={navigateToSection} />
+      <FinopsDashboardCatalogNav
+        connectionId={connectionId}
+        onOpenSharedAnalysis={navigateToSection}
+      />
 
       <section className={styles.workspace} aria-label="FinOps workspace">
         <nav className={styles.workspaceNav} aria-label="FinOps sections">

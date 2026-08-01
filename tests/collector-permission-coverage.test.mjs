@@ -22,6 +22,10 @@ const finopsTemplatePath = resolve(
  *   "finops_source" — runs under the successor FinOps permission pack and an
  *                exact, separately attested source policy. These actions MUST
  *                remain absent from the current default metadata role.
+ *   "finops_source_unprovisioned" — implemented read-only collector contract,
+ *                but no onboarding role artifact grants it yet. Mapping keeps
+ *                command drift visible without falsely widening the active
+ *                Cost Anomaly-only successor permission pack.
  *   "vendor"   — runs under Sutra's own workload identity (the initial
  *                AssumeRole into the customer role) and is NOT part of the
  *                customer role's permission policy.
@@ -119,6 +123,26 @@ const COLLECTOR_COMMANDS = {
   GetAnomalySubscriptionsCommand: {
     action: "ce:GetAnomalySubscriptions",
     scope: "finops_source",
+  },
+  GetEnrollmentStatusCommand: {
+    action: "compute-optimizer:GetEnrollmentStatus",
+    scope: "finops_source_unprovisioned",
+  },
+  GetEnrollmentStatusesForOrganizationCommand: {
+    action: "compute-optimizer:GetEnrollmentStatusesForOrganization",
+    scope: "finops_source_unprovisioned",
+  },
+  DescribeRecommendationExportJobsCommand: {
+    action: "compute-optimizer:DescribeRecommendationExportJobs",
+    scope: "finops_source_unprovisioned",
+  },
+  DescribeTrustedAdvisorChecksCommand: {
+    action: "support:DescribeTrustedAdvisorChecks",
+    scope: "finops_source_unprovisioned",
+  },
+  DescribeTrustedAdvisorCheckResultCommand: {
+    action: "support:DescribeTrustedAdvisorCheckResult",
+    scope: "finops_source_unprovisioned",
   },
   GetMetricDataCommand: { action: "cloudwatch:GetMetricData", scope: "customer" },
   ListMetricsCommand: { action: "cloudwatch:ListMetrics", scope: "customer" },
@@ -228,6 +252,24 @@ test("FinOps source commands require the exact successor source policy and deny 
       `${action} must not widen the current default metadata role`,
     );
     assert.match(action, READ_ONLY_VERBS, `${action} is not a read-only FinOps source action`);
+  }
+});
+
+test("unprovisioned FinOps source commands remain outside every active onboarding role", async () => {
+  const [currentTemplate, finopsTemplate] = await Promise.all([
+    readFile(templatePath, "utf8"),
+    readFile(finopsTemplatePath, "utf8"),
+  ]);
+  const actions = [...new Set(
+    Object.values(COLLECTOR_COMMANDS)
+      .filter((entry) => entry.scope === "finops_source_unprovisioned")
+      .map((entry) => entry.action),
+  )];
+  assert.ok(actions.length > 0);
+  for (const action of actions) {
+    assert.equal(currentTemplate.includes(`- ${action}`), false);
+    assert.equal(finopsTemplate.includes(`- ${action}`), false);
+    assert.match(action, READ_ONLY_VERBS);
   }
 });
 

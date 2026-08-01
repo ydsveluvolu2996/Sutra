@@ -31,6 +31,18 @@ import {
   type TrustedAdvisorStandardReader,
 } from "./trusted-advisor-standard-runner.js";
 import {
+  collectComputeOptimizerExportDiscovery,
+  COMPUTE_OPTIMIZER_EXPORT_COMMAND_DEADLINE_MS,
+  COMPUTE_OPTIMIZER_EXPORT_MAX_JOB_PAGES,
+  COMPUTE_OPTIMIZER_EXPORT_MAX_JOBS,
+  COMPUTE_OPTIMIZER_EXPORT_MAX_MEMBER_ACCOUNTS,
+  COMPUTE_OPTIMIZER_EXPORT_MAX_MEMBER_PAGES,
+  COMPUTE_OPTIMIZER_EXPORT_MAX_OUTPUT_BYTES,
+  COMPUTE_OPTIMIZER_EXPORT_OVERALL_DEADLINE_MS,
+  type ComputeOptimizerExportDiscoveryCollection,
+  type ComputeOptimizerExportDiscoveryReader,
+} from "./compute-optimizer-export-runner.js";
+import {
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   type AwsPartition,
   type FinopsSourceContract,
@@ -58,6 +70,9 @@ export {
   TRUSTED_ADVISOR_STANDARD_SOURCE_ACTIONS,
   TRUSTED_ADVISOR_STANDARD_SOURCE_PERMISSION_CONTRACT_ID,
   TRUSTED_ADVISOR_STANDARD_SOURCE_POLICY_NAME,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+  COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
   type FinopsCollectorSourceId,
   type FinopsSourceContractOwner,
 } from "./finops-source-contract.js";
@@ -74,6 +89,10 @@ export const FINOPS_SOURCE_DISPATCH_LIMITS = Object.freeze({
   trusted_advisor_standard_checks: Object.freeze({
     maximumBytes: TRUSTED_ADVISOR_STANDARD_MAX_OUTPUT_BYTES + 64 * 1_024,
     deadlineMs: TRUSTED_ADVISOR_STANDARD_OVERALL_DEADLINE_MS,
+  }),
+  compute_optimizer_organization_export: Object.freeze({
+    maximumBytes: COMPUTE_OPTIMIZER_EXPORT_MAX_OUTPUT_BYTES + 64 * 1_024,
+    deadlineMs: COMPUTE_OPTIMIZER_EXPORT_OVERALL_DEADLINE_MS,
   }),
 });
 export const FINOPS_SOURCE_MAX_OPERATION_CONCURRENCY = 3;
@@ -109,6 +128,8 @@ export interface FinopsSourceDispatchDependencies {
   readonly costAnomalyReader?: CostAnomalyReader;
   /** Tests only. Production uses the fixed AWS Support us-east-1 endpoint. */
   readonly trustedAdvisorStandardReader?: TrustedAdvisorStandardReader;
+  /** Tests only. Production uses the fixed regional Compute Optimizer endpoint. */
+  readonly computeOptimizerExportReader?: ComputeOptimizerExportDiscoveryReader;
 }
 
 export interface FinopsSourceDispatchCoverage {
@@ -258,6 +279,80 @@ export async function executeFinopsSourceDispatch(
   if (dispatchLimits === undefined) throw new FinopsSourceDispatchError();
   const dispatchDeadlineAt = Date.now() + dispatchLimits.deadlineMs;
 
+  if (contract.sourceId === "compute_optimizer_organization_export") {
+    let collection: ComputeOptimizerExportDiscoveryCollection;
+    try {
+      collection = await withSourceDispatchPermit(
+        (remainingMs) => collectComputeOptimizerExportDiscovery({
+          accountId: session.accountId,
+          partition: session.partition,
+          region: contract.region,
+          credentials: session.credentials,
+          now: () => collectedAtDate,
+          ...(dependencies.computeOptimizerExportReader === undefined
+            ? {}
+            : { client: dependencies.computeOptimizerExportReader }),
+          maximumMemberPages: COMPUTE_OPTIMIZER_EXPORT_MAX_MEMBER_PAGES,
+          maximumJobPages: COMPUTE_OPTIMIZER_EXPORT_MAX_JOB_PAGES,
+          maximumMemberAccounts: COMPUTE_OPTIMIZER_EXPORT_MAX_MEMBER_ACCOUNTS,
+          maximumJobs: COMPUTE_OPTIMIZER_EXPORT_MAX_JOBS,
+          maximumOutputBytes: COMPUTE_OPTIMIZER_EXPORT_MAX_OUTPUT_BYTES,
+          overallDeadlineMs: Math.min(
+            COMPUTE_OPTIMIZER_EXPORT_OVERALL_DEADLINE_MS,
+            remainingMs,
+          ),
+          commandDeadlineMs: Math.min(
+            COMPUTE_OPTIMIZER_EXPORT_COMMAND_DEADLINE_MS,
+            remainingMs,
+          ),
+        }),
+        dispatchDeadlineAt,
+      );
+    } catch {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: "COLLECTION_FAILED",
+        limitations: ["COLLECTION_FAILED", "NO_PROVIDER_DATA_RETURNED"],
+      });
+    }
+    if (collection.status === "UNAVAILABLE") {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: collection.coverage.find((entry) => entry.errorCode !== null)
+          ?.errorCode ?? "SOURCE_UNAVAILABLE",
+        limitations: collection.limitations,
+        coverage: aggregateComputeOptimizerCoverage(collection),
+      });
+    }
+    const result = computeOptimizerExportResult(request, contract, collection);
+    if (Buffer.byteLength(JSON.stringify(result), "utf8") > dispatchLimits.maximumBytes) {
+      return emptyResult({
+        request,
+        connection,
+        collectedAt,
+        sourceId: contract.sourceId,
+        configured: true,
+        implementationState: "IMPLEMENTED",
+        region: contract.region,
+        errorCode: "OUTPUT_SIZE_LIMIT_REACHED",
+        limitations: ["OUTPUT_SIZE_LIMIT_REACHED", "NO_PROVIDER_DATA_RETURNED"],
+        coverage: aggregateComputeOptimizerCoverage(collection),
+      });
+    }
+    return result;
+  }
   if (contract.sourceId === "trusted_advisor_standard_checks") {
     let collection: TrustedAdvisorStandardCollection;
     try {
@@ -394,6 +489,67 @@ export async function executeFinopsSourceDispatch(
     });
   }
   return result;
+}
+
+function computeOptimizerExportResult(
+  request: FinopsSourceDispatchRequest,
+  contract: FinopsSourceContract,
+  collection: ComputeOptimizerExportDiscoveryCollection,
+): FinopsSourceDispatchResult {
+  return {
+    schemaVersion: "sutra.finops-source-dispatch.v1",
+    tenantId: request.tenantId,
+    connectionId: request.connectionId,
+    jobId: request.jobId,
+    contractId: request.contractId,
+    sourceId: "compute_optimizer_organization_export",
+    configured: true,
+    implementationState: "IMPLEMENTED",
+    collectionStatus: "PARTIAL",
+    accountId: collection.accountId,
+    partition: contract.partition,
+    region: contract.region,
+    collectedAt: collection.collectedAt,
+    dataThroughAt: collection.dataThroughAt,
+    coverage: aggregateComputeOptimizerCoverage(collection),
+    evidence: {
+      schemaVersion: collection.schemaVersion,
+      source: collection.source,
+      enrollment: collection.enrollment === null ? null : { ...collection.enrollment },
+      memberEnrollments: collection.memberEnrollments.map((entry) => ({ ...entry })),
+      exportJobs: collection.exportJobs.map((entry) => ({
+        jobId: entry.jobId,
+        resourceType: entry.resourceType,
+        status: entry.status,
+        createdAt: entry.createdAt,
+        lastUpdatedAt: entry.lastUpdatedAt,
+        failureCode: entry.failureCode,
+        destination: { ...entry.destination },
+      })),
+      coverage: collection.coverage.map((entry) => ({ ...entry })),
+    },
+    errorCode: collection.coverage.find((entry) => entry.errorCode !== null)?.errorCode
+      ?? (collection.enrollment?.status === "ACTIVE"
+        ? "EXPORT_OBJECT_BINDING_REQUIRED"
+        : collection.enrollment?.status === "PENDING"
+          ? "ENROLLMENT_PENDING"
+          : collection.enrollment?.status === "INACTIVE"
+            ? "ENROLLMENT_REQUIRED"
+            : "ENROLLMENT_FAILED"),
+    limitations: collection.limitations,
+  };
+}
+
+function aggregateComputeOptimizerCoverage(
+  collection: ComputeOptimizerExportDiscoveryCollection,
+): FinopsSourceDispatchCoverage {
+  return collection.coverage.reduce<FinopsSourceDispatchCoverage>((total, entry) => ({
+    pagesObserved: total.pagesObserved + entry.pagesObserved,
+    recordsObserved: total.recordsObserved + entry.recordsObserved,
+    recordsAccepted: total.recordsAccepted + entry.recordsAccepted,
+    recordsRejected: total.recordsRejected + entry.recordsRejected,
+    recordsOmitted: total.recordsOmitted + entry.recordsOmitted,
+  }), emptyCoverage());
 }
 
 function trustedAdvisorStandardResult(

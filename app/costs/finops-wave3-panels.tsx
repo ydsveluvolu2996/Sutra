@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import styles from "./costs.module.css";
 
 /* ----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ function money(value: number, currency: string | null): string {
   }).format(value);
 }
 
-type CostAnomalyState = "empty" | "ready" | "partial" | "stale" | "failed";
+type CostAnomalyState = "complete" | "partial" | "stale" | "failed" | "waiting";
 
 interface CostAnomalyResponse {
   readonly state: CostAnomalyState;
@@ -62,6 +62,16 @@ interface CostAnomalyResponse {
       readonly status: "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
       readonly windowStartDate: string;
       readonly windowEndDate: string;
+      readonly coverage: readonly {
+        readonly operation: string;
+        readonly status: "SUCCEEDED" | "PARTIAL" | "FAILED";
+        readonly pagesObserved: number;
+        readonly recordsObserved: number;
+        readonly recordsAccepted: number;
+        readonly recordsRejected: number;
+        readonly recordsOmitted: number;
+        readonly errorCode: string | null;
+      }[];
       readonly anomalies: readonly {
         readonly anomalyId: string;
         readonly startDate: string | null;
@@ -121,10 +131,30 @@ function formatCostAnomalyTime(value: string | null): string {
   }).format(new Date(value));
 }
 
-function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
-  const [data, setData] = useState<CostAnomalyResponse | null>(null);
+function csvCell(value: string | number | null): string {
+  const raw = value === null ? "" : String(value);
+  const safe = /^[=+\-@]/u.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+function anomalyLifecycle(endDate: string | null, today: string): "Open window" | "Window ended" {
+  return endDate === null || endDate >= today ? "Open window" : "Window ended";
+}
+
+export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
+  connectionId: string;
+  initialData?: CostAnomalyResponse | null;
+}) {
+  const [data, setData] = useState<CostAnomalyResponse | null>(initialData);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [minimumImpact, setMinimumImpact] = useState("0");
+  const [serviceFilter, setServiceFilter] = useState("all");
+  const [accountFilter, setAccountFilter] = useState("all");
+  const [regionFilter, setRegionFilter] = useState("all");
+  const [lifecycleFilter, setLifecycleFilter] = useState("all");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   const load = useCallback(async () => {
     try {
@@ -173,7 +203,81 @@ function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
   const dashboard = data?.dashboard ?? null;
   const state = data?.state ?? null;
   const ageHours = data?.freshness.ageHours ?? null;
-  const stateLabel = state === null ? "Loading" : state.replace("_", " ");
+  const stateLabel = state === null ? "Loading" : state.replaceAll("_", " ");
+  const today = data?.collectedAt?.slice(0, 10) ?? new Date().toISOString().slice(0, 10);
+  const filterOptions = useMemo(() => {
+    const anomalies = dashboard?.aws.anomalies ?? [];
+    const values = (selector: (anomaly: (typeof anomalies)[number]) => string | null) =>
+      [...new Set(anomalies.flatMap((anomaly) => {
+        const value = selector(anomaly);
+        return value === null ? [] : [value];
+      }))].sort((left, right) => left.localeCompare(right));
+    return {
+      services: values((anomaly) => anomaly.rootCauses[0]?.service ?? null),
+      accounts: values((anomaly) => anomaly.rootCauses[0]?.linkedAccountId ?? null),
+      regions: values((anomaly) => anomaly.rootCauses[0]?.region ?? null),
+    };
+  }, [dashboard]);
+  const filteredAnomalies = useMemo(() => {
+    const threshold = Number(minimumImpact);
+    const safeThreshold = Number.isFinite(threshold) && threshold >= 0 ? threshold : 0;
+    return (dashboard?.aws.anomalies ?? []).filter((anomaly) => {
+      const cause = anomaly.rootCauses[0];
+      const impact = anomaly.impact.total ?? anomaly.impact.maximum;
+      const lifecycle = anomalyLifecycle(anomaly.endDate, today);
+      return impact >= safeThreshold
+        && (serviceFilter === "all" || cause?.service === serviceFilter)
+        && (accountFilter === "all" || cause?.linkedAccountId === accountFilter)
+        && (regionFilter === "all" || cause?.region === regionFilter)
+        && (lifecycleFilter === "all" || lifecycle === lifecycleFilter)
+        && (startDate.length === 0 || (anomaly.startDate !== null && anomaly.startDate >= startDate))
+        && (endDate.length === 0 || (anomaly.startDate !== null && anomaly.startDate <= endDate));
+    });
+  }, [accountFilter, dashboard, endDate, lifecycleFilter, minimumImpact, regionFilter, serviceFilter, startDate, today]);
+  const impactByMonth = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const anomaly of filteredAnomalies) {
+      const month = anomaly.startDate?.slice(0, 7) ?? "Unknown";
+      totals.set(month, (totals.get(month) ?? 0) + (anomaly.impact.total ?? anomaly.impact.maximum));
+    }
+    return [...totals].sort(([left], [right]) => left.localeCompare(right));
+  }, [filteredAnomalies]);
+  const impactByService = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const anomaly of filteredAnomalies) {
+      const service = anomaly.rootCauses[0]?.service ?? "Unattributed service";
+      totals.set(service, (totals.get(service) ?? 0) + (anomaly.impact.total ?? anomaly.impact.maximum));
+    }
+    return [...totals].sort((left, right) => right[1] - left[1]).slice(0, 10);
+  }, [filteredAnomalies]);
+
+  function exportFindings(): void {
+    const heading = [
+      "Anomaly ID", "Start date", "End date", "Window state", "Service",
+      "Account ID", "Region", "Usage type", "Impact (billing currency units)",
+      "Actual spend", "Expected spend", "Impact percent", "Feedback",
+    ];
+    const rows = filteredAnomalies.map((anomaly) => {
+      const cause = anomaly.rootCauses[0];
+      return [
+        anomaly.anomalyId, anomaly.startDate, anomaly.endDate,
+        anomalyLifecycle(anomaly.endDate, today), cause?.service ?? null,
+        cause?.linkedAccountId ?? null, cause?.region ?? null,
+        cause?.usageType ?? null, anomaly.impact.total ?? anomaly.impact.maximum,
+        anomaly.impact.actualSpend, anomaly.impact.expectedSpend,
+        anomaly.impact.percentage, anomaly.feedback,
+      ].map(csvCell).join(",");
+    });
+    const blob = new Blob([[heading.map(csvCell).join(","), ...rows].join("\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `aws-cost-anomalies-${dashboard?.aws.windowStartDate ?? "export"}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <section className={`panel ${styles.costAnomalyPanel}`} aria-labelledby="aws-cost-anomaly-heading">
       <div className="panel-heading">
@@ -183,7 +287,7 @@ function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
           <p>Normalized findings from Cost Explorer monitors and subscriptions. This source is independent from Sutra statistical alerts below.</p>
         </div>
         <div className={styles.costAnomalyActions}>
-          <span className={`status-pill ${state === "ready" ? "status-positive" : state === "failed" ? "status-risk" : "status-warning"}`}>{stateLabel}</span>
+          <span className={`status-pill ${state === "complete" ? "status-positive" : state === "failed" ? "status-risk" : "status-warning"}`}>{stateLabel}</span>
           <button className="button button-secondary" disabled={refreshing} onClick={() => void refresh()} type="button">
             {refreshing ? "Collection queued…" : "Refresh AWS findings"}
           </button>
@@ -192,10 +296,10 @@ function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
 
       {error ? <p className={styles.emptyNote} role="alert">{error}</p> : null}
       {data === null && error === null ? <p className={styles.emptyNote} role="status">Loading persisted AWS Cost Anomaly evidence…</p> : null}
-      {state === "empty" ? (
+      {state === "waiting" ? (
         <div className={styles.costAnomalyState} role="status">
-          <strong>No persisted AWS Cost Anomaly collection yet</strong>
-          <span>Run the first read-only collection. Until AWS returns evidence, Sutra shows no provider anomaly count and never substitutes sample findings or zero spend.</span>
+          <strong>{dashboard === null ? "Waiting for the first persisted AWS collection" : "A new collection is in progress"}</strong>
+          <span>{dashboard === null ? "Run the read-only collection. Until AWS returns evidence, Sutra shows no provider anomaly count and never substitutes sample findings or zero spend." : "The last accepted generation remains visible below with its original timestamp while the new run completes."}</span>
         </div>
       ) : null}
       {state === "failed" ? (
@@ -220,22 +324,88 @@ function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
             <article><small>Data through</small><strong>{formatCostAnomalyTime(data?.dataThroughAt ?? null)}</strong><span>{ageHours === null ? "Freshness unavailable" : `${ageHours} hours old`}</span></article>
           </div>
 
+          <div className={styles.costAnomalyControls} aria-label="AWS Cost Anomaly filters">
+            <label>Minimum impact
+              <input min="0" step="0.01" type="number" value={minimumImpact} onChange={(event) => setMinimumImpact(event.target.value)} />
+            </label>
+            <label>Service
+              <select value={serviceFilter} onChange={(event) => setServiceFilter(event.target.value)}>
+                <option value="all">All services</option>
+                {filterOptions.services.map((service) => <option key={service} value={service}>{service}</option>)}
+              </select>
+            </label>
+            <label>Payer account
+              <select value={accountFilter} onChange={(event) => setAccountFilter(event.target.value)}>
+                <option value="all">All accounts</option>
+                {filterOptions.accounts.map((account) => <option key={account} value={account}>{account}</option>)}
+              </select>
+            </label>
+            <label>Region
+              <select value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)}>
+                <option value="all">All regions</option>
+                {filterOptions.regions.map((region) => <option key={region} value={region}>{region}</option>)}
+              </select>
+            </label>
+            <label>Window state
+              <select value={lifecycleFilter} onChange={(event) => setLifecycleFilter(event.target.value)}>
+                <option value="all">All windows</option>
+                <option value="Open window">Open window</option>
+                <option value="Window ended">Window ended</option>
+              </select>
+            </label>
+            <label>Start date
+              <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} />
+            </label>
+            <label>End date
+              <input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} />
+            </label>
+            <button className="button button-secondary" disabled={filteredAnomalies.length === 0} onClick={exportFindings} type="button">Export filtered CSV</button>
+          </div>
+
+          <div className={styles.costAnomalyVisuals} aria-label="AWS Cost Anomaly visual analysis">
+            <article>
+              <div className="panel-heading"><div><p className="eyebrow">Trend analysis</p><h3>Impact by anomaly month</h3></div><span className="result-count">{filteredAnomalies.length}</span></div>
+              {impactByMonth.length === 0 ? <p className={styles.emptyNote}>No accepted finding matches the current filters.</p> : (
+                <div className={styles.costAnomalyBars}>{impactByMonth.map(([month, impact]) => (
+                  <div key={month}><span>{month}</span><progress max={Math.max(...impactByMonth.map((item) => item[1]), 1)} value={impact} aria-label={`${month}: ${impact.toFixed(2)} billing currency units`} /><strong>{impact.toFixed(2)}</strong></div>
+                ))}</div>
+              )}
+            </article>
+            <article>
+              <div className="panel-heading"><div><p className="eyebrow">Top movers</p><h3>Impact by service</h3></div></div>
+              {impactByService.length === 0 ? <p className={styles.emptyNote}>No service contributor is available for this selection.</p> : (
+                <div className={styles.costAnomalyBars}>{impactByService.map(([service, impact]) => (
+                  <div key={service}><span title={service}>{service}</span><progress max={Math.max(...impactByService.map((item) => item[1]), 1)} value={impact} aria-label={`${service}: ${impact.toFixed(2)} billing currency units`} /><strong>{impact.toFixed(2)}</strong></div>
+                ))}</div>
+              )}
+            </article>
+          </div>
+
           <div className={styles.costAnomalySources}>
             <article className={styles.costAnomalySourceCard} aria-label="AWS provider anomaly findings">
-              <div className="panel-heading"><div><p className="eyebrow">AWS provider engine</p><h3>Detected cost impact</h3></div><span className="result-count">{dashboard.aws.anomalies.length}</span></div>
+              <div className="panel-heading"><div><p className="eyebrow">AWS provider engine</p><h3>Detected cost impact</h3></div><span className="result-count">{filteredAnomalies.length}</span></div>
               {dashboard.aws.anomalies.length === 0 ? (
                 <div className={styles.goodState}><b>✓</b><span><strong>AWS returned no anomaly finding in this window</strong><small>This is not proof that spend is correct or optimized.</small></span></div>
+              ) : filteredAnomalies.length === 0 ? (
+                <p className={styles.emptyNote}>Provider findings exist, but none match the current filters.</p>
               ) : (
                 <div className={styles.signalList}>
-                  {dashboard.aws.anomalies.slice(0, 20).map((anomaly) => {
+                  {filteredAnomalies.slice(0, 20).map((anomaly) => {
                     const primaryCause = anomaly.rootCauses[0];
                     return (
                       <article key={anomaly.anomalyId}>
                         <span className={`${styles.severity} ${anomaly.score.current >= 75 ? styles.high : anomaly.score.current >= 50 ? styles.medium : styles.low}`}>{Math.round(anomaly.score.current)}</span>
                         <div>
                           <h3>{primaryCause?.service ?? "AWS cost anomaly"}</h3>
-                          <p>{money(anomaly.impact.total ?? anomaly.impact.maximum, "USD")} total impact{anomaly.impact.percentage === null ? "" : ` · ${anomaly.impact.percentage.toFixed(1)}% above expected`}</p>
-                          <small>{anomaly.startDate ?? "Start unavailable"}{anomaly.endDate ? ` – ${anomaly.endDate}` : ""}{primaryCause?.region ? ` · ${primaryCause.region}` : ""}{primaryCause?.linkedAccountId ? ` · account ${primaryCause.linkedAccountId}` : ""}</small>
+                          <p>{money(anomaly.impact.total ?? anomaly.impact.maximum, null)} billing currency units total impact{anomaly.impact.percentage === null ? "" : ` · ${anomaly.impact.percentage.toFixed(1)}% above expected`}</p>
+                          <small>{anomaly.startDate ?? "Start unavailable"}{anomaly.endDate ? ` – ${anomaly.endDate}` : ""} · {anomalyLifecycle(anomaly.endDate, today)}{primaryCause?.region ? ` · ${primaryCause.region}` : ""}{primaryCause?.linkedAccountId ? ` · account ${primaryCause.linkedAccountId}` : ""}</small>
+                          <details className={styles.costAnomalyDrilldown}>
+                            <summary>Root-cause drilldown</summary>
+                            {anomaly.rootCauses.length === 0 ? <p>No provider root cause was accepted for this finding.</p> : (
+                              <ul>{anomaly.rootCauses.map((cause, index) => <li key={`${anomaly.anomalyId}:${index}`}>{cause.service ?? "Service unavailable"}{cause.region ? ` · ${cause.region}` : ""}{cause.usageType ? ` · ${cause.usageType}` : ""}{cause.contribution === null ? "" : ` · ${cause.contribution.toFixed(2)} contribution units`}</li>)}</ul>
+                            )}
+                            {anomaly.rootCausesOmitted > 0 ? <p>{anomaly.rootCausesOmitted} additional root causes were omitted by the bounded collector.</p> : null}
+                          </details>
                         </div>
                       </article>
                     );
@@ -260,6 +430,23 @@ function AwsCostAnomalyPanel({ connectionId }: { connectionId: string }) {
               <p className={styles.emptyNote}>{dashboard.sutra.disclaimer}{data?.sutraInput.capped ? " Statistical input reached the disclosed 50,000-line / three-period display bound." : ""}</p>
             </article>
           </div>
+          <details className={styles.costAnomalyEvidence}>
+            <summary>Evidence, collection coverage, and limitations</summary>
+            <div>
+              <p><strong>Provider source:</strong> AWS Cost Explorer Cost Anomaly Detection</p>
+              <p><strong>Accepted generation:</strong> collected {formatCostAnomalyTime(data?.collectedAt ?? null)}; provider data through {formatCostAnomalyTime(data?.dataThroughAt ?? null)}.</p>
+              <p><strong>Window:</strong> {dashboard.aws.windowStartDate} through {dashboard.aws.windowEndDate}. Currency metadata is not returned by this source contract, so provider amounts are labelled as billing currency units and are not converted.</p>
+              <div className={styles.costAnomalyTableWrap}>
+                <table>
+                  <caption>Read-only provider operation coverage</caption>
+                  <thead><tr><th scope="col">Operation</th><th scope="col">Status</th><th scope="col">Pages</th><th scope="col">Observed</th><th scope="col">Accepted</th><th scope="col">Rejected</th><th scope="col">Omitted</th><th scope="col">Error</th></tr></thead>
+                  <tbody>{dashboard.aws.coverage.map((coverage) => <tr key={coverage.operation}><th scope="row">{coverage.operation.replaceAll("_", " ")}</th><td>{coverage.status}</td><td>{coverage.pagesObserved}</td><td>{coverage.recordsObserved}</td><td>{coverage.recordsAccepted}</td><td>{coverage.recordsRejected}</td><td>{coverage.recordsOmitted}</td><td>{coverage.errorCode ?? "None"}</td></tr>)}</tbody>
+                </table>
+              </div>
+              <p>{dashboard.aws.disclaimer}</p>
+              <p>{dashboard.disclaimer}</p>
+            </div>
+          </details>
           <p className={styles.costAnomalyDisclaimer}>{dashboard.disclaimer}</p>
         </>
       ) : null}
@@ -749,7 +936,14 @@ function AlertsPanel({ connectionId }: { connectionId: string }) {
 /* -------------------------------------------------------------------------- */
 
 export function FinopsWave3Panels({ connectionId }: { connectionId: string | null }) {
-  if (connectionId === null) return null;
+  if (connectionId === null) {
+    return (
+      <section className={`panel ${styles.costAnomalyPanel}`} aria-labelledby="aws-cost-anomaly-heading">
+        <div className="panel-heading"><div><p className="eyebrow">Configuration required</p><h2 id="aws-cost-anomaly-heading">AWS Cost Anomaly Detection</h2><p>Connect an active AWS trust role with the current read-only permission pack to collect provider findings, monitor coverage, and subscription evidence.</p></div><span className="status-pill status-warning">configuration required</span></div>
+        <div className={styles.costAnomalyState} role="status"><strong>No active AWS connection is selected</strong><span>No anomaly count or spend value is shown until a tenant-scoped provider collection is accepted.</span></div>
+      </section>
+    );
+  }
   return (
     <>
       <AwsCostAnomalyPanel connectionId={connectionId} />

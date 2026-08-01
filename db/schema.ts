@@ -1529,3 +1529,145 @@ export const finopsSourceSnapshotHeads = sqliteTable("finops_source_snapshot_hea
   uniqueIndex("finops_source_snapshot_heads_generation_uq")
     .on(table.activeGenerationId),
 ]);
+
+/** Frozen, server-derived account set for one organizational TA collection. */
+export const finopsTaCollectionManifests = sqliteTable("finops_ta_collection_manifests", {
+  manifestId: text("manifest_id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  anchorConnectionId: text("anchor_connection_id").notNull().references(() => awsConnections.id),
+  jobId: text("job_id").notNull(),
+  taxonomySnapshotId: text("taxonomy_snapshot_id").notNull(),
+  taxonomySha256: text("taxonomy_sha256").notNull(),
+  accountSetSha256: text("account_set_sha256").notNull(),
+  expectedAccountCount: integer("expected_account_count").notNull(),
+  status: text("status", {
+    enum: ["pending", "collecting", "finalizing", "complete", "partial", "failed"],
+  }).notNull(),
+  createdAt: integer("created_at").notNull(),
+  startedAt: integer("started_at"),
+  finalizedAt: integer("finalized_at"),
+}, (table) => [
+  uniqueIndex("finops_ta_manifests_scope_job_uq")
+    .on(table.orgId, table.customerId, table.anchorConnectionId, table.jobId),
+  index("finops_ta_manifests_scope_time_idx")
+    .on(table.orgId, table.customerId, table.anchorConnectionId, table.createdAt, table.manifestId),
+]);
+
+/** Membership is append-only; lifecycle fields advance through guarded states. */
+export const finopsTaManifestAccounts = sqliteTable("finops_ta_manifest_accounts", {
+  manifestId: text("manifest_id").notNull().references(() => finopsTaCollectionManifests.manifestId),
+  orgId: text("org_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  anchorConnectionId: text("anchor_connection_id").notNull(),
+  accountId: text("account_id").notNull(),
+  accountPosition: integer("account_position").notNull(),
+  targetConnectionId: text("target_connection_id").references(() => awsConnections.id),
+  status: text("status", {
+    enum: ["pending", "running", "accepted", "partial", "failed", "unconfigured"],
+  }).notNull(),
+  accountSnapshotId: text("account_snapshot_id"),
+  errorCode: text("error_code"),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+}, (table) => [
+  uniqueIndex("finops_ta_manifest_accounts_identity_uq").on(table.manifestId, table.accountId),
+  uniqueIndex("finops_ta_manifest_accounts_position_uq").on(table.manifestId, table.accountPosition),
+  index("finops_ta_manifest_accounts_status_idx").on(table.manifestId, table.status, table.accountPosition),
+]);
+
+/** Immutable account-level TA evidence header. */
+export const finopsTaAccountSnapshots = sqliteTable("finops_ta_account_snapshots", {
+  accountSnapshotId: text("account_snapshot_id").primaryKey(),
+  manifestId: text("manifest_id").notNull().references(() => finopsTaCollectionManifests.manifestId),
+  orgId: text("org_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  anchorConnectionId: text("anchor_connection_id").notNull(),
+  accountId: text("account_id").notNull(),
+  status: text("status", { enum: ["complete", "partial"] }).notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  collectedAt: text("collected_at").notNull(),
+  dataThroughAt: text("data_through_at"),
+  checkCount: integer("check_count").notNull(),
+  resourceCount: integer("resource_count").notNull(),
+  rejectedRecordCount: integer("rejected_record_count").notNull(),
+  evidenceReferenceCiphertext: text("evidence_reference_ciphertext").notNull(),
+  evidenceReferenceKeyVersion: text("evidence_reference_key_version").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_ta_account_snapshots_manifest_account_uq").on(table.manifestId, table.accountId),
+]);
+
+/** Immutable check aggregates belonging to an account snapshot. */
+export const finopsTaCheckSnapshots = sqliteTable("finops_ta_check_snapshots", {
+  accountSnapshotId: text("account_snapshot_id").notNull()
+    .references(() => finopsTaAccountSnapshots.accountSnapshotId),
+  checkId: text("check_id").notNull(),
+  name: text("name").notNull(),
+  category: text("category").notNull(),
+  status: text("status", { enum: ["ok", "warning", "error", "not_available"] }).notNull(),
+  dataThroughAt: text("data_through_at"),
+  processedCount: integer("processed_count").notNull(),
+  flaggedCount: integer("flagged_count").notNull(),
+  ignoredCount: integer("ignored_count").notNull(),
+  suppressedCount: integer("suppressed_count").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+}, (table) => [
+  uniqueIndex("finops_ta_check_snapshots_identity_uq").on(table.accountSnapshotId, table.checkId),
+]);
+
+/** Immutable resource findings belonging to an accepted check snapshot. */
+export const finopsTaResourceSnapshots = sqliteTable("finops_ta_resource_snapshots", {
+  resourceKey: text("resource_key").primaryKey(),
+  accountSnapshotId: text("account_snapshot_id").notNull()
+    .references(() => finopsTaAccountSnapshots.accountSnapshotId),
+  checkId: text("check_id").notNull(),
+  resourceId: text("resource_id").notNull(),
+  region: text("region"),
+  status: text("status", { enum: ["ok", "warning", "error"] }).notNull(),
+  suppressed: integer("suppressed").notNull(),
+  metadataJson: text("metadata_json").notNull(),
+  metadataSha256: text("metadata_sha256").notNull(),
+}, (table) => [
+  uniqueIndex("finops_ta_resource_snapshots_identity_uq")
+    .on(table.accountSnapshotId, table.checkId, table.resourceKey),
+  index("finops_ta_resources_filter_idx")
+    .on(table.accountSnapshotId, table.checkId, table.status, table.region, table.resourceKey),
+]);
+
+/** Immutable organization roll-up; partial and failed generations remain history-only. */
+export const finopsTaOrganizationSnapshots = sqliteTable("finops_ta_organization_snapshots", {
+  generationId: text("generation_id").primaryKey(),
+  manifestId: text("manifest_id").notNull().references(() => finopsTaCollectionManifests.manifestId),
+  orgId: text("org_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  anchorConnectionId: text("anchor_connection_id").notNull(),
+  status: text("status", { enum: ["complete", "partial", "failed"] }).notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  collectedAt: text("collected_at").notNull(),
+  dataThroughAt: text("data_through_at"),
+  expectedAccountCount: integer("expected_account_count").notNull(),
+  acceptedAccountCount: integer("accepted_account_count").notNull(),
+  rejectedAccountCount: integer("rejected_account_count").notNull(),
+  checkCount: integer("check_count").notNull(),
+  resourceCount: integer("resource_count").notNull(),
+  createdAt: integer("created_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_ta_org_snapshots_manifest_uq").on(table.manifestId),
+  index("finops_ta_org_snapshots_history_idx")
+    .on(table.orgId, table.customerId, table.anchorConnectionId, table.collectedAt, table.generationId),
+]);
+
+/** Mutable only through monotonic advancement to a complete generation. */
+export const finopsTaOrganizationSnapshotHeads = sqliteTable("finops_ta_organization_snapshot_heads", {
+  orgId: text("org_id").notNull(),
+  customerId: text("customer_id").notNull(),
+  anchorConnectionId: text("anchor_connection_id").notNull(),
+  activeGenerationId: text("active_generation_id").notNull()
+    .references(() => finopsTaOrganizationSnapshots.generationId),
+  advancedAt: integer("advanced_at").notNull(),
+}, (table) => [
+  uniqueIndex("finops_ta_org_snapshot_heads_scope_uq")
+    .on(table.orgId, table.customerId, table.anchorConnectionId),
+  uniqueIndex("finops_ta_org_snapshot_heads_generation_uq").on(table.activeGenerationId),
+]);

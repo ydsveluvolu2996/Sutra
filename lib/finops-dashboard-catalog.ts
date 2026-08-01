@@ -303,7 +303,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "FOCUS",
     level: "additional",
     provider: "multi-cloud",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Portable cloud-cost analysis based on normalized FinOps Open Cost and Usage Specification data.",
     targetAudience: ["Executives", "Finance", "Procurement", "FinOps", "Product owners"],
     documentationUrl: `${AWS_CID_ROOT}/focus-dashboard.html`,

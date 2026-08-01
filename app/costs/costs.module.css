@@ -183,9 +183,32 @@
 .costAnomalyKpis small { color: var(--muted); font-size: 9px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
 .costAnomalyKpis strong { color: var(--ink); font-size: 20px; letter-spacing: -.035em; }
 .costAnomalyKpis span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.costAnomalyControls { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 10px; align-items: end; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.78); }
+.costAnomalyControls label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.costAnomalyControls input, .costAnomalyControls select { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 8px; background: var(--surface-soft); color: var(--ink); font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.costAnomalyControls button { min-height: 38px; }
+.costAnomalyVisuals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+.costAnomalyVisuals > article { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.92); }
+.costAnomalyBars { display: grid; gap: 10px; margin-top: 12px; }
+.costAnomalyBars > div { display: grid; grid-template-columns: minmax(90px, 1.2fr) minmax(100px, 2fr) 72px; gap: 10px; align-items: center; font-size: 11px; }
+.costAnomalyBars > div > span { overflow: hidden; color: var(--ink); font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.costAnomalyBars progress { width: 100%; height: 10px; overflow: hidden; border: 0; border-radius: 999px; background: #dbeafe; accent-color: #0f766e; }
+.costAnomalyBars progress::-webkit-progress-bar { border-radius: 999px; background: #dbeafe; }
+.costAnomalyBars progress::-webkit-progress-value { border-radius: 999px; background: linear-gradient(90deg, #14b8a6, #0f766e); }
+.costAnomalyBars strong { color: var(--muted); font-size: 11px; text-align: right; }
 .costAnomalySources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .costAnomalySourceCard { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.92); }
 .costAnomalySourceCard h3 { margin: 3px 0 0; }
+.costAnomalyDrilldown { margin-top: 8px; color: var(--muted); font-size: 10px; }
+.costAnomalyDrilldown summary { width: fit-content; cursor: pointer; color: #0f766e; font-weight: 800; }
+.costAnomalyDrilldown ul { display: grid; gap: 5px; margin: 8px 0 0; padding-left: 18px; }
+.costAnomalyEvidence { margin-top: 14px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: rgba(255,255,255,.76); color: var(--muted); font-size: 11px; line-height: 1.55; }
+.costAnomalyEvidence summary { cursor: pointer; color: var(--ink); font-size: 12px; font-weight: 800; }
+.costAnomalyEvidence > div { margin-top: 12px; }
+.costAnomalyTableWrap { max-width: 100%; margin: 12px 0; overflow-x: auto; }
+.costAnomalyTableWrap table { width: 100%; border-collapse: collapse; color: var(--ink); font-size: 10px; text-align: left; }
+.costAnomalyTableWrap caption { padding: 0 0 8px; color: var(--muted); font-weight: 800; text-align: left; }
+.costAnomalyTableWrap th, .costAnomalyTableWrap td { padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .costAnomalyDisclaimer { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.55; }
 .w3Form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .w3Grid { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -232,6 +255,8 @@
   .costAnomalyPanel > :global(.panel-heading) { display: grid; gap: 14px; }
   .costAnomalyActions { justify-content: flex-start; }
   .costAnomalyKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .costAnomalyControls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .costAnomalyVisuals { grid-template-columns: 1fr; }
   .costAnomalySources { grid-template-columns: 1fr; }
   .workspaceNav { flex-wrap: nowrap; overscroll-behavior-x: contain; }
   .windowTabs button { min-height: 44px; padding: 0 16px; font-size: 12px; }
@@ -246,6 +271,9 @@
 
 @media screen and (max-width: 520px) {
   .costAnomalyKpis { grid-template-columns: 1fr; }
+  .costAnomalyControls { grid-template-columns: 1fr; }
+  .costAnomalyControls button { width: 100%; min-height: 44px; }
+  .costAnomalyBars > div { grid-template-columns: minmax(76px, 1fr) minmax(80px, 1.5fr) 58px; gap: 7px; }
   .costAnomalyActions > button { width: 100%; }
 }
 
@@ -722,4 +750,88 @@
   .curState button { grid-column: 1 / -1; min-height: 44px; }
   .curPeriod { width: 100%; margin-left: 0; }
   .curPeriod select { width: 100%; min-height: 44px; font-size: 16px; }
+}
+
+/* Dedicated FOCUS 1.2 catalog dashboard. */
+.focusWorkspace { display: grid; gap: 14px; min-width: 0; padding: 0 18px 18px; }
+.focusPeriodFilters { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; margin: 0 18px 16px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; background: #f8faf9; }
+.focusPeriodFilters label { min-width: 135px; display: grid; gap: 4px; color: var(--muted); font-size: 8.5px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.focusPeriodFilters select, .focusPanel select { min-height: 38px; padding: 0 30px 0 10px; border: 1px solid var(--line-dark); border-radius: 9px; background: white; color: var(--ink); font: inherit; font-size: 10.5px; font-weight: 750; text-transform: none; }
+.focusPeriodFilters > span { flex-basis: 100%; color: #9f1239; font-size: 10px; }
+.focusReportHeader { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 18px; border: 1px solid rgba(15, 118, 110, .2); border-radius: 14px; background: linear-gradient(145deg, #f0fdfa, white); }
+.focusReportHeader h3 { margin: 3px 0 6px; font-size: 18px; letter-spacing: -.035em; }
+.focusReportHeader p:last-child { max-width: 690px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.focusCurrencyTabs { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.focusCurrencyTabs button { min-width: 48px; min-height: 36px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 9px; background: white; color: #475569; font: inherit; font-size: 10px; font-weight: 850; cursor: pointer; }
+.focusCurrencyTabs button[aria-pressed="true"] { border-color: #0f766e; background: #0f766e; color: white; }
+.focusCurrencyTabs button:focus-visible, .focusPeriodFilters select:focus-visible, .focusPeriodFilters button:focus-visible, .focusPanel select:focus-visible, .focusEvidenceDrawer summary:focus-visible, .focusTableWrap:focus-visible { border-radius: 7px; outline: 3px solid rgba(15, 118, 110, .25); outline-offset: 2px; }
+.focusKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+.focusKpis article { min-width: 0; display: grid; gap: 4px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.focusKpis small, .focusPanel > header small { color: #0f766e; font-size: 8px; font-weight: 850; letter-spacing: .065em; text-transform: uppercase; }
+.focusKpis strong { overflow-wrap: anywhere; font-size: 15px; letter-spacing: -.025em; }
+.focusKpis span { color: var(--muted); font-size: 8.5px; line-height: 1.4; }
+.focusSplitGrid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, .95fr); gap: 11px; }
+.focusPanel { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: white; }
+.focusPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.focusPanel > header h4 { margin: 3px 0 0; font-size: 13px; }
+.focusPanel > header > span { color: var(--muted); font-size: 8.5px; text-align: right; }
+.focusTrendChart { min-height: 215px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 12px 3px 0; }
+.focusTrendChart > div { min-width: 64px; height: 200px; flex: 1 0 64px; display: grid; grid-template-rows: 32px minmax(5px, 1fr) auto auto; align-items: end; justify-items: center; gap: 4px; text-align: center; }
+.focusTrendChart span { max-width: 72px; overflow: hidden; color: var(--muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.focusTrendChart i { width: min(34px, 72%); min-height: 4px; max-height: 142px; display: block; align-self: end; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #14b8a6, #0f766e); box-shadow: 0 6px 16px rgba(15, 118, 110, .14); }
+.focusTrendChart b { font-size: 8.5px; }
+.focusTrendChart small { color: var(--muted); font-size: 7.5px; }
+.focusDimensionBars { max-height: 250px; display: grid; gap: 8px; overflow-y: auto; padding-right: 4px; }
+.focusDimensionBars article { display: grid; grid-template-columns: minmax(88px, .7fr) minmax(75px, 1fr) auto; align-items: center; gap: 8px; }
+.focusDimensionBars article > div { min-width: 0; display: grid; gap: 2px; }
+.focusDimensionBars strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.focusDimensionBars small { color: var(--muted); font-size: 7.5px; }
+.focusDimensionBars article > span { height: 6px; overflow: hidden; border-radius: 999px; background: #e8eeeb; }
+.focusDimensionBars article > span i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #2dd4bf, #0f766e); }
+.focusDimensionBars article > b { max-width: 115px; overflow: hidden; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.focusFootnote { margin: 12px 0 0; color: var(--muted); font-size: 8.5px; line-height: 1.45; }
+.focusTableWrap { width: 100%; overflow-x: auto; }
+.focusTable { width: 100%; min-width: 780px; border-collapse: collapse; font-size: 9px; }
+.focusTable caption { width: 1px; height: 1px; position: absolute; overflow: hidden; clip-path: inset(50%); }
+.focusTable th, .focusTable td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+.focusTable thead th { color: var(--muted); font-size: 7.5px; letter-spacing: .055em; text-transform: uppercase; }
+.focusTable tbody th { font-size: 9px; }
+.focusTable td { color: #475569; font-variant-numeric: tabular-nums; }
+.focusTable td small, .focusTable th small { display: block; max-width: 190px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 7.5px; text-overflow: ellipsis; }
+.focusQualityGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.focusQualityGrid article { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfdfc; }
+.focusQualityGrid article > div { min-width: 0; display: grid; gap: 2px; }
+.focusQualityGrid strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.focusQualityGrid span, .focusQualityGrid small { color: var(--muted); font-size: 7.5px; }
+.focusQualityGrid b { align-self: center; color: #0f766e; font-size: 11px; }
+.focusQualityGrid small { grid-column: 1 / -1; }
+.focusEvidenceDrawer { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #f8faf9; }
+.focusEvidenceDrawer summary { color: #334155; font-size: 10px; font-weight: 850; cursor: pointer; }
+.focusEvidenceDrawer[open] summary { margin-bottom: 12px; }
+.focusEvidenceDrawer p { margin: 12px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.focusEmpty { margin: 0; padding: 15px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 10px; }
+.focusVisuallyHidden { width: 1px; height: 1px; position: absolute; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+@media screen and (max-width: 1120px) {
+  .focusKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .focusSplitGrid { grid-template-columns: 1fr; }
+  .focusQualityGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media screen and (max-width: 760px) {
+  .focusWorkspace { padding: 0 12px 14px; }
+  .focusPeriodFilters { margin: 0 12px 14px; }
+  .focusPeriodFilters label { flex: 1 1 130px; }
+  .focusPeriodFilters select, .focusPanel select { width: 100%; min-height: 44px; font-size: 16px; }
+  .focusPeriodFilters :global(.button) { min-height: 44px; flex: 1 1 150px; }
+  .focusReportHeader { display: grid; padding: 15px 13px; }
+  .focusCurrencyTabs { justify-content: flex-start; }
+  .focusCurrencyTabs button { min-height: 44px; }
+  .focusKpis, .focusQualityGrid { grid-template-columns: 1fr; }
+  .focusPanel { padding: 14px 11px; }
+  .focusPanel > header { display: grid; }
+  .focusPanel > header label { width: 100%; }
+  .focusDimensionBars article { grid-template-columns: minmax(90px, .8fr) minmax(60px, 1fr); }
+  .focusDimensionBars article > b { grid-column: 2; }
+  .focusTableWrap { scroll-snap-type: x proximity; }
 }
