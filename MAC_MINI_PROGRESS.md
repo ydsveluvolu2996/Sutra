@@ -233,6 +233,19 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Complete GCP CID, then close every remaining production activation and acceptance gap |
 
+### 2026-08-01 — GCP Cloud Intelligence provider vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-03 / local G0–G6 candidate slice |
+| Maturity transition | ADD-03 `ABSENT` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 23 partial pipelines, 0 engine-only, and 0 absent |
+| Provider boundary | Dedicated GCP billing connections, workload-identity/BigQuery contract, authenticated same-tenant source discovery/selection; no AWS trust-role registry and no service-account key ingestion |
+| Delivery | Exact signed nanos; provider billed cost and credits kept separate from calculated pricing variance and Recommender opportunity; immutable complete heads; Summary, Compute Engine, Cloud SQL, BigQuery, Network, Kubernetes, credit, resource, opportunity and evidence views; formula-safe CSV |
+| Focused verification | Engine/vertical 5 passed including live D1 trigger checks; full TypeScript, targeted ESLint, diff validation and explicit AWS-registry isolation check passed |
+| Remaining gates | Configure controlled GCP detailed usage/pricing exports and WIF binding; deploy BigQuery adapter; reconcile provider results; complete scale, two-tenant, signed-in, provider and live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Close production activation gaps dashboard by dashboard, then run exact-tree/provider/release/deployment acceptance |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

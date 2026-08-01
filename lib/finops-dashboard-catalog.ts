@@ -290,7 +290,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "GCP CID",
     level: "additional",
     provider: "gcp",
-    currentMaturity: "ABSENT",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "GCP Cloud Billing exports normalized for cost visualization, reporting, and multicloud financial analysis.",
     targetAudience: ["Executives", "Finance", "Procurement", "FinOps", "Product owners"],
     documentationUrl: "https://catalog.workshops.aws/cid-gcp-cost-dashboard",

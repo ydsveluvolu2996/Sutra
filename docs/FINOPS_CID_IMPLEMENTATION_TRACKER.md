@@ -61,8 +61,8 @@ never replace it or masquerade as current success.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Advanced | 13 | 1 | 12 | 0 | 0 | 0 | 0 |
-| Additional | 13 | 2 | 10 | 0 | 1 | 0 | 0 |
-| **Total** | **29** | **6** | **22** | **0** | **1** | **0** | **0** |
+| Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
+| **Total** | **29** | **6** | **23** | **0** | **0** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
 Anomaly, Trends, and Data Transfer. The twenty-one partial pipelines are Trusted
@@ -70,7 +70,8 @@ Advisor Organizational, Compute Optimizer, Extended Support Cost Projection, Gra
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
-Carbon, Amazon Connect Cost Insights, and Azure CID. GCP CID is absent.
+Carbon, Amazon Connect Cost Insights, Azure CID, and GCP CID. No catalog row is
+engine-only or absent; production activation and acceptance gaps remain explicit.
 
 ## Parent capability tracker
 
@@ -94,7 +95,7 @@ Carbon, Amazon Connect Cost Insights, and Azure CID. GCP CID is absent.
 | ADV-13 | Media Services Insights Hub | `media_services_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-13-media-services-insights.md): immutable CUR2-pinned history, same-tenant API, executive and five-service native workflow UI exist; AWS adapter/job registration, governed budgets/reservation evidence, and provider acceptance remain. |
 | ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md): immutable projection/history, same-tenant API and native UI exist; permanent Cost Optimization Hub export materialization and provider acceptance remain. |
 | ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-02-azure-cid.md): provider-specific Azure source discovery/selection, strict Standard Actual Cost/FOCUS normalization, exact micros, immutable history, same-tenant API, and native six-month/30-day/allocation/pricing/commitment/charge/tag/resource UI exist; credentials, recurring export/blob delivery, production adapter, and live Azure acceptance remain. |
-| ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `ABSENT` | Add GCP Cloud Billing export connection, collector, immutable normalized persistence, API, native visual reports, and live GCP validation. |
+| ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-03-gcp-cloud-intelligence.md): provider-specific GCP billing sources, WIF/BigQuery contract, exact signed nanos, immutable history, same-tenant source selection/API, and native billed-cost/credit/service/resource/Kubernetes/opportunity/evidence UI exist; production BigQuery adapter/export access, controlled reconciliation, and live GCP acceptance remain. |
 | ADD-04 | FOCUS Dashboard | `focus` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-04-focus.md): AWS FOCUS 1.2 API/UI is implemented; official multi-version/provider consolidation, tag taxonomy, and effective discount rate remain. |
 | ADD-05 | AWS Marketplace Single Pane of Glass Dashboard | `marketplace_spg` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-05-marketplace-spg.md): immutable separated CUR2/control-plane history, same-tenant API, and native spend/agreement/entitlement UI exist; signed-broker deployment, richer offer/product typing, and live buyer acceptance remain. |
 | ADD-06 | Kubecost Containers Cost Allocation Dashboard | `kubecost_container_allocation` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-06-kubecost-allocation.md): immutable signed-export/CUR2-pinned history, same-tenant API, and native executive/workload/EKS/showback UI exist; deployed adapter, component-cost/capacity dimensions, retained hourly trends, and live reconciliation remain. |

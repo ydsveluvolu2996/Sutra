@@ -112,6 +112,7 @@ const migrationFiles = [
   "0098_finops_graviton_savings.sql",
   "0099_finops_aws_health_events.sql",
   "0100_finops_azure_cid.sql",
+  "0101_finops_gcp_cloud_intelligence.sql",
   "0102_finops_dcf_execution_history.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {

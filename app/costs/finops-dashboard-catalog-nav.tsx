@@ -23,6 +23,7 @@ import { FinopsExtendedSupportProjectionDashboard } from "./finops-extended-supp
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
 import { FinopsGravitonSavingsDashboard } from "./finops-graviton-savings-dashboard";
+import { FinopsGcpCloudIntelligenceDashboard } from "./finops-gcp-cloud-intelligence-dashboard";
 import { FinopsHealthEventsDashboard } from "./finops-health-events-dashboard";
 import { FinopsKubecostAllocationDashboard } from "./finops-kubecost-allocation-dashboard";
 import { FinopsMarketplaceSpgDashboard } from "./finops-marketplace-spg-dashboard";
@@ -206,6 +207,8 @@ export function FinopsDashboardCatalogNav({
               sourceId={null}
               dashboard={selected}
             />
+          ) : selected.id === "gcp_cid" ? (
+            <FinopsGcpCloudIntelligenceDashboard />
           ) : selected.id === "cora" ? (
             <FinopsCoraDashboard connectionId={connectionId} />
           ) : selected.id === "config_resource_compliance" ? (
