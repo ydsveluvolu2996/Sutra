@@ -99,6 +99,7 @@ import postgresFinopsAwsHealthEventsSql from "../postgres/migrations/0099_finops
 import postgresFinopsAzureCidSql from "../postgres/migrations/0100_finops_azure_cid.sql?raw";
 import postgresFinopsGcpCloudIntelligenceSql from "../postgres/migrations/0101_finops_gcp_cloud_intelligence.sql?raw";
 import postgresFinopsDcfExecutionHistorySql from "../postgres/migrations/0102_finops_dcf_execution_history.sql?raw";
+import postgresFinopsCoraExportObjectsSql from "../postgres/migrations/0103_finops_cora_export_objects.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -202,6 +203,7 @@ const migrations = [
   { id: "0100_finops_azure_cid", source: postgresFinopsAzureCidSql },
   { id: "0101_finops_gcp_cloud_intelligence", source: postgresFinopsGcpCloudIntelligenceSql },
   { id: "0102_finops_dcf_execution_history", source: postgresFinopsDcfExecutionHistorySql },
+  { id: "0103_finops_cora_export_objects", source: postgresFinopsCoraExportObjectsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

@@ -258,6 +258,18 @@ Next gate:
 | Release evidence | Source contract only; no image published or deployed |
 | Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
 
+### 2026-08-01 — CORA execution-specific export activation
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-01 / local Cost Optimization Hub export G2–G3 advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Server-pinned organization/export scope; execution-specific manifest and object reconciliation; direct recommendation API exclusion; complete-only immutable SQLite/PostgreSQL heads; replay-safe orchestration; newest bounded lifecycle history; existing CORA API/UI projection |
+| Security | Mutable latest manifests, client scope, direct API rows, malformed accepted recommendations, partial coverage, duplicate rows and mixed estimate/observed-cost attribution fail closed |
+| Focused verification | 9 activation/migration/runtime/UI tests; full typecheck, touched lint and diff checks pass in the integrated tree |
+| Remaining gates | Deploy the credential-owning S3/Parquet adapter and durable handler, reconcile a controlled export, then exact-tree, two-tenant and live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Continue closing remaining production bindings without publishing an incomplete image |
+
 ### 2026-08-01 — Provider-neutral FOCUS analysis
 
 | Field | Evidence |
