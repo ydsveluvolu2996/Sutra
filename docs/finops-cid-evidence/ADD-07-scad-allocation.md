@@ -2,7 +2,7 @@
 
 Status: `PARTIAL_PIPELINE`; runtime activation is not claimed.
 
-Reviewed 2026-08-02 against the official AWS
+Reviewed 2026-08-01 against the official AWS
 [SCAD Containers Cost Allocation Dashboard](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/scad-containers-dashboard.html),
 [SCAD prerequisites](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/scad-containers-dashboard-prerequisites.html),
 [SCAD concepts](https://docs.aws.amazon.com/cur/latest/userguide/split-cost-allocation-data.html),
@@ -12,11 +12,27 @@ AWS documents EKS/ECS pod/task allocation, the executive and workload lenses,
 resource-request versus actual-utilization modes, a new CUR2 export, 24–48 hour
 delivery latency, and no historical backfill. Sutra preserves those boundaries.
 
+## Immutable official-definition audit
+
+The framework manifest is pinned at commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`, path
+`dashboards/scad-containers-cost-allocation/scad-containers-cost-allocation.yaml`,
+SHA-256 `0b27190fecbb87988b3f06ec122f3a2ffc7636b25f8008b3117367ad8302c2d4`.
+It identifies the dashboard/template and two SCAD datasets, but does not embed
+the QuickSight analysis definition. Exact controls, visual-object counts,
+placement and pixel geometry are therefore undisclosed and are not fabricated.
+
+AWS guidance says “three tabs” and then names five sections: Executive Summary,
+Workloads Explorer, Cluster Breakdown, Labels/Tags Explorer and Data on EKS.
+Sutra records the three-tab claim and five-section inventory separately. The
+first three sections are supported from SCAD evidence; tagged non-SCAD resource
+TCO and EMR service cost remain partial until a governed CUR2 join exists.
+
 | Official lens | Sutra evidence-backed implementation | Boundary |
 |---|---|---|
 | EKS/ECS/AWS Batch pod/task allocation | Exact CUR2 SCAD lineage through account, Region, platform, cluster, namespace, workload and pod/task | AWS SCAD does not publish container IDs |
 | Executive CPU/GPU/RAM/shared/total KPIs | Exact rational allocated, AWS-attributed unused and total cost by currency; VCPU, MEMORY and accelerator families | “Shared/idle” is AWS-attributed unused cost, not all platform overhead |
-| Account and top-cluster views | Account and cluster ranked allocations with pod/task and metric-group counts | No cross-currency merging |
+| Account and top-cluster views | Account and cluster cost-ranked allocations within one currency, with pod/task and metric-group counts | No cross-currency ranking or merging |
 | Workloads Explorer | Bounded filters and drilldown across EKS, ECS, Batch EKS/Batch ECS, usage and costs | Actual usage stays unavailable in request-only mode |
 | Cluster coverage | Account/Region/platform cluster cards with namespace, workload, pod/task and missing-lineage counts | Lineage completeness is explicit |
 | Labels/tags explorer | Exact sorted CUR2 resource-tag dimensions retained in normalized lineage | Only tags present on SCAD rows |
@@ -29,13 +45,14 @@ delivery latency, and no historical backfill. Sutra preserves those boundaries.
 
 - Engine: `lib/finops-scad-allocation.ts`
 - Projection: `lib/finops-scad-dashboard.ts`
+- Official definition: `lib/finops-scad-official-definition.ts`
 - Materializer contract: `lib/finops-scad-materialization-job.ts`
 - CUR2 runtime adapter: `lib/finops-scad-cur2-runtime-adapter.ts`
 - Durable runtime binding: `lib/finops-scad-durable-runtime-binding.ts`
 - Repository: `db/finops-scad-allocation-repository.ts`
 - SQLite/PostgreSQL: `drizzle/0098_finops_scad_allocation.sql`, `postgres/migrations/0093_finops_scad_allocation.sql`
 - API/UI: `app/api/v1/finops/scad-allocation/route.ts`, `app/costs/finops-scad-allocation-dashboard.tsx`
-- Tests: `tests/finops-scad-allocation.test.ts`, `tests/finops-scad-allocation-vertical.test.mjs`, `tests/finops-scad-cur2-runtime-activation.test.ts`
+- Tests: `tests/finops-scad-allocation.test.ts`, `tests/finops-scad-allocation-vertical.test.mjs`, `tests/finops-scad-cur2-runtime-activation.test.ts`, `tests/finops-scad-official-definition.test.ts`
 
 ## Controls
 
@@ -71,7 +88,7 @@ delivery latency, and no historical backfill. Sutra preserves those boundaries.
    multi-account EKS/ECS/Batch request/actual/accelerator reconciliation,
    signed-in two-tenant UI/build, immutable-image deployment and browser smoke.
 
-Focused verification: **28/28 tests passed** across the allocation, vertical and
+Focused verification: **31/31 tests passed** across the allocation, vertical and
 activation suites, including eight new runtime tests. TypeScript and targeted
 ESLint pass on the current tree.
 
