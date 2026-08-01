@@ -242,8 +242,8 @@ function hasFinopsException(row: CoraSnapshot["recommendations"][number]): boole
 }
 
 const OFFICIAL_SHEET_COVERAGE: readonly CoraOfficialSheetCoverage[] = Object.freeze([
-  { sheet: "Summary", status: "IMPLEMENTED", localEvidence: "Resource-deduplicated usage/rate opportunity summaries, raw counts, and action details", limitation: null },
-  { sheet: "Usage Optimization", status: "IMPLEMENTED", localEvidence: "Rightsize, idle/stop, delete, scale-in, upgrade, and migration actions with resource drilldown", limitation: null },
+  { sheet: "Summary", status: "PARTIAL", localEvidence: "Resource-deduplicated usage/rate opportunity summaries, raw counts, action details, filters, export and history", limitation: "The official scatter, Sankey, pivot, pie and calculated GroupBy visual geometry is not reproduced one-for-one." },
+  { sheet: "Usage Optimization", status: "PARTIAL", localEvidence: "Rightsize, idle/stop, delete, scale-in, upgrade, and migration actions with resource drilldown", limitation: "The official pie, pivot, bar and arbitrary GroupBy interaction tree is not reproduced one-for-one." },
   { sheet: "Rate Optimization - Saving Plans", status: "PARTIAL", localEvidence: "Savings Plans recommendation evidence and estimate details", limitation: "The export domain does not yet normalize SP level, term, or upfront-option dimensions." },
   { sheet: "Rate Optimization - Reserved Instances", status: "PARTIAL", localEvidence: "Reserved Instance recommendation evidence and estimate details", limitation: "The export domain does not yet normalize RI service, level, term, or upfront-option dimensions." },
   { sheet: "About", status: "IMPLEMENTED", localEvidence: "Freshness, coverage, generation lineage, limitations, and estimate disclosures", limitation: null },

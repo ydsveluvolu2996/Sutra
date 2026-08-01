@@ -5,6 +5,7 @@ import {
   buildCoraDashboardProjection,
   type CoraDashboardFilters,
 } from "../../../../../lib/finops-cora-dashboard";
+import { CORA_OFFICIAL_DEFINITION } from "../../../../../lib/finops-cora-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -118,6 +119,7 @@ export async function GET(request: Request): Promise<Response> {
       schema: "sutra.finops-cora-dashboard.v1",
       connectionId: connection.id,
       sourceState: "configuration_required",
+      officialDefinition: CORA_OFFICIAL_DEFINITION,
       dashboard: null,
       collection: { available: false, reason: "CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND" },
     });
@@ -148,6 +150,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       source: "AWS_COST_OPTIMIZATION_HUB_DATA_EXPORT",
       sourceState,
+      officialDefinition: CORA_OFFICIAL_DEFINITION,
       freshness: {
         dataThroughAt: selected.snapshot.sourceDataThroughAt,
         ageHours: freshnessAgeHours,

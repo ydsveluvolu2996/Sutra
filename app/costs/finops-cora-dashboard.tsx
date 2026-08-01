@@ -6,6 +6,7 @@ import type {
   CoraDashboardProjection,
   CoraDashboardRow,
 } from "../../lib/finops-cora-dashboard";
+import type { CoraOfficialDefinition } from "../../lib/finops-cora-official-definition";
 import styles from "./finops-cora-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -13,10 +14,19 @@ export interface CoraDashboardEnvelope extends CoraDashboardProjection {
   readonly connectionId: string;
   readonly sourceState: SourceState;
   readonly source: string;
+  readonly officialDefinition: CoraOfficialDefinition;
   readonly freshness: { readonly dataThroughAt: string | null; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly evidence: Readonly<Record<string, unknown>>;
   readonly collection: { readonly available: false; readonly reason: string };
   readonly disclosures: readonly string[];
+}
+
+interface CoraConfigurationEnvelope {
+  readonly connectionId: string;
+  readonly sourceState: "configuration_required";
+  readonly officialDefinition: CoraOfficialDefinition;
+  readonly dashboard: null;
+  readonly collection: { readonly available: false; readonly reason: string };
 }
 
 const EMPTY_FILTERS: CoraDashboardFilters = {
@@ -98,6 +108,30 @@ function RecommendationTable({ rows, emptyMessage }: {
   </table></div>;
 }
 
+function OfficialDefinitionCoverage({ definition }: {
+  readonly definition: CoraOfficialDefinition;
+}) {
+  return <details className={`${styles.section} ${styles.evidence} ${styles.definition}`}>
+    <summary>Official AWS CORA definition · {definition.totals.visuals} visuals across {definition.totals.sheets} sheets</summary>
+    <div className={styles.definitionBody}>
+      <p><strong>Immutable source:</strong> <a href={`${definition.source.repository}/blob/${definition.source.commit}/${definition.source.definitionPath}`} rel="noreferrer" target="_blank">CORA {definition.source.version} QuickSight definition</a> at commit <code>{definition.source.commit}</code>.</p>
+      <p><strong>Verified hashes:</strong> definition <code>{definition.source.definitionSha256}</code>; manifest <code>{definition.source.manifestSha256}</code>; changelog <code>{definition.source.changelogSha256}</code>; embedded <code>cora_view</code> SQL <code>{definition.source.embeddedViewSha256}</code>.</p>
+      <p><strong>Exact inventory:</strong> {definition.totals.visuals} visuals, {definition.totals.parameterControls} parameter controls, {definition.totals.filterControls} filter-control placements, {definition.totals.parameterDeclarations} parameter declarations, {definition.totals.calculatedFields} calculated fields, {definition.totals.filterGroups} filter groups, {definition.totals.columnConfigurations} column configurations, and {definition.totals.datasets} dataset.</p>
+      <div className={styles.definitionSheets} aria-label="Exact official CORA sheet inventory">
+        {definition.sheets.map((sheet) => <details key={sheet.id} className={styles.definitionSheet}>
+          <summary><strong>{sheet.name}</strong><span>{sheet.visualCount} visuals · {sheet.parameterControls.length} parameter controls · {sheet.filterControls.length} filter controls</span></summary>
+          <p><strong>{sheet.coverage.replaceAll("_", " ")}</strong> · {sheet.nativeEvidence}</p>
+          <p><strong>Remaining gap:</strong> {sheet.remainingGap}</p>
+          <p><strong>Parameter controls:</strong> {sheet.parameterControls.join(", ") || "None"}</p>
+          <p><strong>Filter controls:</strong> {sheet.filterControls.join(", ") || "None"}</p>
+          {sheet.visuals.length === 0 ? <p>The pinned sheet contains no visual objects.</p> : <ul className={styles.definitionVisuals}>{sheet.visuals.map((item) => <li key={item.id}><span>{item.title}</span><small>{item.type} · <code>{item.id}</code></small></li>)}</ul>}
+        </details>)}
+      </div>
+      <p><strong>Preserved runtime gaps:</strong> The published Athena view SQL is pinned, but the credential-owning S3/Parquet adapter, live provider reconciliation, two-tenant proof, release-SHA gate, immutable image deployment, and production acceptance remain open. No pixel, layout, interaction-tree, or QuickSight runtime parity is claimed.</p>
+    </div>
+  </details>;
+}
+
 export function CoraDashboardReportView({ report, filters, onFiltersChange }: {
   readonly report: CoraDashboardEnvelope;
   readonly filters: CoraDashboardFilters;
@@ -112,6 +146,7 @@ export function CoraDashboardReportView({ report, filters, onFiltersChange }: {
   return <section className={styles.root} aria-label="CORA cost optimization recommended actions">
     <div className={styles.notice}><strong>AWS recommendation estimates — not realized savings.</strong> Usage and rate opportunities are kept separate and deduplicated by resource ID within each class. Rows without a resource ID remain separate. Rate estimates are not adjusted for implementing rightsizing, stop, upgrade, or migration actions.</div>
     {state ? <div role="status" className={`${styles.state} ${state.tone === "warning" ? styles.warning : state.tone === "error" ? styles.error : ""}`}>{state.text}</div> : null}
+    <OfficialDefinitionCoverage definition={report.officialDefinition} />
     <div className={styles.filters} aria-label="CORA filters">
       <Select label="Account" value={filters.accountId} options={report.filterOptions.accounts.map((item) => ({ value: item.id, label: `${item.name} · ${item.id}` }))} onChange={(value) => set("accountId", value)} />
       <Select label="Optimization class" value={filters.optimizationClass} options={report.filterOptions.optimizationClasses.map((value) => ({ value, label: value.replaceAll("_", " ") }))} onChange={(value) => set("optimizationClass", value as CoraDashboardFilters["optimizationClass"])} />
@@ -172,7 +207,8 @@ export function FinopsCoraDashboard({ connectionId }: { readonly connectionId: s
     report: CoraDashboardEnvelope | null;
     error: string | null;
     configurationRequired: boolean;
-  }>({ report: null, error: null, configurationRequired: false });
+    officialDefinition: CoraOfficialDefinition | null;
+  }>({ report: null, error: null, configurationRequired: false, officialDefinition: null });
   useEffect(() => {
     if (connectionId === null) {
       return;
@@ -183,24 +219,25 @@ export function FinopsCoraDashboard({ connectionId }: { readonly connectionId: s
     fetch(`/api/v1/finops/cora?${parameters.toString()}`, { signal: controller.signal, headers: { Accept: "application/json" } })
       .then(async (response) => {
         if (!response.ok) throw new Error("CORA dashboard request failed");
-        return response.json() as Promise<CoraDashboardEnvelope | { readonly dashboard: null }>;
+        return response.json() as Promise<CoraDashboardEnvelope | CoraConfigurationEnvelope>;
       })
       .then((report) => {
         if ("dashboard" in report && report.dashboard === null) {
-          setState({ report: null, error: null, configurationRequired: true });
+          setState({ report: null, error: null, configurationRequired: true, officialDefinition: report.officialDefinition });
           return;
         }
         setState({
           report: report as CoraDashboardEnvelope,
           error: null,
           configurationRequired: false,
+          officialDefinition: report.officialDefinition,
         });
       })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "CORA dashboard request failed", configurationRequired: false }); });
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "CORA dashboard request failed", configurationRequired: false, officialDefinition: null }); });
     return () => controller.abort();
   }, [connectionId, filters]);
   if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before configuring CORA.</div>;
-  if (state.configurationRequired) return <div role="status" className={`${styles.state} ${styles.warning}`}>Enable Cost Optimization Hub and bind an unfiltered COST_OPTIMIZATION_RECOMMENDATIONS Data Export before CORA can render provider evidence.</div>;
+  if (state.configurationRequired) return <section className={styles.root}><div role="status" className={`${styles.state} ${styles.warning}`}>Enable Cost Optimization Hub and bind an unfiltered COST_OPTIMIZATION_RECOMMENDATIONS Data Export before CORA can render provider evidence.</div>{state.officialDefinition === null ? null : <OfficialDefinitionCoverage definition={state.officialDefinition} />}</section>;
   if (state.error !== null) return <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div>;
   if (state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading CORA evidence…</div>;
   return <CoraDashboardReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
