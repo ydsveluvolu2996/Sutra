@@ -6,10 +6,8 @@ Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence
 
 Official visual reference: <https://docs.aws.amazon.com/images/guidance/latest/cloud-intelligence-dashboards/images/tao_demo.png>
 
-Working-tree base revision: `78dfdc1a2d4a3464ede8a7126c0d81b5d8d5783c`
-
-Assessment scope: the uncommitted ADV-01 working-tree changes based on the
-revision above. This is not a claim that `78dfdc1` alone contains the slice.
+Assessment scope: the integrated ADV-01 source, orchestration, persistence,
+API, native UI, evidence, and focused verification slice.
 
 Current maturity: `PARTIAL_PIPELINE`
 
@@ -33,11 +31,11 @@ Current maturity: `PARTIAL_PIPELINE`
 |---|---|---|
 | G0 requirements | `VERIFIED` | Official AWS narrative, prerequisite, benefit, architecture, and visual inventory above, reviewed 2026-08-01. |
 | G1 source contract | `IMPLEMENTED_UNVERIFIED` | Standard account checks use the read-only AWS Support operations `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult` through the fixed commercial-partition `us-east-1` endpoint. Trusted Advisor Priority organization recommendations remain a separate supplemental source and are never substituted. Eligible Support-plan and Organizations taxonomy prerequisites remain explicit. |
-| G2 collector and orchestration | `PARTIAL` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. Identity-only manifest account and finalization jobs exist, but the worker adapter from each accepted standard-check collection into the frozen organization manifest is not yet connected. |
+| G2 collector and orchestration | `IMPLEMENTED_UNVERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. App-side orchestration validates a fresh fully paged KMS-signed Organizations taxonomy, freezes the manifest, maps active same-tenant trust-role accounts, queues manifest-bound account/finalizer jobs, consumes exact immutable standard-check evidence bytes, and finalizes only terminal manifests. The external signed-taxonomy adapter and durable handler registrations remain unavailable. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Server-owned account manifests, account/check/resource snapshots, organization generations, and active heads are tenant/customer/connection scoped. Evidence is checksum-bound and append-only; database guards prevent incomplete or partial generations from advancing the complete active head. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | Authenticated same-tenant `GET /api/v1/finops/trusted-advisor-organizational` accepts only one connection/account/check/status/Region filter value, queries only the immutable active standard-check generation, bounds account/check/resource/history output, minimizes metadata, and exposes configuration-required/waiting/empty/partial/stale/failed/complete states. |
 | G5 visual UI | `IMPLEMENTED_UNVERIFIED` | The 29-dashboard catalog routes ADV-01 to a native responsive dashboard with organization coverage KPIs, generation history, account and check selection, bounded resource evidence, freshness and limitations, keyboard-visible focus, mobile layouts, and the reusable evidence drawer. No fixture, sample, or Priority data is substituted. |
-| G6 focused verification | `VERIFIED` | Working tree based on `78dfdc1`: 3 repository isolation/projection tests and 15 catalog/navigation/render/accessibility contract tests passed; 18 passed total, 0 failed, 0 skipped. Root TypeScript, targeted ESLint, and `git diff --check` passed. |
+| G6 focused verification | `VERIFIED` | Four repository isolation/projection tests, 15 catalog/navigation/render/accessibility tests, and 9 manifest-job/migration/signed-taxonomy/fan-out/evidence/finalization tests passed; 28 passed total, 0 failed, 0 skipped. Root TypeScript, targeted ESLint, and `git diff --check` passed. |
 | G7 exact-tree gate | `NOT_STARTED` | The complete eventual release SHA still requires the full application, collector, migration, PostgreSQL, build, rendered, security, and image scan gates after all capability work is integrated. |
 | G8 provider acceptance | `NOT_STARTED` | Controlled eligible-Support-plan AWS accounts, accepted server-owned Organizations taxonomy, standard-check reconciliation, failure/partial/freshness exercises, and two-tenant isolation evidence remain. |
 | G9 release acceptance | `NOT_STARTED` | Reviewed merge, immutable image digest, SBOM/security approval, database rollout, rollback rehearsal, and deployment authorization remain. |
@@ -45,17 +43,15 @@ Current maturity: `PARTIAL_PIPELINE`
 
 ## Configuration-required activation blocker
 
-Sutra does not currently have an accepted server-owned AWS Organizations
-taxonomy manifest that can freeze the complete account set and map every
-account to a tenant-owned active trust-role connection. The browser is not
-allowed to supply or expand that set. Consequently, collection activation is
-reported as `configuration_required` with
-`AWS_ORGANIZATIONS_TAXONOMY_MANIFEST_NOT_AVAILABLE`; no collection is started
-from UI input and no Priority recommendation source is used as a fallback.
-
-The worker boundary that converts each bounded standard-check collection into
-the corresponding immutable manifest account snapshot must also be connected
-before provider acceptance.
+The signed taxonomy and immutable fan-out contract now exists, but Sutra does
+not yet have the credential-owning Organizations adapter or durable production
+handlers registered. The browser is not allowed to supply or expand the
+account set. Consequently, collection activation is reported as
+`configuration_required` with
+`AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`; no collection is
+started from UI input and no Priority recommendation source is used as a
+fallback. Provider acceptance additionally requires a real eligible Support
+plan organization and reconciliation across its accepted account manifest.
 
 ## Focused verification
 
@@ -65,7 +61,7 @@ Repository command:
 node --test --test-concurrency=1 tests/finops-trusted-advisor-organization-repository.test.mjs
 ```
 
-Result: **3 passed, 0 failed, 0 skipped**.
+Result: **4 passed, 0 failed, 0 skipped**.
 
 Catalog, navigation, and rendered UI command:
 
@@ -74,6 +70,14 @@ node --test tests/finops-dashboard-catalog.test.ts tests/finops-dashboard-naviga
 ```
 
 Result: **15 passed, 0 failed, 0 skipped**.
+
+Signed taxonomy, fan-out, standard-check evidence, replay, and finalization:
+
+```text
+node --test --test-concurrency=1 tests/finops-trusted-advisor-organization-job.test.ts tests/finops-trusted-advisor-organization-migration-contract.test.mjs tests/finops-trusted-advisor-standard-orchestration.test.ts
+```
+
+Result: **9 passed, 0 failed, 0 skipped**.
 
 Additional checks:
 

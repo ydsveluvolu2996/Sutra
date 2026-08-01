@@ -131,7 +131,7 @@ export async function GET(request: Request): Promise<Response> {
         },
         activation: {
           available: false,
-          reason: "AWS_ORGANIZATIONS_TAXONOMY_MANIFEST_NOT_AVAILABLE",
+          reason: "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED",
         },
       });
     }
@@ -194,13 +194,13 @@ export async function GET(request: Request): Promise<Response> {
       },
       activation: {
         available: false,
-        reason: "AWS_ORGANIZATIONS_TAXONOMY_MANIFEST_NOT_AVAILABLE",
+        reason: "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED",
       },
       limitations: [
         "Standard checks are collected independently for each configured account.",
         "Trusted Advisor Priority recommendations are supplemental and are never substituted for standard checks.",
         "Only the immutable accepted complete generation is rendered; incomplete generations never advance the active head.",
-        "Account discovery activation remains unavailable until a server-owned AWS Organizations taxonomy manifest exists.",
+        "Account discovery activation remains unavailable until the signed server-owned AWS Organizations taxonomy adapter and durable orchestration handlers are registered.",
       ],
     });
   } catch (error) {

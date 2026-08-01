@@ -51,7 +51,7 @@ test("TAO UI exposes honest states, activation gap, filters, and drilldowns", ()
     "Resource drilldown",
     "Trusted Advisor organization filters",
   ]) assert.match(component, new RegExp(label, "u"), label);
-  assert.match(component, /AWS_ORGANIZATIONS_TAXONOMY_MANIFEST_NOT_AVAILABLE|server-owned AWS Organizations taxonomy manifest/iu);
+  assert.match(component, /signed server-owned AWS Organizations taxonomy|signed Organizations adapter/iu);
   assert.match(component, /browser-provided account list/iu);
   assert.match(component, /Priority is never substituted|Priority recommendations are supplemental only/iu);
   assert.match(component, /aria-pressed=\{filters\.accountId === account\.accountId\}/u);
@@ -93,7 +93,7 @@ test("TAO report renders accepted account, check, resource, history, and evidenc
       resources: [{ resourceKey: "a".repeat(64), accountId: "111122223333", checkId: "check-1", checkName: "Idle EC2 instances", resourceId: "i-render", region: "us-east-1", status: "warning", suppressed: false, metadata: [{ name: "reason", value: "idle" }], metadataSha256: "b".repeat(64) }],
       history: [{ generationId: `tao_${"c".repeat(64)}`, status: "complete", collectedAtIso: "2026-08-01T01:00:00.000Z", expectedAccountCount: 1, acceptedAccountCount: 1, rejectedAccountCount: 0, checkCount: 1, resourceCount: 1 }],
       evidence: { generationId: `tao_${"c".repeat(64)}`, manifestId: `tam_${"d".repeat(64)}`, contentSha256: "e".repeat(64) },
-      activation: { available: false, reason: "AWS_ORGANIZATIONS_TAXONOMY_MANIFEST_NOT_AVAILABLE" },
+      activation: { available: false, reason: "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED" },
       limitations: ["Priority is never substituted."],
     };
     const markup = renderToStaticMarkup(createElement(

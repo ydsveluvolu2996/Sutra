@@ -232,7 +232,7 @@ function statePresentation(
   if (sourceState === "configuration_required") return {
     view: "configuration_required",
     title: "Server-owned account discovery is not configured",
-    detail: "Sutra needs an accepted server-owned AWS Organizations taxonomy manifest before it can activate organization fan-out. A browser-provided account list is never accepted.",
+    detail: "The signed server-owned AWS Organizations taxonomy and fan-out contracts exist, but their production adapter and durable handlers are not registered. A browser-provided account list is never accepted.",
   };
   if (sourceState === "waiting") return {
     view: "waiting",
@@ -390,7 +390,7 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
 
       <aside className={styles.taoActivationNote} role="note">
         <strong>Collection activation is intentionally server-owned</strong>
-        <p>The dashboard cannot start account fan-out from a browser-provided list. Activation remains configuration required until Sutra can freeze an accepted AWS Organizations taxonomy manifest. Priority recommendations are supplemental only.</p>
+        <p>The dashboard cannot start account fan-out from a browser-provided list. Activation remains configuration required until the signed Organizations adapter and durable handlers are registered and can freeze an accepted manifest. Priority recommendations are supplemental only.</p>
       </aside>
     </div>
   );

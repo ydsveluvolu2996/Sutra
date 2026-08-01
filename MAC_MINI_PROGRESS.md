@@ -258,6 +258,18 @@ Next gate:
 | Release evidence | Source contract only; no image published or deployed |
 | Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
 
+### 2026-08-01 — Trusted Advisor signed organization orchestration
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-01 / app-side G2 orchestration advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Fresh fully-paged KMS-signed Organizations taxonomy validation; frozen same-tenant account manifest; active trust-role mapping; manifest-bound account/finalizer queueing; exact standard-check evidence consumption; terminal-only finalization and replay safety |
+| Security | Browser account lists, stale/unsigned/cross-tenant captures, duplicate account bindings, Priority substitution, unverified evidence bytes, raw provider errors and non-commercial partitions fail closed |
+| Focused verification | 9 orchestration tests plus the existing repository and native API/UI suites; root typecheck, touched lint and diff checks pass in the integrated tree |
+| Remaining gates | Register the credential-owning signed Organizations adapter and durable handlers, then run eligible-Support-plan, two-tenant, provider, exact-tree and live acceptance |
+| Release evidence | Source contract only; no image published or deployed |
+| Next gate | Continue closing the next partial vertical while provider dependencies remain explicit |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |
