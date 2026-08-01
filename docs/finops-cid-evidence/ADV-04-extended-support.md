@@ -7,10 +7,12 @@ Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence
 ## Status
 
 `PARTIAL_PIPELINE`. The five-service evidence engine, server-owned
-multi-account/Region job contract, immutable accepted-generation repository,
+multi-account/Region job contract, identity-only daily scheduler and sealed
+replay-safe durable handler boundary, immutable accepted-generation repository,
 authenticated same-tenant API and native planning UI are implemented and
-focused-tested. The AWS provider adapter, scheduler, role-policy deployment,
-live authoritative evidence and signed-in production acceptance are pending.
+focused-tested. The credential-owning AWS provider adapter, permanent replay
+store/shared handler registration, role-policy deployment, live authoritative
+evidence and signed-in production acceptance are pending.
 
 ## Official coverage
 
@@ -30,6 +32,7 @@ separate evidence classes even though both use RDS APIs.
 
 - Engine: `lib/finops-extended-support-projection.ts`
 - Job contract: `lib/finops-extended-support-collector-job.ts`
+- Durable runtime: `lib/finops-extended-support-runtime-binding.ts`
 - Exact-money projection: `lib/finops-extended-support-dashboard.ts`
 - SQLite: `drizzle/0102_finops_extended_support_projection.sql`
 - PostgreSQL: `postgres/migrations/0097_finops_extended_support_projection.sql`
@@ -37,12 +40,18 @@ separate evidence classes even though both use RDS APIs.
 - API: `app/api/v1/finops/extended-support-projection/route.ts`
 - UI: `app/costs/finops-extended-support-projection-dashboard.tsx`
 - Tests: `tests/finops-extended-support-projection.test.ts` and
-  `tests/finops-extended-support-vertical.test.mjs`
+  `tests/finops-extended-support-vertical.test.mjs` plus
+  `tests/finops-extended-support-runtime-binding.test.ts`
 
 Captures are normalized against a server-pinned organization/customer/
 connection, management account, partition, account set and Region set before
-persistence. Immutable generations are content-addressed. Only `READY`
-evidence can become the head, and the head advances only to a later collection.
+persistence. The scheduler prevalidates all eligible scopes before enqueue and
+queues only the daily window with five attempts. The handler reloads the full
+boundary, rejects substituted account/Region scope before provider I/O, leases
+a deterministic tenant/connection/window replay key, verifies completed-result
+SHA-256 before replay, and seals successful results. Immutable generations are
+content-addressed. Only `READY` evidence can become the head, and the head
+advances only to a later collection.
 
 ## Projection and exact-money semantics
 
@@ -69,8 +78,8 @@ or micro strings to remove binary floating-point inputs at ingestion.
 
 ## Remaining provider gates
 
-1. Implement the signed bounded multi-account/Region provider adapter.
-2. Deploy and attest least-privilege policies, scheduler and job ledger.
+1. Implement the credential-owning signed bounded multi-account/Region provider adapter.
+2. Register the scheduler/handler with a permanent replay store and deploy and attest least-privilege policies.
 3. Validate calendar/version mappings, normalized OpenSearch factors,
    ElastiCache premiums and Region/date-specific rates against live AWS.
 4. Validate real CUR2 charges, corrections, currencies, missing inputs,
@@ -80,3 +89,8 @@ or micro strings to remove binary floating-point inputs at ingestion.
    claiming end-to-end exact-money ingestion.
 
 Until these gates pass, ADV-04 is not `LOCAL_VERIFIED` or `LIVE_VERIFIED`.
+
+Focused local result: **19 passed, 0 failed, 0 skipped** across the projection,
+runtime, repository, API and server-rendered UI suites; focused ESLint and diff
+checks passed. Full exact-tree type/build/security validation remains G7 after
+all concurrent dashboard work is integrated.
