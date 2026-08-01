@@ -15,6 +15,8 @@ import type {
   FinopsCudosResult,
   FinopsCudosTrendBucket,
 } from "../../lib/finops-cudos";
+import type { FinopsCudosOfficialDefinition } from
+  "../../lib/finops-cudos-official-definition";
 import type {
   FinopsCostIntelligenceResult,
   FinopsCurrencyAllocation,
@@ -94,6 +96,7 @@ interface CudosEnvelope {
   readonly report: FinopsCudosResult | null;
   readonly sourceState: "complete" | "partial" | "waiting";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
+  readonly officialDefinition: FinopsCudosOfficialDefinition;
 }
 
 interface CostIntelligenceEnvelope {
@@ -381,7 +384,16 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
       || value.sourceState === "waiting"
     )
     && stateMatchesEvidence
-    && validSourceEvidence(sourceEvidence);
+    && validSourceEvidence(sourceEvidence)
+    && isRecord(value.officialDefinition)
+    && isRecord(value.officialDefinition.source)
+    && value.officialDefinition.source.sha256
+      === "7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1"
+    && isRecord(value.officialDefinition.totals)
+    && value.officialDefinition.totals.sheets === 19
+    && value.officialDefinition.totals.visuals === 407
+    && Array.isArray(value.officialDefinition.sheets)
+    && value.officialDefinition.sheets.length === 19;
 }
 
 function validCostIntelligenceEnvelope(
@@ -930,7 +942,7 @@ function ChargeDisclosure({
   );
 }
 
-function CudosOverview({
+export function CudosOverview({
   envelope,
 }: {
   readonly envelope: CudosEnvelope;
@@ -954,6 +966,40 @@ function CudosOverview({
           labelled and currencies remain separate.
         </div>
       ) : null}
+      <section
+        className={styles.foundationalPanel}
+        aria-label="Official AWS CUDOS v5 definition"
+      >
+        <PanelHeading
+          eyebrow="Immutable AWS definition"
+          title="Official CUDOS v5 sheet coverage"
+          meta={`${envelope.officialDefinition.totals.sheets} sheets · ${envelope.officialDefinition.totals.visuals} visuals · ${envelope.officialDefinition.totals.parameterControls + envelope.officialDefinition.totals.filterControls} controls`}
+        />
+        <section
+          className={styles.foundationalModuleGrid}
+          aria-label="Official CUDOS sheet inventory"
+        >
+          {envelope.officialDefinition.sheets.map((sheet) => (
+            <article key={sheet.name}>
+              <header>
+                <span>{sheet.name}</span>
+                <strong>{sheet.visualCount}</strong>
+              </header>
+              <p>{sheet.gap ?? "Native evidence-backed coverage is available."}</p>
+              <dl>
+                <div><dt>Parameters</dt><dd>{sheet.parameterControlCount}</dd></div>
+                <div><dt>Filters</dt><dd>{sheet.filterControlCount}</dd></div>
+                <div><dt>Parity</dt><dd>{sheet.support.toLowerCase()}</dd></div>
+              </dl>
+              <small>
+                Definition {compactEvidence(
+                  envelope.officialDefinition.source.sha256, 16,
+                )}
+              </small>
+            </article>
+          ))}
+        </section>
+      </section>
       <CurrencyKpis summaries={report.executive} basis={report.selectedCostBasis} />
       <section className={styles.foundationalThreeColumn}>
         <article className={styles.foundationalPanel}>

@@ -13,6 +13,8 @@ import {
   type FinopsCudosCostBasis,
   type FinopsCudosOptions,
 } from "../../../../../lib/finops-cudos";
+import { FINOPS_CUDOS_OFFICIAL_DEFINITION } from
+  "../../../../../lib/finops-cudos-official-definition";
 import {
   errorResponse,
   jsonResponse,
@@ -146,6 +148,7 @@ export async function GET(request: Request): Promise<Response> {
         report: null,
         sourceState: "waiting",
         sourceEvidence: null,
+        officialDefinition: FINOPS_CUDOS_OFFICIAL_DEFINITION,
       });
     }
 
@@ -187,6 +190,7 @@ export async function GET(request: Request): Promise<Response> {
           incompleteReasons: sourceIncompleteReasons,
         },
       },
+      officialDefinition: FINOPS_CUDOS_OFFICIAL_DEFINITION,
     });
   } catch (error) {
     return errorResponse(error);

@@ -6,7 +6,7 @@ Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence
 
 Official implementation inventory: <https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/cudos/CUDOS-v5-definition.yaml>
 
-Assessment revision: `b45a232d2b` plus the local FND-01 candidate diff described below
+Immutable definition SHA-256: `7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1`
 
 Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 
@@ -26,6 +26,14 @@ Storage & Backup, Amazon S3, Databases, Amazon DynamoDB, AI/ML, Data Transfer &
 Networking, Messaging and Streaming, Monitoring & Observability, Analytics,
 Security, End User Computing, GameTech & Media, Taxonomy Explorer, and OPTICS
 Explorer. `About` is documentation rather than a billing projection.
+
+The immutable YAML contains exactly **19 sheets, 407 visuals, 88 parameter
+controls, 54 filter controls, 40 parameter declarations, 399 calculated fields
+and 1,263 filter groups**. The full ordered sheet/count inventory is encoded in
+`lib/finops-cudos-official-definition.ts`, returned in both waiting and ready
+API states, rendered natively, and enforced by definition and SSR tests. This
+is semantic evidence coverage; it is not a claim of pixel-for-pixel QuickSight
+layout parity.
 
 ## Local capability comparison
 
@@ -51,8 +59,8 @@ Explorer. `About` is documentation rather than a billing projection.
 | G2 collector | `IMPLEMENTED_UNVERIFIED` | Data Export manifest/object ingestion and correction-safe generation path; no claim that every official supplemental resource source is collected. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Active billing generation repository, tenant/export/period/generation scope, immutable canonical rows, correction head. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | `GET /api/v1/finops/cudos`; exact query allowlist, authenticated live AWS connection, active-generation-only reads. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, and all official service-family projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. |
-| G6 focused verification | `VERIFIED` | Included in the 69-test Foundational set below; no failures/skips. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 19-sheet/407-visual/142-control coverage navigator, executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, and all official service-family projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. |
+| G6 focused verification | `VERIFIED` | CUDOS engine, route, immutable definition, native SSR and shared Foundational UI tests pass with no failures/skips. |
 | G7 exact-tree gate | `NOT_STARTED` | Must be rerun on the eventual release SHA with PostgreSQL, Docker, rendered, and full repository gates. |
 | G8–G10 | `NOT_STARTED` | Controlled source reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
 
@@ -66,8 +74,13 @@ combined.
 
 Focused command:
 
-```text
-node --experimental-strip-types --test tests/finops-cost-intelligence-route-contract.test.mjs tests/finops-cost-intelligence.test.ts tests/finops-cudos-route-contract.test.mjs tests/finops-cudos.test.ts tests/finops-foundational-config-migration-contract.test.mjs tests/finops-foundational-config-repository.test.mjs tests/finops-foundational-config-route-contract.test.mjs tests/finops-foundational-cur2-export-template.test.mjs tests/finops-foundational-focus12-export-template.test.mjs tests/finops-foundational-ui-contract.test.mjs tests/finops-kpi-route-contract.test.mjs tests/finops-kpi.test.ts
+```sh
+npx tsx --test \
+  tests/finops-cudos.test.ts \
+  tests/finops-cudos-route-contract.test.mjs \
+  tests/finops-cudos-official-definition.test.ts \
+  tests/finops-cudos-official-ui.test.mjs \
+  tests/finops-foundational-ui-contract.test.mjs
 ```
 
-Result: **69 passed, 0 failed, 0 skipped**.
+Result: **22 passed, 0 failed, 0 skipped**.

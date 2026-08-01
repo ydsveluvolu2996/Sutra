@@ -65,6 +65,15 @@ test("CUDOS route invokes only the canonical active-generation engine and has an
   assert.doesNotMatch(route, /finops_cur_lines|FinopsWorkspaceRepository/u);
 });
 
+test("every CUDOS state returns the immutable official definition", () => {
+  assert.match(route, /FINOPS_CUDOS_OFFICIAL_DEFINITION/u);
+  assert.ok(
+    route.match(/officialDefinition: FINOPS_CUDOS_OFFICIAL_DEFINITION/gu)
+      ?.length >= 2,
+    "waiting and ready responses must carry the same pinned definition",
+  );
+});
+
 test("active billing repository is bounded, paginated, and live-owned in every read", () => {
   assert.match(repository, /await ensureRuntimeSchema\(this\.database\)/u);
   assert.match(repository, /const MAX_PARTITIONS = 36/u);
