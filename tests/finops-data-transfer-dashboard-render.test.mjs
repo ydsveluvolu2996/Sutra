@@ -35,6 +35,11 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
       currency: "USD",
       usageAccountId: "123456789012",
       service: "AWS Global Accelerator",
+      path: { sourceLocation: "North America", sourceLocationType: "AWS Region",
+        destinationLocation: "Europe", evidence: "CUR2_PROVIDER_REPORTED" },
+      provider: { serviceCode: "AWSGlobalAccelerator", serviceName: "AWS Global Accelerator",
+        productCode: "AWSGlobalAccelerator", productName: "AWS Global Accelerator",
+        operation: "Accelerator", transferType: "AWS Outbound" },
       region: "us-east-1",
       availabilityZone: "use1-az1",
       resourceId: "accelerator/evidence",
@@ -99,6 +104,10 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
           service: "complete",
           region: "complete",
           resource: "complete",
+          sourceLocation: "complete",
+          destinationLocation: "complete",
+          providerService: "complete",
+          transferType: "complete",
         },
         byteNormalization: "complete",
         byteNormalizedRowCount: 1,
@@ -131,8 +140,14 @@ test("Data Transfer dashboard renders official categories, filters, drilldown, e
     assert.match(markup, /All accounts/u);
     assert.match(markup, /All services/u);
     assert.match(markup, /All Regions/u);
+    assert.match(markup, /All source locations/u);
+    assert.match(markup, /All destination locations/u);
+    assert.match(markup, /All transfer types/u);
     assert.match(markup, /Export filtered evidence/u);
     assert.match(markup, /use1-az1/u);
+    assert.match(markup, /North America/u);
+    assert.match(markup, /Europe/u);
+    assert.match(markup, /AWS Outbound/u);
     assert.match(markup, /GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1/u);
     assert.match(markup, /Evidence, lineage, classification, and official parity limits/u);
     assert.match(markup, new RegExp("b".repeat(64), "u"));

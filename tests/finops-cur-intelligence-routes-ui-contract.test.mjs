@@ -114,6 +114,10 @@ test("Data Transfer GET uses only committed active manifest object coverage", ()
   assert.match(transferRoute, /"SOURCE_TIMESTAMPS_UNAVAILABLE"/u);
   assert.match(transferRoute, /"SOURCE_ROWS_REJECTED"/u);
   assert.match(transferRoute, /sourceState: "source_incomplete"/u);
+  assert.match(
+    transferRoute,
+    /dataset\.rows\.length === 0[\s\S]*dataset\.evidence\.rejectedRows > 0[\s\S]*activeFileCount === null|dataset\.rows\.length === 0[\s\S]*dataset\.evidence\.activeFileCount === null/u,
+  );
   assert.doesNotMatch(
     transferRoute,
     /manifestObjectCount:\s*dataset\.evidence\.acceptedRows/u,
@@ -152,7 +156,10 @@ test("CUR2 panels expose exact arithmetic and every honest client state", () => 
   assert.match(panel, /report\.source\.objectCoverage\.status/u);
   assert.match(panel, /manifest object counts were not retained/u);
   assert.match(panel, /role="group"/u);
-  assert.match(panel, /<caption>Data-transfer cost by category/u);
+  assert.match(panel, /<caption>Data-transfer cost by exact provider-reported source/u);
+  assert.match(panel, /All source locations/u);
+  assert.match(panel, /All destination locations/u);
+  assert.match(panel, /Provider path coverage/u);
   assert.match(
     panel,
     /never substitutes Cost Explorer snapshots, fixtures, or another tenant/u,

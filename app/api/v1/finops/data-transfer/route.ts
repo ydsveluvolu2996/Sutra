@@ -140,7 +140,11 @@ export async function GET(request: Request): Promise<Response> {
         selectedPeriod: selected.scope.billingPeriod,
         availablePeriods,
         report: null,
-        sourceState: "empty",
+        sourceState: dataset.evidence.rejectedRows > 0
+          || dataset.evidence.activeFileCount === null
+          || dataset.evidence.activeSourceUpdatedAtIso === null
+          ? "source_incomplete"
+          : "empty",
       });
     }
     if (

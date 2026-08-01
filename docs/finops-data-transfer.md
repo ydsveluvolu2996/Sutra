@@ -26,6 +26,7 @@ References:
 
 - <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/datatransfer-dashboard.html>
 - <https://docs.aws.amazon.com/cur/latest/userguide/cur-data-transfers-charges.html>
+- <https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/main/dashboards/data-transfer/DataTransfer-Cost-Analysis-Dashboard.yaml>
 
 Additional collector IAM actions: **none**.
 
@@ -54,10 +55,17 @@ allowed payer and usage account, and have a unique source line-item ID. A
 substituted or staged generation, cross-client row, duplicate line, unsupported
 currency, dishonest success count, or non-CUR2 source fails closed.
 
+The canonical parser retains the official Data Transfer dataset's provider
+dimensions without reinterpreting them: product from/to location, from-location
+type, provider service code/name, product code/name, operation, and transfer
+type. Historical canonical rows may predate these optional fields. Their path
+coverage is `UNAVAILABLE`; Region, Availability Zone, resource ID, service text,
+or usage-type abbreviations are never substituted as endpoints.
+
 ## Pinned classification taxonomy
 
 The output carries taxonomy ID `aws-cur2-data-transfer`, version
-`2026-07-31.v1`, a SHA-256 identifier, official references, matched rule IDs,
+`2026-08-01.v2`, a SHA-256 identifier, official references, matched rule IDs,
 bounded usage-type evidence, and bounded source-line IDs.
 
 Rules are deliberately narrow and ordered:
@@ -96,6 +104,11 @@ name, free text, or service name alone.
   coverage can be complete, partial, or unavailable. The CUR Region and AZ are
   displayed only as line-item dimensions; they are not claimed to be both
   traffic endpoints.
+- Provider service, transfer type, source location, and destination location
+  each have independent complete/partial/unavailable coverage. These exact
+  fields participate in drilldown identity, so costs from two paths cannot
+  collapse merely because account, resource, Region, category and usage type
+  match.
 
 ## Source states
 
@@ -108,9 +121,10 @@ The engine never turns an absent or unhealthy source into live data:
 | `EMPTY` | A complete successful active generation contains zero rows. |
 | `PARTIAL` | Objects/rows were not exhausted, processing is incomplete, or source rows were rejected. |
 | `STALE` | Complete evidence is older than the pinned 48-hour SLA. |
-| `READY` | Complete successful evidence is within the SLA. |
+| `COMPLETE` | Complete successful evidence is within the SLA. |
 
-Classification coverage is independent of source delivery state. A `READY`
+Classification and provider-path coverage are independent of source delivery
+state. A `COMPLETE`
 source may still have partial classification coverage when AWS introduces a
 new usage type; the unknown/unclassified rows remain visible for taxonomy
 review.
@@ -123,9 +137,9 @@ lengths. A caller may lower the group limit but cannot raise the server cap.
 Overflow fails closed instead of silently truncating monetary totals.
 
 Client visuals should use category summaries for cost/byte trends and the
-drilldowns for account, service, Region/AZ, and resource investigation. They
+drilldowns for account, service, exact source/destination/transfer type,
+Region/AZ, and resource investigation. They
 must display source state, freshness, classification coverage, cost-basis
 coverage, unit coverage, taxonomy version, and the limitations returned by the
 engine. `UNKNOWN`, `UNCLASSIFIED`, missing, stale, partial, and error states must
 not be hidden behind a zero or a green health state.
-

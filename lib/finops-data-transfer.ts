@@ -205,6 +205,21 @@ export interface DataTransferDrilldown {
   readonly region: string | null;
   readonly availabilityZone: string | null;
   readonly resourceId: string | null;
+  /** Exact CUR2 product dimensions; null means the active generation omitted them. */
+  readonly path: {
+    readonly sourceLocation: string | null;
+    readonly sourceLocationType: string | null;
+    readonly destinationLocation: string | null;
+    readonly evidence: "CUR2_PROVIDER_REPORTED" | "PARTIAL" | "UNAVAILABLE";
+  };
+  readonly provider: {
+    readonly serviceCode: string | null;
+    readonly serviceName: string | null;
+    readonly productCode: string | null;
+    readonly productName: string | null;
+    readonly operation: string | null;
+    readonly transferType: string | null;
+  };
   readonly rowCount: number;
   readonly costs: readonly DataTransferCostSummary[];
   readonly quantities: readonly DataTransferQuantitySummary[];
@@ -231,6 +246,10 @@ export interface DataTransferCoverage {
     readonly service: "complete" | "partial" | "unavailable";
     readonly region: "complete" | "partial" | "unavailable";
     readonly resource: "complete" | "partial" | "unavailable";
+    readonly sourceLocation: "complete" | "partial" | "unavailable";
+    readonly destinationLocation: "complete" | "partial" | "unavailable";
+    readonly providerService: "complete" | "partial" | "unavailable";
+    readonly transferType: "complete" | "partial" | "unavailable";
   };
   readonly byteNormalization: "complete" | "partial" | "unavailable";
   readonly byteNormalizedRowCount: number;
@@ -323,6 +342,8 @@ interface MutableDrilldown extends MutableAggregate {
   readonly region: string | null;
   readonly availabilityZone: string | null;
   readonly resourceId: string | null;
+  readonly path: DataTransferDrilldown["path"];
+  readonly provider: DataTransferDrilldown["provider"];
   readonly ruleIds: Set<string>;
   readonly usageTypes: Set<string>;
   readonly sourceLineIds: Set<string>;
@@ -415,6 +436,10 @@ function nullableText(value: unknown, maximum = 1_024): value is string | null {
   return value === null || validText(value, maximum);
 }
 
+function optionalNullableText(value: unknown, maximum = 1_024): boolean {
+  return value === undefined || nullableText(value, maximum);
+}
+
 function costValue(line: CanonicalCurLine, basis: DataTransferCostBasis): string | null {
   switch (basis) {
     case "unblended": return line.amountMicros;
@@ -446,6 +471,12 @@ function validLine(value: unknown): value is CanonicalCurLine {
     || !nullableText(value.resourceId)
     || !nullableText(value.productCode, 256)
     || !nullableText(value.productFamily, 512)
+    || !optionalNullableText(value.providerServiceCode, 256)
+    || !optionalNullableText(value.providerServiceName, 256)
+    || !optionalNullableText(value.transferType, 512)
+    || !optionalNullableText(value.fromLocation, 512)
+    || !optionalNullableText(value.toLocation, 512)
+    || !optionalNullableText(value.fromLocationType, 256)
     || typeof value.currency !== "string"
     || !FINOPS_RECONCILIATION_CURRENCIES.has(
       value.currency as (typeof FINOPS_RECONCILIATION_CURRENCIES extends Set<infer T> ? T : never),
@@ -457,6 +488,44 @@ function validLine(value: unknown): value is CanonicalCurLine {
   }
   return value.usageAmountMicros === null
     || (typeof value.usageAmountMicros === "string" && INTEGER_MICROS.test(value.usageAmountMicros));
+}
+
+function providerField(line: CanonicalCurLine, key: "providerServiceCode" | "providerServiceName"
+  | "transferType" | "fromLocation" | "toLocation" | "fromLocationType"): string | null {
+  return line[key] ?? null;
+}
+
+function transferPath(line: CanonicalCurLine): {
+  readonly path: DataTransferDrilldown["path"];
+  readonly provider: DataTransferDrilldown["provider"];
+} {
+  const sourceLocation = providerField(line, "fromLocation");
+  const sourceLocationType = providerField(line, "fromLocationType");
+  const destinationLocation = providerField(line, "toLocation");
+  const serviceCode = providerField(line, "providerServiceCode");
+  const serviceName = providerField(line, "providerServiceName");
+  const transferType = providerField(line, "transferType");
+  const reported = [sourceLocation, sourceLocationType, destinationLocation,
+    serviceCode, serviceName, transferType].filter((value) => value !== null).length;
+  return {
+    path: {
+      sourceLocation,
+      sourceLocationType,
+      destinationLocation,
+      evidence: sourceLocation !== null && destinationLocation !== null
+        && serviceCode !== null && transferType !== null
+        ? "CUR2_PROVIDER_REPORTED"
+        : reported === 0 ? "UNAVAILABLE" : "PARTIAL",
+    },
+    provider: {
+      serviceCode,
+      serviceName,
+      productCode: line.productCode,
+      productName: line.productName,
+      operation: line.operation,
+      transferType,
+    },
+  };
 }
 
 function directionFor(usageType: string): DataTransferDirection {
@@ -742,6 +811,10 @@ function baseCoverage(scannedRowCount: number): DataTransferCoverage {
       service: "unavailable",
       region: "unavailable",
       resource: "unavailable",
+      sourceLocation: "unavailable",
+      destinationLocation: "unavailable",
+      providerService: "unavailable",
+      transferType: "unavailable",
     },
     byteNormalization: "unavailable",
     byteNormalizedRowCount: 0,
@@ -794,6 +867,7 @@ function emptySnapshot(
       "Only immutable active AWS CUR 2.0 evidence is analyzed; absent or failed evidence never becomes live data.",
       "Classification uses pinned AWS-documented CUR usage-type patterns; ambiguous and new patterns remain unknown or unclassified.",
       "Region and Availability Zone fields are the CUR line dimensions, not inferred traffic endpoints.",
+      "Source, destination, transfer type, and provider fields are shown only when the CUR2 product dimensions report them; missing values are never inferred from Region, Availability Zone, or resource identifiers.",
       "Costs are signed source micro-units by currency and basis; this is not an invoice reconciliation or savings claim.",
     ],
   };
@@ -871,6 +945,10 @@ export function buildDataTransferAnalysis(
   let missingUsageType = 0;
   let regionRows = 0;
   let resourceRows = 0;
+  let sourceLocationRows = 0;
+  let destinationLocationRows = 0;
+  let providerServiceRows = 0;
+  let transferTypeRows = 0;
   let normalizedRows = 0;
   let missingQuantityRows = 0;
   let unknownUnitRows = 0;
@@ -900,6 +978,11 @@ export function buildDataTransferAnalysis(
     else classified += 1;
     if (line.region !== null) regionRows += 1;
     if (line.resourceId !== null) resourceRows += 1;
+    const path = transferPath(line);
+    if (path.path.sourceLocation !== null) sourceLocationRows += 1;
+    if (path.path.destinationLocation !== null) destinationLocationRows += 1;
+    if (path.provider.serviceCode !== null) providerServiceRows += 1;
+    if (path.provider.transferType !== null) transferTypeRows += 1;
     if (line.usageAmountMicros === null || line.usageUnit === null) {
       missingQuantityRows += 1;
     } else if (DATA_TRANSFER_TAXONOMY.unitToBytes[
@@ -927,6 +1010,15 @@ export function buildDataTransferAnalysis(
       line.region,
       line.availabilityZone,
       line.resourceId,
+      path.path.sourceLocation,
+      path.path.sourceLocationType,
+      path.path.destinationLocation,
+      path.provider.serviceCode,
+      path.provider.serviceName,
+      path.provider.productCode,
+      path.provider.productName,
+      path.provider.operation,
+      path.provider.transferType,
     ] as const;
     const groupKey = JSON.stringify(dimensions);
     let drilldown = drilldownAggregates.get(groupKey);
@@ -942,6 +1034,8 @@ export function buildDataTransferAnalysis(
         region: line.region,
         availabilityZone: line.availabilityZone,
         resourceId: line.resourceId,
+        path: path.path,
+        provider: path.provider,
         ruleIds: new Set(),
         usageTypes: new Set(),
         sourceLineIds: new Set(),
@@ -978,8 +1072,12 @@ export function buildDataTransferAnalysis(
     }));
   const drilldowns = [...drilldownAggregates.values()]
     .sort((left, right) => compareText(
-      JSON.stringify([left.category, left.direction, left.currency, left.usageAccountId, left.service, left.region, left.availabilityZone, left.resourceId]),
-      JSON.stringify([right.category, right.direction, right.currency, right.usageAccountId, right.service, right.region, right.availabilityZone, right.resourceId]),
+      JSON.stringify([left.category, left.direction, left.currency, left.usageAccountId,
+        left.service, left.region, left.availabilityZone, left.resourceId, left.path,
+        left.provider]),
+      JSON.stringify([right.category, right.direction, right.currency, right.usageAccountId,
+        right.service, right.region, right.availabilityZone, right.resourceId, right.path,
+        right.provider]),
     ))
     .map((aggregate): DataTransferDrilldown => ({
       category: aggregate.category,
@@ -990,6 +1088,8 @@ export function buildDataTransferAnalysis(
       region: aggregate.region,
       availabilityZone: aggregate.availabilityZone,
       resourceId: aggregate.resourceId,
+      path: aggregate.path,
+      provider: aggregate.provider,
       rowCount: aggregate.rowCount,
       costs: costsFor(aggregate),
       quantities: quantitiesFor(aggregate),
@@ -1060,6 +1160,10 @@ export function buildDataTransferAnalysis(
         service: coverage(candidates, candidates),
         region: coverage(regionRows, candidates),
         resource: coverage(resourceRows, candidates),
+        sourceLocation: coverage(sourceLocationRows, candidates),
+        destinationLocation: coverage(destinationLocationRows, candidates),
+        providerService: coverage(providerServiceRows, candidates),
+        transferType: coverage(transferTypeRows, candidates),
       },
       byteNormalization: coverage(normalizedRows, candidates),
       byteNormalizedRowCount: normalizedRows,
@@ -1072,6 +1176,7 @@ export function buildDataTransferAnalysis(
       "Only immutable active AWS CUR 2.0 evidence is analyzed; no live service telemetry is inferred.",
       "CloudFront requires both its product code and documented usage-type pattern; ambiguous patterns remain unclassified.",
       "Inter-AZ rows do not identify both traffic endpoints, and CUR region/AZ fields are not presented as inferred source or destination.",
+      "Transfer paths use only provider-reported CUR2 from/to location, location type, service, operation, and transfer-type product dimensions; absent fields remain null.",
       "Byte normalization uses only the exact pinned unit multipliers; unknown or missing units remain null and disclosed.",
       "Costs and quantities retain signed corrections, remain separated by currency and source unit, and are not invoices, forecasts, or savings claims.",
     ],

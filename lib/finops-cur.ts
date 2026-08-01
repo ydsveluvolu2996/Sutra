@@ -98,6 +98,13 @@ export interface CanonicalCurLine extends NormalizedCurLine {
   readonly productFamily: string | null;
   readonly serviceCategory: string | null;
   readonly serviceSubcategory: string | null;
+  /** AWS CUR2 product dimensions used by the CID Data Transfer view. */
+  readonly providerServiceCode?: string | null;
+  readonly providerServiceName?: string | null;
+  readonly transferType?: string | null;
+  readonly fromLocation?: string | null;
+  readonly toLocation?: string | null;
+  readonly fromLocationType?: string | null;
 
   readonly chargeClass: string | null;
   readonly chargeDescription: string | null;
@@ -435,6 +442,12 @@ interface ColumnMap {
   readonly productFamily: number;
   readonly serviceCategory: number;
   readonly serviceSubcategory: number;
+  readonly providerServiceCode: number;
+  readonly providerServiceName: number;
+  readonly transferType: number;
+  readonly fromLocation: number;
+  readonly toLocation: number;
+  readonly fromLocationType: number;
   // Charge and pricing dimensions/metrics.
   readonly chargeClass: number;
   readonly chargeDescription: number;
@@ -551,6 +564,12 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       productFamily: -1,
       serviceCategory: firstIndex("ServiceCategory"),
       serviceSubcategory: firstIndex("ServiceSubcategory"),
+      providerServiceCode: -1,
+      providerServiceName: -1,
+      transferType: -1,
+      fromLocation: -1,
+      toLocation: -1,
+      fromLocationType: -1,
       chargeClass: firstIndex("ChargeClass"),
       chargeDescription: firstIndex("ChargeDescription"),
       chargeFrequency: firstIndex("ChargeFrequency"),
@@ -631,6 +650,12 @@ function detectColumns(header: readonly string[]): ColumnMap | null {
       productFamily: firstIndex("product_product_family", "product_productfamily", "product_family"),
       serviceCategory: firstIndex("product_service_category", "service_category"),
       serviceSubcategory: firstIndex("product_service_subcategory", "service_subcategory"),
+      providerServiceCode: firstIndex("product_servicecode"),
+      providerServiceName: firstIndex("product_servicename", "product_service_name"),
+      transferType: firstIndex("product_transfer_type", "product_transfertype", "transfer_type"),
+      fromLocation: firstIndex("product_from_location", "from_location"),
+      toLocation: firstIndex("product_to_location", "to_location"),
+      fromLocationType: firstIndex("product_from_location_type", "from_location_type"),
       chargeClass: -1,
       chargeDescription: firstIndex("line_item_line_item_description"),
       chargeFrequency: -1,
@@ -899,6 +924,12 @@ export function parseCurCsv(text: string): CurParseResult | { readonly error: st
       productFamily: optionalTextFor(columns.productFamily, cell, 256),
       serviceCategory: optionalTextFor(columns.serviceCategory, cell, 256),
       serviceSubcategory: optionalTextFor(columns.serviceSubcategory, cell, 256),
+      providerServiceCode: optionalTextFor(columns.providerServiceCode, cell, 256),
+      providerServiceName: optionalTextFor(columns.providerServiceName, cell, 256),
+      transferType: optionalTextFor(columns.transferType, cell, 512),
+      fromLocation: optionalTextFor(columns.fromLocation, cell, 512),
+      toLocation: optionalTextFor(columns.toLocation, cell, 512),
+      fromLocationType: optionalTextFor(columns.fromLocationType, cell, 256),
       chargeClass: optionalTextFor(columns.chargeClass, cell, 128),
       chargeDescription: optionalTextFor(columns.chargeDescription, cell, 1024),
       chargeFrequency: optionalTextFor(columns.chargeFrequency, cell, 128),

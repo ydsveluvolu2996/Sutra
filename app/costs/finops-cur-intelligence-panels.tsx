@@ -365,6 +365,9 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
   const [account, setAccount] = useState("ALL");
   const [service, setService] = useState("ALL");
   const [region, setRegion] = useState("ALL");
+  const [sourceLocation, setSourceLocation] = useState("ALL");
+  const [destinationLocation, setDestinationLocation] = useState("ALL");
+  const [transferType, setTransferType] = useState("ALL");
   const currencyRows = report.drilldowns.filter((item) => item.currency === currency);
   const categories = report.categorySummaries.filter((item) =>
     item.currency === currency && (category === "ALL" || item.category === category));
@@ -373,12 +376,18 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
   const accountOptions = [...new Set(currencyRows.map((item) => item.usageAccountId))].sort();
   const serviceOptions = [...new Set(currencyRows.map((item) => item.service))].sort();
   const regionOptions = [...new Set(currencyRows.map((item) => item.region ?? "NOT_REPORTED"))].sort();
+  const sourceLocationOptions = [...new Set(currencyRows.map((item) => item.path.sourceLocation ?? "NOT_REPORTED"))].sort();
+  const destinationLocationOptions = [...new Set(currencyRows.map((item) => item.path.destinationLocation ?? "NOT_REPORTED"))].sort();
+  const transferTypeOptions = [...new Set(currencyRows.map((item) => item.provider.transferType ?? "NOT_REPORTED"))].sort();
   const drilldowns = currencyRows.filter((item) =>
     (category === "ALL" || item.category === category)
     && (direction === "ALL" || item.direction === direction)
     && (account === "ALL" || item.usageAccountId === account)
     && (service === "ALL" || item.service === service)
-    && (region === "ALL" || (item.region ?? "NOT_REPORTED") === region));
+    && (region === "ALL" || (item.region ?? "NOT_REPORTED") === region)
+    && (sourceLocation === "ALL" || (item.path.sourceLocation ?? "NOT_REPORTED") === sourceLocation)
+    && (destinationLocation === "ALL" || (item.path.destinationLocation ?? "NOT_REPORTED") === destinationLocation)
+    && (transferType === "ALL" || (item.provider.transferType ?? "NOT_REPORTED") === transferType));
   return (
     <section className={styles.curWorkspace} aria-label="Enterprise AWS data-transfer intelligence">
       <StatusBanner
@@ -399,6 +408,9 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
         <label>Account<select value={account} onChange={(event) => setAccount(event.target.value)}><option value="ALL">All accounts</option>{accountOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>Service<select value={service} onChange={(event) => setService(event.target.value)}><option value="ALL">All services</option>{serviceOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
         <label>Region<select value={region} onChange={(event) => setRegion(event.target.value)}><option value="ALL">All Regions</option>{regionOptions.map((item) => <option key={item} value={item}>{item === "NOT_REPORTED" ? "Not reported" : item}</option>)}</select></label>
+        <label>Source<select value={sourceLocation} onChange={(event) => setSourceLocation(event.target.value)}><option value="ALL">All source locations</option>{sourceLocationOptions.map((item) => <option key={item} value={item}>{item === "NOT_REPORTED" ? "Not reported" : item}</option>)}</select></label>
+        <label>Destination<select value={destinationLocation} onChange={(event) => setDestinationLocation(event.target.value)}><option value="ALL">All destination locations</option>{destinationLocationOptions.map((item) => <option key={item} value={item}>{item === "NOT_REPORTED" ? "Not reported" : item}</option>)}</select></label>
+        <label>Transfer type<select value={transferType} onChange={(event) => setTransferType(event.target.value)}><option value="ALL">All transfer types</option>{transferTypeOptions.map((item) => <option key={item} value={item}>{item === "NOT_REPORTED" ? "Not reported" : item}</option>)}</select></label>
       </div>
       <div className={styles.curKpis}>
         <article><small>Transfer candidates</small><strong>{report.coverage.transferCandidateRowCount.toLocaleString("en-US")}</strong><span>{report.coverage.classification} classification</span></article>
@@ -412,7 +424,7 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
       <article className={styles.curPanel}>
         <div className={styles.curPanelHeading}><div><small>Resource evidence</small><h3>Transfer drilldown</h3></div><span>{drilldowns.length} groups</span></div>
         {drilldowns.length === 0 ? <p className={styles.emptyNote}>No evidence-backed transfer group is available.</p> : (
-          <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Data-transfer cost by category, direction, account, service, Region, Availability Zone, and resource</caption><thead><tr><th>Category</th><th>Direction</th><th>Account / service</th><th>Region / AZ / resource</th><th>{costBasis} cost</th><th>Evidence</th></tr></thead><tbody>{drilldowns.slice(0, 40).map((item) => <tr key={`${item.category}:${item.direction}:${item.usageAccountId}:${item.service}:${item.region}:${item.availabilityZone}:${item.resourceId}`}><td>{item.category.replaceAll("_", " ")}</td><td>{item.direction}</td><td><strong>{item.usageAccountId}</strong><small>{item.service}</small></td><td><strong>{item.region ?? "Region not reported"}</strong><small>{item.availabilityZone ?? "AZ not reported"} · {item.resourceId ?? "Resource not reported"}</small></td><td>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</td><td><strong>{item.rowCount} rows</strong><small>{item.classificationRuleIds.join(", ")}</small></td></tr>)}</tbody></table></div>
+          <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Data-transfer cost by exact provider-reported source, destination, transfer type, account, service, Region, Availability Zone, and resource</caption><thead><tr><th>Category / direction</th><th>Source → destination</th><th>Account / provider</th><th>Region / AZ / resource</th><th>{costBasis} cost</th><th>Evidence</th></tr></thead><tbody>{drilldowns.slice(0, 40).map((item) => <tr key={JSON.stringify([item.category,item.direction,item.currency,item.usageAccountId,item.service,item.region,item.availabilityZone,item.resourceId,item.path.sourceLocation,item.path.sourceLocationType,item.path.destinationLocation,item.provider.serviceCode,item.provider.serviceName,item.provider.productCode,item.provider.productName,item.provider.operation,item.provider.transferType])}><td><strong>{item.category.replaceAll("_", " ")}</strong><small>{item.direction}</small></td><td><strong>{item.path.sourceLocation ?? "Source not reported"} → {item.path.destinationLocation ?? "Destination not reported"}</strong><small>{item.path.sourceLocationType ?? "Location type not reported"} · {item.path.evidence.replaceAll("_", " ")}</small></td><td><strong>{item.usageAccountId}</strong><small>{item.provider.serviceName ?? item.provider.serviceCode ?? item.service} · {item.provider.productName ?? item.provider.productCode ?? "Product not reported"} · {item.provider.operation ?? "Operation not reported"} · {item.provider.transferType ?? "Transfer type not reported"}</small></td><td><strong>{item.region ?? "Region not reported"}</strong><small>{item.availabilityZone ?? "AZ not reported"} · {item.resourceId ?? "Resource not reported"}</small></td><td>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</td><td><strong>{item.rowCount} rows</strong><small>{item.classificationRuleIds.join(", ")}</small></td></tr>)}</tbody></table></div>
         )}
       </article>
       <details className={styles.curEvidenceDrawer}>
@@ -420,6 +432,7 @@ export function DataTransferReport({ report }: { readonly report: DataTransferSn
         <div className={styles.curEvidenceGrid}>
           <dl><div><dt>Generation</dt><dd>{report.scope.generationId}</dd></div><div><dt>Manifest SHA-256</dt><dd>{report.source.manifestSha256 ?? "Not available"}</dd></div><div><dt>Manifest objects</dt><dd>{report.source.objectCoverage.manifestObjectCount ?? "Not retained"}</dd></div><div><dt>Processed objects</dt><dd>{report.source.objectCoverage.processedObjectCount ?? "Not retained"}</dd></div></dl>
           <div><strong>Pinned classification</strong><ul><li>{report.taxonomy.id} · {report.taxonomy.version}</li><li>{report.taxonomy.sha256}</li><li>{report.coverage.unclassifiedRowCount} unclassified and {report.coverage.unknownRowCount} unknown rows remain visible.</li></ul></div>
+          <div><strong>Provider path coverage</strong><ul><li>Source location: {report.coverage.dimensions.sourceLocation}</li><li>Destination location: {report.coverage.dimensions.destinationLocation}</li><li>Provider service: {report.coverage.dimensions.providerService}</li><li>Transfer type: {report.coverage.dimensions.transferType}</li></ul></div>
           <div><strong>Official parity boundary</strong><ul>{report.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}<li>Global Accelerator cards show billed CUR evidence; they do not simulate a future pricing quote.</li><li>CUR Region and Availability Zone fields are not inferred traffic endpoints.</li></ul></div>
         </div>
       </details>
