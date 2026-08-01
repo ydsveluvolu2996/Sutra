@@ -41,7 +41,7 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
   );
   assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
   assert.equal(counts.PARTIAL_PIPELINE?.length, 21);
-  assert.equal(counts.ENGINE_ONLY?.length, undefined);
+  assert.equal("ENGINE_ONLY" in counts, false);
   assert.equal(counts.ABSENT?.length, 2);
   assert.deepEqual(
     counts.LOCAL_VERTICAL_CANDIDATE?.map(({ id }) => id),
