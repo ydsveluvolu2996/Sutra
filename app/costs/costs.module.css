@@ -636,6 +636,24 @@
 .foundationalExplorerGrid strong { font-size: 9.5px; }
 .foundationalExplorerGrid b { align-self: center; font-size: 10px; white-space: nowrap; }
 .foundationalExplorerGrid > article > small { grid-column: 1 / -1; }
+.foundationalKpiDefinition { display: grid; gap: 10px; padding: 14px; border: 1px solid #315f62; border-radius: 13px; background: linear-gradient(135deg, #102f35, #17484d); color: #eefaf8; }
+.foundationalKpiDefinition > div { display: grid; gap: 3px; }
+.foundationalKpiDefinition > div small, .foundationalKpiDefinition > div span { color: #b9d5d3; font-size: 8.5px; }
+.foundationalKpiDefinition nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.foundationalKpiDefinition button { display: grid; gap: 3px; min-height: 49px; padding: 8px; border: 1px solid #50777a; border-radius: 8px; background: #183d42; color: #eefaf8; text-align: left; font-size: 9px; }
+.foundationalKpiDefinition button small { color: #b9d5d3; font-size: 7.5px; }
+.foundationalKpiDefinition button[aria-pressed="true"] { border-color: #73dbc8; background: #24605e; box-shadow: inset 0 -2px #73dbc8; }
+.foundationalKpiDefinition button:focus-visible { outline: 3px solid #91e7d7; outline-offset: 2px; }
+.foundationalKpiFilters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)) auto; gap: 8px; align-items: end; }
+.foundationalKpiFilters label { display: grid; gap: 4px; color: var(--muted); font-size: 8.5px; font-weight: 800; }
+.foundationalKpiFilters select, .foundationalKpiFilters button { min-height: 36px; padding: 0 9px; border: 1px solid var(--line); border-radius: 8px; background: white; color: var(--ink); font-size: 9px; }
+.foundationalKpiSheetSummary { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, #f4fbf9, white); }
+.foundationalKpiSheetSummary > div { display: grid; gap: 3px; }
+.foundationalKpiSheetSummary h2 { margin: 0; font-size: 18px; }
+.foundationalKpiSheetSummary small, .foundationalKpiSheetSummary span, .foundationalKpiSheetSummary details, .foundationalKpiSheetSummary li { color: var(--muted); font-size: 8.5px; }
+.foundationalKpiSheetSummary details, .foundationalKpiSheetSummary ul { grid-column: 1 / -1; margin: 0; }
+.foundationalKpiSheetSummary p { margin: 6px 0 0; line-height: 1.5; }
+.foundationalKpiSheetSummary ul { padding-left: 18px; }
 .foundationalKpiHeader { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .foundationalKpiHeader > span { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: white; }
 .foundationalKpiHeader strong { font-size: 11px; }
@@ -650,6 +668,8 @@
 .foundationalKpiSegments > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; padding: 7px; border-radius: 8px; background: #f8faf9; }
 .foundationalKpiSegments strong { grid-row: 1 / span 2; align-self: center; color: #075e54; font-size: 16px; letter-spacing: -.03em; }
 .foundationalKpiSegments span, .foundationalKpiSegments small { color: var(--muted); font-size: 8px; }
+.foundationalKpiSegments i { grid-column: 1 / -1; height: 4px; overflow: hidden; border-radius: 99px; background: #dfecea; }
+.foundationalKpiSegments i b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #0a776c, #65c7b4); }
 .foundationalKpiMissing { display: grid; align-content: center; gap: 3px; padding: 8px; border-radius: 8px; background: #f8fafc; }
 .foundationalKpiMissing strong { color: #64748b; font-size: 9px; }
 .foundationalKpiMissing small { color: var(--muted); font-size: 8px; line-height: 1.4; }
@@ -657,6 +677,8 @@
 
 @media screen and (max-width: 1120px) {
   .foundationalThreeColumn, .foundationalModuleGrid, .foundationalKpiMatrix { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foundationalKpiDefinition nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .foundationalKpiFilters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .foundationalEvidence { grid-template-columns: 1fr; }
 }
 
@@ -672,6 +694,7 @@
   .foundationalRankings > article { grid-template-columns: 22px minmax(0, 1fr); }
   .foundationalRankings article > small { grid-column: 2; }
   .foundationalKpiHeader { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .foundationalKpiDefinition nav, .foundationalKpiFilters { grid-template-columns: 1fr; }
   .foundationalTree li > div { grid-template-columns: 75px minmax(0, 1fr); }
   .foundationalTree li > div small { grid-column: 2; white-space: normal; }
 }

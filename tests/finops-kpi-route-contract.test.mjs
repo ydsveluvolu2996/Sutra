@@ -11,7 +11,7 @@ test("Foundational KPI GET is tenant-resolved, read-only, and query-allowlisted"
   assert.match(route, /export const dynamic = "force-dynamic"/u);
   assert.match(
     route,
-    /const ALLOWED_QUERY_PARAMETERS = new Set\(\["connectionId", "period"\]\)/u,
+    /"connectionId", "period", "accountId", "payerAccountId"/u,
   );
   assert.match(route, /parameters\.getAll\(key\)\.length > 1/u);
   assert.doesNotMatch(route, /\.get\("(?:orgId|customerId|tenantId)"\)/u);
@@ -21,6 +21,8 @@ test("Foundational KPI GET is tenant-resolved, read-only, and query-allowlisted"
   assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.doesNotMatch(route, /export async function (?:POST|PUT|PATCH|DELETE)/u);
+  assert.match(route, /ACCOUNT_ID\.test\(accountId\)/u);
+  assert.match(route, /ACCOUNT_ID\.test\(payerAccountId\)/u);
 });
 
 test("KPI evaluation uses one exact active generation and persistent tenant goals", () => {
@@ -32,7 +34,7 @@ test("KPI evaluation uses one exact active generation and persistent tenant goal
   );
   assert.match(
     route,
-    /evaluateFinopsKpis\(\{\s*scope: active\.scope,\s*rows: active\.rows,/u,
+    /evaluateFinopsKpis\(\{\s*scope: active\.scope,\s*rows,/u,
   );
   assert.match(route, /manifestSha256: active\.evidence\.activeManifestSha256/u);
   assert.match(route, /resourceAgeEvidence: \[\]/u);
@@ -40,6 +42,9 @@ test("KPI evaluation uses one exact active generation and persistent tenant goal
   assert.match(route, /sourceState: "waiting"/u);
   assert.match(route, /sourceState: "complete"/u);
   assert.match(route, /goalsConfigured: goals\.length/u);
+  assert.match(route, /row\.line\.usageAccountId === query\.accountId/u);
+  assert.match(route, /row\.line\.payerAccountId === query\.payerAccountId/u);
+  assert.match(route, /FINOPS_KPI_OFFICIAL_DEFINITION/u);
   assert.doesNotMatch(route, /fixture|demo|sample|finops_cur_lines/iu);
 });
 

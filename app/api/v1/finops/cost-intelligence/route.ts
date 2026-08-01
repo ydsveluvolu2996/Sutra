@@ -19,6 +19,8 @@ import {
   type FinopsCostBasis,
   type FinopsCostDimension,
 } from "../../../../../lib/finops-cost-intelligence";
+import { FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION } from
+  "../../../../../lib/finops-cost-intelligence-official-definition";
 import {
   errorResponse,
   jsonResponse,
@@ -237,6 +239,7 @@ function sourceStateEnvelope(
     taxonomyConfigured,
     sourceState,
     sourceEvidence: activeEvidence(history),
+    officialDefinition: FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION,
   };
 }
 
@@ -333,6 +336,13 @@ export async function GET(request: Request): Promise<Response> {
       comparisonPeriod: selected.comparisonPeriod,
       moverDimension: query.moverDimension,
       pivotDimensions: query.pivotDimensions,
+      explorer: {
+        period: selected.comparisonPeriod,
+        dimensions: query.pivotDimensions,
+        limit: 50,
+        maximumCardinality: 1_000,
+      },
+      forecast: { minimumPeriods: 3, trainingPeriods: 6 },
       commitments: {
         asOfIso: commitmentAsOfIso,
         expiresWithinDays: 90,
@@ -355,6 +365,7 @@ export async function GET(request: Request): Promise<Response> {
       taxonomyConfigured: true,
       sourceState: "complete",
       sourceEvidence: activeEvidence(history),
+      officialDefinition: FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION,
     });
   } catch (error) {
     return errorResponse(error);

@@ -141,6 +141,16 @@ describe("Foundational FinOps KPI engine", () => {
   it("registers and evaluates every required KPI formula deterministically", () => {
     assert.deepEqual(FINOPS_KPI_FORMULAS.map(({ id }) => id), FINOPS_KPI_IDS);
     assert.equal(new Set(FINOPS_KPI_IDS).size, 19);
+    assert.match(
+      FINOPS_KPI_FORMULAS.find(({ id }) => id === "aged_snapshots")
+        ?.numeratorDefinition ?? "",
+      /365 days/u,
+    );
+    assert.match(
+      FINOPS_KPI_FORMULAS.find(({ id }) => id === "ebs_gp3_adoption")
+        ?.denominatorDefinition ?? "",
+      /gp2 or gp3/u,
+    );
     const result = evaluateFinopsKpis(baseInput());
     assert.equal(result.ok, true);
     assert.deepEqual(result.measurements.map(({ kpiId }) => kpiId), FINOPS_KPI_IDS);
@@ -313,6 +323,41 @@ describe("Foundational FinOps KPI engine", () => {
     }));
     assert.equal(empty.ok, true);
     assert.ok(empty.measurements.every(({ state }) => state === "missing"));
+  });
+
+  it("matches the official gp3-of-gp denominator and one-year snapshot threshold", () => {
+    const gp3 = parseLine(
+      "ebs-gp3", "111", "AmazonEC2", "Usage", "EBS:VolumeUsage.gp3", "2",
+    );
+    const io1 = parseLine(
+      "ebs-io1", "111", "AmazonEC2", "Usage", "EBS:VolumeUsage.io1", "8",
+    );
+    const snapshot = {
+      ...parseLine(
+        "snapshot-364", "111", "AmazonEC2", "Usage",
+        "EBS:SnapshotUsage", "4", "USD", "100", "GB-Mo",
+      ),
+      resourceId: "snap-364",
+    };
+    const result = evaluateFinopsKpis(baseInput(scoped([gp3, io1, snapshot]), {
+      resourceAgeEvidence: [{
+        ...TENANT_SCOPE,
+        resourceId: "snap-364",
+        createdAtIso: "2025-08-02T00:00:00.000Z",
+        observedAtIso: "2026-08-01T00:00:00.000Z",
+        source: "aws_ec2_describe_snapshots",
+        sourceEvidenceId: "aws://snapshots/2026-08-01",
+      }],
+    }));
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const gp3Measurement = result.measurements.find(({ kpiId }) =>
+      kpiId === "ebs_gp3_adoption");
+    assert.equal(gp3Measurement?.eligibleLineCount, 1);
+    assert.equal(gp3Measurement?.segments[0]?.currentBasisPoints, 10_000);
+    const aged = result.measurements.find(({ kpiId }) =>
+      kpiId === "aged_snapshots");
+    assert.equal(aged?.segments[0]?.currentBasisPoints, 0);
   });
 
   it("withholds savings without compatible evidence and discloses exact rate math when supplied", () => {

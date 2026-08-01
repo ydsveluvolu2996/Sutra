@@ -88,7 +88,7 @@ test("KPI scorecard is driven by the complete versioned 19-formula registry", ()
     assert.ok(formula.label.length > 0, formula.id);
   }
   assert.match(panel, /FINOPS_KPI_IDS\.every/u);
-  assert.match(panel, /report\.formulaRegistry\.map\(\(formula\)/u);
+  assert.match(panel, /visibleRegistry\.map\(\(formula\)/u);
   assert.match(panel, /measurement\.selectedGoal\.targetBasisPoints/u);
   assert.match(panel, /Candidate estimate · validation required/u);
 });
@@ -118,10 +118,43 @@ test("workspace wires canonical panels into the required sections and gates lega
 
 test("visuals are accessible, responsive, and bound source identifiers", () => {
   assert.match(panel, /role="img"/u);
-  assert.match(panel, /aria-label="All 19 Foundational KPI measurements"/u);
+  assert.match(
+    panel,
+    /aria-label="Cost Intelligence billing summary by currency"/u,
+  );
+  assert.match(
+    panel,
+    /aria-label="Official AWS Cost Intelligence dashboard definition"/u,
+  );
+  assert.match(
+    panel,
+    /aria-label="Official Cost Intelligence dashboard sheet inventory"/u,
+  );
+  assert.match(panel, /sheet\.gaps\.join/u);
+  assert.match(panel, /title="MoM Pivot · Spend"/u);
+  assert.match(
+    panel,
+    /<caption>Cost Intelligence exact month over month spend pivot<\/caption>/u,
+  );
+  assert.match(panel, /title="Bounded explorer groups"/u);
+  assert.match(panel, /title="Expiring RI\/SP Tracker"/u);
+  assert.match(
+    panel,
+    /<caption>Evidence-backed expiring RI and Savings Plans<\/caption>/u,
+  );
+  assert.match(
+    panel,
+    /This is not a claim\s+that no commitments exist\./u,
+  );
+  assert.match(panel, /"All 19 Foundational KPI measurements"/u);
   assert.match(panel, /<caption>Signed charge-kind disclosure by currency<\/caption>/u);
   assert.match(panel, /sourceLineIds\.slice\(0, 3\)/u);
-  assert.match(panel, /report\.opportunities\.slice\(0, 12\)/u);
+  assert.match(panel, /visibleOpportunities\.slice\(0, 12\)/u);
+  assert.match(panel, /Official AWS KPI dashboard definition/u);
+  assert.match(panel, /envelope\.officialDefinition\.sheets\.map/u);
+  assert.match(panel, /Billing period<select/u);
+  assert.match(panel, /Account ID<select/u);
+  assert.match(panel, /Payer account ID<select/u);
   assert.match(css, /\.foundationalTrend \{/u);
   assert.match(css, /\.foundationalKpiMatrix \{/u);
   assert.match(

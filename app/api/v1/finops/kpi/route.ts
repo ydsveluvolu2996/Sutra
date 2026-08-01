@@ -9,13 +9,17 @@ import {
   requireApiSession,
 } from "../../../../../lib/api-auth";
 import { evaluateFinopsKpis } from "../../../../../lib/finops-kpi";
+import { FINOPS_KPI_OFFICIAL_DEFINITION } from "../../../../../lib/finops-kpi-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
+const ACCOUNT_ID = /^\d{12}$/u;
 const PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
-const ALLOWED_QUERY_PARAMETERS = new Set(["connectionId", "period"]);
+const ALLOWED_QUERY_PARAMETERS = new Set([
+  "connectionId", "period", "accountId", "payerAccountId",
+]);
 
 function invalidRequest(): never {
   throw Object.assign(
@@ -27,6 +31,8 @@ function invalidRequest(): never {
 function queryFrom(request: Request): {
   readonly connectionId: string;
   readonly period: string | null;
+  readonly accountId: string | null;
+  readonly payerAccountId: string | null;
 } {
   const parameters = new URL(request.url).searchParams;
   for (const key of parameters.keys()) {
@@ -37,11 +43,20 @@ function queryFrom(request: Request): {
   }
   const connectionId = parameters.get("connectionId") ?? "";
   const period = parameters.get("period");
+  const accountId = parameters.get("accountId");
+  const payerAccountId = parameters.get("payerAccountId");
   if (
     !CONNECTION_ID.test(connectionId)
     || (period !== null && !PERIOD.test(period))
+    || (accountId !== null && !ACCOUNT_ID.test(accountId))
+    || (payerAccountId !== null && !ACCOUNT_ID.test(payerAccountId))
   ) invalidRequest();
-  return { connectionId, period };
+  return { connectionId, period, accountId, payerAccountId };
+}
+
+function sortedUnique(values: readonly (string | null)[]): readonly string[] {
+  return [...new Set(values.filter((value): value is string =>
+    value !== null && ACCOUNT_ID.test(value)))].sort();
 }
 
 function availablePeriods(
@@ -133,15 +148,22 @@ export async function GET(request: Request): Promise<Response> {
         goalsConfigured: 0,
         sourceState: "waiting",
         sourceEvidence: null,
+        filters: { accountId: query.accountId, payerAccountId: query.payerAccountId },
+        filterOptions: { accountIds: [], payerAccountIds: [] },
+        officialDefinition: FINOPS_KPI_OFFICIAL_DEFINITION,
       });
     }
 
     const active = await billing.loadActivePartition(owner, selected);
     const configuration = new FinopsFoundationalConfigRepository();
     const goals = await configuration.goalsForEvaluation(active.scope);
+    const rows = active.rows.filter((row) =>
+      (query.accountId === null || row.line.usageAccountId === query.accountId)
+      && (query.payerAccountId === null
+        || row.line.payerAccountId === query.payerAccountId));
     const report = evaluateFinopsKpis({
       scope: active.scope,
-      rows: active.rows,
+      rows,
       evidenceWindow: {
         startIso: window.startIso,
         endIso: window.endIso,
@@ -161,6 +183,12 @@ export async function GET(request: Request): Promise<Response> {
       report,
       goalsConfigured: goals.length,
       sourceState: "complete",
+      filters: { accountId: query.accountId, payerAccountId: query.payerAccountId },
+      filterOptions: {
+        accountIds: sortedUnique(active.rows.map((row) => row.line.usageAccountId)),
+        payerAccountIds: sortedUnique(active.rows.map((row) => row.line.payerAccountId)),
+      },
+      officialDefinition: FINOPS_KPI_OFFICIAL_DEFINITION,
       sourceEvidence: {
         activeGeneration: {
           manifestSha256: active.evidence.activeManifestSha256,

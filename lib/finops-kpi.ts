@@ -24,7 +24,7 @@ const MAX_ASSUMPTIONS = 2_000;
 const DEFAULT_MAX_OPPORTUNITIES = 1_000;
 const MAX_OPPORTUNITIES = 5_000;
 const RATIO_DENOMINATOR = BigInt(10_000);
-const SNAPSHOT_AGE_DAYS = 90;
+const SNAPSHOT_AGE_DAYS = 365;
 
 export const FINOPS_KPI_IDS = [
   "ec2_previous_generation",
@@ -108,7 +108,7 @@ export const FINOPS_KPI_FORMULAS: readonly FinopsKpiFormula[] = [
     formulaVersion: "1.0.0",
     label: "EBS gp3 adoption",
     numeratorDefinition: "Classifiable EBS volume usage on gp3.",
-    denominatorDefinition: "Classifiable EBS volume usage.",
+    denominatorDefinition: "Classifiable EBS gp2 or gp3 volume usage.",
     targetDirection: "higher_is_better",
     authoritativeEvidenceRequired: false,
     curClassification: "candidate_estimate",
@@ -761,6 +761,9 @@ function classify(
       const detail = detailText(line);
       const volumeType = ["gp3", "gp2", "io1", "io2", "st1", "sc1", "standard"]
         .find((token) => detail.includes(token)) ?? null;
+      if (volumeType !== null && volumeType !== "gp2" && volumeType !== "gp3") {
+        return { eligible: false, numerator: null, confidence: "low", reasonCode: "SERVICE_NOT_APPLICABLE" };
+      }
       return {
         eligible: true,
         numerator: volumeType === null ? null : volumeType === "gp3",

@@ -20,11 +20,15 @@ import type {
   FinopsCurrencyAllocation,
   FinopsTaxonomyAllocationNode,
 } from "../../lib/finops-cost-intelligence";
+import type { FinopsCostIntelligenceOfficialDefinition } from
+  "../../lib/finops-cost-intelligence-official-definition";
 import {
   FINOPS_KPI_IDS,
   type FinopsKpiMeasurement,
   type FinopsKpiResult,
 } from "../../lib/finops-kpi";
+import type { FinopsKpiOfficialDefinition } from
+  "../../lib/finops-kpi-official-definition";
 import { FinopsCurIntelligencePanels } from "./finops-cur-intelligence-panels";
 import styles from "./costs.module.css";
 
@@ -100,6 +104,7 @@ interface CostIntelligenceEnvelope {
   readonly taxonomyConfigured: boolean;
   readonly sourceState: "complete" | "waiting" | "configuration_required";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
+  readonly officialDefinition: FinopsCostIntelligenceOfficialDefinition;
 }
 
 interface KpiEnvelope {
@@ -110,6 +115,21 @@ interface KpiEnvelope {
   readonly goalsConfigured: number;
   readonly sourceState: "complete" | "waiting";
   readonly sourceEvidence: FoundationalSourceEvidence | null;
+  readonly filters: {
+    readonly accountId: string | null;
+    readonly payerAccountId: string | null;
+  };
+  readonly filterOptions: {
+    readonly accountIds: readonly string[];
+    readonly payerAccountIds: readonly string[];
+  };
+  readonly officialDefinition: FinopsKpiOfficialDefinition;
+}
+
+interface KpiFilters {
+  readonly period: string;
+  readonly accountId: string;
+  readonly payerAccountId: string;
 }
 
 type EndpointState<T> =
@@ -133,6 +153,8 @@ const CURRENCY = /^[A-Z]{3}$/u;
 const BILLING_PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const GENERATION_ID = /^fbg_[a-f0-9]{64}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const GIT_COMMIT = /^[a-f0-9]{40}$/u;
+const AWS_ACCOUNT_ID = /^\d{12}$/u;
 
 /**
  * Formats signed integer micro-units without converting the value to Number.
@@ -365,6 +387,7 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
 function validCostIntelligenceEnvelope(
   value: Readonly<Record<string, unknown>>,
 ): boolean {
+  const definition = value.officialDefinition;
   return Array.isArray(value.selectedPeriods)
     && value.selectedPeriods.length <= 36
     && value.selectedPeriods.every((period) =>
@@ -376,10 +399,23 @@ function validCostIntelligenceEnvelope(
       || value.sourceState === "waiting"
       || value.sourceState === "configuration_required"
     )
-    && validSourceEvidence(value.sourceEvidence);
+    && validSourceEvidence(value.sourceEvidence)
+    && isRecord(definition)
+    && typeof definition.commit === "string"
+    && GIT_COMMIT.test(definition.commit)
+    && typeof definition.sha256 === "string"
+    && SHA256.test(definition.sha256)
+    && definition.exactVisualCount === 77
+    && definition.exactFilterControlCount === 11
+    && definition.exactParameterControlCount === 33
+    && Array.isArray(definition.sheets)
+    && definition.sheets.length === 10;
 }
 
 function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
+  const filters = value.filters;
+  const filterOptions = value.filterOptions;
+  const definition = value.officialDefinition;
   return (
     value.selectedPeriod === null
     || (
@@ -392,7 +428,29 @@ function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     && Number.isSafeInteger(value.goalsConfigured)
     && value.goalsConfigured >= 0
     && (value.sourceState === "complete" || value.sourceState === "waiting")
-    && validSourceEvidence(value.sourceEvidence);
+    && validSourceEvidence(value.sourceEvidence)
+    && isRecord(filters)
+    && (filters.accountId === null
+      || (typeof filters.accountId === "string"
+        && AWS_ACCOUNT_ID.test(filters.accountId)))
+    && (filters.payerAccountId === null
+      || (typeof filters.payerAccountId === "string"
+        && AWS_ACCOUNT_ID.test(filters.payerAccountId)))
+    && isRecord(filterOptions)
+    && Array.isArray(filterOptions.accountIds)
+    && filterOptions.accountIds.every((account) =>
+      typeof account === "string" && AWS_ACCOUNT_ID.test(account))
+    && Array.isArray(filterOptions.payerAccountIds)
+    && filterOptions.payerAccountIds.every((account) =>
+      typeof account === "string" && AWS_ACCOUNT_ID.test(account))
+    && isRecord(definition)
+    && isRecord(definition.source)
+    && definition.source.version === "v2.2.1"
+    && isRecord(definition.totals)
+    && definition.totals.sheets === 10
+    && definition.totals.visuals === 91
+    && Array.isArray(definition.sheets)
+    && definition.sheets.length === 10;
 }
 
 async function readEnvelope<T>(
@@ -485,8 +543,13 @@ function costIntelligenceUrl(connectionId: string): string {
   return `/api/v1/finops/cost-intelligence?${query.toString()}`;
 }
 
-function kpiUrl(connectionId: string): string {
+function kpiUrl(connectionId: string, filters: KpiFilters): string {
   const query = new URLSearchParams({ connectionId });
+  if (filters.period !== "") query.set("period", filters.period);
+  if (filters.accountId !== "") query.set("accountId", filters.accountId);
+  if (filters.payerAccountId !== "") {
+    query.set("payerAccountId", filters.payerAccountId);
+  }
   return `/api/v1/finops/kpi?${query.toString()}`;
 }
 
@@ -1222,7 +1285,7 @@ function CostIntelligenceAllocation({
   );
 }
 
-function CostIntelligenceExplorer({
+export function CostIntelligenceExplorer({
   envelope,
 }: {
   readonly envelope: CostIntelligenceEnvelope;
@@ -1230,6 +1293,11 @@ function CostIntelligenceExplorer({
   const report = envelope.report;
   if (report === null || !report.ok) return null;
   const currencies = [...new Set(report.summaries.map(({ currency }) => currency))].sort();
+  const comparisonSummaries = report.summaries.filter(
+    ({ period }) => period === report.comparisonPeriod,
+  );
+  const visiblePivotCells = report.momPivot.cells.slice(0, 100);
+  const visibleCommitments = report.commitments.items.slice(0, 100);
   return (
     <div className={styles.foundationalWorkspace}>
       <EvidenceStrip
@@ -1238,6 +1306,141 @@ function CostIntelligenceExplorer({
         currencies={currencies}
         evidence={sourceEvidenceFor(envelope)}
       />
+      <section
+        className={styles.foundationalPanel}
+        aria-label="Official AWS Cost Intelligence dashboard definition"
+      >
+        <PanelHeading
+          eyebrow="Immutable AWS definition"
+          title="Official sheet coverage"
+          meta={`${envelope.officialDefinition.sheets.length} sheets · ${envelope.officialDefinition.exactVisualCount} visuals · ${envelope.officialDefinition.exactParameterControlCount + envelope.officialDefinition.exactFilterControlCount} controls`}
+        />
+        <section
+          className={styles.foundationalModuleGrid}
+          aria-label="Official Cost Intelligence dashboard sheet inventory"
+        >
+          {envelope.officialDefinition.sheets.map((sheet) => (
+            <article
+              key={sheet.name}
+            >
+              <header>
+                <span>{sheet.name.trim()}</span>
+                <strong>{sheet.visualCount}</strong>
+              </header>
+              <p>
+                {sheet.gaps.length === 0
+                  ? "Native evidence-backed coverage is available."
+                  : sheet.gaps.join(" ")}
+              </p>
+              <dl>
+                <div><dt>Parameters</dt><dd>{sheet.parameterControlCount}</dd></div>
+                <div><dt>Filters</dt><dd>{sheet.filterControlCount}</dd></div>
+                <div>
+                  <dt>Parity</dt>
+                  <dd>{readableToken(sheet.support.toLowerCase())}</dd>
+                </div>
+              </dl>
+              <small>
+                Definition {compactEvidence(envelope.officialDefinition.sha256, 16)}
+              </small>
+            </article>
+          ))}
+        </section>
+      </section>
+      <section className={styles.foundationalKpis} aria-label="Cost Intelligence billing summary by currency">
+        {comparisonSummaries.map((summary) => {
+          const baseline = report.summaries.find((item) =>
+            item.period === report.baselinePeriod
+            && item.currency === summary.currency) ?? null;
+          const delta = BigInt(summary.includedMicros)
+            - BigInt(baseline?.includedMicros ?? "0");
+          return (
+            <article key={summary.currency}>
+              <small>{summary.currency} · {report.comparisonPeriod}</small>
+              <strong>
+                {formatMicrosExact(summary.includedMicros, summary.currency)}
+              </strong>
+              <span>
+                Previous {formatMicrosExact(
+                  baseline?.includedMicros ?? null,
+                  summary.currency,
+                )} · change {formatMicrosExact(
+                  delta.toString(),
+                  summary.currency,
+                )}
+              </span>
+            </article>
+          );
+        })}
+        {comparisonSummaries.map((summary) => (
+          <article key={`${summary.currency}:run-rate`}>
+            <small>{summary.currency} average daily run rate</small>
+            <strong>
+              {formatMicrosExact(
+                summary.averageDailyRunRate.roundedMicrosPerDay,
+                summary.currency,
+              )}
+            </strong>
+            <span>
+              {summary.averageDailyRunRate.observedDays} observed days ·{" "}
+              {summary.excludedLineCount} excluded lines
+            </span>
+          </article>
+        ))}
+      </section>
+      <section className={styles.foundationalTwoColumn}>
+        {currencies.map((currency) => {
+          const points = report.summaries
+            .filter((item) => item.currency === currency)
+            .sort((left, right) => left.period.localeCompare(right.period));
+          const maximumMagnitude = points.reduce((maximum, point) => {
+            const amount = BigInt(point.includedMicros);
+            const magnitude = amount < BigInt(0) ? -amount : amount;
+            return magnitude > maximum ? magnitude : maximum;
+          }, BigInt(0));
+          return (
+            <article className={styles.foundationalPanel} key={currency}>
+              <PanelHeading
+                eyebrow="Billing Summary"
+                title={`${currency} monthly cost trend`}
+                meta={`${points.length} periods`}
+              />
+              <div
+                className={styles.foundationalTrend}
+                role="img"
+                aria-label={`${currency} monthly Cost Intelligence trend`}
+              >
+                {points.map((point) => {
+                  const amount = BigInt(point.includedMicros);
+                  const magnitude = amount < BigInt(0) ? -amount : amount;
+                  return (
+                    <div
+                      className={styles.foundationalTrendColumn}
+                      key={`${point.period}:${currency}`}
+                      aria-label={`${point.period}, ${formatMicrosExact(
+                        point.includedMicros,
+                        currency,
+                      )}`}
+                    >
+                      <span>{formatMicrosExact(point.includedMicros, currency)}</span>
+                      <i
+                        aria-hidden="true"
+                        style={{
+                          height: percentageWidth(relativeBasisPoints(
+                            magnitude.toString(),
+                            maximumMagnitude,
+                          )),
+                        }}
+                      />
+                      <small>{point.period}<b>{currency}</b></small>
+                    </div>
+                  );
+                })}
+              </div>
+            </article>
+          );
+        })}
+      </section>
       <section className={styles.foundationalTwoColumn}>
         <article className={styles.foundationalPanel}>
           <PanelHeading eyebrow={`${report.baselinePeriod} → ${report.comparisonPeriod}`} title="Cost movers" meta={`${report.movers.length} changes`} />
@@ -1284,6 +1487,55 @@ function CostIntelligenceExplorer({
           </div>
         </article>
       </section>
+      <section className={styles.foundationalPanel}>
+        <PanelHeading
+          eyebrow={`${report.momPivot.baselinePeriod} → ${report.momPivot.comparisonPeriod}`}
+          title="MoM Pivot · Spend"
+          meta={`${readableToken(report.momPivot.dimensions[0])} × ${readableToken(
+            report.momPivot.dimensions[1],
+          )} · ${visiblePivotCells.length}/${report.momPivot.cells.length} cells`}
+        />
+        {report.momPivot.cells.length === 0 ? (
+          <p className={styles.foundationalEmpty}>
+            No month-over-month pivot cells were returned.
+          </p>
+        ) : (
+          <div
+            className={styles.foundationalTableScroll}
+            tabIndex={0}
+            role="region"
+            aria-label="Scrollable Cost Intelligence month over month pivot"
+          >
+            <table className={styles.foundationalTable}>
+              <caption>Cost Intelligence exact month over month spend pivot</caption>
+              <thead>
+                <tr>
+                  <th>{readableToken(report.momPivot.dimensions[0])}</th>
+                  <th>{readableToken(report.momPivot.dimensions[1])}</th>
+                  <th>Currency</th>
+                  <th>Baseline</th>
+                  <th>Comparison</th>
+                  <th>Change</th>
+                  <th>Change %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visiblePivotCells.map((cell) => (
+                  <tr key={`${cell.currency}:${cell.rowValue}:${cell.columnValue}`}>
+                    <th scope="row">{cell.rowValue}</th>
+                    <td>{cell.columnValue}</td>
+                    <td>{cell.currency}</td>
+                    <td>{formatMicrosExact(cell.baselineMicros, cell.currency)}</td>
+                    <td>{formatMicrosExact(cell.comparisonMicros, cell.currency)}</td>
+                    <td>{formatMicrosExact(cell.deltaMicros, cell.currency)}</td>
+                    <td>{formatBasisPoints(cell.deltaPercentBasisPoints)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
       {report.explorer === null ? null : (
         <section className={styles.foundationalPanel}>
           <PanelHeading eyebrow={report.explorer.period} title="Bounded explorer groups" meta={`${report.explorer.groups.length} groups`} />
@@ -1300,6 +1552,98 @@ function CostIntelligenceExplorer({
           </div>
         </section>
       )}
+      <section className={styles.foundationalPanel}>
+        <PanelHeading
+          eyebrow={`As of ${report.commitments.asOfIso.slice(0, 10)}`}
+          title="Expiring RI/SP Tracker"
+          meta={`${visibleCommitments.length}/${report.commitments.items.length} tracked · ${report.commitments.untrackable.length} untrackable`}
+        />
+        {report.commitments.items.length === 0 ? (
+          <p className={styles.foundationalEmpty}>
+            No expiring commitment evidence was observed within{" "}
+            {report.commitments.expiresWithinDays} days. This is not a claim
+            that no commitments exist.
+          </p>
+        ) : (
+          <div
+            className={styles.foundationalTableScroll}
+            tabIndex={0}
+            role="region"
+            aria-label="Scrollable expiring RI and Savings Plans table"
+          >
+            <table className={styles.foundationalTable}>
+              <caption>Evidence-backed expiring RI and Savings Plans</caption>
+              <thead>
+                <tr>
+                  <th>Commitment</th>
+                  <th>Type / terms</th>
+                  <th>Account / owner</th>
+                  <th>End</th>
+                  <th>Gross / used</th>
+                  <th>Unused</th>
+                  <th>On-demand equivalent</th>
+                  <th>Net savings</th>
+                  <th>Coverage</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleCommitments.map((item) => (
+                  <tr key={`${item.currency}:${item.commitmentArnOrId}`}>
+                    <th scope="row" title={item.commitmentArnOrId}>
+                      {compactEvidence(item.commitmentArnOrId, 28)}
+                    </th>
+                    <td>
+                      {item.commitmentType}
+                      <small>
+                        {item.terms.pricingTerm ?? "Term not supplied"} ·{" "}
+                        {item.terms.purchaseOption ?? "Purchase option not supplied"}
+                      </small>
+                    </td>
+                    <td>
+                      {item.receivingAccountId}
+                      <small>{item.owner ?? "Owner not supplied"}</small>
+                    </td>
+                    <td>
+                      {item.endIso.slice(0, 10)}
+                      <small>{item.expiresInDays} days</small>
+                    </td>
+                    <td>
+                      {formatMicrosExact(item.grossMicros, item.currency)}
+                      <small>
+                        used {formatMicrosExact(item.usedMicros, item.currency)}
+                      </small>
+                    </td>
+                    <td>{formatMicrosExact(item.unusedMicros, item.currency)}</td>
+                    <td>
+                      {formatMicrosExact(
+                        item.onDemandEquivalentMicros,
+                        item.currency,
+                      )}
+                    </td>
+                    <td>{formatMicrosExact(item.netSavingsMicros, item.currency)}</td>
+                    <td>
+                      <StateBadge
+                        state={item.coverage.complete ? "complete" : "partial"}
+                      />
+                      <small>
+                        {item.coverage.missing.map(readableToken).join(" · ")
+                          || item.coverage.evidenceLabel}
+                      </small>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {report.commitments.untrackable.length === 0 ? null : (
+          <p className={styles.foundationalNotice} role="status">
+            {report.commitments.untrackable.length} source rows could not be
+            placed on the expiry timeline because commitment identity or expiry
+            evidence was missing or invalid.
+          </p>
+        )}
+      </section>
     </div>
   );
 }
@@ -1313,14 +1657,40 @@ function measurementById(
   ]));
 }
 
-function KpiScorecard({ envelope }: { readonly envelope: KpiEnvelope }) {
+export function KpiScorecard({
+  envelope,
+  filters,
+  onFiltersChange,
+}: {
+  readonly envelope: KpiEnvelope;
+  readonly filters: KpiFilters;
+  readonly onFiltersChange: (filters: KpiFilters) => void;
+}) {
+  const [selectedSheetId, setSelectedSheetId] = useState(
+    envelope.officialDefinition.sheets[0].id,
+  );
   const report = envelope.report;
   if (report === null || !report.ok) return null;
+  const selectedSheet = envelope.officialDefinition.sheets.find((sheet) =>
+    sheet.id === selectedSheetId) ?? envelope.officialDefinition.sheets[0];
   const measurements = measurementById(report.measurements);
   const registryComplete = FINOPS_KPI_IDS.every((id) =>
     report.formulaRegistry.some((formula) => formula.id === id));
   const currencies = [...new Set(report.measurements.flatMap((measurement) =>
     measurement.segments.map(({ currency }) => currency)))].sort();
+  const showAllFormulas = ["KPI Tracker", "Set KPI Goals", "Metrics Summary"]
+    .includes(selectedSheet.name);
+  const visibleFormulaIds = new Set<string>(selectedSheet.formulaIds);
+  const visibleRegistry = selectedSheet.name === "About"
+    ? []
+    : showAllFormulas
+      ? report.formulaRegistry
+      : report.formulaRegistry.filter((formula) =>
+        visibleFormulaIds.has(formula.id));
+  const visibleOpportunities = report.opportunities.filter((opportunity) =>
+    showAllFormulas || visibleFormulaIds.has(opportunity.kpiId));
+  const setFilter = (key: keyof KpiFilters, value: string) =>
+    onFiltersChange({ ...filters, [key]: value });
   return (
     <div className={styles.foundationalWorkspace}>
       <EvidenceStrip
@@ -1335,14 +1705,50 @@ function KpiScorecard({ envelope }: { readonly envelope: KpiEnvelope }) {
           replaced with locally invented metrics.
         </div>
       ) : null}
+      <section className={styles.foundationalKpiDefinition} aria-label="Official AWS KPI dashboard definition">
+        <div>
+          <small>Immutable AWS definition</small>
+          <strong>{envelope.officialDefinition.source.version} · {envelope.officialDefinition.totals.sheets} sheets · {envelope.officialDefinition.totals.visuals} visuals</strong>
+          <span>{envelope.officialDefinition.totals.parameterControls} parameter controls · {envelope.officialDefinition.totals.filterControls} filter controls · definition {compactEvidence(envelope.officialDefinition.source.definitionSha256, 16)}</span>
+        </div>
+        <nav aria-label="Official KPI dashboard sheets">
+          {envelope.officialDefinition.sheets.map((sheet) => (
+            <button
+              type="button"
+              key={sheet.id}
+              aria-pressed={sheet.id === selectedSheet.id}
+              onClick={() => setSelectedSheetId(sheet.id)}
+            >
+              {sheet.name}<small>{sheet.visualCount} visuals</small>
+            </button>
+          ))}
+        </nav>
+      </section>
+      <section className={styles.foundationalKpiFilters} aria-label="KPI evidence filters">
+        <label>Billing period<select value={filters.period} onChange={(event) => setFilter("period", event.target.value)}><option value="">Latest active</option>{envelope.availablePeriods.map((period) => <option value={period.period} key={period.generationId}>{period.period}</option>)}</select></label>
+        <label>Account ID<select value={filters.accountId} onChange={(event) => setFilter("accountId", event.target.value)}><option value="">All accounts</option>{envelope.filterOptions.accountIds.map((account) => <option key={account}>{account}</option>)}</select></label>
+        <label>Payer account ID<select value={filters.payerAccountId} onChange={(event) => setFilter("payerAccountId", event.target.value)}><option value="">All payer accounts</option>{envelope.filterOptions.payerAccountIds.map((account) => <option key={account}>{account}</option>)}</select></label>
+        <button type="button" onClick={() => onFiltersChange({ period: "", accountId: "", payerAccountId: "" })}>Clear filters</button>
+      </section>
+      <section className={styles.foundationalKpiSheetSummary}>
+        <div><small>Official sheet</small><h2>{selectedSheet.name}</h2><span>{selectedSheet.visualCount} visuals · {selectedSheet.parameterControls.length} parameter controls · {Object.values(selectedSheet.filterControls).reduce((sum, count) => sum + count, 0)} filter controls</span></div>
+        <StateBadge state={selectedSheet.support} />
+        {selectedSheet.parameterControls.length === 0 ? null : <details><summary>Official controls</summary><p>{selectedSheet.parameterControls.join(" · ")}</p></details>}
+        {selectedSheet.gaps.length === 0 ? null : <ul>{selectedSheet.gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>}
+      </section>
       <section className={styles.foundationalKpiHeader} aria-label="KPI scorecard evidence">
         <span><small>Registry</small><strong>{report.formulaRegistry.length} formulas</strong></span>
         <span><small>Governed goals</small><strong>{envelope.goalsConfigured}</strong></span>
         <span><small>Review candidates</small><strong>{report.opportunities.length}</strong></span>
         <span><small>Evidence window</small><strong>{report.evidenceWindow.startIso.slice(0, 10)} — {report.evidenceWindow.endIso.slice(0, 10)}</strong></span>
       </section>
-      <section className={styles.foundationalKpiMatrix} aria-label="All 19 Foundational KPI measurements">
-        {report.formulaRegistry.map((formula) => {
+      {selectedSheet.name === "About" ? (
+        <section className={styles.foundationalPanel}>
+          <PanelHeading eyebrow="AWS KPI Dashboard" title="Definition and evidence boundary" meta="v2.2.1" />
+          <p className={styles.foundationalEmpty}>The native workspace uses the same 19 governed KPI families over one active reconciled CUR2 generation. Inventory activity, architecture compatibility, migration rates, and savings remain unavailable until independently evidenced.</p>
+        </section>
+      ) : <section className={styles.foundationalKpiMatrix} aria-label={showAllFormulas ? "All 19 Foundational KPI measurements" : `${selectedSheet.name} KPI measurements`}>
+        {visibleRegistry.map((formula) => {
           const measurement = measurements.get(formula.id);
           return (
             <article key={formula.id}>
@@ -1368,6 +1774,7 @@ function KpiScorecard({ envelope }: { readonly envelope: KpiEnvelope }) {
                           ? "not configured"
                           : formatBasisPoints(measurement.selectedGoal.targetBasisPoints)}
                       </small>
+                      <i aria-hidden="true"><b style={{ width: `${Math.min(100, Math.max(0, segment.currentBasisPoints / 100))}%` }} /></i>
                     </div>
                   ))}
                 </div>
@@ -1379,14 +1786,14 @@ function KpiScorecard({ envelope }: { readonly envelope: KpiEnvelope }) {
             </article>
           );
         })}
-      </section>
+      </section>}
       <section className={styles.foundationalPanel}>
-        <PanelHeading eyebrow="Evidence, not execution" title="KPI opportunity candidates" meta={report.opportunitiesTruncated ? "Bounded result" : `${report.opportunities.length} candidates`} />
-        {report.opportunities.length === 0 ? (
+        <PanelHeading eyebrow="Evidence, not execution" title={`${selectedSheet.name} opportunity candidates`} meta={report.opportunitiesTruncated ? "Bounded result" : `${visibleOpportunities.length} candidates`} />
+        {visibleOpportunities.length === 0 ? (
           <p className={styles.foundationalEmpty}>No KPI opportunity evidence was returned.</p>
         ) : (
           <div className={styles.foundationalFindings}>
-            {report.opportunities.slice(0, 12).map((opportunity) => (
+            {visibleOpportunities.slice(0, 12).map((opportunity) => (
               <article key={`${opportunity.kpiId}:${opportunity.sourceLineId}`}>
                 <span>{opportunity.confidence}</span>
                 <div>
@@ -1456,6 +1863,9 @@ export function FinopsFoundationalPanels({
   const [costIntelligence, setCostIntelligence] =
     useState<EndpointState<CostIntelligenceEnvelope>>(INITIAL_STATE);
   const [kpi, setKpi] = useState<EndpointState<KpiEnvelope>>(INITIAL_STATE);
+  const [kpiFilters, setKpiFilters] = useState<KpiFilters>({
+    period: "", accountId: "", payerAccountId: "",
+  });
 
   const needsCudos = ["overview", "explorer", "commitments", "services"]
     .includes(section);
@@ -1533,7 +1943,7 @@ export function FinopsFoundationalPanels({
     }
     if (needsKpi) {
       void request<KpiEnvelope>(
-        kpiUrl(connectionId),
+        kpiUrl(connectionId, kpiFilters),
         "sutra.finops-kpi.v1",
         validKpiEnvelope,
         setKpi,
@@ -1546,6 +1956,7 @@ export function FinopsFoundationalPanels({
     needsCudos,
     needsKpi,
     reloadToken,
+    kpiFilters,
   ]);
 
   const activeStates = useMemo(() => [
@@ -1632,7 +2043,11 @@ export function FinopsFoundationalPanels({
           onRetry={retry}
         >
           {statusReady(kpi) && kpi.envelope.connectionId === connectionId
-            ? <KpiScorecard envelope={kpi.envelope} />
+            ? <KpiScorecard
+                envelope={kpi.envelope}
+                filters={kpiFilters}
+                onFiltersChange={setKpiFilters}
+              />
             : null}
         </BoundaryAndContent>
       ) : null}

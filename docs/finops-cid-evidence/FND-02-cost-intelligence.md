@@ -2,35 +2,91 @@
 
 Reviewed: 2026-08-01
 
-Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cost-intelligence-dashboard-cid>
+Official guidance: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cost-intelligence-dashboard-cid>
 
-Assessment revision: `0fa8d769d4`
+Immutable definition: <https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/cost-intelligence/cost-intelligence-definition.yaml>
+
+Definition SHA-256: `71795647fd09a17c3a2e1ea2f1308d6aecb150efe339a0950866ad766ef10ab0`
 
 Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 
-## Official requirement inventory
+## Exact official definition inventory
 
-- Accessible executive cloud-financial analysis over CUR/CUR 2.0.
-- Chargeback/showback by business unit, account, or cost center.
-- Savings Plan, Reserved Instance, and Spot impact on unit metrics.
-- Savings attribution by account/business unit and RI/SP expiry visibility.
+The pinned definition contains exactly **10 sheets, 77 visuals, 11 filter
+controls, and 33 parameter controls**. The trailing space in the official
+`OPTICS Explorer ` sheet name is retained in the immutable code inventory.
 
-## Sutra implementation evidence
+| Official sheet | Visuals | Filter controls | Parameter controls | Audited visual purpose/title inventory |
+|---|---:|---:|---:|---|
+| Billing Summary | 12 | 0 | 3 | Invoiced Spend; Amortized Forecast; Amortized Spend Forecast; Previous Month Amortized Spend; Amortized Spend; Invoiced Spend by charge type; Amortized Spend by account; Previous Month Invoice; Invoiced Spend Forecast; Invoiced Forecast; AWS Monthly Report pivot; hidden insight |
+| Cost Summary | 15 | 0 | 3 | Usage Spend insights; Daily Cost; Top 10 Drill Down; Top 5 Spending Accounts; Usage Spend trend; account/region/service counts; Most Popular Region; Top Spending Account; Top Service; Usage Spend KPI; hidden insight/anomaly notices |
+| Compute Summary | 11 | 0 | 3 | EC2 Compute Unit Cost; EC2 Spot Savings and percentage; EC2 Coverage month over month; EC2 Elasticity; RI/SP Savings percentage; Compute Usage Spend; EC2 Compute Cost; current-generation EC2 spend; EC2 Coverage; RI/SP Savings |
+| Storage Summary | 12 | 0 | 3 | S3 Standard Storage Cost by Bucket Top 10; S3 usage by bucket; EBS and S3 spend KPIs/trends; EBS Coverage and Unit Cost; storage-class coverage; S3 Unit Cost; period insights |
+| RI/SP Summary | 17 | 3 | 3 | Pricing Model Savings Summary; Coverage; Spot Coverage; RI/SP Utilization and Coverage; savings by end date/product/pricing; savings expiring this/next month; previous-month savings and unused cost; Savings Summary; on-demand eligible spend/coverage; average hourly EC2 cost; hidden insight |
+| Expiring RI/SP Tracker | 2 | 0 | 3 | Expiry tracker pivot; Select Expiration Month table |
+| `OPTICS Explorer ` | 3 | 8 | 12 | Usage Table; Spend Table; Top 10 Spend Chart |
+| MoM Pivot | 2 | 0 | 3 | Usage pivot; Spend pivot |
+| Summary of Changes | 1 | 0 | 0 | Release/change insight |
+| About | 2 | 0 | 0 | About and usage notices |
+
+The account controls on applicable sheets are **Account ID**, **Account Name**,
+and **Payer Accounts**. RI/SP filters are **Usage Date Filter**, **Product
+Category**, and **Service**. OPTICS filters are **Date Range**, **Database
+Engine**, **Pricing Unit**, **Service**, **Instance Type Family**, **Instance
+Type**, **Charge Type**, and **Platform**. OPTICS parameters cover both group-by
+levels, date granularity, account/payer, charge category, product code,
+operation, region, usage type, and purchase option.
+
+## Sutra parity assessment
+
+| Official capability | Local native evidence | Status |
+|---|---|---|
+| Billing Summary | Exact bigint, currency-separated period summaries; previous-period delta; average daily run rate; monthly trend; disclosed integer linear forecast and deterministic residual range | `IMPLEMENTED_LOCAL` |
+| Cost Summary | Cost movers, taxonomy allocation, bounded multi-dimension explorer, exact source/excluded totals | `IMPLEMENTED_LOCAL` |
+| Compute Summary | Canonical rows carry usage quantity/unit and commitment type; no EC2-only unit-cost or elasticity visual is emitted unless complete service-specific quantity evidence is proved | `PARTIAL_EVIDENCE` |
+| Storage Summary | Canonical product, resource, usage quantity/unit, and cost fields are retained; S3 bucket/EBS volume semantics and complete coverage are not asserted from ambiguous rows | `PARTIAL_EVIDENCE` |
+| RI/SP Summary | Evidence-backed commitment costs, utilization inputs, expiry, net savings, and coverage completeness are available; route deliberately marks unused charge, public on-demand cost, and quantity coverage incomplete | `PARTIAL_EVIDENCE` |
+| Expiring RI/SP Tracker | Native expiry table with terms, account/owner, gross/used/unused cost, on-demand equivalent, net savings, coverage state, and untrackable-row disclosure | `IMPLEMENTED_LOCAL` |
+| OPTICS Explorer | Route now activates a 50-row, 1,000-cardinality bounded explorer over an allow-listed pair of dimensions | `PARTIAL_CONTROL_PARITY` |
+| MoM Pivot | Native exact spend pivot with baseline, comparison, signed delta, and percentage state | `IMPLEMENTED_LOCAL` |
+| Summary of Changes / About | This pinned evidence record, freshness strip, cost-basis disclosure, and explicit incomplete-data states | `IMPLEMENTED_LOCAL` |
+
+This is semantic native coverage, not a claim that Sutra reproduces the
+QuickSight layout pixel-for-pixel. Product-specific compute/storage visuals and
+the full set of interactive account/OPTICS controls remain evidence-gated gaps;
+they must not be filled with inferred quantities, fabricated dimensions, or a
+different cost basis.
+
+## Gate evidence
 
 | Gate | Status | Evidence |
 |---|---|---|
-| G0 requirements | `VERIFIED` | Official inventory above, reviewed 2026-08-01. |
-| G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Shares the correction-safe CUR2 ingestion and active-generation persistence path with FND-01. |
-| G4 API | `IMPLEMENTED_UNVERIFIED` | `GET /api/v1/finops/cost-intelligence`; authenticated tenant scope, one canonical export history, 36-period/250,000-row bounds, exact filters. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Executive comparison, allocation, movers, forecast, pivot, explorer, and commitment coverage in the Foundational panels. |
-| G6 focused verification | `VERIFIED` | Exact bigint money, separated currencies, taxonomy reconciliation, incomplete commitment disclosure, source evidence, routes, repositories, and UI are included in the 67-test Foundational set. |
-| G7–G10 | `NOT_STARTED` | Exact-tree, controlled two-tenant/provider, release, deployment, rollback, and live visual evidence remain. |
+| G0 requirements | `VERIFIED` | Immutable commit/path/hash plus exact 10-sheet/77-visual/44-control inventory is enforced by `finops-cost-intelligence-official-definition.test.mjs`. |
+| G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Shares the correction-safe CUR2 ingestion and active-generation persistence path with FND-01; exact-tree and controlled provider evidence remain outstanding. |
+| G4 API | `VERIFIED_LOCAL` | Authenticated tenant scope, one canonical export history, 36-period/250,000-row bounds, strict query allow-list, activated bounded explorer, explicit forecast options, and conservative commitment completeness. |
+| G5 visual UI | `VERIFIED_LOCAL` | Immutable 10-sheet coverage navigator, per-sheet parity gaps, billing summary, trend, movers, forecast, spend pivot, bounded explorer, expiry tracker, allocation, evidence/freshness states, and exact-currency rendering are under UI contract tests. |
+| G6 focused verification | `VERIFIED` | Focused engine, route, official-definition, and UI contract suite passes locally; commands and count are recorded below. |
+| G7–G10 | `NOT_STARTED` | Exact-tree, controlled two-tenant/provider, release, deployment, rollback, and live visual evidence remain release-level gates. |
 
 ## Evidence-honesty limits
 
-Forecasts are labelled insufficient until enough history exists. Commitment
-savings and utilization remain partial unless the active canonical fields prove
-the complete basis. Allocation is reporting attribution, not an invoice change.
+- Forecasts stay `insufficient_data` until the configured minimum history exists.
+- Money is never converted to floating point and currencies are never combined.
+- Missing cost bases fail closed rather than substituting billed or amortized cost.
+- Commitment savings/utilization remain partial unless active canonical fields
+  prove unused charges, public on-demand cost, and usage quantity completeness.
+- “No observed expiry evidence” is not presented as “no commitments exist.”
+- Allocation is reporting attribution, not a mutation of an invoice.
 
-Focused result: **67 passed, 0 failed, 0 skipped** using the command recorded in
-`FND-01-cudos.md`.
+Focused verification command:
+
+```sh
+node --experimental-strip-types --test \
+  tests/finops-cost-intelligence.test.ts \
+  tests/finops-cost-intelligence-route-contract.test.mjs \
+  tests/finops-cost-intelligence-official-definition.test.mjs \
+  tests/finops-cost-intelligence-official-ui.test.mjs \
+  tests/finops-foundational-ui-contract.test.mjs
+```
+
+Result: **23 passed, 0 failed, 0 skipped**.

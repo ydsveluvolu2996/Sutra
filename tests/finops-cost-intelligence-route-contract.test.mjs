@@ -122,6 +122,14 @@ test("the report receives exact active datasets, bounded options, and conservati
   assert.match(route, /comparisonPeriod: selected\.comparisonPeriod/u);
   assert.match(route, /moverDimension: query\.moverDimension/u);
   assert.match(route, /pivotDimensions: query\.pivotDimensions/u);
+  assert.match(
+    route,
+    /explorer:\s*\{\s*period: selected\.comparisonPeriod,\s*dimensions: query\.pivotDimensions,\s*limit: 50,\s*maximumCardinality: 1_000,\s*\}/u,
+  );
+  assert.match(
+    route,
+    /forecast: \{ minimumPeriods: 3, trainingPeriods: 6 \}/u,
+  );
   assert.match(route, /const commitmentAsOfIso = new Date\(\)\.toISOString\(\)/u);
   assert.match(route, /asOfIso: commitmentAsOfIso/u);
   assert.match(route, /unusedChargesComplete: false/u);
@@ -157,4 +165,19 @@ test("source evidence preserves each active generation without flattening freshn
   assert.match(route, /rejectedRows: partition\.evidence\.rejectedRows/u);
   assert.doesNotMatch(route, /partitionFreshness/u);
   assert.doesNotMatch(route, /partitionFreshnessMatchesActiveManifest/u);
+});
+
+test("every Cost Intelligence state returns the immutable official definition", () => {
+  assert.match(
+    route,
+    /FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION/u,
+  );
+  assert.match(
+    route,
+    /sourceStateEnvelope[\s\S]*officialDefinition: FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION/u,
+  );
+  assert.match(
+    route,
+    /sourceState: "complete",[\s\S]*officialDefinition: FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION/u,
+  );
 });
