@@ -10,6 +10,7 @@ import FinopsAiGpuPanel from "./finops-ai-gpu-panel";
 import FinopsSchedulePanel from "./finops-schedule-panel";
 import FinopsExternalCostPanel from "./finops-external-cost-panel";
 import { FinopsSourcesPanel } from "./finops-sources-panel";
+import { FinopsDashboardCatalogNav } from "./finops-dashboard-catalog-nav";
 import {
   FinopsFoundationalPanels,
   type FinopsFoundationalAvailability,
@@ -179,6 +180,11 @@ export function CostsBrowser() {
     setActiveSection(section);
     if (typeof window !== "undefined") {
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#finops-${section}`);
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(`finops-${section}`);
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+        target?.focus({ preventScroll: true });
+      });
     }
   }, []);
 
@@ -201,8 +207,8 @@ export function CostsBrowser() {
       <section className="page-heading">
         <div>
           <p className="eyebrow">FinOps command center</p>
-          <h1>AWS cost intelligence</h1>
-          <p className="page-subtitle">Actual Cost Explorer evidence, spend concentration, explainable signals, and forecast provenance for the selected customer account.</p>
+          <h1>Cloud cost intelligence</h1>
+          <p className="page-subtitle">Evidence-backed cloud cost dashboards, spend concentration, explainable signals, and forecast provenance for the selected customer account.</p>
         </div>
         <div className="heading-actions">
           <button
@@ -211,7 +217,7 @@ export function CostsBrowser() {
             onClick={() => void collect()}
             type="button"
           >
-            {collecting ? "Collecting AWS costs…" : snapshot === null ? "Collect AWS costs" : "Refresh from AWS"}
+            {collecting ? "Collecting connected AWS costs…" : snapshot === null ? "Collect connected AWS costs" : "Refresh connected AWS costs"}
           </button>
         </div>
       </section>
@@ -221,6 +227,8 @@ export function CostsBrowser() {
         <span><strong>Read-only billing evidence.</strong> The permanent collector reads Cost Explorer metadata and only the customer-owned billing export prefix configured for this connection. Export provisioning and every write or remediation action remain in separate, approval-controlled roles.</span>
         <a href="/onboard">Review role</a>
       </div>
+
+      <FinopsDashboardCatalogNav onOpenSharedAnalysis={navigateToSection} />
 
       <section className={styles.workspace} aria-label="FinOps workspace">
         <nav className={styles.workspaceNav} aria-label="FinOps sections">
@@ -234,20 +242,24 @@ export function CostsBrowser() {
             >
               <span>{section.shortLabel}</span>
               <i
-                aria-label={section.availability === "available" ? "Existing live capability" : section.availability === "foundation" ? "Foundation in progress" : "Additional AWS source required"}
+                aria-label={section.availability === "available" ? "Implemented shared analysis" : section.availability === "foundation" ? "Foundation in progress" : "Additional AWS source required"}
                 className={section.availability === "available" ? styles.navReady : section.availability === "foundation" ? styles.navProgress : styles.navSource}
               />
             </button>
           ))}
         </nav>
-        <header className={styles.sectionHeading}>
+        <header
+          className={styles.sectionHeading}
+          id={`finops-${activeSection}`}
+          tabIndex={-1}
+        >
           <div>
             <p className="eyebrow">FinOps workspace</p>
             <h2>{activeSectionDefinition.label}</h2>
             <p>{activeSectionDefinition.description}</p>
           </div>
           <span className={activeSectionDefinition.availability === "available" ? styles.sectionReady : activeSectionDefinition.availability === "foundation" ? styles.sectionProgress : styles.sectionSource}>
-            {activeSectionDefinition.availability === "available" ? "Live capability" : activeSectionDefinition.availability === "foundation" ? "Engine foundation" : "AWS source required"}
+            {activeSectionDefinition.availability === "available" ? "Implemented shared analysis" : activeSectionDefinition.availability === "foundation" ? "Engine foundation" : "AWS source required"}
           </span>
         </header>
       </section>

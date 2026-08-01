@@ -53,6 +53,23 @@ aggregate below records only the corrected complete run.
 | Controlled AWS/Azure/GCP validation | — | NOT STARTED | Required before live acceptance |
 | GitHub exact-SHA release gates | — | NOT STARTED | Required before image publication/deployment |
 
+## Release-boundary discovery
+
+| Item | Verified current state |
+|---|---|
+| Public origin | `https://www.sutracmdb.com` responds successfully |
+| Public health | `GET /api/healthz` returned HTTP 200 with `{"ok":true}` on 2026-08-01 |
+| Currently served image | `738663485493.dkr.ecr.ap-south-1.amazonaws.com/sutra/app@sha256:dac227d0a9cbe84c70abecb82c046c7324edb45c9bc0ec345a8513d8d7a30ebc` |
+| Currently deployed Git revision | Last successful private-beta workflow ran from `main` at `89376840a8b9c2cfe8a970d611065f4e4add6153`; the public header proves the digest, while the workflow run provides the revision association |
+| Configured release path | `.github/workflows/ec2-private-beta-release.yml` with GitHub OIDC, immutable ECR digest, Trivy gate, SSM deployment, and public post-deploy checks |
+| Repository release variables | AWS account, `ap-south-1`, release role, and exact EC2 instance are configured in GitHub |
+| Managed HA environments | Not configured in the repository; the currently usable reviewed path is the existing EC2 private-beta release workflow |
+| New release eligibility | **NO** — implementation and exact-revision gates are still open; the current live digest must remain unchanged until they close |
+
+The deployed revision statement above is an inference from the latest successful
+release workflow plus the live immutable digest header. Final G10 evidence must
+repeat both checks after deployment and record the exact new workflow run.
+
 ## Execution queue
 
 | Order | Workstream | Exit condition |
