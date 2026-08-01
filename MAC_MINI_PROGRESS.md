@@ -220,6 +220,19 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Finish Azure/GCP verticals and continue production activation closure for each partial pipeline |
 
+### 2026-08-01 — Azure Cloud Intelligence provider vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-02 / local G0–G6 candidate slice |
+| Maturity transition | ADD-02 `ABSENT` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 22 partial pipelines, 0 engine-only, and 1 absent |
+| Provider boundary | Dedicated Azure sources, identity/export/blob operations and server-side authenticated source discovery; no AWS connection or trust-role substitution; no client org/customer scope |
+| Delivery | Strict Standard Actual Cost/FOCUS capture; signed exact micros; currency/unit separation; immutable complete/empty accepted heads; native six-month, 30-day, service, subscription, Region, resource-group, pricing, commitment, charge, tag and resource views; formula-safe CSV |
+| Focused verification | Native Node 5 passed; full TypeScript, targeted ESLint and diff validation passed |
+| Remaining gates | Configure Azure credential/workload identity, recurring Cost Management export and Blob delivery; deploy adapter; reconcile controlled Azure export; complete two-tenant/signed-in/provider/live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Complete GCP CID, then close every remaining production activation and acceptance gap |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

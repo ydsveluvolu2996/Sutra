@@ -96,6 +96,7 @@ import postgresFinopsComputeOptimizerExportHistorySql from "../postgres/migratio
 import postgresFinopsExtendedSupportProjectionSql from "../postgres/migrations/0097_finops_extended_support_projection.sql?raw";
 import postgresFinopsGravitonSavingsSql from "../postgres/migrations/0098_finops_graviton_savings.sql?raw";
 import postgresFinopsAwsHealthEventsSql from "../postgres/migrations/0099_finops_aws_health_events.sql?raw";
+import postgresFinopsAzureCidSql from "../postgres/migrations/0100_finops_azure_cid.sql?raw";
 import postgresFinopsDcfExecutionHistorySql from "../postgres/migrations/0102_finops_dcf_execution_history.sql?raw";
 
 const migrations = [
@@ -197,6 +198,7 @@ const migrations = [
   { id: "0097_finops_extended_support_projection", source: postgresFinopsExtendedSupportProjectionSql },
   { id: "0098_finops_graviton_savings", source: postgresFinopsGravitonSavingsSql },
   { id: "0099_finops_aws_health_events", source: postgresFinopsAwsHealthEventsSql },
+  { id: "0100_finops_azure_cid", source: postgresFinopsAzureCidSql },
   { id: "0102_finops_dcf_execution_history", source: postgresFinopsDcfExecutionHistorySql },
 ] as const;
 

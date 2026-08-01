@@ -277,7 +277,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Azure CID",
     level: "additional",
     provider: "azure",
-    currentMaturity: "ABSENT",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Azure billing exports normalized for cost visualization, reporting, allocation, and multicloud financial analysis.",
     targetAudience: ["Executives", "Finance", "Procurement", "FinOps", "Product owners"],
     documentationUrl: "https://aws.amazon.com/blogs/modernizing-with-aws/cloud-intelligence-dashboard-for-azure/",

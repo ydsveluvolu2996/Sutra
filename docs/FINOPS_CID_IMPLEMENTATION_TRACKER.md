@@ -61,8 +61,8 @@ never replace it or masquerade as current success.
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
 | Advanced | 13 | 1 | 12 | 0 | 0 | 0 | 0 |
-| Additional | 13 | 2 | 9 | 0 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **21** | **0** | **2** | **0** | **0** |
+| Additional | 13 | 2 | 10 | 0 | 1 | 0 | 0 |
+| **Total** | **29** | **6** | **22** | **0** | **1** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
 Anomaly, Trends, and Data Transfer. The twenty-one partial pipelines are Trusted
@@ -70,7 +70,7 @@ Advisor Organizational, Compute Optimizer, Extended Support Cost Projection, Gra
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
-Carbon, and Amazon Connect Cost Insights. Azure CID and GCP CID are absent.
+Carbon, Amazon Connect Cost Insights, and Azure CID. GCP CID is absent.
 
 ## Parent capability tracker
 
@@ -93,7 +93,7 @@ Carbon, and Amazon Connect Cost Insights. Azure CID and GCP CID are absent.
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-12-data-collection-monitor.md): tenant-pinned DCF/Step Functions capture, immutable complete history, same-tenant API, and native module/execution/error/retry/latency/coverage UI with validated console links exist; production scheduler/adapter/job registration, real provider acceptance, and live validation remain. |
 | ADV-13 | Media Services Insights Hub | `media_services_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-13-media-services-insights.md): immutable CUR2-pinned history, same-tenant API, executive and five-service native workflow UI exist; AWS adapter/job registration, governed budgets/reservation evidence, and provider acceptance remain. |
 | ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md): immutable projection/history, same-tenant API and native UI exist; permanent Cost Optimization Hub export materialization and provider acceptance remain. |
-| ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `ABSENT` | Add Azure billing-export connection, collector, immutable normalized persistence, API, native visual reports, and live Azure validation. |
+| ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-02-azure-cid.md): provider-specific Azure source discovery/selection, strict Standard Actual Cost/FOCUS normalization, exact micros, immutable history, same-tenant API, and native six-month/30-day/allocation/pricing/commitment/charge/tag/resource UI exist; credentials, recurring export/blob delivery, production adapter, and live Azure acceptance remain. |
 | ADD-03 | Cloud Intelligence Dashboard for GCP | `gcp_cid` | `ABSENT` | Add GCP Cloud Billing export connection, collector, immutable normalized persistence, API, native visual reports, and live GCP validation. |
 | ADD-04 | FOCUS Dashboard | `focus` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-04-focus.md): AWS FOCUS 1.2 API/UI is implemented; official multi-version/provider consolidation, tag taxonomy, and effective discount rate remain. |
 | ADD-05 | AWS Marketplace Single Pane of Glass Dashboard | `marketplace_spg` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-05-marketplace-spg.md): immutable separated CUR2/control-plane history, same-tenant API, and native spend/agreement/entitlement UI exist; signed-broker deployment, richer offer/product typing, and live buyer acceptance remain. |
