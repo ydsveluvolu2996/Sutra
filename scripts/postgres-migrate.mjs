@@ -114,6 +114,8 @@ const migrationFiles = [
   "0100_finops_azure_cid.sql",
   "0101_finops_gcp_cloud_intelligence.sql",
   "0102_finops_dcf_execution_history.sql",
+  "0103_finops_cora_export_objects.sql",
+  "0104_finops_aws_budgets_durable_attempts.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

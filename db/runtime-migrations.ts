@@ -105,6 +105,7 @@ import finopsAzureCidSchemaSql from "../drizzle/0105_finops_azure_cid.sql?raw";
 import finopsGcpCloudIntelligenceSchemaSql from "../drizzle/0106_finops_gcp_cloud_intelligence.sql?raw";
 import finopsDcfExecutionHistorySchemaSql from "../drizzle/0107_finops_dcf_execution_history.sql?raw";
 import finopsCoraExportObjectsSchemaSql from "../drizzle/0108_finops_cora_export_objects.sql?raw";
+import finopsAwsBudgetsDurableAttemptsSchemaSql from "../drizzle/0109_finops_aws_budgets_durable_attempts.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -227,6 +228,7 @@ const migrations = [
   { id: "0106_finops_gcp_cloud_intelligence", statements: statementsFrom(finopsGcpCloudIntelligenceSchemaSql) },
   { id: "0107_finops_dcf_execution_history", statements: statementsFrom(finopsDcfExecutionHistorySchemaSql) },
   { id: "0108_finops_cora_export_objects", statements: statementsFrom(finopsCoraExportObjectsSchemaSql) },
+  { id: "0109_finops_aws_budgets_durable_attempts", statements: statementsFrom(finopsAwsBudgetsDurableAttemptsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

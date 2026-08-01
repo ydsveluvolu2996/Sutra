@@ -100,6 +100,7 @@ import postgresFinopsAzureCidSql from "../postgres/migrations/0100_finops_azure_
 import postgresFinopsGcpCloudIntelligenceSql from "../postgres/migrations/0101_finops_gcp_cloud_intelligence.sql?raw";
 import postgresFinopsDcfExecutionHistorySql from "../postgres/migrations/0102_finops_dcf_execution_history.sql?raw";
 import postgresFinopsCoraExportObjectsSql from "../postgres/migrations/0103_finops_cora_export_objects.sql?raw";
+import postgresFinopsAwsBudgetsDurableAttemptsSql from "../postgres/migrations/0104_finops_aws_budgets_durable_attempts.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -204,6 +205,7 @@ const migrations = [
   { id: "0101_finops_gcp_cloud_intelligence", source: postgresFinopsGcpCloudIntelligenceSql },
   { id: "0102_finops_dcf_execution_history", source: postgresFinopsDcfExecutionHistorySql },
   { id: "0103_finops_cora_export_objects", source: postgresFinopsCoraExportObjectsSql },
+  { id: "0104_finops_aws_budgets_durable_attempts", source: postgresFinopsAwsBudgetsDurableAttemptsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

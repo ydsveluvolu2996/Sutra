@@ -161,7 +161,7 @@ test("API and migrations enforce provider/internal separation, same-tenant reads
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /sutraInternalBudgetsIncluded: false/u);
   assert.match(route, /cid:budget-level/u);
-  assert.match(route, /AWS_BUDGETS_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED/u);
+  assert.match(route, /AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED/u);
   assert.doesNotMatch(route, /createBudget|updateBudget|deleteBudget|FinopsWorkspaceRepository/u);
   assert.match(repository, /deliberately unrelated to finops_budgets/u);
   for (const sql of [sqlite, postgres]) {
@@ -197,10 +197,10 @@ test("native report renders hierarchy, budgeted/actual/forecast, honest status, 
       schema: "sutra.finops-aws-budgets-dashboard.v1", connectionId: CONNECTION_A, source: "AWS_BUDGETS_PROVIDER", sourceState: "partial",
       freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", status: "fresh", ageHours: 1, staleAfterHours: 24 }, dashboard,
       history: [{ generationId: `abg_${"b".repeat(64)}`, sourceCaptureId: `awsbudgets_${"a".repeat(64)}`, state: "ready", hierarchyState: "complete", observedAtIso: "2026-08-01T01:00:00.000Z", dataThroughAtIso: "2026-08-01T00:00:00.000Z", budgetCount: 1, currencies: ["USD"], budgetLevels: ["BusinessUnit"] }],
-      evidence: { generationId: `abg_${"b".repeat(64)}` }, separation: { providerSource: "AWS_BUDGETS", sutraInternalBudgetsIncluded: false, reason: "Separate evidence." }, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" }, prerequisites: ["AWS Budgets", "AWS Organizations", "cid:budget-level"],
+      evidence: { generationId: `abg_${"b".repeat(64)}` }, separation: { providerSource: "AWS_BUDGETS", sutraInternalBudgetsIncluded: false, reason: "Separate evidence." }, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED" }, prerequisites: ["AWS Budgets", "AWS Organizations", "cid:budget-level"],
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.FinopsAwsBudgetsOrganizationReportView, { report, filters: { currency: "", budgetType: "", accountId: "", budgetLevel: "", namePrefix: "" }, onFiltersChange: () => undefined }));
-    for (const text of ["never includes or merges Sutra-authored", "cid:budget-level", "Budgeted", "Actual spend", "Forecasted spend", "Platform budget", "Provider status", "Budget performance history", "Collection evidence history", "AWS_BUDGETS_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED", "Coverage is partial"]) assert.match(html, new RegExp(text, "iu"));
+    for (const text of ["never includes or merges Sutra-authored", "cid:budget-level", "Budgeted", "Actual spend", "Forecasted spend", "Platform budget", "Provider status", "Budget performance history", "Collection evidence history", "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED", "Coverage is partial"]) assert.match(html, new RegExp(text, "iu"));
     assert.doesNotMatch(html, /fixture|sample|placeholder/iu);
   } finally { await vite.close(); }
 });

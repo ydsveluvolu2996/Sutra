@@ -27,12 +27,15 @@ The dashboard shows and groups:
 |---|---|---|
 | Trust boundary | Bounded capture normalization, exact account/tenant pinning, money and pagination validation, minimized tags | `lib/finops-aws-budgets-organization.ts` |
 | Collection job | Read-only signed-broker request contract with 30-minute deadline, exact operations, bounds, Organizations prerequisite, and `cid:budget-level` | `lib/finops-aws-budgets-collector-job.ts` |
+| Permanent binding | Six-hour scheduler enqueue contract, server-resolved scope, stable broker request identity, five-minute transport ceiling, durable handler factory, and explicit unregistered state | `lib/finops-aws-budgets-durable-binding.ts` |
+| Authenticated transport | Ed25519 request signing, exact-byte broker response verification, nonce binding, response/request digest reconciliation, HTTPS-only origin, bounded body, and sanitized failures | `lib/finops-aws-budgets-signed-broker.ts` |
+| Attempt evidence | Immutable per-queue-attempt ledger with same-tenant trust-role joins, exact replay, conflict rejection, provider-unavailable outcomes, signed request/response digests, and broker key lineage | `db/finops-aws-budgets-durable-attempt-repository.ts`, `drizzle/0109_finops_aws_budgets_durable_attempts.sql`, `postgres/migrations/0104_finops_aws_budgets_durable_attempts.sql` |
 | SQLite persistence | Immutable generations and complete-only, monotonic accepted head | `drizzle/0091_finops_aws_budgets_organization.sql` |
 | PostgreSQL persistence | Equivalent constraints/triggers plus `PUBLIC` revocation | `postgres/migrations/0086_finops_aws_budgets_organization.sql` |
 | Repository | Live connection/account/partition scope, digest revalidation, replay safety, incomplete-history retention | `db/finops-aws-budgets-organization-repository.ts` |
 | API | Authenticated `connection:read`, same-tenant connection resolution, bounded filters/cursor, active/latest disclosure | `app/api/v1/finops/aws-budgets-organization/route.ts` |
 | Native UI | Provider/source banner, hierarchy filters, separate budgeted/actual/forecast cards, status, drilldown, performance and generation history, safe CSV | `app/costs/finops-aws-budgets-organization-dashboard.tsx` |
-| Focused verification | Engine, repository, job, migration/API contracts, and SSR evidence rendering | `tests/finops-aws-budgets-organization.test.ts`, `tests/finops-aws-budgets-vertical.test.mjs` |
+| Focused verification | Engine, repository, job, migration/API contracts, SSR evidence rendering, scheduler scoping, replay, signature verification, sanitized failures, and immutable attempt history | `tests/finops-aws-budgets-organization.test.ts`, `tests/finops-aws-budgets-vertical.test.mjs`, `tests/finops-aws-budgets-durable-binding.test.mjs` |
 
 ## Data Collection prerequisites
 
@@ -58,14 +61,30 @@ taxonomy, or provider updates are never rendered as zero.
 
 ## Remaining production gates
 
-- The signed-broker job contract is implemented locally, but its permanent AWS
-  provider adapter is not yet deployed/bound to the scheduler.
+- The isolated scheduler and durable handler binding is complete, but it is
+  deliberately not added to the shared background-handler registry by this
+  vertical. Runtime state remains
+  `AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED` until the root release
+  integrates the job kind and six-hour scheduler.
+- The D1 and PostgreSQL attempt migrations are registered in the shared runtime;
+  the release migration/checksum gate must still execute them before the handler
+  is enabled.
+- The managed broker origin, application signing private key, broker response
+  public key, key identifiers, replay store, and permanent read-only AWS SDK
+  adapter must be provisioned in the deployed app/broker workloads. No local
+  test is evidence that those production secrets or tasks exist.
+- The provider adapter must demonstrate bounded pagination and timeout behavior
+  for every declared Budgets and Organizations operation. A signed unavailable
+  capture is retained honestly and cannot advance the complete evidence head.
 - Provider validation is still required for management-account and delegated-
   administrator collection, pagination, empty accounts, planned budgets,
   history-ineligible types, multi-currency, access denied, stale delivery,
   missing `cid:budget-level`, and cross-tenant denial.
-- Runtime migration registries, dashboard catalog/navigation, and the overall
-  CID tracker are integrated by the root release task.
+- Live acceptance requires at least one scheduled, cryptographically verified
+  tenant collection whose immutable attempt points to the persisted generation,
+  plus retry/replay, signature rejection, timeout, and unavailable-state checks
+  against the deployed broker. Dashboard catalog/navigation and the overall CID
+  tracker remain root-release responsibilities.
 
 Therefore ADV-08 is a local partial pipeline, not production accepted or live
 verified.

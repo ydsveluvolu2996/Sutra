@@ -120,7 +120,7 @@ export async function GET(request: Request): Promise<Response> {
         sutraInternalBudgetsIncluded: false,
         reason: "Sutra-authored budgets are a separate product source and are never merged with AWS Budgets.",
       },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
     });
     const freshness = currentFreshness(selected.snapshot);
     const snapshot = {
@@ -168,7 +168,7 @@ export async function GET(request: Request): Promise<Response> {
         sutraInternalBudgetsIncluded: dashboard.internalSutraBudgets.included,
         reason: dashboard.internalSutraBudgets.reason,
       },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED" },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
       prerequisites: [
         "AWS Budgets definitions and calculated spend in the connected payer or member account.",
         "AWS Organizations hierarchy reads from the management account or an authorized delegated administrator.",
