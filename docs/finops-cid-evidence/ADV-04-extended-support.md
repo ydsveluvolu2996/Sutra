@@ -16,6 +16,16 @@ evidence and signed-in production acceptance are pending.
 
 ## Official coverage
 
+The immutable AWS definition is pinned at framework commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`, path
+`dashboards/extended-support-cost-projection/extended-support-cost-projection-definition.yaml`,
+SHA-256 `6e50955ebeab4f2cbcc86c731c939e12c3fe4880d8132514f8de05042cfdb53f`.
+It contains exactly **5 sheets, 60 visuals, 17 parameter controls, 0 filter
+controls, 11 parameter declarations, 27 calculated fields and 68 filter
+groups**. The native dashboard renders the ordered RDS, EKS, OpenSearch,
+ElastiCache and About inventory; Aurora remains a separate evidence class in
+the official RDS sheet. Exact layout parity is not claimed.
+
 - Amazon ElastiCache cache clusters/replication groups
 - Amazon EKS clusters
 - Amazon RDS DB instances
@@ -34,6 +44,7 @@ separate evidence classes even though both use RDS APIs.
 - Job contract: `lib/finops-extended-support-collector-job.ts`
 - Durable runtime: `lib/finops-extended-support-runtime-binding.ts`
 - Exact-money projection: `lib/finops-extended-support-dashboard.ts`
+- Official definition: `lib/finops-extended-support-official-definition.ts`
 - SQLite: `drizzle/0102_finops_extended_support_projection.sql`
 - PostgreSQL: `postgres/migrations/0097_finops_extended_support_projection.sql`
 - Repository: `db/finops-extended-support-repository.ts`
@@ -90,7 +101,7 @@ or micro strings to remove binary floating-point inputs at ingestion.
 
 Until these gates pass, ADV-04 is not `LOCAL_VERIFIED` or `LIVE_VERIFIED`.
 
-Focused local result: **19 passed, 0 failed, 0 skipped** across the projection,
+Focused local result: **20 passed, 0 failed, 0 skipped** across the projection,
 runtime, repository, API and server-rendered UI suites; focused ESLint and diff
 checks passed. Full exact-tree type/build/security validation remains G7 after
 all concurrent dashboard work is integrated.
