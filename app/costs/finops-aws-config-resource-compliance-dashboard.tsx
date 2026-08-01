@@ -67,7 +67,7 @@ function statePresentation(connectionId: string | null, request: RequestState): 
   if (request.status === "loading") return { view: "loading", title: "Loading accepted AWS Config evidence", detail: "Reading the immutable same-tenant generation and bounded compliance projection." };
   if (request.status === "failed") return { view: "failed", title: "AWS Config evidence could not be verified", detail: request.message };
   const state = request.report.sourceState;
-  if (state === "configuration_required") return { view: state, title: "The permanent AWS Config collector is not active", detail: "The engine and dashboard boundary exist, but browser activation is disabled until the bounded server-owned adapter is implemented." };
+  if (state === "configuration_required") return { view: state, title: "The permanent AWS Config collector is not active", detail: "The bounded server-owned collector/job contract exists, but activation is disabled until its credential-owning adapter and durable handler are registered." };
   if (state === "partial") return { view: state, title: "AWS Config organization coverage is partial", detail: "The last complete generation remains visible while incomplete account, Region, source, or paginator coverage is explicit." };
   if (state === "stale") return { view: state, title: "Accepted AWS Config evidence is stale", detail: "The immutable accepted generation exceeds the 48-hour freshness target and is not presented as current." };
   if (state === "failed") return { view: state, title: "The latest AWS Config collection failed", detail: "A failed attempt never replaces the last complete accepted generation." };

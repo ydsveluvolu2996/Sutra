@@ -38,7 +38,7 @@ test("Config compliance API is authenticated, same-tenant, bounded, and cannot a
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /RESULT_BOUND = 500/u);
   assert.match(route, /parameters|getAll\(key\)\.length > 1/u);
-  assert.match(route, /AWS_CONFIG_COLLECTOR_ADAPTER_NOT_IMPLEMENTED/u);
+  assert.match(route, /AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED/u);
   assert.match(route, /activation: \{ available: false/u);
   assert.doesNotMatch(route, /StartConfigurationRecorder|PutConfigRule|DeleteConfigRule|StartResourceEvaluation/u);
 });
@@ -76,10 +76,10 @@ test("Config compliance report renders provider evidence without fixtures or com
       actualCosts: [{ currency: "USD", billedCostMicros: "1234567", amortizedCostMicros: "1234567", rowCount: 1 }],
       evidence: { snapshotId: `acc_${"b".repeat(64)}`, captureId: `config_${"c".repeat(64)}`, contentSha256: "b".repeat(64) },
       history: [{ snapshotId: `acc_${"b".repeat(64)}`, state: "READY", capturedAt: "2026-08-01T00:00:00.000Z", rules: 1, nonCompliantResources: 1 }],
-      activation: { available: false, reason: "AWS_CONFIG_COLLECTOR_ADAPTER_NOT_IMPLEMENTED" }, limitations: ["No compliance inference."],
+      activation: { available: false, reason: "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED" }, limitations: ["No compliance inference."],
     };
     const markup = renderToStaticMarkup(createElement(dashboardModule.FinopsAwsConfigResourceComplianceReportView, { report, filters: { accountId: "", region: "", ruleName: "", complianceType: "", resourceType: "" }, onFiltersChange: () => undefined }));
-    for (const value of ["encrypted-volumes", "vol-rendered", "111122223333", "AWS::EC2::Volume", "USD 1.234567", "9007199254740993", "AWS_CONFIG_COLLECTOR_ADAPTER_NOT_IMPLEMENTED"]) assert.match(markup, new RegExp(value, "u"));
+    for (const value of ["encrypted-volumes", "vol-rendered", "111122223333", "AWS::EC2::Volume", "USD 1.234567", "9007199254740993", "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED"]) assert.match(markup, new RegExp(value, "u"));
     assert.doesNotMatch(markup, /fixture|sample|placeholder/iu);
   } finally { await vite.close(); }
 });

@@ -246,6 +246,18 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Close production activation gaps dashboard by dashboard, then run exact-tree/provider/release/deployment acceptance |
 
+### 2026-08-01 — AWS Config collector/job activation contract
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-12 / production G2 contract advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Server-owned daily job payload; tenant-pinned aggregator/account/Region scope; exact aggregator, Organizations, rule-lifecycle, recorder and optional exact-prefix S3 operations; fixed inventory query; active reconciled CUR2 binding; bounded timeout; normalized persistence handoff |
+| Security | Mutation operations, raw provider messages, credential material, client tenancy and arbitrary S3 prefixes are excluded; trusted-scope and returned-scope substitution fail closed |
+| Focused verification | New job tests cover pinned operations/privacy/sources and adversarial payload/scope substitution; existing vertical tests continue to prove API/UI honesty |
+| Remaining gates | Register credential-owning AWS adapter and durable handler, schedule it, validate real organization aggregator coverage, and complete two-tenant/provider/live acceptance |
+| Release evidence | Source contract only; no image published or deployed |
+| Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

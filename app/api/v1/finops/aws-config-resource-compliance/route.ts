@@ -79,7 +79,7 @@ export async function GET(request: Request): Promise<Response> {
           snapshotId: latest.snapshotId, state: latest.state, capturedAt: latest.capturedAt,
           contentSha256: latest.contentSha256,
         },
-        activation: { available: false, reason: "AWS_CONFIG_COLLECTOR_ADAPTER_NOT_IMPLEMENTED" },
+        activation: { available: false, reason: "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED" },
       });
     }
 
@@ -143,10 +143,10 @@ export async function GET(request: Request): Promise<Response> {
         snapshotId: latest.snapshotId, state: latest.state, capturedAt: latest.capturedAt,
         contentSha256: latest.contentSha256,
       },
-      activation: { available: false, reason: "AWS_CONFIG_COLLECTOR_ADAPTER_NOT_IMPLEMENTED" },
+      activation: { available: false, reason: "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED" },
       limitations: [
         ...snapshot.limitations,
-        "Collection activation remains unavailable until the permanent bounded AWS Config collector adapter is implemented and provider-validated.",
+        "The bounded server-owned collector/job contract is implemented; activation remains unavailable until its credential-owning adapter and durable handler are registered and provider-validated.",
         "Tag-compliance fields and resource-specific configuration attributes are not collected by the minimized v1 inventory projection.",
       ],
     });
