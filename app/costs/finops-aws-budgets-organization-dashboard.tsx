@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { AwsBudgetsOfficialDefinition } from "../../lib/finops-aws-budgets-official-definition";
 import type { AwsBudgetsDashboard } from "../../lib/finops-aws-budgets-organization";
 import styles from "./finops-aws-budgets-organization-dashboard.module.css";
 
@@ -19,6 +20,7 @@ export interface AwsBudgetsDashboardEnvelope {
   readonly connectionId: string;
   readonly source: "AWS_BUDGETS_PROVIDER";
   readonly sourceState: SourceState;
+  readonly officialDefinition: AwsBudgetsOfficialDefinition;
   readonly freshness: { readonly dataThroughAt: string | null; readonly status: string; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly dashboard: AwsBudgetsDashboard;
   readonly history: readonly {
@@ -105,6 +107,27 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
       <strong>AWS Budgets provider evidence</strong>
       <span>This dashboard never includes or merges Sutra-authored budget guardrails. {report.separation.reason}</span>
     </div>
+    <section className={styles.official} aria-label="Official AWS Budgets definition coverage">
+      <header className={styles.panelHead}>
+        <div>
+          <h3>Official AWS definition coverage</h3>
+          <p>{report.officialDefinition.totals.sheets} sheets · {report.officialDefinition.totals.visuals} visuals · {report.officialDefinition.totals.parameterControls + report.officialDefinition.totals.filterControls} controls</p>
+        </div>
+        <small>Definition {report.officialDefinition.source.commit.slice(0, 12)} · {report.officialDefinition.source.sha256.slice(0, 16)}…</small>
+      </header>
+      <div className={styles.officialSheets}>
+        {report.officialDefinition.sheets.map((sheet) => (
+          <article key={sheet.id}>
+            <header><strong>{sheet.name}</strong><span>{sheet.visualCount} visuals</span></header>
+            <p>{sheet.parameterControls.length} parameter controls · {sheet.filterControls.length} filter controls</p>
+            <small>{[...sheet.parameterControls, ...sheet.filterControls].join(" · ") || "Source and limitation evidence"}</small>
+            {sheet.visuals.length === 0 ? <p>Immutable source, semantics, freshness and limitations are exposed below.</p> : (
+              <ul>{sheet.visuals.map((visual) => <li key={`${visual.name}:${visual.type}`} data-coverage={visual.coverage}><strong>{visual.name}</strong><span>{visual.type} · {visual.coverage.replaceAll("_", " ")}</span><small>{visual.note}</small></li>)}</ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
     {message ? <div role={report.sourceState === "failed" ? "alert" : "status"} className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="AWS Budgets hierarchy and grouping filters">
       <label>Currency<select value={filters.currency} onChange={(event) => set("currency", event.target.value)}><option value="">All currencies</option>{report.dashboard.coverage.currencies.map((value) => <option key={value}>{value}</option>)}</select></label>

@@ -1,5 +1,7 @@
 # ADV-08 — AWS Budgets Dashboard evidence
 
+Reviewed: 2026-08-01
+
 ## Capability and source boundary
 
 This vertical implements the AWS Cloud Intelligence Dashboards AWS Budgets
@@ -28,12 +30,20 @@ The dashboard shows and groups:
 
 Audited at CID framework commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`:
 <https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/aws-budgets/aws-budgets.yaml>.
-The official definition contains **Budget Summary** and **About** sheets. Its
-primary controls are Budget Status, Budget Name, Account Name/ID, Group By and
-Budget Level. Its core measures are budgeted, actual and forecasted cost,
-Healthy, Unhealthy, Forecasted Unhealthy and period-over-period totals. Sutra
-implements the evidence-backed status filters and totals but does not claim
-exact QuickSight geometry or Group By chart parity.
+The manifest SHA-256 is
+`9a9e2229e551332334363656ab4d1310fd3d73049bdce2eada46bd61c5a52de9`.
+Its embedded definition contains exactly **2 sheets, 11 visuals, 2 parameter
+controls, 5 filter-control objects, 3 parameter declarations, 11 calculated
+fields, 9 filter groups and 1 dataset**. The visual inventory is 2 pivot
+tables, 4 gauges, 1 bar chart, 1 combo chart, 1 Sankey diagram and 2 insights.
+Budget Summary owns all 11 visuals, 2 parameter controls and 4 filter controls;
+About has no visuals and one cross-sheet Account Name control.
+
+The native dashboard maps all 11 named visual purposes. Eight are supported by
+exact provider values, status counts, bounded drilldown and history. Three
+Group By/pivot/Sankey purposes are explicitly partial: account and
+`cid:budget-level` relationship evidence is present, but arbitrary QuickSight
+grouping and geometry are not claimed.
 
 ## G1-G6 status
 
@@ -43,7 +53,7 @@ exact QuickSight geometry or Group By chart parity.
 | G2 — source contract | `LOCAL_COMPLETE` | Bounded AWS Budgets and Organizations evidence, minimized exact hierarchy tag, currencies, pagination and no mutation operations. |
 | G3 — durable runtime/replay | `LOCAL_COMPLETE_CONTRACT` | Six-hour scheduling, stable request identity, signed broker transport, immutable attempt replay and timeout contracts exist; shared registration and live broker remain open. |
 | G4 — persistence/API | `LOCAL_COMPLETE` | Registered immutable storage, tenant-scoped authenticated API, bounded cursor/filters and health-status query support. |
-| G5 — native UI | `PARTIAL` | Budgeted/actual/forecast, hierarchy, status cards/filter, history and evidence render. Exact Group By charts and official asset-tree geometry remain open. |
+| G5 — native UI | `PARTIAL` | The exact 2-sheet/11-visual/7-control inventory, budgeted/actual/forecast evidence, hierarchy, status cards/filter, history and immutable source render. Arbitrary Group By chart/Sankey geometry remains open. |
 | G6 — validation/acceptance | `PARTIAL` | Focused engine, vertical and durable tests plus lint/type checks pass locally. Provider, browser/a11y and production acceptance remain open. |
 
 ## Implemented evidence path
@@ -51,6 +61,7 @@ exact QuickSight geometry or Group By chart parity.
 | Plane | Local implementation | Evidence |
 |---|---|---|
 | Trust boundary | Bounded capture normalization, exact account/tenant pinning, money and pagination validation, minimized tags | `lib/finops-aws-budgets-organization.ts` |
+| Official definition | Frozen source hash, exact object/type counts, sheet/control inventory and per-visual native coverage | `lib/finops-aws-budgets-official-definition.ts` |
 | Collection job | Read-only signed-broker request contract with 30-minute deadline, exact operations, bounds, Organizations prerequisite, and `cid:budget-level` | `lib/finops-aws-budgets-collector-job.ts` |
 | Permanent binding | Six-hour scheduler enqueue contract, server-resolved scope, stable broker request identity, five-minute transport ceiling, durable handler factory, and explicit unregistered state | `lib/finops-aws-budgets-durable-binding.ts` |
 | Authenticated transport | Ed25519 request signing, exact-byte broker response verification, nonce binding, response/request digest reconciliation, HTTPS-only origin, bounded body, and sanitized failures | `lib/finops-aws-budgets-signed-broker.ts` |
@@ -60,7 +71,7 @@ exact QuickSight geometry or Group By chart parity.
 | Repository | Live connection/account/partition scope, digest revalidation, replay safety, incomplete-history retention | `db/finops-aws-budgets-organization-repository.ts` |
 | API | Authenticated `connection:read`, same-tenant connection resolution, bounded filters/cursor, active/latest disclosure | `app/api/v1/finops/aws-budgets-organization/route.ts` |
 | Native UI | Provider/source banner, hierarchy and official health-status filters, separate budgeted/actual/forecast cards, health totals, drilldown, performance and generation history, safe CSV | `app/costs/finops-aws-budgets-organization-dashboard.tsx` |
-| Focused verification | Engine, repository, job, migration/API contracts, SSR evidence rendering, scheduler scoping, replay, signature verification, sanitized failures, and immutable attempt history | `tests/finops-aws-budgets-organization.test.ts`, `tests/finops-aws-budgets-vertical.test.mjs`, `tests/finops-aws-budgets-durable-binding.test.mjs` |
+| Focused verification | Exact official audit, engine, repository, job, migration/API contracts, SSR evidence rendering, scheduler scoping, replay, signature verification, sanitized failures, and immutable attempt history | `tests/finops-aws-budgets-official-definition.test.ts`, `tests/finops-aws-budgets-organization.test.ts`, `tests/finops-aws-budgets-vertical.test.mjs`, `tests/finops-aws-budgets-durable-binding.test.mjs` |
 
 ## Data Collection prerequisites
 
@@ -83,6 +94,11 @@ unavailable generations remain immutable history and cannot replace prior
 complete evidence. The API distinguishes configuration-required, partial,
 stale, empty, failed, and complete. Missing actual, forecast, hierarchy tags,
 taxonomy, or provider updates are never rendered as zero.
+
+Focused local verification: **24 passed, 0 failed, 0 skipped** across the exact
+definition, engine, durable binding, repository/API and server-rendered UI
+suites. Scoped lint and diff checks pass. The fixed-tree typecheck remains the
+shared integration gate after concurrent dashboard work settles.
 
 ## Remaining production gates
 

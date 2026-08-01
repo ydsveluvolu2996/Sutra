@@ -2,6 +2,7 @@ import { AwsBudgetsOrganizationRepository } from "../../../../../db/finops-aws-b
 import { FinopsFoundationalConfigRepository } from "../../../../../db/finops-foundational-config-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { AWS_BUDGETS_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-budgets-official-definition";
 import {
   buildAwsBudgetsOrganizationDashboard,
   type AwsBudgetType,
@@ -121,6 +122,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       source: "AWS_BUDGETS_PROVIDER",
       sourceState: "configuration_required",
+      officialDefinition: AWS_BUDGETS_OFFICIAL_DEFINITION,
       dashboard: null,
       separation: {
         providerSource: "AWS_BUDGETS",
@@ -156,6 +158,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       source: "AWS_BUDGETS_PROVIDER",
       sourceState,
+      officialDefinition: AWS_BUDGETS_OFFICIAL_DEFINITION,
       freshness: { dataThroughAt: snapshot.dataThroughAt, ...freshness },
       filters: parsed.query,
       dashboard,
