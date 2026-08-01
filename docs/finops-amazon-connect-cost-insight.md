@@ -16,6 +16,14 @@ granular billing/resource IDs, and endpoint/instance allocation requires the
 relevant Connect system cost-allocation tags. An absent resource ID or tag is
 therefore an explicit coverage limitation, never an inferred zero.
 
+The official Contact Center Analysis view also covers supporting AWS-service
+consumption in accounts running Connect while excluding Connect costs. The v1
+Sutra row schema accepts only `AMAZON_CONNECT` and
+`CONTACT_CENTER_TELECOM`; it therefore does not implement that broader
+supporting-service evidence plane. The runtime and UI disclose this explicitly.
+Full parity requires a separate normalized CUR2 channel with independent
+completeness and attribution semantics, not expansion of Connect totals.
+
 Authoritative AWS references:
 
 - <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/connect-cost-insight.html>
@@ -63,6 +71,32 @@ exact target-ARN enforcement, concurrency/page/record/time bounds, isolated
 collector identity, generic errors, and output schema validation are mandatory
 compensating controls. The collector must not offer these credentials or raw
 responses to the browser, application worker, or customer-facing API.
+
+## Durable runtime boundary
+
+`lib/finops-amazon-connect-cost-insight-runtime-binding.ts` defines the isolated
+production-shaped boundary. A daily durable job contains only the trusted
+organization/customer/connection identity and UTC window. The handler resolves
+the account, partition, Region, sorted instance ARNs, active reconciled CUR2
+generation and source evidence, permission attestation, classifier version,
+resource-ID/tag coverage, HMAC key version and contact-detail policy entirely
+from server state.
+
+The signed materializer request requires an exact authorized `TargetArn` for
+every phone-number list, forbids unscoped listing and traffic-distribution-group
+expansion, pins the API page size to 1,000, rejects pagination-token replay and
+requires per-instance exhaustion evidence. The request/capture hashes and
+ED25519 response are verified before normalization. The exact boundary,
+request, verification and privacy-safe capture are canonically archived,
+content-addressed as a deterministic `fss_` generation and sealed to tenant,
+connection, source and generation. An immutable handoff binds that evidence to
+the normalized `acig_` snapshot. Verified accepted retries avoid another
+provider call, archive or commit.
+
+Incomplete pagination, CUR2 exhaustion, permissions or freshness remain
+non-active history. Generic runtime codes replace provider messages, and the
+binding remains intentionally unregistered until all adapters and live controls
+exist.
 
 Global Resiliency traffic-distribution-group phone inventory is not in v1.
 Supporting it later requires a separate server-authorized traffic-distribution
