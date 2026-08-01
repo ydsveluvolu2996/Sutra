@@ -4,6 +4,23 @@ Status: `PARTIAL_PIPELINE` (local vertical and permanent runtime binding contrac
 
 ## Official capability mapping
 
+Pinned definition audit: CID framework commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`,
+<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/media-services-insights/msih-definition.yaml>.
+The nine official sheets are **Executive Summary**, **MediaLive Reservation &
+Savings**, **MediaConvert**, **MediaConnect**, **MediaLive**, **MediaTailor**,
+**MediaPackage**, **Raw Data**, and **About**. Sutra exposes these navigation
+areas as evidence views while marking reservation savings partial until governed
+comparison prices exist. Official service-specific controls (including Flow,
+Pipeline, Codec, Resolution, Bit Rate, Frame Rate, Quality, transcoding profile,
+usage category, cost model, pricing adjustments, lookback and Top N) remain
+exact-tree gaps where the normalized projection has no equivalent dimension.
+
+G1/G2/G3/G4 are local-complete contracts for inventory, source boundaries,
+durable runtime and persistence/API. G5 remains partial for exact service-sheet
+control and visual geometry. G6 remains partial pending provider and browser
+acceptance.
+
 | AWS Cloud Intelligence Dashboard lens | Sutra implementation | Evidence boundary |
 |---|---|---|
 | CUR2-backed executive summary | Cross-account/Region portfolio summary with signed micro-unit totals kept separate by currency and cost basis | Immutable active-CUR2 generation and manifest SHA only |
