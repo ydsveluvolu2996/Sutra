@@ -205,6 +205,70 @@ test("complete generations advance monotonically while partial generations remai
   });
 });
 
+test("active dashboard reads bounded standard-check account, check, resource, and history evidence", async () => {
+  await withRepository(async ({ repository }) => {
+    const manifest = await createManifest(repository, "ta-dashboard", [{
+      accountId: ACCOUNT_A,
+      targetConnectionId: CONNECTION_A,
+    }], Date.parse("2026-08-01T00:00:00.000Z"));
+    await repository.startManifest(
+      SCOPE_A,
+      manifest.manifestId,
+      Date.parse("2026-08-01T00:01:00.000Z"),
+    );
+    await acceptAccount(
+      repository,
+      manifest.manifestId,
+      ACCOUNT_A,
+      "2026-08-01T01:00:00.000Z",
+      "2026-08-01T00:30:00.000Z",
+      Date.parse("2026-08-01T01:01:00.000Z"),
+    );
+    const generation = await repository.finalizeManifest(
+      SCOPE_A,
+      manifest.manifestId,
+      Date.parse("2026-08-01T01:02:00.000Z"),
+    );
+    const latest = await repository.getLatestManifest(SCOPE_A);
+    assert.equal(latest?.manifestId, manifest.manifestId);
+    const dashboard = await repository.getActiveDashboard(SCOPE_A, {
+      accountId: ACCOUNT_A,
+      checkId: "check-1",
+      status: "warning",
+      region: "us-east-1",
+    });
+    assert.equal(dashboard?.snapshot.generationId, generation.generationId);
+    assert.equal(dashboard?.snapshot.status, "complete");
+    assert.deepEqual(dashboard?.accounts.map((account) => account.accountId), [ACCOUNT_A]);
+    assert.deepEqual(dashboard?.checks.map((check) => ({
+      id: check.checkId,
+      status: check.status,
+      flagged: check.flaggedCount,
+      accounts: check.accountCount,
+    })), [{ id: "check-1", status: "warning", flagged: 1, accounts: 1 }]);
+    assert.deepEqual(dashboard?.resources.map((resource) => ({
+      accountId: resource.accountId,
+      checkId: resource.checkId,
+      region: resource.region,
+      status: resource.status,
+    })), [{ accountId: ACCOUNT_A, checkId: "check-1", region: "us-east-1", status: "warning" }]);
+    assert.equal(dashboard?.resources[0]?.metadataJson, JSON.stringify({ service: "ec2", reason: "idle" }));
+    assert.deepEqual(dashboard?.history.map((entry) => entry.generationId), [generation.generationId]);
+    assert.equal(await repository.getActiveDashboard(SCOPE_B, {
+      accountId: null,
+      checkId: null,
+      status: null,
+      region: null,
+    }), null);
+    await assert.rejects(repository.getActiveDashboard(SCOPE_A, {
+      accountId: "not-an-account",
+      checkId: null,
+      status: null,
+      region: null,
+    }), expectCode("INVALID_INPUT"));
+  });
+});
+
 test("database guards reject evidence mutation, unbacked acceptance, and partial head promotion", async () => {
   await withRepository(async ({ database, repository }) => {
     const manifest = await createManifest(repository, "ta-guards", [{

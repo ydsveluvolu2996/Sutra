@@ -158,6 +158,14 @@ export async function GET(request: Request): Promise<Response> {
       });
     }
     const sourceUpdatedAtIso = dataset.evidence.activeSourceUpdatedAtIso;
+    const activeFileCount = dataset.evidence.activeFileCount;
+    const evidenceErrorCode = activeFileCount === null
+      ? "MANIFEST_OBJECT_COVERAGE_UNAVAILABLE"
+      : sourceUpdatedAtIso === null
+        ? "SOURCE_TIMESTAMPS_UNAVAILABLE"
+        : dataset.evidence.rejectedRows > 0
+          ? "SOURCE_ROWS_REJECTED"
+          : null;
     const report = buildDataTransferAnalysis(
       { scope: dataset.scope, payerAccountIds, usageAccountIds },
       {
@@ -177,15 +185,15 @@ export async function GET(request: Request): Promise<Response> {
           observedAtIso: dataset.evidence.activeObservedAtIso,
           payerAccountIds,
           usageAccountIds,
-          status: "PARTIAL",
-          manifestObjectCount: null,
-          processedObjectCount: null,
+          status: evidenceErrorCode === null ? "SUCCEEDED" : "PARTIAL",
+          manifestObjectCount: activeFileCount,
+          processedObjectCount: activeFileCount,
           sourceRowCount:
             dataset.evidence.acceptedRows + dataset.evidence.rejectedRows,
           acceptedRowCount: dataset.evidence.acceptedRows,
           rejectedRowCount: dataset.evidence.rejectedRows,
           rowsExhausted: true,
-          errorCode: "MANIFEST_OBJECT_COVERAGE_UNAVAILABLE",
+          errorCode: evidenceErrorCode,
         },
         rows: dataset.rows,
         groupLimit: query.groupLimit,

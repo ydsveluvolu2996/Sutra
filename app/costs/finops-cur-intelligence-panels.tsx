@@ -2,14 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
+  DataTransferCategory,
   DataTransferCostBasis,
+  DataTransferDirection,
   DataTransferSnapshot,
 } from "../../lib/finops-data-transfer";
+import { buildDataTransferEvidenceCsv } from "../../lib/finops-data-transfer-export";
 import type {
   FinopsTrendsExactRational,
   FinopsTrendsIntelligenceResult,
   FinopsTrendsSeries,
 } from "../../lib/finops-trends-intelligence";
+import { buildTrendsEvidenceCsv } from "../../lib/finops-trends-export";
 import styles from "./costs.module.css";
 
 type CurIntelligenceSection = "overview" | "services";
@@ -34,6 +38,14 @@ interface TrendsEnvelope {
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FinopsTrendsIntelligenceResult | null;
   readonly sourceState: string;
+}
+
+interface TrendsReportProps {
+  readonly report: Extract<FinopsTrendsIntelligenceResult, { ok: true }>;
+  readonly availablePeriods: readonly AvailablePeriod[];
+  readonly onFromPeriodChange: (period: string) => void;
+  readonly onToPeriodChange: (period: string) => void;
+  readonly onRollingWindowChange: (months: number) => void;
 }
 
 interface DataTransferEnvelope {
@@ -106,6 +118,37 @@ function relativeBasisPoints(value: string | null, maximum: bigint): number {
   return Number((absolute * BigInt(10_000)) / maximum);
 }
 
+function downloadTrendsEvidenceCsv(
+  report: Extract<FinopsTrendsIntelligenceResult, { ok: true }>,
+  series: FinopsTrendsSeries,
+): void {
+  const blob = new Blob([buildTrendsEvidenceCsv(report, series)], {
+    type: "text/csv;charset=utf-8",
+  });
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = `sutra-trends-${report.window.fromPeriod}-${report.window.toPeriod}-${series.currency}-${series.costBasis}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
+
+function downloadDataTransferEvidenceCsv(
+  report: DataTransferSnapshot,
+  rows: DataTransferSnapshot["drilldowns"],
+  costBasis: DataTransferCostBasis,
+): void {
+  const blob = new Blob([buildDataTransferEvidenceCsv(report, rows, costBasis)], {
+    type: "text/csv;charset=utf-8",
+  });
+  const href = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  anchor.download = `sutra-data-transfer-${report.scope.billingPeriod}-${costBasis}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(href);
+}
+
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -166,7 +209,7 @@ function SourceState({
 }
 
 function StatusBanner({ state, message }: { readonly state: string; readonly message: string }) {
-  if (state === "READY") return null;
+  if (state === "READY" || state === "COMPLETE") return null;
   return (
     <div className={styles.curBanner} data-state={state.toLowerCase()} role="status">
       <strong>{state.replaceAll("_", " ")}</strong>
@@ -175,9 +218,19 @@ function StatusBanner({ state, message }: { readonly state: string; readonly mes
   );
 }
 
-function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelligenceResult, { ok: true }> }) {
+export function TrendsReport({
+  report,
+  availablePeriods,
+  onFromPeriodChange,
+  onToPeriodChange,
+  onRollingWindowChange,
+}: TrendsReportProps) {
   const [currency, setCurrency] = useState(report.series[0]?.currency ?? "USD");
   const [costBasis, setCostBasis] = useState(report.series[0]?.costBasis ?? "unblended");
+  const [selectedPeriod, setSelectedPeriod] = useState(report.window.toPeriod);
+  const [contributorDimension, setContributorDimension] = useState<
+    "account" | "service" | "region" | "charge_category"
+  >("service");
   const selected = report.series.find((series) =>
     series.currency === currency && series.costBasis === costBasis)
     ?? report.series[0] ?? null;
@@ -191,7 +244,8 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
       const absolute = value < BigInt(0) ? -value : value;
       return absolute > largest ? absolute : largest;
     }, BigInt(1));
-  const current = selected?.points.at(-1) ?? null;
+  const current = selected?.points.find((point) => point.period === selectedPeriod)
+    ?? selected?.points.at(-1) ?? null;
   const monthOverMonthDetail = current === null
     ? "No period"
     : current.monthOverMonth.available
@@ -200,8 +254,30 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
         selected?.currency ?? currency,
       )
       : current.monthOverMonth.reason.replaceAll("_", " ");
-  const contributors = current?.contributors.flatMap((group) =>
-    group.contributors.map((entry) => ({ ...entry, dimension: group.dimension }))) ?? [];
+  const contributorGroups = current?.contributors ?? [];
+  const selectedContributorGroup = contributorGroups.find((group) =>
+    group.dimension === contributorDimension) ?? contributorGroups[0] ?? null;
+  const contributors = selectedContributorGroup?.contributors ?? [];
+  const rollingLabel = report.rollingWindowMonths === 12
+    ? "Rolling year over year"
+    : report.rollingWindowMonths === 3
+      ? "Rolling quarter over quarter"
+      : `${report.rollingWindowMonths}-month period over period`;
+  const rollingComparison = current?.rollingComparison ?? null;
+  const rollingDetail = rollingComparison === null
+    ? "No period"
+    : rollingComparison.available
+      ? formatCurMicrosExact(
+        rollingComparison.deltaMicros,
+        selected?.currency ?? currency,
+      )
+      : rollingComparison.reason.replaceAll("_", " ");
+  const periodOptions = [...new Set([
+    ...availablePeriods.map(({ period }) => period),
+    report.window.fromPeriod,
+    report.window.toPeriod,
+  ])]
+    .sort((left, right) => left.localeCompare(right));
   return (
     <section className={styles.curWorkspace} aria-label="Enterprise CUR2 trends intelligence">
       <StatusBanner
@@ -211,13 +287,18 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
       <header className={styles.curHeader}>
         <div><p className="eyebrow">Immutable CUR2 intelligence</p><h2>Enterprise cost trends</h2><p>Exact monthly comparisons, explainable signals, and ranked contributors from active reconciled generations only.</p></div>
         <div className={styles.curFilters}>
+          <label>From period<select aria-label="Trends start period" value={report.window.fromPeriod} onChange={(event) => onFromPeriodChange(event.target.value)}>{periodOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>To period<select aria-label="Trends end period" value={report.window.toPeriod} onChange={(event) => onToPeriodChange(event.target.value)}>{periodOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <label>Comparison<select aria-label="Trends comparison window" value={String(report.rollingWindowMonths)} onChange={(event) => onRollingWindowChange(Number(event.target.value))}><option value="1">Monthly</option><option value="3">Quarterly</option><option value="12">Yearly</option></select></label>
           <label>Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}>{currencies.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label>Cost basis<select value={costBasis} onChange={(event) => setCostBasis(event.target.value as FinopsTrendsSeries["costBasis"])}>{bases.map((item) => <option key={item}>{item}</option>)}</select></label>
+          <button type="button" disabled={selected === null} onClick={() => { if (selected !== null) downloadTrendsEvidenceCsv(report, selected); }}>Export evidence CSV</button>
         </div>
       </header>
       <div className={styles.curKpis}>
-        <article><small>Current period</small><strong>{formatCurMicrosExact(current?.totalMicros ?? null, selected?.currency ?? currency)}</strong><span>{current?.period ?? "Not available"}</span></article>
+        <article><small>Selected period</small><strong>{formatCurMicrosExact(current?.totalMicros ?? null, selected?.currency ?? currency)}</strong><span>{current?.period ?? "Not available"}</span></article>
         <article><small>Month over month</small><strong>{current?.monthOverMonth.available ? formatCurRationalPercentExact(current.monthOverMonth.percent) : "Not available"}</strong><span>{monthOverMonthDetail}</span></article>
+        <article><small>{rollingLabel}</small><strong>{current?.rollingComparison.available ? formatCurRationalPercentExact(current.rollingComparison.percent) : "Not available"}</strong><span>{rollingDetail}</span></article>
         <article><small>Evidence coverage</small><strong>{report.summary.completePeriodCount}/{report.window.periodCount}</strong><span>{report.summary.sourceRowCount.toLocaleString("en-US")} accepted rows</span></article>
         <article><small>Explainable signals</small><strong>{report.summary.signalCount}</strong><span>pinned thresholds · no forecast</span></article>
       </div>
@@ -225,23 +306,28 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
         <div className={styles.curGrid}>
           <article className={styles.curPanel}>
             <div className={styles.curPanelHeading}><div><small>Monthly evidence</small><h3>{selected.currency} · {selected.costBasis}</h3></div><span>{report.window.fromPeriod} — {report.window.toPeriod}</span></div>
-            <div className={styles.curChart} role="img" aria-label={`Exact ${selected.currency} ${selected.costBasis} monthly cost trend`}>
+            <div className={styles.curChart} role="group" aria-label={`Exact ${selected.currency} ${selected.costBasis} monthly cost trend; choose a month to update every companion panel`}>
               {selected.points.map((point) => (
-                <div className={styles.curColumn} key={point.period}>
+                <button className={styles.curColumn} type="button" key={point.period} aria-pressed={current?.period === point.period} onClick={() => setSelectedPeriod(point.period)} title={`${point.period}: ${formatCurMicrosExact(point.totalMicros, selected.currency)}; ${point.periodState.replaceAll("_", " ")}`}>
                   <span>{formatCurMicrosExact(point.totalMicros, selected.currency)}</span>
                   <i style={{ height: `${Math.max(3, relativeBasisPoints(point.totalMicros, maximum) / 100)}%` }} data-state={point.periodState.toLowerCase()} />
                   <b>{point.period.slice(5)}</b><small>{point.periodState.replaceAll("_", " ")}</small>
-                </div>
+                </button>
               ))}
             </div>
           </article>
           <article className={styles.curPanel}>
-            <div className={styles.curPanelHeading}><div><small>Cost movers</small><h3>Current-period contributors</h3></div><span>{contributors.length} shown</span></div>
-            {contributors.length === 0 ? <p className={styles.emptyNote}>A complete prior period is required before contributor movement can be ranked.</p> : (
+            <div className={styles.curPanelHeading}><div><small>One-click drilldown</small><h3>{current?.period ?? "Current"} movement contributors</h3></div><span>{contributors.length} shown</span></div>
+            <div className={styles.curDimensionTabs} role="group" aria-label="Movement contributor dimension">{contributorGroups.map((group) => (
+              <button type="button" key={group.dimension} aria-pressed={group.dimension === contributorDimension} onClick={() => setContributorDimension(group.dimension)}>{group.dimension.replaceAll("_", " ")} <span>{group.totalDimensionValues}</span></button>
+            ))}</div>
+            {contributors.length === 0 ? <p className={styles.emptyNote}>A complete prior period is required before {contributorDimension.replaceAll("_", " ")} movement can be ranked.</p> : (
               <ul className={styles.curContributors}>{contributors.slice(0, 12).map((entry) => (
-                <li key={`${entry.dimension}:${entry.value ?? "unknown"}`}><span><b>{entry.value ?? "Unallocated"}</b><small>{entry.dimension.replaceAll("_", " ")}</small></span><span><strong>{formatCurMicrosExact(entry.deltaMicros, selected.currency)}</strong><small>{formatCurRationalPercentExact(entry.absoluteMovementShare)}</small></span></li>
+                <li key={`${contributorDimension}:${entry.value ?? "unknown"}`}><span><b>{entry.value ?? "Unallocated"}</b><small>{contributorDimension.replaceAll("_", " ")}</small></span><span><strong>{formatCurMicrosExact(entry.deltaMicros, selected.currency)}</strong><small>{formatCurRationalPercentExact(entry.absoluteMovementShare)}</small></span></li>
               ))}</ul>
             )}
+            {contributorDimension === "account" ? <p className={styles.curBoundaryNote}>CUR2 usage account IDs are shown. Organization-friendly and payer account names remain unavailable until authoritative Organizations taxonomy is joined.</p> : null}
+            {contributorDimension === "region" ? <p className={styles.curBoundaryNote}>This is exact regional cost movement, not the official geographic usage map; usage magnitude and coordinates are not inferred from cost.</p> : null}
           </article>
         </div>
       )}
@@ -249,7 +335,16 @@ function TrendsReport({ report }: { readonly report: Extract<FinopsTrendsIntelli
         <div className={styles.curPanelHeading}><div><small>Pinned policy</small><h3>Signals requiring review</h3></div><span>Informational, not a forecast</span></div>
         {(current?.signals.length ?? 0) === 0 ? <p className={styles.emptyNote}>No pinned threshold was crossed for the selected current period.</p> : current?.signals.map((signal) => <article key={signal.code}><span>{signal.severity}</span><div><strong>{signal.code.replaceAll("_", " ")}</strong><p>{signal.explanation}</p><small>{formatCurRationalPercentExact(signal.observedPercent)} · {signal.baseline.replaceAll("_", " ")}</small></div></article>)}
       </section>
-      <footer className={styles.curEvidence}>Active generations {report.summary.activeGenerationCount} · evaluated {new Date(report.evaluatedAtIso).toLocaleString()} · forecast withheld ({report.forecast.reason.replaceAll("_", " ").toLowerCase()})</footer>
+      <details className={styles.curEvidenceDrawer}>
+        <summary>Evidence, lineage, formulas, and parity limits</summary>
+        <div className={styles.curEvidenceGrid}>
+          <dl><div><dt>Connection</dt><dd>{report.tenant.connectionId}</dd></div><div><dt>Export</dt><dd>{report.tenant.exportName}</dd></div><div><dt>Evaluated</dt><dd>{new Date(report.evaluatedAtIso).toLocaleString()}</dd></div><div><dt>Active generations</dt><dd>{report.summary.activeGenerationCount}</dd></div></dl>
+          <div><strong>Explainable signal policy</strong><ul><li>{report.signalPolicy.formulas.momAbsolutePercentChange}</li><li>{report.signalPolicy.formulas.trailingBaselineDeviation}</li></ul></div>
+          <div><strong>Official parity boundary</strong><ul><li>Forecast is withheld: {report.forecast.reason.replaceAll("_", " ").toLowerCase()}.</li><li>QuickSight threshold alerts and scheduled report delivery are not connected to this view.</li><li>Service-category taxonomy, payer/friendly account names, and a geographic usage map need authoritative source inputs.</li></ul></div>
+        </div>
+        <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Immutable billing generation evidence by trends period</caption><thead><tr><th>Period</th><th>State</th><th>Generation</th><th>Manifest</th><th>Rows</th><th>Committed</th></tr></thead><tbody>{report.periods.map((period) => <tr key={period.period}><td>{period.period}</td><td><strong>{period.state}</strong><small>{period.stateReasons.join(", ")}</small></td><td>{period.generationId ?? "Not available"}</td><td>{period.lineage?.manifestSha256 ?? "Not available"}</td><td>{period.rowCount ?? "Not available"}</td><td>{period.lineage === null ? "Not available" : new Date(period.lineage.committedAtIso).toLocaleString()}</td></tr>)}</tbody></table></div>
+      </details>
+      <footer className={styles.curEvidence}>Active generations {report.summary.activeGenerationCount} · evaluated {new Date(report.evaluatedAtIso).toLocaleString()} · informational review signals are not AWS Cost Anomaly Detection findings</footer>
     </section>
   );
 }
@@ -261,12 +356,29 @@ function transferCost(
   return costs.find((cost) => cost.basis === basis)?.totalMicros ?? null;
 }
 
-function DataTransferReport({ report }: { readonly report: DataTransferSnapshot }) {
+export function DataTransferReport({ report }: { readonly report: DataTransferSnapshot }) {
   const currencies = [...new Set(report.categorySummaries.map((item) => item.currency))];
   const [currency, setCurrency] = useState(currencies[0] ?? "USD");
   const [costBasis, setCostBasis] = useState<DataTransferCostBasis>("amortized");
-  const categories = report.categorySummaries.filter((item) => item.currency === currency);
-  const drilldowns = report.drilldowns.filter((item) => item.currency === currency);
+  const [category, setCategory] = useState<DataTransferCategory | "ALL">("ALL");
+  const [direction, setDirection] = useState<DataTransferDirection | "ALL">("ALL");
+  const [account, setAccount] = useState("ALL");
+  const [service, setService] = useState("ALL");
+  const [region, setRegion] = useState("ALL");
+  const currencyRows = report.drilldowns.filter((item) => item.currency === currency);
+  const categories = report.categorySummaries.filter((item) =>
+    item.currency === currency && (category === "ALL" || item.category === category));
+  const categoryOptions = [...new Set(currencyRows.map((item) => item.category))].sort();
+  const directionOptions = [...new Set(currencyRows.map((item) => item.direction))].sort();
+  const accountOptions = [...new Set(currencyRows.map((item) => item.usageAccountId))].sort();
+  const serviceOptions = [...new Set(currencyRows.map((item) => item.service))].sort();
+  const regionOptions = [...new Set(currencyRows.map((item) => item.region ?? "NOT_REPORTED"))].sort();
+  const drilldowns = currencyRows.filter((item) =>
+    (category === "ALL" || item.category === category)
+    && (direction === "ALL" || item.direction === direction)
+    && (account === "ALL" || item.usageAccountId === account)
+    && (service === "ALL" || item.service === service)
+    && (region === "ALL" || (item.region ?? "NOT_REPORTED") === region));
   return (
     <section className={styles.curWorkspace} aria-label="Enterprise AWS data-transfer intelligence">
       <StatusBanner
@@ -274,12 +386,20 @@ function DataTransferReport({ report }: { readonly report: DataTransferSnapshot 
         message={report.source.objectCoverage.status === "unavailable" ? "Row evidence is active and reconciled, but manifest object counts were not retained; completeness remains partial." : "The selected source generation is not fully fresh and ready."}
       />
       <header className={styles.curHeader}>
-        <div><p className="eyebrow">AWS Data Transfer</p><h2>Transfer cost intelligence</h2><p>Internet, inter-Region, inter-AZ, and CloudFront classification with exact cost, byte, account, service, and resource drilldowns.</p></div>
+        <div><p className="eyebrow">AWS Data Transfer</p><h2>Transfer cost intelligence</h2><p>Charged internet, Global Accelerator, inter-Region, inter-AZ, and CloudFront evidence with exact cost, byte, account, service, Region, Availability Zone, and resource drilldowns.</p></div>
         <div className={styles.curFilters}>
           <label>Currency<select value={currency} onChange={(event) => setCurrency(event.target.value)}>{currencies.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label>Cost basis<select value={costBasis} onChange={(event) => setCostBasis(event.target.value as DataTransferCostBasis)}>{["unblended", "net", "amortized", "list", "contracted", "public"].map((item) => <option key={item}>{item}</option>)}</select></label>
+          <button type="button" disabled={drilldowns.length === 0} onClick={() => downloadDataTransferEvidenceCsv(report, drilldowns, costBasis)}>Export filtered evidence</button>
         </div>
       </header>
+      <div className={styles.curTransferFilters} role="group" aria-label="Data-transfer drilldown filters">
+        <label>Category<select value={category} onChange={(event) => setCategory(event.target.value as DataTransferCategory | "ALL")}><option value="ALL">All categories</option>{categoryOptions.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>
+        <label>Direction<select value={direction} onChange={(event) => setDirection(event.target.value as DataTransferDirection | "ALL")}><option value="ALL">All directions</option>{directionOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Account<select value={account} onChange={(event) => setAccount(event.target.value)}><option value="ALL">All accounts</option>{accountOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Service<select value={service} onChange={(event) => setService(event.target.value)}><option value="ALL">All services</option>{serviceOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>Region<select value={region} onChange={(event) => setRegion(event.target.value)}><option value="ALL">All Regions</option>{regionOptions.map((item) => <option key={item} value={item}>{item === "NOT_REPORTED" ? "Not reported" : item}</option>)}</select></label>
+      </div>
       <div className={styles.curKpis}>
         <article><small>Transfer candidates</small><strong>{report.coverage.transferCandidateRowCount.toLocaleString("en-US")}</strong><span>{report.coverage.classification} classification</span></article>
         <article><small>Classified rows</small><strong>{report.coverage.classifiedRowCount.toLocaleString("en-US")}</strong><span>{report.coverage.unclassifiedRowCount + report.coverage.unknownRowCount} need review</span></article>
@@ -287,14 +407,22 @@ function DataTransferReport({ report }: { readonly report: DataTransferSnapshot 
         <article><small>Manifest coverage</small><strong>{report.source.objectCoverage.status}</strong><span>{report.source.errorCode?.replaceAll("_", " ") ?? "Complete evidence"}</span></article>
       </div>
       {categories.length === 0 ? <p className={styles.emptyNote}>No data-transfer candidates were classified for this currency and period.</p> : (
-        <div className={styles.curCategoryGrid}>{categories.map((item) => <article key={`${item.category}:${item.currency}`}><small>{item.category.replaceAll("_", " ")}</small><strong>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</strong><span>{item.rowCount} rows · {item.directionCounts.OUTBOUND} outbound</span><i>{item.normalizedBytesMicros === null ? "Bytes unavailable" : `${grouped(item.normalizedBytesMicros)} microbytes`}</i></article>)}</div>
+        <div className={styles.curCategoryGrid} aria-label="Charged transfer category summary">{categories.map((item) => <article key={`${item.category}:${item.currency}`}><small>{item.category.replaceAll("_", " ")}</small><strong>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</strong><span>{item.rowCount} rows · {item.directionCounts.OUTBOUND} outbound · {item.directionCounts.INBOUND} inbound</span><i>{item.normalizedBytesMicros === null ? "Bytes unavailable" : `${grouped(item.normalizedBytesMicros)} microbytes`}</i></article>)}</div>
       )}
       <article className={styles.curPanel}>
         <div className={styles.curPanelHeading}><div><small>Resource evidence</small><h3>Transfer drilldown</h3></div><span>{drilldowns.length} groups</span></div>
         {drilldowns.length === 0 ? <p className={styles.emptyNote}>No evidence-backed transfer group is available.</p> : (
-          <div className={styles.curTableWrap}><table className={styles.curTable}><caption>Data-transfer cost by category, direction, account, service, region, and resource</caption><thead><tr><th>Category</th><th>Direction</th><th>Account / service</th><th>Region / resource</th><th>{costBasis} cost</th><th>Evidence</th></tr></thead><tbody>{drilldowns.slice(0, 40).map((item) => <tr key={`${item.category}:${item.direction}:${item.usageAccountId}:${item.service}:${item.region}:${item.resourceId}`}><td>{item.category.replaceAll("_", " ")}</td><td>{item.direction}</td><td><strong>{item.usageAccountId}</strong><small>{item.service}</small></td><td><strong>{item.region ?? "Not reported"}</strong><small>{item.resourceId ?? "Resource not reported"}</small></td><td>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</td><td><strong>{item.rowCount} rows</strong><small>{item.classificationRuleIds.join(", ")}</small></td></tr>)}</tbody></table></div>
+          <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Data-transfer cost by category, direction, account, service, Region, Availability Zone, and resource</caption><thead><tr><th>Category</th><th>Direction</th><th>Account / service</th><th>Region / AZ / resource</th><th>{costBasis} cost</th><th>Evidence</th></tr></thead><tbody>{drilldowns.slice(0, 40).map((item) => <tr key={`${item.category}:${item.direction}:${item.usageAccountId}:${item.service}:${item.region}:${item.availabilityZone}:${item.resourceId}`}><td>{item.category.replaceAll("_", " ")}</td><td>{item.direction}</td><td><strong>{item.usageAccountId}</strong><small>{item.service}</small></td><td><strong>{item.region ?? "Region not reported"}</strong><small>{item.availabilityZone ?? "AZ not reported"} · {item.resourceId ?? "Resource not reported"}</small></td><td>{formatCurMicrosExact(transferCost(item.costs, costBasis), item.currency)}</td><td><strong>{item.rowCount} rows</strong><small>{item.classificationRuleIds.join(", ")}</small></td></tr>)}</tbody></table></div>
         )}
       </article>
+      <details className={styles.curEvidenceDrawer}>
+        <summary>Evidence, lineage, classification, and official parity limits</summary>
+        <div className={styles.curEvidenceGrid}>
+          <dl><div><dt>Generation</dt><dd>{report.scope.generationId}</dd></div><div><dt>Manifest SHA-256</dt><dd>{report.source.manifestSha256 ?? "Not available"}</dd></div><div><dt>Manifest objects</dt><dd>{report.source.objectCoverage.manifestObjectCount ?? "Not retained"}</dd></div><div><dt>Processed objects</dt><dd>{report.source.objectCoverage.processedObjectCount ?? "Not retained"}</dd></div></dl>
+          <div><strong>Pinned classification</strong><ul><li>{report.taxonomy.id} · {report.taxonomy.version}</li><li>{report.taxonomy.sha256}</li><li>{report.coverage.unclassifiedRowCount} unclassified and {report.coverage.unknownRowCount} unknown rows remain visible.</li></ul></div>
+          <div><strong>Official parity boundary</strong><ul>{report.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}<li>Global Accelerator cards show billed CUR evidence; they do not simulate a future pricing quote.</li><li>CUR Region and Availability Zone fields are not inferred traffic endpoints.</li></ul></div>
+        </div>
+      </details>
       <footer className={styles.curEvidence}>Generation {report.scope.generationId.slice(0, 16)}… · taxonomy {report.taxonomy.version} · {report.source.dataThroughAtIso === null ? "source freshness unavailable" : `source updated ${new Date(report.source.dataThroughAtIso).toLocaleString()}`}</footer>
     </section>
   );
@@ -306,6 +434,9 @@ export function FinopsCurIntelligencePanels({
 }: CurIntelligenceProps) {
   const [reloadToken, setReloadToken] = useState(0);
   const [period, setPeriod] = useState<string | null>(null);
+  const [trendsFromPeriod, setTrendsFromPeriod] = useState<string | null>(null);
+  const [trendsToPeriod, setTrendsToPeriod] = useState<string | null>(null);
+  const [trendsRollingWindow, setTrendsRollingWindow] = useState(3);
   const [state, setState] = useState<LoadState<TrendsEnvelope | DataTransferEnvelope>>({ status: "loading" });
   const retry = useCallback(() => {
     setState({ status: "loading" });
@@ -320,8 +451,12 @@ export function FinopsCurIntelligencePanels({
     const query = new URLSearchParams({ connectionId });
     if (section === "overview") {
       query.set("costBases", "unblended,amortized");
-      query.set("rollingWindowMonths", "3");
+      query.set("rollingWindowMonths", String(trendsRollingWindow));
       query.set("contributorLimit", "8");
+      if (trendsFromPeriod !== null && trendsToPeriod !== null) {
+        query.set("fromPeriod", trendsFromPeriod);
+        query.set("toPeriod", trendsToPeriod);
+      }
     } else {
       query.set("groupLimit", "250");
       if (period !== null) query.set("period", period);
@@ -347,7 +482,7 @@ export function FinopsCurIntelligencePanels({
       });
     });
     return () => controller.abort();
-  }, [connectionId, period, reloadToken, section]);
+  }, [connectionId, period, reloadToken, section, trendsFromPeriod, trendsRollingWindow, trendsToPeriod]);
 
   const periodOptions = useMemo(() => state.status === "ready"
     ? state.envelope.availablePeriods
@@ -370,7 +505,26 @@ export function FinopsCurIntelligencePanels({
     if (report === null || !report.ok) {
       return <section className={styles.curState} role="alert"><span aria-hidden="true">!</span><div><strong>Trends evidence was rejected</strong><p>{report?.failures.map((failure) => failure.code).join(" · ") ?? "Unknown engine rejection"}</p></div><button type="button" onClick={retry}>Retry</button></section>;
     }
-    return <TrendsReport report={report} />;
+    const trendsEnvelope = envelope as TrendsEnvelope;
+    return <TrendsReport
+      report={report}
+      availablePeriods={trendsEnvelope.availablePeriods}
+      onFromPeriodChange={(nextPeriod) => {
+        setTrendsFromPeriod(nextPeriod);
+        setTrendsToPeriod((current) => {
+          const effective = current ?? trendsEnvelope.selectedWindow?.toPeriod ?? nextPeriod;
+          return effective < nextPeriod ? nextPeriod : effective;
+        });
+      }}
+      onToPeriodChange={(nextPeriod) => {
+        setTrendsToPeriod(nextPeriod);
+        setTrendsFromPeriod((current) => {
+          const effective = current ?? trendsEnvelope.selectedWindow?.fromPeriod ?? nextPeriod;
+          return effective > nextPeriod ? nextPeriod : effective;
+        });
+      }}
+      onRollingWindowChange={setTrendsRollingWindow}
+    />;
   }
   const transferReport = (envelope as DataTransferEnvelope).report!;
   return <>{periodControl}<DataTransferReport key={transferReport.scope.generationId} report={transferReport} /></>;

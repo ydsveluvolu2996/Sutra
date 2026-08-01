@@ -242,6 +242,7 @@ class Repository implements FinopsS3IngestionRepository {
       generation,
       acceptedRows: reconciliation.acceptedRows,
       rejectedRows: reconciliation.rejectedRows,
+      processedObjectCount: reconciliation.processedObjectCount,
       currencyTotals: reconciliation.currencyTotals,
       alreadyCommitted: false,
       committedAtIso: "2026-07-31T12:00:00.000Z",

@@ -24,7 +24,9 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const POSITIVE_INTEGER = /^(?:[1-9]|[1-4]\d|50)$/u;
 const ROLLING_WINDOW = /^(?:[1-9]|1[0-2])$/u;
-const MAX_WINDOW_PERIODS = 12;
+// Three years keeps month, quarter and rolling-year comparisons useful while
+// the engine's 500k-row cap still fails closed before partition bodies load.
+const MAX_WINDOW_PERIODS = 36;
 const ALLOWED_QUERY_PARAMETERS = new Set([
   "connectionId",
   "fromPeriod",
@@ -206,7 +208,7 @@ export async function GET(request: Request): Promise<Response> {
     const repository = new FinopsActiveBillingQueryRepository();
     const history = canonicalCur2History(
       await repository.listActivePartitions(owner),
-    );
+    ).slice(0, FINOPS_TRENDS_INTELLIGENCE_BOUNDS.maximumPeriods);
     const availablePeriods = history.map((partition) => ({
       period: partition.scope.billingPeriod,
       generationId: partition.scope.generationId,

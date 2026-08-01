@@ -119,7 +119,7 @@ async function withDatabase(run) {
   }
 }
 
-async function manifest(revision) {
+async function manifest(revision, fileCount = 1) {
   const result = await validateFinopsDataExportManifest({
     scope: {
       organizationId: ORG_A,
@@ -143,9 +143,8 @@ async function manifest(revision) {
         "line_item_unblended_cost",
         `revision_${revision}`,
       ],
-      dataFiles: [
-        `exports/aws-cur/data/BILLING_PERIOD=2026-07/aws-cur-${revision}.csv.gz`,
-      ],
+      dataFiles: Array.from({ length: fileCount }, (_, index) =>
+        `exports/aws-cur/data/BILLING_PERIOD=2026-07/aws-cur-${revision}-${index}.csv.gz`),
     },
   });
   if (!result.ok) throw new Error(result.rejection.message);
@@ -163,8 +162,8 @@ function canonicalLines(count, prefix = "line") {
   return parsed.lines;
 }
 
-async function publish(writer, revision, lines, rejectedRows = 0) {
-  const began = await writer.beginValidatedManifest(await manifest(revision));
+async function publish(writer, revision, lines, rejectedRows = 0, fileCount = 1) {
+  const began = await writer.beginValidatedManifest(await manifest(revision, fileCount));
   if (began.action !== "stage") throw new Error("fixture must stage");
   for (let index = 0; index < lines.length; index += 250) {
     await writer.stageCanonicalLines(
@@ -179,6 +178,7 @@ async function publish(writer, revision, lines, rejectedRows = 0) {
     {
       acceptedRows: lines.length,
       rejectedRows,
+      processedObjectCount: fileCount,
       currencyTotals: { USD: String(lines.length * 1_000_000) },
     },
     Date.parse(`2026-07-31T12:${String(revision).padStart(2, "0")}:30Z`),
@@ -225,6 +225,7 @@ test("pages more than 1,000 active rows by stable ID and keeps staging correctio
       1,
       canonicalLines(1_001, "active"),
       7,
+      2,
     );
     const [ready] = await reader.listActivePartitions(OWNER_A);
     assert.ok(ready);
@@ -239,6 +240,7 @@ test("pages more than 1,000 active rows by stable ID and keeps staging correctio
     assert.equal(ready.evidence.activeManifestSha256, activeGeneration.generationId.slice(4));
     assert.equal(ready.evidence.acceptedRows, 1_001);
     assert.equal(ready.evidence.rejectedRows, 7);
+    assert.equal(ready.evidence.activeFileCount, 2);
     assert.equal(
       ready.evidence.activeSourceUpdatedAtIso,
       "2026-07-31T11:01:00.000Z",
@@ -269,7 +271,7 @@ test("pages more than 1,000 active rows by stable ID and keeps staging correctio
       repositoryError("INVALID_INPUT"),
     );
 
-    const correction = await writer.beginValidatedManifest(await manifest(2));
+    const correction = await writer.beginValidatedManifest(await manifest(2, 3));
     if (correction.action !== "stage") throw new Error("fixture must stage");
     await writer.stageCanonicalLines(
       OWNER_A,
@@ -288,6 +290,11 @@ test("pages more than 1,000 active rows by stable ID and keeps staging correctio
       duringCorrection.evidence.rejectedRows,
       7,
       "the active generation retains its immutable rejection evidence",
+    );
+    assert.equal(
+      duringCorrection.evidence.activeFileCount,
+      2,
+      "staging manifest coverage must not replace active evidence",
     );
     assert.equal(
       duringCorrection.evidence.activeSourceUpdatedAtIso,
@@ -333,6 +340,21 @@ test("pages more than 1,000 active rows by stable ID and keeps staging correctio
         line.lineItemId.startsWith("staging-")),
       false,
     );
+  });
+});
+
+test("legacy active generations keep unverifiable manifest coverage nullable", async () => {
+  await withDatabase(async ({ database, writer, reader }) => {
+    await publish(writer, 1, canonicalLines(1));
+    await database.prepare(
+      "UPDATE finops_export_partitions SET active_file_count = NULL WHERE connection_id = ?",
+    ).bind(CONNECTION_A).run();
+    const [partition] = await reader.listActivePartitions(OWNER_A);
+    assert.ok(partition);
+    assert.equal(partition.evidence.activeFileCount, null);
+    const dataset = await reader.loadActivePartition(OWNER_A, partition);
+    assert.equal(dataset.evidence.activeFileCount, null);
+    assert.equal(dataset.rows.length, 1);
   });
 });
 

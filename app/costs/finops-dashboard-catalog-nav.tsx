@@ -11,6 +11,7 @@ import {
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
+import { FinopsTrustedAdvisorOrganizationalDashboard } from "./finops-trusted-advisor-organizational-dashboard";
 import styles from "./costs.module.css";
 
 interface FinopsDashboardCatalogNavProps {
@@ -161,6 +162,11 @@ export function FinopsDashboardCatalogNav({
               connectionId={connectionId}
               dashboard={selected}
               onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
+            />
+          ) : selected.id === "trusted_advisor_organizational" ? (
+            <FinopsTrustedAdvisorOrganizationalDashboard
+              connectionId={connectionId}
+              dashboard={selected}
             />
           ) : (
             <FinopsCapabilityShell

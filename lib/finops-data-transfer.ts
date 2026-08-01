@@ -54,6 +54,7 @@ export type DataTransferCategory =
   | "INTERNET"
   | "INTER_REGION"
   | "INTER_AZ"
+  | "GLOBAL_ACCELERATOR"
   | "CLOUDFRONT"
   | "UNKNOWN"
   | "UNCLASSIFIED";
@@ -64,22 +65,33 @@ export type DataTransferSnapshotState =
   | "EMPTY"
   | "PARTIAL"
   | "STALE"
-  | "READY";
+  | "COMPLETE";
 export type DataTransferSourceStatus = "SUCCEEDED" | "PARTIAL" | "FAILED";
 
 /** Stable UTF-8 payload whose SHA-256 identifies the executable taxonomy. */
 export const DATA_TRANSFER_TAXONOMY_CANONICAL =
-  "{\"id\":\"aws-cur2-data-transfer\",\"version\":\"2026-07-31.v1\",\"rules\":[{\"id\":\"CLOUDFRONT_PRODUCT_OUT_BYTES_V1\",\"predicate\":\"productCode=AmazonCloudFront AND usageType=/(?:^|-)DataTransfer-Out-(?:O)?Bytes$/\"},{\"id\":\"INTER_AZ_REGIONAL_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)DataTransfer-Regional-Bytes$/\"},{\"id\":\"INTER_REGION_AWS_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)AWS-(?:In|Out)-(?:A)?Bytes$/\"},{\"id\":\"INTERNET_DATA_TRANSFER_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)DataTransfer-(?:In|Out)-(?:A)?Bytes$/\"}],\"unitToBytes\":{\"Byte\":\"1\",\"Bytes\":\"1\",\"GB\":\"1000000000\",\"GiB\":\"1073741824\",\"KB\":\"1000\",\"KiB\":\"1024\",\"MB\":\"1000000\",\"MiB\":\"1048576\",\"TB\":\"1000000000000\",\"TiB\":\"1099511627776\"}}";
+  "{\"id\":\"aws-cur2-data-transfer\",\"version\":\"2026-08-01.v2\",\"rules\":[{\"id\":\"GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1\",\"predicate\":\"productCode=AWSGlobalAccelerator AND usageType=/(?:^|-)(?:IN|OUT)-Bytes-(?:AWS|Internet)$/\"},{\"id\":\"GLOBAL_ACCELERATOR_FIXED_FEE_V1\",\"predicate\":\"productCode=AWSGlobalAccelerator AND usageType=Global-Accelerator-fixed-fee\"},{\"id\":\"CLOUDFRONT_PRODUCT_OUT_BYTES_V1\",\"predicate\":\"productCode=AmazonCloudFront AND usageType=/(?:^|-)DataTransfer-Out-(?:O)?Bytes$/\"},{\"id\":\"INTER_AZ_REGIONAL_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)DataTransfer-Regional-Bytes$/\"},{\"id\":\"INTER_REGION_AWS_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)AWS-(?:In|Out)-(?:A)?Bytes$/\"},{\"id\":\"INTERNET_DATA_TRANSFER_BYTES_V1\",\"predicate\":\"usageType=/(?:^|-)DataTransfer-(?:In|Out)-(?:A)?Bytes$/\"}],\"unitToBytes\":{\"Byte\":\"1\",\"Bytes\":\"1\",\"GB\":\"1000000000\",\"GiB\":\"1073741824\",\"KB\":\"1000\",\"KiB\":\"1024\",\"MB\":\"1000000\",\"MiB\":\"1048576\",\"TB\":\"1000000000000\",\"TiB\":\"1099511627776\"}}";
 
 export const DATA_TRANSFER_TAXONOMY = Object.freeze({
   id: "aws-cur2-data-transfer",
-  version: "2026-07-31.v1",
-  sha256: "8f1c4fe405bb45d02a4eaff961d00a2fb3f4eb619ea012512997061209d8a03a",
+  version: "2026-08-01.v2",
+  sha256: "8055f80dd3f7b8c86439cb96ef0c112a35b414e1ecf308f80405aeff2edde029",
   references: Object.freeze([
     "https://docs.aws.amazon.com/cur/latest/userguide/cur-data-transfers-charges.html",
     "https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/datatransfer-dashboard.html",
+    "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AWSGlobalAccelerator/current/index.json",
   ]),
   rules: Object.freeze([
+    Object.freeze({
+      id: "GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1",
+      category: "GLOBAL_ACCELERATOR" as const,
+      evidenceFields: Object.freeze(["productCode", "usageType"]),
+    }),
+    Object.freeze({
+      id: "GLOBAL_ACCELERATOR_FIXED_FEE_V1",
+      category: "GLOBAL_ACCELERATOR" as const,
+      evidenceFields: Object.freeze(["productCode", "usageType"]),
+    }),
     Object.freeze({
       id: "CLOUDFRONT_PRODUCT_OUT_BYTES_V1",
       category: "CLOUDFRONT" as const,
@@ -460,6 +472,30 @@ function classify(line: CanonicalCurLine): Classification {
     return productFamilySignal
       ? { candidate: true, category: "UNKNOWN", direction: "UNKNOWN", ruleId: "MISSING_USAGE_TYPE_V1" }
       : { candidate: false, category: null, direction: "UNKNOWN", ruleId: null };
+  }
+  if (line.productCode === "AWSGlobalAccelerator") {
+    if (usageType === "Global-Accelerator-fixed-fee") {
+      return {
+        candidate: true,
+        category: "GLOBAL_ACCELERATOR",
+        direction: "UNKNOWN",
+        ruleId: "GLOBAL_ACCELERATOR_FIXED_FEE_V1",
+      };
+    }
+    if (/(?:^|-)(?:IN|OUT)-Bytes-(?:AWS|Internet)$/u.test(usageType)) {
+      return {
+        candidate: true,
+        category: "GLOBAL_ACCELERATOR",
+        direction: /(?:^|-)OUT-Bytes-/u.test(usageType) ? "OUTBOUND" : "INBOUND",
+        ruleId: "GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1",
+      };
+    }
+    return {
+      candidate: true,
+      category: "UNCLASSIFIED",
+      direction: "UNKNOWN",
+      ruleId: "UNMAPPED_GLOBAL_ACCELERATOR_CHARGE_V1",
+    };
   }
   if (
     line.productCode === "AmazonCloudFront"
@@ -979,11 +1015,11 @@ export function buildDataTransferAnalysis(
     ? "PARTIAL"
     : ageHours !== null && ageHours > DATA_TRANSFER_ANALYSIS_BOUNDS.freshnessSlaHours
       ? "STALE"
-      : "READY";
+      : "COMPLETE";
   const snapshot: DataTransferSnapshot = {
     schemaVersion: "sutra.finops-data-transfer-snapshot.v1",
     state,
-    complete: state === "READY",
+    complete: state === "COMPLETE",
     scope: capture.scope,
     source: {
       kind: "AWS_CUR2_ACTIVE_GENERATION",

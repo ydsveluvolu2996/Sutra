@@ -47,6 +47,7 @@ function evidence(
     activeCommittedAtIso: "2026-07-03T02:00:00.000Z",
     acceptedRows,
     rejectedRows: 0,
+    activeFileCount: 1,
     ...overrides,
   };
 }

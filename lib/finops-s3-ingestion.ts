@@ -608,6 +608,7 @@ export async function ingestFinopsS3DataExport(
       {
         acceptedRows: reconciliation.actual.rowCount,
         rejectedRows: rejectedRows.length,
+        processedObjectCount: objects.length,
         currencyTotals,
       },
     );

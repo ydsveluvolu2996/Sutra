@@ -184,6 +184,7 @@ class MemoryBillingRepository implements FinopsS3IngestionRepository {
       generation,
       acceptedRows: reconciliation.acceptedRows,
       rejectedRows: reconciliation.rejectedRows,
+      processedObjectCount: reconciliation.processedObjectCount,
       currencyTotals: reconciliation.currencyTotals,
       alreadyCommitted: false,
       committedAtIso: "2026-07-31T12:05:00.000Z",
@@ -328,6 +329,7 @@ describe("ingestFinopsS3DataExport", () => {
     assert.deepEqual(repository.commitInputs[0], {
       acceptedRows: 2,
       rejectedRows: 1,
+      processedObjectCount: 2,
       currencyTotals: { EUR: "2000000", USD: "1000000" },
     });
 

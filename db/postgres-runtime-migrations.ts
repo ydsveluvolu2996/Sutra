@@ -76,6 +76,8 @@ import postgresFinopsSourceSnapshotsSql from "../postgres/migrations/0076_finops
 import postgresFinopsSourceEvidenceArtifactSql from "../postgres/migrations/0077_finops_source_evidence_artifact.sql?raw";
 import postgresFinopsDataExportObservationsSql from "../postgres/migrations/0078_finops_data_export_observations.sql?raw";
 import postgresFinopsTrustedAdvisorOrganizationSql from "../postgres/migrations/0079_finops_trusted_advisor_organization.sql?raw";
+import postgresFinopsComputeOptimizerDiscoverySql from "../postgres/migrations/0080_finops_compute_optimizer_discovery.sql?raw";
+import postgresFinopsActiveFileCountSql from "../postgres/migrations/0081_finops_active_file_count.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -156,6 +158,8 @@ const migrations = [
   { id: "0077_finops_source_evidence_artifact", source: postgresFinopsSourceEvidenceArtifactSql },
   { id: "0078_finops_data_export_observations", source: postgresFinopsDataExportObservationsSql },
   { id: "0079_finops_trusted_advisor_organization", source: postgresFinopsTrustedAdvisorOrganizationSql },
+  { id: "0080_finops_compute_optimizer_discovery", source: postgresFinopsComputeOptimizerDiscoverySql },
+  { id: "0081_finops_active_file_count", source: postgresFinopsActiveFileCountSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

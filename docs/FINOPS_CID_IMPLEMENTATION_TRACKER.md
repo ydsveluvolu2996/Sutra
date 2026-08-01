@@ -60,13 +60,14 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 1 | 11 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 2 | 10 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 1 | 8 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **2** | **19** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **3** | **18** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The two partial pipelines are Data
-Collection Monitor and FOCUS. Azure CID and GCP CID are absent.
+Anomaly, Trends, and Data Transfer. The three partial pipelines are Trusted
+Advisor Organizational, Data Collection Monitor, and FOCUS. Azure CID and GCP
+CID are absent.
 
 ## Parent capability tracker
 
@@ -75,7 +76,7 @@ Collection Monitor and FOCUS. Azure CID and GCP CID are absent.
 | FND-01 | CUDOS Dashboard | `cudos` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-01-cudos.md); exact-tree and controlled two-tenant/provider acceptance remain. |
 | FND-02 | Cost Intelligence Dashboard | `cost_intelligence_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-02-cost-intelligence.md); exact-tree and controlled two-tenant/provider acceptance remain. |
 | FND-03 | KPI and Modernization Dashboard | `kpi_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-03-kpi-modernization.md); exact-tree and controlled two-tenant/provider acceptance remain. |
-| ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `ENGINE_ONLY` | Add authoritative standard-check organizational-view export collection/history/API/UI. Existing Priority API logic is supplemental and cannot prove full TAO coverage. |
+| ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md); an accepted server-owned Organizations taxonomy manifest and worker activation are still required. Priority API logic remains supplemental. |
 | ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `ENGINE_ONLY` | Complete organization export/history, savings and under-provisioning risk views, API/UI, and coverage evidence. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md); exact-tree and controlled payer/two-tenant acceptance remain. |
 | ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | Complete ElastiCache/EKS/RDS/OpenSearch inventory/history, lifecycle bands, projections, API/UI, and live reconciliation. |
@@ -96,8 +97,8 @@ Collection Monitor and FOCUS. Azure CID and GCP CID are absent.
 | ADD-06 | Kubecost Containers Cost Allocation Dashboard | `kubecost_container_allocation` | `ENGINE_ONLY` | Complete exporter ingestion/persistence, workload allocation, efficiency/right-sizing, showback/chargeback API/UI, and reconciliation. |
 | ADD-07 | SCAD Containers Cost Allocation Dashboard | `scad_container_allocation` | `ENGINE_ONLY` | Complete CUR2 SCAD lineage for EKS/ECS, workload allocation, showback/chargeback persistence, API/UI, and reconciliation. |
 | ADD-08 | Sustainability Proxy Metrics and Carbon Emissions Dashboard | `sustainability_proxy` | `ENGINE_ONLY` | Complete durable proxy/provider carbon inputs, clearly separated claims, trends, persistence, API/UI, and reconciliation. |
-| ADD-09 | Trends Dashboard | `trends` | `LOCAL_VERTICAL_CANDIDATE` | Audit scale, filters, comparison periods, contributors, signals/anomalies, exports, and visual accessibility. |
-| ADD-10 | Data Transfer Dashboard | `data_transfer` | `LOCAL_VERTICAL_CANDIDATE` | Audit internet/inter-region/inter-AZ/service flows, byte/cost reconciliation, flow visualizations, and drilldowns. |
+| ADD-09 | Trends Dashboard | `trends` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-09-trends.md): bounded CUR2 API/native visuals now cover exact monthly/quarterly/yearly comparisons, interactive contributors, signals, CSV, and lineage; forecast/alerts, service taxonomy/usage, friendly account names, map, exact-tree, and provider acceptance remain. |
+| ADD-10 | Data Transfer Dashboard | `data_transfer` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-10-data-transfer.md): pinned internet/Global Accelerator/inter-Region/inter-AZ/CloudFront taxonomy, exact cost/bytes, filters, drilldowns, safe export and lineage are present; exact-tree/provider/live acceptance remain. |
 | ADD-11 | Amazon Connect Cost Insights Dashboard | `amazon_connect_cost_insights` | `ENGINE_ONLY` | Complete privacy-minimized spend/usage/voice/telecom collection, granular breakdown/search, persistence, API/UI. |
 | ADD-12 | Config Resource Compliance Dashboard | `config_resource_compliance` | `ENGINE_ONLY` | Complete organization aggregator inventory/compliance history, accounts/regions/rules/resources/cost, persistence, API/UI. |
 | ADD-13 | Pricing Change Analysis Dashboard | `pricing_change` | `ENGINE_ONLY` | Complete version-pinned pricing evidence, immutable repricing report, signed impact, API/UI, and actual-usage reconciliation. |

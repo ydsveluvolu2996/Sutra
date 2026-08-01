@@ -24,6 +24,7 @@ const MAX_TEXT = 4_096;
 const MAX_CANONICAL_BYTES = 512 * 1_024;
 const MAX_STAGE_CHUNK = 250;
 const MAX_QUERY_ROWS = 1_000;
+const MAX_MANIFEST_OBJECTS = 10_000;
 const AGGREGATE_PAGE_SIZE = 1_000;
 const INT64_MIN = -(BigInt(2) ** BigInt(63));
 const INT64_MAX = (BigInt(2) ** BigInt(63)) - BigInt(1);
@@ -63,6 +64,8 @@ export interface StageFinopsBillingLinesResult {
 export interface FinopsBillingReconciliation {
   readonly acceptedRows: number;
   readonly rejectedRows: number;
+  /** Objects actually exhausted by the trusted ingestion loop. */
+  readonly processedObjectCount: number;
   /** Exact signed integer micro-unit totals, keyed by ISO currency. */
   readonly currencyTotals: Readonly<Record<string, string>>;
 }
@@ -71,6 +74,7 @@ export interface CommitFinopsBillingGenerationResult {
   readonly generation: FinopsBillingGeneration;
   readonly acceptedRows: number;
   readonly rejectedRows: number;
+  readonly processedObjectCount: number;
   readonly currencyTotals: Readonly<Record<string, string>>;
   readonly alreadyCommitted: boolean;
   readonly committedAtIso: string;
@@ -106,6 +110,7 @@ export class FinopsBillingEngineRepositoryError extends Error {
     | "GENERATION_MISMATCH"
     | "LINE_CONFLICT"
     | "ROW_COUNT_MISMATCH"
+    | "OBJECT_COUNT_MISMATCH"
     | "CURRENCY_TOTAL_MISMATCH"
     | "LIMIT_EXCEEDED";
 
@@ -127,6 +132,7 @@ interface PartitionRow {
   active_observed_at: string | null;
   active_accepted_rows: number | string | null;
   active_rejected_rows: number | string | null;
+  active_file_count: number | string | null;
   active_currency_totals_json: string | null;
   active_committed_at: string | null;
   staging_generation_id: string | null;
@@ -135,6 +141,7 @@ interface PartitionRow {
   status: "staging" | "ready" | "failed";
   accepted_rows: number | string;
   rejected_rows: number | string;
+  file_count: number | string;
   currency_totals_json: string | null;
   committed_at: string | null;
 }
@@ -354,6 +361,9 @@ function assertReconciliation(input: FinopsBillingReconciliation): Readonly<Reco
     || input.acceptedRows < 0
     || !Number.isSafeInteger(input.rejectedRows)
     || input.rejectedRows < 0
+    || !Number.isSafeInteger(input.processedObjectCount)
+    || input.processedObjectCount < 1
+    || input.processedObjectCount > MAX_MANIFEST_OBJECTS
   ) reject();
   return normalizedCurrencyTotals(input.currencyTotals);
 }
@@ -678,6 +688,8 @@ export class FinopsBillingEngineRepository {
         || initial.active_rejected_rows === null
         || count(initial.active_accepted_rows) !== reconciliation.acceptedRows
         || count(initial.active_rejected_rows) !== reconciliation.rejectedRows
+        || initial.active_file_count === null
+        || count(initial.active_file_count) !== reconciliation.processedObjectCount
         || !sameCurrencyTotals(storedTotals, expectedTotals)
         || initial.active_committed_at === null
       ) reject("GENERATION_MISMATCH");
@@ -685,6 +697,7 @@ export class FinopsBillingEngineRepository {
         generation,
         acceptedRows: reconciliation.acceptedRows,
         rejectedRows: reconciliation.rejectedRows,
+        processedObjectCount: reconciliation.processedObjectCount,
         currencyTotals: storedTotals,
         alreadyCommitted: true,
         committedAtIso: initial.active_committed_at,
@@ -694,6 +707,11 @@ export class FinopsBillingEngineRepository {
       initial.status !== "staging"
       || initial.staging_generation_id !== generation.generationId
     ) reject("GENERATION_MISMATCH");
+
+    if (count(initial.file_count) !== reconciliation.processedObjectCount) {
+      await this.failGeneration(scope, generation, "OBJECT_COUNT_MISMATCH", now);
+      return reject("OBJECT_COUNT_MISMATCH");
+    }
 
     const actual = await this.generationTotals(db, scope, generation, false);
     if (actual.rowCount !== reconciliation.acceptedRows) {
@@ -720,6 +738,7 @@ export class FinopsBillingEngineRepository {
               active_observed_at = observed_at,
               active_accepted_rows = ?,
               active_rejected_rows = ?,
+              active_file_count = file_count,
               active_currency_totals_json = ?,
               active_committed_at = ?,
               staging_generation_id = NULL,
@@ -729,6 +748,7 @@ export class FinopsBillingEngineRepository {
               committed_at = ?, updated_at = ?
         WHERE ${partitionWhere()}
           AND status = 'staging' AND staging_generation_id = ?
+          AND file_count = ?
           AND (SELECT COUNT(*) FROM finops_billing_lines_v2 l
                 WHERE l.org_id = finops_export_partitions.org_id
                   AND l.customer_id = finops_export_partitions.customer_id
@@ -752,6 +772,7 @@ export class FinopsBillingEngineRepository {
       timestamp, timestamp,
       scope.orgId, scope.customerId, scope.connectionId,
       generation.exportName, generation.billingPeriod, generation.generationId,
+      reconciliation.processedObjectCount,
       reconciliation.acceptedRows,
     ).run();
     if (count(promoted.meta?.changes) === 0) {
@@ -761,6 +782,10 @@ export class FinopsBillingEngineRepository {
         && current.status === "staging"
         && current.staging_generation_id === generation.generationId
       ) {
+        if (count(current.file_count) !== reconciliation.processedObjectCount) {
+          await this.failGeneration(scope, generation, "OBJECT_COUNT_MISMATCH", now);
+          return reject("OBJECT_COUNT_MISMATCH");
+        }
         await this.failGeneration(scope, generation, "ROW_COUNT_MISMATCH", now);
         return reject("ROW_COUNT_MISMATCH");
       }
@@ -770,6 +795,7 @@ export class FinopsBillingEngineRepository {
       generation,
       acceptedRows: reconciliation.acceptedRows,
       rejectedRows: reconciliation.rejectedRows,
+      processedObjectCount: reconciliation.processedObjectCount,
       currencyTotals: expectedTotals,
       alreadyCommitted: false,
       committedAtIso: timestamp,
@@ -908,10 +934,11 @@ export class FinopsBillingEngineRepository {
               active_source_format, active_source_version,
               active_source_updated_at, active_observed_at,
               active_accepted_rows, active_rejected_rows,
-              active_currency_totals_json, active_committed_at,
+              active_file_count, active_currency_totals_json, active_committed_at,
               staging_generation_id,
               staging_manifest_sha256, manifest_version_id, status,
-              accepted_rows, rejected_rows, currency_totals_json, committed_at
+              accepted_rows, rejected_rows, file_count, currency_totals_json,
+              committed_at
          FROM finops_export_partitions
         WHERE ${partitionWhere()} LIMIT 1`,
     ).bind(

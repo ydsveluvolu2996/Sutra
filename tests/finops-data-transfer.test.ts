@@ -182,15 +182,51 @@ function expectCode(code: string, run: () => unknown): void {
 describe("AWS Data Transfer analysis", () => {
   it("pins the official CUR2 taxonomy and requires no additional AWS reads", () => {
     assert.deepEqual(DATA_TRANSFER_ADDITIONAL_READ_OPERATIONS, []);
-    assert.equal(DATA_TRANSFER_TAXONOMY.version, "2026-07-31.v1");
+    assert.equal(DATA_TRANSFER_TAXONOMY.version, "2026-08-01.v2");
     assert.match(DATA_TRANSFER_TAXONOMY.sha256, /^[a-f0-9]{64}$/u);
     assert.match(DATA_TRANSFER_TAXONOMY_CANONICAL, /CLOUDFRONT_PRODUCT_OUT_BYTES_V1/u);
     assert.equal(
       createHash("sha256").update(DATA_TRANSFER_TAXONOMY_CANONICAL).digest("hex"),
       DATA_TRANSFER_TAXONOMY.sha256,
     );
-    assert.equal(DATA_TRANSFER_TAXONOMY.rules.length, 4);
-    assert.equal(DATA_TRANSFER_TAXONOMY.references.every((url) => url.startsWith("https://docs.aws.amazon.com/")), true);
+    assert.equal(DATA_TRANSFER_TAXONOMY.rules.length, 6);
+    assert.equal(DATA_TRANSFER_TAXONOMY.references.every((url) =>
+      url.startsWith("https://docs.aws.amazon.com/")
+      || url.startsWith("https://pricing.us-east-1.amazonaws.com/")), true);
+  });
+
+  it("separates Global Accelerator premium transfer and fixed fees from generic internet traffic", () => {
+    const rows = [
+      scoped(line("ga-premium", "NA-EU-OUT-Bytes-Internet", {
+        productCode: "AWSGlobalAccelerator",
+        productFamily: "AWS Global Accelerator",
+        service: "AWS Global Accelerator",
+      })),
+      scoped(line("ga-fixed", "Global-Accelerator-fixed-fee", {
+        productCode: "AWSGlobalAccelerator",
+        productFamily: "AWS Global Accelerator",
+        service: "AWS Global Accelerator",
+        usageAmountMicros: "1000000",
+        usageUnit: "Hrs",
+      })),
+    ];
+    const result = buildDataTransferAnalysis(BOUNDARY, capture(rows), NOW);
+    assert.deepEqual(result.categorySummaries.map(({ category }) => category), [
+      "GLOBAL_ACCELERATOR",
+    ]);
+    assert.deepEqual(result.categorySummaries[0]?.directionCounts, {
+      INBOUND: 0,
+      OUTBOUND: 1,
+      UNKNOWN: 1,
+    });
+    assert.deepEqual(
+      result.drilldowns.flatMap(({ classificationRuleIds }) => classificationRuleIds).sort(),
+      [
+        "GLOBAL_ACCELERATOR_FIXED_FEE_V1",
+        "GLOBAL_ACCELERATOR_TRANSFER_PREMIUM_V1",
+      ],
+    );
+    assert.equal(result.coverage.classification, "complete");
   });
 
   it("classifies internet, inter-region, inter-AZ, and CloudFront from CUR evidence", () => {
@@ -208,7 +244,7 @@ describe("AWS Data Transfer analysis", () => {
     ];
     const result = buildDataTransferAnalysis(BOUNDARY, capture(rows), NOW);
 
-    assert.equal(result.state, "READY");
+    assert.equal(result.state, "COMPLETE");
     assert.equal(result.complete, true);
     assert.deepEqual(result.categorySummaries.map(({ category }) => category), [
       "CLOUDFRONT",

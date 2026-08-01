@@ -126,6 +126,7 @@ function activePartition(overrides: {
         overrides.committedAtIso ?? "2026-07-31T09:06:00.000Z",
       acceptedRows: overrides.acceptedRows ?? 100,
       rejectedRows: overrides.rejectedRows ?? 0,
+      activeFileCount: 1,
     },
   };
 }

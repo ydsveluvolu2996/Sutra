@@ -40,8 +40,8 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     ({ currentMaturity }) => currentMaturity,
   );
   assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
-  assert.equal(counts.PARTIAL_PIPELINE?.length, 2);
-  assert.equal(counts.ENGINE_ONLY?.length, 19);
+  assert.equal(counts.PARTIAL_PIPELINE?.length, 3);
+  assert.equal(counts.ENGINE_ONLY?.length, 18);
   assert.equal(counts.ABSENT?.length, 2);
   assert.deepEqual(
     counts.LOCAL_VERTICAL_CANDIDATE?.map(({ id }) => id),
@@ -56,7 +56,7 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
   );
   assert.deepEqual(
     counts.PARTIAL_PIPELINE?.map(({ id }) => id),
-    ["data_collection_monitor", "focus"],
+    ["trusted_advisor_organizational", "data_collection_monitor", "focus"],
   );
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("COMPLETE" as never), false);
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("READY" as never), false);

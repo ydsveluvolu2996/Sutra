@@ -95,7 +95,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Trusted Advisor",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Organization-wide Trusted Advisor checks, risks, resources, and historical optimization outcomes.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering", "SRE", "Security"],
     documentationUrl: `${AWS_CID_ROOT}/trusted-advisor-dashboard.html`,

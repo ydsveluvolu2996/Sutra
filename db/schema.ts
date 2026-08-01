@@ -707,6 +707,7 @@ export const finopsExportPartitions = sqliteTable("finops_export_partitions", {
   activeObservedAt: text("active_observed_at"),
   activeAcceptedRows: integer("active_accepted_rows"),
   activeRejectedRows: integer("active_rejected_rows"),
+  activeFileCount: integer("active_file_count"),
   activeCurrencyTotalsJson: text("active_currency_totals_json"),
   activeCommittedAt: text("active_committed_at"),
   stagingGenerationId: text("staging_generation_id"),

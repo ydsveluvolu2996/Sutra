@@ -20,6 +20,9 @@ const MAX_ACCOUNTS = 10_000;
 const MAX_CHECKS = 512;
 const MAX_RESOURCES = 25_000;
 const MAX_HISTORY = 36;
+const MAX_DASHBOARD_ACCOUNTS = 200;
+const MAX_DASHBOARD_CHECKS = 500;
+const MAX_DASHBOARD_RESOURCES = 500;
 
 export interface TrustedAdvisorOrganizationScope {
   readonly organizationId: string;
@@ -127,6 +130,59 @@ export interface StoredTrustedAdvisorOrganizationSnapshot {
   readonly createdAtIso: string;
 }
 
+export interface TrustedAdvisorOrganizationDashboardFilters {
+  readonly accountId: string | null;
+  readonly checkId: string | null;
+  readonly status: "ok" | "warning" | "error" | null;
+  readonly region: string | null;
+}
+
+export interface TrustedAdvisorOrganizationDashboardAccount {
+  readonly accountId: string;
+  readonly collectedAtIso: string;
+  readonly dataThroughAtIso: string | null;
+  readonly checkCount: number;
+  readonly resourceCount: number;
+  readonly rejectedRecordCount: number;
+}
+
+export interface TrustedAdvisorOrganizationDashboardCheck {
+  readonly checkId: string;
+  readonly name: string;
+  readonly category: string;
+  readonly status: "ok" | "warning" | "error" | "not_available";
+  readonly accountCount: number;
+  readonly processedCount: number;
+  readonly flaggedCount: number;
+  readonly ignoredCount: number;
+  readonly suppressedCount: number;
+}
+
+export interface TrustedAdvisorOrganizationDashboardResource {
+  readonly resourceKey: string;
+  readonly accountId: string;
+  readonly checkId: string;
+  readonly checkName: string;
+  readonly resourceId: string;
+  readonly region: string | null;
+  readonly status: "ok" | "warning" | "error";
+  readonly suppressed: boolean;
+  readonly metadataJson: string;
+  readonly metadataSha256: string;
+}
+
+export interface TrustedAdvisorOrganizationDashboardProjection {
+  readonly snapshot: StoredTrustedAdvisorOrganizationSnapshot;
+  readonly filters: TrustedAdvisorOrganizationDashboardFilters;
+  readonly accounts: readonly TrustedAdvisorOrganizationDashboardAccount[];
+  readonly accountsTruncated: boolean;
+  readonly checks: readonly TrustedAdvisorOrganizationDashboardCheck[];
+  readonly checksTruncated: boolean;
+  readonly resources: readonly TrustedAdvisorOrganizationDashboardResource[];
+  readonly resourcesTruncated: boolean;
+  readonly history: readonly StoredTrustedAdvisorOrganizationSnapshot[];
+}
+
 export class TrustedAdvisorOrganizationRepositoryError extends Error {
   public readonly code:
     | "INVALID_INPUT"
@@ -185,6 +241,40 @@ interface OrganizationSnapshotRow {
   check_count: number | string;
   resource_count: number | string;
   created_at: number | string;
+}
+
+interface DashboardAccountRow {
+  account_id: string;
+  collected_at: string;
+  data_through_at: string | null;
+  check_count: number | string;
+  resource_count: number | string;
+  rejected_record_count: number | string;
+}
+
+interface DashboardCheckRow {
+  check_id: string;
+  name: string;
+  category: string;
+  status: "ok" | "warning" | "error" | "not_available";
+  account_count: number | string;
+  processed_count: number | string;
+  flagged_count: number | string;
+  ignored_count: number | string;
+  suppressed_count: number | string;
+}
+
+interface DashboardResourceRow {
+  resource_key: string;
+  account_id: string;
+  check_id: string;
+  check_name: string;
+  resource_id: string;
+  region: string | null;
+  status: "ok" | "warning" | "error";
+  suppressed: number | string;
+  metadata_json: string;
+  metadata_sha256: string;
 }
 
 function reject(
@@ -470,6 +560,19 @@ export class TrustedAdvisorOrganizationRepository {
     if (!/^tam_[a-f0-9]{64}$/u.test(manifestId)) reject();
     const database = await this.assertLiveScope(scope);
     return this.readManifest(database, scope, manifestId);
+  }
+
+  public async getLatestManifest(
+    scope: TrustedAdvisorOrganizationScope,
+  ): Promise<StoredTrustedAdvisorManifest | null> {
+    const database = await this.assertLiveScope(scope);
+    const row = await database.prepare(
+      `SELECT manifest_id FROM finops_ta_collection_manifests
+       WHERE org_id = ? AND customer_id = ? AND anchor_connection_id = ?
+       ORDER BY created_at DESC, manifest_id DESC LIMIT 1`,
+    ).bind(scope.organizationId, scope.customerId, scope.connectionId)
+      .first<{ manifest_id: string }>();
+    return row === null ? null : this.readManifest(database, scope, row.manifest_id);
   }
 
   public async startManifest(
@@ -824,6 +927,173 @@ export class TrustedAdvisorOrganizationRepository {
     ).bind(scope.organizationId, scope.customerId, scope.connectionId)
       .first<OrganizationSnapshotRow>();
     return row === null ? null : storedOrganizationSnapshot(row);
+  }
+
+  /**
+   * Read a bounded projection from the immutable active standard-check
+   * generation. Priority recommendation tables are intentionally not queried.
+   */
+  public async getActiveDashboard(
+    scope: TrustedAdvisorOrganizationScope,
+    filters: TrustedAdvisorOrganizationDashboardFilters,
+  ): Promise<TrustedAdvisorOrganizationDashboardProjection | null> {
+    if (
+      typeof filters !== "object" || filters === null
+      || (filters.accountId !== null && !ACCOUNT_ID.test(filters.accountId))
+      || (filters.checkId !== null && !IDENTIFIER.test(filters.checkId))
+      || (filters.status !== null && !new Set(["ok", "warning", "error"]).has(filters.status))
+      || (filters.region !== null && !/^[a-z0-9-]{1,128}$/u.test(filters.region))
+    ) reject();
+    const database = await this.assertLiveScope(scope);
+    const snapshotRow = await database.prepare(
+      `SELECT s.* FROM finops_ta_organization_snapshot_heads h
+       JOIN finops_ta_organization_snapshots s ON s.generation_id = h.active_generation_id
+       WHERE h.org_id = ? AND h.customer_id = ? AND h.anchor_connection_id = ?
+         AND s.status = 'complete' LIMIT 1`,
+    ).bind(scope.organizationId, scope.customerId, scope.connectionId)
+      .first<OrganizationSnapshotRow>();
+    if (snapshotRow === null) return null;
+    const snapshot = storedOrganizationSnapshot(snapshotRow);
+
+    const accountBindings: unknown[] = [
+      snapshot.manifestId,
+      scope.organizationId,
+      scope.customerId,
+      scope.connectionId,
+    ];
+    accountBindings.push(MAX_DASHBOARD_ACCOUNTS + 1);
+    const accountRows = await database.prepare(
+      `SELECT a.account_id, a.collected_at, a.data_through_at, a.check_count,
+              a.resource_count, a.rejected_record_count
+       FROM finops_ta_account_snapshots a
+       WHERE a.manifest_id = ? AND a.org_id = ? AND a.customer_id = ?
+         AND a.anchor_connection_id = ? AND a.status = 'complete'
+       ORDER BY a.account_id ASC LIMIT ?`,
+    ).bind(...accountBindings).all<DashboardAccountRow>();
+
+    const checkBindings: unknown[] = [
+      snapshot.manifestId,
+      scope.organizationId,
+      scope.customerId,
+      scope.connectionId,
+    ];
+    const checkClauses: string[] = [];
+    if (filters.accountId !== null) {
+      checkClauses.push("a.account_id = ?");
+      checkBindings.push(filters.accountId);
+    }
+    if (filters.checkId !== null) {
+      checkClauses.push("c.check_id = ?");
+      checkBindings.push(filters.checkId);
+    }
+    if (filters.status !== null) {
+      checkClauses.push("c.status = ?");
+      checkBindings.push(filters.status);
+    }
+    checkBindings.push(MAX_DASHBOARD_CHECKS + 1);
+    const checkWhere = checkClauses.length === 0 ? "" : ` AND ${checkClauses.join(" AND ")}`;
+    const checkRows = await database.prepare(
+      `SELECT c.check_id, c.name, c.category, c.status,
+              COUNT(DISTINCT a.account_id) AS account_count,
+              SUM(c.processed_count) AS processed_count,
+              SUM(c.flagged_count) AS flagged_count,
+              SUM(c.ignored_count) AS ignored_count,
+              SUM(c.suppressed_count) AS suppressed_count
+       FROM finops_ta_account_snapshots a
+       JOIN finops_ta_check_snapshots c ON c.account_snapshot_id = a.account_snapshot_id
+       WHERE a.manifest_id = ? AND a.org_id = ? AND a.customer_id = ?
+         AND a.anchor_connection_id = ? AND a.status = 'complete'${checkWhere}
+       GROUP BY c.check_id, c.name, c.category, c.status
+       ORDER BY flagged_count DESC, c.name ASC, c.check_id ASC LIMIT ?`,
+    ).bind(...checkBindings).all<DashboardCheckRow>();
+
+    const resourceBindings: unknown[] = [
+      snapshot.manifestId,
+      scope.organizationId,
+      scope.customerId,
+      scope.connectionId,
+    ];
+    const resourceClauses: string[] = [];
+    if (filters.accountId !== null) {
+      resourceClauses.push("a.account_id = ?");
+      resourceBindings.push(filters.accountId);
+    }
+    if (filters.checkId !== null) {
+      resourceClauses.push("r.check_id = ?");
+      resourceBindings.push(filters.checkId);
+    }
+    if (filters.status !== null) {
+      resourceClauses.push("r.status = ?");
+      resourceBindings.push(filters.status);
+    }
+    if (filters.region !== null) {
+      resourceClauses.push("r.region = ?");
+      resourceBindings.push(filters.region);
+    }
+    resourceBindings.push(MAX_DASHBOARD_RESOURCES + 1);
+    const resourceWhere = resourceClauses.length === 0 ? "" : ` AND ${resourceClauses.join(" AND ")}`;
+    const resourceRows = await database.prepare(
+      `SELECT r.resource_key, a.account_id, r.check_id, c.name AS check_name,
+              r.resource_id, r.region, r.status, r.suppressed,
+              r.metadata_json, r.metadata_sha256
+       FROM finops_ta_account_snapshots a
+       JOIN finops_ta_check_snapshots c ON c.account_snapshot_id = a.account_snapshot_id
+       JOIN finops_ta_resource_snapshots r
+         ON r.account_snapshot_id = c.account_snapshot_id AND r.check_id = c.check_id
+       WHERE a.manifest_id = ? AND a.org_id = ? AND a.customer_id = ?
+         AND a.anchor_connection_id = ? AND a.status = 'complete'${resourceWhere}
+       ORDER BY CASE r.status WHEN 'error' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END,
+                a.account_id ASC, c.name ASC, r.resource_key ASC LIMIT ?`,
+    ).bind(...resourceBindings).all<DashboardResourceRow>();
+
+    const historyRows = await database.prepare(
+      `SELECT * FROM finops_ta_organization_snapshots
+       WHERE org_id = ? AND customer_id = ? AND anchor_connection_id = ?
+       ORDER BY collected_at DESC, generation_id DESC LIMIT 12`,
+    ).bind(scope.organizationId, scope.customerId, scope.connectionId)
+      .all<OrganizationSnapshotRow>();
+    const accounts = accountRows.results ?? [];
+    const checks = checkRows.results ?? [];
+    const resources = resourceRows.results ?? [];
+    return {
+      snapshot,
+      filters: { ...filters },
+      accounts: accounts.slice(0, MAX_DASHBOARD_ACCOUNTS).map((row) => ({
+        accountId: row.account_id,
+        collectedAtIso: row.collected_at,
+        dataThroughAtIso: row.data_through_at,
+        checkCount: safeInteger(row.check_count, true),
+        resourceCount: safeInteger(row.resource_count, true),
+        rejectedRecordCount: safeInteger(row.rejected_record_count, true),
+      })),
+      accountsTruncated: accounts.length > MAX_DASHBOARD_ACCOUNTS,
+      checks: checks.slice(0, MAX_DASHBOARD_CHECKS).map((row) => ({
+        checkId: row.check_id,
+        name: row.name,
+        category: row.category,
+        status: row.status,
+        accountCount: safeInteger(row.account_count, true),
+        processedCount: safeInteger(row.processed_count, true),
+        flaggedCount: safeInteger(row.flagged_count, true),
+        ignoredCount: safeInteger(row.ignored_count, true),
+        suppressedCount: safeInteger(row.suppressed_count, true),
+      })),
+      checksTruncated: checks.length > MAX_DASHBOARD_CHECKS,
+      resources: resources.slice(0, MAX_DASHBOARD_RESOURCES).map((row) => ({
+        resourceKey: row.resource_key,
+        accountId: row.account_id,
+        checkId: row.check_id,
+        checkName: row.check_name,
+        resourceId: row.resource_id,
+        region: row.region,
+        status: row.status,
+        suppressed: safeInteger(row.suppressed, true) === 1,
+        metadataJson: row.metadata_json,
+        metadataSha256: row.metadata_sha256,
+      })),
+      resourcesTruncated: resources.length > MAX_DASHBOARD_RESOURCES,
+      history: (historyRows.results ?? []).map(storedOrganizationSnapshot),
+    };
   }
 
   public async listHistory(

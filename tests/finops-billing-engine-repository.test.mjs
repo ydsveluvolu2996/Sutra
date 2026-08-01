@@ -66,7 +66,7 @@ async function withDatabase(run) {
   }
 }
 
-async function validatedManifest(scope = SCOPE_A, revision = 1) {
+async function validatedManifest(scope = SCOPE_A, revision = 1, fileCount = 1) {
   const result = await validateFinopsDataExportManifest({
     scope: {
       organizationId: scope.orgId,
@@ -81,9 +81,8 @@ async function validatedManifest(scope = SCOPE_A, revision = 1) {
     body: {
       metadata: { exportName: "aws-cur", exportTableName: "COST_AND_USAGE_REPORT" },
       columns: ["line_item_id", "line_item_unblended_cost", `revision_${revision}`],
-      dataFiles: [
-        `exports/aws-cur/data/BILLING_PERIOD=2026-07/aws-cur-${String(revision).padStart(5, "0")}.csv.gz`,
-      ],
+      dataFiles: Array.from({ length: fileCount }, (_, index) =>
+        `exports/aws-cur/data/BILLING_PERIOD=2026-07/aws-cur-${String(revision).padStart(5, "0")}-${String(index).padStart(5, "0")}.csv.gz`),
     },
   });
   if (!result.ok) throw new Error(result.rejection.message);
@@ -122,9 +121,11 @@ test("a reconciled generation becomes visible atomically and duplicate content i
     const committed = await repo.commitGeneration(SCOPE_A, began.generation, {
       acceptedRows: 3,
       rejectedRows: 1,
+      processedObjectCount: 1,
       currencyTotals: { EUR: "3000000", USD: "10750000" },
     }, Date.parse("2026-07-31T12:02:00Z"));
     assert.equal(committed.alreadyCommitted, false);
+    assert.equal(committed.processedObjectCount, 1);
     assert.deepEqual(
       (await repo.listActiveLines(SCOPE_A)).map((row) => row.line.lineItemId),
       ["li-1", "li-2", "li-3"],
@@ -140,6 +141,7 @@ test("a reconciled generation becomes visible atomically and duplicate content i
     const duplicateCommit = await repo.commitGeneration(SCOPE_A, began.generation, {
       acceptedRows: 3,
       rejectedRows: 1,
+      processedObjectCount: 1,
       currencyTotals: { EUR: "3000000", USD: "10750000" },
     });
     assert.equal(duplicateCommit.alreadyCommitted, true);
@@ -172,14 +174,15 @@ test("same-content chunk retries do not duplicate rows and conflicting line cont
     await repo.commitGeneration(SCOPE_A, began.generation, {
       acceptedRows: 1,
       rejectedRows: 0,
+      processedObjectCount: 1,
       currencyTotals: { USD: "1000000" },
     });
   });
 });
 
-test("failed corrected generation leaves the previous active generation and its evidence visible", async () => {
+test("failed corrected generations leave the previous active generation and file evidence visible", async () => {
   await withDatabase(async (repo, database) => {
-    const first = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 1));
+    const first = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 1, 2));
     if (first.action !== "stage") throw new Error("fixture must stage");
     const firstLines = canonicalLines([
       "old-line,111122223333,AmazonEC2,Usage,2026-07-01T00:00:00Z,5.00,USD,prod",
@@ -188,15 +191,17 @@ test("failed corrected generation leaves the previous active generation and its 
     await repo.commitGeneration(SCOPE_A, first.generation, {
       acceptedRows: 1,
       rejectedRows: 0,
+      processedObjectCount: 2,
       currencyTotals: { USD: "5000000" },
     });
 
-    const correction = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 2));
+    const correction = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 2, 3));
     if (correction.action !== "stage") throw new Error("fixture must stage");
     const activeWhileCorrecting = await database.prepare(
       `SELECT active_generation_id, active_manifest_sha256,
               active_source_table, active_source_format, active_source_version,
               active_observed_at, active_accepted_rows, active_rejected_rows,
+              active_file_count, file_count,
               active_currency_totals_json, active_committed_at,
               observed_at, accepted_rows, rejected_rows
          FROM finops_export_partitions
@@ -217,6 +222,8 @@ test("failed corrected generation leaves the previous active generation and its 
     assert.equal(activeWhileCorrecting?.active_observed_at, "2026-07-31T12:01:00.000Z");
     assert.equal(Number(activeWhileCorrecting?.active_accepted_rows), 1);
     assert.equal(Number(activeWhileCorrecting?.active_rejected_rows), 0);
+    assert.equal(Number(activeWhileCorrecting?.active_file_count), 2);
+    assert.equal(Number(activeWhileCorrecting?.file_count), 3);
     assert.equal(activeWhileCorrecting?.active_currency_totals_json, "{\"USD\":\"5000000\"}");
     assert.equal(typeof activeWhileCorrecting?.active_committed_at, "string");
     assert.equal(activeWhileCorrecting?.observed_at, "2026-07-31T12:02:00.000Z");
@@ -229,36 +236,63 @@ test("failed corrected generation leaves the previous active generation and its 
     assert.equal((await repo.listActiveLines(SCOPE_A))[0]?.line.lineItemId, "old-line");
     await assert.rejects(
       repo.commitGeneration(SCOPE_A, correction.generation, {
+        acceptedRows: 1,
+        rejectedRows: 0,
+        processedObjectCount: 2,
+        currencyTotals: { USD: "7000000" },
+      }),
+      repositoryError("OBJECT_COUNT_MISMATCH"),
+    );
+    assert.equal((await repo.listActiveLines(SCOPE_A))[0]?.line.lineItemId, "old-line");
+    const afterObjectMismatch = await database.prepare(
+      "SELECT active_generation_id, active_file_count, status FROM finops_export_partitions WHERE connection_id = ?",
+    ).bind(CONN_A).first();
+    assert.equal(afterObjectMismatch?.active_generation_id, first.generation.generationId);
+    assert.equal(Number(afterObjectMismatch?.active_file_count), 2);
+    assert.equal(afterObjectMismatch?.status, "failed");
+
+    const badRows = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 3, 3));
+    if (badRows.action !== "stage") throw new Error("fixture must stage");
+    await repo.stageCanonicalLines(SCOPE_A, badRows.generation, correctedLines);
+    await assert.rejects(
+      repo.commitGeneration(SCOPE_A, badRows.generation, {
         acceptedRows: 2,
         rejectedRows: 0,
+        processedObjectCount: 3,
         currencyTotals: { USD: "7000000" },
       }),
       repositoryError("ROW_COUNT_MISMATCH"),
     );
     assert.equal((await repo.listActiveLines(SCOPE_A))[0]?.line.lineItemId, "old-line");
 
-    const badTotals = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 3));
+    const badTotals = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 4, 4));
     if (badTotals.action !== "stage") throw new Error("fixture must stage");
     await repo.stageCanonicalLines(SCOPE_A, badTotals.generation, correctedLines);
     await assert.rejects(
       repo.commitGeneration(SCOPE_A, badTotals.generation, {
         acceptedRows: 1,
         rejectedRows: 0,
+        processedObjectCount: 4,
         currencyTotals: { USD: "8000000" },
       }),
       repositoryError("CURRENCY_TOTAL_MISMATCH"),
     );
     assert.equal((await repo.listActiveLines(SCOPE_A))[0]?.line.lineItemId, "old-line");
 
-    const replacement = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 4));
+    const replacement = await repo.beginValidatedManifest(await validatedManifest(SCOPE_A, 5, 5));
     if (replacement.action !== "stage") throw new Error("fixture must stage");
     await repo.stageCanonicalLines(SCOPE_A, replacement.generation, correctedLines);
     await repo.commitGeneration(SCOPE_A, replacement.generation, {
       acceptedRows: 1,
       rejectedRows: 0,
+      processedObjectCount: 5,
       currencyTotals: { USD: "7000000" },
     });
     assert.equal((await repo.listActiveLines(SCOPE_A))[0]?.line.lineItemId, "new-line");
+    const activeReplacement = await database.prepare(
+      "SELECT active_file_count FROM finops_export_partitions WHERE connection_id = ?",
+    ).bind(CONN_A).first();
+    assert.equal(Number(activeReplacement?.active_file_count), 5);
   });
 });
 
@@ -279,6 +313,7 @@ test("currency reconciliation uses bigint-safe totals above Number and signed-bi
     await repo.commitGeneration(SCOPE_A, began.generation, {
       acceptedRows: 2,
       rejectedRows: 0,
+      processedObjectCount: 1,
       currencyTotals: { USD: exact },
     });
     assert.deepEqual(await repo.activeCurrencyTotals(SCOPE_A), [
@@ -315,6 +350,7 @@ test("tenant, customer, connection, generation, and live-source ownership are en
     await repo.commitGeneration(SCOPE_A, began.generation, {
       acceptedRows: 1,
       rejectedRows: 0,
+      processedObjectCount: 1,
       currencyTotals: { USD: "1000000" },
     });
     assert.deepEqual(await repo.listActiveLines(SCOPE_B), []);

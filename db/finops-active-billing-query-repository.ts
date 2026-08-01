@@ -20,6 +20,7 @@ const PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const GENERATION_ID = /^fbg_[a-f0-9]{64}$/u;
 const MAX_PARTITIONS = 36;
+const MAX_MANIFEST_OBJECTS = 10_000;
 const MAX_PAGE_ROWS = 1_000;
 const MAX_PARTITION_ROWS = 250_000;
 const MAX_TOTAL_ROWS = 250_000;
@@ -51,6 +52,8 @@ export interface FinopsActiveBillingEvidence {
   readonly activeCommittedAtIso: string;
   readonly acceptedRows: number;
   readonly rejectedRows: number;
+  /** Null only when legacy active-manifest coverage cannot be proven. */
+  readonly activeFileCount: number | null;
 }
 
 export interface FinopsActiveBillingPartition {
@@ -107,6 +110,7 @@ interface ActivePartitionRow {
   active_committed_at: string | null;
   active_accepted_rows: number | string | null;
   active_rejected_rows: number | string | null;
+  active_file_count: number | string | null;
 }
 
 interface ActiveCanonicalRow {
@@ -152,6 +156,15 @@ function exactCount(value: unknown): number {
   return parsed;
 }
 
+function exactOptionalFileCount(value: unknown): number | null {
+  if (value === null) return null;
+  const parsed = exactCount(value);
+  if (parsed < 1 || parsed > MAX_MANIFEST_OBJECTS) {
+    return reject("GENERATION_MISMATCH");
+  }
+  return parsed;
+}
+
 function assertScope(scope: FinopsActiveBillingScope): void {
   if (
     scope === null
@@ -192,7 +205,8 @@ function samePartition(
     && left.evidence.activeCommittedAtIso
       === right.evidence.activeCommittedAtIso
     && left.evidence.acceptedRows === right.evidence.acceptedRows
-    && left.evidence.rejectedRows === right.evidence.rejectedRows;
+    && left.evidence.rejectedRows === right.evidence.rejectedRows
+    && left.evidence.activeFileCount === right.evidence.activeFileCount;
 }
 
 function assertPartition(
@@ -227,6 +241,14 @@ function assertPartition(
     || partition.evidence.acceptedRows < 0
     || !Number.isSafeInteger(partition.evidence.rejectedRows)
     || partition.evidence.rejectedRows < 0
+    || (
+      partition.evidence.activeFileCount !== null
+      && (
+        !Number.isSafeInteger(partition.evidence.activeFileCount)
+        || partition.evidence.activeFileCount < 1
+        || partition.evidence.activeFileCount > MAX_MANIFEST_OBJECTS
+      )
+    )
   ) reject();
   if (
     partition.evidence.acceptedRows > MAX_PARTITION_ROWS
@@ -237,6 +259,7 @@ function assertPartition(
 function materializePartition(row: ActivePartitionRow): FinopsActiveBillingPartition {
   const acceptedRows = exactCount(row.active_accepted_rows);
   const rejectedRows = exactCount(row.active_rejected_rows);
+  const activeFileCount = exactOptionalFileCount(row.active_file_count);
   const activeSourceTable = row.active_source_table;
   const activeSourceFormat = row.active_source_format;
   const activeSourceVersion = row.active_source_version;
@@ -286,6 +309,7 @@ function materializePartition(row: ActivePartitionRow): FinopsActiveBillingParti
       activeCommittedAtIso,
       acceptedRows,
       rejectedRows,
+      activeFileCount,
     },
   };
 }
@@ -366,7 +390,7 @@ export class FinopsActiveBillingQueryRepository {
               p.active_source_format, p.active_source_version,
               p.active_source_updated_at, p.active_observed_at,
               p.active_committed_at, p.active_accepted_rows,
-              p.active_rejected_rows
+              p.active_rejected_rows, p.active_file_count
          FROM finops_export_partitions p
          JOIN aws_connections c
            ON c.id = p.connection_id AND c.org_id = p.org_id
@@ -560,7 +584,7 @@ export class FinopsActiveBillingQueryRepository {
               p.active_source_format, p.active_source_version,
               p.active_source_updated_at, p.active_observed_at,
               p.active_committed_at, p.active_accepted_rows,
-              p.active_rejected_rows
+              p.active_rejected_rows, p.active_file_count
          FROM finops_export_partitions p
          JOIN aws_connections c
            ON c.id = p.connection_id AND c.org_id = p.org_id
