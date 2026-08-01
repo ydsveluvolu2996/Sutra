@@ -2,19 +2,63 @@
 
 Status: `PARTIAL_PIPELINE` until a live, same-tenant GCP Cloud Billing export adapter produces a complete generation. No sample or inferred money is shown.
 
+Reviewed: 2026-08-01
+
 ## Official scope verified
 
 The common CID framework commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`
 contains no GCP dashboard definition. The authoritative separate repository was
 audited at immutable commit `d0b5983db3a0931a63fcc21a9f7e2764483cfcaf`:
 <https://github.com/awslabs/cid-gcp-cost-dashboard/blob/d0b5983db3a0931a63fcc21a9f7e2764483cfcaf/GCP-Cost-Dashboard.yaml>.
-The audited artifact SHA-256 is
+The audited manifest SHA-256 is
 `78ed3d8245be60aea8f212e38f1458d6ea5be8b9f0fe660deee71f494ec7087c`.
 Its seven sheets are Summary, Compute Engine, Cloud SQL, Big Query, Network,
 Kubernetes, and About. Sutra now exposes all seven evidence views (using the
 provider product spelling `BigQuery`) plus separate Credits, Resources,
 Opportunities, and Evidence views. Exact visual geometry remains a live/browser
 acceptance gate.
+
+## Immutable public artifact audit
+
+| Artifact | SHA-256 | Hash basis |
+|---|---|---|
+| `README.md` | `3e8baa8574a604fe4d061beebbe1a84cb4ea28afb0fc8e36a35b5c3b5bcd9059` | Raw file bytes |
+| `GCP-Cost-Dashboard.yaml` | `78ed3d8245be60aea8f212e38f1458d6ea5be8b9f0fe660deee71f494ec7087c` | Raw file bytes |
+| Embedded QuickSight definition | `f0c8192efe855309d5cd63189b9a7c10e0819b2ee7eb64e124fae47588347b07` | Decoded YAML scalar UTF-8 bytes |
+| `GCP-Cost-Dashboard-Stack.yaml` | `d6d4b02fd0ca40270e212600e88bf021e431db924875fb0d3670b5ec6cdea8a4` | Raw file bytes |
+| Embedded dataset `gcp_currency` | `a20a78ce6cc2150640e7f0aa39671c0c2ec5e5964b5fc48141ee6f1d2a6920e8` | UTF-8 canonical JSON with recursively sorted object keys |
+| Embedded dataset `gcp_summary_with_pricing` | `171af7d3e269bd51871a3bc860cda8354bf37fd3b942ddbd6b63d15a22016624` | UTF-8 canonical JSON with recursively sorted object keys |
+| Embedded view query `gcp_currency` | `0cc292a475e92c5b47eef7308f367dad25f71ef382f8f0d70214a4cf7de449f7` | Decoded YAML scalar UTF-8 bytes |
+| Embedded view query `gcp_current_pricing` | `0edd777957dccca9dcc7d92d8868aaf93dc1b23a22496f3b981e8bf5cac8206b` | Decoded YAML scalar UTF-8 bytes |
+| Embedded view query `gcp_summary` | `d0fe4d58905b1a95a2da2ea24f0c22fce196854112559430352fc26abac5c221` | Decoded YAML scalar UTF-8 bytes |
+
+The pinned repository publishes no changelog, release version, standalone
+QuickSight definition, standalone template body, or external template ID.
+Those fields are `null`; they are not inferred from Git history or deployment
+defaults. The two embedded dataset contracts contain respectively two input
+columns and 72 physical input-column occurrences (66 unique names).
+
+## Exact QuickSight source inventory
+
+The complete embedded definition has exactly seven sheets, 60 visuals, 47
+parameter controls, seven filter controls, 14 parameter declarations, 53
+calculated fields, 172 filter groups, 23 column configurations, two datasets,
+and three manifest views.
+
+| Sheet | Visuals | Parameter controls | Filter control | Visual types |
+|---|---:|---|---|---|
+| Summary | 27 | Default Cost, Currency, Project, Product, Group By, Billing Account Id, L1–L6 | Cost Type | 6 Sankey, 10 pivot, 3 line, 1 table, 5 bar, 1 waterfall, 1 combo |
+| Compute Engine | 19 | Billing Account Id, L1–L6 | Cost Type | 11 bar, 2 combo, 3 pivot, 1 heat map, 1 Sankey, 1 line |
+| Cloud SQL | 7 | Billing Account Id, L1–L6 | Cost Type | 1 pivot, 5 bar, 1 Sankey |
+| Big Query | 3 | Billing Account Id, L1–L6 | Cost Type | 1 pivot, 2 bar |
+| Network | 3 | Billing Account Id, L1–L6 | Cost Type | 1 pivot, 2 bar |
+| Kubernetes | 1 | Billing Account Id, L1–L6 | Cost Type | 1 bar |
+| About | 0 | None | Cost Type | No QuickSight visual objects; attribution is layout text |
+
+The aggregate visual inventory is eight Sankey, 16 pivot, four line, one table,
+26 bar, one waterfall, three combo, and one heat-map object. These are exact
+source counts, not a claim of pixel, layout, query-result, or interaction
+parity in Sutra.
 
 - [AWS Cloud Intelligence Dashboards — dashboard catalog](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/dashboards.html) classifies the GCP dashboard as an Additional dashboard that exports Google Cloud billing data for visualization and reporting, for executives, finance/procurement, FinOps, and product owners.
 - [AWS Labs CID GCP project](https://github.com/awslabs/cid-gcp-cost-dashboard) requires one or more BigQuery billing export tables plus the Cloud Billing pricing export. Its published QuickSight definition contains the `Summary`, `Compute Engine`, `Cloud SQL`, `Big Query`, `Network`, `Kubernetes`, and `About` sheets. It filters and drills through billing account, project hierarchy, service/product, SKU, region, usage period, credit classes, usage/pricing units, labels, cores, memory, and resource detail where supplied.
@@ -54,3 +98,27 @@ The authenticated API discovers active GCP billing sources inside the session or
 - Formula-safe CSV neutralizes cells beginning with `=`, `+`, `-`, `@`, tab, or carriage return.
 
 The permanent Workload Identity / BigQuery runtime adapter is not present in this repository, so activation remains `PARTIAL_PIPELINE` with reason `GCP_BIGQUERY_BILLING_EXPORT_ADAPTER_NOT_DEPLOYED`. The adapter contract requires `bigquery.jobs.create`, `bigquery.tables.get`, and `bigquery.tables.getData`, parameterized read-only queries, exact table scope, bounded rows, exhaustive pagination, and complete lineage. No production deployment was performed by this isolated vertical.
+
+## Frozen evidence integration and verification
+
+`lib/finops-gcp-cloud-intelligence-official-definition.ts` freezes the source
+identity, artifact hashes and hash bases, exact QuickSight inventory, per-sheet
+native mapping, unpublished fields, and live-adapter gaps. All four HTTP-200
+API branches return it: no source, source selection required, configured source
+without a generation, and report available. The client rejects an unrecognized
+schema, commit, manifest hash, embedded-definition hash, or 7/60 object count.
+The official panel is rendered independently in loading, configuration,
+selection, error, and report states.
+
+Focused verification command:
+
+```text
+node --experimental-strip-types --test tests/finops-gcp-cloud-intelligence.test.mjs tests/finops-gcp-cloud-intelligence-vertical.test.mjs tests/finops-gcp-cloud-intelligence-official-definition.test.ts tests/finops-gcp-cloud-intelligence-official-ui.test.mjs
+```
+
+Result: **10 passed, 0 failed, 0 skipped**. Scoped ESLint, full
+`tsc --noEmit`, and repository diff-check pass on the integrated working tree.
+
+Provider adapter registration, live same-tenant reconciliation, exact-tree
+browser validation, reviewed release, immutable image deployment, and live
+acceptance remain open. Maturity therefore remains `PARTIAL_PIPELINE`.
