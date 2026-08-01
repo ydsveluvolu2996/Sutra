@@ -621,6 +621,10 @@ export async function scheduleMarketplaceSpgCollections(input: {
       reject("SCOPE_REJECTED");
     }
     seen.add(scope.connectionId);
+  }
+  // Validate the complete resolver result before producing any queue side effect.
+  // A corrupt late entry must not leave a partially scheduled tenant set.
+  for (const scope of ordered) {
     await input.queue.enqueue({
       orgId: scope.organizationId,
       customerId: scope.customerId,

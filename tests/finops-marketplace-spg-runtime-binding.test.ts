@@ -278,11 +278,13 @@ test("scheduler queues only a trusted connection identity and daily window", asy
     idempotencyKey: `marketplace-spg:${SCOPE.organizationId}:${SCOPE.customerId}:${CONNECTION}:${encodeURIComponent(WINDOW)}`,
   }]);
   assert.equal(JSON.stringify(queued).includes(MEMBER), false);
+  const rejectedQueue: unknown[] = [];
   await assert.rejects(scheduleMarketplaceSpgCollections({
     scheduledWindow: WINDOW,
     loadEligibleScopes: async () => [SCOPE, SCOPE],
-    queue: { enqueue: async () => undefined },
+    queue: { enqueue: async (value) => { rejectedQueue.push(value); } },
   }), expectCode("SCOPE_REJECTED"));
+  assert.equal(rejectedQueue.length, 0);
 });
 
 test("runtime pins buyer/license reads, account coverage, CUR2, privacy and signed evidence", async () => {

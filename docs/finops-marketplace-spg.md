@@ -21,6 +21,18 @@ sharing, agreement, charge, legal-term, deployment, and expiration views:
 
 - <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/marketplace-dashboard.html>
 
+The native definition audit is pinned to
+`aws-samples/aws-cudos-framework-deployment` commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`, manifest
+`dashboards/aws-marketplace/aws-marketplace-spg.yaml`, SHA-256
+`67aaab07865d8c5096379bd3baf962f92e2337762d365b75bbfb8cbc28276f5d`.
+That manifest references the AWS-managed `aws-marketplace` QuickSight template
+but does not embed its analysis definition, so an exact QuickSight control,
+object-count, or pixel-layout inventory is not available from the immutable
+artifact. The separately documented AWS catalog contains five tabs and 23
+named visual areas; Sutra maps those names to supported, partial, or unavailable
+evidence-backed native views without claiming undisclosed QuickSight parity.
+
 ## Exact permanent collector reads
 
 ### Buyer Agreement Service

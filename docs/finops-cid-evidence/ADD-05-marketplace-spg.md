@@ -12,6 +12,40 @@ when no generation exists and the API reports
 `MARKETPLACE_SIGNED_BROKER_ADAPTER_NOT_DEPLOYED`; this vertical is not live
 verified.
 
+## Immutable official-definition audit
+
+The source audit is pinned to AWS's public CID repository at commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`. The Marketplace manifest is
+`dashboards/aws-marketplace/aws-marketplace-spg.yaml`, with SHA-256
+`67aaab07865d8c5096379bd3baf962f92e2337762d365b75bbfb8cbc28276f5d`.
+It identifies dashboard/template ID `aws-marketplace`, category `Additional`,
+theme `MIDNIGHT`, and the agreements, Marketplace licenses/grants, Marketplace
+spend, and terms datasets.
+
+The immutable manifest references an AWS-managed QuickSight template; it does
+not embed the QuickSight analysis definition. Exact sheet objects, visual
+objects, controls, placements, and pixel geometry therefore cannot be audited
+from this source. Sutra records the control inventory as
+`NOT_DISCLOSED_IN_IMMUTABLE_SOURCE`, keeps the QuickSight visual-object count
+`null`, and makes no pixel-parity claim.
+
+AWS's official guidance page documents five tabs and 23 named visual areas:
+
+| Documented tab | Named areas |
+|---|---:|
+| Spend Summary | 5 |
+| Spend Deep Dive | 4 |
+| Bedrock 3P Foundational Model Spend | 2 |
+| Granted and Entitled Licenses | 5 |
+| Marketplace Agreements | 7 |
+
+The pinned inventory and per-area support state are encoded in
+`lib/finops-marketplace-spg-official-definition.ts` and rendered in the native
+dashboard. The Bedrock 3P areas remain explicitly unavailable because the
+approved evidence contract has no authoritative foundational-model
+classification or usage-unit dimension; product names are not used to infer
+either fact.
+
 ## Official capability coverage
 
 The native workspace covers the official dashboard areas that the current
@@ -19,14 +53,14 @@ evidence contract can prove:
 
 | Area | Implemented evidence |
 |---|---|
-| Spend summary and deep dive | Reconciled CUR2 rows only, with exact signed micro-units, currencies separated, billing period/account/product/seller/charge-category filters, trend and safe visible-row CSV. |
+| Spend summary and deep dive | Reconciled CUR2 rows only, with exact signed micro-units, currencies separated, billing period/account/product/seller/charge-category filters, trend, seller/product/account/invoice rankings, and safe visible-row CSV. |
 | Invoice tracker | Allowlisted CUR2 invoice ID, billing period, product, seller, account, charge category, billed and amortized amounts. Missing invoice IDs remain missing. |
 | Agreements and subscriptions | Buyer/acceptor agreements, lifecycle status, acceptance/start/end, product, seller, fulfillment metadata, offer ID, terms, agreement entitlements and known charges. |
-| Renewal and expiration | Explicit 30/60/90-day expiration classifications, end dates, renewal-term `autoRenew` evidence where supplied, and status drilldown. |
+| Renewal and expiration | Explicit 30/60/90-day agreement and license expiration classifications, end dates, renewal-term `autoRenew` evidence where supplied, and status drilldown. |
 | Licenses and entitlements | Received License Manager licenses, beneficiary, validity, status and allowlisted entitlement quantities. |
 | Sharing and grants | Received grant beneficiary, activation state and allowlisted operations. |
 | Deployment | Marketplace Discovery `deployedOnAws` product metadata only; no resource deployment is inferred. |
-| Procurement/legal/GRC | Agreement, offer ID, legal document *type* (not URL/content), validity, renewal, commitment and license/grant evidence in one tenant-scoped view. |
+| Procurement/legal/GRC | Agreement, offer ID, legal document *type* (not URL/content), validity, renewal, deployment-status counts, lifecycle commitment by deployment status, agreement charges by month, and license/grant evidence in one tenant-scoped view. |
 
 The following official dimensions remain explicit gaps rather than inferred
 claims:
@@ -59,8 +93,11 @@ claims:
 - PostgreSQL migration: `postgres/migrations/0091_finops_marketplace_spg.sql`
 - Repository: `db/finops-marketplace-spg-repository.ts`
 - API: `app/api/v1/finops/marketplace-spg/route.ts`
+- Official definition: `lib/finops-marketplace-spg-official-definition.ts`
+- Dashboard projection: `lib/finops-marketplace-spg-dashboard.ts`
 - UI: `app/costs/finops-marketplace-spg-dashboard.tsx`
 - Focused tests: `tests/finops-marketplace-spg.test.ts`,
+  `tests/finops-marketplace-spg-dashboard.test.ts`,
   `tests/finops-marketplace-spg-vertical.test.mjs`, and
   `tests/finops-marketplace-spg-runtime-binding.test.ts`
 
