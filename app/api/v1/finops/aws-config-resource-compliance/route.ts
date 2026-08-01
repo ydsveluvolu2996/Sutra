@@ -1,6 +1,7 @@
 import { AwsConfigComplianceRepository } from "../../../../../db/finops-aws-config-compliance-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON } from "../../../../../lib/finops-aws-config-compliance-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -79,7 +80,7 @@ export async function GET(request: Request): Promise<Response> {
           snapshotId: latest.snapshotId, state: latest.state, capturedAt: latest.capturedAt,
           contentSha256: latest.contentSha256,
         },
-        activation: { available: false, reason: "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED" },
+        activation: { available: false, reason: AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON },
       });
     }
 
@@ -143,7 +144,7 @@ export async function GET(request: Request): Promise<Response> {
         snapshotId: latest.snapshotId, state: latest.state, capturedAt: latest.capturedAt,
         contentSha256: latest.contentSha256,
       },
-      activation: { available: false, reason: "AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED" },
+      activation: { available: false, reason: AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON },
       limitations: [
         ...snapshot.limitations,
         "The bounded server-owned collector/job contract is implemented; activation remains unavailable until its credential-owning adapter and durable handler are registered and provider-validated.",

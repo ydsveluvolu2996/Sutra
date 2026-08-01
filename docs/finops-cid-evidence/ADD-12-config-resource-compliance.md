@@ -28,6 +28,11 @@ does not infer compliance from missing rows.
   read-only AWS operations, fixed inventory query, active reconciled CUR 2.0
   binding, exact-prefix S3 policy, timeout, privacy exclusions, normalization,
   and immutable persistence handoff.
+- `finops-aws-config-compliance-runtime-binding.ts` adds the permanent daily
+  scheduler and five-attempt job shape, tenant-complete idempotency, a bounded
+  lease, concurrent-claim suppression, immutable receipt completion, verified
+  replay, and provider-neutral failure release. All scopes are prevalidated
+  before the scheduler performs its first enqueue.
 - Reserved SQLite `0087` and PostgreSQL `0082` migrations add append-only
   normalized snapshot generations. Database guards reject snapshot mutation
   and allow the active head to advance only to a newer `READY` or `EMPTY`
@@ -48,16 +53,18 @@ does not infer compliance from missing rows.
 
 This is a **partial pipeline**, not a local vertical candidate or a
 production-accepted capability. The bounded job contract is implemented, but
-its credential-owning AWS adapter and durable handler are not registered, so
+its credential-owning AWS adapter, replay store, and shared durable handler are
+not registered, so
 API activation is deliberately `available: false` with
-`AWS_CONFIG_COMPLIANCE_JOB_HANDLER_NOT_REGISTERED`. No fixture or sample data
-is substituted.
+`AWS_CONFIG_COMPLIANCE_DURABLE_RUNTIME_NOT_REGISTERED`. No fixture or sample
+data is substituted.
 
 Remaining gates:
 
-1. Implement, register, and provider-test the credential-owning adapter and
-   durable handler for the exact bounded aggregator, Organizations, recorder,
-   and rule-lifecycle operations, including empty-page pagination.
+1. Implement and provider-test the credential-owning adapter for the exact
+   bounded aggregator, Organizations, recorder, and rule-lifecycle operations,
+   including empty-page pagination; then register it with a permanent replay
+   store and the shared scheduler/handler runtime.
 2. Bind optional Config S3 delivery objects and reconciled active CUR 2.0 rows
    to the capture without accepting browser-supplied AWS scope.
 3. Extend the minimized projection for required-tag compliance and the
@@ -71,6 +78,8 @@ Remaining gates:
 
 - Domain engine suite: `tests/finops-aws-config-compliance.test.ts`
 - Collector/job contract suite: `tests/finops-aws-config-compliance-job.test.ts`
+- Durable runtime/replay suite:
+  `tests/finops-aws-config-compliance-runtime-binding.test.ts`
 - Persistence/API/UI/render contract:
   `tests/finops-aws-config-resource-compliance-vertical.test.mjs`
 - TypeScript and touched-file lint must pass in the integrated tree; unrelated
