@@ -7,9 +7,60 @@ an identity-only daily scheduler contract, server-resolved Connect/CUR2/privacy
 boundary, permission attestation, signed materializer verification, canonical
 immutable evidence archive, sealed tenant reference, accepted-attempt replay,
 immutable accepted-generation persistence, authenticated aggregate API and
-native seven-area UI. The real provider adapter, runtime composition, IAM
+native seven-area UI. A complete pinned AWS QuickSight definition audit is now
+returned in every successful API state and rendered with ready or missing data.
+The real provider adapter, runtime composition, IAM
 deployment, HMAC key service, privileged contact approval/audit route and live
 AWS evidence are not deployed.
+
+## Pinned official-source audit
+
+Reviewed `2026-08-01` against current AWS Guidance and immutable AWS CID commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`.
+
+AWS publishes the complete QuickSight `AnalysisDefinition` inline in
+`dashboards/amazon-connect/amazon-connect.yaml`. Exact structural counts are
+therefore provable: **8 sheets, 121 visuals, 47 parameter-control placements,
+14 filter-control placements, 18 parameter declarations, 33 calculated fields,
+157 filter groups, 8 column configurations and 2 dataset declarations**. These
+are source-definition counts, not a claim of pixel, geometry, query-result or
+interaction parity.
+
+| Public artifact | SHA-256 |
+|---|---|
+| `dashboards/amazon-connect/amazon-connect.yaml` | `dc39d46a29881b54384ff57feee193f23fa23bd6631cc3dda39352cd2960cbea` |
+| Embedded QuickSight definition | `c5078f8b73558a7ab1bc388e24dd52fae0ddd954f5097aec8e50b6552fdfc0b8` |
+| `changes/CHANGELOG-amazon-connect.md` | `147cab6cc9d5e2e95126ea39ae1b3df8efbee3b880788daef4114e6ca14383b2` |
+| Public shared `summary_view` dataset definition | `8e509103b770e7deb220a04eba63703c47db3142f08033bbb70c93498acc3ab8` |
+| Public shared `summary_view` SQL | `57b8ab6ec7d22e0bd642c1bbe44f5bc5cc2cce8523ef0c795ce410a1ae3dec8e` |
+
+The changelog's latest pinned entry is `v1.1.1`. No separate definition file,
+standalone template body, external template ID or dashboard-specific deployment
+template is published; those paths remain `null`. Of the two declared datasets,
+the shared `summary_view` body and SQL are public and hash-pinned (50 unique
+input columns). The `resource_connect_view` identifier and field references are
+visible inside the dashboard definition, but its dataset body and producing
+query are not committed at this revision; all of their artifact paths, hashes
+and input-column totals remain `null` rather than zero.
+
+The embedded inventory proves these per-sheet totals:
+
+| Sheet | Visuals | Parameter controls | Filter controls | AWS-documented purpose mapping |
+|---|---:|---:|---:|---|
+| Overview | 16 | 9 | 0 | High-level Amazon Connect and Contact Center Telecom charges. |
+| Contact Center | 8 | 7 | 0 | Accounts running Connect and associated contact-center services; native supporting-service coverage remains unavailable. |
+| Connect | 23 | 7 | 0 | Connect Voice usage and cost; native evidence is partial. |
+| Telecom | 17 | 8 | 4 | Telecom cost by number type and country; native evidence is partial and retains no telephone values. |
+| Daily Usage | 27 | 6 | 0 | Thirty-day cost/usage trends and inbound/outbound/phone-number usage; native evidence is partial. |
+| Call Details | 22 | 5 | 4 | Call patterns, durations and regional distribution; native billing country and source-unit semantics are explicitly narrower. |
+| Contact Search | 7 | 5 | 6 | Individual-contact analysis; native ordinary access is deliberately privacy-safe aggregate-only. |
+| About | 1 | 0 | 0 | Additional source-defined sheet; AWS Guidance enumerates seven analytical tabs, so no eighth analytical purpose is invented. |
+
+The frozen contract is
+`lib/finops-amazon-connect-official-definition.ts`. The API returns it in both
+configuration-required and report-bearing HTTP 200 responses. The native UI
+validates the pinned schema, commit and embedded-definition hash before
+rendering it in both states.
 
 ## Implemented official areas
 
@@ -34,7 +85,8 @@ AWS evidence are not deployed.
 - API: `app/api/v1/finops/amazon-connect-cost-insights/route.ts`
 - UI: `app/costs/finops-amazon-connect-cost-insights-dashboard.tsx`
 - Tests: `tests/finops-amazon-connect-cost-insight.test.ts` and
-  `tests/finops-amazon-connect-cost-insights-vertical.test.mjs`
+  `tests/finops-amazon-connect-cost-insights-vertical.test.mjs`, plus
+  `tests/finops-amazon-connect-official-definition.test.ts`
 
 Snapshots are normalized before persistence, content-addressed, immutable and
 tenant/account/partition/Region/instance scoped. Only `complete` generations
