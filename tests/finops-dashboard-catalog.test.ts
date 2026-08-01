@@ -40,8 +40,8 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     ({ currentMaturity }) => currentMaturity,
   );
   assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
-  assert.equal(counts.PARTIAL_PIPELINE?.length, 6);
-  assert.equal(counts.ENGINE_ONLY?.length, 15);
+  assert.equal(counts.PARTIAL_PIPELINE?.length, 9);
+  assert.equal(counts.ENGINE_ONLY?.length, 12);
   assert.equal(counts.ABSENT?.length, 2);
   assert.deepEqual(
     counts.LOCAL_VERTICAL_CANDIDATE?.map(({ id }) => id),
@@ -58,6 +58,9 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     counts.PARTIAL_PIPELINE?.map(({ id }) => id),
     [
       "trusted_advisor_organizational",
+      "aws_news_feeds",
+      "aws_budgets",
+      "support_cases_radar",
       "data_collection_monitor",
       "cora",
       "focus",

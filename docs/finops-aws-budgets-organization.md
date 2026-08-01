@@ -18,6 +18,8 @@ The normalized contract preserves:
 - subscriber type and count while excluding email addresses and SNS ARNs;
 - action type, threshold, approval model, status, role presence, and target
   count, while excluding role ARNs, policy content, and provider error text.
+- only the `cid:budget-level` AWS Budget tag used by the official dashboard
+  hierarchy; other provider tags do not cross this minimized boundary.
 
 Money is normalized to exact signed integer micro-units. Units are retained;
 only three-letter ISO-style units are identified as currencies, and currencies
@@ -38,6 +40,7 @@ The broker contract permits only these AWS Budgets API calls:
 - `DescribeNotificationsForBudget`
 - `DescribeSubscribersForNotification`
 - `DescribeBudgetActionsForBudget`
+- `ListTagsForResource` (the adapter retains only `cid:budget-level`)
 
 The current AWS service-authorization mapping requires these read permissions:
 
@@ -90,6 +93,18 @@ assignments remain explicit coverage gaps. Canonical company, business unit,
 environment, cost center, and owner values come only from the pinned taxonomy
 snapshot for the same organization, customer, and connection.
 
+Dashboard grouping uses the exact provider-side `cid:budget-level` tag. A
+missing or inaccessible tag is a hierarchy coverage gap, never a hierarchy
+inferred from the budget name. Budgeted, AWS-calculated actual, and
+AWS-forecasted values remain distinct in every projection and currency.
+
+The Data Collection prerequisites are both AWS Budgets and AWS Organizations:
+the connected payer/member account supplies budget definitions and calculated
+spend, while the management account or authorized delegated administrator
+supplies the complete account/OU set. The active Sutra taxonomy is an optional
+business-ownership enrichment. None of these sources is equivalent to the
+Sutra-authored budgets stored in `finops_budgets`.
+
 AWS requires callers to follow `NextToken` until it is null even when a page is
 empty, so the collector cannot treat an empty page as completion.
 
@@ -108,15 +123,13 @@ gates are:
 
 1. add the exact missing read actions to the reviewed collector role and its
    session ceiling without adding mutation authority;
-2. implement a bounded signed-broker runner that owns temporary AWS
-   credentials and emits this capture schema;
-3. persist immutable capture generations and collection attempts under exact
-   organization/customer/connection scope;
-4. expose an authenticated tenant-scoped API and professional dashboard UI,
-   keeping AWS and Sutra internal budgets visually separate;
-5. run live management-account and delegated-administrator tests for empty,
+2. deploy the implemented bounded signed-broker adapter behind the collection
+   job contract so it owns temporary AWS credentials and emits this schema;
+3. run live management-account and delegated-administrator tests for empty,
    populated, multi-currency, planned, history-ineligible, paginated,
    access-denied, stale, unknown-account, and cross-tenant cases.
 
-Until all five gates pass, this capability remains in progress and must not be
+Immutable persistence, accepted-head promotion, authenticated API, native UI,
+and explicit AWS/Sutra source separation now exist locally. Until the remaining
+provider gates pass, this capability remains in progress and must not be
 reported as production accepted.

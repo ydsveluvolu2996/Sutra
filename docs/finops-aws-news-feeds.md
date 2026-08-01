@@ -2,11 +2,13 @@
 
 ## Status
 
-This slice provides a production-oriented, transport-independent normalizer,
-source policy, relevance engine, source-health projection, and tests. It does
-not schedule network calls, persist captures, expose an API, or render a UI.
-It is therefore implementation evidence, not live or production-accepted
-evidence.
+This capability now provides the production-oriented normalizer, source policy,
+relevance engine, source-health projection, server-owned six-hour job contract,
+immutable tenant-scoped persistence, authenticated API, native dashboard, and
+focused tests. The shared durable worker/tick and production XXE-hardened
+outbound XML gateway are not yet registered, so it remains `PARTIAL_PIPELINE`,
+not live or production-accepted evidence. See
+`docs/finops-cid-evidence/ADV-07-aws-news-feeds.md` for the exact gate record.
 
 AWS documents the Cloud Intelligence Dashboard as covering What's New, blog
 posts, videos, and security bulletins with service/feed/category filtering:
@@ -67,8 +69,8 @@ tenant resource is affected.
 
 ## Governed transport contract
 
-The eventual collector/gateway must meet all of these requirements before
-this slice can be considered wired:
+The production gateway bound to the implemented server-owned job must meet all
+of these requirements before this slice can be considered wired:
 
 - take a source ID from the server schedule, never a URL from a request;
 - call `assertAwsNewsFeedRequestTarget` before connection;
@@ -119,15 +121,11 @@ reports accepted records but keeps expected/rejected record counts unknown.
 
 The following are intentionally not claimed by this slice:
 
-1. governed outbound gateway/collector implementing streaming byte limits,
+1. bind a governed outbound gateway implementing streaming byte limits,
    redirect interception, XML hardening, retry/backoff, and egress controls;
-2. durable, idempotent, tenant-scoped schedule and source-job ledger wiring;
-3. immutable capture/snapshot persistence with retention and correction
-   semantics;
-4. tenant-authorized API/query service with bounded pagination and no
-   request-derived scope or service catalog;
-5. professional dashboard views/filters and explicit partial/stale evidence;
-6. live official-source collection, failure/recovery tests, tenant-isolation
+2. register the implemented durable, idempotent, tenant-scoped six-hour job and
+   enqueue tick in the shared worker;
+3. live official-source collection, failure/recovery tests, tenant-isolation
    tests, security review, observability/alerts, and production acceptance.
 
 No deployment, image publication, permission change, or live-site mutation is

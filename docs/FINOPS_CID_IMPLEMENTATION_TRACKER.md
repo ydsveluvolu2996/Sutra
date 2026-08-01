@@ -60,14 +60,15 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 2 | 10 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 5 | 7 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 4 | 5 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **6** | **15** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **9** | **12** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The six partial pipelines are Trusted
-Advisor Organizational, Data Collection Monitor, CORA, FOCUS, Config Resource
-Compliance, and Pricing Change Analysis. Azure CID and GCP CID are absent.
+Anomaly, Trends, and Data Transfer. The nine partial pipelines are Trusted
+Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar, Data
+Collection Monitor, CORA, FOCUS, Config Resource Compliance, and Pricing Change
+Analysis. Azure CID and GCP CID are absent.
 
 ## Parent capability tracker
 
@@ -82,9 +83,9 @@ Compliance, and Pricing Change Analysis. Azure CID and GCP CID are absent.
 | ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | [G0/G1/engine evidence](finops-cid-evidence/ADV-04-extended-support.md); concrete multi-account collector, accepted materialization/history, authenticated API, native visual, exact-money review, and provider acceptance remain. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-05-graviton-savings.md); add OpenSearch/ElastiCache contracts, export-object recommendation ingestion, compatibility/inventory/pricing joins, accepted history, API/UI, and provider reconciliation. |
 | ADV-06 | Health Events Dashboard | `health_events` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-06-health-events.md); implement concrete scheduled AWS Health collection, immutable event/entity/detail history, authenticated API, planning timeline/UI, and eligible-plan provider acceptance. |
-| ADV-07 | AWS News Feeds | `aws_news_feeds` | `ENGINE_ONLY` | Complete governed scheduled persistence and visual What’s New/blog/video/security feeds with provenance and freshness. |
-| ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `ENGINE_ONLY` | Complete provider budgets hierarchy, actual/forecast/status history, API/UI, distinct from Sutra-authored budgets. |
-| ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `ENGINE_ONLY` | Complete privacy-minimized multi-account/org history, API/UI, support-plan states, and optional summary provenance. |
+| ADV-07 | AWS News Feeds | `aws_news_feeds` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): immutable accepted history, same-tenant API, and native four-family UI exist; shared worker registration, hardened production XML gateway, and provider acceptance remain. |
+| ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-08-aws-budgets.md): immutable hierarchy/actual/forecast history, same-tenant API, and native UI exist; signed-broker scheduler binding and provider acceptance remain. |
+| ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): privacy-minimized immutable incremental history, same-tenant API, native UI, plan states, and explicit optional-summary state exist; live Support adapter/entitlement probe and provider acceptance remain. |
 | ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `ENGINE_ONLY` | Complete Resilience Hub application/assessment/drift history across accounts/regions and visual recommendations. |
 | ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `ENGINE_ONLY` | Complete WorkSpaces/AppStream usage, cost, performance, logon, optimization, persistence, API/UI, and privacy-safe user views. |
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | Replace generic telemetry equivalence with official DCF module instrumentation, execution history, errors, Step Functions links, retries, latency, and coverage. |

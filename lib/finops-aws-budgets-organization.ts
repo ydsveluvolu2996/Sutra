@@ -34,6 +34,7 @@ export const AWS_BUDGETS_COLLECTION_BOUNDS = Object.freeze({
   maximumNotifications: 5_000,
   maximumSubscribers: 50_000,
   maximumActions: 10_000,
+  maximumBudgetLevelTags: 1_000,
   maximumCostFilterKeys: 50,
   maximumCostFilterValuesPerKey: 100,
   maximumTextCharacters: 256,
@@ -53,6 +54,7 @@ export const AWS_BUDGETS_READ_API_OPERATIONS = Object.freeze([
   "DescribeNotificationsForBudget",
   "DescribeSubscribersForNotification",
   "DescribeBudgetActionsForBudget",
+  "ListTagsForResource",
 ] as const);
 
 /** Current IAM actions required by the capture contract. */
@@ -172,6 +174,12 @@ export interface AwsBudgetSubscriberRecord {
   readonly subscriptionType: "EMAIL" | "SNS";
 }
 
+/** Minimized provider tag projection used by the CID budget hierarchy. */
+export interface AwsBudgetLevelTagRecord {
+  readonly key: "cid:budget-level";
+  readonly value: string;
+}
+
 export interface AwsBudgetActionRecord {
   readonly actionId: string;
   readonly actionType: "APPLY_IAM_POLICY" | "APPLY_SCP_POLICY" | "RUN_SSM_DOCUMENTS";
@@ -231,6 +239,7 @@ export interface AwsBudgetsCapture {
   readonly notificationSequences: readonly AwsBudgetNamedSequence<AwsBudgetNotificationRecord>[];
   readonly subscriberSequences: readonly AwsBudgetSubscriberSequence[];
   readonly actionSequences: readonly AwsBudgetNamedSequence<AwsBudgetActionRecord>[];
+  readonly tagSequences: readonly AwsBudgetNamedSequence<AwsBudgetLevelTagRecord>[];
 }
 
 export interface NormalizedAwsBudgetMoney {
@@ -281,11 +290,14 @@ export interface NormalizedAwsBudget {
   readonly history: readonly NormalizedAwsBudgetHistory[];
   readonly notifications: readonly NormalizedAwsBudgetNotification[];
   readonly actions: readonly NormalizedAwsBudgetAction[];
+  /** Exact value of the provider-side cid:budget-level tag, never inferred. */
+  readonly hierarchyLevel: string | null;
   readonly coverage: {
     readonly history: "complete" | "partial" | "not_applicable" | "configuration_required";
     readonly notifications: "complete" | "partial" | "configuration_required";
     readonly subscribers: "complete" | "partial" | "configuration_required";
     readonly actions: "complete" | "partial" | "configuration_required";
+    readonly hierarchyTag: "complete" | "partial" | "configuration_required";
     readonly actual: "available" | "unavailable";
     readonly forecast: "available" | "unavailable";
   };
@@ -325,6 +337,7 @@ export interface AwsBudgetsDashboardQuery {
   readonly currencies?: readonly string[];
   readonly budgetTypes?: readonly AwsBudgetType[];
   readonly accountIds?: readonly string[];
+  readonly budgetLevels?: readonly string[];
   readonly namePrefix?: string;
   readonly effectiveAtIso?: string;
   readonly page?: { readonly limit?: number; readonly cursor?: string };
@@ -375,6 +388,7 @@ export interface AwsBudgetsDashboard {
     readonly missingHierarchyAccounts: number;
     readonly missingTaxonomyAccounts: number;
     readonly currencies: readonly string[];
+    readonly budgetLevels: readonly string[];
   };
   readonly budgets: readonly AwsBudgetsDashboardBudget[];
   readonly nextCursor: string | null;
@@ -640,11 +654,13 @@ function parseBudget(value: unknown): NormalizedAwsBudget {
     history: [],
     notifications: [],
     actions: [],
+    hierarchyLevel: null,
     coverage: {
       history: "configuration_required",
       notifications: "configuration_required",
       subscribers: "configuration_required",
       actions: "configuration_required",
+      hierarchyTag: "configuration_required",
       actual: value.calculatedSpend.actualSpend === null ? "unavailable" : "available",
       forecast: value.calculatedSpend.forecastedSpend === null ? "unavailable" : "available",
     },
@@ -697,6 +713,13 @@ function parseSubscriber(value: unknown): AwsBudgetSubscriberRecord {
   }
   if (Object.keys(value).some((key) => key !== "subscriptionType")) reject("INVALID_CAPTURE");
   return { subscriptionType: value.subscriptionType as "EMAIL" | "SNS" };
+}
+
+function parseBudgetLevelTag(value: unknown): AwsBudgetLevelTagRecord {
+  if (!record(value)) reject("INVALID_CAPTURE");
+  exactKeys(value, ["key", "value"]);
+  if (value.key !== "cid:budget-level") reject("INVALID_CAPTURE");
+  return { key: "cid:budget-level", value: safeText(value.value, 128) };
 }
 
 function parseAction(value: unknown): NormalizedAwsBudgetAction {
@@ -804,7 +827,7 @@ export function normalizeAwsBudgetsCapture(
   exactKeys(value, [
     "schemaVersion", "scope", "captureId", "startedAtIso", "completedAtIso",
     "operationCoverage", "budgetPages", "historySequences",
-    "notificationSequences", "subscriberSequences", "actionSequences",
+    "notificationSequences", "subscriberSequences", "actionSequences", "tagSequences",
   ]);
   if (
     !exactScope(value.scope, expectedScope)
@@ -885,6 +908,14 @@ export function normalizeAwsBudgetsCapture(
     parseAction,
     (item) => item.actionId,
   );
+  const tags = parseNamedSequences(
+    (value.tagSequences as readonly AwsBudgetNamedSequence<AwsBudgetLevelTagRecord>[]) ?? [],
+    expectedScope,
+    names,
+    AWS_BUDGETS_COLLECTION_BOUNDS.maximumBudgetLevelTags,
+    parseBudgetLevelTag,
+    (item) => item.key,
+  );
   if (!Array.isArray(value.subscriberSequences) || value.subscriberSequences.length > AWS_BUDGETS_COLLECTION_BOUNDS.maximumNotifications) {
     reject("BOUND_EXCEEDED");
   }
@@ -916,6 +947,7 @@ export function normalizeAwsBudgetsCapture(
     DescribeNotificationsForBudget: [...notifications.values()].reduce((sum, item) => sum + item.values.length, 0),
     DescribeSubscribersForNotification: subscriberCount,
     DescribeBudgetActionsForBudget: [...actions.values()].reduce((sum, item) => sum + item.values.length, 0),
+    ListTagsForResource: [...tags.values()].reduce((sum, item) => sum + item.values.length, 0),
   };
   for (const [operation, count] of Object.entries(operationCounts) as [Exclude<AwsBudgetOperation, "DescribeBudgets">, number][]) {
     if (coverage.get(operation)?.recordCount !== count) reject("INVALID_CAPTURE");
@@ -924,10 +956,12 @@ export function normalizeAwsBudgetsCapture(
   const notificationState = operationState(coverage, "DescribeNotificationsForBudget");
   const subscriberState = operationState(coverage, "DescribeSubscribersForNotification");
   const actionState = operationState(coverage, "DescribeBudgetActionsForBudget");
+  const tagState = operationState(coverage, "ListTagsForResource");
   const normalizedBudgets = [...budgetMap.values()].map(({ value: budget }) => {
     const history = histories.get(budget.budgetName);
     const notification = notifications.get(budget.budgetName);
     const action = actions.get(budget.budgetName);
+    const tag = tags.get(budget.budgetName);
     const normalizedNotifications = (notification?.values ?? []).map((item) => {
       const subscriber = subscribers.get(`${budget.budgetName}|${notificationKey(item)}`);
       return {
@@ -965,6 +999,7 @@ export function normalizeAwsBudgetsCapture(
       history: history?.values ?? [],
       notifications: normalizedNotifications,
       actions: action?.values ?? [],
+      hierarchyLevel: tag?.values[0]?.value ?? null,
       coverage: {
         history: ["ANNUALLY", "CUSTOM"].includes(budget.timeUnit)
           ? "not_applicable" as const
@@ -978,6 +1013,7 @@ export function normalizeAwsBudgetsCapture(
           ? "configuration_required" as const
           : "partial" as const,
         actions: coverageForSequence(actionState, Boolean(action), action?.exhausted ?? false),
+        hierarchyTag: coverageForSequence(tagState, Boolean(tag), tag?.exhausted ?? false),
         actual: budget.actual === null ? "unavailable" as const : "available" as const,
         forecast: budget.forecast === null ? "unavailable" as const : "available" as const,
       },
@@ -985,10 +1021,11 @@ export function normalizeAwsBudgetsCapture(
   }).sort((left, right) => compareText(left.budgetName, right.budgetName));
   const secondaryPartial = [...coverage.values()].some((item) => item.state !== "SUCCEEDED");
   const missingCostEvidence = normalizedBudgets.some((item) => item.actual === null || item.forecast === null);
+  const missingBudgetHierarchy = normalizedBudgets.some((item) => item.hierarchyLevel === null);
   const collectionState: AwsBudgetsSnapshot["collectionState"] =
     describeState === "ACCESS_DENIED" ? "configuration_required"
     : describeState === "UNAVAILABLE" ? "unavailable"
-    : describeState === "PARTIAL" || secondaryPartial || missingCostEvidence ? "partial"
+    : describeState === "PARTIAL" || secondaryPartial || missingCostEvidence || missingBudgetHierarchy ? "partial"
     : "ready";
   const providerUpdates = normalizedBudgets.map((item) => item.lastUpdatedAt)
     .filter((item): item is string => item !== null).sort(compareText);
@@ -1014,6 +1051,7 @@ export function normalizeAwsBudgetsCapture(
     limitations: [
       "AWS Budgets status is updated several times per day and is not real-time billing evidence.",
       "AWS Budgets and Sutra internal budgets remain separate sources and are never silently merged.",
+      "The dashboard hierarchy uses only the exact provider cid:budget-level tag; missing tags are never inferred.",
       "Missing access, taxonomy, hierarchy, actual, or forecast evidence is reported as partial or configuration-required, never as zero.",
     ],
   };
@@ -1134,7 +1172,7 @@ function validateTaxonomy(
   return map;
 }
 
-function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "currencies" | "budgetTypes" | "accountIds">> & {
+function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "currencies" | "budgetTypes" | "accountIds" | "budgetLevels">> & {
   namePrefix: string | null;
   effectiveAtIso: string | null;
   limit: number;
@@ -1143,12 +1181,13 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
   if (value === undefined) value = {};
   if (!record(value)) reject("INVALID_QUERY");
   if (Object.keys(value).some((key) => ![
-    "currencies", "budgetTypes", "accountIds", "namePrefix",
+    "currencies", "budgetTypes", "accountIds", "budgetLevels", "namePrefix",
     "effectiveAtIso", "page",
   ].includes(key))) reject("INVALID_QUERY");
   const currencies = value.currencies ?? [];
   const budgetTypes = value.budgetTypes ?? [];
   const accountIds = value.accountIds ?? [];
+  const budgetLevels = value.budgetLevels ?? [];
   if (!Array.isArray(currencies) || currencies.length > 20 || currencies.some((item) => !CURRENCY.test(String(item)))) reject("INVALID_QUERY");
   const knownTypes: readonly string[] = ["COST", "USAGE", "RI_UTILIZATION", "RI_COVERAGE", "SAVINGS_PLANS_UTILIZATION", "SAVINGS_PLANS_COVERAGE"];
   if (!Array.isArray(budgetTypes) || budgetTypes.length > knownTypes.length || budgetTypes.some((item) => !knownTypes.includes(String(item)))) reject("INVALID_QUERY");
@@ -1156,7 +1195,9 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
     || accountIds.length > AWS_BUDGETS_COLLECTION_BOUNDS.maximumQueryAccountFilters
     || accountIds.some((item) => !ACCOUNT_ID.test(String(item)))
   ) reject("INVALID_QUERY");
-  for (const items of [currencies, budgetTypes, accountIds]) {
+  if (!Array.isArray(budgetLevels) || budgetLevels.length > 100
+    || budgetLevels.some((item) => typeof item !== "string" || !SAFE_TEXT.test(item))) reject("INVALID_QUERY");
+  for (const items of [currencies, budgetTypes, accountIds, budgetLevels]) {
     if (new Set(items).size !== items.length) reject("INVALID_QUERY");
   }
   const namePrefix = value.namePrefix === undefined ? null : safeText(value.namePrefix, 100);
@@ -1176,6 +1217,7 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
     currencies: [...currencies] as string[],
     budgetTypes: [...budgetTypes] as AwsBudgetType[],
     accountIds: [...accountIds] as string[],
+    budgetLevels: [...budgetLevels] as string[],
     namePrefix,
     effectiveAtIso,
     limit: Number(limit),
@@ -1253,6 +1295,7 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
     return (query.currencies.length === 0 || query.currencies.some((currency) => currencies.includes(currency)))
       && (query.budgetTypes.length === 0 || query.budgetTypes.includes(budget.budgetType))
       && (query.accountIds.length === 0 || query.accountIds.some((accountId) => item.accountMappings.some((entry) => entry.accountId === accountId)))
+      && (query.budgetLevels.length === 0 || (budget.hierarchyLevel !== null && query.budgetLevels.includes(budget.hierarchyLevel)))
       && (query.namePrefix === null || budget.budgetName.startsWith(query.namePrefix))
       && (query.effectiveAtIso === null || (
         Date.parse(budget.effectivePeriod.start) <= Date.parse(query.effectiveAtIso)
@@ -1306,6 +1349,8 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
         item.budget.actual?.currency,
         item.budget.forecast?.currency,
       ].filter((value): value is string => value !== null && value !== undefined)))].sort(compareText),
+      budgetLevels: [...new Set(page.map((item) => item.budget.hierarchyLevel)
+        .filter((value): value is string => value !== null))].sort(compareText),
     },
     budgets: page,
     nextCursor: hasMore ? `v1:${query.offset + page.length}` : null,
@@ -1319,6 +1364,7 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
       "Organization-wide targeting is projected only when hierarchy evidence is available.",
       "Business ownership is projected only from the canonical, tenant-scoped Sutra taxonomy snapshot.",
       "Budget actions are read-only metadata; this engine never executes, creates, or updates an action.",
+      "Budget grouping uses the exact AWS Budgets cid:budget-level tag value and never a name-based hierarchy guess.",
     ],
   };
   if (encodedBytes(dashboard) > AWS_BUDGETS_COLLECTION_BOUNDS.maximumDashboardBytes) reject("RESPONSE_BOUND_EXCEEDED");

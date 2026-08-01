@@ -11,6 +11,9 @@ import {
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
 import { FinopsAwsConfigResourceComplianceDashboard } from "./finops-aws-config-resource-compliance-dashboard";
+import { FinopsAwsBudgetsOrganizationDashboard } from "./finops-aws-budgets-organization-dashboard";
+import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
+import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
 import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
@@ -183,6 +186,15 @@ export function FinopsDashboardCatalogNav({
               connectionId={connectionId}
               dashboard={selected}
               onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
+            />
+          ) : selected.id === "aws_news_feeds" ? (
+            <FinopsAwsNewsFeedsDashboard connectionId={connectionId} />
+          ) : selected.id === "aws_budgets" ? (
+            <FinopsAwsBudgetsOrganizationDashboard connectionId={connectionId} />
+          ) : selected.id === "support_cases_radar" ? (
+            <FinopsAwsSupportCasesRadarDashboard
+              connectionId={connectionId}
+              dashboard={selected}
             />
           ) : (
             <FinopsCapabilityShell

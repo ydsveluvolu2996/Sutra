@@ -81,6 +81,9 @@ import postgresFinopsActiveFileCountSql from "../postgres/migrations/0081_finops
 import postgresFinopsAwsConfigComplianceSql from "../postgres/migrations/0082_finops_aws_config_compliance.sql?raw";
 import postgresFinopsPricingChangeMaterializationsSql from "../postgres/migrations/0083_finops_pricing_change_materializations.sql?raw";
 import postgresFinopsCoraSnapshotsSql from "../postgres/migrations/0084_finops_cora_snapshots.sql?raw";
+import postgresFinopsAwsNewsFeedSnapshotsSql from "../postgres/migrations/0085_finops_aws_news_feed_snapshots.sql?raw";
+import postgresFinopsAwsBudgetsOrganizationSql from "../postgres/migrations/0086_finops_aws_budgets_organization.sql?raw";
+import postgresFinopsAwsSupportCasesSql from "../postgres/migrations/0087_finops_aws_support_cases.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -166,6 +169,9 @@ const migrations = [
   { id: "0082_finops_aws_config_compliance", source: postgresFinopsAwsConfigComplianceSql },
   { id: "0083_finops_pricing_change_materializations", source: postgresFinopsPricingChangeMaterializationsSql },
   { id: "0084_finops_cora_snapshots", source: postgresFinopsCoraSnapshotsSql },
+  { id: "0085_finops_aws_news_feed_snapshots", source: postgresFinopsAwsNewsFeedSnapshotsSql },
+  { id: "0086_finops_aws_budgets_organization", source: postgresFinopsAwsBudgetsOrganizationSql },
+  { id: "0087_finops_aws_support_cases", source: postgresFinopsAwsSupportCasesSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

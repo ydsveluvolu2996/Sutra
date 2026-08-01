@@ -74,6 +74,7 @@ function capture(): Mutable<AwsBudgetsCapture> {
       { operation: "DescribeNotificationsForBudget", state: "SUCCEEDED", recordCount: 1, failureCode: null },
       { operation: "DescribeSubscribersForNotification", state: "SUCCEEDED", recordCount: 2, failureCode: null },
       { operation: "DescribeBudgetActionsForBudget", state: "SUCCEEDED", recordCount: 1, failureCode: null },
+      { operation: "ListTagsForResource", state: "SUCCEEDED", recordCount: 1, failureCode: null },
     ],
     budgetPages: [page([{
       budgetName: "Platform monthly guardrail",
@@ -128,6 +129,10 @@ function capture(): Mutable<AwsBudgetsCapture> {
         executionRolePresent: true,
         targetedResourceCount: 1,
       }])],
+    }],
+    tagSequences: [{
+      budgetName: "Platform monthly guardrail",
+      pages: [page([{ key: "cid:budget-level", value: "BusinessUnit" }])],
     }],
   };
 }
@@ -185,6 +190,7 @@ test("normalizes authoritative definitions, spend, history, alerts, subscribers,
   const budget = snapshot.budgets[0]!;
   assert.equal(budget.actual?.amountMicros, "6250250000");
   assert.equal(budget.forecast?.amountMicros, "10100500000");
+  assert.equal(budget.hierarchyLevel, "BusinessUnit");
   assert.equal(budget.history[0]?.budgeted.currency, "USD");
   assert.equal(budget.notifications[0]?.subscriberCount, 2);
   assert.deepEqual(budget.notifications[0]?.subscriberTypes, ["EMAIL", "SNS"]);
@@ -219,6 +225,7 @@ test("projects linked accounts through AWS OU and canonical business taxonomy ev
   assert.equal(dashboard.coverage.totalAwsBudgets, 1);
   assert.equal(dashboard.coverage.matchedAwsBudgets, 1);
   assert.deepEqual(dashboard.coverage.currencies, ["USD"]);
+  assert.deepEqual(dashboard.coverage.budgetLevels, ["BusinessUnit"]);
   assert.equal(dashboard.budgets[0]?.targeting, "linked_accounts");
   assert.deepEqual(dashboard.budgets[0]?.accountMappings[0], {
     accountId: LINKED_ACCOUNT_ID,
@@ -315,6 +322,16 @@ test("rejects subscriber contacts, role ARNs, policies, and unmodeled provider f
     () => normalizeAwsBudgetsCapture(roleArn, SCOPE, NOW),
     (error) => error instanceof AwsBudgetsOrganizationError && error.code === "INVALID_CAPTURE",
   );
+
+  const unrelatedTag = capture() as unknown as Record<string, unknown>;
+  const tagSequences = unrelatedTag.tagSequences as Array<{
+    pages: Array<{ response: { records: Array<Record<string, unknown>> } }>;
+  }>;
+  tagSequences[0]!.pages[0]!.response.records[0]!.key = "OwnerEmail";
+  assert.throws(
+    () => normalizeAwsBudgetsCapture(unrelatedTag, SCOPE, NOW),
+    (error) => error instanceof AwsBudgetsOrganizationError && error.code === "INVALID_CAPTURE",
+  );
 });
 
 test("enforces provider history retention bounds and rejects mixed units within one budget", () => {
@@ -362,6 +379,7 @@ test("represents denied access as configuration-required with unknown totals, no
   denied.notificationSequences = [];
   denied.subscriberSequences = [];
   denied.actionSequences = [];
+  denied.tagSequences = [];
   const snapshot = normalizeAwsBudgetsCapture(denied, SCOPE, NOW);
   assert.equal(snapshot.collectionState, "configuration_required");
   const source = awsBudgetsOrganizationSourceEvidence(snapshot);
@@ -404,7 +422,7 @@ test("keeps currencies separate and enforces bounded exact filters and cursors",
     snapshot,
     hierarchy: hierarchy(),
     taxonomy: taxonomy(),
-    query: { currencies: ["USD"], budgetTypes: ["COST"], namePrefix: "Platform" },
+    query: { currencies: ["USD"], budgetTypes: ["COST"], budgetLevels: ["BusinessUnit"], namePrefix: "Platform" },
     nowEpochMs: NOW,
   });
   assert.equal(usd.budgets.length, 1);
@@ -435,6 +453,7 @@ test("documents exact read APIs, IAM actions, and organization dependencies with
     "DescribeNotificationsForBudget",
     "DescribeSubscribersForNotification",
     "DescribeBudgetActionsForBudget",
+    "ListTagsForResource",
   ]);
   assert.deepEqual(AWS_BUDGETS_READ_IAM_ACTIONS, [
     "aws-portal:ViewBilling",
