@@ -38,11 +38,11 @@ Microsoft documents recurring exports for cost and usage data, FOCUS, price shee
 |---|---|---|
 | G0 official requirements | `VERIFIED` | AWS and Microsoft primary sources above were reviewed on 2026-08-01. |
 | G1 source contract | `IMPLEMENTED_UNVERIFIED` | Strict Standard Actual Cost / FOCUS 1.0 capture schema, exact fields, signed integer micros, currencies and usage units isolated, six-month/30-day coverage declarations, row/byte/time bounds, explicit completeness and reconciliation. |
-| G2 collector contract | `IMPLEMENTED_UNVERIFIED` | Server-owned Azure workload identity or secret reference; export, run-history, and Blob reads only; credential material prohibited; billing and Sutra tenant scope pinned. A concrete Azure provider adapter is not deployed. |
+| G2 collector contract | `IMPLEMENTED_UNVERIFIED` | Server-owned Azure workload identity or secret reference; export, run-history, and Blob reads only; credential material prohibited; billing and Sutra tenant scope pinned. An identity-only daily scheduler and strict five-attempt durable handler reload the exact source boundary and hash-verify replay results. The shared runtime/replay adapter and concrete Azure provider adapter are not deployed. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | SQLite `0105` and PostgreSQL `0100`; immutable content-addressed snapshots; exact org/customer/source scope; READY/EMPTY-only monotonic accepted head; incomplete attempts retained without replacing the accepted generation. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | Authenticated read-only `GET /api/v1/finops/azure-cloud-intelligence`; browser supplies no org/customer scope; server discovers the authenticated organization’s sources, filters each by stored-customer authorization, supports multiple-source selection, and uses exact activation reasons. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Native responsive dashboard contains summary, six-month trend, 30-day activity, service/subscription/region/resource-group allocation, pricing/commitment, charge, tag and resource views, source selector, evidence history, gap disclosure, and formula-safe CSV. |
-| G6 focused verification | `VERIFIED` | `tests/finops-azure-cid-vertical.test.mjs`: 5 passed, 0 failed, 0 skipped. Targeted ESLint passed. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Native responsive dashboard contains summary, six-month trend, 30-day activity, service/subscription/region/resource-group allocation, pricing/commitment, charge, tag and resource views, source selector, durable-runtime disclosure, evidence history, gap disclosure, and formula-safe CSV. |
+| G6 focused verification | `VERIFIED` | `tests/finops-azure-cid-vertical.test.mjs` plus `tests/finops-azure-cid-runtime-binding.test.ts`: 10 passed, 0 failed, 0 skipped. Targeted ESLint and TypeScript passed. |
 | G7 exact-tree gate | `WORKING_TREE_VERIFIED` | Repository-wide `pnpm typecheck` passed on the current shared working tree. The parent must rerun the complete exact-revision gate after integration. |
 | G8 controlled provider acceptance | `BLOCKED` | No Azure credential, recurring export, delivered Blob manifest, price sheet, reservation recommendation dataset, or deployed provider adapter is configured in this environment. |
 | G9–G10 deployment | `NOT_STARTED` | Reviewed integration, immutable image build, deployment, rollback proof, and live two-tenant visual/API acceptance belong to the parent release gate. |
@@ -64,7 +64,8 @@ Focused commands:
 
 ```text
 node --test tests/finops-azure-cid-vertical.test.mjs
-pnpm exec eslint app/costs/finops-azure-cloud-intelligence-dashboard.tsx app/api/v1/finops/azure-cloud-intelligence/route.ts lib/finops-azure-cid.ts lib/finops-azure-cid-collector-job.ts db/finops-azure-cid-repository.ts tests/finops-azure-cid-vertical.test.mjs
+pnpm exec tsx --test tests/finops-azure-cid-runtime-binding.test.ts tests/finops-azure-cid-vertical.test.mjs
+pnpm exec eslint app/costs/finops-azure-cloud-intelligence-dashboard.tsx app/api/v1/finops/azure-cloud-intelligence/route.ts lib/finops-azure-cid.ts lib/finops-azure-cid-collector-job.ts lib/finops-azure-cid-runtime-binding.ts db/finops-azure-cid-repository.ts tests/finops-azure-cid-vertical.test.mjs tests/finops-azure-cid-runtime-binding.test.ts
 pnpm typecheck
 git diff --check
 ```
