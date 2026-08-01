@@ -36,6 +36,10 @@ The contract was checked against the current AWS documentation on 2026-07-31:
 - [Understanding export delivery](https://docs.aws.amazon.com/cur/latest/userguide/dataexports-export-delivery.html)
   defines the delivered `<prefix>/<export-name>/` namespace, manifests, and
   gzip/CSV chunk paths.
+- [Data protection and default S3 encryption](https://docs.aws.amazon.com/cur/latest/userguide/data-protection.html)
+  documents that Data Exports defaults to SSE-S3 and that SSE-KMS is applied
+  through the destination bucket's default encryption configuration during
+  object delivery.
 
 AWS currently supports FOCUS 1.2 directly, so this is an active native template
 contract rather than a guarded FOCUS 1.0 fallback. It must fail deployment if a
@@ -79,17 +83,22 @@ by itself, reconciliation evidence.
 ## Dedicated destination contract
 
 With no existing bucket name, the stack creates a retained, update-retained,
-versioned, AES-256-encrypted bucket with ACLs disabled and every S3 public
-access block enabled.
+versioned bucket and retained, rotating, symmetric customer-managed KMS key.
+The bucket uses that exact key for default SSE-KMS encryption, has ACLs
+disabled, and enables every S3 public-access block.
 
 Existing-bucket mode is deliberately guarded. The operator must set
-`ExistingBucketContract=dedicated-private-retained` and separately verify that
-the named bucket:
+`ExistingBucketContract=dedicated-private-retained-cmk`, provide the exact full
+customer-managed key ARN in `ExistingBucketKmsKeyArn`, and separately verify
+that the named bucket and key:
 
 - is dedicated to this export and private;
 - is retained through customer lifecycle policy;
-- has ACLs disabled, encryption and versioning enabled, and all public access
-  blocks enabled; and
+- have matching account, partition, and declared destination Region;
+- have ACLs disabled, exact-key SSE-KMS default encryption, versioning, and all
+  public-access blocks enabled;
+- permit only the exact account-bound Data Exports delivery through S3 in the
+  key policy; and
 - has no independently managed bucket-policy statements.
 
 `AWS::S3::BucketPolicy` owns the whole policy document; CloudFormation does not
@@ -106,18 +115,26 @@ and restricts `aws:SourceArn` to the regional, account-owned export name:
 
 `arn:<partition>:bcm-data-exports:<region>:<account>:export/<ExportName>-*`
 
-The service principal cannot read or delete objects.
+AWS documents that Data Exports delivers through `s3:PutObject`; S3 default
+bucket encryption applies SSE-KMS during that object delivery. For the created
+destination, the key policy permits `bcm-data-exports.amazonaws.com` only
+`kms:GenerateDataKey` and `kms:Decrypt` through S3, with the source account,
+exact regional export-name ARN, and S3 encryption context constrained. It does
+not grant the service direct KMS encryption, key management, or access outside
+an S3 encryption context. The service principal cannot read or delete objects.
 
 ## Permanent collector contract
 
 The immutable `standard-2026-08.1` base role deny ceiling is sufficient for this
-add-on. It ceiling-permits the five actions below without granting them. This
+add-on. It ceiling-permits the actions below without granting them. This
 add-on owns the exact resource-scoped Allows:
 
 - `s3:ListBucket` only for `<ExportPrefix>/<ExportName>` and descendants;
 - `s3:GetBucketLocation` on the dedicated bucket;
 - `s3:GetObject` and `s3:GetObjectAttributes` only below the exact export root;
-  and
+- `kms:Decrypt` on only the exact destination CMK, constrained by
+  `kms:ViaService` to S3 in the destination Region and by the exact export
+  object encryption context; and
 - `bcm-data-exports:GetExport` only on the one created export ARN.
 
 AWS [GetExport](https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_DataExports_GetExport.html)
@@ -128,9 +145,10 @@ configuration input, `ListExports`, `ListExecutions`, `GetExecution`,
 are not granted.
 
 The permanent collector never receives `CreateExport`, `UpdateExport`,
-`DeleteExport`, tagging writes, `s3:PutObject`, `s3:DeleteObject`, or any
-remediation permission. Customer-authorized CloudFormation deployment
-credentials—not the collector—create and own the export.
+`DeleteExport`, tagging writes, `s3:PutObject`, `s3:DeleteObject`,
+`kms:Encrypt`, `kms:GenerateDataKey`, key administration, or any remediation
+permission. Customer-authorized CloudFormation deployment credentials—not the
+collector—create and own the export.
 
 ## Activation and release gate
 
@@ -141,8 +159,9 @@ Do not launch or publish this source contract until all of the following pass:
 2. Contract-test these exact template bytes, publish them at a different
    immutable digest-verified URL, and deploy the add-on in the customer billing
    or management account.
-3. Verify the stack outputs, FOCUS query, exact IAM policy, bucket controls,
-   bucket policy, export ARN, and the `FOCUS_1_2_AWS` table in `GetExport`.
+3. Verify the stack outputs, FOCUS query, exact IAM policy, CMK ARN/key policy,
+   SSE-KMS bucket default, bucket controls, bucket policy, export ARN, and the
+   `FOCUS_1_2_AWS` table in `GetExport`.
 4. Wait for an actual delivery. AWS says initial delivery can take up to
    24 hours; absence before delivery is a waiting state, not zero cost.
 5. Validate a real manifest and every listed gzip/CSV object through the

@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Immutable standard-2026-08.1 least-privilege customer role for the Sutra
   collector. It preserves the standard metadata and posture collectors and
-  opens the explicit deny ceiling for exactly six read actions used by the
-  separately versioned Foundational CUR 2.0 export add-on. This base role does
-  not grant S3 object access or Data Exports access by itself.
+  opens the explicit deny ceiling for the seven read actions used by the
+  separately versioned Foundational CUR 2.0 export add-on and the three exact
+  Cost Anomaly Detection reads granted by its dedicated source policy. This
+  base role does not grant S3 object access or Data Exports access by itself.
 
 Metadata:
   SutraPermissionPack:
@@ -167,8 +168,12 @@ Resources:
                   - s3:GetBucketLocation
                   - s3:GetObject
                   - s3:GetObjectAttributes
+                  - kms:Decrypt
                   - bcm-data-exports:ListExports
                   - bcm-data-exports:GetExport
+                  - ce:GetAnomalies
+                  - ce:GetAnomalyMonitors
+                  - ce:GetAnomalySubscriptions
                 Resource: '*'
               - Sid: ImplementedMetadataApis
                 Effect: Allow
@@ -236,6 +241,17 @@ Resources:
                   - iam:GetRolePolicy
                 Resource:
                   Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/sutra/${RoleName}'
+        - PolicyName: SutraFinopsCostAnomalyReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactFinopsSourceRead
+                Effect: Allow
+                Action:
+                  - ce:GetAnomalies
+                  - ce:GetAnomalyMonitors
+                  - ce:GetAnomalySubscriptions
+                Resource: '*'
       Tags:
         - Key: sutra:tenant-id
           Value:

@@ -109,6 +109,22 @@
 @media (max-width: 720px) { .sectionHeading { align-items: flex-start; display: grid; } .sectionHeading > span { justify-self: start; } .capabilityBoundary { grid-template-columns: 1fr; } .workspaceNav button { min-height: 44px; } }
 
 /* Wave 3: allocation rules, MSP margin, alerts management controls */
+.costAnomalyPanel { margin-bottom: 16px; padding: 24px; overflow: hidden; background: linear-gradient(145deg, rgba(255,255,255,.98), rgba(240,253,250,.72)); }
+.costAnomalyPanel > :global(.panel-heading) { align-items: flex-start; }
+.costAnomalyActions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
+.costAnomalyState { display: grid; gap: 5px; margin: 14px 0; padding: 14px 16px; border: 1px solid rgba(245, 158, 11, .28); border-radius: 12px; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.5; }
+.costAnomalyState strong { color: #78350f; }
+.costAnomalyFailed { border-color: rgba(220, 38, 38, .22); background: #fff7f7; color: #991b1b; }
+.costAnomalyFailed strong { color: #7f1d1d; }
+.costAnomalyKpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0; }
+.costAnomalyKpis article { display: grid; align-content: center; gap: 5px; min-height: 104px; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.88); }
+.costAnomalyKpis small { color: var(--muted); font-size: 9px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
+.costAnomalyKpis strong { color: var(--ink); font-size: 20px; letter-spacing: -.035em; }
+.costAnomalyKpis span { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.costAnomalySources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.costAnomalySourceCard { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(255,255,255,.92); }
+.costAnomalySourceCard h3 { margin: 3px 0 0; }
+.costAnomalyDisclaimer { margin: 16px 0 0; padding-top: 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.55; }
 .w3Form { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .w3Grid { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .w3Input { min-height: 34px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface-soft); font-size: 11px; color: var(--ink); flex: 1 1 120px; min-width: 90px; }
@@ -150,6 +166,11 @@
    for assistive technology, because each cell now carries its own label.
    ------------------------------------------------------------------------- */
 @media screen and (max-width: 860px) {
+  .costAnomalyPanel { padding: 18px; }
+  .costAnomalyPanel > :global(.panel-heading) { display: grid; gap: 14px; }
+  .costAnomalyActions { justify-content: flex-start; }
+  .costAnomalyKpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .costAnomalySources { grid-template-columns: 1fr; }
   .workspaceNav { flex-wrap: nowrap; overscroll-behavior-x: contain; }
   .windowTabs button { min-height: 44px; padding: 0 16px; font-size: 12px; }
   .budgetConfirm { gap: 12px; }
@@ -159,6 +180,11 @@
   .trendChart::-webkit-scrollbar { -webkit-appearance: none; height: 9px; }
   .trendChart::-webkit-scrollbar-thumb { border-radius: 999px; background: rgba(15, 118, 110, .45); }
   .trendColumn { flex: 0 0 46px; }
+}
+
+@media screen and (max-width: 520px) {
+  .costAnomalyKpis { grid-template-columns: 1fr; }
+  .costAnomalyActions > button { width: 100%; }
 }
 
 /* 860px is where the sidebar collapses and the Access tables switch to cards;

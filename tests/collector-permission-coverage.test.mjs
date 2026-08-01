@@ -6,6 +6,10 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const collectorSrc = resolve(root, "services/aws-collector/src");
 const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml");
+const finopsTemplatePath = resolve(
+  root,
+  "infrastructure/customer-onboarding-role-standard-2026-08.1.yaml",
+);
 
 /**
  * The definitive set of AWS SDK commands the wired collector constructs, keyed
@@ -15,6 +19,9 @@ const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml
  * scope:
  *   "customer" — runs under the assumed customer onboarding role and therefore
  *                MUST be permitted by the default onboarding template.
+ *   "finops_source" — runs under the successor FinOps permission pack and an
+ *                exact, separately attested source policy. These actions MUST
+ *                remain absent from the current default metadata role.
  *   "vendor"   — runs under Sutra's own workload identity (the initial
  *                AssumeRole into the customer role) and is NOT part of the
  *                customer role's permission policy.
@@ -107,6 +114,12 @@ const COLLECTOR_COMMANDS = {
   LookupEventsCommand: { action: "cloudtrail:LookupEvents", scope: "customer" },
   GetCostAndUsageCommand: { action: "ce:GetCostAndUsage", scope: "customer" },
   GetCostForecastCommand: { action: "ce:GetCostForecast", scope: "customer" },
+  GetAnomaliesCommand: { action: "ce:GetAnomalies", scope: "finops_source" },
+  GetAnomalyMonitorsCommand: { action: "ce:GetAnomalyMonitors", scope: "finops_source" },
+  GetAnomalySubscriptionsCommand: {
+    action: "ce:GetAnomalySubscriptions",
+    scope: "finops_source",
+  },
   GetMetricDataCommand: { action: "cloudwatch:GetMetricData", scope: "customer" },
   ListMetricsCommand: { action: "cloudwatch:ListMetrics", scope: "customer" },
   DescribeInstanceInformationCommand: { action: "ssm:DescribeInstanceInformation", scope: "customer" },
@@ -188,6 +201,33 @@ test("default onboarding template permits every read-only action the collector c
   // No customer action the collector relies on may be a mutation.
   for (const action of customerActions) {
     assert.match(action, READ_ONLY_VERBS, `granted collector action ${action} is not read-only`);
+  }
+});
+
+test("FinOps source commands require the exact successor source policy and deny ceiling", async () => {
+  const currentTemplate = await readFile(templatePath, "utf8");
+  const finopsTemplate = await readFile(finopsTemplatePath, "utf8");
+  const sourceAllowed = new Set(actionsInStatement(finopsTemplate, "ExactFinopsSourceRead"));
+  const denyCeiling = new Set(actionsInStatement(finopsTemplate, "DenyUnimplementedActions"));
+  const sourceActions = [...new Set(
+    Object.values(COLLECTOR_COMMANDS)
+      .filter((entry) => entry.scope === "finops_source")
+      .map((entry) => entry.action),
+  )];
+
+  assert.match(finopsTemplate, /PolicyName: SutraFinopsCostAnomalyReadV1/u);
+  assert.deepEqual([...sourceAllowed], sourceActions);
+  for (const action of sourceActions) {
+    assert.ok(
+      denyCeiling.has(action),
+      `FinOps source calls ${action} but the successor deny ceiling would deny it`,
+    );
+    assert.equal(
+      currentTemplate.includes(`- ${action}`),
+      false,
+      `${action} must not widen the current default metadata role`,
+    );
+    assert.match(action, READ_ONLY_VERBS, `${action} is not a read-only FinOps source action`);
   }
 });
 

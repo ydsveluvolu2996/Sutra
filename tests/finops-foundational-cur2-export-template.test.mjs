@@ -34,6 +34,10 @@ function resourceBlock(logicalId, nextLogicalId) {
   return template.slice(start, end);
 }
 
+const key = resourceBlock(
+  "BillingExportKey",
+  "BillingExportBucket",
+);
 const bucket = resourceBlock(
   "BillingExportBucket",
   "BillingExportBucketPolicy",
@@ -79,10 +83,33 @@ test("the dedicated destination is accepted or provisioned with private retained
     template,
     /CreateDestinationBucket:[\s\S]*Ref: ExistingBucketName[\s\S]*- ''/u,
   );
+  assert.match(
+    template,
+    /ExistingBucketContract:[\s\S]*dedicated-private-retained-cmk/u,
+  );
+  assert.match(
+    template,
+    /ExistingBucketKmsKeyArn:[\s\S]*AllowedPattern:[^\n]*:kms:/u,
+  );
+  assert.match(
+    template,
+    /ExistingBucketMeetsDestinationContract:[\s\S]*Ref: ExistingBucketKmsKeyArn[\s\S]*- ''/u,
+  );
+  assert.match(key, /Type: AWS::KMS::Key/u);
+  assert.match(key, /Condition: CreateDestinationBucket/u);
+  assert.match(key, /DeletionPolicy: Retain/u);
+  assert.match(key, /UpdateReplacePolicy: Retain/u);
+  assert.match(key, /EnableKeyRotation: true/u);
+  assert.match(key, /KeySpec: SYMMETRIC_DEFAULT/u);
   assert.match(bucket, /Type: AWS::S3::Bucket/u);
   assert.match(bucket, /DeletionPolicy: Retain/u);
   assert.match(bucket, /UpdateReplacePolicy: Retain/u);
-  assert.match(bucket, /SSEAlgorithm: AES256/u);
+  assert.match(bucket, /SSEAlgorithm: aws:kms/u);
+  assert.match(
+    bucket,
+    /KMSMasterKeyID:[\s\S]*Fn::GetAtt:[\s\S]*BillingExportKey[\s\S]*Arn/u,
+  );
+  assert.doesNotMatch(bucket, /SSEAlgorithm: AES256|alias\/aws\/s3/u);
   assert.match(bucket, /ObjectOwnership: BucketOwnerEnforced/u);
   for (const setting of [
     "BlockPublicAcls",
@@ -93,6 +120,37 @@ test("the dedicated destination is accepted or provisioned with private retained
     assert.match(bucket, new RegExp(`${setting}: true`, "u"));
   }
   assert.match(bucket, /VersioningConfiguration:\s*\n\s*Status: Enabled/u);
+});
+
+test("the created CMK permits only account-bound Data Exports encryption through S3", () => {
+  const deliveryStatement = key.slice(
+    key.indexOf("- Sid: AllowAccountBoundDataExportsEncryption"),
+  );
+  const actions = [...deliveryStatement.matchAll(
+    /^\s+- (kms:[A-Za-z0-9*]+)\s*$/gmu,
+  )].map((match) => match[1]);
+  assert.deepEqual(actions, ["kms:GenerateDataKey", "kms:Decrypt"]);
+  assert.match(deliveryStatement, /Service: bcm-data-exports\.amazonaws\.com/u);
+  assert.match(
+    deliveryStatement,
+    /aws:SourceArn:[\s\S]*arn:\$\{AWS::Partition\}:bcm-data-exports:\$\{AWS::Region\}:\$\{AWS::AccountId\}:export\/\$\{ExportName\}-\*/u,
+  );
+  assert.match(
+    deliveryStatement,
+    /aws:SourceAccount:\s*\n\s*Ref: AWS::AccountId/u,
+  );
+  assert.match(
+    deliveryStatement,
+    /kms:ViaService:[\s\S]*s3\.\$\{AWS::Region\}\.\$\{AWS::URLSuffix\}/u,
+  );
+  assert.match(
+    deliveryStatement,
+    /kms:EncryptionContext:aws:s3:arn:/u,
+  );
+  assert.doesNotMatch(
+    deliveryStatement,
+    /kms:(?:Encrypt|ReEncrypt\w*|CreateGrant)(?:\s|$)|Principal:\s*['"]?\*['"]?/u,
+  );
 });
 
 test("AWS Data Exports can write only the exact account-bound export prefix", () => {
@@ -138,19 +196,20 @@ test("the native export is CUR2 hourly/resource/split-cost GZIP CSV with correct
   );
 });
 
-test("the permanent collector policy contains exactly the six requested read actions", () => {
+test("the permanent collector policy contains only the exact seven requested read actions", () => {
   const actions = [...collectorPolicy.matchAll(
-    /^\s+(?:Action:\s*|-\s+)((?:s3|bcm-data-exports):[A-Za-z0-9*]+)\s*$/gmu,
+    /^\s+(?:Action:\s*|-\s+)((?:s3|kms|bcm-data-exports):[A-Za-z0-9*]+)\s*$/gmu,
   )].map((match) => match[1]);
   assert.deepEqual(new Set(actions), new Set([
     "s3:ListBucket",
     "s3:GetBucketLocation",
     "s3:GetObject",
     "s3:GetObjectAttributes",
+    "kms:Decrypt",
     "bcm-data-exports:ListExports",
     "bcm-data-exports:GetExport",
   ]));
-  assert.equal(actions.length, 6, "collector actions must not be duplicated");
+  assert.equal(actions.length, 7, "collector actions must not be duplicated");
   assert.match(
     collectorPolicy,
     /s3:prefix:[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
@@ -163,9 +222,13 @@ test("the permanent collector policy contains exactly the six requested read act
     collectorPolicy,
     /ReadOnlyThisDataExport[\s\S]*Fn::GetAtt:[\s\S]*FoundationalCur2Export[\s\S]*ExportArn/u,
   );
+  assert.match(
+    collectorPolicy,
+    /DecryptOnlyExactFoundationalExportObjects[\s\S]*Action: kms:Decrypt[\s\S]*BillingExportKey[\s\S]*ExistingBucketKmsKeyArn[\s\S]*kms:ViaService:[\s\S]*s3\.\$\{DestinationBucketRegion\}\.\$\{AWS::URLSuffix\}[\s\S]*kms:EncryptionContext:aws:s3:arn:[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
+  );
   assert.doesNotMatch(
     collectorPolicy,
-    /CreateExport|UpdateExport|DeleteExport|PutReportDefinition|PutObject|DeleteObject|Action:\s*['"]?\*['"]?/u,
+    /CreateExport|UpdateExport|DeleteExport|PutReportDefinition|PutObject|DeleteObject|kms:(?:Encrypt|GenerateDataKey|ReEncrypt\w*|CreateGrant)(?:\s|$)|Action:\s*['"]?\*['"]?/u,
   );
 });
 
@@ -174,6 +237,7 @@ test("the current default remains incompatible and the runbook gates publication
   for (const action of [
     "s3:GetObject",
     "s3:GetObjectAttributes",
+    "kms:Decrypt",
     "bcm-data-exports:GetExport",
     "bcm-data-exports:ListExports",
   ]) {

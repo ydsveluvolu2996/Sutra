@@ -128,6 +128,7 @@ function csvField(value) {
   return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
+const key = resourceBlock("FocusExportKey", "FocusExportBucket");
 const bucket = resourceBlock("FocusExportBucket", "FocusExportBucketPolicy");
 const bucketPolicy = resourceBlock(
   "FocusExportBucketPolicy",
@@ -163,16 +164,31 @@ test("the created or explicitly attested destination is dedicated, private and r
   );
   assert.match(
     template,
-    /ExistingBucketContract:[\s\S]*Default: not-applicable[\s\S]*- dedicated-private-retained/u,
+    /ExistingBucketContract:[\s\S]*Default: not-applicable[\s\S]*- dedicated-private-retained-cmk/u,
   );
   assert.match(
     template,
-    /ExistingBucketMeetsDestinationContract:[\s\S]*Ref: ExistingBucketName[\s\S]*Ref: ExistingBucketContract[\s\S]*dedicated-private-retained/u,
+    /ExistingBucketMeetsDestinationContract:[\s\S]*Ref: ExistingBucketName[\s\S]*Ref: ExistingBucketContract[\s\S]*dedicated-private-retained-cmk[\s\S]*Ref: ExistingBucketKmsKeyArn[\s\S]*- ''/u,
   );
+  assert.match(
+    template,
+    /ExistingBucketKmsKeyArn:[\s\S]*AllowedPattern:[^\n]*:kms:/u,
+  );
+  assert.match(key, /Type: AWS::KMS::Key/u);
+  assert.match(key, /Condition: CreateDestinationBucket/u);
+  assert.match(key, /DeletionPolicy: Retain/u);
+  assert.match(key, /UpdateReplacePolicy: Retain/u);
+  assert.match(key, /EnableKeyRotation: true/u);
+  assert.match(key, /KeySpec: SYMMETRIC_DEFAULT/u);
   assert.match(bucket, /Type: AWS::S3::Bucket/u);
   assert.match(bucket, /DeletionPolicy: Retain/u);
   assert.match(bucket, /UpdateReplacePolicy: Retain/u);
-  assert.match(bucket, /SSEAlgorithm: AES256/u);
+  assert.match(bucket, /SSEAlgorithm: aws:kms/u);
+  assert.match(
+    bucket,
+    /KMSMasterKeyID:[\s\S]*Fn::GetAtt:[\s\S]*FocusExportKey[\s\S]*Arn/u,
+  );
+  assert.doesNotMatch(bucket, /SSEAlgorithm: AES256|alias\/aws\/s3/u);
   assert.match(bucket, /ObjectOwnership: BucketOwnerEnforced/u);
   assert.match(bucket, /VersioningConfiguration:\s*\n\s*Status: Enabled/u);
   for (const setting of [
@@ -183,6 +199,34 @@ test("the created or explicitly attested destination is dedicated, private and r
   ]) {
     assert.match(bucket, new RegExp(`${setting}: true`, "u"));
   }
+});
+
+test("the created CMK permits only account-bound Data Exports encryption through S3", () => {
+  const deliveryStatement = key.slice(
+    key.indexOf("- Sid: AllowAccountBoundDataExportsEncryption"),
+  );
+  const actions = [...deliveryStatement.matchAll(
+    /^\s+- (kms:[A-Za-z0-9*]+)\s*$/gmu,
+  )].map((match) => match[1]);
+  assert.deepEqual(actions, ["kms:GenerateDataKey", "kms:Decrypt"]);
+  assert.match(deliveryStatement, /Service: bcm-data-exports\.amazonaws\.com/u);
+  assert.match(
+    deliveryStatement,
+    /aws:SourceArn:[\s\S]*arn:\$\{AWS::Partition\}:bcm-data-exports:\$\{AWS::Region\}:\$\{AWS::AccountId\}:export\/\$\{ExportName\}-\*/u,
+  );
+  assert.match(
+    deliveryStatement,
+    /aws:SourceAccount:\s*\n\s*Ref: AWS::AccountId/u,
+  );
+  assert.match(
+    deliveryStatement,
+    /kms:ViaService:[\s\S]*s3\.\$\{AWS::Region\}\.\$\{AWS::URLSuffix\}/u,
+  );
+  assert.match(deliveryStatement, /kms:EncryptionContext:aws:s3:arn:/u);
+  assert.doesNotMatch(
+    deliveryStatement,
+    /kms:(?:Encrypt|ReEncrypt\w*|CreateGrant)(?:\s|$)|Principal:\s*['"]?\*['"]?/u,
+  );
 });
 
 test("the Data Exports service can write only the exact account/name-bound namespace", () => {
@@ -282,18 +326,19 @@ test("the exact native export header is accepted as FOCUS 1.2 by the canonical p
   assert.equal(parsed.lines[0].usageType, "USE1-BoxUsage:m7g.large");
 });
 
-test("the permanent collector has only exact-prefix reads and one exact status API", () => {
+test("the permanent collector has only exact-prefix reads, exact decrypt, and one exact status API", () => {
   const actions = [...collectorPolicy.matchAll(
-    /^\s+(?:Action:\s*|-\s+)((?:s3|bcm-data-exports):[A-Za-z0-9*]+)\s*$/gmu,
+    /^\s+(?:Action:\s*|-\s+)((?:s3|kms|bcm-data-exports):[A-Za-z0-9*]+)\s*$/gmu,
   )].map((match) => match[1]);
   assert.deepEqual(new Set(actions), new Set([
     "s3:ListBucket",
     "s3:GetBucketLocation",
     "s3:GetObject",
     "s3:GetObjectAttributes",
+    "kms:Decrypt",
     "bcm-data-exports:GetExport",
   ]));
-  assert.equal(actions.length, 5, "collector actions must not be duplicated");
+  assert.equal(actions.length, 6, "collector actions must not be duplicated");
   assert.match(
     collectorPolicy,
     /s3:prefix:[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
@@ -306,9 +351,13 @@ test("the permanent collector has only exact-prefix reads and one exact status A
     collectorPolicy,
     /ReadOnlyThisFocus12ExportStatus[\s\S]*Fn::GetAtt:[\s\S]*FoundationalFocus12Export[\s\S]*ExportArn/u,
   );
+  assert.match(
+    collectorPolicy,
+    /DecryptOnlyExactFocus12ExportObjects[\s\S]*Action: kms:Decrypt[\s\S]*FocusExportKey[\s\S]*ExistingBucketKmsKeyArn[\s\S]*kms:ViaService:[\s\S]*s3\.\$\{DestinationBucketRegion\}\.\$\{AWS::URLSuffix\}[\s\S]*kms:EncryptionContext:aws:s3:arn:[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
+  );
   assert.doesNotMatch(
     collectorPolicy,
-    /ListExports|ListExecutions|GetExecution|ListTables|GetTable|CreateExport|UpdateExport|DeleteExport|TagResource|UntagResource|PutObject|DeleteObject|Action:\s*['"]?\*['"]?/u,
+    /ListExports|ListExecutions|GetExecution|ListTables|GetTable|CreateExport|UpdateExport|DeleteExport|TagResource|UntagResource|PutObject|DeleteObject|kms:(?:Encrypt|GenerateDataKey|ReEncrypt\w*|CreateGrant)(?:\s|$)|Action:\s*['"]?\*['"]?/u,
   );
 });
 
@@ -318,6 +367,7 @@ test("standard-2026-08.1 ceiling-permits exactly what this add-on needs without 
     "s3:GetBucketLocation",
     "s3:GetObject",
     "s3:GetObjectAttributes",
+    "kms:Decrypt",
     "bcm-data-exports:GetExport",
   ]);
   for (const action of collectorActions) {

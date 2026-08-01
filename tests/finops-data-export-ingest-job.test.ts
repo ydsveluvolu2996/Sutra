@@ -46,7 +46,7 @@ const HEADER = [
 ] as const;
 
 const PAYLOAD: FinopsDataExportIngestJobPayload = {
-  schema: "sutra.finops-data-export-ingest.v1",
+  schema: "sutra.finops-data-export-ingest.v2",
   connectionId: CONNECTION,
   contractId: "foundational-cur2-export-v1",
   exportName: EXPORT_NAME,
@@ -56,11 +56,49 @@ const PAYLOAD: FinopsDataExportIngestJobPayload = {
   manifestKey: MANIFEST_KEY,
   evidence: {
     sourceEvidenceId: "aws-data-export-execution:execution-1",
+    manifestSha256:
+      "bedde6a148c07cb6a62494ff2fb0136b79a7d5b7d2c00ac3ac15251992a8a21c",
     rowCount: 1,
     currencies: [{
       currency: "USD",
       rowCount: 1,
       totalMicros: "1000000",
+    }],
+  },
+};
+
+const FOCUS_EXPORT_NAME = "sutra_foundational_focus12_v1";
+const FOCUS_PREFIX = `sutra/focus12/${FOCUS_EXPORT_NAME}/`;
+const FOCUS_MANIFEST_KEY =
+  `${FOCUS_PREFIX}metadata/BILLING_PERIOD=2026-07/manifest.json`;
+const FOCUS_DATA_KEY =
+  `${FOCUS_PREFIX}data/BILLING_PERIOD=2026-07/part-00001.csv.gz`;
+const FOCUS_HEADER = [
+  "BillingAccountId",
+  "SubAccountId",
+  "ServiceName",
+  "ChargeCategory",
+  "ChargePeriodStart",
+  "BilledCost",
+  "BillingCurrency",
+  "BillingAccountType",
+  "ChargeDescription",
+] as const;
+const FOCUS_PAYLOAD: FinopsDataExportIngestJobPayload = {
+  ...PAYLOAD,
+  contractId: "foundational-focus12-export-v1",
+  exportName: FOCUS_EXPORT_NAME,
+  prefix: FOCUS_PREFIX,
+  manifestKey: FOCUS_MANIFEST_KEY,
+  evidence: {
+    sourceEvidenceId: "aws-data-export-execution:focus-execution-1",
+    manifestSha256:
+      "087addaf6b8d5f5dbd1c48af5e78bc1f82aa1cea07782fefdc0576a8ac3f1fc2",
+    rowCount: 2,
+    currencies: [{
+      currency: "USD",
+      rowCount: 2,
+      totalMicros: "3000000",
     }],
   },
 };
@@ -107,6 +145,28 @@ function csv(): string {
   return [
     HEADER.join(","),
     "line-1,111122223333,AmazonEC2,Usage,2026-07-01T00:00:00Z,1.00,USD",
+  ].join("\n");
+}
+
+function focusManifestBody(
+  tableName = "FOCUS_1_2_AWS",
+): string {
+  return JSON.stringify({
+    metadata: {
+      exportName: FOCUS_EXPORT_NAME,
+      exportTableName: tableName,
+      exportLastUpdatedTime: "2026-07-31T11:45:00.000Z",
+    },
+    columns: FOCUS_HEADER,
+    dataFiles: [FOCUS_DATA_KEY],
+  });
+}
+
+function focusCsv(): string {
+  return [
+    FOCUS_HEADER.join(","),
+    "111122223333,444455556666,Amazon EC2,Usage,2026-07-01T00:00:00Z,1.00,USD,Organization,shared description",
+    "111122223333,444455556666,Amazon EC2,Usage,2026-07-01T01:00:00Z,2.00,USD,Organization,shared description",
   ].join("\n");
 }
 
@@ -235,6 +295,32 @@ function dependencies(
   };
 }
 
+function focusDependencies(): {
+  readonly repository: Repository;
+  readonly reads: string[];
+  readonly deps: FinopsDataExportIngestJobDependencies;
+} {
+  const repository = new Repository();
+  const reads: string[] = [];
+  const manifest = new TextEncoder().encode(focusManifestBody());
+  const data = new Uint8Array(gzipSync(focusCsv()));
+  return {
+    repository,
+    reads,
+    deps: {
+      getConnection: async () => CONNECTION_ROW,
+      repository,
+      readObject: async (_boundary, request) => {
+        reads.push(request.key);
+        if (request.key === FOCUS_MANIFEST_KEY) return object(manifest);
+        if (request.key === FOCUS_DATA_KEY) return object(data);
+        throw new Error("unexpected object");
+      },
+      now: () => Date.parse("2026-07-31T12:00:00.000Z"),
+    },
+  };
+}
+
 function jobFailure(code: FinopsDataExportIngestJobError["code"]) {
   return (error: unknown): boolean =>
     error instanceof FinopsDataExportIngestJobError
@@ -256,6 +342,47 @@ describe("durable canonical Data Export ingestion job", () => {
       "a committed duplicate validates the live manifest but never refetches data files",
     );
     assert.equal(fixture.repository.commits, 1);
+  });
+
+  it("activates an exact FOCUS 1.2 contract and synthesizes collision-safe line identities", async () => {
+    const fixture = focusDependencies();
+    await runFinopsDataExportIngestJob(
+      job({ payload: FOCUS_PAYLOAD }),
+      fixture.deps,
+    );
+    assert.deepEqual(fixture.reads, [FOCUS_MANIFEST_KEY, FOCUS_DATA_KEY]);
+    assert.equal(fixture.repository.commits, 1);
+    assert.equal(fixture.repository.staged.size, 2);
+    assert.equal(
+      [...fixture.repository.staged.keys()].every((id) =>
+        /^focus_[a-f0-9]{64}$/u.test(id)
+      ),
+      true,
+    );
+  });
+
+  it("rejects CUR2/FOCUS contract-table substitution before data access", async () => {
+    const focusContractCurTable = focusDependencies();
+    const substitutedManifest = new TextEncoder().encode(
+      focusManifestBody("COST_AND_USAGE_REPORT"),
+    );
+    await assert.rejects(
+      runFinopsDataExportIngestJob(
+        job({ payload: FOCUS_PAYLOAD }),
+        {
+          ...focusContractCurTable.deps,
+          readObject: async (_boundary, request) => {
+            focusContractCurTable.reads.push(request.key);
+            if (request.key === FOCUS_MANIFEST_KEY) {
+              return object(substitutedManifest);
+            }
+            throw new Error("data must not be read");
+          },
+        },
+      ),
+      jobFailure("MANIFEST_REJECTED"),
+    );
+    assert.deepEqual(focusContractCurTable.reads, [FOCUS_MANIFEST_KEY]);
   });
 
   it("rejects cross-customer scope and the current read-only pack before object access", async () => {
@@ -311,6 +438,24 @@ describe("durable canonical Data Export ingestion job", () => {
     assert.deepEqual(escaped.reads, [MANIFEST_KEY]);
   });
 
+  it("rejects substituted source evidence before activating a generation", async () => {
+    const fixture = dependencies();
+    await assert.rejects(
+      runFinopsDataExportIngestJob(job({
+        payload: {
+          ...PAYLOAD,
+          evidence: {
+            ...PAYLOAD.evidence,
+            manifestSha256: "b".repeat(64),
+          },
+        },
+      }), fixture.deps),
+      jobFailure("SOURCE_EVIDENCE_REJECTED"),
+    );
+    assert.deepEqual(fixture.reads, [MANIFEST_KEY]);
+    assert.equal(fixture.repository.commits, 0);
+  });
+
   it("enqueues only a connection-scoped six-attempt job", async () => {
     const calls: unknown[] = [];
     const result = await enqueueFinopsDataExportIngestJob({
@@ -324,13 +469,54 @@ describe("durable canonical Data Export ingestion job", () => {
       payload: PAYLOAD,
     });
     assert.equal(result.jobId, `job_${"2".repeat(32)}`);
-    assert.deepEqual(calls, [{
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], {
       orgId: ORG,
       customerId: CUSTOMER,
       connectionId: CONNECTION,
       kind: FINOPS_DATA_EXPORT_INGEST_JOB_KIND,
       payload: PAYLOAD,
       maxAttempts: 6,
-    }]);
+      idempotencyKey: (calls[0] as { idempotencyKey: string }).idempotencyKey,
+    });
+    assert.match(
+      (calls[0] as { idempotencyKey: string }).idempotencyKey,
+      /^finops-data-export:[a-f0-9]{64}$/u,
+    );
+  });
+
+  it("rejects legacy evidence-free schemas and unknown add-on contracts", async () => {
+    const calls: unknown[] = [];
+    const port = {
+      async enqueue(input: unknown) {
+        calls.push(input);
+        return { id: `job_${"3".repeat(32)}` };
+      },
+    };
+    await assert.rejects(
+      enqueueFinopsDataExportIngestJob(port, {
+        orgId: ORG,
+        customerId: CUSTOMER,
+        payload: {
+          ...PAYLOAD,
+          schema: "sutra.finops-data-export-ingest.v1",
+          evidence: {
+            sourceEvidenceId: PAYLOAD.evidence.sourceEvidenceId,
+            rowCount: PAYLOAD.evidence.rowCount,
+            currencies: PAYLOAD.evidence.currencies,
+          },
+        },
+      }),
+      jobFailure("INVALID_JOB"),
+    );
+    await assert.rejects(
+      enqueueFinopsDataExportIngestJob(port, {
+        orgId: ORG,
+        customerId: CUSTOMER,
+        payload: { ...PAYLOAD, contractId: "foundational-unknown-v1" },
+      }),
+      jobFailure("INVALID_JOB"),
+    );
+    assert.deepEqual(calls, []);
   });
 });

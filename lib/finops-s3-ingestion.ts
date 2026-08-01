@@ -289,6 +289,22 @@ function sameColumns(
     && actual.every((column, index) => column === expected[index]);
 }
 
+async function focusLineIdentity(
+  objectKey: string,
+  sourceLineId: string,
+  acceptedOrdinal: number,
+): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(
+      `${objectKey}\0${acceptedOrdinal}\0${sourceLineId}`,
+    ),
+  );
+  return `focus_${[...new Uint8Array(digest)]
+    .map((part) => part.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 function expectedSource(manifest: ValidatedFinopsManifest): {
   readonly format: CanonicalCurLine["sourceFormat"];
   readonly version: CanonicalCurLine["sourceVersion"];
@@ -520,7 +536,18 @@ export async function ingestFinopsS3DataExport(
           reason: rejected.reason,
         });
       }
-      for (const line of parsed.lines) {
+      // FOCUS has no guaranteed line-item identifier. ChargeDescription and
+      // ResourceId are descriptive and can repeat, while row ordinals restart
+      // in every object. Bind a deterministic surrogate to the manifest-owned
+      // object key plus accepted-row ordinal before enforcing generation-wide
+      // uniqueness. The source fields remain available on the canonical row.
+      const canonicalLines = source.format === "focus"
+        ? await Promise.all(parsed.lines.map(async (line, index) => ({
+            ...line,
+            lineItemId: await focusLineIdentity(object.key, line.lineItemId, index),
+          })))
+        : parsed.lines;
+      for (const line of canonicalLines) {
         if (seenLineItems.has(line.lineItemId)) {
           ingestionError("DUPLICATE_LINE_ITEM", { object, rejectedRows });
         }
@@ -535,11 +562,11 @@ export async function ingestFinopsS3DataExport(
           line,
         });
       }
-      for (let offset = 0; offset < parsed.lines.length; offset += limits.stageChunkRows) {
+      for (let offset = 0; offset < canonicalLines.length; offset += limits.stageChunkRows) {
         await dependencies.repository.stageCanonicalLines(
           scope,
           generation,
-          parsed.lines.slice(offset, offset + limits.stageChunkRows),
+          canonicalLines.slice(offset, offset + limits.stageChunkRows),
         );
       }
       objects.push({
@@ -548,7 +575,7 @@ export async function ingestFinopsS3DataExport(
         compressedBytes: compressed.byteLength,
         uncompressedBytes: uncompressed.byteLength,
         sourceRows: parsed.totalRows,
-        acceptedRows: parsed.lines.length,
+        acceptedRows: canonicalLines.length,
         rejectedRows: parsed.rejected.length,
       });
     }

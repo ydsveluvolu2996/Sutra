@@ -138,6 +138,33 @@ describe("authenticated broker FinOps object assembly", () => {
     assert.equal(transport.requests[1]?.ifMatch, null);
   });
 
+  it("preserves an exact FOCUS 1.2 add-on contract through every broker read", async () => {
+    const focusBoundary = {
+      ...BOUNDARY,
+      contractId: "foundational-focus12-export-v1",
+      exportName: "focus_foundational",
+      prefix: "sutra/focus12/focus_foundational/",
+    } as const;
+    const focusKey = `${focusBoundary.prefix}data/BILLING_PERIOD=2026-07/part.csv.gz`;
+    const transport = new Transport((request) =>
+      response(request, new Uint8Array([1, 2]), {
+        totalBytes: 2,
+        complete: true,
+      }));
+    const reader = createFinopsBrokerObjectReader(focusBoundary, transport);
+    await reader({
+      scope: SCOPE,
+      bucket: focusBoundary.bucket,
+      key: focusKey,
+      maximumCompressedBytes: 32,
+    });
+    assert.equal(
+      transport.requests[0]?.contractId,
+      "foundational-focus12-export-v1",
+    );
+    assert.equal(transport.requests[0]?.prefix, focusBoundary.prefix);
+  });
+
   it("rejects cross-tenant or out-of-prefix reads before transport", async () => {
     const transport = new Transport(() => {
       throw new Error("must not run");

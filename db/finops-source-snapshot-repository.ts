@@ -749,6 +749,41 @@ export class FinopsSourceSnapshotRepository {
     return row === null ? null : activeSnapshot(row);
   }
 
+  /** Latest persisted complete or partial generation; never crosses scope. */
+  public async getLatestSnapshot(
+    scope: FinopsSourceSnapshotScope,
+    sourceId: FinopsSourceId,
+  ): Promise<RecordFinopsSourceSnapshotResult["snapshot"] | null> {
+    if (!SOURCE_IDS.has(sourceId)) reject();
+    const database = await this.assertLiveScope(scope);
+    const row = await database.prepare(
+      `SELECT s.*
+         FROM finops_source_snapshots s
+         JOIN finops_source_job_attempts a
+           ON a.org_id = s.org_id AND a.customer_id = s.customer_id
+          AND a.connection_id = s.connection_id AND a.source_id = s.source_id
+          AND a.job_id = s.job_id AND a.attempt = s.attempt
+         JOIN aws_connections c
+           ON c.id = s.connection_id AND c.org_id = s.org_id
+          AND c.customer_id = s.customer_id
+         JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
+         JOIN customers cu
+           ON cu.id = c.customer_id AND cu.org_id = c.org_id
+          AND cu.status = 'active'
+        WHERE s.org_id = ? AND s.customer_id = ? AND s.connection_id = ?
+          AND s.source_id = ?
+          AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        ORDER BY a.queued_at DESC, s.job_id DESC, s.attempt DESC
+        LIMIT 1`,
+    ).bind(
+      scope.organizationId,
+      scope.customerId,
+      scope.connectionId,
+      sourceId,
+    ).first<SnapshotRow>();
+    return row === null ? null : baseSnapshot(row);
+  }
+
   public async listActiveSnapshots(
     scope: FinopsSourceSnapshotScope,
     options: { readonly limit?: number } = {},

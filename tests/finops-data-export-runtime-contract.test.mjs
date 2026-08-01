@@ -25,6 +25,13 @@ const handlers = await readFile(
   new URL("../db/background-job-handlers.ts", import.meta.url),
   "utf8",
 );
+const emitterRoute = await readFile(
+  new URL(
+    "../app/api/v1/finops/data-export/ingest/route.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("the durable job is composed through the authenticated broker and canonical repository", () => {
   assert.match(
@@ -66,7 +73,7 @@ test("the broker endpoint owns S3 and both sides pin the same four-MiB range cap
   );
 });
 
-test("activation stays fail-closed without the successor pack and exact add-on", () => {
+test("activation stays fail-closed and only emits server-owned observations", () => {
   assert.match(
     job,
     /FOUNDATIONAL_FINOPS_PERMISSION_PACK =\s*\n\s*"standard-2026-08\.1"/u,
@@ -87,5 +94,11 @@ test("activation stays fail-closed without the successor pack and exact add-on",
     handlers,
     /ensureDueFinopsDataExport|enqueueFinopsDataExportIngestJob/u,
     "the system must not auto-enqueue a path whose successor role is not active",
+  );
+  assert.match(emitterRoute, /FinopsDataExportObservationRepository/u);
+  assert.match(emitterRoute, /payload: observation\.payload/u);
+  assert.doesNotMatch(
+    emitterRoute,
+    /body\.(?:manifestKey|manifestSha256|rowCount|currencies|bucket|prefix|contractId)/u,
   );
 });

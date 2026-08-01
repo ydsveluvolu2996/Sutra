@@ -339,6 +339,16 @@ function minimizeCostAnomalyEvidence(
     source: collection.source,
     windowStartDate: collection.windowStartDate,
     windowEndDate: collection.windowEndDate,
+    coverage: collection.coverage.map((entry) => ({
+      operation: entry.operation,
+      status: entry.status,
+      pagesObserved: entry.pagesObserved,
+      recordsObserved: entry.recordsObserved,
+      recordsAccepted: entry.recordsAccepted,
+      recordsRejected: entry.recordsRejected,
+      recordsOmitted: entry.recordsOmitted,
+      errorCode: entry.errorCode,
+    })),
     anomalies: collection.anomalies.map((anomaly) => ({
       anomalyId: anomaly.anomalyId,
       monitorArn: anomaly.monitorArn,

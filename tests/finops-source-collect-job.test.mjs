@@ -17,6 +17,7 @@ const { FinopsSourceSnapshotRepository } =
 const {
   FINOPS_SOURCE_COLLECT_JOB_KIND,
   FinopsSourceCollectJobError,
+  enqueueAwsCostAnomalyCollection,
   runFinopsSourceCollectJob,
 } = await import("../lib/finops-source-collect-job.ts");
 const {
@@ -124,6 +125,14 @@ function job(digit, overrides = {}) {
 
 function result(input, overrides = {}) {
   const status = overrides.collectionStatus ?? "COMPLETE";
+  const aggregateCoverage = overrides.coverage ?? {
+    pagesObserved: 3,
+    recordsObserved: 3,
+    recordsAccepted: 3,
+    recordsRejected: 0,
+    recordsOmitted: 0,
+  };
+  const partial = status === "PARTIAL";
   return {
     schemaVersion: "sutra.finops-source-dispatch.v1",
     tenantId: input.tenantId,
@@ -141,18 +150,51 @@ function result(input, overrides = {}) {
     dataThroughAt: overrides.dataThroughAt === undefined
       ? DATA_THROUGH_AT
       : overrides.dataThroughAt,
-    coverage: overrides.coverage ?? {
-      pagesObserved: 3,
-      recordsObserved: 3,
-      recordsAccepted: 3,
-      recordsRejected: 0,
-      recordsOmitted: 0,
-    },
+    coverage: aggregateCoverage,
     evidence: status === "UNAVAILABLE"
       ? null
       : {
           schemaVersion: "sutra.aws-cost-anomaly-detection.v1",
-          anomalies: [{ anomalyId: "anomaly-1", impact: { maximum: 12.5 } }],
+          source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
+          windowStartDate: "2026-07-01",
+          windowEndDate: "2026-07-31",
+          coverage: [
+            { operation: "GET_ANOMALIES", status: "SUCCEEDED", pagesObserved: 1, recordsObserved: 1, recordsAccepted: 1, recordsRejected: 0, recordsOmitted: 0, errorCode: null },
+            partial
+              ? { operation: "GET_ANOMALY_MONITORS", status: "PARTIAL", pagesObserved: 1, recordsObserved: 1, recordsAccepted: 0, recordsRejected: 1, recordsOmitted: 0, errorCode: "SOURCE_COVERAGE_INCOMPLETE" }
+              : { operation: "GET_ANOMALY_MONITORS", status: "SUCCEEDED", pagesObserved: 1, recordsObserved: 1, recordsAccepted: 1, recordsRejected: 0, recordsOmitted: 0, errorCode: null },
+            { operation: "GET_ANOMALY_SUBSCRIPTIONS", status: "SUCCEEDED", pagesObserved: partial ? 0 : 1, recordsObserved: 1, recordsAccepted: 1, recordsRejected: 0, recordsOmitted: 0, errorCode: null },
+          ],
+          anomalies: [{
+            anomalyId: "anomaly-1",
+            monitorArn: `arn:aws:ce::${input.accountId}:anomalymonitor/monitor-1`,
+            startDate: "2026-07-20",
+            endDate: "2026-07-21",
+            feedback: null,
+            score: { current: 70, maximum: 90 },
+            impact: { maximum: 12.5, total: 12.5, actualSpend: 22.5, expectedSpend: 10, percentage: 125 },
+            rootCauses: [],
+            rootCausesOmitted: 0,
+          }],
+          monitors: partial ? [] : [{
+            monitorArn: `arn:aws:ce::${input.accountId}:anomalymonitor/monitor-1`,
+            type: "DIMENSIONAL",
+            dimension: "SERVICE",
+            specificationPresent: false,
+            dimensionalValueCount: 1,
+            createdAt: null,
+            lastUpdatedAt: null,
+            lastEvaluatedAt: DATA_THROUGH_AT,
+          }],
+          subscriptions: [{
+            subscriptionArn: `arn:aws:ce::${input.accountId}:anomalysubscription/subscription-1`,
+            frequency: "DAILY",
+            monitorArns: [`arn:aws:ce::${input.accountId}:anomalymonitor/monitor-1`],
+            monitorArnsOmitted: 0,
+            threshold: 100,
+            thresholdExpressionPresent: false,
+            subscriberCounts: { emailConfirmed: 0, emailDeclined: 0, snsConfirmed: 0, snsDeclined: 0, unknown: 0 },
+          }],
         },
     errorCode: status === "COMPLETE"
       ? null
@@ -222,8 +264,8 @@ test("durable job archives complete evidence, isolates tenants, and never activa
     const archivedJson = Buffer.from(object.body_base64, "base64").toString("utf8");
     assert.doesNotMatch(archivedJson, new RegExp(ORG_A, "u"));
     assert.doesNotMatch(archivedJson, new RegExp(CONNECTION_A, "u"));
-    assert.doesNotMatch(archivedJson, /roleArn|credentials|endpoint|limitations|errorCode/u);
-    assert.match(archivedJson, /sutra\.finops-source-evidence\.v1/u);
+    assert.doesNotMatch(archivedJson, /roleArn|credentials|endpoint|providerMessage|temporaryCredentials/u);
+    assert.match(archivedJson, /sutra\.finops-source-evidence\.v2/u);
 
     const active = await runtime.snapshots.getActiveSnapshot({
       organizationId: ORG_A,
@@ -240,6 +282,24 @@ test("durable job archives complete evidence, isolates tenants, and never activa
       sourceId: SOURCE_ID,
       generationId: active.generationId,
     }), object.id);
+    const verified = await runtime.evidence.readFinopsSourceSnapshot({
+      scope: { orgId: ORG_A, customerId: CUSTOMER_A, connectionId: CONNECTION_A },
+      objectId: object.id,
+      snapshotId: active.generationId,
+      contentSha256: active.contentSha256,
+      now: Date.parse(COLLECTED_AT),
+    });
+    assert.equal(new TextDecoder().decode(verified.body), archivedJson);
+    for (const adversarial of [
+      { scope: { orgId: ORG_B, customerId: CUSTOMER_B, connectionId: CONNECTION_B }, objectId: object.id, snapshotId: active.generationId, contentSha256: active.contentSha256 },
+      { scope: { orgId: ORG_A, customerId: CUSTOMER_A, connectionId: CONNECTION_A }, objectId: object.id, snapshotId: `fss_${"f".repeat(64)}`, contentSha256: active.contentSha256 },
+      { scope: { orgId: ORG_A, customerId: CUSTOMER_A, connectionId: CONNECTION_A }, objectId: object.id, snapshotId: active.generationId, contentSha256: "f".repeat(64) },
+    ]) {
+      await assert.rejects(
+        runtime.evidence.readFinopsSourceSnapshot({ ...adversarial, now: Date.parse(COLLECTED_AT) }),
+        (error) => error instanceof EvidenceRepositoryError && error.code === "SCOPE_NOT_FOUND",
+      );
+    }
 
     await assert.rejects(
       runtime.evidence.issueGrant({
@@ -276,6 +336,12 @@ test("durable job archives complete evidence, isolates tenants, and never activa
       "SELECT status FROM finops_source_snapshots WHERE job_id = ?",
     ).bind(`job_${"3".repeat(32)}`).first();
     assert.equal(partialSnapshot.status, "partial");
+    const latestAfterPartial = await runtime.snapshots.getLatestSnapshot({
+      organizationId: ORG_A,
+      customerId: CUSTOMER_A,
+      connectionId: CONNECTION_A,
+    }, SOURCE_ID);
+    assert.equal(latestAfterPartial?.status, "partial");
     const activeAfter = await runtime.snapshots.getActiveSnapshot({
       organizationId: ORG_A,
       customerId: CUSTOMER_A,
@@ -374,6 +440,32 @@ test("durable job archives complete evidence, isolates tenants, and never activa
       "SELECT COUNT(*) AS n FROM evidence_objects",
     ).first()).n), evidenceBeforeUnavailable);
   });
+});
+
+test("authorized Cost Anomaly enqueue owns the exact source and contract identity", async () => {
+  const calls = [];
+  const queued = await enqueueAwsCostAnomalyCollection({
+    async enqueue(input, now) {
+      calls.push({ input, now });
+      return { id: `job_${"d".repeat(32)}` };
+    },
+  }, {
+    organizationId: ORG_A,
+    customerId: CUSTOMER_A,
+    connectionId: CONNECTION_A,
+  }, Date.parse("2026-07-31T12:04:00.000Z"));
+  assert.equal(queued.jobId, `job_${"d".repeat(32)}`);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].input.payload, {
+    connectionId: CONNECTION_A,
+    sourceId: "cost_anomaly_detection",
+    contractId: "cost-anomaly-primary-v1",
+  });
+  assert.equal(calls[0].input.kind, "finops-source-collect");
+  assert.equal(calls[0].input.orgId, ORG_A);
+  assert.equal(calls[0].input.customerId, CUSTOMER_A);
+  assert.equal(calls[0].input.connectionId, CONNECTION_A);
+  assert.match(calls[0].input.idempotencyKey, /cost_anomaly_detection/u);
 });
 
 test("signed-result parser binds source, contract, account, partition, and connection", () => {

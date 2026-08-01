@@ -79,6 +79,7 @@ import finopsFoundationalConfigSchemaSql from "../drizzle/0079_finops_foundation
 import finopsSourceJobLedgerSchemaSql from "../drizzle/0080_finops_source_job_ledger.sql?raw";
 import finopsSourceSnapshotsSchemaSql from "../drizzle/0081_finops_source_snapshots.sql?raw";
 import finopsSourceEvidenceArtifactSchemaSql from "../drizzle/0082_finops_source_evidence_artifact.sql?raw";
+import finopsDataExportObservationsSchemaSql from "../drizzle/0083_finops_data_export_observations.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -175,6 +176,7 @@ const migrations = [
   { id: "0080_finops_source_job_ledger", statements: statementsFrom(finopsSourceJobLedgerSchemaSql) },
   { id: "0081_finops_source_snapshots", statements: statementsFrom(finopsSourceSnapshotsSchemaSql) },
   { id: "0082_finops_source_evidence_artifact", statements: statementsFrom(finopsSourceEvidenceArtifactSchemaSql) },
+  { id: "0083_finops_data_export_observations", statements: statementsFrom(finopsDataExportObservationsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

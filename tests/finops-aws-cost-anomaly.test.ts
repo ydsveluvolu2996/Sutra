@@ -6,8 +6,12 @@ import {
   buildCostAnomalyDashboard,
   CostAnomalyBoundaryError,
   CostAnomalyQueryServiceError,
+  AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+  AWS_COST_ANOMALY_SOURCE_ID,
   createCostAnomalyQueryService,
+  materializeAwsCostAnomalyDispatchEvidence,
   parseAwsCostAnomalyCollection,
+  parsePersistedAwsCostAnomalyMaterialization,
   type CostAnomalyBrokerRequest,
 } from "../lib/finops-aws-cost-anomaly.ts";
 import { ANOMALY_DISCLAIMER } from "../lib/finops-insights.ts";
@@ -119,6 +123,53 @@ function collection(): Record<string, unknown> {
       "RAW_MONITOR_AND_THRESHOLD_EXPRESSIONS_NOT_RETAINED",
       "AWS_PROVIDER_FINDINGS_SEPARATE_FROM_SUTRA_STATISTICAL_SIGNALS",
     ],
+  };
+}
+
+function minimizedEvidence(): Record<string, unknown> {
+  const full = collection();
+  return {
+    schemaVersion: full.schemaVersion,
+    source: full.source,
+    windowStartDate: full.windowStartDate,
+    windowEndDate: full.windowEndDate,
+    coverage: full.coverage,
+    anomalies: (full.anomalies as Array<Record<string, unknown>>).map((anomaly) => ({
+      anomalyId: anomaly.anomalyId,
+      monitorArn: anomaly.monitorArn,
+      startDate: anomaly.startDate,
+      endDate: anomaly.endDate,
+      feedback: anomaly.feedback,
+      score: anomaly.score,
+      impact: anomaly.impact,
+      rootCauses: (anomaly.rootCauses as Array<Record<string, unknown>>).map((cause) => ({
+        service: cause.service,
+        region: cause.region,
+        linkedAccountId: cause.linkedAccountId,
+        usageType: cause.usageType,
+        contribution: cause.contribution,
+      })),
+      rootCausesOmitted: anomaly.rootCausesOmitted,
+    })),
+    monitors: (full.monitors as Array<Record<string, unknown>>).map((monitor) => ({
+      monitorArn: monitor.monitorArn,
+      type: monitor.type,
+      dimension: monitor.dimension,
+      specificationPresent: monitor.specificationPresent,
+      dimensionalValueCount: monitor.dimensionalValueCount,
+      createdAt: monitor.createdAt,
+      lastUpdatedAt: monitor.lastUpdatedAt,
+      lastEvaluatedAt: monitor.lastEvaluatedAt,
+    })),
+    subscriptions: (full.subscriptions as Array<Record<string, unknown>>).map((subscription) => ({
+      subscriptionArn: subscription.subscriptionArn,
+      frequency: subscription.frequency,
+      monitorArns: subscription.monitorArns,
+      monitorArnsOmitted: subscription.monitorArnsOmitted,
+      threshold: subscription.threshold,
+      thresholdExpressionPresent: subscription.thresholdExpressionPresent,
+      subscriberCounts: subscription.subscriberCounts,
+    })),
   };
 }
 
@@ -370,4 +421,84 @@ test("projects explicit source readiness from accepted signed-broker evidence", 
   assert.equal(evidence.coverage.acceptedRecords, 3);
   assert.equal(evidence.dataThroughAt, "2026-07-31T04:30:00.000Z");
   assert.match(evidence.evidenceBasis, /ce:GetAnomalies/u);
+});
+
+test("materializes the privacy-minimized dispatch with exact operation coverage", () => {
+  const parsed = materializeAwsCostAnomalyDispatchEvidence({
+    sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+    contractId: AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+    collectionStatus: "COMPLETE",
+    accountId: ACCOUNT_ID,
+    partition: "aws",
+    region: "us-east-1",
+    collectedAt: "2026-07-31T10:00:00.000Z",
+    dataThroughAt: "2026-07-31T04:30:00.000Z",
+    coverage: {
+      pagesObserved: 3,
+      recordsObserved: 3,
+      recordsAccepted: 3,
+      recordsRejected: 0,
+      recordsOmitted: 0,
+    },
+    evidence: minimizedEvidence(),
+    limitations: [],
+  }, NOW);
+  assert.equal(parsed.anomalies[0]?.dimensionValue, null);
+  assert.equal(parsed.anomalies[0]?.rootCauses[0]?.linkedAccountName, null);
+  assert.equal(parsed.monitors[0]?.name, "AWS monitor label redacted");
+  assert.equal(parsed.subscriptions[0]?.name, "AWS subscription label redacted");
+
+  assert.throws(
+    () => materializeAwsCostAnomalyDispatchEvidence({
+      sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+      contractId: AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+      collectionStatus: "COMPLETE",
+      accountId: ACCOUNT_ID,
+      partition: "aws",
+      region: "us-east-1",
+      collectedAt: "2026-07-31T10:00:00.000Z",
+      dataThroughAt: "2026-07-31T04:30:00.000Z",
+      coverage: { pagesObserved: 3, recordsObserved: 3, recordsAccepted: 2, recordsRejected: 0, recordsOmitted: 0 },
+      evidence: minimizedEvidence(),
+      limitations: [],
+    }, NOW),
+    (error) => error instanceof CostAnomalyBoundaryError,
+  );
+});
+
+test("persisted materialization is account-bound and excludes expanded fields", () => {
+  const artifact = {
+    schemaVersion: "sutra.finops-source-evidence.v2",
+    sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+    contractId: AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+    collectionStatus: "COMPLETE",
+    accountId: ACCOUNT_ID,
+    partition: "aws",
+    region: "us-east-1",
+    collectedAt: "2026-07-31T10:00:00.000Z",
+    dataThroughAt: "2026-07-31T04:30:00.000Z",
+    coverage: { pagesObserved: 3, recordsObserved: 3, recordsAccepted: 3, recordsRejected: 0, recordsOmitted: 0 },
+    evidence: minimizedEvidence(),
+    limitations: [],
+  };
+  assert.equal(
+    parsePersistedAwsCostAnomalyMaterialization(
+      artifact,
+      { accountId: ACCOUNT_ID, partition: "aws" },
+      NOW,
+    ).anomalies.length,
+    1,
+  );
+  for (const invalid of [
+    { expected: { accountId: "999988887777", partition: "aws" as const }, artifact },
+    { expected: { accountId: ACCOUNT_ID, partition: "aws-us-gov" as const }, artifact },
+    { expected: { accountId: ACCOUNT_ID, partition: "aws" as const }, artifact: { ...artifact, credentials: "secret" } },
+    { expected: { accountId: ACCOUNT_ID, partition: "aws" as const }, artifact: { ...artifact, region: "provider error text" } },
+    { expected: { accountId: ACCOUNT_ID, partition: "aws" as const }, artifact: { ...artifact, collectedAt: 1234 } },
+  ]) {
+    assert.throws(
+      () => parsePersistedAwsCostAnomalyMaterialization(invalid.artifact, invalid.expected, NOW),
+      (error) => error instanceof CostAnomalyBoundaryError,
+    );
+  }
 });

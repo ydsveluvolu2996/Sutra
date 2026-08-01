@@ -17,6 +17,7 @@ Authoritative AWS contracts:
 - [CUR 2.0 table and configurations](https://docs.aws.amazon.com/cur/latest/userguide/table-dictionary-cur2.html)
 - [Data Exports query syntax](https://docs.aws.amazon.com/cur/latest/userguide/dataexports-data-query.html)
 - [Data Exports S3 bucket policy](https://docs.aws.amazon.com/cur/latest/userguide/dataexports-s3-bucket.html)
+- [Data protection and default S3 encryption](https://docs.aws.amazon.com/cur/latest/userguide/data-protection.html)
 - [Data Exports IAM actions and resource types](https://docs.aws.amazon.com/service-authorization/latest/reference/list_bcm-data-exports.html)
 
 ## Deliberate activation block
@@ -30,12 +31,13 @@ add-on policy cannot make them effective:
 - `s3:GetBucketLocation`
 - `s3:GetObject`
 - `s3:GetObjectAttributes`
+- `kms:Decrypt`
 - `bcm-data-exports:ListExports`
 - `bcm-data-exports:GetExport`
 
 The add-on's CloudFormation rule rejects `standard-2026-07.4`. It accepts only
 the future, separately reviewed `standard-2026-08.1` base-role contract. That
-future base template must add exactly the six actions above to its explicit
+future base template must add exactly the seven actions above to its explicit
 deny ceiling without granting broad S3 access, export mutation access, or any
 other data-plane read. The scoped Allows remain owned by this add-on.
 
@@ -47,11 +49,25 @@ for ownership of one IAM policy name.
 
 ## Customer-owned resources and access
 
-The add-on either creates a retained, encrypted, versioned, public-blocked S3
-bucket or accepts the name of a dedicated existing bucket. In existing-bucket
-mode, this stack owns that bucket's bucket policy. Use a bucket dedicated to
-this export with no unrelated bucket-policy statements; CloudFormation does not
-merge a new `AWS::S3::BucketPolicy` with policy state owned elsewhere.
+The add-on either creates a retained, versioned, public-blocked S3 bucket and a
+retained, rotating, symmetric customer-managed KMS key, or accepts the name of
+a dedicated existing bucket plus its exact customer-managed KMS key ARN. In
+existing-bucket mode, set
+`ExistingBucketContract=dedicated-private-retained-cmk`; the named key must be
+in the declared bucket Region, account, and partition and its key policy must
+permit this exact account-bound Data Exports delivery. This stack owns that
+bucket's bucket policy. Use a bucket dedicated to this export with no unrelated
+bucket-policy statements; CloudFormation does not merge a new
+`AWS::S3::BucketPolicy` with policy state owned elsewhere.
+
+AWS documents that Data Exports delivers through `s3:PutObject` and that
+SSE-KMS is triggered through the S3 bucket's default encryption during object
+delivery. The created-bucket path therefore sets `SSEAlgorithm=aws:kms` with
+the ARN of the stack-created CMK. The key policy lets only
+`bcm-data-exports.amazonaws.com` request `kms:GenerateDataKey` and
+`kms:Decrypt` through S3, with the source account and exact regional export-name
+ARN enforced. It does not grant that service direct KMS encryption, key
+management, or access outside an S3 encryption context.
 
 The Data Exports service principal can write only:
 
@@ -66,13 +82,17 @@ The permanent collector receives only:
 - bucket listing for the exact export root through an `s3:prefix` condition;
 - `GetBucketLocation` on the dedicated bucket;
 - `GetObject` and `GetObjectAttributes` on the exact export root;
+- `kms:Decrypt` on only the exact destination CMK, constrained by
+  `kms:ViaService` to S3 in the destination Region and by the exact export
+  object encryption context;
 - `ListExports`, which AWS documents as not supporting resource-level scope;
 - `GetExport` on the one export ARN created by this stack.
 
 It never receives `CreateExport`, `UpdateExport`, `DeleteExport`,
-`cur:PutReportDefinition`, `s3:PutObject`, `s3:DeleteObject`, or any remediation
-write. CloudFormation deployment credentials—not the permanent collector—must
-be authorized by the customer to create the native export and satisfy AWS's
+`cur:PutReportDefinition`, `s3:PutObject`, `s3:DeleteObject`, `kms:Encrypt`,
+`kms:GenerateDataKey`, key administration, or any remediation write.
+CloudFormation deployment credentials—not the permanent collector—must be
+authorized by the customer to create the native export and satisfy AWS's
 additional CUR creation permission.
 
 ## Publish-before-application release order
@@ -86,8 +106,9 @@ The order is a release gate, not an optional runbook:
 3. Review this add-on, publish its exact tested bytes at a separate immutable
    URL, and deploy it in the customer's billing or management account. Do not
    substitute the mutable default onboarding URL.
-4. Verify the stack outputs and the exact IAM policy, bucket policy, export ARN,
-   query, and prefix. AWS says initial export delivery can take up to 24 hours;
+4. Verify the stack outputs and the exact IAM policy, CMK ARN/key policy,
+   SSE-KMS bucket default, bucket policy, export ARN, query, and prefix. AWS
+   says initial export delivery can take up to 24 hours;
    absence before delivery is a waiting state, not zero spend.
 5. Observe and validate a real manifest and its listed GZIP CSV objects through
    the read-only collector. Reconcile the accepted active generation before

@@ -183,7 +183,10 @@ function periodFromDates(start: string | null): string | null {
 
 function inferTable(sourceTableName: string | null, exportName: string): FinopsExportTable {
   const candidate = `${sourceTableName ?? ""} ${exportName}`.toUpperCase().replaceAll("-", "_");
-  if (candidate.includes("FOCUS") && candidate.includes("1.2")) return "focus-1.2-aws";
+  if (
+    candidate.includes("FOCUS")
+    && (candidate.includes("1.2") || candidate.includes("1_2"))
+  ) return "focus-1.2-aws";
   if (candidate.includes("FOCUS")) return "focus-1.0-aws";
   if (candidate.includes("COST_OPTIMIZATION") || candidate.includes("RECOMMENDATION")) return "cost-optimization-recommendations";
   if (candidate.includes("CARBON") || candidate.includes("EMISSION")) return "carbon-emissions";

@@ -37,8 +37,14 @@ const FOUNDATIONAL_READS = [
   "s3:GetBucketLocation",
   "s3:GetObject",
   "s3:GetObjectAttributes",
+  "kms:Decrypt",
   "bcm-data-exports:ListExports",
   "bcm-data-exports:GetExport",
+];
+const FINOPS_SOURCE_READS = [
+  "ce:GetAnomalies",
+  "ce:GetAnomalyMonitors",
+  "ce:GetAnomalySubscriptions",
 ];
 
 function statementBlock(source, sid, nextSid) {
@@ -46,6 +52,7 @@ function statementBlock(source, sid, nextSid) {
   assert.notEqual(start, -1, `${sid} statement must exist`);
   const endCandidates = nextSid === null
     ? [
+        source.indexOf("\n        - PolicyName:", start),
         source.indexOf("\n      Tags:", start),
         source.indexOf("\nOutputs:", start),
       ].filter((candidate) => candidate >= 0)
@@ -109,6 +116,11 @@ const currentAttestation = statementBlock(
   "TrustContractAttestation",
   null,
 );
+const successorFinopsSource = statementBlock(
+  successor,
+  "ExactFinopsSourceRead",
+  null,
+);
 
 test("the successor is an explicit immutable source contract and leaves both defaults on 2026-07.4", () => {
   assert.match(
@@ -131,7 +143,7 @@ test("the successor is an explicit immutable source contract and leaves both def
   assert.match(runbook, /Do not overwrite a previously published/u);
 });
 
-test("the deny ceiling changes by exactly the six Foundational read actions", () => {
+test("the deny ceiling changes by exactly the reviewed Foundational and FinOps source reads", () => {
   const currentActions = listActions(currentDeny, "NotAction");
   const successorActions = listActions(successorDeny, "NotAction");
   const additions = successorActions.filter(
@@ -141,18 +153,19 @@ test("the deny ceiling changes by exactly the six Foundational read actions", ()
     (action) => !successorActions.includes(action),
   );
 
-  assert.deepEqual(additions, FOUNDATIONAL_READS);
+  const reviewedAdditions = [...FOUNDATIONAL_READS, ...FINOPS_SOURCE_READS];
+  assert.deepEqual(additions, reviewedAdditions);
   assert.deepEqual(removals, []);
   assert.equal(
     successorActions.length,
-    currentActions.length + FOUNDATIONAL_READS.length,
+    currentActions.length + reviewedAdditions.length,
   );
   assert.equal(new Set(successorActions).size, successorActions.length);
   assert.match(successorDeny, /Effect: Deny/u);
   assert.match(successorDeny, /Resource: '\*'/u);
 });
 
-test("the base role grants none of the six newly ceiling-permitted actions", () => {
+test("the base role grants none of the seven newly ceiling-permitted Foundational reads", () => {
   for (const action of FOUNDATIONAL_READS) {
     const occurrences = [...successor.matchAll(
       new RegExp(`^\\s+- ${escapeRegExp(action)}\\s*$`, "gmu"),
@@ -168,6 +181,31 @@ test("the base role grants none of the six newly ceiling-permitted actions", () 
   assert.doesNotMatch(
     successor,
     /bcm-data-exports:(?:Create|Update|Delete)Export|s3:(?:Put|Delete)Object/u,
+  );
+});
+
+test("the Cost Anomaly source policy grants exactly its three read actions", () => {
+  assert.match(successor, /PolicyName: SutraFinopsCostAnomalyReadV1/u);
+  assert.deepEqual(
+    listActions(successorFinopsSource, "Action"),
+    FINOPS_SOURCE_READS,
+  );
+  assert.match(successorFinopsSource, /Effect: Allow/u);
+  assert.match(successorFinopsSource, /Resource: '\*'/u);
+  assert.doesNotMatch(successorMetadata, /ce:GetAnomal/u);
+  assert.doesNotMatch(successorAttestation, /ce:GetAnomal/u);
+  for (const action of FINOPS_SOURCE_READS) {
+    assert.equal(
+      [...successor.matchAll(
+        new RegExp(`^\\s+- ${escapeRegExp(action)}\\s*$`, "gmu"),
+      )].length,
+      2,
+      `${action} must occur only in the deny ceiling and exact source policy`,
+    );
+  }
+  assert.doesNotMatch(
+    successorFinopsSource,
+    /ce:(?:Create|Update|Delete)Anomaly|Action:\s*['"]?\*['"]?/u,
   );
 });
 
@@ -235,7 +273,7 @@ test("tenant-bound trust, session controls, role path and tags remain enforced",
   );
 });
 
-test("the add-on owns exact resource-scoped Allows for all six reads", () => {
+test("the add-on owns exact resource-scoped Allows for all seven reads", () => {
   const list = statementBlock(
     addOn,
     "ListOnlyExactFoundationalExportPrefix",
@@ -249,6 +287,11 @@ test("the add-on owns exact resource-scoped Allows for all six reads", () => {
   const objects = statementBlock(
     addOn,
     "ReadOnlyExactFoundationalExportObjects",
+    "DecryptOnlyExactFoundationalExportObjects",
+  );
+  const decrypt = statementBlock(
+    addOn,
+    "DecryptOnlyExactFoundationalExportObjects",
     "ListDataExports",
   );
   const listExports = statementBlock(
@@ -280,6 +323,11 @@ test("the add-on owns exact resource-scoped Allows for all six reads", () => {
     objects,
     /arn:\$\{AWS::Partition\}:s3:::\$\{DestinationBucket\}\/\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
   );
+  assert.match(decrypt, /Action: kms:Decrypt/u);
+  assert.match(
+    decrypt,
+    /BillingExportKey[\s\S]*ExistingBucketKmsKeyArn[\s\S]*kms:ViaService:[\s\S]*s3\.\$\{DestinationBucketRegion\}\.\$\{AWS::URLSuffix\}[\s\S]*kms:EncryptionContext:aws:s3:arn:[\s\S]*\$\{ExportPrefix\}\/\$\{ExportName\}\/\*/u,
+  );
   assert.match(listExports, /Action: bcm-data-exports:ListExports/u);
   assert.match(listExports, /Resource: '\*'/u);
   assert.match(getExport, /Action: bcm-data-exports:GetExport/u);
@@ -288,8 +336,8 @@ test("the add-on owns exact resource-scoped Allows for all six reads", () => {
     /Fn::GetAtt:[\s\S]*- FoundationalCur2Export[\s\S]*- ExportArn/u,
   );
   assert.doesNotMatch(
-    `${list}${location}${objects}${listExports}${getExport}`,
-    /CreateExport|UpdateExport|DeleteExport|s3:PutObject|s3:DeleteObject|Action:\s*['"]?\*['"]?/u,
+    `${list}${location}${objects}${decrypt}${listExports}${getExport}`,
+    /CreateExport|UpdateExport|DeleteExport|s3:PutObject|s3:DeleteObject|kms:(?:Encrypt|GenerateDataKey|ReEncrypt\w*|CreateGrant)(?:\s|$)|Action:\s*['"]?\*['"]?/u,
   );
   assert.doesNotMatch(
     objects,

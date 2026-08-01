@@ -12,17 +12,24 @@ ID, bounded role-session name, `/sutra/` path, tenant tag, optional permissions
 boundary, one-hour maximum session, metadata collector Allows, trust
 attestation scope, and explicit `DenyUnimplementedActions` ceiling.
 
-The only actions added to that ceiling are:
+The only actions added to that ceiling are the seven Foundational export reads:
 
 - `s3:ListBucket`
 - `s3:GetBucketLocation`
 - `s3:GetObject`
 - `s3:GetObjectAttributes`
+- `kms:Decrypt`
 - `bcm-data-exports:ListExports`
 - `bcm-data-exports:GetExport`
 
+and the three Cost Anomaly Detection source reads:
+
+- `ce:GetAnomalies`
+- `ce:GetAnomalyMonitors`
+- `ce:GetAnomalySubscriptions`
+
 Adding an action to the ceiling does not grant it. This base template contains
-no Allow for any of those six actions. The separately versioned
+no Allow for any of those seven actions. The separately versioned
 `foundational-cur2-export-v1` add-on remains the sole owner of their effective
 resource-scoped Allows:
 
@@ -31,13 +38,23 @@ resource-scoped Allows:
 - bucket location is limited to the one dedicated destination bucket;
 - object reads are limited to
   `arn:<partition>:s3:::<bucket>/<ExportPrefix>/<ExportName>/*`;
+- KMS decryption is limited to the exact customer-managed key and is usable
+  only through S3 for that same export-object encryption context;
 - `ListExports` uses `Resource: '*'` because AWS does not support resource-level
   authorization for that action;
 - `GetExport` is limited to the exact ARN returned by the add-on's
   `AWS::BCMDataExports::Export` resource.
 
-Neither contract grants Data Exports mutations, S3 writes or deletes, wildcard
-object reads, public access, account-root trust, or wildcard principal trust.
+The three Cost Anomaly Detection actions are granted only by the separately
+named inline policy `SutraFinopsCostAnomalyReadV1`. Its sole statement,
+`ExactFinopsSourceRead`, grants exactly those three read operations on
+`Resource: '*'`, as required by the Cost Explorer APIs. The collector broker
+attests that exact policy and intersects the assumed session with the same
+three-action contract before source collection.
+
+Neither contract grants Data Exports mutations, S3 writes or deletes, KMS
+encryption or key management, wildcard object reads, public access,
+account-root trust, or wildcard principal trust.
 
 ## Controlled release order
 
@@ -52,6 +69,6 @@ object version and do not replace the mutable default URL as part of
 publication. Attest the `standard-2026-08.1` tag and deny ceiling on the
 customer role before launching `finops-foundational-cur2-export-v1.yaml`.
 
-The role update by itself must still fail all six Foundational billing reads.
+The role update by itself must still fail all seven Foundational billing reads.
 Only after the separate add-on stack succeeds may the effective permission set
 read the exact customer-owned export root.

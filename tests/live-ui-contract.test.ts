@@ -37,13 +37,14 @@ describe("hosted live UI contract", () => {
           productionSourceFiles(path.join(root, directory))),
       )
     ).flat();
-    const source = (
-      await Promise.all(files.map((file) => readFile(file, "utf8")))
-    ).join("\n");
-    assert.doesNotMatch(
-      source,
-      /^(?:[\s\S]*https:\/\/app\.sutracmdb\.com[\s\S]*)$/u,
-    );
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      assert.equal(
+        source.includes("https://app.sutracmdb.com"),
+        false,
+        `${path.relative(root, file)} emits the retired production origin`,
+      );
+    }
   });
 
   it("backs every visible navigation destination with a real page", async () => {

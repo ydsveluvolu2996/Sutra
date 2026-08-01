@@ -386,6 +386,20 @@ test("dispatches a persisted Cost Anomaly contract and removes caller-defined PI
   assert.equal(result.region, "us-east-1");
   assert.equal(result.coverage.pagesObserved, 3);
   assert.equal(result.coverage.recordsAccepted, 3);
+  const operationCoverage = result.evidence?.coverage;
+  assert.ok(Array.isArray(operationCoverage));
+  assert.deepEqual(
+    operationCoverage.map((entry) =>
+      typeof entry === "object" && entry !== null && "operation" in entry
+        ? entry.operation
+        : null
+    ),
+    [
+      "GET_ANOMALIES",
+      "GET_ANOMALY_MONITORS",
+      "GET_ANOMALY_SUBSCRIPTIONS",
+    ],
+  );
   assert.deepEqual(deps.broker.calls, [{
     tenantId: TENANT_ID,
     connectionId: CONNECTION_ID,

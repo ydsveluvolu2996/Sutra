@@ -113,7 +113,10 @@ function validBoundary(value: FinopsBrokerObjectBoundary): boolean {
     && /^conn_[a-f0-9]{32}$/u.test(value.scope.connectionId)
     && typeof value.jobId === "string"
     && /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u.test(value.jobId)
-    && value.contractId === "foundational-cur2-export-v1"
+    && (
+      value.contractId === "foundational-cur2-export-v1"
+      || value.contractId === "foundational-focus12-export-v1"
+    )
     && typeof value.exportName === "string"
     && /^[0-9A-Za-z_-]{1,128}$/u.test(value.exportName)
     && REGION.test(value.region)

@@ -74,6 +74,7 @@ import postgresFinopsFoundationalConfigSql from "../postgres/migrations/0074_fin
 import postgresFinopsSourceJobLedgerSql from "../postgres/migrations/0075_finops_source_job_ledger.sql?raw";
 import postgresFinopsSourceSnapshotsSql from "../postgres/migrations/0076_finops_source_snapshots.sql?raw";
 import postgresFinopsSourceEvidenceArtifactSql from "../postgres/migrations/0077_finops_source_evidence_artifact.sql?raw";
+import postgresFinopsDataExportObservationsSql from "../postgres/migrations/0078_finops_data_export_observations.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -152,6 +153,7 @@ const migrations = [
   { id: "0075_finops_source_job_ledger", source: postgresFinopsSourceJobLedgerSql },
   { id: "0076_finops_source_snapshots", source: postgresFinopsSourceSnapshotsSql },
   { id: "0077_finops_source_evidence_artifact", source: postgresFinopsSourceEvidenceArtifactSql },
+  { id: "0078_finops_data_export_observations", source: postgresFinopsDataExportObservationsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

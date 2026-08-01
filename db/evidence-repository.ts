@@ -13,6 +13,7 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const OBJECT_ID = /^eobj_[a-f0-9]{32}$/u;
 const DOWNLOAD_TOKEN = /^sutra_evd_[A-Za-z0-9_-]{43}$/u;
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
+const FINOPS_SNAPSHOT_ID = /^fss_[a-f0-9]{64}$/u;
 const CONTENT_TYPE = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+/-]{1,126}$/u;
 const MAX_GRANT_TTL_MS = 5 * 60 * 1000;
 const MIN_GRANT_TTL_MS = 15 * 1000;
@@ -558,6 +559,60 @@ export class EvidenceRepository {
     ).run();
     if ((result.meta?.changes ?? 0) !== 1) return null;
     return candidate;
+  }
+
+  /**
+   * Internal-only exact read for one sealed FinOps source artifact. The caller
+   * must first authenticate the encrypted object id against the complete
+   * tenant/source/generation AAD. This repository then independently rebinds
+   * the object to the same live organization, customer, connection, snapshot,
+   * kind, hash, status, and retention window before returning verified bytes.
+   */
+  public async readFinopsSourceSnapshot(input: {
+    readonly scope: EvidenceScope;
+    readonly objectId: string;
+    readonly snapshotId: string;
+    readonly contentSha256: string;
+    readonly now?: number;
+  }): Promise<EvidenceStoredObject> {
+    assertScope(input.scope);
+    if (
+      !OBJECT_ID.test(input.objectId)
+      || !FINOPS_SNAPSHOT_ID.test(input.snapshotId)
+      || !SHA256_HEX.test(input.contentSha256)
+    ) reject("INVALID_INPUT");
+    const database = await this.ready();
+    const now = input.now ?? Date.now();
+    if (!Number.isSafeInteger(now) || now < 0) reject("INVALID_INPUT");
+    const row = await database.prepare(
+      `SELECT e.*
+         FROM evidence_objects e
+         JOIN aws_connections c
+           ON c.id = e.connection_id AND c.org_id = e.org_id
+          AND c.customer_id = e.customer_id
+         JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
+         JOIN customers cu
+           ON cu.id = c.customer_id AND cu.org_id = c.org_id
+          AND cu.status = 'active'
+        WHERE e.id = ? AND e.org_id = ? AND e.customer_id = ?
+          AND e.connection_id = ? AND e.snapshot_id = ?
+          AND e.artifact_kind = 'finops_source_snapshot'
+          AND e.content_type = 'application/json'
+          AND e.content_sha256 = ? AND e.status = 'available'
+          AND e.retention_until > ?
+          AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        LIMIT 1`,
+    ).bind(
+      input.objectId,
+      input.scope.orgId,
+      input.scope.customerId,
+      input.scope.connectionId,
+      input.snapshotId,
+      input.contentSha256,
+      now,
+    ).first<StoredEvidenceObject>();
+    if (row === null) reject("SCOPE_NOT_FOUND");
+    return this.readVerified(row);
   }
 
   public async readVerified(row: StoredEvidenceObject): Promise<EvidenceStoredObject> {

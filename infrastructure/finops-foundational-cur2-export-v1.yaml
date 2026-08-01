@@ -17,6 +17,8 @@ Metadata:
           default: Dedicated billing export destination
         Parameters:
           - ExistingBucketName
+          - ExistingBucketContract
+          - ExistingBucketKmsKeyArn
           - DestinationBucketRegion
           - ExportPrefix
           - ExportName
@@ -25,6 +27,10 @@ Metadata:
         default: Verified base collector permission pack
       ExistingBucketName:
         default: Existing dedicated S3 bucket (optional)
+      ExistingBucketContract:
+        default: Existing bucket security, retention, and CMK attestation
+      ExistingBucketKmsKeyArn:
+        default: Existing bucket customer-managed KMS key ARN
 
 Parameters:
   CollectorRoleName:
@@ -56,6 +62,26 @@ Parameters:
     ConstraintDescription: >-
       Leave empty to create a retained private bucket, or provide one dedicated
       bucket whose bucket policy this stack is authorized to manage.
+
+  ExistingBucketContract:
+    Type: String
+    Default: not-applicable
+    AllowedValues:
+      - not-applicable
+      - dedicated-private-retained-cmk
+    Description: >-
+      Existing-bucket mode requires an explicit attestation that the bucket is
+      dedicated, private, customer-retained, and encrypted by the exact
+      customer-managed KMS key supplied below.
+
+  ExistingBucketKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]{1,128}$'
+    ConstraintDescription: >-
+      Supply the full same-partition, same-account, same-Region ARN of the
+      existing bucket's symmetric customer-managed KMS key, or leave empty
+      when this stack creates the destination and key.
 
   DestinationBucketRegion:
     Type: String
@@ -109,6 +135,48 @@ Rules:
           A bucket created by this stack is in the stack Region, so its declared
           Data Exports destination Region must match.
 
+  ExistingBucketMeetsDestinationContract:
+    RuleCondition:
+      Fn::Not:
+        - Fn::Equals:
+            - Ref: ExistingBucketName
+            - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketContract
+            - dedicated-private-retained-cmk
+        AssertDescription: >-
+          Existing-bucket mode requires the dedicated, private, retained, and
+          customer-managed KMS encryption attestation.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: ExistingBucketKmsKeyArn
+                - ''
+        AssertDescription: >-
+          Existing-bucket mode requires the exact customer-managed KMS key ARN.
+
+  CreatedBucketOwnsDestinationKey:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: ExistingBucketName
+        - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketContract
+            - not-applicable
+        AssertDescription: >-
+          Created-bucket mode owns its destination controls; do not attest an
+          existing-bucket contract.
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketKmsKeyArn
+            - ''
+        AssertDescription: >-
+          Created-bucket mode creates and retains its own customer-managed KMS key.
+
 Conditions:
   CreateDestinationBucket:
     Fn::Equals:
@@ -116,6 +184,55 @@ Conditions:
       - ''
 
 Resources:
+  BillingExportKey:
+    Type: AWS::KMS::Key
+    Condition: CreateDestinationBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Customer-managed key for the Sutra Foundational CUR 2.0 export.
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableCustomerAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowAccountBoundDataExportsEncryption
+            Effect: Allow
+            Principal:
+              Service: bcm-data-exports.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: '*'
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: >-
+                    arn:${AWS::Partition}:bcm-data-exports:${AWS::Region}:${AWS::AccountId}:export/${ExportName}-*
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                kms:ViaService:
+                  Fn::Sub: 's3.${AWS::Region}.${AWS::URLSuffix}'
+              StringLike:
+                kms:EncryptionContext:aws:s3:arn:
+                  Fn::Sub: 'arn:${AWS::Partition}:s3:::*'
+      Tags:
+        - Key: sutra:component
+          Value: foundational-cur2-export
+        - Key: sutra:contract
+          Value: foundational-cur2-export-v1
+        - Key: sutra:managed-by
+          Value: cloudformation
+
   BillingExportBucket:
     Type: AWS::S3::Bucket
     Condition: CreateDestinationBucket
@@ -125,7 +242,11 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt:
+                  - BillingExportKey
+                  - Arn
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
@@ -307,6 +428,30 @@ Resources:
                       - Ref: BillingExportBucket
                       - Ref: ExistingBucketName
 
+          - Sid: DecryptOnlyExactFoundationalExportObjects
+            Effect: Allow
+            Action: kms:Decrypt
+            Resource:
+              Fn::If:
+                - CreateDestinationBucket
+                - Fn::GetAtt:
+                    - BillingExportKey
+                    - Arn
+                - Ref: ExistingBucketKmsKeyArn
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  Fn::Sub: 's3.${DestinationBucketRegion}.${AWS::URLSuffix}'
+              StringLike:
+                kms:EncryptionContext:aws:s3:arn:
+                  Fn::Sub:
+                    - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                    - DestinationBucket:
+                        Fn::If:
+                          - CreateDestinationBucket
+                          - Ref: BillingExportBucket
+                          - Ref: ExistingBucketName
+
           - Sid: ListDataExports
             Effect: Allow
             Action: bcm-data-exports:ListExports
@@ -341,6 +486,16 @@ Outputs:
     Description: Exact object namespace readable by the Sutra collector.
     Value:
       Fn::Sub: '${ExportPrefix}/${ExportName}/'
+
+  DestinationKmsKeyArn:
+    Description: Exact customer-managed KMS key protecting the export objects.
+    Value:
+      Fn::If:
+        - CreateDestinationBucket
+        - Fn::GetAtt:
+            - BillingExportKey
+            - Arn
+        - Ref: ExistingBucketKmsKeyArn
 
   DataExportArn:
     Description: Customer-owned CUR 2.0 Data Export ARN.

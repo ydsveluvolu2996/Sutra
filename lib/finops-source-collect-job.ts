@@ -24,6 +24,11 @@ import type {
 } from "../db/finops-source-job-ledger-repository.ts";
 import type { EvidenceRepository } from "../db/evidence-repository.ts";
 import type { FinopsSourceSnapshotRepository } from "../db/finops-source-snapshot-repository.ts";
+import {
+  AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+  AWS_COST_ANOMALY_SOURCE_ID,
+  materializeAwsCostAnomalyDispatchEvidence,
+} from "./finops-aws-cost-anomaly.ts";
 
 export const FINOPS_SOURCE_COLLECT_JOB_KIND = "finops-source-collect";
 export const FINOPS_SOURCE_COLLECT_ACTOR_ID = "system_finops_source_collect";
@@ -38,6 +43,18 @@ export interface FinopsSourceCollectJobPayload {
   readonly connectionId: string;
   readonly sourceId: FinopsSourceId;
   readonly contractId: string;
+}
+
+export interface FinopsSourceCollectQueue {
+  enqueue(input: {
+    readonly orgId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly kind: string;
+    readonly payload: FinopsSourceCollectJobPayload;
+    readonly maxAttempts: number;
+    readonly idempotencyKey: string;
+  }, now?: number): Promise<{ readonly id: string }>;
 }
 
 export interface FinopsSourceCollectJobDependencies {
@@ -154,9 +171,10 @@ function minimizedEvidence(result: FinopsSourceCollectionResult): Uint8Array {
   // provider error strings, and free-form limitations. Scope and attempt
   // lineage remain in the repositories; this object holds evidence only.
   return new TextEncoder().encode(canonicalJson({
-    schemaVersion: "sutra.finops-source-evidence.v1",
+    schemaVersion: "sutra.finops-source-evidence.v2",
     sourceId: result.sourceId,
     contractId: result.contractId,
+    collectionStatus: result.collectionStatus,
     accountId: result.accountId,
     partition: result.partition,
     region: result.region,
@@ -164,6 +182,7 @@ function minimizedEvidence(result: FinopsSourceCollectionResult): Uint8Array {
     dataThroughAt: result.dataThroughAt,
     coverage: result.coverage,
     evidence: result.evidence,
+    limitations: result.limitations,
   }));
 }
 
@@ -216,6 +235,43 @@ function identityFor(
     jobId: job.id,
     attempt: job.attempt,
   };
+}
+
+/**
+ * Server-owned activation edge for the implemented Cost Anomaly source. The
+ * browser supplies no source, contract, account, partition, operation, or AWS
+ * coordinate. A five-minute idempotency window absorbs accidental double
+ * clicks while still allowing an operator to retry a completed collection.
+ */
+export async function enqueueAwsCostAnomalyCollection(
+  queue: FinopsSourceCollectQueue,
+  scope: FinopsSourceJobScope,
+  nowMs = Date.now(),
+): Promise<{ readonly jobId: string }> {
+  if (
+    !Number.isSafeInteger(nowMs)
+    || nowMs < 0
+    || !IDENTIFIER.test(scope.organizationId)
+    || !IDENTIFIER.test(scope.customerId)
+    || !CONNECTION_ID.test(scope.connectionId)
+  ) reject("INVALID_SCOPE");
+  const window = Math.floor(nowMs / (5 * 60_000));
+  const queued = await queue.enqueue({
+    orgId: scope.organizationId,
+    customerId: scope.customerId,
+    connectionId: scope.connectionId,
+    kind: FINOPS_SOURCE_COLLECT_JOB_KIND,
+    payload: {
+      connectionId: scope.connectionId,
+      sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+      contractId: AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+    },
+    maxAttempts: 6,
+    idempotencyKey:
+      `finops-source:${AWS_COST_ANOMALY_SOURCE_ID}:${scope.connectionId}:${window}`,
+  }, nowMs);
+  if (!/^job_[a-f0-9]{32}$/u.test(queued.id)) reject("COLLECTION_REJECTED");
+  return { jobId: queued.id };
 }
 
 /** Runs one at-least-once durable collection attempt. */
@@ -289,6 +345,21 @@ export async function runFinopsSourceCollectJob(
       result.coverage.recordsRejected,
       result.coverage.recordsOmitted,
     );
+    if (result.sourceId === AWS_COST_ANOMALY_SOURCE_ID) {
+      materializeAwsCostAnomalyDispatchEvidence({
+        sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+        contractId: result.contractId,
+        collectionStatus: result.collectionStatus,
+        accountId: result.accountId,
+        partition: result.partition,
+        region: result.region,
+        collectedAt: result.collectedAt,
+        dataThroughAt: result.dataThroughAt,
+        coverage: result.coverage,
+        evidence: result.evidence,
+        limitations: result.limitations,
+      }, new Date(iso(now)));
+    }
     const body = minimizedEvidence(result);
     const contentSha256 = await sha256(new TextDecoder().decode(body));
     const generationId = `fss_${await sha256([
@@ -355,7 +426,7 @@ export async function runFinopsSourceCollectJob(
       attempt: job.attempt,
       status: complete ? "complete" : "partial",
       contentSha256,
-      schemaVersion: "sutra.finops-source-evidence.v1",
+      schemaVersion: "sutra.finops-source-evidence.v2",
       collectedAtIso: result.collectedAt,
       dataThroughAtIso: result.dataThroughAt,
       coverage: {

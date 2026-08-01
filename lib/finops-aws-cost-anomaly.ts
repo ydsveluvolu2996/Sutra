@@ -26,6 +26,7 @@ import type {
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
+const AWS_REGION = /^[a-z]{2}(?:-gov)?-[a-z0-9-]{1,32}-[1-9]\d?$/u;
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/u;
 const SAFE_CODE = /^[A-Z][A-Z0-9_]{0,95}$/u;
 const MAX_LOOKBACK_DAYS = 90;
@@ -41,6 +42,10 @@ const OPERATIONS: readonly CostAnomalyOperation[] = [
   "GET_ANOMALY_MONITORS",
   "GET_ANOMALY_SUBSCRIPTIONS",
 ];
+
+export const AWS_COST_ANOMALY_SOURCE_ID = "cost_anomaly_detection" as const;
+export const AWS_COST_ANOMALY_SOURCE_CONTRACT_ID =
+  "cost-anomaly-primary-v1" as const;
 
 export interface CostAnomalyTenantBoundary {
   readonly scope: FinopsSourceScope;
@@ -81,6 +86,26 @@ export interface CostAnomalyDashboard {
     readonly disclaimer: string;
   };
   readonly disclaimer: string;
+}
+
+export interface AwsCostAnomalyDispatchMaterialization {
+  readonly sourceId: typeof AWS_COST_ANOMALY_SOURCE_ID;
+  readonly contractId: string;
+  readonly collectionStatus: AwsCostAnomalyCollection["status"];
+  readonly accountId: string;
+  readonly partition: "aws" | "aws-us-gov" | "aws-cn";
+  readonly region: string | null;
+  readonly collectedAt: string;
+  readonly dataThroughAt: string | null;
+  readonly coverage: {
+    readonly pagesObserved: number;
+    readonly recordsObserved: number;
+    readonly recordsAccepted: number;
+    readonly recordsRejected: number;
+    readonly recordsOmitted: number;
+  };
+  readonly evidence: Readonly<Record<string, unknown>>;
+  readonly limitations: readonly string[];
 }
 
 export class CostAnomalyBoundaryError extends Error {
@@ -227,6 +252,199 @@ export function parseAwsCostAnomalyCollection(
     subscriptions,
     limitations,
   };
+}
+
+/**
+ * Rehydrates the privacy-minimized signed broker projection into the canonical
+ * dashboard model. Caller-defined monitor/subscription labels, anomaly
+ * dimension labels, and linked-account names remain redacted. Per-operation
+ * coverage and generic error codes are preserved so partial evidence is never
+ * presented as complete.
+ */
+export function materializeAwsCostAnomalyDispatchEvidence(
+  input: AwsCostAnomalyDispatchMaterialization,
+  now: Date = new Date(),
+): AwsCostAnomalyCollection {
+  if (
+    input.sourceId !== AWS_COST_ANOMALY_SOURCE_ID
+    || input.contractId !== AWS_COST_ANOMALY_SOURCE_CONTRACT_ID
+    || !ACCOUNT_ID.test(input.accountId)
+    || !new Set(["aws", "aws-us-gov", "aws-cn"]).has(input.partition)
+    || !Array.isArray(input.limitations)
+    || input.limitations.length > 20
+  ) invalidBoundary();
+  const evidence = exactRecord(input.evidence, [
+    "schemaVersion",
+    "source",
+    "windowStartDate",
+    "windowEndDate",
+    "coverage",
+    "anomalies",
+    "monitors",
+    "subscriptions",
+  ]);
+  if (
+    evidence.schemaVersion !== "sutra.aws-cost-anomaly-detection.v1"
+    || evidence.source !== "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION"
+    || !Array.isArray(evidence.coverage)
+    || !Array.isArray(evidence.anomalies)
+    || !Array.isArray(evidence.monitors)
+    || !Array.isArray(evidence.subscriptions)
+  ) invalidBoundary();
+
+  const anomalies = evidence.anomalies.map((candidate) => {
+    const anomaly = exactRecord(candidate, [
+      "anomalyId",
+      "monitorArn",
+      "startDate",
+      "endDate",
+      "feedback",
+      "score",
+      "impact",
+      "rootCauses",
+      "rootCausesOmitted",
+    ]);
+    if (!Array.isArray(anomaly.rootCauses)) invalidBoundary();
+    return {
+      ...anomaly,
+      dimensionValue: null,
+      rootCauses: anomaly.rootCauses.map((candidateCause) => ({
+        ...exactRecord(candidateCause, [
+          "service",
+          "region",
+          "linkedAccountId",
+          "usageType",
+          "contribution",
+        ]),
+        linkedAccountName: null,
+      })),
+    };
+  });
+  const monitors = evidence.monitors.map((candidate) => ({
+    ...exactRecord(candidate, [
+      "monitorArn",
+      "type",
+      "dimension",
+      "specificationPresent",
+      "dimensionalValueCount",
+      "createdAt",
+      "lastUpdatedAt",
+      "lastEvaluatedAt",
+    ]),
+    name: "AWS monitor label redacted",
+  }));
+  const subscriptions = evidence.subscriptions.map((candidate) => ({
+    ...exactRecord(candidate, [
+      "subscriptionArn",
+      "frequency",
+      "monitorArns",
+      "monitorArnsOmitted",
+      "threshold",
+      "thresholdExpressionPresent",
+      "subscriberCounts",
+    ]),
+    name: "AWS subscription label redacted",
+  }));
+  const parsed = parseAwsCostAnomalyCollection({
+    schemaVersion: evidence.schemaVersion,
+    source: evidence.source,
+    status: input.collectionStatus,
+    accountId: input.accountId,
+    collectedAt: input.collectedAt,
+    windowStartDate: evidence.windowStartDate,
+    windowEndDate: evidence.windowEndDate,
+    dataThroughAt: input.dataThroughAt,
+    coverage: evidence.coverage,
+    anomalies,
+    monitors,
+    subscriptions,
+    limitations: input.limitations,
+  }, input.accountId, now);
+
+  const aggregate = parsed.coverage.reduce((total, operation) => ({
+    pagesObserved: total.pagesObserved + operation.pagesObserved,
+    recordsObserved: total.recordsObserved + operation.recordsObserved,
+    recordsAccepted: total.recordsAccepted + operation.recordsAccepted,
+    recordsRejected: total.recordsRejected + operation.recordsRejected,
+    recordsOmitted: total.recordsOmitted + operation.recordsOmitted,
+  }), {
+    pagesObserved: 0,
+    recordsObserved: 0,
+    recordsAccepted: 0,
+    recordsRejected: 0,
+    recordsOmitted: 0,
+  });
+  for (const key of Object.keys(aggregate) as (keyof typeof aggregate)[]) {
+    if (aggregate[key] !== input.coverage[key]) invalidBoundary();
+  }
+  return parsed;
+}
+
+/** Parses the exact immutable evidence-object wrapper written by the source job. */
+export function parsePersistedAwsCostAnomalyMaterialization(
+  value: unknown,
+  expected: {
+    readonly accountId: string;
+    readonly partition: AwsCostAnomalyDispatchMaterialization["partition"];
+  },
+  now: Date = new Date(),
+): AwsCostAnomalyCollection {
+  const artifact = exactRecord(value, [
+    "schemaVersion",
+    "sourceId",
+    "contractId",
+    "collectionStatus",
+    "accountId",
+    "partition",
+    "region",
+    "collectedAt",
+    "dataThroughAt",
+    "coverage",
+    "evidence",
+    "limitations",
+  ]);
+  if (
+    artifact.schemaVersion !== "sutra.finops-source-evidence.v2"
+    || artifact.sourceId !== AWS_COST_ANOMALY_SOURCE_ID
+    || artifact.contractId !== AWS_COST_ANOMALY_SOURCE_CONTRACT_ID
+    || artifact.accountId !== expected.accountId
+    || artifact.partition !== expected.partition
+    || (artifact.region !== null
+      && (typeof artifact.region !== "string" || !AWS_REGION.test(artifact.region)))
+    || typeof artifact.collectedAt !== "string"
+    || (artifact.dataThroughAt !== null && typeof artifact.dataThroughAt !== "string")
+    || typeof artifact.coverage !== "object"
+    || artifact.coverage === null
+    || Array.isArray(artifact.coverage)
+    || typeof artifact.evidence !== "object"
+    || artifact.evidence === null
+    || Array.isArray(artifact.evidence)
+    || !Array.isArray(artifact.limitations)
+  ) invalidBoundary();
+  const coverage = exactRecord(artifact.coverage, [
+    "pagesObserved",
+    "recordsObserved",
+    "recordsAccepted",
+    "recordsRejected",
+    "recordsOmitted",
+  ]);
+  if (
+    artifact.collectionStatus !== "COMPLETE"
+    && artifact.collectionStatus !== "PARTIAL"
+  ) invalidBoundary();
+  return materializeAwsCostAnomalyDispatchEvidence({
+    sourceId: AWS_COST_ANOMALY_SOURCE_ID,
+    contractId: AWS_COST_ANOMALY_SOURCE_CONTRACT_ID,
+    collectionStatus: artifact.collectionStatus,
+    accountId: expected.accountId,
+    partition: expected.partition,
+    region: artifact.region,
+    collectedAt: artifact.collectedAt,
+    dataThroughAt: artifact.dataThroughAt,
+    coverage: coverage as unknown as AwsCostAnomalyDispatchMaterialization["coverage"],
+    evidence: artifact.evidence as Readonly<Record<string, unknown>>,
+    limitations: artifact.limitations as readonly string[],
+  }, now);
 }
 
 export function createCostAnomalyQueryService(

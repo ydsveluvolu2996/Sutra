@@ -65,6 +65,21 @@ describe("AWS Data Exports manifest validation", () => {
     if (result.ok) assert.equal(result.manifest.table, "focus-1.2-aws");
   });
 
+  it("recognizes the exact AWS FOCUS_1_2_AWS export table token", async () => {
+    const result = await validateFinopsDataExportManifest(observation({
+      body: {
+        exportName: "foundational-focus-export",
+        tableName: "FOCUS_1_2_AWS",
+        columns: ["BillingAccountId", "BilledCost"],
+        dataFiles: [
+          "focus/data/BILLING_PERIOD=2026-07/focus-00001.csv.gz",
+        ],
+      },
+    }));
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.manifest.table, "focus-1.2-aws");
+  });
+
   it("rejects cross-bucket, duplicate, unsafe, and unsupported data objects", async () => {
     const cases = [
       {
