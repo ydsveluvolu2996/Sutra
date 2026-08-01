@@ -16,6 +16,7 @@ import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
 import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
 import { FinopsAmazonConnectCostInsightsDashboard } from "./finops-amazon-connect-cost-insights-dashboard";
 import { FinopsComputeOptimizerDashboard } from "./finops-compute-optimizer-dashboard";
+import { FinopsDataCollectionMonitorDashboard } from "./finops-data-collection-monitor-dashboard";
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsExtendedSupportProjectionDashboard } from "./finops-extended-support-projection-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
@@ -197,6 +198,8 @@ export function FinopsDashboardCatalogNav({
             <FinopsGravitonSavingsDashboard connectionId={connectionId} />
           ) : selected.id === "health_events" ? (
             <FinopsHealthEventsDashboard connectionId={connectionId} />
+          ) : selected.id === "data_collection_monitor" ? (
+            <FinopsDataCollectionMonitorDashboard connectionId={connectionId} />
           ) : selected.id === "cora" ? (
             <FinopsCoraDashboard connectionId={connectionId} />
           ) : selected.id === "config_resource_compliance" ? (

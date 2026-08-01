@@ -1,0 +1,13 @@
+CREATE TABLE `finops_dcf_snapshots`(`generation_id` text PRIMARY KEY,`org_id` text NOT NULL,`customer_id` text NOT NULL,`connection_id` text NOT NULL,`capture_id` text NOT NULL,`complete` integer NOT NULL CHECK(`complete` IN(0,1)),`provider_access` text NOT NULL,`content_sha256` text NOT NULL,`snapshot_json` text NOT NULL,`completed_at` text NOT NULL,`module_count` integer NOT NULL,`execution_count` integer NOT NULL,`created_at` integer NOT NULL,FOREIGN KEY(`org_id`)REFERENCES `organizations`(`id`)ON DELETE CASCADE,FOREIGN KEY(`customer_id`)REFERENCES `customers`(`id`)ON DELETE CASCADE,FOREIGN KEY(`connection_id`)REFERENCES `aws_connections`(`id`)ON DELETE CASCADE,UNIQUE(`org_id`,`customer_id`,`connection_id`,`capture_id`),CHECK(length(`generation_id`)=68 AND substr(`generation_id`,1,4)='dcg_'),CHECK(length(`content_sha256`)=64),CHECK(length(`snapshot_json`)BETWEEN 2 AND 67108864));
+--> statement-breakpoint
+CREATE INDEX `finops_dcf_history_idx` ON `finops_dcf_snapshots`(`org_id`,`customer_id`,`connection_id`,`completed_at` DESC);
+--> statement-breakpoint
+CREATE TABLE `finops_dcf_heads`(`org_id` text NOT NULL,`customer_id` text NOT NULL,`connection_id` text NOT NULL,`active_generation_id` text NOT NULL UNIQUE,`advanced_at` integer NOT NULL,PRIMARY KEY(`org_id`,`customer_id`,`connection_id`),FOREIGN KEY(`active_generation_id`)REFERENCES `finops_dcf_snapshots`(`generation_id`));
+--> statement-breakpoint
+CREATE TRIGGER `finops_dcf_snapshots_update_guard` BEFORE UPDATE ON `finops_dcf_snapshots` BEGIN SELECT RAISE(ABORT,'FINOPS_DCF_SNAPSHOT_IMMUTABLE');END;
+--> statement-breakpoint
+CREATE TRIGGER `finops_dcf_snapshots_delete_guard` BEFORE DELETE ON `finops_dcf_snapshots` BEGIN SELECT RAISE(ABORT,'FINOPS_DCF_SNAPSHOT_IMMUTABLE');END;
+--> statement-breakpoint
+CREATE TRIGGER `finops_dcf_heads_insert_guard` BEFORE INSERT ON `finops_dcf_heads` WHEN NOT EXISTS(SELECT 1 FROM `finops_dcf_snapshots` s WHERE s.`generation_id`=NEW.`active_generation_id` AND s.`org_id`=NEW.`org_id` AND s.`customer_id`=NEW.`customer_id` AND s.`connection_id`=NEW.`connection_id` AND s.`complete`=1)BEGIN SELECT RAISE(ABORT,'FINOPS_DCF_HEAD_REJECTED');END;
+--> statement-breakpoint
+CREATE TRIGGER `finops_dcf_heads_update_guard` BEFORE UPDATE ON `finops_dcf_heads` WHEN NOT EXISTS(SELECT 1 FROM `finops_dcf_snapshots` c JOIN `finops_dcf_snapshots` a ON a.`generation_id`=OLD.`active_generation_id` WHERE c.`generation_id`=NEW.`active_generation_id` AND c.`org_id`=OLD.`org_id` AND c.`customer_id`=OLD.`customer_id` AND c.`connection_id`=OLD.`connection_id` AND c.`complete`=1 AND c.`completed_at`>a.`completed_at`)BEGIN SELECT RAISE(ABORT,'FINOPS_DCF_HEAD_REJECTED');END;

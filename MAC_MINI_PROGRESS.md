@@ -208,6 +208,18 @@ Next gate:
 | Release evidence | Source slice only; no image published or deployed |
 | Next gate | Build Azure CID and GCP CID, then finish each partial pipeline’s production activation and acceptance gates |
 
+### 2026-08-01 — Data Collection Monitor DCF execution vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-12 / local G1–G6 candidate slice; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Tenant-pinned DCF Step Functions capture and bounded instrumentation contract; immutable complete-only history; same-tenant API; module/job state, errors, retries, latency, coverage and execution history; links generated only from validated same-account/partition/Region execution ARNs |
+| Security | No arbitrary console URL or raw provider payload is accepted or stored; incomplete captures cannot advance the head |
+| Focused verification | Vertical and contract 4 passed; full TypeScript, targeted ESLint and diff validation passed before shared integration |
+| Remaining gates | Register production scheduler, Step Functions adapter and job handler; validate real DCF pagination, retries, errors, cadence and two-tenant isolation; complete signed-in/provider/live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Finish Azure/GCP verticals and continue production activation closure for each partial pipeline |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |
