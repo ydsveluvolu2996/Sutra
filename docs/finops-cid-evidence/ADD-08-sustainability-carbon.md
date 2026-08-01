@@ -88,7 +88,12 @@ stale, waiting, and configuration-required generations remain immutable history.
 The API derives tenant scope from the authenticated organization, resolves the
 active trust-role connection, and enforces `connection:read` for its customer.
 No tenant identifier can be supplied. Filter values are bounded and apply only
-to persisted same-tenant rows.
+to persisted same-tenant rows. Every successful API envelope, including the
+configuration-required response with no accepted snapshot, returns the same
+frozen official definition. The browser validates its schema, commit, artifact
+hash, counts, and sheet inventory before accepting provider-backed envelopes,
+and renders the pinned source audit independently of report availability in
+disconnected, loading, configuration-required, and failed states.
 
 ## Activation gaps
 
@@ -115,7 +120,8 @@ provider acceptance, live data, production registration or deployment.
 
 - Engine/repository/UI vertical tests cover channel separation, schema and
   permission pins, exact normalization, missing totals, tenant/account/model/
-  unit failures, empty/partial/stale states, immutable heads and native UI.
+  unit failures, empty/partial/stale states, immutable heads, both successful
+  API audit surfaces, native UI, and report-independent official evidence.
 - Runtime tests cover identity-only queue payloads, dual-plane lineage and
   policy pins, signed archive evidence, deterministic replay, unavailable
   states, partial-carbon non-activation, boundary/signature/CUR2/carbon/archive
