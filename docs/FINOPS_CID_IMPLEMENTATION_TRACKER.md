@@ -60,13 +60,13 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 8 | 4 | 0 | 0 | 0 |
+| Advanced | 13 | 1 | 9 | 3 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 9 | 0 | 2 | 0 | 0 |
-| **Total** | **29** | **6** | **17** | **4** | **2** | **0** | **0** |
+| **Total** | **29** | **6** | **18** | **3** | **2** | **0** | **0** |
 
 The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The seventeen partial pipelines are Trusted
-Advisor Organizational, AWS News Feeds, AWS Budgets, Support Cases Radar,
+Anomaly, Trends, and Data Transfer. The eighteen partial pipelines are Trusted
+Advisor Organizational, Compute Optimizer, AWS News Feeds, AWS Budgets, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -80,7 +80,7 @@ Carbon, and Amazon Connect Cost Insights. Azure CID and GCP CID are absent.
 | FND-02 | Cost Intelligence Dashboard | `cost_intelligence_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-02-cost-intelligence.md); exact-tree and controlled two-tenant/provider acceptance remain. |
 | FND-03 | KPI and Modernization Dashboard | `kpi_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-03-kpi-modernization.md); exact-tree and controlled two-tenant/provider acceptance remain. |
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md); an accepted server-owned Organizations taxonomy manifest and worker activation are still required. Priority API logic remains supplemental. |
-| ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `ENGINE_ONLY` | Complete organization export/history, savings and under-provisioning risk views, API/UI, and coverage evidence. |
+| ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-02-compute-optimizer.md): immutable organization S3-export history, same-tenant API, and native rightsizing/savings/risk/ownership UI exist; production S3 adapter/job binding, real organization-export coverage, and provider acceptance remain. Discovery and direct recommendation APIs are never substituted for export history. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md); exact-tree and controlled payer/two-tenant acceptance remain. |
 | ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `ENGINE_ONLY` | [G0/G1/engine evidence](finops-cid-evidence/ADV-04-extended-support.md); concrete multi-account collector, accepted materialization/history, authenticated API, native visual, exact-money review, and provider acceptance remain. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `ENGINE_ONLY` | [G0/engine audit](finops-cid-evidence/ADV-05-graviton-savings.md); add OpenSearch/ElastiCache contracts, export-object recommendation ingestion, compatibility/inventory/pricing joins, accepted history, API/UI, and provider reconciliation. |

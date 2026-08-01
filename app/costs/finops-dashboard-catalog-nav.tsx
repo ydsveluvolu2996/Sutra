@@ -15,6 +15,7 @@ import { FinopsAwsBudgetsOrganizationDashboard } from "./finops-aws-budgets-orga
 import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
 import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
 import { FinopsAmazonConnectCostInsightsDashboard } from "./finops-amazon-connect-cost-insights-dashboard";
+import { FinopsComputeOptimizerDashboard } from "./finops-compute-optimizer-dashboard";
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
 import { FinopsFocusDashboard } from "./finops-focus-dashboard";
@@ -182,6 +183,8 @@ export function FinopsDashboardCatalogNav({
               connectionId={connectionId}
               dashboard={selected}
             />
+          ) : selected.id === "compute_optimizer" ? (
+            <FinopsComputeOptimizerDashboard connectionId={connectionId} />
           ) : selected.id === "cora" ? (
             <FinopsCoraDashboard connectionId={connectionId} />
           ) : selected.id === "config_resource_compliance" ? (

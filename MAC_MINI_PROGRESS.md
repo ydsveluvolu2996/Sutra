@@ -157,6 +157,19 @@ Next gate:
 | Release evidence | No image published or deployed; current live digest remains unchanged |
 | Next gate | Push exact commits and continue ADV-01/ADV-02 through API/UI, then complete the remaining engine-only rows |
 
+### 2026-08-01 — Compute Optimizer export-history vertical
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADV-02 / local G2–G6 candidate slice over organization S3 export objects |
+| Maturity transition | ADV-02 `ENGINE_ONLY` → `PARTIAL_PIPELINE`; aggregate is 6 candidates, 18 partial pipelines, 3 engine-only, and 2 absent |
+| Trust boundary | Only completed, hash-addressed organization S3 exports enter recommendation history; discovery and direct recommendation APIs are explicitly excluded |
+| Delivery | Immutable complete-head export generations and retained history, same-tenant API, organization/account/Region/resource views, over/under/idle/optimized status, savings/risk, owner/team/business-unit and eligibility-tag analysis, formula-safe CSV |
+| Focused verification | Engine plus vertical 18 passed; full TypeScript and targeted ESLint passed before shared integration |
+| Remaining gates | Register production S3 export-object adapter and durable handler, bind completed discovery jobs without using discovery as recommendation evidence, validate real organization/all-Region/resource-type exports, and run two-tenant/provider/visual/live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Integrate release migrations and navigation, then continue Extended Support, Graviton, and Health Events |
+
 ### 2026-08-01 — TAO, Trends, Data Transfer, and optimizer persistence checkpoint
 
 | Field | Evidence |

@@ -108,7 +108,7 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
     shortName: "Compute Optimizer",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "ENGINE_ONLY",
+    currentMaturity: "PARTIAL_PIPELINE",
     summary: "Organization-wide rightsizing recommendations, savings opportunities, and under-provisioning risk.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/compute-optimizer-dashboard.html`,
