@@ -133,7 +133,7 @@ export async function GET(request: Request): Promise<Response> {
         evidence: null,
         activation: {
           available: false,
-          reason: "PRICING_CHANGE_CAPTURE_MATERIALIZER_NOT_IMPLEMENTED",
+          reason: "AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED",
         },
         limitations: [
           "No browser-supplied catalog, price, usage, payer, account, or Region evidence is accepted.",
@@ -206,13 +206,13 @@ export async function GET(request: Request): Promise<Response> {
         },
         activation: {
           available: false,
-          reason: "PRICING_CHANGE_CAPTURE_MATERIALIZER_NOT_IMPLEMENTED",
+          reason: "AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED",
         },
         limitations: [
           "Actual usage is held constant while public catalog rates at two effective dates are compared.",
           "Private pricing, credits, taxes, support, refunds, commitment-benefit allocation, and currency conversion are excluded.",
           "AWS Price List files are informational; this dashboard is not an invoice, quote, forecast, discount calculation, or savings claim.",
-          "Collection activation remains disabled until the server-owned CUR2-to-catalog capture materializer is implemented and provider-accepted.",
+          "Local server-owned CUR2-to-catalog orchestration is implemented; activation remains disabled until its historical AWS Price List provider adapter and durable job handler are registered and provider-accepted.",
         ],
       });
     } catch {
@@ -232,7 +232,7 @@ export async function GET(request: Request): Promise<Response> {
         },
         activation: {
           available: false,
-          reason: "PRICING_CHANGE_CAPTURE_MATERIALIZER_NOT_IMPLEMENTED",
+          reason: "AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED",
         },
         limitations: [
           "The retained evidence object could not be independently rebound and validated; no modeled values are returned.",

@@ -32,7 +32,7 @@ test("route and UI expose honest source states and disabled activation", () => {
   for (const state of ["configuration_required", "waiting", "partial", "stale", "failed", "empty", "complete"]) {
     assert.match(route + component, new RegExp(`"${state}"`, "u"), state);
   }
-  assert.match(route, /PRICING_CHANGE_CAPTURE_MATERIALIZER_NOT_IMPLEMENTED/u);
+  assert.match(route, /AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED/u);
   assert.match(route, /available: false/u);
   assert.doesNotMatch(route, /fixture|sample|placeholder|temporaryCredentials|roleArn|objectKey/iu);
   for (const label of [
@@ -69,7 +69,7 @@ test("Pricing Change report actually renders exact comparison, drilldown, exclus
       usagePeriodEndAt: "2026-07-01T00:00:00.000Z",
       baselineEffectiveAt: "2025-01-15T00:00:00.000Z",
       comparisonEffectiveAt: "2026-01-15T00:00:00.000Z",
-      activeCur2GenerationId: `gen_${"c".repeat(64)}`,
+      activeCur2GenerationId: `fbg_${"c".repeat(64)}`,
       activeCur2GeneratedAt: "2026-08-01T00:00:00.000Z",
       activeCur2ManifestSha256: "d".repeat(64),
       assumptions: [],

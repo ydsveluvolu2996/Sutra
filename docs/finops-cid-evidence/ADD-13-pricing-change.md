@@ -1,10 +1,11 @@
 # ADD-13 — Pricing Change Analysis Dashboard
 
-Status: **PARTIAL_PIPELINE**. A bounded exact-arithmetic engine, immutable
-sealed-evidence metadata repository, authenticated same-tenant read API, and
-native responsive dashboard view now exist locally. The server-owned
-CUR2-to-catalog capture materializer, live AWS acceptance, catalog navigation
-wiring, and production activation remain open.
+Status: **PARTIAL_PIPELINE**. A bounded exact-arithmetic engine, server-owned
+CUR2-to-catalog materialization job, immutable sealed-evidence metadata
+repository, authenticated same-tenant read API, and native responsive dashboard
+view now exist locally. The historical AWS Price List provider adapter, durable
+job-handler registration, live AWS acceptance, and production activation remain
+open.
 
 ## Official capability audit
 
@@ -34,6 +35,13 @@ savings claim:
   version-pinned catalog evidence, source coverage, term/product applicability,
   effective intervals, currency, units, tier bounds, and exact rational
   arithmetic. It never fuzzy-matches products or combines currencies.
+- `lib/finops-pricing-change-materialization-job.ts` resolves an identity-only
+  durable job through a server-owned comparison policy, requires one active
+  reconciled canonical CUR2 `fbg_` generation, freezes its payer/account/Region
+  boundary, requests only historical Price List bulk files, reruns the engine,
+  archives the canonical capture, seals its managed object reference, and
+  persists immutable metadata. Missing policy, CUR2, or provider adapter states
+  return explicit unavailable reasons and never fabricate a zero-impact result.
 - `drizzle/0088_finops_pricing_change_materializations.sql` and
   `postgres/migrations/0083_finops_pricing_change_materializations.sql` add
   append-only lineage/count metadata and complete-only monotonic active heads.
@@ -92,6 +100,9 @@ No state treats missing delivery as zero usage or zero impact.
 ## Focused verification
 
 - Domain engine: `tests/finops-pricing-change-analysis.test.ts`
+- Materializer orchestration, exact-money preservation, unavailable states,
+  mismatch denial, and at-least-once replay:
+  `tests/finops-pricing-change-materialization-job.test.ts`
 - Migration parity/guard contract:
   `tests/finops-pricing-change-migration-contract.test.mjs`
 - Same-tenant persistence, replay, head monotonicity, and immutability:
@@ -102,19 +113,21 @@ No state treats missing delivery as zero usage or zero impact.
 
 ## Remaining production gates
 
-1. Implement the server-owned, timeout/page/byte-bounded collector adapter that
-   combines the accepted active CUR 2.0 generation with two historical
-   `ListPriceLists`/`GetPriceListFileUrl` sets and archives the exact capture.
-2. Build and provider-verify the complete CUR2 product/term applicability map,
+1. Register a durable handler for `finops-pricing-change-materialize` and bind
+   its server policy and active-CUR2 loaders. The existing billing repository is
+   authoritative, but a bounded materializer reader must page the complete
+   selected `fbg_` generation rather than using its 1,000-row UI query ceiling.
+2. Implement and register the timeout/page/byte-bounded authenticated AWS
+   adapter for historical `pricing:ListPriceLists` and
+   `pricing:GetPriceListFileUrl` JSON files. No adapter is currently claimed.
+3. Build and provider-verify the complete CUR2 product/term applicability map,
    including explicit tier allocation evidence. Unmapped or tier-ambiguous rows
    must remain exclusions.
-3. Wire the dashboard component into the shared catalog navigation after the
-   concurrent catalog work is merged.
 4. Run controlled AWS acceptance against at least two known historical catalog
    versions, independently reproduce totals, prove cross-tenant denial, retain
    signed evidence, and pass exact-image rollback/post-deploy gates.
 
 Until these gates pass, activation is deliberately returned as
 `available: false` with
-`PRICING_CHANGE_CAPTURE_MATERIALIZER_NOT_IMPLEMENTED`, and ADD-13 must not be
+`AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED`, and ADD-13 must not be
 marked local-verified, live-accepted, or production-ready.

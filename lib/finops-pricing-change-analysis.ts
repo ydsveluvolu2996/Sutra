@@ -11,7 +11,7 @@ import type { FinopsSourceScope } from "./finops-source-health.ts";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const COLLECTION_ID = /^pca_[a-f0-9]{64}$/u;
-const GENERATION_ID = /^gen_[a-f0-9]{64}$/u;
+const GENERATION_ID = /^fbg_[a-f0-9]{64}$/u;
 const SNAPSHOT_ID = /^pls_[a-f0-9]{64}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const REGION = /^(?:[a-z]{2}(?:-gov)?-[a-z]+-\d|GLOBAL)$/u;

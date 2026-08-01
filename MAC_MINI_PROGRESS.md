@@ -258,6 +258,18 @@ Next gate:
 | Release evidence | Source contract only; no image published or deployed |
 | Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
 
+### 2026-08-01 — Pricing Change materialization contract
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-13 / local server-owned materialization advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | Identity-only job; server policy and active reconciled `fbg_` CUR2 binding; exact historical ListPriceLists/GetPriceListFileUrl bulk-file contract; rational repricing; deterministic evidence archive/sealing; immutable replay-safe persistence |
+| Security | Client policy/scope, placeholder generation IDs, credential fields, malformed catalog/CUR2 evidence, incomplete reconciliation and persisted lineage mismatch fail closed |
+| Focused verification | 20 engine/materializer/migration/API/render tests; full typecheck, touched lint and diff checks pass in the integrated tree |
+| Remaining gates | Register policy/full-CUR2 readers, historical Price List adapter and durable handler; provider-verify applicability/tiering; then exact-tree/two-tenant/live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Integrate the next completed runtime binding before the all-dashboard release gate |
+
 ### 2026-08-01 — AWS Support Cases signed runtime contract
 
 | Field | Evidence |

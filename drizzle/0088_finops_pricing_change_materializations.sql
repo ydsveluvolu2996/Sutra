@@ -45,7 +45,7 @@ CREATE TABLE `finops_pricing_change_materializations` (
   CHECK (length(`baseline_effective_at`) = 24),
   CHECK (length(`comparison_effective_at`) = 24 AND `comparison_effective_at` > `baseline_effective_at`),
   CHECK (length(`active_cur2_generation_id`) = 68
-    AND substr(`active_cur2_generation_id`, 1, 4) = 'gen_'
+    AND substr(`active_cur2_generation_id`, 1, 4) = 'fbg_'
     AND substr(`active_cur2_generation_id`, 5) NOT GLOB '*[^a-f0-9]*'),
   CHECK (`input_line_count` BETWEEN 0 AND 250000),
   CHECK (`modeled_line_count` BETWEEN 0 AND `input_line_count`),

@@ -16,7 +16,7 @@ CREATE TABLE finops_pricing_change_materializations (
   usage_period_end_at text NOT NULL CHECK (char_length(usage_period_end_at) = 24 AND usage_period_end_at > usage_period_start_at),
   baseline_effective_at text NOT NULL CHECK (char_length(baseline_effective_at) = 24),
   comparison_effective_at text NOT NULL CHECK (char_length(comparison_effective_at) = 24 AND comparison_effective_at > baseline_effective_at),
-  active_cur2_generation_id text NOT NULL CHECK (active_cur2_generation_id ~ '^gen_[a-f0-9]{64}$'),
+  active_cur2_generation_id text NOT NULL CHECK (active_cur2_generation_id ~ '^fbg_[a-f0-9]{64}$'),
   input_line_count integer NOT NULL CHECK (input_line_count BETWEEN 0 AND 250000),
   modeled_line_count integer NOT NULL,
   excluded_line_count integer NOT NULL,

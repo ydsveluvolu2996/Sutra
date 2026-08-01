@@ -14,6 +14,8 @@ test("Pricing Change migrations retain sealed metadata, immutable rows, and comp
     assert.match(sql, /FINOPS_PRICING_CHANGE_IMMUTABLE/u);
     assert.match(sql, /FINOPS_PRICING_CHANGE_HEAD_REJECTED/u);
     assert.match(sql, /'ready'[\s\S]*'no_usage'/u);
+    assert.match(sql, /fbg_/u);
+    assert.doesNotMatch(sql, /\^gen_|'gen_'/u);
     assert.doesNotMatch(sql, /capture_json|usage_json|catalog_terms_json|price_per_unit/u);
   }
   assert.match(postgres, /REVOKE ALL ON finops_pricing_change_materializations FROM PUBLIC/u);

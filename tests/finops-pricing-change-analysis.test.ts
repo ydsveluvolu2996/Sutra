@@ -30,7 +30,7 @@ const boundary: PricingChangeTenantBoundary = {
   linkedAccountIds: [LINKED],
   regions: [REGION],
 };
-const GENERATION_ID = `gen_${"a".repeat(64)}`;
+const GENERATION_ID = `fbg_${"a".repeat(64)}`;
 const BASELINE_SNAPSHOT_ID = `pls_${"b".repeat(64)}`;
 const COMPARISON_SNAPSHOT_ID = `pls_${"c".repeat(64)}`;
 

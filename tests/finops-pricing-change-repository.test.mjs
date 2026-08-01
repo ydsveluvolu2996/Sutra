@@ -69,7 +69,7 @@ function snapshot(idCharacter, state = "READY", generatedAt = "2026-08-01T01:00:
     usagePeriodEndAt: "2026-07-01T00:00:00.000Z",
     baselineEffectiveAt: "2025-01-15T00:00:00.000Z",
     comparisonEffectiveAt: "2026-01-15T00:00:00.000Z",
-    activeCur2GenerationId: `gen_${"d".repeat(64)}`,
+    activeCur2GenerationId: `fbg_${"d".repeat(64)}`,
     activeCur2GeneratedAt: "2026-08-01T00:00:00.000Z",
     activeCur2ManifestSha256: "e".repeat(64),
     assumptions: [],
