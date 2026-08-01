@@ -13,13 +13,27 @@ provider collection has been accepted in the deployment environment.
 
 ## Official dashboard coverage
 
-Reviewed 2026-08-02 against the official AWS
+Reviewed 2026-08-01 against the official AWS
 [AWS News Feeds dashboard](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/news-feeds.html),
 [Cloud Intelligence dashboard catalog](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/dashboards.html),
 and [AWS Security Bulletins](https://aws.amazon.com/security/security-bulletins/).
 The AWS guidance identifies the four content families and the service, feed-
 type, and category filters implemented below. Exact endpoint availability still
 requires the live-provider acceptance gate.
+
+The public framework manifest is pinned at commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`, path
+`dashboards/aws-feeds/aws-feeds.yaml`, SHA-256
+`1e3c569b4fe4100971a0c0c1530492745726408f58e9c5edd817895c516a4d6e`.
+Its embedded QuickSight definition SHA-256 is
+`ac9bffb471fcf9730d765c45270ddc818c363ed8539c2d62f1df2da6f6115c4e`.
+Independent parsing proves exactly **6 sheets, 21 visuals, 12 parameter
+controls, 0 filter controls, 20 parameter declarations, 16 calculated fields,
+20 filter groups and 5 datasets**. Visuals comprise 7 tables, 7 bar charts, 1
+word cloud, 3 pivot tables, 1 custom-content visual and 2 insights. Every exact
+sheet, visual ID/type and control placement is exposed in the native source
+inventory; native equivalents do not claim QuickSight pixel or interaction
+parity.
 
 The implementation explicitly covers all four AWS-documented content families:
 
@@ -86,7 +100,7 @@ scheduler boundary. The shared-worker handler maps an existing replay lease to
 a retryable generic error, so another replica's in-progress work cannot be
 marked successful.
 
-Focused verification result: **28/28 tests passed**, with zero failures, skips,
+Focused verification result: **30/30 tests passed**, with zero failures, skips,
 or cancellations. Full TypeScript checking and targeted ESLint also passed on
 this exact local tree.
 

@@ -5,6 +5,7 @@ import {
   buildAwsNewsDashboardProjection,
   type AwsNewsDashboardFilters,
 } from "../../../../../lib/finops-aws-news-dashboard";
+import { AWS_NEWS_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-news-official-definition";
 import type { AwsNewsFeedKind, AwsNewsFeedSourceId } from "../../../../../lib/finops-aws-news-feeds";
 import { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../../../../../lib/finops-aws-news-feeds-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
@@ -85,6 +86,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       sourceState: "configuration_required",
       dashboard: null,
+      officialDefinition: AWS_NEWS_OFFICIAL_DEFINITION,
       collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY,
     });
     const projection = buildAwsNewsDashboardProjection(selected.snapshot, history, query.filters);
@@ -98,6 +100,7 @@ export async function GET(request: Request): Promise<Response> {
       ...projection,
       connectionId: connection.id,
       sourceState,
+      officialDefinition: AWS_NEWS_OFFICIAL_DEFINITION,
       freshness: { observedAt: selected.snapshot.observedAt, ageHours: freshnessAgeHours, staleAfterHours: FRESHNESS_HOURS },
       sourceEvidence: selected.snapshot.sourceEvidence,
       evidence: {

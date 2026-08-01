@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import type { AwsNewsDashboardFilters, AwsNewsDashboardProjection } from "../../lib/finops-aws-news-dashboard";
 import type { AwsNewsSourceEvidence } from "../../lib/finops-aws-news-feeds";
 import type { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../../lib/finops-aws-news-feeds-runtime-binding";
+import type { AwsNewsOfficialDefinition } from "../../lib/finops-aws-news-official-definition";
 import styles from "./finops-aws-news-feeds-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
 interface AwsNewsDashboardEnvelope extends AwsNewsDashboardProjection {
   readonly connectionId: string;
   readonly sourceState: SourceState;
+  readonly officialDefinition: AwsNewsOfficialDefinition;
   readonly freshness: { readonly observedAt: string; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly sourceEvidence: readonly AwsNewsSourceEvidence[];
   readonly evidence: Readonly<Record<string, unknown>>;
@@ -19,6 +21,7 @@ interface AwsNewsDashboardEnvelope extends AwsNewsDashboardProjection {
 
 interface AwsNewsFeedsConfigurationEnvelope {
   readonly dashboard: null;
+  readonly officialDefinition: AwsNewsOfficialDefinition;
   readonly collection: typeof AWS_NEWS_FEEDS_RUNTIME_CAPABILITY;
 }
 
@@ -52,11 +55,20 @@ function Select({ label, value, options, onChange }: { readonly label: string; r
   return <label>{label}<select value={value ?? ""} onChange={(event) => onChange(event.target.value || null)}><option value="">All</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label>;
 }
 
+function AwsNewsOfficialDefinitionPanel({ definition }: { readonly definition: AwsNewsOfficialDefinition }) {
+  return <section className={styles.official} aria-label="Official AWS News Feeds definition coverage">
+    <header><div><h3>Official AWS definition coverage</h3><p>{definition.totals.sheets} sheets · {definition.totals.visuals} visuals · {definition.totals.parameterControls} controls</p></div><small>{definition.source.commit.slice(0, 12)} · {definition.source.sha256.slice(0, 16)}…</small></header>
+    <div className={styles.officialGrid}>{definition.sheets.map((sheet) => <article key={sheet.id}><div><strong>{sheet.name}</strong><span>{sheet.visuals.length} visuals · {sheet.controls.length} controls</span></div><small>{sheet.controls.join(" · ") || "No controls"}</small><p>{sheet.note}</p><details><summary>Exact visual objects</summary><ul>{sheet.visuals.map((visual) => <li key={visual.id}><code>{visual.id.slice(0, 8)}…</code> · {visual.type}</li>)}</ul></details></article>)}</div>
+    <p className={styles.officialNote}>Definition SHA-256 {definition.source.embeddedDefinitionSha256}. Exact counts describe the pinned source tree; native charts do not claim QuickSight pixel or interaction parity.</p>
+  </section>;
+}
+
 export function AwsNewsFeedsReportView({ report, filters, onFiltersChange }: { readonly report: AwsNewsDashboardEnvelope; readonly filters: AwsNewsDashboardFilters; readonly onFiltersChange: (filters: AwsNewsDashboardFilters) => void }) {
   const message = status(report.sourceState);
   const set = <K extends keyof AwsNewsDashboardFilters>(key: K, value: AwsNewsDashboardFilters[K]) => onFiltersChange({ ...filters, [key]: value });
   return <section className={styles.root} aria-label="AWS News Feeds intelligence dashboard">
     <div className={styles.notice}><strong>Context, not impact evidence.</strong> {report.disclosure}</div>
+    <AwsNewsOfficialDefinitionPanel definition={report.officialDefinition} />
     {message ? <div role="status" className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="AWS News Feeds filters">
       <Select label="AWS service" value={filters.serviceId} options={report.filterOptions.services.map((item) => ({ value: item.id, label: item.label }))} onChange={(value) => set("serviceId", value)} />
@@ -92,7 +104,7 @@ export function FinopsAwsNewsFeedsDashboard({ connectionId }: { readonly connect
     return () => controller.abort();
   }, [connectionId, filters]);
   if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting AWS News Feeds.</div>;
-  if (state.configuration !== null) return <div role="status" className={`${styles.state} ${styles.warning}`}>The six-hour scheduler and replay-safe handler are implemented, but the shared worker, durable replay store, and outbound gateway adapters are not registered. No governed AWS News Feeds evidence has been persisted for this connection.</div>;
+  if (state.configuration !== null) return <section className={styles.root}><div role="status" className={`${styles.state} ${styles.warning}`}>The six-hour scheduler and replay-safe handler are implemented, but the shared worker, durable replay store, and outbound gateway adapters are not registered. No governed AWS News Feeds evidence has been persisted for this connection.</div><AwsNewsOfficialDefinitionPanel definition={state.configuration.officialDefinition} /></section>;
   if (state.error !== null) return <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div>;
   if (state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading official AWS feed evidence…</div>;
   return <AwsNewsFeedsReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;

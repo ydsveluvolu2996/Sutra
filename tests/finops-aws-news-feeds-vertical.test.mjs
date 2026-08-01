@@ -17,6 +17,7 @@ import {
   runAwsNewsFeedsCollectionJob,
 } from "../lib/finops-aws-news-feeds-job.ts";
 import { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../lib/finops-aws-news-feeds-runtime-binding.ts";
+import { AWS_NEWS_OFFICIAL_DEFINITION } from "../lib/finops-aws-news-official-definition.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const scope = { organizationId: "org_alpha", customerId: "customer_alpha", connectionId: `conn_${"a".repeat(32)}` };
@@ -89,6 +90,7 @@ test("route authenticates and tenant-scopes immutable reads; runtime capability 
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /repository\.getActiveSnapshot\(scope\)/u);
   assert.match(route, /AWS_NEWS_FEEDS_RUNTIME_CAPABILITY/u);
+  assert.ok(route.match(/AWS_NEWS_OFFICIAL_DEFINITION/gu)?.length >= 3);
   assert.doesNotMatch(route, /AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED/u);
   assert.doesNotMatch(route, /searchParams\.get\("orgId"\)|searchParams\.get\("customerId"\)/u);
 });
@@ -108,9 +110,9 @@ test("native report renders official families, required filters, provenance, fre
     const dashboardModule = await vite.ssrLoadModule("/app/costs/finops-aws-news-feeds-dashboard.tsx");
     const base = snapshot();
     const projection = buildAwsNewsDashboardProjection(base, [{ generationId: `newsg_${"d".repeat(64)}`, captureId: base.captureId, catalogId: base.catalogId, observedAt: base.observedAt, state: "READY", coverage: "COMPLETE", counts: base.counts, contentSha256: "d".repeat(64) }], { sourceId: null, feedKind: null, serviceId: null, category: null, relevance: null, search: null });
-    const report = { ...projection, connectionId: scope.connectionId, sourceState: "partial", freshness: { observedAt: base.observedAt, ageHours: 2, staleAfterHours: 48 }, sourceEvidence: base.sourceEvidence, evidence: { generationId: `newsg_${"d".repeat(64)}` }, collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY, disclosure: "Public AWS announcements are contextual intelligence, not evidence that a tenant resource is affected." };
+    const report = { ...projection, connectionId: scope.connectionId, sourceState: "partial", officialDefinition: AWS_NEWS_OFFICIAL_DEFINITION, freshness: { observedAt: base.observedAt, ageHours: 2, staleAfterHours: 48 }, sourceEvidence: base.sourceEvidence, evidence: { generationId: `newsg_${"d".repeat(64)}` }, collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY, disclosure: "Public AWS announcements are contextual intelligence, not evidence that a tenant resource is affected." };
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsNewsFeedsReportView, { report, filters: projection.filters, onFiltersChange: () => undefined }));
-    for (const expected of ["AWS service", "Feed type", "Category", "WHATS NEW", "BLOG", "VIDEO", "SECURITY BULLETIN", "Scheduled collection runtime", "Every 6 hours", "Shared worker not registered", "Durable adapter not registered", "Gateway not registered", "Source provenance", "freshness", "Immutable collection history", "Watch on the official AWS YouTube channel", "Export visible rows", "Context, not impact evidence", "newer collection is incomplete"]) assert.match(html, new RegExp(expected, "iu"));
+    for (const expected of ["Official AWS definition coverage", "6 sheets · 21 visuals · 12 controls", "AWS Feeds Summary", "AWS What", "AWS Blog Posts", "AWS YouTube Videos", "AWS Security Bulletin", "Exact visual objects", "AWS service", "Feed type", "Category", "WHATS NEW", "BLOG", "VIDEO", "SECURITY BULLETIN", "Scheduled collection runtime", "Every 6 hours", "Shared worker not registered", "Durable adapter not registered", "Gateway not registered", "Source provenance", "freshness", "Immutable collection history", "Watch on the official AWS YouTube channel", "Export visible rows", "Context, not impact evidence", "newer collection is incomplete"]) assert.ok(html.includes(expected), `Expected rendered report to include: ${expected}`);
     assert.match(html, /target="_blank" rel="noopener noreferrer"/u);
   } finally { await vite.close(); }
 });
