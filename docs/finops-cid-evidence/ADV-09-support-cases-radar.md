@@ -43,8 +43,15 @@ This vertical adds:
 
 ## Official inventory audit
 
-The pinned framework definition declares `support_cases_status_view` and
-`support_cases_communications_view`. The latter supplies payer/account,
+The pinned framework manifest SHA-256 is
+`4d9970206b4c927bb1d0cf1afd4e2a732370472f1b2f54c2681c13d71131e8fa`;
+the changelog SHA-256 is
+`385bc28ba04f119c41ada8a3490c2a753abc6f79e3b9a6331213a8c59ea7969c`,
+and the official preview SHA-256 is
+`3702251ed48abe49e529ea5fc12ce3e44a3fce570043f44797a95b94b855852a`.
+The manifest declares `support_cases_status_view` with 3 unique input columns
+and `support_cases_communications_view` with 35 unique input columns across 2
+physical tables. The latter supplies payer/account,
 case-created time, status, service, category, severity, communication time,
 communication lag/origin/class, and optional summary fields. The current AWS
 guide confirms daily changed-case collection, nightly dashboard refresh,
@@ -54,8 +61,11 @@ status/severity/service/category distributions, account readiness, observed
 history, case age, response transitions and drilldown. It deliberately does
 not expose the official definition's raw subject, body, submitter, CC, URL or
 Bedrock-summary fields to the browser. The pinned YAML does not contain the
-QuickSight asset geometry, so exact sheet/layout parity remains an acceptance
-gate rather than an inferred claim.
+managed QuickSight definition. Exact sheet, visual and control totals are
+therefore explicitly unavailable rather than inferred from the preview. The
+native source inventory shows the preview's Cases Summary, Contact Summary and
+About tabs, 5 named visual purposes and 8 visible controls without treating
+those screenshot observations as exact object counts.
 
 ## Privacy and plan states
 
@@ -115,7 +125,8 @@ runtime registration, credential-owning AWS SDK Support adapter, and provider
 accounts are not bound in this repository. Activation therefore remains false
 with `AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED`.
 
-Focused local result: **19 passed, 0 failed, 0 skipped** across the engine,
+Focused local result: **21 passed, 0 failed, 0 skipped** across the exact public
+source audit, engine,
 runtime binding and vertical contract suites; scoped lint, TypeScript and the
 parent exact-tree gates are tracked separately.
 

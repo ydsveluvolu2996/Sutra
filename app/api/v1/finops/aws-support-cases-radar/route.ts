@@ -1,6 +1,7 @@
 import { AwsSupportCasesRepository } from "../../../../../db/finops-aws-support-cases-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
+import { AWS_SUPPORT_CASES_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-support-cases-official-definition";
 import {
   AWS_SUPPORT_CASES_COLLECTION_BOUNDS,
   buildAwsSupportCasesRadar,
@@ -84,6 +85,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null,
+      officialDefinition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION,
       collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
       supportPlanState: "UNKNOWN",
     });
@@ -107,6 +109,7 @@ export async function GET(request: Request): Promise<Response> {
     return jsonResponse({
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: connection.id,
       sourceState: mappedState, generatedAt: dashboard.generatedAt,
+      officialDefinition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION,
       source: { ...dashboard.source, accountCoverage: dashboard.source.accountCoverage.map((entry) => ({
         accountId: entry.accountId, supportPlan: entry.supportPlan, entitlementState: entry.entitlementState,
         readPermissionsValidated: entry.readPermissionsValidated, status: entry.status,

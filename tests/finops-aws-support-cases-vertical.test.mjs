@@ -6,6 +6,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
+const { AWS_SUPPORT_CASES_OFFICIAL_DEFINITION } = await import(
+  "../lib/finops-aws-support-cases-official-definition.ts"
+);
+
 test("Support case migrations make snapshots immutable and head complete-only and monotonic", async () => {
   const files = await Promise.all([
     readFile(new URL("../drizzle/0092_finops_aws_support_cases.sql", import.meta.url), "utf8"),
@@ -37,6 +41,7 @@ test("route authenticates, same-tenant scopes and minimizes the browser projecti
   assert.match(source, /includeSafeSummaries: false/u);
   assert.match(source, /OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED/u);
   assert.match(source, /organizationCoverageClaimed: false/u);
+  assert.ok(source.match(/AWS_SUPPORT_CASES_OFFICIAL_DEFINITION/gu)?.length >= 3);
   for (const forbidden of ["subjectEvidenceHash:", "contactEvidenceHash:", "communications:", "caseId:"]) assert.equal(source.includes(forbidden), false);
 });
 
@@ -47,6 +52,7 @@ test("native report renders plan states, filters, trends, provenance and privacy
     const dashboardModule = await vite.ssrLoadModule("/app/costs/finops-aws-support-cases-radar-dashboard.tsx");
     const report = {
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: `conn_${"a".repeat(32)}`, sourceState: "partial", generatedAt: "2026-08-01T00:00:00.000Z",
+      officialDefinition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION,
       source: { latestObservedAt: "2026-08-01T00:00:00.000Z", freshness: "fresh", historyCoverage: "observed_snapshots_only", watermarkCoverage: "continuous", organizationCoverageClaimed: false,
         accountCoverage: [{ accountId: "111111111111", supportPlan: "business", entitlementState: "QUALIFYING", readPermissionsValidated: true, status: "complete", caseCount: 1, communicationCount: 2, failureCode: null }],
         limitations: ["AWS retains case data for 24 months."] },
@@ -59,7 +65,7 @@ test("native report renders plan states, filters, trends, provenance and privacy
       collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" }, summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesRadarReportView, { report, filters: { accountId: "", status: "", severity: "", serviceCode: "", categoryCode: "" }, onFiltersChange: () => undefined }));
-    for (const text of ["Privacy-minimized", "Support-plan readiness", "Case history", "Open case age", "Response cadence", "Average AWS response", "Top case topics", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.match(html, new RegExp(text, "iu"));
+    for (const text of ["Privacy-minimized", "Official AWS source coverage", "Managed QuickSight definition not publicly committed", "Cases Summary", "Contact Summary", "About", "support_cases_status_view", "support_cases_communications_view", "Cases by Service", "Management Account", "Exact object counts are not inferred", "Support-plan readiness", "Case history", "Open case age", "Response cadence", "Average AWS response", "Top case topics", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.ok(html.includes(text), `Expected rendered report to include: ${text}`);
     for (const forbidden of ["subjectEvidenceHash", "contactEvidenceHash", "bodyEvidenceHash"]) assert.doesNotMatch(html, new RegExp(forbidden, "u"));
   } finally { await vite.close(); }
 });
