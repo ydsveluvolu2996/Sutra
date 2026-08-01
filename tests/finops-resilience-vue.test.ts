@@ -217,7 +217,13 @@ test("normalizes provider evidence and keeps inferred prioritization visibly sep
   assert.equal(dashboard.observedAwsEvidence.policyBreachedApplicationCount, 1);
   assert.equal(dashboard.observedAwsEvidence.driftedApplicationCount, 1);
   assert.equal(dashboard.observedAwsEvidence.openRecommendationCount, 1);
+  assert.equal(dashboard.observedAwsEvidence.recommendationEvidenceCount, 2);
+  assert.equal(dashboard.observedAwsEvidence.recommendationEvidence.length, 2);
   assert.equal(dashboard.observedAwsEvidence.recommendationBacklog[0]?.recommendationId, "config-001");
+  assert.equal(dashboard.observedAwsEvidence.applicationPosture[0]?.policyTier, "MissionCritical");
+  assert.equal(dashboard.observedAwsEvidence.applicationPosture[0]?.policyObjectives[0]?.disruptionType, "AZ");
+  assert.equal(dashboard.observedAwsEvidence.applicationPosture[0]?.latestObjectivePosture[0]?.currentRpoInSecs, 7200);
+  assert.equal(dashboard.observedAwsEvidence.applicationPosture[0]?.lastAssessmentTime, "2026-07-31T10:05:00.000Z");
   assert.deepEqual(dashboard.inferredPrioritization[0], {
     label: "SUTRA_INFERRED_PRIORITY_NOT_AWS_FINDING",
     assessmentArn: ASSESSMENT_ARN,

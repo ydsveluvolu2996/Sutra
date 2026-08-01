@@ -2,7 +2,21 @@
 
 Status: **PARTIAL_PIPELINE** (local vertical and permanent runtime binding contract complete; authenticated AWS adapter registration and deployed provider evidence are not active)
 
-Official AWS Cloud Intelligence Dashboards scope rechecked 2026-08-01: ResilienceVue uses daily incremental AWS Resilience Hub assessments across AWS Organizations, linked accounts, Regions, and payer views to expose application resilience posture, RTO/RPO objectives and breaches, infrastructure recommendation trends, and outstanding operational recommendations.
+Official AWS Cloud Intelligence Dashboards scope rechecked 2026-08-01 against the pinned AWS CID Framework definition at commit [`f9e36d88c47709f10e8fa784ad11d5cc0e728021`](https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/resilience-vue/resilience-vue-definition.yaml). ResilienceVue uses daily incremental AWS Resilience Hub assessments across AWS Organizations, linked accounts, Regions, and payer views to expose application resilience posture, RTO/RPO objectives and breaches, infrastructure recommendation trends, and outstanding operational recommendations.
+
+## Pinned definition audit
+
+The pinned definition contains exactly four sheets: `Organizational Summary`, `Application Resiliency`, `Recommendations`, and `About`.
+
+| Official capability | Sutra local status | Evidence-honest implementation |
+|---|---|---|
+| Organizational account/Region/status summary, assessed/not-assessed, in-policy/breached, drift and score posture | Implemented locally | Native filters and summary cards are derived only from retained complete target heads. Absence remains an explicit non-resilience state. |
+| Last Assessment Time control | Implemented locally | Bounded UTC from/to query controls filter retained assessment `startTime`; invalid or inverted ranges fail closed. |
+| Application Resiliency, latest ten assessments and score trend | Implemented locally | Latest-assessment posture, provider status, last-assessed time, count and ten-row score trend are rendered from retained assessment history. |
+| Current/achievable/target RPO and RTO by AZ, application/software, infrastructure/hardware and Region | Implemented locally | Dimension drilldown joins the latest assessment objective evidence with the linked resiliency-policy objectives without inventing missing dimensions. |
+| Suggested resiliency and operational recommendations | Implemented locally where present in v1 evidence | Open recommendation drilldown and CSV remain available; all retained SOP, alarm and FIS-test statuses now feed separate status panels. |
+| Estimated cost, optimization type and availability architecture | Not present in immutable v1 schema | The UI explicitly discloses these fields as unavailable. Adding them requires a versioned capture-schema migration and provider validation; no placeholder values are inferred. |
+| About/source provenance | Implemented locally | Evidence generation, content hash, capture ID, freshness, activation state and limitations remain inspectable. |
 
 ## Implemented local evidence path
 
@@ -13,7 +27,7 @@ Official AWS Cloud Intelligence Dashboards scope rechecked 2026-08-01: Resilienc
 - `drizzle/0093_finops_resilience_vue.sql` and `postgres/migrations/0088_finops_resilience_vue.sql` retain immutable generations and a monotonic accepted head per tenant, connection, account, partition, and Region. Incomplete/configuration generations remain in history and cannot displace a complete head. PostgreSQL revokes `PUBLIC` access.
 - `db/finops-resilience-vue-repository.ts` validates the live AWS connection, normalizes captures against a trusted target, hashes the exact JSON, verifies it again on reads, and exposes tenant-scoped active targets and bounded history.
 - `app/api/v1/finops/resilience-vue/route.ts` requires an authenticated session, resolves the connection inside the authenticated organization, checks `connection:read` for the connection customer, reads only accepted heads, supports bounded account/Region/application/posture/recommendation filters, and discloses freshness, newer incomplete attempts, provenance, and activation state.
-- `app/costs/finops-resilience-vue-dashboard.tsx` is a native accessible visual with account/payer and Region filters, application search, policy posture and recommendation-kind filters, summary cards, daily evidence trends, application posture and RTO/RPO targets, policy breaches and drift, unimplemented recommendation drilldowns, formula-safe CSV, immutable evidence identifiers, and honest configuration/partial/stale/empty/failure states.
+- `app/costs/finops-resilience-vue-dashboard.tsx` is a native accessible visual with account/payer, Region, application, policy-posture, recommendation-kind and last-assessment-time filters; organizational assessed/in-policy/breach/drift cards; daily retained-generation trends; latest-ten assessment score history; application posture and dimension-level current/achievable/target RTO/RPO evidence; SOP/alarm/FIS status panels; unimplemented recommendation drilldowns; formula-safe CSV; immutable evidence identifiers; and honest configuration/partial/stale/empty/failure states.
 
 ## Evidence and tests
 

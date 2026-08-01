@@ -16,6 +16,20 @@ The v1 pure engine normalizes:
 - application-version resources and component lineage; and
 - assessment compliance and resource drift.
 
+The dashboard projection preserves linked policy tier/objectives, the latest
+assessment's dimension-level objective posture, last-assessed time, and all
+retained recommendation statuses. The native visual uses those fields for the
+official ResilienceVue organizational summary, latest-ten assessment score
+trend, AZ/application/infrastructure/Region RPO/RTO drilldown, and separate
+SOP/alarm/FIS recommendation-status panels.
+
+The pinned AWS CID definition also displays estimated recommendation cost,
+optimization type, and availability architecture. Those attributes are not in
+the immutable `sutra.resilience-vue.v1` capture schema. The UI therefore marks
+them unavailable; it does not synthesize or parse them from recommendation
+text. A future addition must use a versioned schema migration and live provider
+validation.
+
 Observed AWS evidence is returned under `observedAwsEvidence`. Sutra's bounded,
 deterministic ordering of the recommendation backlog is returned separately
 under `inferredPrioritization`, with the label

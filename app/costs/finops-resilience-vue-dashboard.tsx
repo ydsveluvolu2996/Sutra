@@ -2,28 +2,34 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ResilienceAssessment, ResilienceComponentCompliance, ResilienceDrift,
-  ResilienceRecommendation, ResilienceResource, ResilienceVueInferredPriority } from "../../lib/finops-resilience-vue";
+  ResilienceObjectivePosture, ResiliencePolicyObjective, ResilienceRecommendation,
+  ResilienceResource, ResilienceVueInferredPriority } from "../../lib/finops-resilience-vue";
 import styles from "./finops-resilience-vue-dashboard.module.css";
 
 type Filters = { accountId: string | null; region: string | null; application: string | null;
-  compliance: string | null; recommendationKind: string | null };
+  compliance: string | null; recommendationKind: string | null; assessmentFrom: string | null; assessmentTo: string | null };
 type Application = { appArn: string; name: string; policyName: string | null; latestAssessmentArn: string | null;
-  latestAssessmentStatus: string | null; complianceStatus: string | null; driftStatus: string | null;
-  resiliencyScore: number | null; rpoInSecs: number | null; rtoInSecs: number | null; observedAssessmentCount: number };
+  policyTier: string | null; latestAssessmentStatus: string | null; complianceStatus: string | null; driftStatus: string | null;
+  resiliencyScore: number | null; rpoInSecs: number | null; rtoInSecs: number | null; lastAssessmentTime: string | null;
+  observedAssessmentCount: number; policyObjectives: readonly ResiliencePolicyObjective[];
+  latestObjectivePosture: readonly ResilienceObjectivePosture[] };
 type Target = { accountId: string; partition: string; region: string; generationId: string; contentSha256: string;
   captureId: string; completedAtIso: string; state: string; applications: readonly Application[];
   assessmentHistory: readonly ResilienceAssessment[]; componentPosture: readonly ResilienceComponentCompliance[];
-  recommendations: readonly ResilienceRecommendation[]; resources: readonly ResilienceResource[];
+  recommendationEvidence: readonly ResilienceRecommendation[]; recommendations: readonly ResilienceRecommendation[]; resources: readonly ResilienceResource[];
   drifts: readonly ResilienceDrift[]; inferredPrioritization: readonly ResilienceVueInferredPriority[]; limitations: readonly string[] };
 export interface ResilienceVueReport {
   readonly connectionId: string; readonly sourceState: "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
   readonly freshness: { readonly dataThroughAt: string | null; readonly ageHours: number | null; readonly staleAfterHours: number };
-  readonly summary: { readonly targetCount: number; readonly applicationCount: number; readonly policyBreachedApplicationCount: number; readonly driftedApplicationCount: number; readonly openRecommendationCount: number };
+  readonly summary: { readonly targetCount: number; readonly applicationCount: number; readonly assessedApplicationCount: number;
+    readonly unassessedApplicationCount: number; readonly policyMetApplicationCount: number;
+    readonly policyBreachedApplicationCount: number; readonly driftedApplicationCount: number; readonly openRecommendationCount: number };
   readonly targets: readonly Target[]; readonly history: readonly { generationId: string; accountId: string; region: string; completedAtIso: string; state: string; complete: boolean; applicationCount: number; assessmentCount: number; recommendationCount: number; contentSha256: string }[];
   readonly filterOptions: { readonly accounts: readonly string[]; readonly regions: readonly string[] };
   readonly evidence: unknown; readonly collection: { readonly available: false; readonly reason: string }; readonly limitations: readonly string[];
 }
-const EMPTY: Filters = { accountId: null, region: null, application: null, compliance: null, recommendationKind: null };
+const EMPTY: Filters = { accountId: null, region: null, application: null, compliance: null, recommendationKind: null,
+  assessmentFrom: null, assessmentTo: null };
 function duration(seconds: number | null): string {
   if (seconds === null) return "Not supplied"; if (seconds < 60) return `${seconds}s`;
   if (seconds < 3_600) return `${Math.round(seconds / 60)}m`; if (seconds < 86_400) return `${Math.round(seconds / 3_600 * 10) / 10}h`;
@@ -55,6 +61,20 @@ function stateMessage(state: ResilienceVueReport["sourceState"]): string | null 
   if (state === "configuration_required") return "Configure AWS Resilience Hub applications and authorize the read-only collector.";
   return "The latest collection failed; failed evidence never replaces an accepted complete head.";
 }
+function objectiveFor(objectives: readonly ResiliencePolicyObjective[], disruptionType: string): ResiliencePolicyObjective | null {
+  return objectives.find((item) => item.disruptionType === disruptionType) ?? null;
+}
+function postureFor(postures: readonly ResilienceObjectivePosture[], disruptionType: string): ResilienceObjectivePosture | null {
+  return postures.find((item) => item.disruptionType === disruptionType) ?? null;
+}
+function RecommendationStatus({ title, kind, recommendations }: { readonly title: string; readonly kind: string;
+  readonly recommendations: readonly ResilienceRecommendation[] }) {
+  const rows = recommendations.filter((item) => item.kind === kind);
+  const statuses = ["NotImplemented", "Implemented", "Inactive", "Excluded"] as const;
+  return <article className={styles.statusPanel}><h4>{title}</h4><div>{statuses.map((status) => <span key={status}>
+    <b>{rows.filter((item) => item.status === status).length}</b>{status}
+  </span>)}</div></article>;
+}
 
 export function ResilienceVueReportView({ report, filters, onFiltersChange }: { readonly report: ResilienceVueReport;
   readonly filters: Filters; readonly onFiltersChange: (filters: Filters) => void }) {
@@ -63,6 +83,10 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
   const applications = report.targets.flatMap((target) => target.applications.map((app) => ({ ...app, accountId: target.accountId, region: target.region, target })));
   const recommendations = report.targets.flatMap((target) => target.recommendations.map((item) => ({ item, target,
     inferred: target.inferredPrioritization.find((value) => value.assessmentArn === item.assessmentArn && value.recommendationId === item.recommendationId) ?? null })));
+  const recommendationEvidence = report.targets.flatMap((target) => target.recommendationEvidence);
+  const assessmentRows = report.targets.flatMap((target) => target.assessmentHistory.map((assessment) => ({ assessment, target,
+    application: target.applications.find((app) => app.appArn === assessment.appArn) ?? null })))
+    .sort((left, right) => right.assessment.startTime.localeCompare(left.assessment.startTime));
   const maximum = Math.max(1, ...report.history.map((point) => point.recommendationCount));
   return <section className={styles.root} aria-label="ResilienceVue AWS Resilience Hub dashboard">
     <div className={styles.notice}><strong>Observed AWS Resilience Hub evidence.</strong> RTO/RPO, posture, breaches, drift, and operational recommendations come from retained assessments. Any Sutra priority is labeled inference, not an AWS finding.</div>
@@ -73,9 +97,13 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
       <label>Application search<input value={filters.application ?? ""} maxLength={80} placeholder="Application name" onChange={(event) => set("application", event.target.value || null)} /></label>
       <Select label="Policy posture" value={filters.compliance} options={["PolicyBreached", "PolicyMet", "NotApplicable", "MissingPolicy"]} onChange={(value) => set("compliance", value)} />
       <Select label="Recommendation type" value={filters.recommendationKind} options={["CONFIG", "ALARM", "SOP", "TEST"]} onChange={(value) => set("recommendationKind", value)} />
+      <label>Last assessment from<input type="date" value={filters.assessmentFrom ?? ""} onChange={(event) => set("assessmentFrom", event.target.value || null)} /></label>
+      <label>Last assessment to<input type="date" value={filters.assessmentTo ?? ""} onChange={(event) => set("assessmentTo", event.target.value || null)} /></label>
     </div>
     <div className={styles.cards} aria-label="Resilience posture summary">
       <article><small>Applications</small><strong>{report.summary.applicationCount}</strong><span>{report.summary.targetCount} account/Region targets</span></article>
+      <article><small>Applications assessed</small><strong>{report.summary.assessedApplicationCount}</strong><span>{report.summary.unassessedApplicationCount} not assessed</span></article>
+      <article><small>Applications in policy</small><strong>{report.summary.policyMetApplicationCount}</strong><span>AWS latest assessment status</span></article>
       <article><small>Policy breaches</small><strong>{report.summary.policyBreachedApplicationCount}</strong><span>Latest retained assessment posture</span></article>
       <article><small>Drift detected</small><strong>{report.summary.driftedApplicationCount}</strong><span>Application assessment drift</span></article>
       <article><small>Operational backlog</small><strong>{report.summary.openRecommendationCount}</strong><span>Unimplemented, non-excluded recommendations</span></article>
@@ -87,12 +115,27 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
         <b>{point.assessmentCount} assessments / {point.recommendationCount} open</b>
       </div>)}</div>
     </section>
+    <section className={styles.section} aria-label="Latest assessment score trend"><header><h3>Summary of 10 latest assessments</h3><span>Provider assessment evidence · Resiliency score trend</span></header>
+      <div className={styles.trend}>{assessmentRows.slice(0, 10).map(({ assessment, target, application }) => <div className={styles.trendRow} key={`${target.generationId}:${assessment.assessmentArn}`}>
+        <time dateTime={assessment.startTime}>{assessment.startTime.slice(0, 10)}</time><span>{application?.name ?? "Application not in current filter"} · {target.region}</span>
+        <div className={styles.track} title={assessment.resiliencyScore === null ? "Score not supplied" : `Resiliency score ${assessment.resiliencyScore}`}><i style={{ width: `${assessment.resiliencyScore ?? 0}%` }} /></div>
+        <b>{assessment.resiliencyScore ?? "No score"} · {assessment.assessmentStatus} · {assessment.complianceStatus ?? "Unknown"}</b>
+      </div>)}</div>
+    </section>
     <section className={styles.section} aria-label="Application resilience posture"><header><h3>Application posture · {applications.length}</h3></header><div className={styles.scroll}><table><thead><tr><th>Account / Region</th><th>Application / policy</th><th>Posture</th><th>Resiliency score</th><th>RPO target</th><th>RTO target</th><th>Assessment evidence</th></tr></thead><tbody>
-      {applications.map((app) => <tr key={`${app.accountId}:${app.region}:${app.appArn}`}><td>{app.accountId}<br />{app.region}</td><td><strong>{app.name}</strong><br />{app.policyName ?? "No policy observed"}</td><td><span className={`${styles.pill} ${app.complianceStatus === "PolicyBreached" ? styles.breach : ""}`}>{app.complianceStatus ?? "Unknown"}</span><br />Drift: {app.driftStatus ?? "Unknown"}</td><td>{app.resiliencyScore ?? "Not supplied"}</td><td>{duration(app.rpoInSecs)}</td><td>{duration(app.rtoInSecs)}</td><td><details><summary>Drill down</summary><dl><div><dt>Latest status</dt><dd>{app.latestAssessmentStatus ?? "No assessment"}</dd></div><div><dt>Observed assessments</dt><dd>{app.observedAssessmentCount}</dd></div><div><dt>Application ARN</dt><dd>{app.appArn}</dd></div><div><dt>Accepted generation</dt><dd>{app.target.generationId}</dd></div></dl></details></td></tr>)}
+      {applications.map((app) => <tr key={`${app.accountId}:${app.region}:${app.appArn}`}><td>{app.accountId}<br />{app.region}</td><td><strong>{app.name}</strong><br />{app.policyName ?? "No policy observed"}<br />Tier: {app.policyTier ?? "Not supplied"}</td><td><span className={`${styles.pill} ${app.complianceStatus === "PolicyBreached" ? styles.breach : ""}`}>{app.complianceStatus ?? "Unknown"}</span><br />Drift: {app.driftStatus ?? "Unknown"}</td><td>{app.resiliencyScore ?? "Not supplied"}</td><td>{duration(app.rpoInSecs)}</td><td>{duration(app.rtoInSecs)}</td><td><details><summary>RPO/RTO dimensions</summary><div className={styles.objectives}>{["AZ", "Software", "Hardware", "Region"].map((dimension) => {
+        const target = objectiveFor(app.policyObjectives, dimension); const current = postureFor(app.latestObjectivePosture, dimension);
+        return <div key={dimension}><b>{dimension === "Software" ? "Application" : dimension === "Hardware" ? "Infrastructure" : dimension}</b><span>{current?.complianceStatus ?? "Not observed"}</span><small>Current RPO / RTO: {duration(current?.currentRpoInSecs ?? null)} / {duration(current?.currentRtoInSecs ?? null)}</small><small>Achievable RPO / RTO: {duration(current?.achievableRpoInSecs ?? null)} / {duration(current?.achievableRtoInSecs ?? null)}</small><small>Target RPO / RTO: {duration(target?.rpoInSecs ?? null)} / {duration(target?.rtoInSecs ?? null)}</small></div>;
+      })}</div><dl><div><dt>Latest status</dt><dd>{app.latestAssessmentStatus ?? "No assessment"}</dd></div><div><dt>Last assessed</dt><dd>{app.lastAssessmentTime ?? "No assessment"}</dd></div><div><dt>Observed assessments</dt><dd>{app.observedAssessmentCount}</dd></div><div><dt>Application ARN</dt><dd>{app.appArn}</dd></div><div><dt>Accepted generation</dt><dd>{app.target.generationId}</dd></div></dl></details></td></tr>)}
     </tbody></table></div></section>
+    <section className={styles.section} aria-label="Operational recommendation status"><header><h3>Outstanding operational recommendations</h3><span>All retained statuses, not only backlog rows</span></header><div className={styles.statusGrid}>
+      <RecommendationStatus title="Suggested Standard Operating Procedures (SOP) · SOP Recommendations by status" kind="SOP" recommendations={recommendationEvidence} />
+      <RecommendationStatus title="Suggested Alarm Recommendations · Alarm Recommendations by status" kind="ALARM" recommendations={recommendationEvidence} />
+      <RecommendationStatus title="Suggested Fault Injection Experiments · Experiment Recommendations by status" kind="TEST" recommendations={recommendationEvidence} />
+    </div></section>
     <section className={styles.section} aria-label="Unimplemented operational recommendations"><header><h3>Unimplemented operational recommendations · {recommendations.length}</h3><button type="button" onClick={() => downloadRecommendations(report.targets)}>Export visible rows</button></header><div className={styles.scroll}><table><thead><tr><th>Target</th><th>Type / component</th><th>Recommendation</th><th>Expected RPO / RTO</th><th>Provider risk</th><th>Prioritization and provenance</th></tr></thead><tbody>
       {recommendations.map(({ item, target, inferred }) => <tr key={`${target.generationId}:${item.assessmentArn}:${item.recommendationId}`}><td>{target.accountId}<br />{target.region}</td><td><span className={styles.pill}>{item.kind}</span><br />{item.appComponentName}</td><td><strong>{item.name}</strong><br />{item.description}</td><td>{duration(item.expectedRpoInSecs)} / {duration(item.expectedRtoInSecs)}</td><td>{item.risk ?? "Not supplied"}</td><td><details><summary>Evidence</summary><dl><div><dt>Status</dt><dd>{item.status}</dd></div><div><dt>Resource</dt><dd>{item.resourceId ?? "Not linked"}</dd></div><div><dt>Sutra inferred priority</dt><dd>{inferred === null ? "Not scored" : `${inferred.priorityScore}/100 · ${inferred.label}`}</dd></div><div><dt>Reasons</dt><dd>{inferred?.reasons.join("; ") ?? "None"}</dd></div><div><dt>Assessment ARN</dt><dd>{item.assessmentArn}</dd></div></dl></details></td></tr>)}
-    </tbody></table></div></section>
+    </tbody></table></div><div className={styles.schemaGap}><strong>Official recommendation dimensions not present in immutable v1 evidence:</strong> estimated cost, optimization type, and availability architecture remain unavailable until a versioned provider-schema migration is implemented and live-validated.</div></section>
     <details className={`${styles.section} ${styles.evidence}`}><summary>Coverage, freshness, provenance, and limitations</summary><pre>{JSON.stringify({ freshness: report.freshness, evidence: report.evidence, collection: report.collection, limitations: report.limitations, targets: report.targets.map((target) => ({ accountId: target.accountId, region: target.region, state: target.state, captureId: target.captureId, generationId: target.generationId, contentSha256: target.contentSha256, limitations: target.limitations })) }, null, 2)}</pre></details>
   </section>;
 }

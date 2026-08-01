@@ -768,10 +768,12 @@ export interface ResilienceVueObservedDashboard {
   readonly policyBreachedApplicationCount: number;
   readonly driftedApplicationCount: number;
   readonly openRecommendationCount: number;
+  readonly recommendationEvidenceCount: number;
   readonly applicationPosture: readonly ({
     readonly appArn: string;
     readonly name: string;
     readonly policyName: string | null;
+    readonly policyTier: string | null;
     readonly latestAssessmentArn: string | null;
     readonly latestAssessmentStatus: ResilienceAssessmentStatus | null;
     readonly complianceStatus: ResilienceComplianceStatus | null;
@@ -779,10 +781,16 @@ export interface ResilienceVueObservedDashboard {
     readonly resiliencyScore: number | null;
     readonly rpoInSecs: number | null;
     readonly rtoInSecs: number | null;
+    readonly lastAssessmentTime: string | null;
     readonly observedAssessmentCount: number;
+    readonly policyObjectives: readonly ResiliencePolicyObjective[];
+    readonly latestObjectivePosture: readonly ResilienceObjectivePosture[];
   })[];
   readonly assessmentHistory: readonly ResilienceAssessment[];
   readonly componentPosture: readonly ResilienceComponentCompliance[];
+  /** All bounded provider recommendation evidence, including implemented and excluded rows. */
+  readonly recommendationEvidence: readonly ResilienceRecommendation[];
+  /** Open, non-excluded provider recommendation evidence only. */
   readonly recommendationBacklog: readonly ResilienceRecommendation[];
   readonly resourceInventory: readonly ResilienceResource[];
   readonly driftEvidence: readonly ResilienceDrift[];
@@ -819,22 +827,28 @@ export function buildResilienceVueDashboard(
     values.push(item);
     assessmentsByApp.set(item.appArn, values);
   }
-  const policyNames = new Map(snapshot.policies.map((item) => [item.policyArn, item.policyName]));
+  const policies = new Map(snapshot.policies.map((item) => [item.policyArn, item]));
   const applicationPosture = snapshot.applications.map((item) => {
     const history = (assessmentsByApp.get(item.appArn) ?? []).sort((a, b) => b.startTime.localeCompare(a.startTime));
     const latest = history[0] ?? null;
+    const linkedPolicy = item.policyArn === null ? null : policies.get(item.policyArn) ?? null;
     return {
       appArn: item.appArn, name: item.name,
-      policyName: item.policyArn === null ? null : policyNames.get(item.policyArn) ?? null,
+      policyName: linkedPolicy?.policyName ?? null,
+      policyTier: linkedPolicy?.tier ?? null,
       latestAssessmentArn: latest?.assessmentArn ?? null,
       latestAssessmentStatus: latest?.assessmentStatus ?? null,
       complianceStatus: latest?.complianceStatus ?? item.complianceStatus,
       driftStatus: latest?.driftStatus ?? item.driftStatus,
       resiliencyScore: latest?.resiliencyScore ?? item.resiliencyScore,
       rpoInSecs: item.rpoInSecs, rtoInSecs: item.rtoInSecs,
+      lastAssessmentTime: latest?.endTime ?? latest?.startTime ?? item.lastAssessmentTime,
       observedAssessmentCount: history.length,
+      policyObjectives: linkedPolicy?.objectives ?? [],
+      latestObjectivePosture: latest?.objectivePosture ?? [],
     };
   });
+  const recommendationEvidence = snapshot.recommendations.slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardRecommendations);
   const recommendationBacklog = snapshot.recommendations.filter((item) => item.status === "NotImplemented" && item.excluded !== true).slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardRecommendations);
   const inferredPrioritization = recommendationBacklog.map((item) => {
     const assessmentItem = snapshot.assessments.find((assessmentValue) => assessmentValue.assessmentArn === item.assessmentArn);
@@ -857,9 +871,11 @@ export function buildResilienceVueDashboard(
       policyBreachedApplicationCount: applicationPosture.filter((item) => item.complianceStatus === "PolicyBreached").length,
       driftedApplicationCount: applicationPosture.filter((item) => item.driftStatus === "Detected").length,
       openRecommendationCount: recommendationBacklog.length,
+      recommendationEvidenceCount: recommendationEvidence.length,
       applicationPosture,
       assessmentHistory: snapshot.assessments.slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardHistoryRecords),
       componentPosture: snapshot.componentCompliances.slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardResources),
+      recommendationEvidence,
       recommendationBacklog,
       resourceInventory: snapshot.resources.slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardResources),
       driftEvidence: snapshot.drifts.slice(0, RESILIENCE_VUE_COLLECTION_BOUNDS.maximumDashboardResources),

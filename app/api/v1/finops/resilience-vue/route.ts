@@ -8,11 +8,17 @@ export const dynamic = "force-dynamic";
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const REGION = /^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u;
+const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 const SAFE_TEXT = /^[^\u0000-\u001f\u007f<>]{1,80}$/u;
-const ALLOWED = new Set(["connectionId", "accountId", "region", "application", "compliance", "recommendationKind"]);
+const ALLOWED = new Set(["connectionId", "accountId", "region", "application", "compliance", "recommendationKind", "assessmentFrom", "assessmentTo"]);
 const FRESH_HOURS = 168;
 
 function bad(): never { throw Object.assign(new Error("The ResilienceVue request is invalid"), { code: "INVALID_INPUT", status: 400 }); }
+function isDate(value: string): boolean {
+  if (!DATE.test(value)) return false;
+  const parsed = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
+}
 function missing(): never { throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 }); }
 function parse(request: Request) {
   const values = new URL(request.url).searchParams;
@@ -21,11 +27,15 @@ function parse(request: Request) {
   const connectionId = values.get("connectionId") ?? ""; const accountId = values.get("accountId");
   const region = values.get("region"); const application = values.get("application");
   const compliance = values.get("compliance"); const recommendationKind = values.get("recommendationKind");
+  const assessmentFrom = values.get("assessmentFrom"); const assessmentTo = values.get("assessmentTo");
   if (!CONNECTION_ID.test(connectionId) || (accountId !== null && !ACCOUNT_ID.test(accountId))
     || (region !== null && !REGION.test(region)) || (application !== null && !SAFE_TEXT.test(application))
     || (compliance !== null && !["PolicyBreached", "PolicyMet", "NotApplicable", "MissingPolicy"].includes(compliance))
-    || (recommendationKind !== null && !["CONFIG", "ALARM", "SOP", "TEST"].includes(recommendationKind))) bad();
-  return { connectionId, accountId, region, application, compliance, recommendationKind };
+    || (recommendationKind !== null && !["CONFIG", "ALARM", "SOP", "TEST"].includes(recommendationKind))
+    || (assessmentFrom !== null && !isDate(assessmentFrom))
+    || (assessmentTo !== null && !isDate(assessmentTo))
+    || (assessmentFrom !== null && assessmentTo !== null && assessmentFrom > assessmentTo)) bad();
+  return { connectionId, accountId, region, application, compliance, recommendationKind, assessmentFrom, assessmentTo };
 }
 function ageHours(value: string): number | null {
   const parsed = Date.parse(value); if (!Number.isFinite(parsed) || parsed > Date.now() + 300_000) return null;
@@ -56,21 +66,29 @@ export async function GET(request: Request): Promise<Response> {
     const targets = active.map((stored) => {
       const built = buildResilienceVueDashboard(stored.snapshot);
       const observed = built.observedAwsEvidence;
+      const rangeAssessments = observed.assessmentHistory.filter((assessment) =>
+        (query.assessmentFrom === null || assessment.startTime >= `${query.assessmentFrom}T00:00:00.000Z`)
+        && (query.assessmentTo === null || assessment.startTime <= `${query.assessmentTo}T23:59:59.999Z`));
       const apps = observed.applicationPosture.filter((app) =>
         (query.application === null || app.name.toLocaleLowerCase().includes(query.application.toLocaleLowerCase()))
-        && (query.compliance === null || app.complianceStatus === query.compliance));
+        && (query.compliance === null || app.complianceStatus === query.compliance)
+        && (query.assessmentFrom === null || app.lastAssessmentTime !== null && app.lastAssessmentTime >= `${query.assessmentFrom}T00:00:00.000Z`)
+        && (query.assessmentTo === null || app.lastAssessmentTime !== null && app.lastAssessmentTime <= `${query.assessmentTo}T23:59:59.999Z`));
       const appArns = new Set(apps.map((app) => app.appArn));
-      const assessmentArns = new Set(observed.assessmentHistory.filter((assessment) => appArns.has(assessment.appArn)).map((item) => item.assessmentArn));
+      const assessmentHistory = rangeAssessments.filter((assessment) => appArns.has(assessment.appArn));
+      const assessmentArns = new Set(assessmentHistory.map((item) => item.assessmentArn));
       const recommendations = observed.recommendationBacklog.filter((item) => assessmentArns.has(item.assessmentArn)
+        && (query.recommendationKind === null || item.kind === query.recommendationKind));
+      const recommendationEvidence = observed.recommendationEvidence.filter((item) => assessmentArns.has(item.assessmentArn)
         && (query.recommendationKind === null || item.kind === query.recommendationKind));
       return {
         accountId: stored.snapshot.scope.accountId, partition: stored.snapshot.scope.partition,
         region: stored.snapshot.scope.region, generationId: stored.generationId,
         contentSha256: stored.contentSha256, captureId: stored.snapshot.captureId,
         completedAtIso: stored.snapshot.completedAtIso, state: stored.snapshot.state,
-        applications: apps, assessmentHistory: observed.assessmentHistory.filter((item) => appArns.has(item.appArn)),
+        applications: apps, assessmentHistory,
         componentPosture: observed.componentPosture.filter((item) => assessmentArns.has(item.assessmentArn)),
-        recommendations, resources: observed.resourceInventory.filter((item) => appArns.has(item.appArn)),
+        recommendationEvidence, recommendations, resources: observed.resourceInventory.filter((item) => appArns.has(item.appArn)),
         drifts: observed.driftEvidence.filter((item) => assessmentArns.has(item.assessmentArn)),
         inferredPrioritization: built.inferredPrioritization.filter((item) => recommendations.some((rec) => rec.assessmentArn === item.assessmentArn && rec.recommendationId === item.recommendationId)),
         limitations: observed.limitations,
@@ -81,6 +99,8 @@ export async function GET(request: Request): Promise<Response> {
     const newestActive = active.map((item) => item.snapshot.completedAtIso).sort().at(-1) ?? "";
     const newerIncomplete = history.some((item) => !item.complete && item.completedAtIso >= newestActive);
     const applicationCount = targets.reduce((sum, target) => sum + target.applications.length, 0);
+    const assessedApplicationCount = targets.reduce((sum, target) => sum + target.applications.filter((item) => item.latestAssessmentArn !== null).length, 0);
+    const policyMetApplicationCount = targets.reduce((sum, target) => sum + target.applications.filter((item) => item.complianceStatus === "PolicyMet").length, 0);
     const policyBreachedApplicationCount = targets.reduce((sum, target) => sum + target.applications.filter((item) => item.complianceStatus === "PolicyBreached").length, 0);
     const driftedApplicationCount = targets.reduce((sum, target) => sum + target.applications.filter((item) => item.driftStatus === "Detected").length, 0);
     const recommendationCount = targets.reduce((sum, target) => sum + target.recommendations.length, 0);
@@ -89,7 +109,9 @@ export async function GET(request: Request): Promise<Response> {
     return jsonResponse({
       schema: "sutra.finops-resilience-vue.v1", connectionId: connection.id, source: "AWS_RESILIENCE_HUB",
       sourceState, filters: query, freshness: { dataThroughAt: completedAt, ageHours: currentAge, staleAfterHours: FRESH_HOURS },
-      summary: { targetCount: targets.length, applicationCount, policyBreachedApplicationCount, driftedApplicationCount, openRecommendationCount: recommendationCount },
+      summary: { targetCount: targets.length, applicationCount, assessedApplicationCount,
+        unassessedApplicationCount: applicationCount - assessedApplicationCount, policyMetApplicationCount,
+        policyBreachedApplicationCount, driftedApplicationCount, openRecommendationCount: recommendationCount },
       targets, history: history.slice(0, 180),
       filterOptions: {
         accounts: [...new Set(activeAll.map((item) => item.snapshot.scope.accountId))].sort(),
