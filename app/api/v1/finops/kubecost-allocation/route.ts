@@ -3,6 +3,7 @@ import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { buildKubecostDashboard, type KubecostDashboardFilters } from "../../../../../lib/finops-kubecost-dashboard";
 import type { KubecostAllocationKind } from "../../../../../lib/finops-kubecost-allocation";
+import { KUBECOST_OFFICIAL_DEFINITION } from "../../../../../lib/finops-kubecost-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export async function GET(request: Request): Promise<Response> {
     const repository = new KubecostAllocationRepository();
     const [active, latest, history] = await Promise.all([repository.getActiveSnapshot(scope), repository.getLatestSnapshot(scope), repository.listHistory(scope, 31)]);
     const selected = active ?? latest;
-    if (selected === null) return jsonResponse({ schema: "sutra.finops-kubecost-dashboard.v1", connectionId: connection.id, sourceState: "configuration_required", dashboard: null,
+    if (selected === null) return jsonResponse({ schema: "sutra.finops-kubecost-dashboard.v1", connectionId: connection.id, sourceState: "configuration_required", officialDefinition: KUBECOST_OFFICIAL_DEFINITION, dashboard: null,
       collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED" } });
     const dashboard = buildKubecostDashboard(selected.snapshot, parsed.filters);
     const ageHours = Math.round(Math.max(0, (Date.now() - Date.parse(selected.snapshot.dataThroughAtIso)) / 3_600_000) * 100) / 100;
@@ -46,7 +47,7 @@ export async function GET(request: Request): Promise<Response> {
       : ["CONFIGURATION_REQUIRED","WAITING_FIRST_DELIVERY","UNKNOWN"].includes(selected.snapshot.state) ? "configuration_required"
         : selected.snapshot.state === "PARTIAL" ? "partial" : ageHours > 24 ? "stale"
           : selected.snapshot.state === "EMPTY" || dashboard.resultCount === 0 ? "empty" : "complete";
-    return jsonResponse({ ...dashboard, connectionId: connection.id, sourceState, history,
+    return jsonResponse({ ...dashboard, connectionId: connection.id, sourceState, officialDefinition: KUBECOST_OFFICIAL_DEFINITION, history,
       freshness: { dataThroughAt: selected.snapshot.dataThroughAtIso, ageHours, staleAfterHours: 24 },
       evidence: { generationId: selected.generationId, activeGenerationId: active?.generationId ?? null, latestGenerationId: latest?.generationId ?? null,
         sourceCaptureId: selected.snapshot.captureId, contentSha256: selected.contentSha256, activeCur2GenerationId: selected.snapshot.scope.activeCur2GenerationId,

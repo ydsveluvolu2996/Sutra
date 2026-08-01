@@ -14,6 +14,30 @@ repository were rechecked 2026-08-01. The source is pinned at commit
 [`8a581332a70ae55d53464e52a0bb8b3dd64cb425`](https://github.com/awslabs/containers-cost-allocation-dashboard/tree/8a581332a70ae55d53464e52a0bb8b3dd64cb425),
 whose CID asset `cid/containers_cost_allocation.yaml` has SHA-256
 `2bde67113c8f585d13fc43fe537c3bee3eecf3a416b81cd0f57295226b4ed45b`.
+The pinned CID framework commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021` contains **0
+Kubecost-dashboard-specific artifacts**; its SCAD assets belong to the separate
+CUR Split Cost Allocation Data vertical and are not Kubecost evidence.
+
+| Published official artifact | Path or extraction | SHA-256 | Hash basis |
+|---|---|---|---|
+| CID-CMD manifest | `cid/containers_cost_allocation.yaml` | `2bde67113c8f585d13fc43fe537c3bee3eecf3a416b81cd0f57295226b4ed45b` | Raw file bytes |
+| Embedded SPICE dataset | `cid/containers_cost_allocation.yaml#datasets` | `3cd36937146500be79d7cfe3f6fa78012f999378dd9729ec17a300888c7962a6` | UTF-8 canonical JSON with recursively sorted object keys |
+| Extracted Athena view query | `terraform/terraform-aws-cca/modules/pipeline/locals.tf#athena_view_sql` | `2a5db62703b857a19d56a50661e5a20be4d02776aad3d1065422c7bab8b2e07c` | Exact 247 UTF-8 source bytes between Terraform heredoc delimiters |
+| Terraform root template | `terraform/terraform-aws-cca/main.tf` | `44761c0335e9b87b1280473e90cc233a77d57a64ea9163df1d24d220c43f414a` | Raw file bytes |
+| Terraform pipeline template | `terraform/terraform-aws-cca/modules/pipeline/main.tf` | `0d2aa8d88a021763a24e5939682b90f8be32763c272db149ac9682458463018c` | Raw file bytes |
+| Helm exporter cron template | `helm/kubecost_s3_exporter/templates/cron.yaml` | `0d87ae307676a0fec9db1a774028b318bf9940f22e58deddb26a88a074a3d163` | Raw file bytes |
+| Kubecost S3 exporter | `main.py` | `48f44e9147ed57fa2252a6867473fac82fd362b612fe59041b8dc9f4df81fdf3` | Raw file bytes |
+| Update instructions | `UPDATE.md` | `f8cc13ac9d922c3063d74dd2d742faaa4267dd6301ca35043e97f9df3ca390fa` | Raw file bytes; not a changelog |
+
+The repository does **not** publish the complete QuickSight definition or a
+changelog. Its manifest references the service-hosted template ID
+`containers-cost-allocation`, embeds one 62-column dataset, and declares an
+empty `views` section; the one Athena view query is instead embedded in the
+Terraform pipeline. Exact QuickSight sheet, visual, parameter-control,
+filter-control, parameter, calculated-field, and filter-group totals are
+therefore all **`null`**, not zero. Screenshot geometry is not inferred.
+
 AWS documents exactly three dashboard tabs: **Executive Summary**, **Workloads
 Explorer**, and **EKS Breakdown**. The official repository explicitly supports
 self-hosted Kubecost and explicitly does not support OpenCost. Sutra retains
@@ -26,7 +50,7 @@ official parity.
 | Container/pod/namespace/controller allocation | Full account → cluster → namespace → controller → workload → pod → container lineage with special allocations preserved | None for accepted source rows; null lineage stays unallocated |
 | Executive Summary | Exact total and CPU/RAM/GPU/network/PV/load-balancer/shared/external component cost by currency, CPU/RAM usage-vs-request efficiency, cost by account, and top clusters | None for accepted component-cost evidence |
 | Workloads Explorer | Tenant-bounded filters, exact rows, namespace/controller/workload pivots, allocation categories, pagination, efficiency, and filtered hourly allocated-cost trend | Exact QuickSight geometry remains a browser/live gate |
-| EKS Breakdown | Cluster distribution, coverage, group counts, and workload drilldown | Capacity type and instance type are absent from the export schema and are not inferred |
+| EKS Breakdown | Cluster distribution, coverage, group counts, and workload drilldown | Capacity type and instance type exist in the official dataset but are absent from Sutra's accepted export contract and are not inferred |
 | Showback/chargeback | Reconciled namespace showback and usage-vs-request evidence | Read-only dashboard creates no invoices, journals, transfers, or chargeback posting |
 
 ## End-to-end assets
@@ -44,6 +68,10 @@ official parity.
 - PostgreSQL runtime attempts 0106: `postgres/migrations/0106_finops_kubecost_runtime_attempts.sql`
 - API: `app/api/v1/finops/kubecost-allocation/route.ts`
 - Native UI: `app/costs/finops-kubecost-allocation-dashboard.tsx`
+- Frozen official audit:
+  `lib/finops-kubecost-official-definition.ts`
+- Official audit proof:
+  `tests/finops-kubecost-official-definition.test.ts`
 - Focused runtime proof: `tests/finops-kubecost-runtime-binding.test.mjs`
 
 The durable job payload contains only its server-owned scheduled window. At
@@ -81,6 +109,10 @@ The API resolves the connection under the authenticated organization and
 checks `connection:read` for its customer. Organization/customer IDs cannot be
 supplied by the client. Filters are bounded and apply only to groups already
 inside the persisted server scope.
+Every HTTP-200 response includes the frozen official audit. The native client
+validates its source commit and manifest hash, and the report-independent panel
+remains visible in ready, configuration-required, loading, error, and
+no-connection states without synthesizing allocation evidence.
 
 ## Reconciliation and presentation
 
@@ -112,3 +144,10 @@ special idle/shared/external/unallocated/unmounted costs are not redistributed.
 Until those gates pass, the API returns
 `KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED` and this vertical is
 not locally verified or live.
+
+## Focused verification
+
+The allocation engine, persistence/API/UI vertical, official-definition audit,
+and durable runtime suites pass **28/28 tests** with zero failures, skips, or
+cancellations. Root TypeScript, targeted ESLint, and `git diff --check` pass on
+the integrated tree.
