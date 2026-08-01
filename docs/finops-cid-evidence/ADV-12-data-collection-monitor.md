@@ -11,6 +11,27 @@ AWS documents that the monitor is based on Step Functions execution
 instrumentation, provides execution/error links, and treats recent API results
 as eventually consistent. Those limits remain explicit in Sutra.
 
+Pinned definition audit: CID framework commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`,
+<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/data-collection-monitor/data-collection-monitor.yaml>.
+The official definition has **Main** and **About** sheets. Main controls include
+Module, Payer ID, Status Category, Account ID, Days back and Log Links Mode.
+Its visuals cover latest module execution state, status families, duration,
+parameters and guarded Lambda/Step Functions log links. Sutra now provides
+Module, Status Category, Days back and Log Links Mode controls over normalized
+execution evidence; Payer/account scope remains server-pinned rather than a
+client-selectable tenant boundary, and raw parameters/log payloads remain
+excluded by design.
+
+| Gate | Status | Evidence / remaining work |
+|---|---|---|
+| G1 official inventory | `LOCAL_COMPLETE` | Two sheets, controls and visual families audited at the pinned commit. |
+| G2 source contract | `LOCAL_COMPLETE` | Metadata-only, tenant-pinned Standard Step Functions execution evidence with bounded pagination. |
+| G3 durable runtime | `LOCAL_COMPLETE_CONTRACT` | Hourly identity, leases, receipt verification and sanitized failures; shared registration/provider client remain open. |
+| G4 persistence/API | `LOCAL_COMPLETE` | Immutable accepted history and authenticated same-tenant read route. |
+| G5 UI | `PARTIAL` | Official module/status/time/link controls, health, retries, latency, coverage and validated links render. Exact visual geometry and Lambda-specific links remain open. |
+| G6 acceptance | `PARTIAL` | Focused tests/lint/types pass locally; live provider and browser acceptance remain open. |
+
 The existing generic source-job ledger is authoritative for Sutra collection
 attempt lifecycle, but it is not equivalent to the official DCF module monitor.
 This vertical therefore adds tenant-pinned Step Functions module execution
