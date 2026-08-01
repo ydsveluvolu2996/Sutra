@@ -336,7 +336,7 @@ export function buildGcpCloudIntelligenceDashboard(snapshot: GcpBillingSnapshot,
   const opportunities = snapshot.opportunities.rows.filter((row) => (!filters.projectId || row.projectId === filters.projectId) && (!filters.service || row.serviceDescription === filters.service) && (!filters.region || value(row.locationRegion) === filters.region) && (!filters.currency || row.currency === filters.currency));
   return {
     schema: "sutra.finops-gcp-cloud-intelligence-dashboard.v1" as const,
-    views: ["Summary", "Compute Engine", "Cloud SQL", "BigQuery", "Network", "Kubernetes", "Credits & discounts", "Resources & labels", "Opportunities", "Evidence"] as const,
+    views: ["Summary", "Compute Engine", "Cloud SQL", "BigQuery", "Network", "Kubernetes", "About", "Credits & discounts", "Resources & labels", "Opportunities", "Evidence"] as const,
     scope: snapshot.scope,
     sourceState: snapshot.sourceState,
     actualBilled,

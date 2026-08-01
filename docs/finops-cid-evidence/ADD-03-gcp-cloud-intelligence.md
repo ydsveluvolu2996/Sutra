@@ -4,6 +4,18 @@ Status: `PARTIAL_PIPELINE` until a live, same-tenant GCP Cloud Billing export ad
 
 ## Official scope verified
 
+The common CID framework commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`
+contains no GCP dashboard definition. The authoritative separate repository was
+audited at immutable commit `d0b5983db3a0931a63fcc21a9f7e2764483cfcaf`:
+<https://github.com/awslabs/cid-gcp-cost-dashboard/blob/d0b5983db3a0931a63fcc21a9f7e2764483cfcaf/GCP-Cost-Dashboard.yaml>.
+The audited artifact SHA-256 is
+`78ed3d8245be60aea8f212e38f1458d6ea5be8b9f0fe660deee71f494ec7087c`.
+Its seven sheets are Summary, Compute Engine, Cloud SQL, Big Query, Network,
+Kubernetes, and About. Sutra now exposes all seven evidence views (using the
+provider product spelling `BigQuery`) plus separate Credits, Resources,
+Opportunities, and Evidence views. Exact visual geometry remains a live/browser
+acceptance gate.
+
 - [AWS Cloud Intelligence Dashboards — dashboard catalog](https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/dashboards.html) classifies the GCP dashboard as an Additional dashboard that exports Google Cloud billing data for visualization and reporting, for executives, finance/procurement, FinOps, and product owners.
 - [AWS Labs CID GCP project](https://github.com/awslabs/cid-gcp-cost-dashboard) requires one or more BigQuery billing export tables plus the Cloud Billing pricing export. Its published QuickSight definition contains the `Summary`, `Compute Engine`, `Cloud SQL`, `Big Query`, `Network`, `Kubernetes`, and `About` sheets. It filters and drills through billing account, project hierarchy, service/product, SKU, region, usage period, credit classes, usage/pricing units, labels, cores, memory, and resource detail where supplied.
 - [Google Cloud Billing export table types](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables) documents FOCUS, standard usage, detailed usage, pricing, and committed-use-discount metadata exports.
