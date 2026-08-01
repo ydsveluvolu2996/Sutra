@@ -5,6 +5,18 @@
 .filters { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 10px; }
 .filters label { display: grid; gap: 5px; color: #526866; font-size: 11px; font-weight: 700; }
 .filters select, .filters input { min-height: 38px; border: 1px solid #cbd9d6; border-radius: 9px; background: #fff; padding: 0 9px; color: #172b2a; }
+.filters .checkbox { display: flex; align-items: center; align-self: end; min-height: 38px; flex-direction: row; gap: 8px; border: 1px solid #cbd9d6; border-radius: 9px; background: #fff; padding: 0 10px; }
+.filters .checkbox input { min-height: auto; margin: 0; }
+.coverage { display: grid; grid-template-columns: repeat(5, minmax(150px, 1fr)); gap: 8px; }
+.coverageItem { display: grid; align-content: start; gap: 6px; border: 1px solid #d8e5e2; border-radius: 11px; background: #fff; padding: 11px; }
+.coverageItem strong { font-size: 11px; }
+.coverageItem small { color: #667875; font-size: 9px; line-height: 1.4; }
+.coverageItem > span { width: fit-content; border-radius: 999px; padding: 2px 6px; font-size: 8px; font-weight: 850; }
+.implemented { background: #def4ed; color: #075e54; }
+.partial { background: #fff1ca; color: #7a5900; }
+.summarySection { border: 1px solid #d8e5e2; border-radius: 13px; background: #f8fbfa; padding: 13px; }
+.summaryHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; }
+.summaryHead h3 { margin: 0; font-size: 14px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(205px, 1fr)); gap: 10px; }
 .card { border: 1px solid #d8e5e2; border-radius: 12px; background: #fff; padding: 13px; }
 .card small { display: block; color: #647a77; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
@@ -25,11 +37,15 @@
 .detailGrid dt { color: #6c7c79; font-size: 9px; text-transform: uppercase; }
 .detailGrid dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .evidence { padding: 13px 14px; }
+.empty { margin: 0; padding: 18px 14px; color: #667875; font-size: 11px; }
 .evidence pre { max-height: 280px; overflow: auto; border-radius: 8px; background: #f5f8f7; padding: 10px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .footnote { margin: 0; color: #667875; font-size: 10px; }
+@media (max-width: 1100px) { .coverage { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 560px) {
   .filters { grid-template-columns: 1fr; }
+  .coverage { grid-template-columns: 1fr; }
   .sectionHead { align-items: flex-start; flex-direction: column; }
+  .summaryHead { align-items: flex-start; flex-direction: column; }
   .detailGrid { grid-template-columns: 1fr; }
 }

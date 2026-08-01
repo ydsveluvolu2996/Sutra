@@ -34,6 +34,7 @@ Attempts are classified as `WAITING_DELIVERY`, `FAILED`, `PARTIAL`, `EMPTY`, or 
 - Failed, waiting, and partial attempts remain audit history but cannot replace the accepted head.
 - Head movement is monotonic by data-through time, provider generation time, and generation digest.
 - The orchestration request selects `EXECUTION_SPECIFIC_ONLY`, rejects the mutable latest manifest, accepts no direct API recommendation rows, bounds bytes/objects/rows, and pins the exact read operations.
+- Request identity is derived from tenant scope, scheduled provider window, export ARN, and pinned export/query/configuration hashes rather than the transient durable-job ID. A retry therefore replays the same request key while a new provider window or definition receives a new key.
 - A complete export is converted into the existing `CoraCapture`; only prior complete export-object generations build recommendation lifecycle history.
 - Current enrollment/preferences API reads are readiness/configuration evidence only. Existing immutable CUR2 observations remain cost facts with `OBSERVED_COST_NOT_ATTRIBUTED_SAVINGS`; AWS recommendation savings remain estimates.
 - Complete rows are passed through the existing CORA domain normalizer before

@@ -12,11 +12,13 @@ export const dynamic = "force-dynamic";
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^[0-9]{12}$/u;
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
+const RESOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9._:/@+=,-]{0,511}$/u;
 const REGION = /^(?:[a-z]{2}(?:-gov)?-[a-z]+-[0-9]|global)$/u;
 const CURRENCY = /^[A-Z]{3}$/u;
 const ALLOWED = new Set([
   "connectionId", "accountId", "optimizationClass", "actionType", "region",
   "implementationEffort", "workflowStatus", "currencyCode", "tagKey", "tagValue",
+  "resourceId", "restartNeeded", "rollbackPossible", "excludeFinopsExceptions",
 ]);
 const FRESHNESS_HOURS = 48;
 
@@ -40,6 +42,10 @@ function parse(request: Request): { readonly connectionId: string; readonly filt
   const currencyCode = parameters.get("currencyCode");
   const tagKey = parameters.get("tagKey");
   const tagValue = parameters.get("tagValue");
+  const resourceId = parameters.get("resourceId");
+  const restartNeeded = parameters.get("restartNeeded");
+  const rollbackPossible = parameters.get("rollbackPossible");
+  const excludeFinopsExceptions = parameters.get("excludeFinopsExceptions");
   if (
     !CONNECTION_ID.test(connectionId)
     || (accountId !== null && !ACCOUNT_ID.test(accountId))
@@ -60,6 +66,11 @@ function parse(request: Request): { readonly connectionId: string; readonly filt
     || (currencyCode !== null && !CURRENCY.test(currencyCode))
     || (tagKey !== null && !TOKEN.test(tagKey))
     || (tagValue !== null && (tagKey === null || !TOKEN.test(tagValue)))
+    || (resourceId !== null && !RESOURCE_ID.test(resourceId))
+    || (restartNeeded !== null && restartNeeded !== "true" && restartNeeded !== "false")
+    || (rollbackPossible !== null && rollbackPossible !== "true" && rollbackPossible !== "false")
+    || (excludeFinopsExceptions !== null
+      && excludeFinopsExceptions !== "true" && excludeFinopsExceptions !== "false")
   ) invalid();
   return { connectionId, filters: {
     accountId,
@@ -68,7 +79,10 @@ function parse(request: Request): { readonly connectionId: string; readonly filt
     region,
     implementationEffort: implementationEffort as CoraDashboardFilters["implementationEffort"],
     workflowStatus: workflowStatus as CoraDashboardFilters["workflowStatus"],
-    currencyCode, tagKey, tagValue,
+    currencyCode, tagKey, tagValue, resourceId,
+    restartNeeded: restartNeeded === null ? null : restartNeeded === "true",
+    rollbackPossible: rollbackPossible === null ? null : rollbackPossible === "true",
+    excludeFinopsExceptions: excludeFinopsExceptions === "true",
   } };
 }
 
@@ -154,7 +168,8 @@ export async function GET(request: Request): Promise<Response> {
       collection: { available: false, reason: "CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND" },
       disclosures: [
         "AWS estimates are not realized savings or invoices.",
-        "Displayed sums are non-deduplicated row sums, not portfolio savings claims.",
+        "Opportunity cards select the maximum recommendation per resource within Usage or Rate; rows without resource IDs remain non-deduplicated.",
+        "Raw recommendation totals remain evidence only and are not portfolio savings claims.",
         "Rate optimization is not adjusted for implementing usage optimization recommendations.",
       ],
     });

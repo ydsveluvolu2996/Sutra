@@ -17,6 +17,30 @@ export interface CoraDashboardFilters {
   readonly currencyCode: string | null;
   readonly tagKey: string | null;
   readonly tagValue: string | null;
+  readonly resourceId: string | null;
+  readonly restartNeeded: boolean | null;
+  readonly rollbackPossible: boolean | null;
+  readonly excludeFinopsExceptions: boolean;
+}
+
+export interface CoraDashboardOpportunitySummary {
+  readonly optimizationClass: CoraSnapshot["recommendations"][number]["optimizationClass"];
+  readonly currencyCode: string;
+  readonly rawRecommendationCount: number;
+  readonly deduplicatedActionCount: number;
+  readonly distinctResourceCount: number;
+  readonly recommendationsWithoutResourceId: number;
+  readonly estimatedMonthlySavingsBeforeDiscountMicros: string;
+  readonly estimatedMonthlySavingsAfterDiscountMicros: string | null;
+  readonly aggregationMeaning: "MAX_RECOMMENDATION_PER_RESOURCE_WITHIN_OPTIMIZATION_CLASS_MISSING_RESOURCE_IDS_UNDEDUPLICATED";
+}
+
+export interface CoraOfficialSheetCoverage {
+  readonly sheet: "Summary" | "Usage Optimization" | "Rate Optimization - Saving Plans"
+    | "Rate Optimization - Reserved Instances" | "About";
+  readonly status: "IMPLEMENTED" | "PARTIAL";
+  readonly localEvidence: string;
+  readonly limitation: string | null;
 }
 
 export interface CoraDashboardHistoryPoint {
@@ -76,6 +100,8 @@ export interface CoraDashboardProjection {
   readonly rowsTruncated: boolean;
   readonly rows: readonly CoraDashboardRow[];
   readonly summaries: CoraSnapshot["summaries"];
+  readonly opportunitySummaries: readonly CoraDashboardOpportunitySummary[];
+  readonly officialSheetCoverage: readonly CoraOfficialSheetCoverage[];
   readonly history: readonly CoraDashboardHistoryPoint[];
 }
 
@@ -135,6 +161,94 @@ function summaries(
     || left.currencyCode.localeCompare(right.currencyCode));
 }
 
+function savingsForOrdering(
+  row: CoraSnapshot["recommendations"][number],
+): bigint {
+  return BigInt(row.estimates.monthlySavingsAfterDiscountMicros
+    ?? row.estimates.monthlySavingsBeforeDiscountMicros);
+}
+
+/**
+ * AWS CORA removes duplicate recommendations by resource ID independently for
+ * Usage and Rate. Account, Region, and currency are included in the key so a
+ * provider-local resource identifier cannot collide across scopes. Rows with no
+ * resource ID remain separate because collapsing them would invent identity.
+ */
+function deduplicatedOpportunitySummaries(
+  rows: readonly CoraSnapshot["recommendations"][number][],
+): readonly CoraDashboardOpportunitySummary[] {
+  const selected = new Map<string, CoraSnapshot["recommendations"][number]>();
+  for (const row of rows) {
+    const identity = row.resourceId === null
+      ? `missing:${row.trackingKey}`
+      : `resource:${row.accountId}:${row.region}:${row.resourceId}`;
+    const key = `${row.optimizationClass}:${row.estimates.currencyCode}:${identity}`;
+    const current = selected.get(key);
+    if (current === undefined
+      || savingsForOrdering(row) > savingsForOrdering(current)
+      || (savingsForOrdering(row) === savingsForOrdering(current)
+        && row.trackingKey.localeCompare(current.trackingKey) < 0)) {
+      selected.set(key, row);
+    }
+  }
+
+  const grouped = new Map<string, CoraDashboardOpportunitySummary>();
+  const rawCounts = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${row.optimizationClass}:${row.estimates.currencyCode}`;
+    rawCounts.set(key, (rawCounts.get(key) ?? 0) + 1);
+  }
+  for (const row of selected.values()) {
+    const key = `${row.optimizationClass}:${row.estimates.currencyCode}`;
+    const current = grouped.get(key);
+    const hasResource = row.resourceId !== null;
+    if (current === undefined) {
+      grouped.set(key, {
+        optimizationClass: row.optimizationClass,
+        currencyCode: row.estimates.currencyCode,
+        rawRecommendationCount: rawCounts.get(key) ?? 1,
+        deduplicatedActionCount: 1,
+        distinctResourceCount: hasResource ? 1 : 0,
+        recommendationsWithoutResourceId: hasResource ? 0 : 1,
+        estimatedMonthlySavingsBeforeDiscountMicros: row.estimates.monthlySavingsBeforeDiscountMicros,
+        estimatedMonthlySavingsAfterDiscountMicros: row.estimates.monthlySavingsAfterDiscountMicros,
+        aggregationMeaning: "MAX_RECOMMENDATION_PER_RESOURCE_WITHIN_OPTIMIZATION_CLASS_MISSING_RESOURCE_IDS_UNDEDUPLICATED",
+      });
+      continue;
+    }
+    grouped.set(key, {
+      ...current,
+      deduplicatedActionCount: current.deduplicatedActionCount + 1,
+      distinctResourceCount: current.distinctResourceCount + (hasResource ? 1 : 0),
+      recommendationsWithoutResourceId: current.recommendationsWithoutResourceId + (hasResource ? 0 : 1),
+      estimatedMonthlySavingsBeforeDiscountMicros: sum(
+        current.estimatedMonthlySavingsBeforeDiscountMicros,
+        row.estimates.monthlySavingsBeforeDiscountMicros,
+      ),
+      estimatedMonthlySavingsAfterDiscountMicros:
+        current.estimatedMonthlySavingsAfterDiscountMicros === null
+        || row.estimates.monthlySavingsAfterDiscountMicros === null
+          ? null
+          : sum(current.estimatedMonthlySavingsAfterDiscountMicros, row.estimates.monthlySavingsAfterDiscountMicros),
+    });
+  }
+  return [...grouped.values()].sort((left, right) =>
+    left.optimizationClass.localeCompare(right.optimizationClass)
+    || left.currencyCode.localeCompare(right.currencyCode));
+}
+
+function hasFinopsException(row: CoraSnapshot["recommendations"][number]): boolean {
+  return row.tags.some((tag) => tag.key.toLowerCase() === "finopsexception");
+}
+
+const OFFICIAL_SHEET_COVERAGE: readonly CoraOfficialSheetCoverage[] = Object.freeze([
+  { sheet: "Summary", status: "IMPLEMENTED", localEvidence: "Resource-deduplicated usage/rate opportunity summaries, raw counts, and action details", limitation: null },
+  { sheet: "Usage Optimization", status: "IMPLEMENTED", localEvidence: "Rightsize, idle/stop, delete, scale-in, upgrade, and migration actions with resource drilldown", limitation: null },
+  { sheet: "Rate Optimization - Saving Plans", status: "PARTIAL", localEvidence: "Savings Plans recommendation evidence and estimate details", limitation: "The export domain does not yet normalize SP level, term, or upfront-option dimensions." },
+  { sheet: "Rate Optimization - Reserved Instances", status: "PARTIAL", localEvidence: "Reserved Instance recommendation evidence and estimate details", limitation: "The export domain does not yet normalize RI service, level, term, or upfront-option dimensions." },
+  { sheet: "About", status: "IMPLEMENTED", localEvidence: "Freshness, coverage, generation lineage, limitations, and estimate disclosures", limitation: null },
+]);
+
 export function buildCoraDashboardProjection(
   snapshot: CoraSnapshot,
   history: readonly CoraDashboardHistoryPoint[],
@@ -151,13 +265,14 @@ export function buildCoraDashboardProjection(
     && (filters.implementationEffort === null || row.implementationEffort === filters.implementationEffort)
     && (filters.workflowStatus === null || row.workflow.status === filters.workflowStatus)
     && (filters.currencyCode === null || row.currencyCode === filters.currencyCode)
+    && (filters.resourceId === null || row.resourceId === filters.resourceId)
+    && (filters.restartNeeded === null || row.restartNeeded === filters.restartNeeded)
+    && (filters.rollbackPossible === null || row.rollbackPossible === filters.rollbackPossible)
+    && (!filters.excludeFinopsExceptions || !hasFinopsException(row))
     && (filters.tagKey === null || row.tags.some((tag) =>
       tag.key === filters.tagKey && (filters.tagValue === null || tag.value === filters.tagValue))));
   const ordered = [...matched].sort((left, right) => {
-    const savings = BigInt(right.estimates.monthlySavingsAfterDiscountMicros
-      ?? right.estimates.monthlySavingsBeforeDiscountMicros)
-      - BigInt(left.estimates.monthlySavingsAfterDiscountMicros
-        ?? left.estimates.monthlySavingsBeforeDiscountMicros);
+    const savings = savingsForOrdering(right) - savingsForOrdering(left);
     return savings > BigInt(0) ? 1
       : savings < BigInt(0) ? -1
         : left.trackingKey.localeCompare(right.trackingKey);
@@ -210,6 +325,8 @@ export function buildCoraDashboardProjection(
       observedCostEvidenceCount: row.observedCosts.length,
     })),
     summaries: summaries(matched),
+    opportunitySummaries: deduplicatedOpportunitySummaries(matched),
+    officialSheetCoverage: OFFICIAL_SHEET_COVERAGE,
     history: history.slice(0, CORA_DASHBOARD_BOUNDS.maximumHistoryPoints),
   };
 }

@@ -6,7 +6,8 @@ import { buildCoraDashboardProjection, type CoraDashboardFilters } from "../lib/
 const FILTERS: CoraDashboardFilters = {
   accountId: null, optimizationClass: null, actionType: null, region: null,
   implementationEffort: null, workflowStatus: null, currencyCode: null,
-  tagKey: null, tagValue: null,
+  tagKey: null, tagValue: null, resourceId: null, restartNeeded: null,
+  rollbackPossible: null, excludeFinopsExceptions: false,
 };
 
 function recommendation(overrides: Partial<CoraSnapshot["recommendations"][number]> = {}): CoraSnapshot["recommendations"][number] {
@@ -68,4 +69,54 @@ test("CORA projection filters by workload-owner tags without changing evidence h
   assert.equal(result.history.length, 1);
   assert.equal(result.rows[0]?.workflow.status, "NEW");
   assert.equal(result.rows[0]?.observedCostEvidenceCount, 0);
+});
+
+test("CORA opportunity summaries deduplicate the greatest recommendation per resource within each class", () => {
+  const rows = [
+    recommendation(),
+    recommendation({
+      trackingKey: `cor_${"4".repeat(64)}`,
+      recommendationId: "rec-smaller",
+      actionType: "Stop",
+      estimates: {
+        currencyCode: "USD", monthlyCostBeforeDiscountMicros: "10",
+        monthlyCostAfterDiscountMicros: "10", monthlySavingsBeforeDiscountMicros: "5",
+        monthlySavingsAfterDiscountMicros: "5", meaning: "AWS_ESTIMATE_NOT_REALIZED_SAVINGS",
+      },
+    }),
+    recommendation({
+      trackingKey: `cor_${"5".repeat(64)}`,
+      recommendationId: "rec-without-resource",
+      resourceId: null,
+      resourceArn: null,
+      estimates: {
+        currencyCode: "USD", monthlyCostBeforeDiscountMicros: "20",
+        monthlyCostAfterDiscountMicros: "20", monthlySavingsBeforeDiscountMicros: "10",
+        monthlySavingsAfterDiscountMicros: "10", meaning: "AWS_ESTIMATE_NOT_REALIZED_SAVINGS",
+      },
+    }),
+  ];
+  const [summary] = buildCoraDashboardProjection(snapshot(rows), [], FILTERS).opportunitySummaries;
+  assert.equal(summary?.rawRecommendationCount, 3);
+  assert.equal(summary?.deduplicatedActionCount, 2);
+  assert.equal(summary?.distinctResourceCount, 1);
+  assert.equal(summary?.recommendationsWithoutResourceId, 1);
+  assert.equal(summary?.estimatedMonthlySavingsAfterDiscountMicros, "7000010");
+});
+
+test("CORA filters exact resource, restart and rollback flags and can exclude FinopsException tags", () => {
+  const excepted = recommendation({
+    trackingKey: `cor_${"6".repeat(64)}`,
+    resourceId: "i-excepted",
+    tags: [{ key: "FinopsException", value: "Approved" }],
+  });
+  const result = buildCoraDashboardProjection(snapshot([recommendation(), excepted]), [], {
+    ...FILTERS,
+    resourceId: "i-1",
+    restartNeeded: true,
+    rollbackPossible: true,
+    excludeFinopsExceptions: true,
+  });
+  assert.equal(result.resultCount, 1);
+  assert.equal(result.rows[0]?.resourceId, "i-1");
 });
