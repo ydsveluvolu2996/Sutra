@@ -73,6 +73,15 @@ test("panel implements official trend, account/service filters, export, root-cau
   assert.doesNotMatch(panel, /money\(anomaly\.impact\.[\s\S]{0,100}"USD"/u);
 });
 
+test("panel exposes the pinned official AWS object inventory and semantic gaps", () => {
+  assert.match(panel, /Official AWS definition coverage/u);
+  assert.match(panel, /Native coverage of every visual in the pinned AWS definition/u);
+  assert.match(panel, /embedded QuickSight definition SHA-256/u);
+  assert.match(panel, /no standalone SQL\/query artifact/u);
+  assert.match(panel, /Active\/Past status also differs/u);
+  assert.match(panel, /does not claim QuickSight pixel, geometry, interaction-tree, or query parity/u);
+});
+
 test("enterprise layout has responsive provider and Sutra evidence cards", () => {
   assert.match(css, /\.costAnomalyKpis \{ display: grid; grid-template-columns: repeat\(4/u);
   assert.match(css, /\.costAnomalySources \{ display: grid; grid-template-columns: repeat\(2/u);
@@ -95,6 +104,38 @@ test("complete provider evidence renders filters, trends, root causes, and cover
     const anomalyModule = await vite.ssrLoadModule("/app/costs/finops-wave3-panels.tsx");
     const initialData = {
       state: "complete",
+      officialDefinition: {
+        schema: "sutra.aws-cost-anomaly-official-definition.v1",
+        source: {
+          repository: "https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework",
+          commit: "f9e36d88c47709f10e8fa784ad11d5cc0e728021",
+          manifestPath: "dashboards/cost-anomalies/cost-anomalies.yaml",
+          manifestSha256: "3676df09c3e3933987dfad923e0fc1b418c30db0562c3344d0ff2f0e54726244",
+          embeddedDefinitionSha256: "299b580daf221ab61cc243eb5f3fe121aee9c7fb21a88d66be58c007ab6a3b14",
+          changelogPath: "changes/CHANGELOG-aws-cost-anomalies.md",
+          changelogSha256: "5a78599be4f131feb12944e5ea6da5bb87b38d55cd8d4ae00a0a1e9f205ac104",
+          dashboardId: "aws-cost-anomalies",
+          category: "Advanced",
+          datasetIdentifier: "ca_summary_view",
+          queryArtifact: null,
+        },
+        totals: { sheets: 2, visuals: 6, parameterControls: 4, filterControls: 8, parameterDeclarations: 10, calculatedFields: 11, filterGroups: 9, datasets: 1 },
+        visualTypes: { BarChartVisual: 4, TableVisual: 1, PieChartVisual: 1 },
+        sheets: [
+          {
+            id: "307f2c1e-fcf1-42f7-b0a2-fa4af0e48d1c",
+            name: "AWS Cost Anomalies",
+            visualCount: 6,
+            parameterControls: ["End Date", "Start Date", "Total Impact Greater then", "Days to consider Active"],
+            filterControls: ["Account Name", "Linked Account Id", "Status", "Management Account Id"],
+            visuals: [{ id: "b8cec74c-3349-4000-bc25-f902d45db291", name: "Daily Cost Anomalies Total Impact", type: "Bar chart", coverage: "PARTIAL_SEMANTICS", nativeEvidence: "Filtered provider impact trend.", remainingGap: "Currently grouped by anomaly month." }],
+          },
+          { id: "73835dbf-c978-4de7-bd4c-f538ce56c75d", name: "About", visualCount: 0, parameterControls: [], filterControls: ["Account Name", "Linked Account Id", "Status", "Management Account Id"], visuals: [], coverage: "ABOUT" },
+        ],
+        parameterDeclarations: ["TotalImpactThreshold", "numberofdays", "linkedaccount", "AccountName", "payeraccount", "status", "GroupBy", "AnomalyStartDateRange", "startdate", "enddate"],
+        filterGroups: [],
+        disclosures: [],
+      },
       latestAttemptStatus: "succeeded",
       collectedAt: "2026-08-01T10:00:00.000Z",
       dataThroughAt: "2026-08-01T09:00:00.000Z",
@@ -165,6 +206,10 @@ test("complete provider evidence renders filters, trends, root causes, and cover
     assert.match(markup, /Planned activity/u);
     assert.match(markup, /DIMENSIONAL/u);
     assert.match(markup, /Provider alert subscription coverage/u);
+    assert.match(markup, /Official AWS definition coverage/u);
+    assert.match(markup, /Daily Cost Anomalies Total Impact/u);
+    assert.match(markup, /PARTIAL SEMANTICS/u);
+    assert.match(markup, /299b580daf221ab61cc243eb5f3fe121aee9c7fb21a88d66be58c007ab6a3b14/u);
     assert.match(markup, /Export filtered CSV/u);
     assert.match(markup, /Root-cause drilldown/u);
     assert.match(markup, /GET ANOMALIES/u);

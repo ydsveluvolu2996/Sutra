@@ -71,6 +71,25 @@ linked account, Region, usage type, assessment, monitor type, overlapping date
 window and derived window-state controls, plus deterministic sorting and safe
 CSV.
 
+## Official AWS dashboard definition coverage
+
+Sutra freezes the public AWS CID Cost Anomaly manifest at repository commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021`. The manifest SHA-256 is
+`3676df09c3e3933987dfad923e0fc1b418c30db0562c3344d0ff2f0e54726244`;
+its inline QuickSight `AnalysisDefinition` SHA-256 is
+`299b580daf221ab61cc243eb5f3fe121aee9c7fb21a88d66be58c007ab6a3b14`.
+The definition proves exact totals of 2 sheets, 6 visuals, 4 parameter
+controls, 8 filter-control placements, 10 parameter declarations, 11
+calculated fields, 9 filter groups, and 1 dataset declaration.
+
+`GET /api/v1/finops/cost-anomaly` exposes this immutable audit in every
+successful response state, including before provider materialization exists.
+The UI maps all six official visual objects to native evidence and labels four
+semantic differences as partial. It does not claim QuickSight layout,
+interaction-tree, runtime, or query parity. The pinned repository does not
+publish a standalone SQL/query artifact for `ca_summary_view`; no query count
+or query-equivalence claim is inferred.
+
 ## Evidence semantics
 
 - AWS evaluates net unblended cost approximately three times each day.

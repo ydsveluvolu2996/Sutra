@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const [route, job, evidence, snapshots, domain] = await Promise.all([
+const [route, job, evidence, snapshots, domain, officialDefinition] = await Promise.all([
   readFile(new URL("../app/api/v1/finops/cost-anomaly/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../lib/finops-source-collect-job.ts", import.meta.url), "utf8"),
   readFile(new URL("../db/evidence-repository.ts", import.meta.url), "utf8"),
   readFile(new URL("../db/finops-source-snapshot-repository.ts", import.meta.url), "utf8"),
   readFile(new URL("../lib/finops-aws-cost-anomaly.ts", import.meta.url), "utf8"),
+  readFile(new URL("../lib/finops-cost-anomaly-official-definition.ts", import.meta.url), "utf8"),
 ]);
 
 test("Cost Anomaly route is dynamic, authenticated, and connection-derived", () => {
@@ -68,4 +69,15 @@ test("API uses canonical dashboard builder and exposes honest bounded states", (
   assert.match(domain, /sutra\.aws-cost-anomaly-analysis\.v1/u);
   assert.match(domain, /maximum daily impact is never substituted/u);
   assert.doesNotMatch(route, /fixture|seed|demo|providerMessage|temporaryCredentials|roleArn|objectKey|ciphertext/iu);
+});
+
+test("API exposes the frozen official definition even without provider materialization", () => {
+  assert.match(route, /COST_ANOMALY_OFFICIAL_DEFINITION/u);
+  assert.equal(
+    route.match(/officialDefinition: COST_ANOMALY_OFFICIAL_DEFINITION/gu)?.length,
+    3,
+  );
+  assert.match(officialDefinition, /sutra\.aws-cost-anomaly-official-definition\.v1/u);
+  assert.match(officialDefinition, /f9e36d88c47709f10e8fa784ad11d5cc0e728021/u);
+  assert.match(officialDefinition, /queryArtifact: null/u);
 });

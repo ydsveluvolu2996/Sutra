@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CostAnomalyProviderAnalysis } from "../../lib/finops-aws-cost-anomaly";
+import type { CostAnomalyOfficialDefinition } from "../../lib/finops-cost-anomaly-official-definition";
 import styles from "./costs.module.css";
 
 /* ----------------------------------------------------------------------------
@@ -53,6 +54,7 @@ type CostAnomalyState = "complete" | "partial" | "stale" | "failed" | "waiting";
 
 interface CostAnomalyResponse {
   readonly state: CostAnomalyState;
+  readonly officialDefinition: CostAnomalyOfficialDefinition;
   readonly latestAttemptStatus: string | null;
   readonly collectedAt: string | null;
   readonly dataThroughAt: string | null;
@@ -414,6 +416,32 @@ export function AwsCostAnomalyPanel({ connectionId, initialData = null }: {
       ) : null}
       {state === "stale" ? (
         <div className={styles.costAnomalyState} role="status"><strong>Provider evidence is stale</strong><span>AWS data is older than {data?.freshness.staleAfterHours} hours. Findings remain visible with their provider evaluation timestamp.</span></div>
+      ) : null}
+
+      {data !== null ? (
+        <details className={styles.costAnomalyEvidence}>
+          <summary>Official AWS definition coverage · {data.officialDefinition.totals.visuals} visuals across {data.officialDefinition.totals.sheets} sheets</summary>
+          <div>
+            <p>
+              <strong>Frozen source:</strong>{" "}
+              <a href={`${data.officialDefinition.source.repository}/blob/${data.officialDefinition.source.commit}/${data.officialDefinition.source.manifestPath}`} rel="noreferrer" target="_blank">
+                AWS CID Cost Anomaly manifest
+              </a>{" "}
+              at commit <code>{data.officialDefinition.source.commit}</code>.
+            </p>
+            <p><strong>Verified definition:</strong> manifest SHA-256 <code>{data.officialDefinition.source.manifestSha256}</code>; embedded QuickSight definition SHA-256 <code>{data.officialDefinition.source.embeddedDefinitionSha256}</code>.</p>
+            <p><strong>Exact structural inventory:</strong> {data.officialDefinition.totals.visuals} visuals, {data.officialDefinition.totals.parameterControls} parameter controls, {data.officialDefinition.totals.filterControls} filter-control placements, {data.officialDefinition.totals.parameterDeclarations} parameter declarations, {data.officialDefinition.totals.calculatedFields} calculated fields, and {data.officialDefinition.totals.filterGroups} filter groups.</p>
+            <div className={styles.costAnomalyTableWrap}>
+              <table>
+                <caption>Native coverage of every visual in the pinned AWS definition</caption>
+                <thead><tr><th scope="col">Official visual</th><th scope="col">Type</th><th scope="col">Coverage</th><th scope="col">Native evidence</th><th scope="col">Remaining gap</th></tr></thead>
+                <tbody>{data.officialDefinition.sheets.flatMap((sheet) => sheet.visuals.map((visual) => <tr key={visual.id}><th scope="row">{visual.name}</th><td>{visual.type}</td><td>{visual.coverage.replaceAll("_", " ")}</td><td>{visual.nativeEvidence}</td><td>{visual.remainingGap}</td></tr>))}</tbody>
+              </table>
+            </div>
+            <p><strong>Controls:</strong> {data.officialDefinition.sheets[0].parameterControls.join(", ")}. Cross-sheet filters cover {data.officialDefinition.sheets[0].filterControls.join(", ")}.</p>
+            <p><strong>Preserved gaps:</strong> The pinned repository publishes no standalone SQL/query artifact for <code>{data.officialDefinition.source.datasetIdentifier}</code>. Native coverage does not claim QuickSight pixel, geometry, interaction-tree, or query parity. AWS CID Active/Past status also differs from Sutra&apos;s provider-window lifecycle.</p>
+          </div>
+        </details>
       ) : null}
 
       {dashboard !== null ? (

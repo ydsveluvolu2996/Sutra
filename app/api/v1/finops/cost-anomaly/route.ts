@@ -12,6 +12,9 @@ import {
   buildCostAnomalyDashboard,
   parsePersistedAwsCostAnomalyMaterialization,
 } from "../../../../../lib/finops-aws-cost-anomaly";
+import {
+  COST_ANOMALY_OFFICIAL_DEFINITION,
+} from "../../../../../lib/finops-cost-anomaly-official-definition";
 import { detectAnomalies } from "../../../../../lib/finops-insights";
 import {
   enqueueAwsCostAnomalyCollection,
@@ -156,6 +159,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selectedSnapshot === null) {
       return jsonResponse({
         source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
+        officialDefinition: COST_ANOMALY_OFFICIAL_DEFINITION,
         state: noMaterializationState,
         latestAttemptStatus: latestAttempt?.status ?? null,
         collectedAt: null,
@@ -256,6 +260,7 @@ export async function GET(request: Request): Promise<Response> {
             : "complete";
       return jsonResponse({
         source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
+        officialDefinition: COST_ANOMALY_OFFICIAL_DEFINITION,
         state,
         latestAttemptStatus: latestAttempt?.status ?? null,
         collectedAt: collection.collectedAt,
@@ -274,6 +279,7 @@ export async function GET(request: Request): Promise<Response> {
     } catch {
       return jsonResponse({
         source: "AWS_COST_EXPLORER_COST_ANOMALY_DETECTION",
+        officialDefinition: COST_ANOMALY_OFFICIAL_DEFINITION,
         state: "failed",
         latestAttemptStatus: latestAttempt?.status ?? null,
         collectedAt: selectedSnapshot.collectedAtIso,
