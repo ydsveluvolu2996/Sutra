@@ -13,6 +13,7 @@ import type {
   FinopsTrendsIntelligenceResult,
   FinopsTrendsSeries,
 } from "../../lib/finops-trends-intelligence";
+import type { FinopsTrendsCapabilityClosure } from "../../lib/finops-trends-capability-closure";
 import { buildTrendsEvidenceCsv } from "../../lib/finops-trends-export";
 import styles from "./costs.module.css";
 
@@ -29,6 +30,10 @@ interface AvailablePeriod {
   readonly committedAtIso: string;
 }
 
+type TrendsSuccessfulReport = Extract<FinopsTrendsIntelligenceResult, { ok: true }> & {
+  readonly capabilities: FinopsTrendsCapabilityClosure;
+};
+
 interface TrendsEnvelope {
   readonly connectionId: string;
   readonly selectedWindow: {
@@ -36,12 +41,12 @@ interface TrendsEnvelope {
     readonly toPeriod: string;
   } | null;
   readonly availablePeriods: readonly AvailablePeriod[];
-  readonly report: FinopsTrendsIntelligenceResult | null;
+  readonly report: TrendsSuccessfulReport | Exclude<FinopsTrendsIntelligenceResult, { ok: true }> | null;
   readonly sourceState: string;
 }
 
 interface TrendsReportProps {
-  readonly report: Extract<FinopsTrendsIntelligenceResult, { ok: true }>;
+  readonly report: TrendsSuccessfulReport;
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly onFromPeriodChange: (period: string) => void;
   readonly onToPeriodChange: (period: string) => void;
@@ -69,6 +74,19 @@ function grouped(value: string): string {
   const digits = negative ? value.slice(1) : value;
   const separated = digits.replace(/\B(?=(\d{3})+(?!\d))/gu, ",");
   return `${negative ? "−" : ""}${separated}`;
+}
+
+function formatQuantityMicrosExact(micros: string, unit: string): string {
+  if (!INTEGER.test(micros)) return "Not available";
+  const amount = BigInt(micros);
+  const negative = amount < BigInt(0);
+  const absolute = negative ? -amount : amount;
+  const whole = (absolute / BigInt(1_000_000)).toString();
+  const fraction = (absolute % BigInt(1_000_000)).toString()
+    .padStart(6, "0").replace(/0+$/u, "");
+  return `${negative ? "−" : ""}${grouped(whole)}${
+    fraction.length === 0 ? "" : `.${fraction}`
+  } ${unit}`;
 }
 
 /** Exact string/BigInt rendering; no billing integer is converted to Number. */
@@ -119,7 +137,7 @@ function relativeBasisPoints(value: string | null, maximum: bigint): number {
 }
 
 function downloadTrendsEvidenceCsv(
-  report: Extract<FinopsTrendsIntelligenceResult, { ok: true }>,
+  report: TrendsSuccessfulReport,
   series: FinopsTrendsSeries,
 ): void {
   const blob = new Blob([buildTrendsEvidenceCsv(report, series)], {
@@ -278,6 +296,23 @@ export function TrendsReport({
     report.window.toPeriod,
   ])]
     .sort((left, right) => left.localeCompare(right));
+  const capabilities = report.capabilities;
+  const selectedForecast = capabilities.forecast.sutra.find((item) =>
+    item.currency === (selected?.currency ?? currency)
+      && item.costBasis === (selected?.costBasis ?? costBasis)) ?? null;
+  const selectedTaxonomyCosts = capabilities.serviceTaxonomy.costTrends.filter((item) =>
+    item.period === (current?.period ?? report.window.toPeriod)
+      && item.currency === (selected?.currency ?? currency)
+      && item.costBasis === (selected?.costBasis ?? costBasis));
+  const selectedUsage = capabilities.serviceUsage.groups.filter((item) =>
+    item.period === (current?.period ?? report.window.toPeriod));
+  const selectedRegions = capabilities.geography.regions.map((item) => ({
+    ...item,
+    cost: item.costs.find((cost) => cost.currency === (selected?.currency ?? currency)
+      && cost.costBasis === (selected?.costBasis ?? costBasis)) ?? null,
+  })).filter((item) => item.cost !== null || item.usage.length > 0);
+  const sutraAlertRules = capabilities.automation.sutraAlertRules;
+  const sutraReports = capabilities.automation.sutraScheduledCostReports;
   return (
     <section className={styles.curWorkspace} aria-label="Enterprise CUR2 trends intelligence">
       <StatusBanner
@@ -300,7 +335,8 @@ export function TrendsReport({
         <article><small>Month over month</small><strong>{current?.monthOverMonth.available ? formatCurRationalPercentExact(current.monthOverMonth.percent) : "Not available"}</strong><span>{monthOverMonthDetail}</span></article>
         <article><small>{rollingLabel}</small><strong>{current?.rollingComparison.available ? formatCurRationalPercentExact(current.rollingComparison.percent) : "Not available"}</strong><span>{rollingDetail}</span></article>
         <article><small>Evidence coverage</small><strong>{report.summary.completePeriodCount}/{report.window.periodCount}</strong><span>{report.summary.sourceRowCount.toLocaleString("en-US")} accepted rows</span></article>
-        <article><small>Explainable signals</small><strong>{report.summary.signalCount}</strong><span>pinned thresholds · no forecast</span></article>
+        <article><small>Explainable signals</small><strong>{report.summary.signalCount}</strong><span>pinned review thresholds</span></article>
+        <article><small>Next-month Sutra estimate</small><strong>{selectedForecast?.available ? formatCurMicrosExact(selectedForecast.points[0]?.forecastMicros ?? null, selectedForecast.currency) : "Not available"}</strong><span>deterministic estimate · not QuickSight ML</span></article>
       </div>
       {selected === null ? <p className={styles.emptyNote}>No currency and cost-basis series is available.</p> : (
         <div className={styles.curGrid}>
@@ -335,12 +371,50 @@ export function TrendsReport({
         <div className={styles.curPanelHeading}><div><small>Pinned policy</small><h3>Signals requiring review</h3></div><span>Informational, not a forecast</span></div>
         {(current?.signals.length ?? 0) === 0 ? <p className={styles.emptyNote}>No pinned threshold was crossed for the selected current period.</p> : current?.signals.map((signal) => <article key={signal.code}><span>{signal.severity}</span><div><strong>{signal.code.replaceAll("_", " ")}</strong><p>{signal.explanation}</p><small>{formatCurRationalPercentExact(signal.observedPercent)} · {signal.baseline.replaceAll("_", " ")}</small></div></article>)}
       </section>
+      <div className={styles.curGrid}>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Evidence-derived outlook</small><h3>Three-month Sutra estimate</h3></div><span>Not a quote or statistical confidence interval</span></div>
+          {selectedForecast?.available ? <>
+            <p className={styles.curBoundaryNote}>Integer linear trend over {selectedForecast.trainingWindow.periodCount} contiguous complete periods ({selectedForecast.trainingWindow.fromPeriod} — {selectedForecast.trainingWindow.toPeriod}); the band is mean absolute residual, not statistical confidence.</p>
+            <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Sutra deterministic forecast evidence</caption><thead><tr><th>Period</th><th>Estimate</th><th>Residual band</th></tr></thead><tbody>{selectedForecast.points.map((point) => <tr key={point.period}><td>{point.period}</td><td><strong>{formatCurMicrosExact(point.forecastMicros, selectedForecast.currency)}</strong></td><td>{formatCurMicrosExact(point.lowerMicros, selectedForecast.currency)} — {formatCurMicrosExact(point.upperMicros, selectedForecast.currency)}</td></tr>)}</tbody></table></div>
+          </> : <p className={styles.emptyNote}>A Sutra estimate requires at least three contiguous complete periods for the selected currency and cost basis. {selectedForecast?.observedCompletePeriods ?? 0} are currently eligible.</p>}
+          <p className={styles.curBoundaryNote}>AWS QuickSight ML forecast is unavailable because provider forecast evidence is not ingested.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Active CUR2 taxonomy</small><h3>Service category cost trends</h3></div><span>{capabilities.serviceTaxonomy.state}</span></div>
+          {selectedTaxonomyCosts.length === 0 ? <p className={styles.emptyNote}>No service-category cost evidence is available for the selected period and cost basis.</p> : <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>CUR2 service taxonomy and cost</caption><thead><tr><th>Category</th><th>Service</th><th>Cost</th><th>Rows</th></tr></thead><tbody>{selectedTaxonomyCosts.slice(0, 20).map((item) => <tr key={JSON.stringify([item.period,item.category,item.subcategory,item.service,item.currency,item.costBasis])}><td><strong>{item.category}</strong><small>{item.subcategory ?? "No subcategory"}</small></td><td>{item.service}</td><td>{formatCurMicrosExact(item.totalMicros, item.currency)}</td><td>{item.rowCount}</td></tr>)}</tbody></table></div>}
+          <p className={styles.curBoundaryNote}>{capabilities.serviceTaxonomy.missingTaxonomyRowCount} rows lack provider taxonomy and remain excluded from taxonomy grouping.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Metered evidence by unit</small><h3>Service usage trends</h3></div><span>{capabilities.serviceUsage.state}</span></div>
+          {selectedUsage.length === 0 ? <p className={styles.emptyNote}>No metered quantity with a provider unit is available for the selected period.</p> : <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Exact CUR2 metered usage; unlike units are never combined</caption><thead><tr><th>Service</th><th>Usage type</th><th>Quantity</th><th>Rows</th></tr></thead><tbody>{selectedUsage.slice(0, 20).map((item) => <tr key={JSON.stringify([item.period,item.category,item.service,item.usageType,item.unit])}><td><strong>{item.service}</strong><small>{item.category ?? "Category unavailable"}</small></td><td>{item.usageType ?? "Not reported"}</td><td>{formatQuantityMicrosExact(item.usageAmountMicros, item.unit)}</td><td>{item.rowCount}</td></tr>)}</tbody></table></div>}
+          <p className={styles.curBoundaryNote}>{capabilities.serviceUsage.missingQuantityRowCount} rows lack quantity and {capabilities.serviceUsage.missingUnitRowCount} lack a usable unit.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Payer and usage directory</small><h3>Account identity evidence</h3></div><span>{capabilities.accounts.state}</span></div>
+          {capabilities.accounts.entries.length === 0 ? <p className={styles.emptyNote}>No account identity evidence is available.</p> : <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>CUR2 account identity fields</caption><thead><tr><th>Role</th><th>Account</th><th>Friendly name</th><th>Evidence</th></tr></thead><tbody>{capabilities.accounts.entries.slice(0, 20).map((item) => <tr key={`${item.role}:${item.accountId}`}><td>{item.role}</td><td>{item.accountId}</td><td>{item.friendlyName ?? "Unavailable"}</td><td>{item.nameState.replaceAll("_", " ")}</td></tr>)}</tbody></table></div>}
+          <p className={styles.curBoundaryNote}>Friendly names are CUR2 fields only. AWS Organizations API evidence is not available and conflicting names are never resolved by inference.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Region evidence</small><h3>Geographic cost and usage</h3></div><span>{capabilities.geography.state}</span></div>
+          {selectedRegions.length === 0 ? <p className={styles.emptyNote}>No provider Region evidence is available for this selection.</p> : <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>CUR2 Region cost and unit-separated usage</caption><thead><tr><th>Region</th><th>Cost</th><th>Usage</th></tr></thead><tbody>{selectedRegions.slice(0, 20).map((item) => <tr key={item.region}><td><strong>{item.region}</strong></td><td>{item.cost === null ? "Not available" : formatCurMicrosExact(item.cost.totalMicros, item.cost.currency)}</td><td>{item.usage.length === 0 ? "Not available" : item.usage.map((usage) => formatQuantityMicrosExact(usage.usageAmountMicros, usage.unit)).join(" · ")}</td></tr>)}</tbody></table></div>}
+          <p className={styles.curBoundaryNote}>The official geographic map is unavailable because authoritative Region coordinates are not ingested; Sutra does not infer coordinates.</p>
+        </article>
+        <article className={styles.curPanel}>
+          <div className={styles.curPanelHeading}><div><small>Delivery and review controls</small><h3>Automation status</h3></div><span>Tenant scoped</span></div>
+          <div className={styles.curKpis}>
+            <article><small>Sutra alert rules</small><strong>{sutraAlertRules.available ? `${sutraAlertRules.enabledCount}/${sutraAlertRules.configuredCount}` : "Unavailable"}</strong><span>enabled / configured</span></article>
+            <article><small>Sutra scheduled reports</small><strong>{sutraReports.available ? `${sutraReports.enabledCount}/${sutraReports.configuredCount}` : "Unavailable"}</strong><span>enabled / configured for this connection</span></article>
+          </div>
+          <p className={styles.curBoundaryNote}>AWS QuickSight threshold alerts and scheduled delivery are unavailable because provider configuration evidence is not ingested. Sutra automation is shown separately and is not claimed as QuickSight parity.</p>
+        </article>
+      </div>
       <details className={styles.curEvidenceDrawer}>
         <summary>Evidence, lineage, formulas, and parity limits</summary>
         <div className={styles.curEvidenceGrid}>
           <dl><div><dt>Connection</dt><dd>{report.tenant.connectionId}</dd></div><div><dt>Export</dt><dd>{report.tenant.exportName}</dd></div><div><dt>Evaluated</dt><dd>{new Date(report.evaluatedAtIso).toLocaleString()}</dd></div><div><dt>Active generations</dt><dd>{report.summary.activeGenerationCount}</dd></div></dl>
           <div><strong>Explainable signal policy</strong><ul><li>{report.signalPolicy.formulas.momAbsolutePercentChange}</li><li>{report.signalPolicy.formulas.trailingBaselineDeviation}</li></ul></div>
-          <div><strong>Official parity boundary</strong><ul><li>Forecast is withheld: {report.forecast.reason.replaceAll("_", " ").toLowerCase()}.</li><li>QuickSight threshold alerts and scheduled report delivery are not connected to this view.</li><li>Service-category taxonomy, payer/friendly account names, and a geographic usage map need authoritative source inputs.</li></ul></div>
+          <div><strong>Official parity boundary</strong><ul><li>Core AWS ML forecast remains withheld: {report.forecast.reason.replaceAll("_", " ").toLowerCase()}; the separately labelled Sutra estimate is deterministic.</li><li>QuickSight threshold alerts and scheduled report delivery are not connected to this view.</li><li>CUR2 taxonomy, usage, account names, and Region evidence are shown with completeness states; AWS Organizations identity and an authoritative geographic map remain unavailable.</li></ul></div>
         </div>
         <div className={styles.curTableWrap} tabIndex={0}><table className={styles.curTable}><caption>Immutable billing generation evidence by trends period</caption><thead><tr><th>Period</th><th>State</th><th>Generation</th><th>Manifest</th><th>Rows</th><th>Committed</th></tr></thead><tbody>{report.periods.map((period) => <tr key={period.period}><td>{period.period}</td><td><strong>{period.state}</strong><small>{period.stateReasons.join(", ")}</small></td><td>{period.generationId ?? "Not available"}</td><td>{period.lineage?.manifestSha256 ?? "Not available"}</td><td>{period.rowCount ?? "Not available"}</td><td>{period.lineage === null ? "Not available" : new Date(period.lineage.committedAtIso).toLocaleString()}</td></tr>)}</tbody></table></div>
       </details>

@@ -75,6 +75,8 @@ test("Trends GET is an exact bounded immutable-active-CUR2 route", () => {
     /activeSourceFormat === "aws-cur"[\s\S]*activeSourceVersion === "2\.0"/u,
   );
   assert.match(trendsRoute, /buildFinopsTrendsIntelligence\(\{/u);
+  assert.match(trendsRoute, /buildFinopsTrendsCapabilityClosure\(\{/u);
+  assert.match(trendsRoute, /trendsAutomationStatus\(/u);
   assert.match(trendsRoute, /loadKind: "UNCLASSIFIED"/u);
   assert.match(trendsRoute, /report: null,[\s\S]*sourceState: "waiting"/u);
   assert.match(trendsRoute, /sourceState: "source_incomplete"/u);
@@ -185,7 +187,15 @@ test("Trends visual exposes bounded period comparisons, drilldowns, export and l
   }
   assert.match(panel, /Evidence, lineage, formulas, and parity limits/u);
   assert.match(panel, /QuickSight threshold alerts/u);
-  assert.match(panel, /geographic usage map need authoritative source inputs/u);
+  assert.match(panel, /Three-month Sutra estimate/u);
+  assert.match(panel, /Service category cost trends/u);
+  assert.match(panel, /Service usage trends/u);
+  assert.match(panel, /Account identity evidence/u);
+  assert.match(panel, /Geographic cost and usage/u);
+  assert.match(panel, /Automation status/u);
+  assert.match(panel, /AWS Organizations API evidence is not available/u);
+  assert.match(panel, /authoritative Region coordinates are not ingested/u);
+  assert.match(panel, /Sutra automation is shown separately/u);
   assert.match(panel, /not AWS Cost Anomaly Detection findings/u);
   assert.match(panel, /tabIndex=\{0\}/u);
   assert.match(css, /\.curDimensionTabs button:focus-visible/u);
@@ -325,6 +335,84 @@ test("Trends report server-renders exact controls, contributors and lineage", as
         available: false,
         reason: "NOT_PRODUCED_EVIDENCE_HONEST_TRENDS_ONLY",
       },
+      capabilities: {
+        schema: "sutra.finops-trends-capability-closure.v1",
+        forecast: {
+          provider: {
+            available: false,
+            reason: "AWS_QUICKSIGHT_ML_FORECAST_EVIDENCE_NOT_INGESTED",
+          },
+          sutra: [{
+            available: false,
+            currency: "USD",
+            costBasis: "unblended",
+            reason: "INSUFFICIENT_CONTIGUOUS_COMPLETE_HISTORY",
+            observedCompletePeriods: 2,
+            minimumRequired: 3,
+          }],
+        },
+        serviceTaxonomy: {
+          state: "COMPLETE",
+          evidenceBasis: "ACTIVE_CUR2_SERVICE_CATEGORY_FIELDS",
+          missingTaxonomyRowCount: 0,
+          groups: [{ category: "Compute", subcategory: "Virtual machines", services: ["AmazonEC2"] }],
+          costTrends: [{
+            period: "2026-06",
+            category: "Compute",
+            subcategory: "Virtual machines",
+            service: "AmazonEC2",
+            currency: "USD",
+            costBasis: "unblended",
+            totalMicros: "125000000",
+            rowCount: 1,
+          }],
+        },
+        serviceUsage: {
+          state: "COMPLETE",
+          evidenceBasis: "ACTIVE_CUR2_METERED_QUANTITY_AND_UNIT",
+          missingQuantityRowCount: 0,
+          missingUnitRowCount: 0,
+          groups: [{
+            period: "2026-06",
+            category: "Compute",
+            service: "AmazonEC2",
+            usageType: "BoxUsage:m7g.large",
+            unit: "Hrs",
+            usageAmountMicros: "24000000",
+            rowCount: 1,
+          }],
+        },
+        accounts: {
+          state: "COMPLETE",
+          evidenceBasis: "ACTIVE_CUR2_ACCOUNT_NAME_FIELDS_NOT_ORGANIZATIONS_API",
+          organizationsApiEvidenceAvailable: false,
+          missingPayerAccountIdRowCount: 0,
+          missingNameRowCount: 0,
+          entries: [{
+            role: "USAGE",
+            accountId: "123456789012",
+            friendlyName: "Production",
+            nameState: "CUR2_FIELD",
+          }],
+        },
+        geography: {
+          state: "COMPLETE",
+          evidenceBasis: "ACTIVE_CUR2_REGION_COST_AND_METERED_USAGE",
+          map: { available: false, reason: "AUTHORITATIVE_REGION_COORDINATES_NOT_INGESTED" },
+          missingRegionRowCount: 0,
+          regions: [{
+            region: "us-east-1",
+            costs: [{ currency: "USD", costBasis: "unblended", totalMicros: "125000000" }],
+            usage: [{ unit: "Hrs", usageAmountMicros: "24000000" }],
+          }],
+        },
+        automation: {
+          quickSightThresholdAlerts: { available: false, reason: "AWS_QUICKSIGHT_ALERT_EVIDENCE_NOT_INGESTED" },
+          quickSightScheduledDelivery: { available: false, reason: "AWS_QUICKSIGHT_SCHEDULE_EVIDENCE_NOT_INGESTED" },
+          sutraAlertRules: { available: true, configuredCount: 2, enabledCount: 1, reason: "SUTRA_TENANT_SCOPED_RUNTIME" },
+          sutraScheduledCostReports: { available: true, configuredCount: 1, enabledCount: 1, reason: "SUTRA_TENANT_SCOPED_RUNTIME" },
+        },
+      },
       signalPolicy: {
         momAbsolutePercentThreshold: 20,
         trailingBaselineMonths: 3,
@@ -351,6 +439,12 @@ test("Trends report server-renders exact controls, contributors and lineage", as
     assert.match(markup, /Enterprise cost trends/u);
     assert.match(markup, /Export evidence CSV/u);
     assert.match(markup, /AmazonEC2/u);
+    assert.match(markup, /Service category cost trends/u);
+    assert.match(markup, /24 Hrs/u);
+    assert.match(markup, /Production/u);
+    assert.match(markup, /us-east-1/u);
+    assert.match(markup, /Sutra scheduled reports/u);
+    assert.match(markup, /AWS QuickSight ML forecast is unavailable/u);
     assert.match(markup, /Exact movement crossed the pinned review threshold/u);
     assert.match(markup, /Evidence, lineage, formulas, and parity limits/u);
     assert.match(markup, new RegExp(lineage.manifestSha256, "u"));

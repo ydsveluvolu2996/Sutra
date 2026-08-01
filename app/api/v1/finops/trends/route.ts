@@ -3,6 +3,8 @@ import {
   type FinopsActiveBillingDataset,
   type FinopsActiveBillingPartition,
 } from "../../../../../db/finops-active-billing-query-repository";
+import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
+import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
@@ -16,6 +18,10 @@ import {
   FINOPS_TRENDS_INTELLIGENCE_BOUNDS,
   buildFinopsTrendsIntelligence,
 } from "../../../../../lib/finops-trends-intelligence";
+import {
+  buildFinopsTrendsCapabilityClosure,
+  type FinopsTrendsAutomationStatus,
+} from "../../../../../lib/finops-trends-capability-closure";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -176,6 +182,42 @@ function availableCostBases(dataset: FinopsActiveBillingDataset): FinopsCostBasi
     dataset.rows.every((row) => valueFor(basis, row) !== null));
 }
 
+async function trendsAutomationStatus(scope: {
+  readonly orgId: string;
+  readonly customerId: string;
+}, connectionId: string): Promise<{
+  readonly alertRules: FinopsTrendsAutomationStatus;
+  readonly scheduledReports: FinopsTrendsAutomationStatus;
+}> {
+  const [rules, reports] = await Promise.allSettled([
+    new AlertRuleRepository().list(scope),
+    new FinopsScheduledReportRepository().list(scope),
+  ]);
+  const unavailable: FinopsTrendsAutomationStatus = {
+    available: false,
+    configuredCount: null,
+    enabledCount: null,
+    reason: "RUNTIME_STATUS_UNAVAILABLE",
+  };
+  const connectionReports = reports.status === "fulfilled"
+    ? reports.value.filter((report) => report.connectionId === connectionId)
+    : [];
+  return {
+    alertRules: rules.status === "fulfilled" ? {
+      available: true,
+      configuredCount: rules.value.length,
+      enabledCount: rules.value.filter((rule) => rule.enabled).length,
+      reason: "SUTRA_TENANT_SCOPED_RUNTIME",
+    } : unavailable,
+    scheduledReports: reports.status === "fulfilled" ? {
+      available: true,
+      configuredCount: connectionReports.length,
+      enabledCount: connectionReports.filter((report) => report.enabled).length,
+      reason: "SUTRA_TENANT_SCOPED_RUNTIME",
+    } : unavailable,
+  };
+}
+
 export async function GET(request: Request): Promise<Response> {
   try {
     const query = parseQuery(request);
@@ -270,7 +312,7 @@ export async function GET(request: Request): Promise<Response> {
       });
     }
     const evaluatedAtIso = new Date().toISOString();
-    const report = buildFinopsTrendsIntelligence({
+    const coreReport = buildFinopsTrendsIntelligence({
       tenant: {
         organizationId: authenticated.subject.orgId,
         customerId: connection.customerId,
@@ -312,6 +354,38 @@ export async function GET(request: Request): Promise<Response> {
         contributorLimit: query.contributorLimit,
       },
     });
+    const report = coreReport.ok ? {
+      ...coreReport,
+      capabilities: buildFinopsTrendsCapabilityClosure({
+        report: coreReport,
+        periods: datasets.map((dataset) => ({
+          scope: dataset.scope,
+          evidence: {
+            sourceEvidenceId: `active-cur2:${dataset.evidence.activeManifestSha256}`,
+            manifestSha256: dataset.evidence.activeManifestSha256,
+            sourceUpdatedAtIso: dataset.evidence.activeSourceUpdatedAtIso,
+            observedAtIso: dataset.evidence.activeObservedAtIso,
+            committedAtIso: dataset.evidence.activeCommittedAtIso,
+            activatedAtIso: dataset.evidence.activeCommittedAtIso,
+            active: true,
+            immutable: true,
+            reconciliationState: "RECONCILED",
+            collectionState: dataset.evidence.rejectedRows === 0 ? "COMPLETE" : "PARTIAL",
+            rowsExhausted: true,
+            reconciledRowCount: dataset.evidence.acceptedRows,
+            rejectedRowCount: dataset.evidence.rejectedRows,
+            availableCostBases: availableCostBases(dataset),
+            loadKind: "UNCLASSIFIED",
+            supersededGenerationId: null,
+          },
+          rows: dataset.rows,
+        })),
+        automation: await trendsAutomationStatus({
+          orgId: authenticated.subject.orgId,
+          customerId: connection.customerId,
+        }, connection.id),
+      }),
+    } : coreReport;
     return jsonResponse({
       connectionId: query.connectionId,
       selectedWindow: window,
