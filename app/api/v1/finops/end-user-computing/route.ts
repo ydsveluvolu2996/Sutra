@@ -6,6 +6,8 @@ import {
   type EndUserComputingDashboardQuery,
   type EndUserComputingService,
 } from "../../../../../lib/finops-end-user-computing";
+import { END_USER_COMPUTING_OFFICIAL_DEFINITION } from "../../../../../lib/finops-end-user-computing-official-definition";
+import { END_USER_COMPUTING_RUNTIME_BINDING } from "../../../../../lib/finops-end-user-computing-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -68,7 +70,9 @@ export async function GET(request: Request): Promise<Response> {
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null,
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
+      collection: END_USER_COMPUTING_RUNTIME_BINDING,
+      officialDefinition: END_USER_COMPUTING_OFFICIAL_DEFINITION,
+      filterOptions: { services: ["WORKSPACES", "APPSTREAM"], accountIds: [], regions: [] },
     });
     const dashboard = buildEndUserComputingDashboard(selected.snapshot, parsed.query);
     const through = dataThrough(selected.snapshot);
@@ -84,7 +88,9 @@ export async function GET(request: Request): Promise<Response> {
       evidence: { generationId: selected.generationId, activeGenerationId: active?.generationId ?? null,
         latestGenerationId: latest?.generationId ?? null, contentSha256: selected.contentSha256,
         sourceCaptureId: selected.snapshot.captureId, newerIncomplete },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
+      collection: END_USER_COMPUTING_RUNTIME_BINDING,
+      officialDefinition: END_USER_COMPUTING_OFFICIAL_DEFINITION,
+      filterOptions: { services: ["WORKSPACES", "APPSTREAM"], accountIds: selected.snapshot.accountIds, regions: selected.snapshot.regions },
       privacy: { userIdentifiersStored: false, sessionIdentifiersStored: false, instanceIdentifiersStored: false, networkAddressesStored: false },
       unsupportedOfficialViews: [
         "WorkSpaces protocol and operating-system dimensions are not present in the current privacy-minimized collector contract.",

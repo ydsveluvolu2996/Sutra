@@ -1,24 +1,31 @@
 # ADV-11 — AWS End User Computing
 
-Status: **PARTIAL_PIPELINE (local vertical)**. This change adds a permanent-job
-contract, immutable accepted-head persistence, authenticated same-tenant API,
-and a native accessible dashboard. It does not claim a deployed AWS adapter or
-live customer evidence.
+Status: **PARTIAL_PIPELINE (local vertical)**. This vertical has a permanent-job
+contract, failure-isolated scheduler facade, immutable accepted-head
+persistence, authenticated same-tenant API, and a native accessible dashboard.
+It does not claim a deployed AWS adapter or live customer evidence.
 
 ## Official dashboard coverage
 
+The exact pinned AWS CID definition at commit
+`f9e36d88c47709f10e8fa784ad11d5cc0e728021` contains 7 sheets, 82 visuals,
+and 24 controls. The complete sheet/control/visual title inventory and local
+mapping is recorded in
+[`ADV-11-official-definition-audit.md`](ADV-11-official-definition-audit.md).
+
 | Official UI area | Local implementation | Honest gap |
 |---|---|---|
-| Three-month service/cost summary and top accounts | Current accepted CUR2 cost bases by service/currency, resource totals, billing lineage, and immutable snapshot history | Rolling three-month daily/monthly cost facts and cost-ranked accounts are not materialized yet |
-| WorkSpaces insights | Point-in-time state, running mode, connection state, bundles, account/Region resources, and canonical cost/usage evidence | Protocol and OS dimensions are absent from the accepted source contract and are not guessed |
+| Three-month service/cost summary and top accounts | Current accepted CUR2 cost bases by service/currency plus server-side linked-account and Region cost breakdowns, resource totals, billing lineage, and immutable snapshot history | Rolling three-month daily/monthly cost facts, payer aliases, and account names are not materialized yet |
+| WorkSpaces insights | Point-in-time state, running mode, connection state, and complete server-side account/Region/bundle aggregates independent of resource paging | Protocol and OS dimensions are absent from the accepted source contract and are not guessed |
 | WorkSpaces usage/logons | Connected/disconnected/unknown/missing and AlwaysOn review signals | Per-user last logon, low-use, never-used, and named-user views are excluded by the current privacy boundary |
 | Optional CloudWatch metrics | Observed/partial/stale/unknown evidence for every metric in the engine, with sample/window lineage retained | CPU, memory, disk, and uptime need approved AWS dimensions if not present in the current contract |
-| AppStream 2.0 overview | Fleet/stack inventory, capacity, aggregate active/pending/expired and connected/not-connected sessions, metrics, and costs | No user, session, instance, IP, or raw provider object crosses the broker |
+| WorkSpaces Applications summary | Fleet/stack inventory, capacity, aggregate active/pending/expired and connected/not-connected sessions, fleet type/state/account/Region aggregates, metrics, and costs | No user, session, instance, IP, or raw provider object crosses the broker |
 | Cost optimization opportunities | Clearly labeled review queues for AlwaysOn/disconnected WorkSpaces and stopped fleets | Signals are not savings estimates; authoritative recommendation ingestion remains separate |
 
 ## End-to-end assets
 
 - Pure fail-closed evidence engine: `lib/finops-end-user-computing.ts`
+- Pinned official inventory: `lib/finops-end-user-computing-official-definition.ts`
 - Credential-free signed-broker job contract:
   `lib/finops-end-user-computing-collector-job.ts`
 - Permanent server runtime/scheduler binding:
@@ -67,6 +74,17 @@ privacy-minimized EUC cost projection. When CUR2 is unavailable, the response
 must contain null billing evidence and no cost rows; unavailable is never
 converted into zero cost. Broker responses are verified over their exact bytes
 before parsing and normalized again before immutable publication.
+
+The scheduler validates the entire eligible boundary inventory before any
+enqueue, rejects duplicate connection scope, sorts deterministically, caps the
+tick at 10,000 connections, and uses bounded concurrency. A queue rejection for
+one connection does not suppress other tenant submissions; only aggregate
+submitted/rejected counts leave the detailed scheduler boundary. Discovery and
+queue adapter detail are reduced to generic runtime outcomes.
+
+Focused verification result: **22/22 tests passed**, with zero failures,
+skips, or cancellations. Full TypeScript checking, scoped ESLint, and exact
+diff hygiene also passed on this local tree.
 
 ## Activation gates still open
 

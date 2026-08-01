@@ -86,6 +86,26 @@ test("scheduler queues only a server-owned window and runtime replays immutable 
   assert.equal(brokerRequest.bounds.maximumPages, 20000);
 });
 
+test("scheduler validates the full inventory before enqueue and isolates per-connection queue rejection", async () => {
+  const second = { ...BOUNDARY, scope: { orgId: "org_euc_2", customerId: "customer_euc_2", connectionId: `conn_${"9".repeat(32)}` } };
+  const queued = [];
+  const result = await runtime.scheduleEndUserComputingCollectionsDetailed({ scheduledWindow: WINDOW,
+    loadEligibleBoundaries: async () => [second, BOUNDARY],
+    enqueue: async (value) => { queued.push(value); if (value.connectionId === second.scope.connectionId) throw new Error("tenant queue secret"); } });
+  assert.deepEqual(result, { schemaVersion: "sutra.end-user-computing-schedule-result.v1",
+    scheduledWindow: WINDOW, connectionCount: 2, submittedCount: 1, rejectedCount: 1 });
+  assert.deepEqual(queued.map((item) => item.connectionId), [second.scope.connectionId, BOUNDARY.scope.connectionId]);
+  assert.equal(JSON.stringify(result).includes("secret"), false);
+  let enqueueCalls = 0;
+  await assert.rejects(runtime.scheduleEndUserComputingCollectionsDetailed({ scheduledWindow: WINDOW,
+    loadEligibleBoundaries: async () => [BOUNDARY, { ...second, accountIds: ["attacker"] }],
+    enqueue: async () => { enqueueCalls += 1; } }), (error) => error.code === "SCOPE_REJECTED");
+  assert.equal(enqueueCalls, 0);
+  await assert.rejects(runtime.scheduleEndUserComputingCollectionsDetailed({ scheduledWindow: WINDOW,
+    loadEligibleBoundaries: async () => { throw new Error("database password"); },
+    enqueue: async () => undefined }), (error) => error.code === "INTERNAL_ERROR" && !error.message.includes("password"));
+});
+
 test("runtime rejects scope substitution and CUR2 lineage substitution before publication", async () => {
   let persisted = false;
   await assert.rejects(runtime.runEndUserComputingRuntimeJob(JOB, {
@@ -112,6 +132,19 @@ test("runtime rejects scope substitution and CUR2 lineage substitution before pu
     recordCapture: async () => { persisted = true; },
     attempts: { getAttempt: async () => null, recordAttempt: async (input) => ({ ...input }) },
   }), (error) => error.code === "CUR2_LINEAGE_REJECTED");
+});
+
+test("runtime accepts only the scheduler's exact five-attempt job contract", async () => {
+  const dependencies = {
+    loadRuntimeContext: async () => { throw new Error("must not load"); },
+    broker: { collect: async () => { throw new Error("must not collect"); } },
+    recordCapture: async () => { throw new Error("must not persist"); },
+    attempts: { getAttempt: async () => null, recordAttempt: async () => { throw new Error("must not record"); } },
+  };
+  await assert.rejects(runtime.runEndUserComputingRuntimeJob({ ...JOB, maxAttempts: 4 }, dependencies),
+    (error) => error.code === "INVALID_JOB");
+  await assert.rejects(runtime.runEndUserComputingRuntimeJob({ ...JOB, attempt: 6 }, dependencies),
+    (error) => error.code === "INVALID_JOB");
 });
 
 function keys() {
@@ -156,6 +189,7 @@ test("privacy flags cannot be enabled and activation remains explicitly unavaila
   await assert.rejects(broker.collect({ ...request(), privacy: { ...request().privacy,
     includeSessionIdentifiers: true } }), (error) => error.code === "PRIVACY_REJECTED");
   assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.registeredInSharedRuntime, false);
+  assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.schedulerFailureIsolationImplemented, true);
   assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.activationReason, "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED");
 });
 

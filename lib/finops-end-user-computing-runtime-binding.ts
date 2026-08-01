@@ -112,6 +112,14 @@ export interface EndUserComputingRuntimeAttemptStore {
   }): Promise<EndUserComputingRuntimeAttempt>;
 }
 
+export interface EndUserComputingScheduleResult {
+  readonly schemaVersion: "sutra.end-user-computing-schedule-result.v1";
+  readonly scheduledWindow: string;
+  readonly connectionCount: number;
+  readonly submittedCount: number;
+  readonly rejectedCount: number;
+}
+
 export class EndUserComputingRuntimeError extends Error {
   public constructor(public readonly code: EndUserComputingRuntimeFailureCode | "INVALID_JOB") {
     super("End User Computing runtime collection failed");
@@ -182,7 +190,7 @@ function exactBilling(left: EndUserComputingBillingEvidence, right: EndUserCompu
 function parseJob(job: RunnableJob): string {
   if (job.kind !== END_USER_COMPUTING_DURABLE_JOB_KIND || job.customerId === null
     || job.connectionId === null || !JOB.test(job.id) || !Number.isSafeInteger(job.attempt)
-    || job.attempt < 1 || job.attempt > 25
+    || job.maxAttempts !== 5 || job.attempt < 1 || job.attempt > job.maxAttempts
     || typeof job.payload !== "object" || job.payload === null || Array.isArray(job.payload)) {
     throw new EndUserComputingRuntimeError("INVALID_JOB");
   }
@@ -197,24 +205,51 @@ function sanitize(error: unknown): EndUserComputingRuntimeFailureCode {
   return "INTERNAL_ERROR";
 }
 
-export async function scheduleEndUserComputingCollections(input: {
+export async function scheduleEndUserComputingCollectionsDetailed(input: {
   readonly scheduledWindow: string;
   readonly loadEligibleBoundaries: () => Promise<readonly EndUserComputingBoundary[]>;
   readonly enqueue: (input: { readonly orgId: string; readonly customerId: string; readonly connectionId: string; readonly kind: string; readonly payload: { readonly scheduledWindow: string }; readonly maxAttempts: 5; readonly idempotencyKey: string }) => Promise<unknown>;
-}): Promise<number> {
+}): Promise<EndUserComputingScheduleResult> {
   if (!validWindow(input.scheduledWindow)) throw new EndUserComputingRuntimeError("INVALID_JOB");
-  const boundaries = await input.loadEligibleBoundaries();
-  if (boundaries.length > 10_000) throw new EndUserComputingRuntimeError("SCOPE_REJECTED");
+  let received: readonly EndUserComputingBoundary[];
+  try { received = await input.loadEligibleBoundaries(); }
+  catch { throw new EndUserComputingRuntimeError("INTERNAL_ERROR"); }
+  if (!Array.isArray(received) || received.length > 10_000) throw new EndUserComputingRuntimeError("SCOPE_REJECTED");
+  const boundaries = [...received].sort((a, b) => `${a.scope.orgId}|${a.scope.customerId}|${a.scope.connectionId}`
+    .localeCompare(`${b.scope.orgId}|${b.scope.customerId}|${b.scope.connectionId}`));
   const seen = new Set<string>();
-  for (const boundary of [...boundaries].sort((a, b) => a.scope.connectionId.localeCompare(b.scope.connectionId))) {
-    if (!validBoundary(boundary) || seen.has(boundary.scope.connectionId)) throw new EndUserComputingRuntimeError("SCOPE_REJECTED");
-    seen.add(boundary.scope.connectionId);
-    await input.enqueue({ orgId: boundary.scope.orgId, customerId: boundary.scope.customerId,
-      connectionId: boundary.scope.connectionId, kind: END_USER_COMPUTING_DURABLE_JOB_KIND,
-      payload: { scheduledWindow: input.scheduledWindow }, maxAttempts: 5,
-      idempotencyKey: `euc:${boundary.scope.connectionId}:${input.scheduledWindow}` });
+  for (const boundary of boundaries) {
+    const key = boundary.scope.connectionId;
+    if (!validBoundary(boundary) || seen.has(key)) throw new EndUserComputingRuntimeError("SCOPE_REJECTED");
+    seen.add(key);
   }
-  return boundaries.length;
+  let cursor = 0;
+  let submittedCount = 0;
+  let rejectedCount = 0;
+  await Promise.all(Array.from({ length: Math.min(8, boundaries.length) }, async () => {
+    while (cursor < boundaries.length) {
+      const boundary = boundaries[cursor++]!;
+      try {
+        await input.enqueue({ orgId: boundary.scope.orgId, customerId: boundary.scope.customerId,
+          connectionId: boundary.scope.connectionId, kind: END_USER_COMPUTING_DURABLE_JOB_KIND,
+          payload: { scheduledWindow: input.scheduledWindow }, maxAttempts: 5,
+          idempotencyKey: `euc:${boundary.scope.connectionId}:${input.scheduledWindow}` });
+        submittedCount += 1;
+      } catch { rejectedCount += 1; }
+    }
+  }));
+  return Object.freeze({ schemaVersion: "sutra.end-user-computing-schedule-result.v1",
+    scheduledWindow: input.scheduledWindow, connectionCount: boundaries.length,
+    submittedCount, rejectedCount });
+}
+
+/** Compatibility surface for the existing scheduler caller. */
+export async function scheduleEndUserComputingCollections(
+  input: Parameters<typeof scheduleEndUserComputingCollectionsDetailed>[0],
+): Promise<number> {
+  const result = await scheduleEndUserComputingCollectionsDetailed(input);
+  if (result.rejectedCount > 0) throw new EndUserComputingRuntimeError("INTERNAL_ERROR");
+  return result.submittedCount;
 }
 
 export async function runEndUserComputingRuntimeJob(job: RunnableJob, dependencies: {
@@ -308,6 +343,15 @@ export function createEndUserComputingRuntimeHandler(dependencies: Parameters<ty
 }
 
 export const END_USER_COMPUTING_RUNTIME_BINDING = Object.freeze({
-  jobKind: END_USER_COMPUTING_DURABLE_JOB_KIND, cadence: END_USER_COMPUTING_SCHEDULER_CADENCE,
-  registeredInSharedRuntime: false, activationReason: END_USER_COMPUTING_RUNTIME_ACTIVATION_REASON,
+  schemaVersion: "sutra.end-user-computing-runtime-binding.v1",
+  jobKind: END_USER_COMPUTING_DURABLE_JOB_KIND,
+  cadence: END_USER_COMPUTING_SCHEDULER_CADENCE,
+  schedulerImplemented: true,
+  schedulerFailureIsolationImplemented: true,
+  handlerImplemented: true,
+  signedBrokerTransportImplemented: true,
+  immutableAttemptStoreImplemented: true,
+  registeredInSharedRuntime: false,
+  providerAdapterAvailable: false,
+  activationReason: END_USER_COMPUTING_RUNTIME_ACTIVATION_REASON,
 });

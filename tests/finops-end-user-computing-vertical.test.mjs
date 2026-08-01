@@ -50,7 +50,9 @@ test("EUC repository and API enforce normalized persistence and same-tenant read
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /getConnectionForOrg\(authenticated\.subject\.orgId/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
-  assert.match(route, /EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED/u);
+  assert.match(route, /END_USER_COMPUTING_RUNTIME_BINDING/u);
+  assert.match(route, /END_USER_COMPUTING_OFFICIAL_DEFINITION/u);
+  assert.match(route, /filterOptions/u);
   assert.match(route, /userIdentifiersStored: false, sessionIdentifiersStored: false/u);
   assert.doesNotMatch(route, /ALLOWED[^\n]*(?:user|session|ipAddress|clientIp)/u);
 });
@@ -75,7 +77,7 @@ test("EUC collector job pins exact reads, bounds, CUR2 and privacy exclusions", 
   }), (error) => error instanceof EndUserComputingCollectorJobError && !/must not persist/u.test(error.message));
 });
 
-test("native EUC report renders all six official areas with explicit privacy and source gaps", async () => {
+test("native EUC report renders the mapped official areas with explicit privacy and source gaps", async () => {
   const vite = await createServer({ root, configFile: false, logLevel: "silent", plugins: [react()], server: { middlewareMode: true } });
   try {
     const dashboardModule = await vite.ssrLoadModule("/app/costs/finops-end-user-computing-dashboard.tsx");
@@ -86,16 +88,21 @@ test("native EUC report renders all six official areas with explicit privacy and
       activity: { workspaceConnections: { connected: 0, disconnected: 1, unknown: 0, missing: 0 }, appStreamSessions: { active: 2, pending: 1, expired: 0, connected: 2, notConnected: 1 } },
       telemetry: [{ service: "WORKSPACES", metricName: "WORKSPACES_IN_SESSION_LATENCY", evidenceKind: "PERFORMANCE", evidenceState: "OBSERVED", observations: [] }],
       costViews: [{ service: "WORKSPACES", currency: "USD", lineCount: 1, totals: [{ basis: "net", totalMicros: "12000000", contributingLineCount: 1, missingLineCount: 0, coverage: "COMPLETE" }], usage: [], commitments: [] }],
+      dimensionViews: { workspacesByAccount: [{ value: "111122223333", count: 1 }], workspacesByRegion: [{ value: "us-east-1", count: 1 }], workspacesByRunningMode: [{ value: "ALWAYS_ON", count: 1 }], workspacesByBundle: [{ value: "wsb-12345678", bundleName: "Standard", count: 1 }], fleetsByAccount: [{ value: "111122223333", count: 1 }], fleetsByRegion: [{ value: "us-east-1", count: 1 }], fleetsByType: [{ value: "ON_DEMAND", count: 1 }], fleetsByState: [{ value: "RUNNING", count: 1 }] },
+      costBreakdowns: { byAccount: [{ service: "WORKSPACES", currency: "USD", value: "111122223333", lineCount: 1, displayTotal: { basis: "net", totalMicros: "12000000", coverage: "COMPLETE" }, totals: [] }], byRegion: [{ service: "WORKSPACES", currency: "USD", value: "us-east-1", lineCount: 1, displayTotal: { basis: "net", totalMicros: "12000000", coverage: "COMPLETE" }, totals: [] }] },
       resources: [{ accountId: "111122223333", region: "us-east-1", workspaceId: "ws-12345678", bundleId: "wsb-12345678", state: "AVAILABLE", runningMode: "ALWAYS_ON", computeType: "STANDARD", rootVolumeGib: 80, userVolumeGib: 50, observedAt: "2026-08-01T01:00:00.000Z", connection: { state: "DISCONNECTED", observedAt: "2026-08-01T01:00:00.000Z" } }], nextCursor: null,
       separation: { inventoryActivitySource: "AWS_CONTROL_PLANE", performanceSource: "CLOUDWATCH_ONLY", costSource: "ACTIVE_RECONCILED_CUR2_ONLY", crossSourceInference: false }, limitations: ["No cross-source inference."],
     };
     const report = { schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: `conn_${"a".repeat(32)}`, sourceState: "partial", dashboard,
       history: [{ generationId: `eucg_${"c".repeat(64)}`, sourceState: "PARTIAL", observedAtIso: "2026-08-01T01:00:00.000Z", workspaceCount: 1, fleetCount: 1, metricCount: 1, costLineCount: 1 }],
-      freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", ageHours: 1, staleAfterHours: 48 }, evidence: {}, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
+      freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", ageHours: 1, staleAfterHours: 48 }, evidence: {}, collection: { schemaVersion: "sutra.end-user-computing-runtime-binding.v1", jobKind: "finops.end-user-computing.collect", cadence: "rate(6 hours)", schedulerImplemented: true, schedulerFailureIsolationImplemented: true, handlerImplemented: true, signedBrokerTransportImplemented: true, immutableAttemptStoreImplemented: true, registeredInSharedRuntime: false, providerAdapterAvailable: false, activationReason: "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED" },
+      officialDefinition: { schemaVersion: "sutra.euc-official-definition-audit.v1", repository: "aws-solutions-library-samples/cloud-intelligence-dashboards-framework", commit: "f9e36d88c47709f10e8fa784ad11d5cc0e728021", path: "dashboards/euc/euc-dashboard.yaml", sourceUrl: "https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/euc/euc-dashboard.yaml", dashboardVersion: "v1.2.0", sheetCount: 7, visualCount: 82, controlCount: 24, sheets: [{ name: "Summary", visualCount: 28, controlCount: 5, localArea: "Service and cost summary", coverage: "EVIDENCE_BACKED" }] },
+      filterOptions: { services: ["WORKSPACES", "APPSTREAM"], accountIds: ["111122223333"], regions: ["us-east-1"] },
       privacy: { userIdentifiersStored: false }, unsupportedOfficialViews: ["Protocol unavailable"],
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.FinopsEndUserComputingReportView, { report, service: "ALL", onServiceChange: () => undefined }));
-    for (const text of ["Service and cost summary", "WorkSpaces insights", "WorkSpaces usage and logons", "Optional CloudWatch performance", "AppStream 2.0 overview", "Cost-optimization review candidates", "neither persisted nor returned", "not savings claims", "three-month", "Last logon", "Evidence, coverage"]) assert.match(html, new RegExp(text, "iu"));
-    assert.doesNotMatch(html, /sample|fixture|placeholder/iu);
+    for (const text of ["Pinned AWS CID definition coverage", "Official visuals", "Linked account ID", "Region", "Canonical cost by linked account", "WorkSpaces by running mode", "WorkSpaces by bundle", "Service and cost summary", "WorkSpaces insights", "WorkSpaces usage and logons", "Optional CloudWatch performance", "WorkSpaces Applications summary", "AppStream 2.0 provider evidence", "Fleets by type", "Cost-optimization review candidates", "neither persisted nor returned", "not savings claims", "three-month", "Last logon", "Evidence, coverage"]) assert.match(html, new RegExp(text, "iu"));
+    assert.doesNotMatch(html, /\bsample\b|fixture|placeholder/iu);
+    assert.match(html, /target="_blank" rel="noopener noreferrer"/u);
   } finally { await vite.close(); }
 });

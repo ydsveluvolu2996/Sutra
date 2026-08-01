@@ -1188,6 +1188,24 @@ export interface EndUserComputingCostView {
   }[];
 }
 
+export interface EndUserComputingDimensionCount {
+  readonly value: string;
+  readonly count: number;
+}
+
+export interface EndUserComputingCostBreakdown {
+  readonly service: EndUserComputingService;
+  readonly currency: string;
+  readonly value: string;
+  readonly lineCount: number;
+  readonly displayTotal: {
+    readonly basis: EndUserComputingCostBasis;
+    readonly totalMicros: string;
+    readonly coverage: EndUserComputingCostTotal["coverage"];
+  } | null;
+  readonly totals: readonly EndUserComputingCostTotal[];
+}
+
 export interface EndUserComputingDashboard {
   readonly schemaVersion: "sutra.end-user-computing-dashboard.v1";
   readonly state: EndUserComputingState;
@@ -1223,6 +1241,21 @@ export interface EndUserComputingDashboard {
     readonly observations: readonly EndUserComputingMetricObservation[];
   }[];
   readonly costViews: readonly EndUserComputingCostView[];
+  /** Complete server-side aggregates; independent of resource cursor paging. */
+  readonly dimensionViews: {
+    readonly workspacesByAccount: readonly EndUserComputingDimensionCount[];
+    readonly workspacesByRegion: readonly EndUserComputingDimensionCount[];
+    readonly workspacesByRunningMode: readonly EndUserComputingDimensionCount[];
+    readonly workspacesByBundle: readonly (EndUserComputingDimensionCount & { readonly bundleName: string | null })[];
+    readonly fleetsByAccount: readonly EndUserComputingDimensionCount[];
+    readonly fleetsByRegion: readonly EndUserComputingDimensionCount[];
+    readonly fleetsByType: readonly EndUserComputingDimensionCount[];
+    readonly fleetsByState: readonly EndUserComputingDimensionCount[];
+  };
+  readonly costBreakdowns: {
+    readonly byAccount: readonly EndUserComputingCostBreakdown[];
+    readonly byRegion: readonly EndUserComputingCostBreakdown[];
+  };
   readonly resources: readonly (EndUserComputingWorkspace | EndUserComputingAppStreamFleet | EndUserComputingAppStreamStack)[];
   readonly nextCursor: string | null;
   readonly separation: {
@@ -1287,6 +1320,58 @@ function costViews(lines: readonly EndUserComputingCostLine[]): readonly EndUser
   });
 }
 
+function dimensionCounts<T>(values: readonly T[], select: (value: T) => string): readonly EndUserComputingDimensionCount[] {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const key = select(value);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value));
+}
+
+function displayTotal(values: readonly EndUserComputingCostTotal[]): EndUserComputingCostBreakdown["displayTotal"] {
+  for (const basis of ["net", "amortized", "unblended", "contracted", "list", "public"] as const) {
+    const total = values.find((item) => item.basis === basis);
+    if (total?.totalMicros !== null && total !== undefined) {
+      return { basis, totalMicros: total.totalMicros, coverage: total.coverage };
+    }
+  }
+  return null;
+}
+
+function costBreakdowns(
+  lines: readonly EndUserComputingCostLine[],
+  select: (line: EndUserComputingCostLine) => string,
+): readonly EndUserComputingCostBreakdown[] {
+  const groups = new Map<string, EndUserComputingCostLine[]>();
+  for (const line of lines) {
+    const value = select(line);
+    const key = `${line.service}|${line.currency}|${value}`;
+    const group = groups.get(key) ?? [];
+    group.push(line);
+    groups.set(key, group);
+  }
+  return [...groups.entries()].map(([key, group]) => {
+    const [service, currency, value] = key.split("|") as [EndUserComputingService, string, string];
+    const values = totals(group);
+    return { service, currency, value, lineCount: group.length, displayTotal: displayTotal(values), totals: values };
+  }).sort((left, right) => {
+    const scope = `${left.service}|${left.currency}`.localeCompare(`${right.service}|${right.currency}`);
+    if (scope !== 0) return scope;
+    if (left.displayTotal !== null && right.displayTotal !== null
+      && left.displayTotal.basis === right.displayTotal.basis) {
+      const leftAmount = BigInt(left.displayTotal.totalMicros);
+      const rightAmount = BigInt(right.displayTotal.totalMicros);
+      if (leftAmount !== rightAmount) return leftAmount > rightAmount ? -1 : 1;
+    }
+    if (left.displayTotal === null && right.displayTotal !== null) return 1;
+    if (left.displayTotal !== null && right.displayTotal === null) return -1;
+    return left.value.localeCompare(right.value);
+  });
+}
+
 export function buildEndUserComputingDashboard(
   snapshot: EndUserComputingSnapshot,
   query?: EndUserComputingDashboardQuery,
@@ -1300,6 +1385,13 @@ export function buildEndUserComputingDashboard(
   const sessions = snapshot.appStreamSessions.filter((item) => included("APPSTREAM", item.accountId, item.region));
   const metrics = snapshot.metrics.filter((item) => included(item.service, item.accountId, item.region));
   const costs = snapshot.costs.filter((item) => included(item.service, item.accountId, item.region));
+  const bundleNames = new Map<string, string | null>();
+  for (const bundle of bundles) {
+    const current = bundleNames.get(bundle.bundleId);
+    bundleNames.set(bundle.bundleId, current === undefined || current === bundle.name ? bundle.name : null);
+  }
+  const workspaceBundles = dimensionCounts(workspaces, (item) => item.bundleId)
+    .map((item) => ({ ...item, bundleName: bundleNames.get(item.value) ?? null }));
   const allResources = [...workspaces, ...fleets, ...stacks].sort((left, right) => stable(left).localeCompare(stable(right)));
   const offset = parsed.cursor === "" ? 0 : Number(parsed.cursor.slice(3));
   if (!Number.isSafeInteger(offset) || offset > allResources.length) reject("INVALID_INPUT");
@@ -1343,7 +1435,22 @@ export function buildEndUserComputingDashboard(
       },
       appStreamSessions: sessions.reduce((sum, item) => ({ active: sum.active + item.active, pending: sum.pending + item.pending, expired: sum.expired + item.expired, connected: sum.connected + item.connected, notConnected: sum.notConnected + item.notConnected }), { active: 0, pending: 0, expired: 0, connected: 0, notConnected: 0 }),
     },
-    telemetry, costViews: costViews(costs), resources, nextCursor,
+    telemetry, costViews: costViews(costs),
+    dimensionViews: {
+      workspacesByAccount: dimensionCounts(workspaces, (item) => item.accountId),
+      workspacesByRegion: dimensionCounts(workspaces, (item) => item.region),
+      workspacesByRunningMode: dimensionCounts(workspaces, (item) => item.runningMode),
+      workspacesByBundle: workspaceBundles,
+      fleetsByAccount: dimensionCounts(fleets, (item) => item.accountId),
+      fleetsByRegion: dimensionCounts(fleets, (item) => item.region),
+      fleetsByType: dimensionCounts(fleets, (item) => item.fleetType),
+      fleetsByState: dimensionCounts(fleets, (item) => item.state),
+    },
+    costBreakdowns: {
+      byAccount: costBreakdowns(costs, (item) => item.accountId),
+      byRegion: costBreakdowns(costs, (item) => item.region),
+    },
+    resources, nextCursor,
     separation: { inventoryActivitySource: "AWS_CONTROL_PLANE", performanceSource: "CLOUDWATCH_ONLY", costSource: "ACTIVE_RECONCILED_CUR2_ONLY", crossSourceInference: false },
     limitations: [...snapshot.limitations, "Telemetry entries marked UNKNOWN have no authoritative observation and must render as unknown/partial, never as 0."],
   };

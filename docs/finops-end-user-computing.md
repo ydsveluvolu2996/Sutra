@@ -118,6 +118,21 @@ duplicate identities are deterministically collapsed; conflicting duplicates
 fail closed. Coverage counts must reconcile to the normalized account/Region
 records. Provider exception text is replaced by a bounded generic code.
 
+## Native dashboard projections
+
+The server builds complete account, Region, running-mode, bundle, fleet-type,
+and fleet-state counts before applying resource cursor paging. It also groups
+the active reconciled CUR2 projection by linked account and Region while
+retaining service, currency, cost basis, contributing/missing-line coverage,
+and line count. These aggregates power native bar/table visuals and never infer
+usage, performance, or savings from cost.
+
+The API returns server-owned service, account, and Region filter options. The
+UI sends only allowlisted values, and the engine validates them against the
+persisted boundary again. Billing period is displayed from the active CUR2
+lineage; it is not a selectable pseudo-history. The pinned upstream comparison
+is documented in `docs/finops-cid-evidence/ADV-11-official-definition-audit.md`.
+
 ## Production acceptance gates
 
 This source-only slice is locally implemented, but is not production-accepted
@@ -143,5 +158,5 @@ until all of these gates pass:
    stale evidence, CUR2 rows with incomplete cost bases, and adversarial
    cross-tenant/PII payloads.
 
-No IAM policy, broker implementation, persistence schema, route, UI, customer
-account, or live environment is changed by this source-only slice.
+No IAM policy, customer account, broker deployment, or live environment is
+changed by this local vertical.

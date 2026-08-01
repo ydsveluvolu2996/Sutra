@@ -346,6 +346,13 @@ test("normalizes inventory, aggregate activity, CloudWatch evidence, and reconci
     ?.totals.find((item) => item.basis === "net")?.totalMicros, null);
   assert.equal(dashboard.costViews.find((item) => item.service === "APPSTREAM")
     ?.commitments[0]?.commitmentClass, "SAVINGS_PLAN");
+  assert.deepEqual(dashboard.dimensionViews.workspacesByRunningMode, [{ value: "AUTO_STOP", count: 1 }]);
+  assert.deepEqual(dashboard.dimensionViews.workspacesByRegion, [{ value: REGION, count: 1 }]);
+  assert.deepEqual(dashboard.dimensionViews.workspacesByBundle, [{ value: BUNDLE_ID, count: 1, bundleName: "Standard" }]);
+  assert.deepEqual(dashboard.dimensionViews.fleetsByType, [{ value: "ON_DEMAND", count: 1 }]);
+  assert.equal(dashboard.costBreakdowns.byAccount.length, 2);
+  assert.equal(dashboard.costBreakdowns.byAccount.every((item) => item.value === ACCOUNT_ID), true);
+  assert.equal(dashboard.costBreakdowns.byRegion.every((item) => item.value === REGION), true);
   assert.equal(dashboard.separation.crossSourceInference, false);
 
   const missing = dashboard.telemetry.find((item) =>
