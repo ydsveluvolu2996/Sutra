@@ -34,6 +34,10 @@ test("route and UI expose honest source states and disabled activation", () => {
   }
   assert.match(route, /AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED/u);
   assert.match(route, /available: false/u);
+  assert.equal(route.match(/officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION/gu)?.length, 3);
+  assert.match(component, /Official Pricing Change Analysis definition coverage/u);
+  assert.match(component, /complete embedded definition/u);
+  assert.match(component, /envelope\?\.officialDefinition \?\? PRICING_CHANGE_OFFICIAL_DEFINITION/u);
   assert.doesNotMatch(route, /fixture|sample|placeholder|temporaryCredentials|roleArn|objectKey/iu);
   for (const label of [
     "Pricing Change Analysis filters", "All services", "All payer accounts",
@@ -52,6 +56,34 @@ test("Pricing Change layout is responsive, keyboard-visible, and uses a separate
   assert.match(css, /\.filters select:focus-visible/u);
   assert.match(css, /min-height: 44px/u);
   assert.match(css, /@media screen and \(max-width: 760px\)/u);
+  for (const selector of [".official", ".officialArtifacts", ".officialSheets", ".officialVisuals", ".officialControls"]) {
+    assert.match(css, new RegExp(selector.replace(".", "\\."), "u"));
+  }
+});
+
+test("Pricing Change public definition renders in the report-independent null-state panel", async () => {
+  const vite = await createServer({ root, configFile: false, logLevel: "silent", plugins: [react()], server: { middlewareMode: true } });
+  try {
+    const [dashboardModule, definitionModule] = await Promise.all([
+      vite.ssrLoadModule("/app/costs/finops-pricing-change-dashboard.tsx"),
+      vite.ssrLoadModule("/lib/finops-pricing-change-official-definition.ts"),
+    ]);
+    const markup = renderToStaticMarkup(createElement(
+      dashboardModule.PricingChangeOfficialDefinitionPanel,
+      { definition: definitionModule.PRICING_CHANGE_OFFICIAL_DEFINITION },
+    ));
+    assert.match(markup, /2 sheets · 11 upstream visuals audited/u);
+    assert.match(markup, /Total Cost Difference by Region - Service SKUs Impacted by Price Change/u);
+    assert.match(markup, /Cost Difference Last month/u);
+    assert.match(markup, /Product SKUs with rate changes \(Cost Type Cost\)/u);
+    assert.match(markup, /Notices/u);
+    assert.match(markup, /2919c040bd19/u);
+    assert.match(markup, /b8f3c3579f4c/u);
+    assert.match(markup, /server pinned/u);
+    assert.doesNotMatch(markup, /fixture|sample|placeholder/iu);
+  } finally {
+    await vite.close();
+  }
 });
 
 test("Pricing Change report actually renders exact comparison, drilldown, exclusions, and lineage", async () => {

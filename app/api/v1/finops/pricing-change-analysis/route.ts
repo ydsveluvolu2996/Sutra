@@ -11,6 +11,7 @@ import {
   type PricingChangeTenantBoundary,
 } from "../../../../../lib/finops-pricing-change-analysis";
 import { FinopsEvidenceReferenceSealer } from "../../../../../lib/finops-source-evidence-reference";
+import { PRICING_CHANGE_OFFICIAL_DEFINITION } from "../../../../../lib/finops-pricing-change-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -128,6 +129,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState,
+        officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report: null,
         evidence: null,
@@ -195,6 +197,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState: attemptState ?? sourceStateFor(report),
+        officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report,
         evidence: {
@@ -221,6 +224,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState: "failed",
+        officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report: null,
         evidence: {

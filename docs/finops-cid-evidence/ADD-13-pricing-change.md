@@ -1,5 +1,8 @@
 # ADD-13 — Pricing Change Analysis Dashboard
 
+Reviewed: **2026-08-01** against AWS Guidance and immutable AWS CID framework
+commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`.
+
 Status: **PARTIAL_PIPELINE**. A bounded exact-arithmetic engine, server-owned
 CUR2-to-catalog materialization job, immutable sealed-evidence metadata
 repository, authenticated same-tenant read API, and native responsive dashboard
@@ -28,6 +31,57 @@ public-catalog what-if and never an invoice, quote, forecast, discount, or
 savings claim:
 
 - [Calling AWS services and prices using AWS Price List](https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/price-changes.html)
+
+### Pinned public artifact inventory
+
+The pinned AWS CID framework publishes the complete QuickSight definition as a
+decoded YAML block scalar inside `dashboards/pca/pca.yaml`. It also embeds the
+SPICE dataset template and Athena view query, publishes a PCA changelog, and
+uses the shared CID plugin CloudFormation template. No standalone definition or
+dashboard-specific deployment template exists at this commit.
+
+| Published artifact | Pinned path / hash basis | SHA-256 |
+|---|---|---|
+| Manifest container | `dashboards/pca/pca.yaml`, raw bytes | `2919c040bd1913eddac949bfcf5aceb2df14b2e2d0dd28a9e3f399001dfa2ae8` |
+| Embedded QuickSight definition | `dashboards.PRICING CHANGE ANALYSIS.data`, exact decoded scalar bytes | `b8f3c3579f4c7fe9163b5b1a4399c8ca7e40c70ed0155c9312f95eacdfca40fd` |
+| Embedded SPICE dataset template | `datasets.pricing_changes.data`, recursively key-sorted canonical JSON | `dbf76e59436e60a4b855cace840d9c8823972b53ee344494b86aefab97fa3af4` |
+| Embedded Athena view | `views.pricing_changes.data`, exact decoded scalar bytes | `d8aa257b9655f94c2112042e57587914a7dceeb38b664209bb7591709634540f` |
+| PCA changelog | `changes/CHANGELOG-pca.md`, raw bytes | `8ef9302aa2f33a190c6ef84d7f069c79e99afb730cc25dd287e56193ca3122f8` |
+| Shared deployment template | `cfn-templates/cid-plugin.yml`, raw bytes | `b96a47e6b53418293ec7127d0a95f96f2ffdae2781cde2b2dffcabad926a713d` |
+
+Current AWS Guidance lists this dashboard as **Additional**, while the pinned
+manifest labels it `ADVANCED`. The manifest identifies dashboard version
+`v1.1.0`; the separate public changelog currently says `v1.0.1`. All four
+source values are retained without inventing a reconciliation.
+
+### Exact published QuickSight inventory
+
+| Sheet | Visual inventory | Control placements |
+|---|---|---|
+| Pricing Change Analysis | 10: 4 bar, 2 KPI, 1 line, 1 combo, 2 pivot | 1 parameter + 5 filter |
+| About | 1 insight (`Notices`) | 4 repeated cross-sheet filters |
+| **Total** | **2 sheets / 11 visuals** | **1 parameter + 9 filter = 10 placements** |
+
+The definition also proves 6 parameter declarations, 10 calculated fields, 8
+filter groups, 3 column configurations, and 1 dataset declaration. The SPICE
+dataset joins a 21-column `pricing_changes` physical table to the 2-column
+`account_map`, projects 25 logical columns, and depends on the embedded
+121-line Athena view and the shared account map.
+
+The exact main-sheet purposes are: Region and impacted-service-SKU cost
+difference; account-name and service impact; last-month difference; monthly
+pre/post-change cost; monthly payer/account drilldown; payer impact; service
+impact; two-months-ago difference; service/month summary; and SKU/rate-change
+detail. The published controls are Cost Type, Service Name, Linked Account
+Name, Linked Account ID, Payer Account ID, and Date Range. Sutra maps only
+service, linked-account ID and payer filters as supported; Date Range remains
+server-pinned, and friendly account name and Cost Type remain unavailable.
+
+These are exact definition objects, not claims of pixel or interaction parity.
+The upstream query detects historical billed-rate changes from CUR, whereas the
+unfinished Sutra engine compares two version-pinned public Price List files
+against held-constant CUR2 usage. Those methods are intentionally not presented
+as equivalent.
 
 ## Implemented local slice
 
@@ -59,12 +113,20 @@ savings claim:
   `connection:read`, opens the evidence pointer with full
   organization/customer/connection/source/generation AAD, independently reads
   the hash-bound managed object, and reruns the engine before returning values.
+  Every successful response state also includes the frozen official-source
+  definition audit.
 - `app/costs/finops-pricing-change-dashboard.tsx` and its dedicated CSS module
   provide complete/configuration/waiting/partial/stale/failed/empty states,
   service/payer/linked-account/Region/currency/direction filters, per-currency
   baseline/comparison visuals, exact group drilldown, exclusions, and immutable
-  Price List/CUR lineage. `bigint` is retained for monetary display and bar
-  proportions.
+  Price List/CUR lineage. The report-independent official-source panel renders
+  the exact artifacts, sheets, visual purposes, control placements and gaps in
+  both report-ready and report-null states. `bigint` is retained for monetary
+  display and bar proportions.
+- `lib/finops-pricing-change-official-definition.ts` freezes the pinned hashes,
+  exact object inventory, dataset/query boundaries, source-proven titles, and
+  per-purpose native coverage without filling unpublished or unavailable
+  behavior with zero.
 
 ## Evidence and privacy boundary
 
@@ -115,6 +177,8 @@ No state treats missing delivery as zero usage or zero impact.
 - Authenticated route, evidence rebinding, state/UI contract, responsive CSS,
   and actual SSR content:
   `tests/finops-pricing-change-route-ui-contract.test.mjs`
+- Pinned artifacts, exact QuickSight totals, source-proven purposes and dataset
+  boundaries: `tests/finops-pricing-change-official-definition.test.ts`
 
 ## Remaining production gates
 

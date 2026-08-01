@@ -7,6 +7,10 @@ import type {
   PricingChangeSnapshot,
 } from "../../lib/finops-pricing-change-analysis";
 import {
+  PRICING_CHANGE_OFFICIAL_DEFINITION,
+  type PricingChangeOfficialDefinition,
+} from "../../lib/finops-pricing-change-official-definition";
+import {
   FinopsCapabilityShell,
   type FinopsCapabilityEvidence,
   type FinopsCapabilityViewState,
@@ -20,6 +24,7 @@ export interface PricingChangeDashboardEnvelope {
   readonly connectionId: string;
   readonly source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE";
   readonly sourceState: SourceState;
+  readonly officialDefinition: PricingChangeOfficialDefinition;
   readonly latestAttemptStatus: string | null;
   readonly report: PricingChangeSnapshot | null;
   readonly evidence: {
@@ -61,6 +66,18 @@ function parseEnvelope(value: unknown, connectionId: string): PricingChangeDashb
     || !new Set<SourceState>([
       "configuration_required", "waiting", "partial", "stale", "failed", "empty", "complete",
     ]).has(value.sourceState as SourceState)
+    || !isRecord(value.officialDefinition)
+    || value.officialDefinition.schema !== PRICING_CHANGE_OFFICIAL_DEFINITION.schema
+    || !isRecord(value.officialDefinition.source)
+    || value.officialDefinition.source.commit !== PRICING_CHANGE_OFFICIAL_DEFINITION.source.commit
+    || !Array.isArray(value.officialDefinition.artifacts)
+    || !isRecord(value.officialDefinition.artifacts[0])
+    || value.officialDefinition.artifacts[0].sha256 !== PRICING_CHANGE_OFFICIAL_DEFINITION.artifacts[0].sha256
+    || !isRecord(value.officialDefinition.artifacts[1])
+    || value.officialDefinition.artifacts[1].sha256 !== PRICING_CHANGE_OFFICIAL_DEFINITION.artifacts[1].sha256
+    || !isRecord(value.officialDefinition.totals)
+    || value.officialDefinition.totals.sheets !== 2
+    || value.officialDefinition.totals.visuals !== 11
     || !isRecord(value.activation)
     || value.activation.available !== false
     || typeof value.activation.reason !== "string"
@@ -101,6 +118,53 @@ function percentage(value: string, maximum: bigint): string {
   const amount = BigInt(value);
   const absolute = amount < BigInt(0) ? -amount : amount;
   return `${(absolute * BigInt(100)) / maximum}%`;
+}
+
+export function PricingChangeOfficialDefinitionPanel({
+  definition,
+}: {
+  readonly definition: PricingChangeOfficialDefinition;
+}) {
+  return <section className={styles.official} aria-label="Official Pricing Change Analysis definition coverage">
+    <header className={styles.officialHeader}>
+      <div>
+        <small>AWS CID {definition.source.version} · complete embedded definition</small>
+        <h3>{definition.totals.sheets} sheets · {definition.totals.visuals} upstream visuals audited</h3>
+        <p>Manifest <code>{definition.artifacts[0].sha256.slice(0, 12)}…</code> · definition <code>{definition.artifacts[1].sha256.slice(0, 12)}…</code>. Counts come from the decoded public definition, never a screenshot.</p>
+      </div>
+      <dl>
+        <div><dt>Controls</dt><dd>{definition.totals.controlPlacements}</dd></div>
+        <div><dt>Parameters</dt><dd>{definition.totals.parameterDeclarations}</dd></div>
+        <div><dt>Calculated fields</dt><dd>{definition.totals.calculatedFields}</dd></div>
+        <div><dt>Filter groups</dt><dd>{definition.totals.filterGroups}</dd></div>
+      </dl>
+    </header>
+    <div className={styles.officialArtifacts} aria-label="Published Pricing Change Analysis artifacts">
+      {definition.artifacts.map((artifact) => <article key={artifact.kind}>
+        <strong>{artifact.kind.replaceAll("_", " ")}</strong>
+        <code>{artifact.sha256.slice(0, 16)}…</code>
+        <small>{artifact.hashBasis}</small>
+      </article>)}
+    </div>
+    <div className={styles.officialSheets}>
+      {definition.sheets.map((sheet) => <details key={sheet.id} open={sheet.name !== "About"}>
+        <summary><span><strong>{sheet.name}</strong><small>{sheet.visualCount} visual{sheet.visualCount === 1 ? "" : "s"} · {sheet.controls.length} control placements</small></span></summary>
+        <div className={styles.officialVisuals}>
+          {sheet.visuals.map((item) => <article key={item.id} data-coverage={item.coverage}>
+            <div><span>{item.type.replace("Visual", "")}</span><strong>{item.title}</strong></div>
+            <p>{item.nativeEvidence}</p>
+            <small><strong>Remaining:</strong> {item.remainingGap}</small>
+          </article>)}
+        </div>
+        <div className={styles.officialControls} aria-label={`${sheet.name} official controls`}>
+          {sheet.controls.map((item) => <span key={`${item.placement}:${item.type}:${item.title}`} data-state={item.nativeState}>
+            {item.title} · {item.placement} · {item.nativeState.toLocaleLowerCase().replace("_", " ")}
+          </span>)}
+        </div>
+      </details>)}
+    </div>
+    <p className={styles.officialDisclosure}>{definition.disclosures[2]}</p>
+  </section>;
 }
 
 export function FinopsPricingChangeReportView({ report }: { readonly report: PricingChangeSnapshot }) {
@@ -219,6 +283,7 @@ export function FinopsPricingChangeDashboard({ connectionId, dashboard, onOpenSh
   const copy = presentation(state);
   const envelope = request.envelope;
   return <FinopsCapabilityShell dashboard={dashboard} state={copy.view} stateTitle={copy.title} stateDetail={request.error ?? copy.detail} evidence={envelope === null ? null : shellEvidence(envelope)} actions={<><button className="button button-secondary" type="button" disabled={connectionId === null || request.loading} onClick={() => void load()}>Retry report</button><button className="button button-secondary" type="button" onClick={onOpenSharedAnalysis}>Open shared cost explorer</button><a className="button button-secondary" href={dashboard.documentationUrl} target="_blank" rel="noreferrer">AWS guidance</a></>}>
+    <PricingChangeOfficialDefinitionPanel definition={envelope?.officialDefinition ?? PRICING_CHANGE_OFFICIAL_DEFINITION} />
     {envelope?.report === null || envelope?.report === undefined ? null : <FinopsPricingChangeReportView report={envelope.report} />}
   </FinopsCapabilityShell>;
 }
