@@ -1,9 +1,11 @@
 # ADD-06 — Kubecost Containers Cost Allocation
 
 Status: **PARTIAL_PIPELINE (local vertical)**. The pure Kubecost/OpenCost engine
-is now backed by a signed versioned-export materialization contract, immutable
-accepted-head persistence, authenticated same-tenant API, and native UI. No
-exporter adapter or customer evidence is deployed by this change.
+is now backed by a permanent six-hour scheduler/handler contract, strict
+exact-byte Ed25519 broker transport, version-pinned export acceptance,
+immutable attempt and accepted-head persistence, authenticated same-tenant API,
+and native UI. No exporter adapter or customer evidence is deployed by this
+change.
 
 ## Official scope coverage
 
@@ -21,17 +23,42 @@ exporter adapter or customer evidence is deployed by this change.
 - Acceptance engine: `lib/finops-kubecost-allocation.ts`
 - Dashboard projection: `lib/finops-kubecost-dashboard.ts`
 - Materialization job: `lib/finops-kubecost-allocation-job.ts`
+- Permanent runtime binding: `lib/finops-kubecost-runtime-binding.ts`
+- Signed export broker: `lib/finops-kubecost-signed-export-broker.ts`
 - Repository: `db/finops-kubecost-allocation-repository.ts`
+- Runtime-attempt repository: `db/finops-kubecost-runtime-attempt-repository.ts`
 - SQLite 0097: `drizzle/0097_finops_kubecost_allocation.sql`
+- SQLite runtime attempts 0111: `drizzle/0111_finops_kubecost_runtime_attempts.sql`
 - PostgreSQL 0092: `postgres/migrations/0092_finops_kubecost_allocation.sql`
+- PostgreSQL runtime attempts 0106: `postgres/migrations/0106_finops_kubecost_runtime_attempts.sql`
 - API: `app/api/v1/finops/kubecost-allocation/route.ts`
 - Native UI: `app/costs/finops-kubecost-allocation-dashboard.tsx`
+- Focused runtime proof: `tests/finops-kubecost-runtime-binding.test.mjs`
 
-The job pins the tenant scope, exact bucket/prefix and expected bucket owner,
-read-only current/versioned S3 actions, conditional KMS decrypt action, query
-contract, bounds, active CUR2 generation, and 30-minute deadline. Exporter
-write permission is never included. Returned destination and full account,
-cluster, billing-period, CUR2-generation scope must exactly match the request.
+The durable job payload contains only its server-owned scheduled window. At
+execution time the handler reloads and validates the exact tenant, account,
+cluster, billing period, destination, expected bucket owner, optional CMK and
+active reconciled CUR2 evidence. Only attempts 1–5 with `maxAttempts=5` are
+accepted, and the enqueue idempotency identity includes encoded organization,
+customer, connection and window values. The reloaded scope, destination and
+CUR2 evidence are deep-cloned and frozen, including every array and currency
+total, before hashing or broker invocation. The request pins the read-only
+current and versioned S3 actions, conditional KMS decrypt action, query contract, bounds,
+and five-minute broker deadline. Exporter write permission is an explicit empty
+list. The deterministic request ID and immutable attempt ledger make a replay
+return the prior result without calling the broker or republishing a capture.
+
+The broker origin must be a credential-free HTTPS origin. Requests and exact
+response bytes are Ed25519 authenticated with nonce binding and bounded while
+streaming. Response request ID/body hash, broker key ID, destination, full
+scope, and active CUR2 digest must match before persistence. Provider details
+are reduced to a finite sanitized error vocabulary.
+
+A capture that otherwise qualifies for complete `READY` or `EMPTY` publication
+is rejected unless every S3 object has a non-null version ID. An ETag and object
+hash do not make a mutable current-key read immutable. The collector may still
+retain incomplete current-key evidence as non-complete history, but it cannot
+publish it as the accepted head through this permanent runtime.
 
 Snapshots are content-addressed and rebound to tenant, connection, partition,
 billing period, active CUR2 generation, capture, state, data-through time, row
@@ -54,16 +81,23 @@ special idle/shared/external/unallocated/unmounted costs are not redistributed.
 
 ## Activation gates open
 
-1. Register SQLite 0097, PostgreSQL 0092, and the deploy migrator entry.
-2. Wire the dashboard component and catalog maturity.
-3. Deploy a signed exporter/ingest adapter for the exact tenant prefix.
-4. Bind it to an active reconciled CUR2 generation and schedule materialization.
+1. Register the durable job handler and six-hour scheduler in the shared worker
+   runtime. Until then activation reason is
+   `KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED`.
+2. Provision the managed HTTPS broker origin, client signing key, broker
+   verification key, nonce/replay store, and secret rotation process.
+3. Deploy its credential-owning read adapter for the exact tenant prefix and
+   keep the exporter writer on a separate identity.
+4. Bind it to an active reconciled CUR2 generation and validate S3 bucket-owner,
+   prefix, object-versioning, Object Lock/lifecycle where applicable, KMS and IAM
+   restrictions with real objects.
 5. Extend the normalized snapshot with retained hourly facts for trend views,
    CPU/RAM component cost, and EKS capacity/instance-type dimensions.
-6. Prove bucket-owner/prefix/version/KMS restrictions and writer separation.
-7. Run live multi-account/cluster acceptance across complete, empty, mismatch,
+6. Run live multi-account/cluster acceptance across complete, empty, mismatch,
    partial, stale, waiting, error, and cross-tenant attacks.
+7. Run the exact-tree G7 gate, controlled provider/two-tenant G8 acceptance,
+   reviewed GitHub/release G9 gate, and deployed-digest/rollback G10 acceptance.
 
 Until those gates pass, the API returns
-`KUBECOST_EXPORTER_INGEST_ADAPTER_NOT_DEPLOYED` and this vertical is not locally
-verified or live.
+`KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED` and this vertical is
+not locally verified or live.

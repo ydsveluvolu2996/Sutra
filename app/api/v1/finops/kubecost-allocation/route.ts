@@ -38,7 +38,7 @@ export async function GET(request: Request): Promise<Response> {
     const [active, latest, history] = await Promise.all([repository.getActiveSnapshot(scope), repository.getLatestSnapshot(scope), repository.listHistory(scope, 31)]);
     const selected = active ?? latest;
     if (selected === null) return jsonResponse({ schema: "sutra.finops-kubecost-dashboard.v1", connectionId: connection.id, sourceState: "configuration_required", dashboard: null,
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "KUBECOST_EXPORTER_INGEST_ADAPTER_NOT_DEPLOYED" } });
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED" } });
     const dashboard = buildKubecostDashboard(selected.snapshot, parsed.filters);
     const ageHours = Math.round(Math.max(0, (Date.now() - Date.parse(selected.snapshot.dataThroughAtIso)) / 3_600_000) * 100) / 100;
     const newerIncomplete = active !== null && latest !== null && active.generationId !== latest.generationId;
@@ -51,7 +51,7 @@ export async function GET(request: Request): Promise<Response> {
       evidence: { generationId: selected.generationId, activeGenerationId: active?.generationId ?? null, latestGenerationId: latest?.generationId ?? null,
         sourceCaptureId: selected.snapshot.captureId, contentSha256: selected.contentSha256, activeCur2GenerationId: selected.snapshot.scope.activeCur2GenerationId,
         billingPeriod: selected.snapshot.scope.billingPeriod, newerIncomplete },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "KUBECOST_EXPORTER_INGEST_ADAPTER_NOT_DEPLOYED" },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED" },
       disclosures: ["Kubecost is an allocation view only; do not add it to authoritative CUR2 spend.", "Currencies are never combined or converted.", "Showback is evidence attribution; chargeback posting is outside this read-only dashboard."],
     });
   } catch (error) { return errorResponse(error); }
