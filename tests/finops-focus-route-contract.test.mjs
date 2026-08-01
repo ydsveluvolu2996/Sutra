@@ -34,7 +34,7 @@ test("FOCUS GET is authenticated, same-tenant, and read-only", () => {
 test("FOCUS GET has an exact query allowlist and fixed history bounds", () => {
   assert.match(
     route,
-    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"fromPeriod",\s*"toPeriod",\s*\]\)/u,
+    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"providerSourceId",\s*"fromPeriod",\s*"toPeriod",\s*\]\)/u,
   );
   assert.match(route, /parameters\.keys\(\)/u);
   assert.match(route, /!ALLOWED_QUERY_PARAMETERS\.has\(key\)/u);
@@ -57,4 +57,20 @@ test("FOCUS GET cannot substitute CUR or FOCUS 1.0", () => {
   assert.doesNotMatch(route, /activeSourceVersion === "1\.0"/u);
   assert.doesNotMatch(route, /CostExplorer|fixture|simulated|sample/iu);
   assert.doesNotMatch(route, /sourceState: "ready"|source_incomplete/u);
+});
+
+test("FOCUS GET discovers only authorized provider sources and fails closed on unbound schemas", () => {
+  assert.match(route, /AzureCidRepository/u);
+  assert.match(route, /GcpCloudIntelligenceRepository/u);
+  assert.match(route, /assertSessionCapability\(authenticated, "connection:read", source\.scope\.customerId\)/u);
+  assert.match(route, /assertSessionCapability\(authenticated, "connection:read", source\.customerId\)/u);
+  assert.match(route, /source\.scope\.customerId !== connection\.customerId/u);
+  assert.match(route, /source\.customerId !== connection\.customerId/u);
+  assert.doesNotMatch(route, /parameters\.get\("(?:orgId|organizationId|customerId)"\)/u);
+  assert.match(route, /AZURE_FOCUS_1_0_NORMALIZED_BINDING_NOT_DEPLOYED/u);
+  assert.match(route, /AZURE_SOURCE_IS_NOT_FOCUS/u);
+  assert.match(route, /GCP_FOCUS_EXPORT_ADAPTER_NOT_DEPLOYED/u);
+  assert.match(route, /FOCUS_PROVIDER_SOURCE_NOT_FOUND/u);
+  assert.match(route, /substitutionAllowed: false/u);
+  assert.match(route, /tagTaxonomy: GOVERNED_TAG_TAXONOMY/u);
 });

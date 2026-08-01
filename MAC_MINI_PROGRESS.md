@@ -258,6 +258,18 @@ Next gate:
 | Release evidence | Source contract only; no image published or deployed |
 | Next gate | Wire the adapter/handler in the controlled provider environment after exact-tree local verification |
 
+### 2026-08-01 — Provider-neutral FOCUS analysis
+
+| Field | Evidence |
+|---|---|
+| Tracker row / gates | ADD-04 / local G1, G4 and G5 advanced; maturity remains `PARTIAL_PIPELINE` |
+| Delivery | FOCUS 1.0/1.0r2/1.1/1.2 provider-neutral contract; exact signed micros; immutable source provenance; same-customer Azure/GCP discovery; governed/provider/ungoverned tag taxonomy; denominator-safe effective discount rate; native selector and evidence visuals |
+| Security | Client tenant scope, cross-customer sources, duplicate/unbound rows, mixed-currency aggregation, schema substitution and unsupported discount denominators fail closed |
+| Focused verification | 19 native engine/neutral/route/render tests; full typecheck, touched lint and diff checks pass in the integrated tree |
+| Remaining gates | Deploy Azure/GCP FOCUS export adapters, reconcile controlled provider totals, then exact-tree, two-tenant and live acceptance |
+| Release evidence | Source slice only; no image published or deployed |
+| Next gate | Continue dashboard-by-dashboard production binding without weakening source honesty |
+
 ### 2026-08-01 — Trusted Advisor signed organization orchestration
 
 | Field | Evidence |

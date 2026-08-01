@@ -11,6 +11,7 @@ import type {
   FinopsActiveBillingScope,
 } from "../db/finops-active-billing-query-repository.ts";
 import type { CanonicalCurLine } from "./finops-cur.ts";
+import { buildProviderNeutralFocusReport, type FinopsFocusNeutralReport, type FinopsFocusTagTaxonomyPolicy } from "./finops-focus-neutral.ts";
 import { FINOPS_RECONCILIATION_CURRENCIES } from "./finops-reconciliation.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
@@ -44,6 +45,7 @@ export type FinopsFocusCoverage = "complete" | "partial" | "unavailable";
 export interface FinopsFocusDashboardInput {
   readonly scope: FinopsActiveBillingScope;
   readonly datasets: readonly FinopsActiveBillingDataset[];
+  readonly tagTaxonomy?: FinopsFocusTagTaxonomyPolicy | null;
 }
 
 export type FinopsFocusDashboardFailureCode =
@@ -177,6 +179,7 @@ export type FinopsFocusDashboardResult =
         readonly truncated: boolean;
         readonly rows: readonly FinopsFocusDrilldownRow[];
       };
+      readonly neutral: FinopsFocusNeutralReport;
       readonly invariants: readonly [
         "only_active_canonical_focus_1_2_is_accepted",
         "currencies_are_never_combined",
@@ -215,6 +218,10 @@ const FIELD_COVERAGE: readonly {
   { field: "BilledCost", requirement: "projection_required", value: (line) => line.amountMicros },
   { field: "BillingCurrency", requirement: "projection_required", value: (line) => line.currency },
   { field: "EffectiveCost", requirement: "optional", value: (line) => line.amortizedMicros },
+  { field: "ListCost", requirement: "optional", value: (line) => line.listCostMicros },
+  { field: "ContractedCost", requirement: "optional", value: (line) => line.contractedCostMicros },
+  { field: "ChargeClass", requirement: "optional", value: (line) => line.chargeClass },
+  { field: "Tags", requirement: "optional", value: (line) => Object.keys(line.tags).length === 0 ? null : line.tags },
   { field: "ProviderName", requirement: "optional", value: (line) => line.billingEntity },
   { field: "ServiceCategory", requirement: "optional", value: (line) => line.serviceCategory },
   { field: "RegionId", requirement: "optional", value: (line) => line.region },
@@ -560,6 +567,14 @@ export function buildFinopsFocusDashboard(
       coverage: coverage(presentLineCount, totalRows),
     };
   });
+  const neutralSourceId = (dataset: FinopsActiveBillingDataset) => `${input.scope.connectionId}:${dataset.scope.billingPeriod}`;
+  const neutralTags = (line: CanonicalCurLine) => { const tags = new Map(Object.entries(line.tags)); for (const [key, value] of Object.entries(line.costCategories)) { const normalized = `aws:cost-category:${key}`; if (!tags.has(normalized)) tags.set(normalized, value); } return [...tags].map(([key, value]) => ({ key, value })); };
+  const neutral = buildProviderNeutralFocusReport({
+    scope: { orgId: input.scope.orgId, customerId: input.scope.customerId },
+    sources: sortedDatasets.map((dataset) => ({ orgId: input.scope.orgId, customerId: input.scope.customerId, sourceId: neutralSourceId(dataset), provider: "AWS", focusVersion: "1.2", datasetName: dataset.evidence.activeSourceTable, generationId: dataset.scope.generationId, contentSha256: dataset.evidence.activeManifestSha256, collectedAt: dataset.evidence.activeCommittedAtIso, dataThroughAt: dataset.evidence.activeSourceUpdatedAtIso ?? dataset.evidence.activeObservedAtIso, normalizedSchema: "sutra.focus-neutral-line.v1" })),
+    rows: sortedDatasets.flatMap((dataset) => dataset.rows.map(({ line }: { readonly line: CanonicalCurLine }) => ({ sourceId: neutralSourceId(dataset), lineId: line.lineItemId, billingPeriod: dataset.scope.billingPeriod, billingCurrency: line.currency, billedCostMicros: line.amountMicros, effectiveCostMicros: line.amortizedMicros, listCostMicros: line.listCostMicros, contractedCostMicros: line.contractedCostMicros, providerName: line.billingEntity ?? "AWS", serviceName: line.service, chargeCategory: line.chargeCategory, chargeClass: line.chargeClass, chargeClassEvidence: "NOT_PROVIDED" as const, tags: neutralTags(line) }))),
+    taxonomy: input.tagTaxonomy ?? null,
+  });
 
   return {
     ok: true,
@@ -623,6 +638,7 @@ export function buildFinopsFocusDashboard(
         resourceId: line.resourceId,
       })),
     },
+    neutral,
     invariants: [
       "only_active_canonical_focus_1_2_is_accepted",
       "currencies_are_never_combined",

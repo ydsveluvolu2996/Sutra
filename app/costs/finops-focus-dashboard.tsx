@@ -21,6 +21,7 @@ interface AvailablePeriod {
   readonly generationId: string;
   readonly committedAtIso: string;
 }
+interface FocusProviderSource { readonly provider: "AWS" | "AZURE" | "GCP"; readonly sourceId: string; readonly focusVersion: string | null; readonly state: string; readonly selectable: boolean }
 
 interface FocusEnvelope {
   readonly connectionId: string;
@@ -30,8 +31,12 @@ interface FocusEnvelope {
   } | null;
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FocusReport | null;
+  readonly providerSources: readonly FocusProviderSource[];
+  readonly activation?: { readonly ready: boolean; readonly reason: string; readonly substitutionAllowed: false };
   readonly sourceState:
-    | "ready"
+    | "complete"
+    | "stale"
+    | "partial"
     | "configuration_required"
     | "waiting"
     | "empty"
@@ -102,10 +107,13 @@ function parseFocusEnvelope(body: unknown, connectionId: string): FocusEnvelope 
     !isRecord(body)
     || body.connectionId !== connectionId
     || !Array.isArray(body.availablePeriods)
+    || !Array.isArray(body.providerSources)
     || !("selectedWindow" in body)
     || !("report" in body)
     || ![
-      "ready",
+      "complete",
+      "stale",
+      "partial",
       "configuration_required",
       "waiting",
       "empty",
@@ -190,8 +198,8 @@ function statePresentation(
   if (envelope.sourceState === "configuration_required") {
     return {
       view: "configuration_required",
-      title: "Canonical FOCUS 1.2 delivery is not configured",
-      detail: "The connection has other billing evidence, but no active canonical FOCUS 1.2 generation. Sutra will not substitute CUR or FOCUS 1.0.",
+      title: "The selected provider FOCUS source is not ready",
+      detail: `Activation state: ${envelope.activation?.reason ?? "FOCUS_SOURCE_NOT_CONFIGURED"}. Sutra will not relabel another billing schema or substitute another provider.`,
     };
   }
   if (envelope.sourceState === "waiting") {
@@ -208,7 +216,7 @@ function statePresentation(
       detail: "The selected active FOCUS 1.2 history is empty; no spend, savings, or reconciliation value is inferred.",
     };
   }
-  if (envelope.sourceState === "source_incomplete") {
+  if (envelope.sourceState === "source_incomplete" || envelope.sourceState === "partial") {
     return {
       view: "partial",
       title: "FOCUS source evidence is partial",
@@ -224,6 +232,7 @@ function statePresentation(
       detail: "The API reported ready without a verified report payload.",
     };
   }
+  if (envelope.sourceState === "stale") return { view: "stale", title: "The selected FOCUS evidence is stale", detail: "The provider-reported data-through timestamp is outside the 48-hour freshness boundary." };
   const committedAt = envelope.report.evidence.periods
     .map(({ committedAtIso }) => Date.parse(committedAtIso))
     .filter(Number.isFinite)
@@ -283,7 +292,9 @@ function evidenceFor(report: FocusReport | null): FinopsCapabilityEvidence | nul
   };
 }
 
-function CurrencyKpis({ currency }: { readonly currency: FinopsFocusCurrencyReport }) {
+function percentFromBasisPoints(value: string | null): string { if (value === null || !INTEGER_MICROS.test(value)) return "Not available"; const amount=BigInt(value),negative=amount<BigInt(0),absolute=negative?-amount:amount;return `${negative?"−":""}${absolute/BigInt(100)}.${(absolute%BigInt(100)).toString().padStart(2,"0")}%`; }
+
+function CurrencyKpis({ currency, neutralCurrency }: { readonly currency: FinopsFocusCurrencyReport; readonly neutralCurrency: FocusReport["neutral"]["currencies"][number] | null }) {
   return (
     <div className={styles.focusKpis} aria-label={`${currency.currency} FOCUS key metrics`}>
       <article>
@@ -302,9 +313,9 @@ function CurrencyKpis({ currency }: { readonly currency: FinopsFocusCurrencyRepo
         <span>Current currency only</span>
       </article>
       <article>
-        <small>Dimension coverage</small>
-        <strong>{currency.dimensions.length}</strong>
-        <span>Bounded canonical dimensions</span>
+        <small>Effective discount rate</small>
+        <strong>{percentFromBasisPoints(neutralCurrency?.effectiveDiscountRate.basisPoints ?? null)}</strong>
+        <span>{neutralCurrency?.effectiveDiscountRate.reason.replaceAll("_", " ") ?? "No denominator evidence"}</span>
       </article>
     </div>
   );
@@ -331,6 +342,7 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
   }, BigInt(1));
   const drilldowns = report.drilldowns.rows.filter(({ currency }) =>
     currency === selectedCurrency?.currency);
+  const neutralCurrency = report.neutral.currencies.find(({ currency }) => currency === selectedCurrency?.currency) ?? null;
 
   return (
     <div className={styles.focusWorkspace} aria-label="FOCUS 1.2 cost projection">
@@ -358,7 +370,7 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
         <p className={styles.focusEmpty}>No accepted currency totals are available in this report.</p>
       ) : (
         <>
-          <CurrencyKpis currency={selectedCurrency} />
+          <CurrencyKpis currency={selectedCurrency} neutralCurrency={neutralCurrency} />
           <div className={styles.focusSplitGrid}>
             <section className={styles.focusPanel} aria-labelledby="focus-trend-heading">
               <header><div><small>Monthly evidence</small><h4 id="focus-trend-heading">{selectedCurrency.currency} billed-cost trend</h4></div><span>{trend.length} periods</span></header>
@@ -442,6 +454,12 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
             </div>
           </section>
 
+          <section className={styles.focusPanel} aria-labelledby="focus-taxonomy-heading">
+            <header><div><small>Governed organizational allocation</small><h4 id="focus-taxonomy-heading">Tag taxonomy</h4></div><span>{report.neutral.taxonomy.state} · {report.neutral.taxonomy.policyId ?? "no policy"}</span></header>
+            {neutralCurrency === null || neutralCurrency.tags.length === 0 ? <p className={styles.focusEmpty}>No governed or provider tag values are present for this currency.</p> : <div className={styles.focusTableWrap} tabIndex={0} role="region" aria-label="Scrollable governed FOCUS tag taxonomy"><table className={styles.focusTable}><caption>Governed FOCUS tag taxonomy allocation</caption><thead><tr><th>Classification</th><th>Taxonomy key</th><th>Value</th><th>Lines</th><th>Billed cost</th></tr></thead><tbody>{neutralCurrency.tags.map((tag) => <tr key={`${tag.classification}:${tag.key}:${tag.value}`}><td>{tag.classification.replaceAll("_", " ")}</td><th scope="row">{tag.label}<small>{tag.key}</small></th><td>{tag.value}</td><td>{tag.lineCount}</td><td>{formatFocusMicrosExact(tag.billedCostMicros, neutralCurrency.currency)}</td></tr>)}</tbody></table></div>}
+            <p className={styles.focusFootnote}>Only exact policy keys are governed. Provider-prefixed and ungoverned tags remain visibly separate.</p>
+          </section>
+
           <details className={styles.focusEvidenceDrawer}>
             <summary>Active generation evidence for all selected periods</summary>
             <div className={styles.focusTableWrap} tabIndex={0} role="region" aria-label="Scrollable FOCUS generation evidence table">
@@ -461,6 +479,7 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
               </table>
             </div>
             <p>{report.disclaimer}</p>
+            <p>Normalized source contract: {report.neutral.providers.join(", ")} · FOCUS {report.neutral.versions.join(", ")} · {report.neutral.sources.length} immutable period sources. Version and provider provenance are retained; currencies are never combined.</p>
           </details>
         </>
       )}
@@ -479,7 +498,10 @@ export function FinopsFocusDashboard({
   });
   const [fromPeriod, setFromPeriod] = useState("");
   const [toPeriod, setToPeriod] = useState("");
+  const [providerSourceId, setProviderSourceId] = useState(connectionId ?? "");
   const requestSequence = useRef(0);
+
+  useEffect(() => { const frame = window.requestAnimationFrame(() => setProviderSourceId(connectionId ?? "")); return () => window.cancelAnimationFrame(frame); }, [connectionId]);
 
   const load = useCallback(async (
     selectedFrom?: string,
@@ -492,6 +514,7 @@ export function FinopsFocusDashboard({
     if (requestSequence.current !== sequence) return;
     setRequestState({ status: "loading", connectionId });
     const parameters = new URLSearchParams({ connectionId });
+    if (providerSourceId !== "" && providerSourceId !== connectionId) parameters.set("providerSourceId", providerSourceId);
     if (selectedFrom !== undefined && selectedTo !== undefined) {
       parameters.set("fromPeriod", selectedFrom);
       parameters.set("toPeriod", selectedTo);
@@ -516,14 +539,14 @@ export function FinopsFocusDashboard({
           : "Sutra could not load the active FOCUS 1.2 report.",
       });
     }
-  }, [connectionId]);
+  }, [connectionId, providerSourceId]);
 
   useEffect(() => {
     requestSequence.current += 1;
     if (connectionId === null) return;
     const frame = window.requestAnimationFrame(() => void load());
     return () => window.cancelAnimationFrame(frame);
-  }, [connectionId, load]);
+  }, [connectionId, providerSourceId, load]);
 
   const presentation = statePresentation(connectionId, requestState);
   const envelope = requestState.status === "loaded"
@@ -534,13 +557,17 @@ export function FinopsFocusDashboard({
   const evidence = useMemo(() => evidenceFor(report), [report]);
   const periodOptions = envelope?.availablePeriods ?? [];
   const invalidWindow = fromPeriod === "" || toPeriod === "" || fromPeriod > toPeriod;
+  const providerSources = envelope?.providerSources ?? [];
+  const providerSelector = providerSources.length === 0 ? null : <label>FOCUS source<select value={providerSourceId || connectionId || ""} onChange={(event) => { setProviderSourceId(event.target.value); setFromPeriod(""); setToPeriod(""); }}>{providerSources.map((source) => <option key={source.sourceId} value={source.sourceId}>{source.provider} · FOCUS {source.focusVersion ?? "adapter pending"} · {source.state.replaceAll("_", " ")}</option>)}</select></label>;
   const actions = presentation.view === "configuration_required" ? (
     <>
+      {providerSelector}
       <a className="button button-secondary" href="/onboard">Configure AWS source</a>
       <a className="button button-secondary" href={dashboard.documentationUrl} rel="noreferrer" target="_blank">AWS guidance</a>
     </>
   ) : (
     <>
+      {providerSelector}
       <button className="button button-secondary" disabled={connectionId === null || requestState.status === "loading"} onClick={() => void load(fromPeriod || undefined, toPeriod || undefined)} type="button">Retry report</button>
       <button className="button button-secondary" onClick={onOpenSharedAnalysis} type="button">Open shared cost explorer</button>
       <a className="button button-secondary" href={dashboard.documentationUrl} rel="noreferrer" target="_blank">AWS guidance</a>

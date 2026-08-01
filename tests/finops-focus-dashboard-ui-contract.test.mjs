@@ -69,6 +69,12 @@ test("FOCUS visuals use exact money, bounded API output, and accessible controls
   assert.match(component, /role="img" aria-label=\{`\$\{selectedCurrency\.currency\} exact billed-cost trend`\}/u);
   assert.match(component, /Dimension analysis/u);
   assert.match(component, /Bounded billing-line drilldown/u);
+  assert.match(component, /Effective discount rate/u);
+  assert.match(component, /Tag taxonomy/u);
+  assert.match(component, /Only exact policy keys are governed/u);
+  assert.match(component, /Normalized source contract/u);
+  assert.match(component, /FOCUS source<select/u);
+  assert.match(component, /providerSourceId/u);
   assert.match(component, /Schema coverage/u);
   assert.match(component, /Active generation evidence for all selected periods/u);
   assert.match(component, /aria-pressed=\{currency === selectedCurrency\?\.currency\}/u);
@@ -208,6 +214,15 @@ test("FOCUS report view renders exact evidence without browser data or placehold
           chargeCategory: "Usage",
           resourceId: "i-render",
         }],
+      },
+      neutral: {
+        schema: "sutra.finops-focus-neutral-report.v1",
+        scope: { orgId: "org_render", customerId: "customer_render" },
+        sources: [{ orgId: "org_render", customerId: "customer_render", sourceId: "conn_render:2026-07", provider: "AWS", focusVersion: "1.2", datasetName: "FOCUS_1_2_AWS", generationId: `fbg_${"a".repeat(64)}`, contentSha256: "b".repeat(64), collectedAt: "2026-08-01T00:00:00.000Z", dataThroughAt: "2026-08-01T00:00:00.000Z", normalizedSchema: "sutra.focus-neutral-line.v1" }],
+        versions: ["1.2"], providers: ["AWS"],
+        currencies: [{ currency: "USD", billedCostMicros: "9007199254740993000001", effectiveCostMicros: "8000000", effectiveDiscountRate: { state: "UNAVAILABLE", basisPoints: null, numeratorMicros: null, denominatorMicros: null, formula: "(LIST_COST-EFFECTIVE_COST)/LIST_COST", reason: "CHARGE_CLASS_SEMANTICS_NOT_PROVIDED" }, tags: [{ key: "team", label: "Team", classification: "GOVERNED", value: "platform", billedCostMicros: "9007199254740993000001", lineCount: 1 }] }],
+        taxonomy: { state: "GOVERNED", policyId: "sutra-focus-baseline-v1", governedKeys: ["team"] },
+        invariants: ["source_versions_and_provenance_are_retained", "currencies_are_never_combined", "money_uses_signed_integer_micros", "missing_cost_columns_are_never_substituted", "discount_rate_requires_valid_focus_denominator_semantics"],
       },
       invariants: [
         "only_active_canonical_focus_1_2_is_accepted",
