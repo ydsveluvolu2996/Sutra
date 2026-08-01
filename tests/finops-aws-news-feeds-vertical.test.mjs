@@ -16,6 +16,7 @@ import {
   awsNewsFeedsJobIdempotencyKey,
   runAwsNewsFeedsCollectionJob,
 } from "../lib/finops-aws-news-feeds-job.ts";
+import { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../lib/finops-aws-news-feeds-runtime-binding.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const scope = { organizationId: "org_alpha", customerId: "customer_alpha", connectionId: `conn_${"a".repeat(32)}` };
@@ -81,13 +82,14 @@ test("server-owned scheduled job uses all pinned sources and accepts no URL or c
   assert.match(awsNewsFeedsJobIdempotencyKey(scope, "2026-07-31T12:00:00.000Z"), /^aws-news-feeds:org_alpha/u);
 });
 
-test("route authenticates and tenant-scopes immutable reads; runtime binding remains honest", async () => {
+test("route authenticates and tenant-scopes immutable reads; runtime capability remains honest", async () => {
   const route = await readFile(new URL("../app/api/v1/finops/aws-news-feeds/route.ts", import.meta.url), "utf8");
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /getConnectionForOrg\(authenticated\.subject\.orgId/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /repository\.getActiveSnapshot\(scope\)/u);
-  assert.match(route, /AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED/u);
+  assert.match(route, /AWS_NEWS_FEEDS_RUNTIME_CAPABILITY/u);
+  assert.doesNotMatch(route, /AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED/u);
   assert.doesNotMatch(route, /searchParams\.get\("orgId"\)|searchParams\.get\("customerId"\)/u);
 });
 
@@ -106,9 +108,9 @@ test("native report renders official families, required filters, provenance, fre
     const dashboardModule = await vite.ssrLoadModule("/app/costs/finops-aws-news-feeds-dashboard.tsx");
     const base = snapshot();
     const projection = buildAwsNewsDashboardProjection(base, [{ generationId: `newsg_${"d".repeat(64)}`, captureId: base.captureId, catalogId: base.catalogId, observedAt: base.observedAt, state: "READY", coverage: "COMPLETE", counts: base.counts, contentSha256: "d".repeat(64) }], { sourceId: null, feedKind: null, serviceId: null, category: null, relevance: null, search: null });
-    const report = { ...projection, connectionId: scope.connectionId, sourceState: "partial", freshness: { observedAt: base.observedAt, ageHours: 2, staleAfterHours: 48 }, sourceEvidence: base.sourceEvidence, evidence: { generationId: `newsg_${"d".repeat(64)}` }, collection: { runtimeBound: false, reason: "AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED" }, disclosure: "Public AWS announcements are contextual intelligence, not evidence that a tenant resource is affected." };
+    const report = { ...projection, connectionId: scope.connectionId, sourceState: "partial", freshness: { observedAt: base.observedAt, ageHours: 2, staleAfterHours: 48 }, sourceEvidence: base.sourceEvidence, evidence: { generationId: `newsg_${"d".repeat(64)}` }, collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY, disclosure: "Public AWS announcements are contextual intelligence, not evidence that a tenant resource is affected." };
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsNewsFeedsReportView, { report, filters: projection.filters, onFiltersChange: () => undefined }));
-    for (const expected of ["AWS service", "Feed type", "Category", "WHATS NEW", "BLOG", "VIDEO", "SECURITY BULLETIN", "Source provenance", "freshness", "Immutable collection history", "Watch on the official AWS YouTube channel", "Export visible rows", "Context, not impact evidence", "newer collection is incomplete"]) assert.match(html, new RegExp(expected, "iu"));
+    for (const expected of ["AWS service", "Feed type", "Category", "WHATS NEW", "BLOG", "VIDEO", "SECURITY BULLETIN", "Scheduled collection runtime", "Every 6 hours", "Shared worker not registered", "Durable adapter not registered", "Gateway not registered", "Source provenance", "freshness", "Immutable collection history", "Watch on the official AWS YouTube channel", "Export visible rows", "Context, not impact evidence", "newer collection is incomplete"]) assert.match(html, new RegExp(expected, "iu"));
     assert.match(html, /target="_blank" rel="noopener noreferrer"/u);
   } finally { await vite.close(); }
 });

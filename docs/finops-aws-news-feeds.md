@@ -4,10 +4,11 @@
 
 This capability now provides the production-oriented normalizer, source policy,
 relevance engine, source-health projection, server-owned six-hour job contract,
+adapter-neutral scheduler/shared-worker facade,
 immutable tenant-scoped persistence, authenticated API, native dashboard, and
-focused tests. The shared durable worker/tick and production XXE-hardened
-outbound XML gateway are not yet registered, so it remains `PARTIAL_PIPELINE`,
-not live or production-accepted evidence. See
+focused tests. The shared worker, durable replay-store adapter, and production
+egress binding are not yet registered, so it remains `PARTIAL_PIPELINE`, not
+live or production-accepted evidence. See
 `docs/finops-cid-evidence/ADV-07-aws-news-feeds.md` for the exact gate record.
 
 AWS documents the Cloud Intelligence Dashboard as covering What's New, blog
@@ -67,6 +68,26 @@ severity inference, or summary-text guessing. Every item states
 `impactAssessment: NOT_ASSESSED`: public AWS news is not evidence that a
 tenant resource is affected.
 
+AWS Security Bulletin labels such as Important and Informational remain
+provider-authored categories. They are not promoted to a tenant-impact claim.
+
+## Runtime binding contract
+
+`lib/finops-aws-news-feeds-runtime-binding.ts` exposes the permanent adapter-
+neutral integration surface for the shared runtime. The six-hour tick accepts
+only server-discovered active AWS trust-role connections, validates and sorts
+their exact tenant scope, rejects duplicates, caps discovery at 5,000
+connections, and submits deterministic jobs with five attempts and the existing
+scope/window idempotency key. Scheduling uses bounded concurrency and reports
+only aggregate queue rejections.
+
+The worker handler accepts only the exact job kind, tenant identifiers,
+connection identifier, and `scheduledWindow` payload. It constructs the durable
+envelope internally. An active replay lease becomes a retryable generic worker
+failure rather than a successful completion. The API and dashboard expose a
+versioned capability object that distinguishes these implemented contracts from
+the three production adapters that remain unregistered.
+
 ## Governed transport contract
 
 The production gateway bound to the implemented server-owned job must meet all
@@ -121,11 +142,11 @@ reports accepted records but keeps expected/rejected record counts unknown.
 
 The following are intentionally not claimed by this slice:
 
-1. bind a governed outbound gateway implementing streaming byte limits,
-   redirect interception, XML hardening, retry/backoff, and egress controls;
-2. register the implemented durable, idempotent, tenant-scoped six-hour job and
-   enqueue tick in the shared worker;
-3. live official-source collection, failure/recovery tests, tenant-isolation
+1. bind the implemented governed outbound gateway to production egress controls;
+2. register the implemented durable handler in the shared worker and invoke the
+   implemented tenant-scoped six-hour tick from the deployment scheduler;
+3. bind the implemented replay contract to the production durable replay store;
+4. live official-source collection, failure/recovery tests, tenant-isolation
    tests, security review, observability/alerts, and production acceptance.
 
 No deployment, image publication, permission change, or live-site mutation is

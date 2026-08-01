@@ -6,6 +6,7 @@ import {
   type AwsNewsDashboardFilters,
 } from "../../../../../lib/finops-aws-news-dashboard";
 import type { AwsNewsFeedKind, AwsNewsFeedSourceId } from "../../../../../lib/finops-aws-news-feeds";
+import { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../../../../../lib/finops-aws-news-feeds-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -84,7 +85,7 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
       sourceState: "configuration_required",
       dashboard: null,
-      collection: { runtimeBound: false, reason: "AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED" },
+      collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY,
     });
     const projection = buildAwsNewsDashboardProjection(selected.snapshot, history, query.filters);
     const freshnessAgeHours = ageHours(selected.snapshot.observedAt);
@@ -111,7 +112,7 @@ export async function GET(request: Request): Promise<Response> {
         counts: selected.snapshot.counts,
         limitations: selected.snapshot.limitations,
       },
-      collection: { runtimeBound: false, reason: "AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED" },
+      collection: AWS_NEWS_FEEDS_RUNTIME_CAPABILITY,
       disclosure: "Public AWS announcements are contextual intelligence, not evidence that a tenant resource is affected.",
     });
   } catch (error) {

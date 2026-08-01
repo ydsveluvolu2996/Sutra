@@ -4,7 +4,7 @@
 
 Local maturity: **PARTIAL_PIPELINE**. This vertical now has a concrete
 bounded outbound XML gateway, a registry-independent durable/replay-safe handler
-contract, six-hour server-owned job implementation, immutable
+contract, an adapter-neutral six-hour scheduler/shared-worker facade, immutable
 tenant-scoped SQLite/PostgreSQL persistence, authenticated same-tenant API,
 native accessible dashboard, and focused evidence tests. The provider-to-visual
 path is still incomplete because the shared worker registry/tick, durable
@@ -37,12 +37,17 @@ Public news is never presented as proof of customer impact. Every item remains
 `impactAssessment: NOT_ASSESSED`; tenant relevance is an explainable exact
 match to a server-resolved service catalog.
 
+AWS's Important and Informational security-bulletin classifications remain
+provider-authored categories. Sutra does not reinterpret either classification
+as evidence that a tenant resource is affected.
+
 ## Pipeline evidence
 
 - Engine/source policy: `lib/finops-aws-news-feeds.ts`
 - Scheduled worker contract: `lib/finops-aws-news-feeds-job.ts`
 - Hardened XML gateway: `lib/finops-aws-news-feeds-xml-gateway.ts`
 - Durable shared-handler contract: `lib/finops-aws-news-feeds-durable-handler.ts`
+- Runtime scheduler/shared-worker facade: `lib/finops-aws-news-feeds-runtime-binding.ts`
 - SQLite persistence: `drizzle/0090_finops_aws_news_feed_snapshots.sql`
 - PostgreSQL persistence: `postgres/migrations/0085_finops_aws_news_feed_snapshots.sql`
 - Repository: `db/finops-aws-news-feeds-repository.ts`
@@ -51,7 +56,8 @@ match to a server-resolved service catalog.
 - Native UI: `app/costs/finops-aws-news-feeds-dashboard.tsx`
 - Focused evidence: `tests/finops-aws-news-feeds.test.ts` and
   `tests/finops-aws-news-feeds-vertical.test.mjs`, plus
-  `tests/finops-aws-news-feeds-gateway-handler.test.mjs`
+  `tests/finops-aws-news-feeds-gateway-handler.test.mjs` and
+  `tests/finops-aws-news-feeds-runtime-binding.test.mjs`
 
 The gateway accepts only the five frozen source definitions and issues
 credential-free `GET` requests with manual redirects. Every redirect must
@@ -71,7 +77,16 @@ existing immutable repository, then commits a SHA-256-bound result receipt.
 Concurrent work returns `IN_PROGRESS`; claim, collection, receipt, and secondary
 failure details are reduced to stable sanitized error codes.
 
-Focused verification result: **22/22 tests passed**, with zero failures, skips,
+The runtime facade validates the active AWS trust-role connection inventory,
+rejects duplicate or malformed tenant scope, caps one tick at 5,000
+connections, and submits deterministic per-connection jobs for exact UTC
+00/06/12/18 windows with bounded concurrency. One queue-adapter rejection does
+not suppress other tenant jobs and only aggregate rejection counts leave the
+scheduler boundary. The shared-worker handler maps an existing replay lease to
+a retryable generic error, so another replica's in-progress work cannot be
+marked successful.
+
+Focused verification result: **28/28 tests passed**, with zero failures, skips,
 or cancellations. Full TypeScript checking and targeted ESLint also passed on
 this exact local tree.
 
@@ -91,10 +106,12 @@ videos are never embedded as arbitrary HTML.
 ## Remaining gates
 
 1. Register `AWS_NEWS_FEEDS_JOB_KIND` and the durable handler in the shared
-   background worker and add an idempotent per-active-connection six-hour tick.
+   background worker, then invoke the implemented idempotent
+   per-active-connection six-hour tick from the deployment scheduler.
 2. Bind the handler to the production durable replay store and bind the gateway
    to the egress-controlled runtime. Until then the API truthfully reports
-   `AWS_NEWS_FEEDS_JOB_HANDLER_NOT_REGISTERED`.
+   `AWS_NEWS_FEEDS_RUNTIME_ADAPTERS_NOT_REGISTERED` and the UI identifies each
+   unregistered adapter separately.
 3. Run live provider success/failure/recovery, timeout, redirect, tenant isolation, retention,
    observability, and alert acceptance tests.
 4. Pass the parent exact-tree CI/build, immutable-image, deployment, rollback,

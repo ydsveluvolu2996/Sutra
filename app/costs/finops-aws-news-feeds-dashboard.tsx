@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AwsNewsDashboardFilters, AwsNewsDashboardProjection } from "../../lib/finops-aws-news-dashboard";
 import type { AwsNewsSourceEvidence } from "../../lib/finops-aws-news-feeds";
+import type { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../../lib/finops-aws-news-feeds-runtime-binding";
 import styles from "./finops-aws-news-feeds-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -12,8 +13,13 @@ interface AwsNewsDashboardEnvelope extends AwsNewsDashboardProjection {
   readonly freshness: { readonly observedAt: string; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly sourceEvidence: readonly AwsNewsSourceEvidence[];
   readonly evidence: Readonly<Record<string, unknown>>;
-  readonly collection: { readonly runtimeBound: false; readonly reason: string };
+  readonly collection: typeof AWS_NEWS_FEEDS_RUNTIME_CAPABILITY;
   readonly disclosure: string;
+}
+
+interface AwsNewsFeedsConfigurationEnvelope {
+  readonly dashboard: null;
+  readonly collection: typeof AWS_NEWS_FEEDS_RUNTIME_CAPABILITY;
 }
 
 const EMPTY: AwsNewsDashboardFilters = { sourceId: null, feedKind: null, serviceId: null, category: null, relevance: null, search: null };
@@ -63,6 +69,7 @@ export function AwsNewsFeedsReportView({ report, filters, onFiltersChange }: { r
     <div className={styles.cards} aria-label="Official feed family counts">
       {report.familyCounts.map((family) => <article className={styles.card} key={family.kind}><small>{family.kind.replaceAll("_", " ")}</small><strong>{family.count}</strong><span>accepted official items</span></article>)}
     </div>
+    <section className={styles.section} aria-label="Scheduled collection runtime"><header><h3>Scheduled collection runtime</h3><span>Every {report.collection.intervalMs / 3_600_000} hours</span></header><div className={styles.sourceGrid}><article className={styles.source}><strong>Scheduler</strong><span>{report.collection.schedulerImplemented ? "Implemented" : "Not implemented"}</span><span>Shared worker {report.collection.sharedWorkerRegistered ? "registered" : "not registered"}</span></article><article className={styles.source}><strong>Replay safety</strong><span>{report.collection.replayContractImplemented ? "Implemented" : "Not implemented"}</span><span>Durable adapter {report.collection.durableReplayAdapterRegistered ? "registered" : "not registered"}</span></article><article className={styles.source}><strong>Outbound collection</strong><span>{report.collection.handlerImplemented ? "Handler implemented" : "Handler not implemented"}</span><span>Gateway {report.collection.outboundGatewayRegistered ? "registered" : "not registered"}</span></article></div><small>{report.collection.reason}</small></section>
     <section className={styles.section} aria-label="Collection provenance and freshness"><header><h3>Source provenance &amp; freshness</h3><span>Observed {report.freshness.observedAt} · {report.freshness.ageHours ?? "unknown"} hours ago</span></header><div className={styles.sourceGrid}>{report.sourceEvidence.map((source) => <article key={source.sourceId} className={styles.source}><strong>{source.label}</strong><span>{source.authority.replaceAll("_", " ")} · {source.kind.replaceAll("_", " ")}</span><span>{source.status} · {source.acceptedItems} items</span><span>Fetched {source.fetchedAt}</span><span>Latest publication {source.lastPublishedAt ?? "None"}</span>{source.failureCode ? <span className={styles.errorText}>{source.failureCode}</span> : null}</article>)}</div></section>
     <section className={styles.section} aria-label="AWS announcements"><header><h3>Official announcements · {report.resultCount}</h3><button type="button" onClick={() => exportCsv(report)}>Export visible rows</button></header><div className={styles.newsGrid}>{report.items.map((item) => <article className={styles.item} key={`${item.sourceId}:${item.externalId}`}><div className={styles.itemMeta}><span>{item.feedKind.replaceAll("_", " ")}</span><time dateTime={item.publishedAt}>{item.publishedAt}</time></div><h4>{item.title}</h4><p>{item.summary || "No plain-text summary supplied by the official feed."}</p><div className={styles.chips}>{item.matchedServices.map((service) => <span key={service.serviceId}>{service.displayName} · {service.usageBasis}</span>)}{item.categories.map((category) => <span key={category}>{category}</span>)}</div><details><summary>Relevance and provenance</summary><p>Source: {item.sourceLabel}. Impact assessment: {item.impactAssessment.replaceAll("_", " ")}.</p>{item.matchedServices.length ? <ul>{item.matchedServices.map((service) => <li key={service.serviceId}>{service.displayName}: {service.reason.kind.replaceAll("_", " ")} “{service.reason.matchedAlias}” · {service.observationBasis ?? "explicitly enabled"}</li>)}</ul> : <p>No exact enabled/observed tenant-service match.</p>}</details><a href={item.canonicalUrl} target="_blank" rel="noopener noreferrer">{item.feedKind === "VIDEO" ? "Watch on the official AWS YouTube channel" : "Open the official AWS publication"}<span className={styles.srOnly}> (opens in a new tab)</span></a></article>)}</div>{report.rowsTruncated ? <p>Only the first 250 sorted items are shown. Refine filters before exporting.</p> : null}</section>
     <section className={styles.section} aria-label="Collection history"><header><h3>Immutable collection history</h3></header><div className={styles.scroll}><table><thead><tr><th>Observed</th><th>State</th><th>Coverage</th><th>Sources</th><th>Items</th><th>Tenant relevant</th></tr></thead><tbody>{report.history.map((point) => <tr key={point.generationId}><td>{point.observedAt}</td><td>{point.state}</td><td>{point.coverage}</td><td>{point.counts.sourcesSucceeded} succeeded / {point.counts.sourcesFailed} failed</td><td>{point.counts.deduplicatedItems}</td><td>{point.counts.tenantRelevantItems}</td></tr>)}</tbody></table></div></section>
@@ -72,20 +79,20 @@ export function AwsNewsFeedsReportView({ report, filters, onFiltersChange }: { r
 
 export function FinopsAwsNewsFeedsDashboard({ connectionId }: { readonly connectionId: string | null }) {
   const [filters, setFilters] = useState<AwsNewsDashboardFilters>(EMPTY);
-  const [state, setState] = useState<{ report: AwsNewsDashboardEnvelope | null; error: string | null; configurationRequired: boolean }>({ report: null, error: null, configurationRequired: false });
+  const [state, setState] = useState<{ report: AwsNewsDashboardEnvelope | null; error: string | null; configuration: AwsNewsFeedsConfigurationEnvelope | null }>({ report: null, error: null, configuration: null });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
     const parameters = new URLSearchParams({ connectionId });
     for (const [key, value] of Object.entries(filters)) if (value !== null) parameters.set(key, value);
     fetch(`/api/v1/finops/aws-news-feeds?${parameters.toString()}`, { signal: controller.signal, headers: { Accept: "application/json" } })
-      .then(async (response) => { if (!response.ok) throw new Error("AWS News Feeds dashboard request failed"); return response.json() as Promise<AwsNewsDashboardEnvelope | { readonly dashboard: null }>; })
-      .then((report) => { if ("dashboard" in report && report.dashboard === null) setState({ report: null, error: null, configurationRequired: true }); else setState({ report: report as AwsNewsDashboardEnvelope, error: null, configurationRequired: false }); })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "AWS News Feeds dashboard request failed", configurationRequired: false }); });
+      .then(async (response) => { if (!response.ok) throw new Error("AWS News Feeds dashboard request failed"); return response.json() as Promise<AwsNewsDashboardEnvelope | AwsNewsFeedsConfigurationEnvelope>; })
+      .then((report) => { if ("dashboard" in report && report.dashboard === null) setState({ report: null, error: null, configuration: report }); else setState({ report: report as AwsNewsDashboardEnvelope, error: null, configuration: null }); })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "AWS News Feeds dashboard request failed", configuration: null }); });
     return () => controller.abort();
   }, [connectionId, filters]);
   if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting AWS News Feeds.</div>;
-  if (state.configurationRequired) return <div role="status" className={`${styles.state} ${styles.warning}`}>The governed scheduled collector has not persisted AWS News Feeds evidence for this connection.</div>;
+  if (state.configuration !== null) return <div role="status" className={`${styles.state} ${styles.warning}`}>The six-hour scheduler and replay-safe handler are implemented, but the shared worker, durable replay store, and outbound gateway adapters are not registered. No governed AWS News Feeds evidence has been persisted for this connection.</div>;
   if (state.error !== null) return <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div>;
   if (state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading official AWS feed evidence…</div>;
   return <AwsNewsFeedsReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
