@@ -338,10 +338,13 @@ export interface AwsBudgetsDashboardQuery {
   readonly budgetTypes?: readonly AwsBudgetType[];
   readonly accountIds?: readonly string[];
   readonly budgetLevels?: readonly string[];
+  readonly budgetStatuses?: readonly AwsBudgetHealthStatus[];
   readonly namePrefix?: string;
   readonly effectiveAtIso?: string;
   readonly page?: { readonly limit?: number; readonly cursor?: string };
 }
+
+export type AwsBudgetHealthStatus = "HEALTHY" | "UNHEALTHY" | "FORECASTED_UNHEALTHY" | "UNCLASSIFIED";
 
 export interface AwsBudgetAccountMapping {
   readonly accountId: string;
@@ -362,6 +365,11 @@ export interface AwsBudgetsDashboardBudget {
   readonly accountMappings: readonly AwsBudgetAccountMapping[];
   readonly unmappedAccountIds: readonly string[];
   readonly mappingCoverage: "complete" | "partial" | "configuration_required";
+  readonly health: {
+    readonly statuses: readonly AwsBudgetHealthStatus[];
+    readonly actualComparisonAvailable: boolean;
+    readonly forecastComparisonAvailable: boolean;
+  };
 }
 
 export interface AwsBudgetsDashboard {
@@ -389,6 +397,7 @@ export interface AwsBudgetsDashboard {
     readonly missingTaxonomyAccounts: number;
     readonly currencies: readonly string[];
     readonly budgetLevels: readonly string[];
+    readonly healthStatusCounts: Readonly<Record<AwsBudgetHealthStatus, number>>;
   };
   readonly budgets: readonly AwsBudgetsDashboardBudget[];
   readonly nextCursor: string | null;
@@ -1172,7 +1181,7 @@ function validateTaxonomy(
   return map;
 }
 
-function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "currencies" | "budgetTypes" | "accountIds" | "budgetLevels">> & {
+function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "currencies" | "budgetTypes" | "accountIds" | "budgetLevels" | "budgetStatuses">> & {
   namePrefix: string | null;
   effectiveAtIso: string | null;
   limit: number;
@@ -1181,13 +1190,14 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
   if (value === undefined) value = {};
   if (!record(value)) reject("INVALID_QUERY");
   if (Object.keys(value).some((key) => ![
-    "currencies", "budgetTypes", "accountIds", "budgetLevels", "namePrefix",
+    "currencies", "budgetTypes", "accountIds", "budgetLevels", "budgetStatuses", "namePrefix",
     "effectiveAtIso", "page",
   ].includes(key))) reject("INVALID_QUERY");
   const currencies = value.currencies ?? [];
   const budgetTypes = value.budgetTypes ?? [];
   const accountIds = value.accountIds ?? [];
   const budgetLevels = value.budgetLevels ?? [];
+  const budgetStatuses = value.budgetStatuses ?? [];
   if (!Array.isArray(currencies) || currencies.length > 20 || currencies.some((item) => !CURRENCY.test(String(item)))) reject("INVALID_QUERY");
   const knownTypes: readonly string[] = ["COST", "USAGE", "RI_UTILIZATION", "RI_COVERAGE", "SAVINGS_PLANS_UTILIZATION", "SAVINGS_PLANS_COVERAGE"];
   if (!Array.isArray(budgetTypes) || budgetTypes.length > knownTypes.length || budgetTypes.some((item) => !knownTypes.includes(String(item)))) reject("INVALID_QUERY");
@@ -1197,7 +1207,10 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
   ) reject("INVALID_QUERY");
   if (!Array.isArray(budgetLevels) || budgetLevels.length > 100
     || budgetLevels.some((item) => typeof item !== "string" || !SAFE_TEXT.test(item))) reject("INVALID_QUERY");
-  for (const items of [currencies, budgetTypes, accountIds, budgetLevels]) {
+  const knownStatuses: readonly string[] = ["HEALTHY", "UNHEALTHY", "FORECASTED_UNHEALTHY", "UNCLASSIFIED"];
+  if (!Array.isArray(budgetStatuses) || budgetStatuses.length > knownStatuses.length
+    || budgetStatuses.some((item) => !knownStatuses.includes(String(item)))) reject("INVALID_QUERY");
+  for (const items of [currencies, budgetTypes, accountIds, budgetLevels, budgetStatuses]) {
     if (new Set(items).size !== items.length) reject("INVALID_QUERY");
   }
   const namePrefix = value.namePrefix === undefined ? null : safeText(value.namePrefix, 100);
@@ -1218,11 +1231,28 @@ function parseQuery(value: unknown): Required<Pick<AwsBudgetsDashboardQuery, "cu
     budgetTypes: [...budgetTypes] as AwsBudgetType[],
     accountIds: [...accountIds] as string[],
     budgetLevels: [...budgetLevels] as string[],
+    budgetStatuses: [...budgetStatuses] as AwsBudgetHealthStatus[],
     namePrefix,
     effectiveAtIso,
     limit: Number(limit),
     offset,
   };
+}
+
+function budgetHealth(budget: NormalizedAwsBudget): AwsBudgetsDashboardBudget["health"] {
+  const limit = budget.budgetLimit;
+  const actual = budget.actual;
+  const forecast = budget.forecast;
+  const actualAvailable = limit !== null && actual !== null && limit.currency === actual.currency;
+  const forecastAvailable = limit !== null && forecast !== null && limit.currency === forecast.currency;
+  const statuses: AwsBudgetHealthStatus[] = [];
+  if (actualAvailable && BigInt(actual.amountMicros) < BigInt(limit.amountMicros)) statuses.push("HEALTHY");
+  if (actualAvailable && BigInt(actual.amountMicros) > BigInt(limit.amountMicros)) statuses.push("UNHEALTHY");
+  if (actualAvailable && forecastAvailable
+    && BigInt(actual.amountMicros) < BigInt(limit.amountMicros)
+    && BigInt(forecast.amountMicros) > BigInt(limit.amountMicros)) statuses.push("FORECASTED_UNHEALTHY");
+  if (statuses.length === 0) statuses.push("UNCLASSIFIED");
+  return { statuses, actualComparisonAvailable: actualAvailable, forecastComparisonAvailable: forecastAvailable };
 }
 
 function linkedAccounts(budget: NormalizedAwsBudget): readonly string[] | null {
@@ -1285,7 +1315,7 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
       : accountMappings.every((item) => item.coverage === "complete")
       ? "complete" as const
       : "partial" as const;
-    return { budget, targeting, accountMappings, unmappedAccountIds, mappingCoverage };
+    return { budget, targeting, accountMappings, unmappedAccountIds, mappingCoverage, health: budgetHealth(budget) };
   });
   const filtered = all.filter((item) => {
     const budget = item.budget;
@@ -1296,6 +1326,7 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
       && (query.budgetTypes.length === 0 || query.budgetTypes.includes(budget.budgetType))
       && (query.accountIds.length === 0 || query.accountIds.some((accountId) => item.accountMappings.some((entry) => entry.accountId === accountId)))
       && (query.budgetLevels.length === 0 || (budget.hierarchyLevel !== null && query.budgetLevels.includes(budget.hierarchyLevel)))
+      && (query.budgetStatuses.length === 0 || query.budgetStatuses.some((status) => item.health.statuses.includes(status)))
       && (query.namePrefix === null || budget.budgetName.startsWith(query.namePrefix))
       && (query.effectiveAtIso === null || (
         Date.parse(budget.effectivePeriod.start) <= Date.parse(query.effectiveAtIso)
@@ -1351,6 +1382,12 @@ export function buildAwsBudgetsOrganizationDashboard(input: {
       ].filter((value): value is string => value !== null && value !== undefined)))].sort(compareText),
       budgetLevels: [...new Set(page.map((item) => item.budget.hierarchyLevel)
         .filter((value): value is string => value !== null))].sort(compareText),
+      healthStatusCounts: {
+        HEALTHY: page.filter((item) => item.health.statuses.includes("HEALTHY")).length,
+        UNHEALTHY: page.filter((item) => item.health.statuses.includes("UNHEALTHY")).length,
+        FORECASTED_UNHEALTHY: page.filter((item) => item.health.statuses.includes("FORECASTED_UNHEALTHY")).length,
+        UNCLASSIFIED: page.filter((item) => item.health.statuses.includes("UNCLASSIFIED")).length,
+      },
     },
     budgets: page,
     nextCursor: hasMore ? `v1:${query.offset + page.length}` : null,

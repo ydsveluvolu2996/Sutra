@@ -226,6 +226,10 @@ test("projects linked accounts through AWS OU and canonical business taxonomy ev
   assert.equal(dashboard.coverage.matchedAwsBudgets, 1);
   assert.deepEqual(dashboard.coverage.currencies, ["USD"]);
   assert.deepEqual(dashboard.coverage.budgetLevels, ["BusinessUnit"]);
+  assert.deepEqual(dashboard.budgets[0]?.health.statuses, ["HEALTHY", "FORECASTED_UNHEALTHY"]);
+  assert.deepEqual(dashboard.coverage.healthStatusCounts, {
+    HEALTHY: 1, UNHEALTHY: 0, FORECASTED_UNHEALTHY: 1, UNCLASSIFIED: 0,
+  });
   assert.equal(dashboard.budgets[0]?.targeting, "linked_accounts");
   assert.deepEqual(dashboard.budgets[0]?.accountMappings[0], {
     accountId: LINKED_ACCOUNT_ID,
@@ -244,6 +248,14 @@ test("projects linked accounts through AWS OU and canonical business taxonomy ev
     included: false,
     reason: "Sutra-authored budgets use a separate repository and evidence lineage; they are not AWS Budgets records.",
   });
+  assert.equal(buildAwsBudgetsOrganizationDashboard({
+    snapshot, hierarchy: hierarchy(), taxonomy: taxonomy(), nowEpochMs: NOW,
+    query: { budgetStatuses: ["FORECASTED_UNHEALTHY"] },
+  }).budgets.length, 1);
+  assert.equal(buildAwsBudgetsOrganizationDashboard({
+    snapshot, hierarchy: hierarchy(), taxonomy: taxonomy(), nowEpochMs: NOW,
+    query: { budgetStatuses: ["UNHEALTHY"] },
+  }).budgets.length, 0);
 });
 
 test("rejects organization, customer, connection, account, and partition substitution", () => {

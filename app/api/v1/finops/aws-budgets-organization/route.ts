@@ -5,6 +5,7 @@ import { assertSessionCapability, requireApiSession } from "../../../../../lib/a
 import {
   buildAwsBudgetsOrganizationDashboard,
   type AwsBudgetType,
+  type AwsBudgetHealthStatus,
   type AwsBudgetsDashboardQuery,
   type AwsBudgetsSnapshot,
 } from "../../../../../lib/finops-aws-budgets-organization";
@@ -21,9 +22,12 @@ const BUDGET_TYPES = new Set<AwsBudgetType>([
   "COST", "USAGE", "RI_UTILIZATION", "RI_COVERAGE",
   "SAVINGS_PLANS_UTILIZATION", "SAVINGS_PLANS_COVERAGE",
 ]);
+const BUDGET_STATUSES = new Set<AwsBudgetHealthStatus>([
+  "HEALTHY", "UNHEALTHY", "FORECASTED_UNHEALTHY", "UNCLASSIFIED",
+]);
 const ALLOWED = new Set([
   "connectionId", "currency", "budgetType", "accountId", "budgetLevel",
-  "namePrefix", "effectiveAt", "cursor", "limit",
+  "namePrefix", "budgetStatus", "effectiveAt", "cursor", "limit",
 ]);
 const FRESHNESS_SLA_HOURS = 24;
 
@@ -41,6 +45,7 @@ function parse(request: Request): { readonly connectionId: string; readonly quer
   const accountId = values.get("accountId");
   const budgetLevel = values.get("budgetLevel");
   const namePrefix = values.get("namePrefix");
+  const budgetStatus = values.get("budgetStatus");
   const effectiveAt = values.get("effectiveAt");
   const cursor = values.get("cursor");
   const limitText = values.get("limit");
@@ -51,6 +56,7 @@ function parse(request: Request): { readonly connectionId: string; readonly quer
     || (accountId !== null && !ACCOUNT_ID.test(accountId))
     || (budgetLevel !== null && !SAFE_TEXT.test(budgetLevel))
     || (namePrefix !== null && (!SAFE_TEXT.test(namePrefix) || namePrefix.length > 100))
+    || (budgetStatus !== null && !BUDGET_STATUSES.has(budgetStatus as AwsBudgetHealthStatus))
     || (effectiveAt !== null && (!Number.isFinite(Date.parse(effectiveAt))
       || new Date(Date.parse(effectiveAt)).toISOString() !== effectiveAt))
     || (cursor !== null && !CURSOR.test(cursor))
@@ -62,6 +68,7 @@ function parse(request: Request): { readonly connectionId: string; readonly quer
       budgetTypes: budgetType === null ? [] : [budgetType as AwsBudgetType],
       accountIds: accountId === null ? [] : [accountId],
       budgetLevels: budgetLevel === null ? [] : [budgetLevel],
+      budgetStatuses: budgetStatus === null ? [] : [budgetStatus as AwsBudgetHealthStatus],
       ...(namePrefix === null ? {} : { namePrefix }),
       ...(effectiveAt === null ? {} : { effectiveAtIso: effectiveAt }),
       page: { limit, ...(cursor === null ? {} : { cursor }) },

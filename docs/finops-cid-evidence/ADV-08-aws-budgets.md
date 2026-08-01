@@ -20,6 +20,31 @@ The dashboard shows and groups:
 - the exact provider `cid:budget-level` tag as the official dashboard hierarchy
   grouping key. Missing tags are coverage gaps and are never guessed from a
   budget name.
+- official Healthy, Unhealthy, and Forecasted Unhealthy signals using strict
+  same-currency comparisons. Missing, equal, or incompatible evidence remains
+  Unclassified rather than being treated as zero.
+
+## Official inventory audit
+
+Audited at CID framework commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`:
+<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/aws-budgets/aws-budgets.yaml>.
+The official definition contains **Budget Summary** and **About** sheets. Its
+primary controls are Budget Status, Budget Name, Account Name/ID, Group By and
+Budget Level. Its core measures are budgeted, actual and forecasted cost,
+Healthy, Unhealthy, Forecasted Unhealthy and period-over-period totals. Sutra
+implements the evidence-backed status filters and totals but does not claim
+exact QuickSight geometry or Group By chart parity.
+
+## G1-G6 status
+
+| Gate | Status | Evidence / remaining work |
+|---|---|---|
+| G1 — requirements and official inventory | `LOCAL_COMPLETE` | Two sheets, controls, measures and status semantics audited against the pinned official definition. |
+| G2 — source contract | `LOCAL_COMPLETE` | Bounded AWS Budgets and Organizations evidence, minimized exact hierarchy tag, currencies, pagination and no mutation operations. |
+| G3 — durable runtime/replay | `LOCAL_COMPLETE_CONTRACT` | Six-hour scheduling, stable request identity, signed broker transport, immutable attempt replay and timeout contracts exist; shared registration and live broker remain open. |
+| G4 — persistence/API | `LOCAL_COMPLETE` | Registered immutable storage, tenant-scoped authenticated API, bounded cursor/filters and health-status query support. |
+| G5 — native UI | `PARTIAL` | Budgeted/actual/forecast, hierarchy, status cards/filter, history and evidence render. Exact Group By charts and official asset-tree geometry remain open. |
+| G6 — validation/acceptance | `PARTIAL` | Focused engine, vertical and durable tests plus lint/type checks pass locally. Provider, browser/a11y and production acceptance remain open. |
 
 ## Implemented evidence path
 
@@ -34,7 +59,7 @@ The dashboard shows and groups:
 | PostgreSQL persistence | Equivalent constraints/triggers plus `PUBLIC` revocation | `postgres/migrations/0086_finops_aws_budgets_organization.sql` |
 | Repository | Live connection/account/partition scope, digest revalidation, replay safety, incomplete-history retention | `db/finops-aws-budgets-organization-repository.ts` |
 | API | Authenticated `connection:read`, same-tenant connection resolution, bounded filters/cursor, active/latest disclosure | `app/api/v1/finops/aws-budgets-organization/route.ts` |
-| Native UI | Provider/source banner, hierarchy filters, separate budgeted/actual/forecast cards, status, drilldown, performance and generation history, safe CSV | `app/costs/finops-aws-budgets-organization-dashboard.tsx` |
+| Native UI | Provider/source banner, hierarchy and official health-status filters, separate budgeted/actual/forecast cards, health totals, drilldown, performance and generation history, safe CSV | `app/costs/finops-aws-budgets-organization-dashboard.tsx` |
 | Focused verification | Engine, repository, job, migration/API contracts, SSR evidence rendering, scheduler scoping, replay, signature verification, sanitized failures, and immutable attempt history | `tests/finops-aws-budgets-organization.test.ts`, `tests/finops-aws-budgets-vertical.test.mjs`, `tests/finops-aws-budgets-durable-binding.test.mjs` |
 
 ## Data Collection prerequisites

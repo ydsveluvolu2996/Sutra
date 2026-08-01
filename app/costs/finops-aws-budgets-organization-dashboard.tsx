@@ -10,6 +10,7 @@ export interface AwsBudgetsDashboardFilters {
   readonly budgetType: string;
   readonly accountId: string;
   readonly budgetLevel: string;
+  readonly budgetStatus: string;
   readonly namePrefix: string;
 }
 
@@ -32,7 +33,7 @@ export interface AwsBudgetsDashboardEnvelope {
 }
 
 const EMPTY_FILTERS: AwsBudgetsDashboardFilters = {
-  currency: "", budgetType: "", accountId: "", budgetLevel: "", namePrefix: "",
+  currency: "", budgetType: "", accountId: "", budgetLevel: "", budgetStatus: "", namePrefix: "",
 };
 
 function money(micros: string | null, unit: string | null): string {
@@ -110,7 +111,14 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
       <label>Budget type<select value={filters.budgetType} onChange={(event) => set("budgetType", event.target.value)}><option value="">All types</option>{budgetTypes.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label>Account<select value={filters.accountId} onChange={(event) => set("accountId", event.target.value)}><option value="">All accounts</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName ?? account.accountId} · {account.accountId}</option>)}</select></label>
       <label>cid:budget-level<select value={filters.budgetLevel} onChange={(event) => set("budgetLevel", event.target.value)}><option value="">All hierarchy levels</option>{report.dashboard.coverage.budgetLevels.map((value) => <option key={value}>{value}</option>)}</select></label>
+      <label>Budget status<select value={filters.budgetStatus} onChange={(event) => set("budgetStatus", event.target.value)}><option value="">All budgets</option><option value="HEALTHY">Healthy budgets</option><option value="UNHEALTHY">Unhealthy budgets</option><option value="FORECASTED_UNHEALTHY">Forecasted unhealthy budgets</option><option value="UNCLASSIFIED">Unclassified evidence</option></select></label>
       <label>Budget name starts with<input value={filters.namePrefix} maxLength={100} onChange={(event) => set("namePrefix", event.target.value)} /></label>
+    </div>
+    <div className={styles.cards} aria-label="Official AWS Budget health status">
+      <article className={styles.card}><small>Healthy budgets</small><strong>{report.dashboard.coverage.healthStatusCounts.HEALTHY}</strong><span>Actual spend is below the budgeted amount</span></article>
+      <article className={styles.card}><small>Unhealthy budgets</small><strong>{report.dashboard.coverage.healthStatusCounts.UNHEALTHY}</strong><span>Actual spend is above the budgeted amount</span></article>
+      <article className={styles.card}><small>Forecasted unhealthy budgets</small><strong>{report.dashboard.coverage.healthStatusCounts.FORECASTED_UNHEALTHY}</strong><span>Actual is below budget while forecast is above it</span></article>
+      <article className={styles.card}><small>Unclassified evidence</small><strong>{report.dashboard.coverage.healthStatusCounts.UNCLASSIFIED}</strong><span>Missing, equal, or currency-incompatible evidence is not guessed</span></article>
     </div>
     <div className={styles.cards} aria-label="Budgeted forecast and actual spend by currency">
       {currencySums.flatMap(([currency, item]) => [
@@ -122,9 +130,10 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
     <section className={styles.panel} aria-label="AWS Budget hierarchy status and drilldown">
       <header className={styles.panelHead}><div><h3>Provider budget hierarchy</h3><p>Grouped only by the exact AWS tag <code>cid:budget-level</code>.</p></div><button type="button" onClick={() => exportVisible(report)}>Export visible rows</button></header>
       <div className={styles.scroll}><table><thead><tr><th>Hierarchy</th><th>Provider budget</th><th>Budgeted</th><th>Actual</th><th>Forecast</th><th>Provider status</th><th>Accounts / ownership</th></tr></thead><tbody>
-        {report.dashboard.budgets.map(({ budget, targeting, accountMappings, mappingCoverage }) => {
+        {report.dashboard.budgets.map((row) => {
+          const { budget, targeting, accountMappings, mappingCoverage } = row;
           const unit = budget.budgetLimit?.unit ?? budget.actual?.unit ?? budget.forecast?.unit ?? null;
-          return <tr key={budget.budgetName}><td><span className={styles.pill}>{budget.hierarchyLevel ?? "Tag missing"}</span></td><td><strong>{budget.budgetName}</strong><br />{budget.budgetType} · {budget.timeUnit}</td><td>{money(budget.budgetLimit?.amountMicros ?? null, unit)}</td><td>{money(budget.actual?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.actual}</small></td><td>{money(budget.forecast?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.forecast}</small></td><td><span className={styles.pill}>{budget.coverage.hierarchyTag}</span><br />Updated {budget.lastUpdatedAt ?? "not supplied"}<br />{budget.notifications.length} notifications · {budget.actions.length} read-only actions</td><td><details><summary>{targeting.replaceAll("_", " ")} · {mappingCoverage}</summary>{accountMappings.length ? <ul>{accountMappings.map((account) => <li key={account.accountId}>{account.accountName ?? "Unknown account"} · {account.accountId}<br />{account.ouPath.join(" / ") || "OU unavailable"} · {account.businessUnit ?? account.costCenter ?? "taxonomy unavailable"}</li>)}</ul> : <p>No evidenced account mapping.</p>}</details></td></tr>;
+          return <tr key={budget.budgetName}><td><span className={styles.pill}>{budget.hierarchyLevel ?? "Tag missing"}</span></td><td><strong>{budget.budgetName}</strong><br />{budget.budgetType} · {budget.timeUnit}</td><td>{money(budget.budgetLimit?.amountMicros ?? null, unit)}</td><td>{money(budget.actual?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.actual}</small></td><td>{money(budget.forecast?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.forecast}</small></td><td><span className={styles.pill}>{row.health.statuses.map((status) => status.replaceAll("_", " ")).join(" · ")}</span><br />Updated {budget.lastUpdatedAt ?? "not supplied"}<br />{budget.notifications.length} notifications · {budget.actions.length} read-only actions</td><td><details><summary>{targeting.replaceAll("_", " ")} · {mappingCoverage}</summary>{accountMappings.length ? <ul>{accountMappings.map((account) => <li key={account.accountId}>{account.accountName ?? "Unknown account"} · {account.accountId}<br />{account.ouPath.join(" / ") || "OU unavailable"} · {account.businessUnit ?? account.costCenter ?? "taxonomy unavailable"}</li>)}</ul> : <p>No evidenced account mapping.</p>}</details></td></tr>;
         })}
       </tbody></table></div>
     </section>
