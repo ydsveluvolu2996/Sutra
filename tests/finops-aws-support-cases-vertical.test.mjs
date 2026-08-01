@@ -51,6 +51,7 @@ test("native report renders plan states, filters, trends, provenance and privacy
         accountCoverage: [{ accountId: "111111111111", supportPlan: "business", entitlementState: "QUALIFYING", readPermissionsValidated: true, status: "complete", caseCount: 1, communicationCount: 2, failureCode: null }],
         limitations: ["AWS retains case data for 24 months."] },
       summary: { caseCount: 1, openCount: 1, resolvedCount: 0, pendingCustomerActionCount: 1, highUrgentCriticalCount: 1, communicationCount: 2, intendedAccountCount: 1, completeAccountCount: 1,
+        communicationActorCounts: { AWS: 1, CUSTOMER: 1, UNKNOWN: 0 }, responseCadence: { awsResponseTransitions: 1, customerResponseTransitions: 1, averageAwsResponseMinutes: 75, averageCustomerResponseMinutes: 40 }, openAgeBands: { under7Days: 0, days7To30: 1, days31To90: 0, over90Days: 0 },
         statusCounts: { "pending-customer-action": 1 }, severityCounts: { high: 1 }, serviceCounts: [{ code: "amazon-ec2", count: 1 }], categoryCounts: [{ code: "performance", count: 1 }] },
       cases: [{ accountId: "111111111111", caseReference: "case-…1001", serviceCode: "amazon-ec2", categoryCode: "performance", severity: "high", status: "pending-customer-action", createdAt: "2026-07-01T00:00:00.000Z", updatedAt: "2026-08-01T00:00:00.000Z", resolvedObservedAt: null, submittedByKind: "CUSTOMER", communicationCount: 2, attachmentCount: 0, observationCount: 2, communicationsComplete: true }],
       casesTruncated: false, disclosure: "Privacy minimized", history: [{ generationId: `supg_${"1".repeat(64)}`, observedAt: "2026-08-01T00:00:00.000Z", dataThroughAt: "2026-08-01T00:00:00.000Z", collectionState: "complete", intendedAccountCount: 1, completeAccountCount: 1, caseCount: 1, openCount: 1, highUrgentCriticalCount: 1 }],
@@ -58,7 +59,7 @@ test("native report renders plan states, filters, trends, provenance and privacy
       collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" }, summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesRadarReportView, { report, filters: { accountId: "", status: "", severity: "", serviceCode: "", categoryCode: "" }, onFiltersChange: () => undefined }));
-    for (const text of ["Privacy-minimized", "Support-plan readiness", "Case history", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.match(html, new RegExp(text, "iu"));
+    for (const text of ["Privacy-minimized", "Support-plan readiness", "Case history", "Open case age", "Response cadence", "Average AWS response", "Top case topics", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.match(html, new RegExp(text, "iu"));
     for (const forbidden of ["subjectEvidenceHash", "contactEvidenceHash", "bodyEvidenceHash"]) assert.doesNotMatch(html, new RegExp(forbidden, "u"));
   } finally { await vite.close(); }
 });

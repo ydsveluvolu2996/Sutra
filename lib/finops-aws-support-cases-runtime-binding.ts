@@ -7,6 +7,7 @@ import {
   type AwsSupportCasesTargetResolver,
 } from "./finops-aws-support-cases-job.ts";
 import {
+  AWS_SUPPORT_CASES_COLLECTION_BOUNDS,
   type AwsSupportCasesSnapshot,
   type AwsSupportCasesTransport,
   type AwsSupportCollectionWindow,
@@ -21,6 +22,8 @@ const JOB_ID = /^job_[a-f0-9]{32}$/u;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const HOUR_MS = 60 * 60 * 1_000;
 
 export interface AwsSupportCasesRuntimeQueue {
   enqueue(input: {
@@ -51,14 +54,37 @@ function validIso(value: string): boolean {
     && new Date(Date.parse(value)).toISOString() === value;
 }
 
-function validScope(scope: AwsSupportCasesJobScope): boolean {
-  return IDENTIFIER.test(scope.organizationId)
+function record(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+function validScope(scope: unknown): scope is AwsSupportCasesJobScope {
+  return record(scope)
+    && exactKeys(scope, ["customerId", "organizationId", "parentConnectionId", "partition"])
+    && typeof scope.organizationId === "string"
+    && typeof scope.customerId === "string"
+    && typeof scope.parentConnectionId === "string"
+    && typeof scope.partition === "string"
+    && IDENTIFIER.test(scope.organizationId)
     && IDENTIFIER.test(scope.customerId)
     && CONNECTION_ID.test(scope.parentConnectionId)
     && new Set(["aws", "aws-us-gov"]).has(scope.partition);
 }
 
-function validWindow(window: AwsSupportCollectionWindow): boolean {
+function validWindow(window: unknown): window is AwsSupportCollectionWindow {
+  if (!record(window)
+    || !exactKeys(window, ["afterTime", "beforeTime", "mode", "nextWatermark", "priorWatermark"])
+    || typeof window.mode !== "string"
+    || typeof window.afterTime !== "string"
+    || typeof window.beforeTime !== "string"
+    || typeof window.nextWatermark !== "string"
+    || (window.priorWatermark !== null && typeof window.priorWatermark !== "string")) return false;
+  const durationMs = Date.parse(window.beforeTime) - Date.parse(window.afterTime);
+  const priorMs = window.priorWatermark === null ? null : Date.parse(window.priorWatermark);
   return new Set(["INITIAL", "INCREMENTAL"]).has(window.mode)
     && validIso(window.afterTime)
     && validIso(window.beforeTime)
@@ -68,7 +94,13 @@ function validWindow(window: AwsSupportCollectionWindow): boolean {
     && window.nextWatermark === window.beforeTime
     && (window.mode === "INITIAL"
       ? window.priorWatermark === null
-      : window.priorWatermark !== null);
+        && durationMs <= AWS_SUPPORT_CASES_COLLECTION_BOUNDS.maximumInitialLookbackDays * DAY_MS
+      : priorMs !== null
+        && Date.parse(window.beforeTime) > priorMs
+        && Date.parse(window.afterTime) <= priorMs
+        && priorMs - Date.parse(window.afterTime)
+          <= AWS_SUPPORT_CASES_COLLECTION_BOUNDS.maximumIncrementalOverlapHours * HOUR_MS
+        && durationMs <= AWS_SUPPORT_CASES_COLLECTION_BOUNDS.maximumIncrementalWindowDays * DAY_MS);
 }
 
 function parseJob(job: RunnableJob): AwsSupportCollectionWindow {
@@ -77,9 +109,13 @@ function parseJob(job: RunnableJob): AwsSupportCollectionWindow {
     || job.customerId === null
     || job.connectionId === null
     || !JOB_ID.test(job.id)
+    || !IDENTIFIER.test(job.orgId)
+    || !IDENTIFIER.test(job.customerId)
+    || !CONNECTION_ID.test(job.connectionId)
     || !Number.isSafeInteger(job.attempt)
     || job.attempt < 1
-    || job.attempt > 25
+    || job.attempt > 5
+    || job.maxAttempts !== 5
     || typeof job.payload !== "object"
     || job.payload === null
     || Array.isArray(job.payload)
@@ -91,7 +127,7 @@ function parseJob(job: RunnableJob): AwsSupportCollectionWindow {
     || payload.window === null
     || Array.isArray(payload.window)
   ) reject();
-  const window = payload.window as unknown as AwsSupportCollectionWindow;
+  const window = payload.window;
   if (
     JSON.stringify(Object.keys(payload.window as Record<string, unknown>).sort())
       !== JSON.stringify([
@@ -124,15 +160,24 @@ export async function scheduleAwsSupportCasesCollections(input: {
   ) => Promise<AwsSupportCollectionWindow>;
   readonly queue: AwsSupportCasesRuntimeQueue;
 }): Promise<{ readonly enqueued: number }> {
-  const scopes = [...await input.loadEligibleScopes()]
-    .sort((left, right) => left.parentConnectionId.localeCompare(right.parentConnectionId));
+  const loaded = await input.loadEligibleScopes();
+  if (!Array.isArray(loaded)) reject();
+  const scopes = [...loaded];
   if (scopes.length > 10_000) reject();
   const seen = new Set<string>();
   for (const scope of scopes) {
     if (!validScope(scope) || seen.has(scope.parentConnectionId)) reject();
     seen.add(scope.parentConnectionId);
-    const window = Object.freeze({ ...await input.resolveWindow(scope) });
-    if (!validWindow(window)) reject();
+  }
+  scopes.sort((left, right) =>
+    left.parentConnectionId.localeCompare(right.parentConnectionId));
+  const planned: { readonly scope: AwsSupportCasesJobScope; readonly window: AwsSupportCollectionWindow }[] = [];
+  for (const scope of scopes) {
+    const resolved: unknown = await input.resolveWindow(scope);
+    if (!validWindow(resolved)) reject();
+    planned.push({ scope, window: Object.freeze({ ...resolved }) });
+  }
+  for (const { scope, window } of planned) {
     await input.queue.enqueue({
       orgId: scope.organizationId,
       customerId: scope.customerId,
@@ -143,7 +188,7 @@ export async function scheduleAwsSupportCasesCollections(input: {
       idempotencyKey: `aws-support-cases:${scope.parentConnectionId}:${window.nextWatermark}`,
     });
   }
-  return { enqueued: scopes.length };
+  return { enqueued: planned.length };
 }
 
 export async function runAwsSupportCasesRuntimeHandler(job: RunnableJob, dependencies: {

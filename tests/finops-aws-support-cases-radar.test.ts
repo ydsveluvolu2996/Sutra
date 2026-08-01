@@ -375,6 +375,20 @@ test("reports explicit unavailable and partial account coverage without an organ
   assert.equal(dashboard.source.organizationCoverageClaimed, false);
   assert.equal(dashboard.summary.intendedAccountCount, 2);
   assert.equal(dashboard.summary.completeAccountCount, 1);
+  assert.deepEqual(dashboard.summary.communicationActorCounts, {
+    AWS: 1,
+    CUSTOMER: 0,
+    UNKNOWN: 0,
+  });
+  assert.equal(dashboard.summary.responseCadence.awsResponseTransitions, 1);
+  assert.equal(dashboard.summary.responseCadence.averageAwsResponseMinutes, 1_440);
+  assert.equal(dashboard.summary.responseCadence.averageCustomerResponseMinutes, null);
+  assert.deepEqual(dashboard.summary.openAgeBands, {
+    under7Days: 0,
+    days7To30: 1,
+    days31To90: 0,
+    over90Days: 0,
+  });
   assert.match(dashboard.disclosure, /account-by-account/u);
 });
 

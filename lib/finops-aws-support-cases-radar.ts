@@ -1674,6 +1674,19 @@ export interface AwsSupportCasesRadarDashboard {
     readonly highUrgentCriticalCount: number;
     readonly communicationCount: number;
     readonly attachmentCount: number;
+    readonly communicationActorCounts: Readonly<Record<AwsSupportActorKind, number>>;
+    readonly responseCadence: {
+      readonly awsResponseTransitions: number;
+      readonly customerResponseTransitions: number;
+      readonly averageAwsResponseMinutes: number | null;
+      readonly averageCustomerResponseMinutes: number | null;
+    };
+    readonly openAgeBands: {
+      readonly under7Days: number;
+      readonly days7To30: number;
+      readonly days31To90: number;
+      readonly over90Days: number;
+    };
     readonly intendedAccountCount: number;
     readonly completeAccountCount: number;
     readonly statusCounts: Readonly<Record<AwsSupportCaseStatus, number>>;
@@ -1896,6 +1909,21 @@ export function buildAwsSupportCasesRadar(input: {
   };
   const serviceCounts = new Map<string, number>();
   const categoryCounts = new Map<string, number>();
+  const communicationActorCounts: Record<AwsSupportActorKind, number> = {
+    AWS: 0,
+    CUSTOMER: 0,
+    UNKNOWN: 0,
+  };
+  let awsResponseTransitions = 0;
+  let customerResponseTransitions = 0;
+  let awsResponseMs = BigInt(0);
+  let customerResponseMs = BigInt(0);
+  const openAgeBands = {
+    under7Days: 0,
+    days7To30: 0,
+    days31To90: 0,
+    over90Days: 0,
+  };
   for (const supportCase of allFiltered) {
     statusCounts[supportCase.status] += 1;
     severityCounts[supportCase.severity] += 1;
@@ -1907,6 +1935,38 @@ export function buildAwsSupportCasesRadar(input: {
       supportCase.categoryCode,
       (categoryCounts.get(supportCase.categoryCode) ?? 0) + 1,
     );
+    let previousActor = supportCase.submittedByKind;
+    let previousAt = supportCase.createdAt;
+    for (const communication of supportCase.communications) {
+      communicationActorCounts[communication.submittedByKind] += 1;
+      if (previousActor === communication.submittedByKind) {
+        previousAt = communication.createdAt;
+        continue;
+      }
+      const elapsedMs = BigInt(
+        Date.parse(communication.createdAt) - Date.parse(previousAt),
+      );
+      if (communication.submittedByKind === "AWS"
+        && previousActor === "CUSTOMER") {
+        awsResponseTransitions += 1;
+        awsResponseMs += elapsedMs;
+      } else if (communication.submittedByKind === "CUSTOMER"
+        && previousActor === "AWS") {
+        customerResponseTransitions += 1;
+        customerResponseMs += elapsedMs;
+      }
+      previousActor = communication.submittedByKind;
+      previousAt = communication.createdAt;
+    }
+    if (supportCase.status !== "resolved") {
+      const ageDays = Math.floor(
+        Math.max(0, nowMs - Date.parse(supportCase.createdAt)) / DAY_MS,
+      );
+      if (ageDays < 7) openAgeBands.under7Days += 1;
+      else if (ageDays <= 30) openAgeBands.days7To30 += 1;
+      else if (ageDays <= 90) openAgeBands.days31To90 += 1;
+      else openAgeBands.over90Days += 1;
+    }
   }
   const watermarkCoverage = ordered[0]?.window.mode === "INITIAL"
     && ordered.every((snapshot, index) =>
@@ -1953,6 +2013,18 @@ export function buildAwsSupportCasesRadar(input: {
         (total, supportCase) => total + supportCase.attachmentCount,
         0,
       ),
+      communicationActorCounts,
+      responseCadence: {
+        awsResponseTransitions,
+        customerResponseTransitions,
+        averageAwsResponseMinutes: awsResponseTransitions === 0
+          ? null
+          : Number(awsResponseMs / BigInt(awsResponseTransitions) / BigInt(60_000)),
+        averageCustomerResponseMinutes: customerResponseTransitions === 0
+          ? null
+          : Number(customerResponseMs / BigInt(customerResponseTransitions) / BigInt(60_000)),
+      },
+      openAgeBands,
       intendedAccountCount: latest.intendedAccounts.length,
       completeAccountCount: latest.accountCoverage.filter((account) =>
         account.status === "complete"

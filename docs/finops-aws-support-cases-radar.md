@@ -159,8 +159,9 @@ all of these gates pass:
    substitution.
 5. **UI gate:** the professional Operations/FinOps view renders account
    coverage, status/severity/service/category distributions, incremental
-   history, safe summaries, and empty/unverified/unavailable/partial/stale
-   states without raw correspondence.
+   history, open-case age, privacy-safe response cadence, top topics, safe
+   summaries, and empty/unverified/unavailable/partial/stale states without raw
+   correspondence.
 6. **Live gate:** controlled qualifying and non-qualifying accounts validate
    pagination, resolved cases, communication counts, entitlement denial,
    authorization denial, throttling, stale data, watermark replay, privacy

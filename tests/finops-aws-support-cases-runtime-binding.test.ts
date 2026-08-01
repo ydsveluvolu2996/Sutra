@@ -62,8 +62,21 @@ test("Support scheduler accepts only server-resolved scopes and identity-only wi
   await assert.rejects(scheduleAwsSupportCasesCollections({
     loadEligibleScopes: async () => [scope, scope],
     resolveWindow: async () => window,
-    queue: { enqueue: async () => undefined },
+    queue: { enqueue: async () => { throw new Error("must not enqueue"); } },
   }));
+
+  let enqueuedBeforeWindowValidation = false;
+  await assert.rejects(scheduleAwsSupportCasesCollections({
+    loadEligibleScopes: async () => [
+      scope,
+      { ...scope, parentConnectionId: `conn_${"b".repeat(32)}` },
+    ],
+    resolveWindow: async (candidate) => candidate.parentConnectionId === CONNECTION
+      ? window
+      : { ...window, beforeTime: "2026-09-15T00:00:00.000Z", nextWatermark: "2026-09-15T00:00:00.000Z" },
+    queue: { enqueue: async () => { enqueuedBeforeWindowValidation = true; } },
+  }));
+  assert.equal(enqueuedBeforeWindowValidation, false);
 });
 
 test("Support broker signs the exact privacy-minimized request and rejects unsigned output", async () => {
@@ -143,6 +156,8 @@ test("Support runtime contract pins entitlement probing and remains honestly unr
   assert.match(engine, /entitlementProbe: "DESCRIBE_CASES_AUTHORIZATION_OUTCOME"/u);
   assert.match(engine, /credentials: "SERVER_OWNED_TRUST_ROLE_SESSIONS"/u);
   assert.match(runtime, /loadScope/u);
+  assert.match(runtime, /job\.maxAttempts !== 5/u);
+  assert.match(runtime, /maximumIncrementalWindowDays/u);
   assert.match(runtime, /targets: dependencies\.targets/u);
   assert.match(runtime, /registeredInSharedRuntime: false/u);
   assert.match(broker, /verifyHostedBrokerResponse/u);

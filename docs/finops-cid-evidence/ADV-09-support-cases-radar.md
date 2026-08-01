@@ -1,5 +1,13 @@
 # ADV-09 — AWS Support Cases Radar Dashboard
 
+Reviewed: 2026-08-01
+
+Official definition (pinned):
+<https://github.com/aws-solutions-library-samples/cloud-intelligence-dashboards-framework/blob/f9e36d88c47709f10e8fa784ad11d5cc0e728021/dashboards/support-cases-radar/support-cases-radar.yaml>
+
+Official guide:
+<https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/support-cases-radar.html>
+
 ## Official capability and bounded implementation
 
 The official AWS Cloud Intelligence Dashboard describes a daily view of changed
@@ -19,8 +27,9 @@ This vertical adds:
   exact path/body/tenant headers, request nonce, response signature, content
   type, byte bound, request digest, job identity, scope, and normalized capture;
 - a daily server-owned scheduler/runtime handler contract with deterministic
-  collection identity and an explicit `DescribeCases` authorization-outcome
-  entitlement probe;
+  collection identity, exact five-attempt leases, prevalidated tenant scopes
+  and bounded initial/incremental windows, plus an explicit `DescribeCases`
+  authorization-outcome entitlement probe;
 - immutable tenant/customer/anchor-connection persistence in SQLite migration
   `0092` and PostgreSQL migration `0087`, with failed/partial attempts retained
   and a complete-only monotonic accepted head;
@@ -28,8 +37,25 @@ This vertical adds:
   the signed-in organization, never accepts tenant/customer substitution, and
   returns only a bounded browser-safe projection;
 - a native accessible dashboard with account, status, severity, service, and
-  category filters; coverage and Support-plan states; case-history visuals;
-  metadata drilldown; provenance; freshness; and explicit activation limits.
+  category filters; coverage and Support-plan states; case-history, open-age,
+  privacy-safe response-cadence and top-topic visuals; metadata drilldown;
+  provenance; freshness; and explicit activation limits.
+
+## Official inventory audit
+
+The pinned framework definition declares `support_cases_status_view` and
+`support_cases_communications_view`. The latter supplies payer/account,
+case-created time, status, service, category, severity, communication time,
+communication lag/origin/class, and optional summary fields. The current AWS
+guide confirms daily changed-case collection, nightly dashboard refresh,
+multi-account/multi-organization consolidation, and an optional Bedrock
+summarization plugin. Sutra covers the operational metadata inventory with
+status/severity/service/category distributions, account readiness, observed
+history, case age, response transitions and drilldown. It deliberately does
+not expose the official definition's raw subject, body, submitter, CC, URL or
+Bedrock-summary fields to the browser. The pinned YAML does not contain the
+QuickSight asset geometry, so exact sheet/layout parity remains an acceptance
+gate rather than an inferred claim.
 
 ## Privacy and plan states
 
@@ -82,11 +108,16 @@ the pure engine.
 Focused tests cover engine privacy/bounds, immutable migrations, tenant-scoped
 repository and route contracts, browser-safe projection, accessible native
 rendering, plan/configuration states, history/provenance, the server-owned job
-boundary, signed transport rejection, and scheduler isolation. The
+boundary, response/age/topic visuals, signed transport rejection, strict
+lease/window validation, and all-scope scheduler prevalidation. The
 implementation remains `PARTIAL_PIPELINE`, not live-verified: the shared
 runtime registration, credential-owning AWS SDK Support adapter, and provider
 accounts are not bound in this repository. Activation therefore remains false
 with `AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED`.
+
+Focused local result: **19 passed, 0 failed, 0 skipped** across the engine,
+runtime binding and vertical contract suites; scoped lint, TypeScript and the
+parent exact-tree gates are tracked separately.
 
 Production activation requires controlled qualifying and non-qualifying linked
 accounts to validate IAM, endpoint partitioning, pagination, throttling,
