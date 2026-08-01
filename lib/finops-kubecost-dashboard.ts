@@ -1,4 +1,5 @@
-import type { KubecostAllocationGroup, KubecostAllocationKind, KubecostAllocationSnapshot, KubecostExactDecimal, KubecostMetric } from "./finops-kubecost-allocation.ts";
+import type { KubecostAllocationGroup, KubecostAllocationKind, KubecostAllocationSnapshot,
+  KubecostCostComponent, KubecostExactDecimal, KubecostMetric } from "./finops-kubecost-allocation.ts";
 
 export interface KubecostDashboardFilters {
   readonly accountId?: string; readonly clusterId?: string; readonly namespace?: string;
@@ -33,6 +34,32 @@ function efficiency(groups: readonly KubecostAllocationGroup[], metric: Kubecost
   return { metric, requestedOrProvisioned: requested, used, ratio, contributingGroupCount: evidence.length, state: evidence.length === 0 ? "UNAVAILABLE" as const : evidence.length === groups.length ? "COMPLETE" as const : "PARTIAL" as const };
 }
 
+function componentCosts(groups: readonly KubecostAllocationGroup[]) {
+  const values = new Map<string, { component: KubecostCostComponent; currency: string; costs: KubecostExactDecimal[]; groupCount: number }>();
+  for (const group of groups) for (const item of group.componentCosts) {
+    const key = `${group.currency}|${item.component}`;
+    const current = values.get(key) ?? { component: item.component, currency: group.currency, costs: [], groupCount: 0 };
+    current.costs.push(item.exact); current.groupCount += 1; values.set(key, current);
+  }
+  return [...values.values()].map((item) => ({ component: item.component, currency: item.currency,
+    totalCost: sum(item.costs), contributingGroupCount: item.groupCount }))
+    .sort((left, right) => `${left.currency}|${left.component}`.localeCompare(`${right.currency}|${right.component}`));
+}
+
+function hourlyCosts(groups: readonly KubecostAllocationGroup[]) {
+  const values = new Map<string, { windowStartIso: string; windowEndIso: string; currency: string;
+    costs: KubecostExactDecimal[]; rowCount: number }>();
+  for (const group of groups) for (const item of group.hourlyCosts) {
+    const key = `${item.windowStartIso}|${item.windowEndIso}|${item.currency}`;
+    const current = values.get(key) ?? { windowStartIso: item.windowStartIso, windowEndIso: item.windowEndIso,
+      currency: item.currency, costs: [], rowCount: 0 };
+    current.costs.push(item.totalCost); current.rowCount += item.rowCount; values.set(key, current);
+  }
+  return [...values.values()].map((item) => ({ windowStartIso: item.windowStartIso,
+    windowEndIso: item.windowEndIso, currency: item.currency, totalCost: sum(item.costs), rowCount: item.rowCount }))
+    .sort((left, right) => left.windowStartIso.localeCompare(right.windowStartIso) || left.currency.localeCompare(right.currency));
+}
+
 export function buildKubecostDashboard(snapshot: KubecostAllocationSnapshot, filters: KubecostDashboardFilters = {}) {
   const limit = filters.limit ?? 100; const cursor = filters.cursor ?? "";
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500 || (cursor !== "" && !/^v1:(?:0|[1-9]\d{0,7})$/u.test(cursor))) throw new Error("INVALID_KUBECOST_DASHBOARD_QUERY");
@@ -46,7 +73,9 @@ export function buildKubecostDashboard(snapshot: KubecostAllocationSnapshot, fil
   const currencies = [...new Set(groups.map((group) => group.currency))].sort();
   return {
     schema: "sutra.finops-kubecost-dashboard.v1" as const, filters, resultCount: groups.length, rows, nextCursor,
-    executiveSummary: { totals: currencies.map((currency) => ({ currency, totalCost: sum(groups.filter((group) => group.currency === currency).map((group) => group.totalCost)) })), efficiencies: [efficiency(groups, "CPU"), efficiency(groups, "RAM")] },
+    executiveSummary: { totals: currencies.map((currency) => ({ currency, totalCost: sum(groups.filter((group) => group.currency === currency).map((group) => group.totalCost)) })),
+      componentCosts: componentCosts(groups), efficiencies: [efficiency(groups, "CPU"), efficiency(groups, "RAM")] },
+    hourlyCosts: hourlyCosts(groups),
     byAccount: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.usageAccountId).map((item) => ({ accountId: item.identity, ...item }))),
     topClusters: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.clusterId).map((item) => ({ clusterId: item.identity, ...item }))).slice(0, 25),
     pivots: {
@@ -56,8 +85,6 @@ export function buildKubecostDashboard(snapshot: KubecostAllocationSnapshot, fil
     },
     reconciliation: snapshot.reconciliation, coverage: snapshot.coverage, source: snapshot.exportLineage,
     unsupported: {
-      cpuRamCostSplit: "Normalized groups retain exact total cost and efficiency, but not CPU/RAM component cost; no split is inferred.",
-      timeSeries: "The accepted snapshot aggregates its explicit window; per-hour trend facts are not retained in this projection.",
       eksCapacityInstanceType: "The Kubecost allocation contract does not carry EKS node capacity type or EC2 instance type dimensions.",
     },
   };

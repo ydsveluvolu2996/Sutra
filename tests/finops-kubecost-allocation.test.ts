@@ -261,6 +261,12 @@ test("builds full container lineage, disjoint cost categories, exact efficiencie
   assert.deepEqual(workload?.efficiencies.find((metric) => metric.metric === "GPU")?.ratio, {
     numerator: "1", denominator: "4",
   });
+  assert.deepEqual(workload?.componentCosts.find((item) => item.component === "CPU")?.exact, {
+    numerator: "4", denominator: "1",
+  });
+  assert.deepEqual(workload?.hourlyCosts[0]?.totalCost, {
+    numerator: "43", denominator: "4",
+  });
   assert.equal(workload?.efficiencies.find((metric) => metric.metric === "NETWORK")?.state, "UNAVAILABLE");
   assert.equal(snapshot.reconciliation.state, "MATCHED");
   assert.equal(snapshot.reconciliation.presentationPolicy, "ATTRIBUTION_VIEW_ONLY_DO_NOT_ADD_TO_CUR2");

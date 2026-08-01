@@ -2,6 +2,12 @@
 
 `lib/finops-kubecost-allocation.ts` is the pure normalization and acceptance boundary for the Additional-level Kubecost allocation capability. It consumes an already-collected, tenant-pinned export; it does not call Kubecost, OpenCost, Kubernetes, S3, or AWS Billing itself.
 
+The AWS CID dashboard's official scope is self-hosted Kubecost. The engine's
+OpenCost input is a supplemental Sutra extension and is never represented as
+official AWS dashboard parity. Accepted hourly rows retain exact component
+costs and are projected into filtered hourly trend evidence before resource
+pagination.
+
 The source is an attribution view, not a second spend ledger. AWS CUR 2.0 remains authoritative spend. A Kubecost snapshot cannot become `READY` until its aggregate currency totals reconcile to the exact immutable `ACTIVE` CUR2 generation named in the tenant scope. The presentation policy is always `ATTRIBUTION_VIEW_ONLY_DO_NOT_ADD_TO_CUR2`.
 
 ## Evidence contract

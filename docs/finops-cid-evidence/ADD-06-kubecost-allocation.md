@@ -9,12 +9,23 @@ change.
 
 ## Official scope coverage
 
+Official AWS guidance and the authoritative `awslabs/containers-cost-allocation-dashboard`
+repository were rechecked 2026-08-01. The source is pinned at commit
+[`8a581332a70ae55d53464e52a0bb8b3dd64cb425`](https://github.com/awslabs/containers-cost-allocation-dashboard/tree/8a581332a70ae55d53464e52a0bb8b3dd64cb425),
+whose CID asset `cid/containers_cost_allocation.yaml` has SHA-256
+`2bde67113c8f585d13fc43fe537c3bee3eecf3a416b81cd0f57295226b4ed45b`.
+AWS documents exactly three dashboard tabs: **Executive Summary**, **Workloads
+Explorer**, and **EKS Breakdown**. The official repository explicitly supports
+self-hosted Kubecost and explicitly does not support OpenCost. Sutra retains
+OpenCost as a supplemental, clearly labeled source; it is not counted as
+official parity.
+
 | Official area | Implemented locally | Honest remaining gap |
 |---|---|---|
-| Self-hosted Kubecost, any tier | Provider-neutral `KUBECOST`/`OPENCOST` versioned S3 export contract | Customer exporter and signed ingest adapter are not deployed |
+| Self-hosted Kubecost, any tier | `KUBECOST` versioned S3 export contract; supplemental `OPENCOST` is disclosed separately | Customer exporter and signed ingest adapter are not deployed |
 | Container/pod/namespace/controller allocation | Full account → cluster → namespace → controller → workload → pod → container lineage with special allocations preserved | None for accepted source rows; null lineage stays unallocated |
-| Executive Summary | Exact total allocated cost by currency, CPU/RAM usage-vs-request efficiency, cost by account, and top clusters | Normalized groups do not retain CPU/RAM component cost, so those component KPIs are explicitly unavailable |
-| Workloads Explorer | Tenant-bounded filters, exact rows, namespace/controller/workload pivots, allocation categories, pagination, and efficiency | Per-hour trend facts are not retained after snapshot grouping |
+| Executive Summary | Exact total and CPU/RAM/GPU/network/PV/load-balancer/shared/external component cost by currency, CPU/RAM usage-vs-request efficiency, cost by account, and top clusters | None for accepted component-cost evidence |
+| Workloads Explorer | Tenant-bounded filters, exact rows, namespace/controller/workload pivots, allocation categories, pagination, efficiency, and filtered hourly allocated-cost trend | Exact QuickSight geometry remains a browser/live gate |
 | EKS Breakdown | Cluster distribution, coverage, group counts, and workload drilldown | Capacity type and instance type are absent from the export schema and are not inferred |
 | Showback/chargeback | Reconciled namespace showback and usage-vs-request evidence | Read-only dashboard creates no invoices, journals, transfers, or chargeback posting |
 
@@ -91,8 +102,8 @@ special idle/shared/external/unallocated/unmounted costs are not redistributed.
 4. Bind it to an active reconciled CUR2 generation and validate S3 bucket-owner,
    prefix, object-versioning, Object Lock/lifecycle where applicable, KMS and IAM
    restrictions with real objects.
-5. Extend the normalized snapshot with retained hourly facts for trend views,
-   CPU/RAM component cost, and EKS capacity/instance-type dimensions.
+5. Version the accepted schema for EKS node capacity and instance-type
+   dimensions; current evidence does not carry them and they are not inferred.
 6. Run live multi-account/cluster acceptance across complete, empty, mismatch,
    partial, stale, waiting, error, and cross-tenant attacks.
 7. Run the exact-tree G7 gate, controlled provider/two-tenant G8 acceptance,

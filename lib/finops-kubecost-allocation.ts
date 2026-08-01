@@ -127,6 +127,7 @@ export type KubecostEconomicCategory =
   | "UNALLOCATED"
   | "UNMOUNTED";
 export type KubecostMetric = "CPU" | "RAM" | "GPU" | "NETWORK" | "PV";
+export type KubecostCostComponent = KubecostMetric | "LOAD_BALANCER" | "SHARED" | "EXTERNAL";
 
 export interface KubecostAllocationScope extends FinopsSourceScope {
   readonly partition: "aws" | "aws-us-gov" | "aws-cn";
@@ -301,6 +302,20 @@ export interface KubecostEfficiency {
   readonly evidenceBasis: "EXPLICIT_SOURCE_FIELDS" | "NOT_PUBLISHED";
 }
 
+export interface KubecostComponentCost {
+  readonly component: KubecostCostComponent;
+  readonly exact: KubecostExactDecimal;
+}
+
+export interface KubecostHourlyCost {
+  readonly windowStartIso: string;
+  readonly windowEndIso: string;
+  readonly currency: string;
+  readonly totalCost: KubecostExactDecimal;
+  readonly componentCosts: readonly KubecostComponentCost[];
+  readonly rowCount: number;
+}
+
 export interface KubecostAllocationGroup {
   readonly usageAccountId: string;
   readonly region: string | null;
@@ -315,6 +330,8 @@ export interface KubecostAllocationGroup {
   readonly currency: string;
   readonly rowCount: number;
   readonly totalCost: KubecostExactDecimal;
+  readonly componentCosts: readonly KubecostComponentCost[];
+  readonly hourlyCosts: readonly KubecostHourlyCost[];
   readonly efficiencies: readonly KubecostEfficiency[];
   readonly sourceRowIds: readonly string[];
   readonly sourceRowsTruncated: boolean;
@@ -709,6 +726,35 @@ function sumRows(rows: readonly KubecostAllocationRow[], select: (row: KubecostA
   return rows.reduce((sum, row) => add(sum, select(row)), ZERO);
 }
 
+const COMPONENT_COSTS: readonly { readonly component: KubecostCostComponent; readonly key: keyof KubecostAllocationCosts }[] = [
+  { component: "CPU", key: "cpuCost" }, { component: "RAM", key: "ramCost" },
+  { component: "GPU", key: "gpuCost" }, { component: "NETWORK", key: "networkCost" },
+  { component: "PV", key: "pvCost" }, { component: "LOAD_BALANCER", key: "loadBalancerCost" },
+  { component: "SHARED", key: "sharedCost" }, { component: "EXTERNAL", key: "externalCost" },
+];
+
+function componentCosts(rows: readonly KubecostAllocationRow[]): readonly KubecostComponentCost[] {
+  return COMPONENT_COSTS.map(({ component, key }) => ({ component, exact: exact(sumRows(rows, (row) => {
+    const amount = decimal(row.costs[key]);
+    if (amount === null) fail("INVALID_INPUT");
+    return amount;
+  })) }));
+}
+
+function hourlyCosts(rows: readonly KubecostAllocationRow[]): readonly KubecostHourlyCost[] {
+  const windows = new Map<string, KubecostAllocationRow[]>();
+  for (const row of rows) {
+    const key = `${row.windowStartIso}\u001f${row.windowEndIso}\u001f${row.currency}`;
+    const values = windows.get(key) ?? [];
+    values.push(row);
+    windows.set(key, values);
+  }
+  return [...windows.entries()].sort(([left], [right]) => left.localeCompare(right, "en-US"))
+    .map(([, values]) => ({ windowStartIso: values[0]!.windowStartIso,
+      windowEndIso: values[0]!.windowEndIso, currency: values[0]!.currency,
+      totalCost: exact(sumRows(values, totalCost)), componentCosts: componentCosts(values), rowCount: values.length }));
+}
+
 function economicParts(row: KubecostAllocationRow): Readonly<Record<KubecostEconomicCategory, Rational>> {
   const empty = (): Record<KubecostEconomicCategory, Rational> => ({
     WORKLOAD_ALLOCATION: ZERO, IDLE: ZERO, SHARED: ZERO, EXTERNAL: ZERO, UNALLOCATED: ZERO, UNMOUNTED: ZERO,
@@ -810,6 +856,8 @@ function buildGroups(rows: readonly KubecostAllocationRow[]): readonly KubecostA
         currency: row.currency,
         rowCount: group.rows.length,
         totalCost: exact(sumRows(group.rows, totalCost)),
+        componentCosts: componentCosts(group.rows),
+        hourlyCosts: hourlyCosts(group.rows),
         efficiencies: (["CPU", "RAM", "GPU", "NETWORK", "PV"] as const).map((metric) => efficiency(group.rows, metric)),
         sourceRowIds: limited,
         sourceRowsTruncated: sourceRows.length > limited.length,
