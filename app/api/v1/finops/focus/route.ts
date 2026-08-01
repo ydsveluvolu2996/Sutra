@@ -14,6 +14,7 @@ import {
   buildFinopsFocusDashboard,
   FINOPS_FOCUS_DASHBOARD_BOUNDS,
 } from "../../../../../lib/finops-focus-dashboard";
+import { FOCUS_OFFICIAL_DEFINITION } from "../../../../../lib/finops-focus-official-definition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -256,7 +257,7 @@ export async function GET(request: Request): Promise<Response> {
     ];
     if (query.providerSourceId !== null && query.providerSourceId !== connection.id) {
       const selected = providerSources.find((source) => source.sourceId === query.providerSourceId);
-      return jsonResponse({ connectionId: query.connectionId, selectedWindow: null, availablePeriods: [], report: null, sourceState: "configuration_required", providerSources, activation: { ready: false, reason: selected?.state ?? "FOCUS_PROVIDER_SOURCE_NOT_FOUND", substitutionAllowed: false } });
+      return jsonResponse({ connectionId: query.connectionId, selectedWindow: null, availablePeriods: [], report: null, sourceState: "configuration_required", providerSources, officialDefinition: FOCUS_OFFICIAL_DEFINITION, activation: { ready: false, reason: selected?.state ?? "FOCUS_PROVIDER_SOURCE_NOT_FOUND", substitutionAllowed: false } });
     }
 
     const owner = {
@@ -288,6 +289,7 @@ export async function GET(request: Request): Promise<Response> {
           substitutionAllowed: false,
         },
         providerSources,
+        officialDefinition: FOCUS_OFFICIAL_DEFINITION,
       });
     }
 
@@ -303,6 +305,7 @@ export async function GET(request: Request): Promise<Response> {
         report: null,
         sourceState: "waiting",
         providerSources,
+        officialDefinition: FOCUS_OFFICIAL_DEFINITION,
       });
     }
     if (selectedPartitions.length > FINOPS_FOCUS_DASHBOARD_BOUNDS.maximumPeriods) {
@@ -333,6 +336,7 @@ export async function GET(request: Request): Promise<Response> {
         sourceState: "partial",
         qualityFailures: report.failures,
         providerSources,
+        officialDefinition: FOCUS_OFFICIAL_DEFINITION,
       });
     }
     const freshness = freshnessFor(selectedPartitions[0]!);
@@ -351,6 +355,7 @@ export async function GET(request: Request): Promise<Response> {
       sourceState,
       sourceFreshness: freshness,
       providerSources,
+      officialDefinition: FOCUS_OFFICIAL_DEFINITION,
     });
   } catch (error) {
     return errorResponse(error);

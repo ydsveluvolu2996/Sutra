@@ -8,6 +8,7 @@ import type {
   FinopsFocusDashboardResult,
   FinopsFocusDimension,
 } from "../../lib/finops-focus-dashboard";
+import type { FocusOfficialDefinition } from "../../lib/finops-focus-official-definition";
 import {
   FinopsCapabilityShell,
   type FinopsCapabilityEvidence,
@@ -35,6 +36,7 @@ interface FocusEnvelope {
   readonly availablePeriods: readonly AvailablePeriod[];
   readonly report: FocusReport | null;
   readonly providerSources: readonly FocusProviderSource[];
+  readonly officialDefinition: FocusOfficialDefinition;
   readonly activation?: { readonly ready: boolean; readonly reason: string; readonly substitutionAllowed: false };
   readonly sourceState:
     | "complete"
@@ -130,6 +132,14 @@ function parseFocusEnvelope(body: unknown, connectionId: string): FocusEnvelope 
     || body.connectionId !== connectionId
     || !Array.isArray(body.availablePeriods)
     || !Array.isArray(body.providerSources)
+    || !isRecord(body.officialDefinition)
+    || body.officialDefinition.schema !== "sutra.finops-focus-official-definition.v1"
+    || !isRecord(body.officialDefinition.source)
+    || body.officialDefinition.source.commit !== "f9e36d88c47709f10e8fa784ad11d5cc0e728021"
+    || body.officialDefinition.source.definitionSha256 !== "bc7bafbcb47e745dd256a151ee3fbe260aad10515fc5e626e02aec0c6e6ea1cc"
+    || !isRecord(body.officialDefinition.totals)
+    || body.officialDefinition.totals.sheets !== 3
+    || body.officialDefinition.totals.visuals !== 27
     || !("selectedWindow" in body)
     || !("report" in body)
     || ![
@@ -155,6 +165,58 @@ function parseFocusEnvelope(body: unknown, connectionId: string): FocusEnvelope 
     )
   ) throw new Error("The FOCUS report schema was not recognized.");
   return body as unknown as FocusEnvelope;
+}
+
+export function FocusOfficialDefinitionPanel({
+  definition,
+}: {
+  readonly definition: FocusOfficialDefinition;
+}) {
+  return (
+    <div className={styles.focusWorkspace}>
+      <section className={styles.focusPanel} aria-label="Official AWS FOCUS definition coverage">
+        <header>
+          <div>
+            <small>Pinned public QuickSight source</small>
+            <h4>Official FOCUS definition coverage</h4>
+          </div>
+          <span>{definition.source.version} · {definition.source.commit.slice(0, 12)} · {definition.source.definitionSha256.slice(0, 16)}…</span>
+        </header>
+        <div className={styles.focusQualityGrid}>
+          {definition.sheets.map((officialSheet) => (
+            <article key={officialSheet.id}>
+              <div>
+                <strong>{officialSheet.name}</strong>
+                <span>{officialSheet.visualCount} visuals · {officialSheet.parameterControls.length + officialSheet.filterControls.length} controls</span>
+              </div>
+              <b>{officialSheet.nativeCoverage}</b>
+              <small>{officialSheet.documentedPurpose ?? "Source attribution, version and notices in layout text boxes."}</small>
+            </article>
+          ))}
+        </div>
+        <details className={styles.focusEvidenceDrawer}>
+          <summary>Official provider repositories and native binding state</summary>
+          <div className={styles.focusTableWrap} tabIndex={0} role="region" aria-label="Scrollable FOCUS provider source audit">
+            <table className={styles.focusTable}>
+              <caption>Official provider repository audit and native binding state</caption>
+              <thead><tr><th>Provider</th><th>Published source</th><th>Immutable commit</th><th>Native state</th><th>Disclosure</th></tr></thead>
+              <tbody>{definition.providerSources.map((source) => (
+                <tr key={source.provider}>
+                  <th scope="row">{source.provider}</th>
+                  <td>{source.sourceKind.replaceAll("_", " ")}</td>
+                  <td title={source.commit}>{source.commit.slice(0, 12)}</td>
+                  <td>{source.nativeBindingState.replaceAll("_", " ")}</td>
+                  <td>{source.disclosure}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          <p>{definition.totals.sheets} sheets · {definition.totals.visuals} visuals · {definition.totals.parameterControls + definition.totals.filterControls} controls. Exact counts describe the pinned public definition; Sutra does not claim QuickSight pixel, geometry, query-result, or interaction parity.</p>
+          <p>Azure, GCP, and OCI normalized provider bindings remain fail-closed. Discovery never implies supported FOCUS ingestion, and native billing exports are never relabelled as FOCUS.</p>
+        </details>
+      </section>
+    </div>
+  );
 }
 
 async function readFocusEnvelope(
@@ -667,6 +729,9 @@ export function FinopsFocusDashboard({
       stateDetail={presentation.detail}
       stateTitle={presentation.title}
     >
+      {envelope === null ? null : (
+        <FocusOfficialDefinitionPanel definition={envelope.officialDefinition} />
+      )}
       {periodOptions.length === 0 ? null : (
         <form
           className={styles.focusPeriodFilters}

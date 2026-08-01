@@ -114,6 +114,39 @@ test("FOCUS layout is responsive and exposes keyboard focus", () => {
   assert.match(css, /min-height: 44px/u);
 });
 
+test("FOCUS official definition panel renders without a billing report", async () => {
+  const vite = await createServer({
+    root,
+    configFile: false,
+    logLevel: "silent",
+    plugins: [react()],
+    server: { middlewareMode: true },
+  });
+  try {
+    const [focusModule, definitionModule] = await Promise.all([
+      vite.ssrLoadModule("/app/costs/finops-focus-dashboard.tsx"),
+      vite.ssrLoadModule("/lib/finops-focus-official-definition.ts"),
+    ]);
+    const html = renderToStaticMarkup(createElement(
+      focusModule.FocusOfficialDefinitionPanel,
+      { definition: definitionModule.FOCUS_OFFICIAL_DEFINITION },
+    ));
+    assert.match(html, /Official FOCUS definition coverage/u);
+    assert.match(html, /Billing Summary/u);
+    assert.match(html, /18 visuals/u);
+    assert.match(html, /MoM Trends/u);
+    assert.match(html, /9 visuals/u);
+    assert.match(html, /About/u);
+    assert.match(html, /Official provider repositories and native binding state/u);
+    assert.match(html, /AZURE FOCUS 1 0 NORMALIZED BINDING NOT DEPLOYED/u);
+    assert.match(html, /GCP FOCUS EXPORT ADAPTER NOT DEPLOYED/u);
+    assert.match(html, /OCI SOURCE DISCOVERY AND BINDING NOT DEPLOYED/u);
+    assert.match(html, /does not claim QuickSight pixel, geometry, query-result, or interaction parity/u);
+  } finally {
+    await vite.close();
+  }
+});
+
 test("FOCUS report view renders exact evidence without browser data or placeholders", async () => {
   const vite = await createServer({
     root,
