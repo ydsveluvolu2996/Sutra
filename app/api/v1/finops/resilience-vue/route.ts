@@ -4,6 +4,8 @@ import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { buildResilienceVueDashboard } from "../../../../../lib/finops-resilience-vue";
 import { RESILIENCE_VUE_OFFICIAL_DEFINITION } from "../../../../../lib/finops-resilience-vue-official-definition";
+import { isResilienceVueRuntimePermissionPack } from
+  "../../../../../lib/finops-permission-pack-successors";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,24 @@ export async function GET(request: Request): Promise<Response> {
     const connection = await getConnectionForOrg(authenticated.subject.orgId, query.connectionId);
     if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") missing();
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
+    if (!isResilienceVueRuntimePermissionPack(connection.permissionPackVersion)) {
+      return jsonResponse({
+        schema: "sutra.finops-resilience-vue.v1",
+        connectionId: connection.id,
+        sourceState: "configuration_required",
+        officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION,
+        dashboard: null,
+        latestAttempt: null,
+        collection: {
+          state: "unavailable",
+          reason: "RESILIENCE_VUE_PERMISSION_PACK_UPGRADE_REQUIRED",
+          lastAttemptAt: null,
+        },
+        limitations: [
+          "Deploy immutable permission pack standard-2026-08.9 or its explicitly supported .8.10 successor before Resilience Hub collection can start.",
+        ],
+      });
+    }
     const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };
     const repository = new ResilienceVueRepository();
     const runtime = new ResilienceVueRuntimeRepository();

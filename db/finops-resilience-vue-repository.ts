@@ -7,6 +7,8 @@ import {
 } from "../lib/finops-resilience-vue.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
+import { RESILIENCE_VUE_RUNTIME_PERMISSION_PACK_SQL } from
+  "../lib/finops-permission-pack-successors.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
@@ -127,7 +129,9 @@ export class ResilienceVueRepository {
       JOIN organizations o ON o.id=c.org_id AND o.status='active'
       JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status='active'
       WHERE c.org_id=? AND c.customer_id=? AND c.id=? AND c.source_kind='aws_trust_role'
-        AND c.status='active' LIMIT 1`).bind(scope.organizationId, scope.customerId, scope.connectionId).first();
+        AND c.status='active'
+        AND c.permission_pack_version IN (${RESILIENCE_VUE_RUNTIME_PERMISSION_PACK_SQL})
+      LIMIT 1`).bind(scope.organizationId, scope.customerId, scope.connectionId).first();
     if (row === null) reject("SCOPE_NOT_FOUND"); return this.database;
   }
   private async byGeneration(db: D1Database, scope: ResilienceVuePersistenceScope, id: string) {

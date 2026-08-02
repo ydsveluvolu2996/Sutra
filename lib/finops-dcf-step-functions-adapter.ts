@@ -93,7 +93,7 @@ export interface DcfStepFunctionsExecutionMetadata {
   readonly startedAt: string;
   readonly stoppedAt: string | null;
   readonly redriveCount: number;
-  readonly inputSha256: string;
+  readonly inputSha256: string | null;
   readonly acceptedRecords: number | null;
   readonly rejectedRecords: number | null;
   readonly expectedRecords: number | null;
@@ -350,8 +350,8 @@ function metadata(value: unknown, listed: DcfStepFunctionsExecutionSummary, bind
     || !Number.isSafeInteger(value.redriveCount)
     || (value.redriveCount as number) < 0
     || (value.redriveCount as number) > 1_000
-    || typeof value.inputSha256 !== "string"
-    || !SHA256.test(value.inputSha256)
+    || (value.inputSha256 !== null
+      && (typeof value.inputSha256 !== "string" || !SHA256.test(value.inputSha256)))
     || !nullableCount(value.acceptedRecords)
     || !nullableCount(value.rejectedRecords)
     || !nullableCount(value.expectedRecords)
@@ -385,7 +385,7 @@ function metadata(value: unknown, listed: DcfStepFunctionsExecutionSummary, bind
     stoppedAt: value.stoppedAt as string | null,
     attempt: (value.redriveCount as number) + 1,
     retryOfExecutionArn: null,
-    inputSha256: value.inputSha256,
+    inputSha256: value.inputSha256 as string | null,
     acceptedRecords: value.acceptedRecords as number | null,
     rejectedRecords: value.rejectedRecords as number | null,
     expectedRecords: value.expectedRecords as number | null,

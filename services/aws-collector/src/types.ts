@@ -86,6 +86,12 @@ export const AWS_HEALTH_PERMISSION_PACK_VERSION =
 export const RESILIENCE_VUE_PERMISSION_PACK_VERSION =
   "standard-2026-08.9" as const;
 /**
+ * Immutable successor for ADV-12. It preserves .8.9 and adds only the three
+ * Step Functions metadata operations scoped to server-declared DCF machines.
+ */
+export const DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION =
+  "standard-2026-08.10" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -107,6 +113,7 @@ export type PermissionPackVersion =
   | typeof AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
   | typeof AWS_HEALTH_PERMISSION_PACK_VERSION
   | typeof RESILIENCE_VUE_PERMISSION_PACK_VERSION
+  | typeof DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

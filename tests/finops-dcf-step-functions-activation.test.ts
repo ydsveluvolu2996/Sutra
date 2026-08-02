@@ -375,7 +375,7 @@ async function sha256(value: unknown): Promise<string> {
     .join("");
 }
 
-test("runtime schedules sorted tenant-bound jobs and exposes an honestly unregistered binding", async () => {
+test("runtime schedules sorted tenant-bound jobs and exposes the registered binding", async () => {
   const enqueued: Array<Record<string, unknown>> = [];
   const second = { ...RUNTIME_SCOPE, connectionId: `conn_${"e".repeat(32)}` };
   const result = await scheduleDcfStepFunctionsCollections({
@@ -401,7 +401,7 @@ test("runtime schedules sorted tenant-bound jobs and exposes an honestly unregis
     ),
   );
   assert.deepEqual(enqueued[0]?.payload, { scheduledWindow: WINDOW });
-  assert.equal(DCF_STEP_FUNCTIONS_RUNTIME_BINDING.registeredInSharedRuntime, false);
+  assert.equal(DCF_STEP_FUNCTIONS_RUNTIME_BINDING.registeredInSharedRuntime, true);
   assert.equal(DCF_STEP_FUNCTIONS_RUNTIME_BINDING.activationReason,
     DCF_STEP_FUNCTIONS_RUNTIME_ACTIVATION_REASON);
 });

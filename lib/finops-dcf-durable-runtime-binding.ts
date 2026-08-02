@@ -17,7 +17,7 @@ export const DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND =
   "finops.dcf-step-functions.collect" as const;
 export const DCF_STEP_FUNCTIONS_RUNTIME_CADENCE = "rate(1 hour)" as const;
 export const DCF_STEP_FUNCTIONS_RUNTIME_ACTIVATION_REASON =
-  "DCF_STEP_FUNCTIONS_INSTRUMENTATION_NOT_REGISTERED" as const;
+  "DCF_STEP_FUNCTIONS_DURABLE_RUNTIME_REGISTERED" as const;
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
@@ -391,6 +391,6 @@ export const DCF_STEP_FUNCTIONS_RUNTIME_BINDING = Object.freeze({
   cadence: DCF_STEP_FUNCTIONS_RUNTIME_CADENCE,
   handlerFactory: createDcfStepFunctionsRuntimeJobHandler,
   scheduler: scheduleDcfStepFunctionsCollections,
-  registeredInSharedRuntime: false,
+  registeredInSharedRuntime: true,
   activationReason: DCF_STEP_FUNCTIONS_RUNTIME_ACTIVATION_REASON,
 });

@@ -14,6 +14,10 @@ import {
 } from "../lib/finops-aws-health-organization.ts";
 import type { AwsHealthAcceptedRuntimeAttempt, AwsHealthRuntimeFailureCode, AwsHealthRuntimeHandoff } from
   "../lib/finops-aws-health-runtime-binding.ts";
+import {
+  AWS_HEALTH_RUNTIME_PERMISSION_PACK_SQL,
+  isAwsHealthRuntimePermissionPack,
+} from "../lib/finops-permission-pack-successors.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION = /^conn_[a-f0-9]{32}$/u;
@@ -40,7 +44,7 @@ function validScope(scope: AwsHealthPersistenceScope): boolean { return IDENTIFI
 function validWindow(value: string): boolean { return WINDOW.test(value) && Number.isFinite(Date.parse(value)) && new Date(Date.parse(value)).toISOString() === value; }
 async function token(): Promise<string> { const bytes = new TextEncoder().encode(crypto.randomUUID()); const hash = await crypto.subtle.digest("SHA-256", bytes); return [...new Uint8Array(hash)].map((part) => part.toString(16).padStart(2, "0")).join(""); }
 
-const LIVE = `FROM aws_connections c JOIN organizations o ON o.id=c.org_id AND o.status='active' JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status IN ('active','trial') WHERE c.source_kind='aws_trust_role' AND c.status='active' AND c.partition IN ('aws','aws-us-gov') AND c.permission_pack_version IN ('standard-2026-08.8','standard-2026-08.9')`;
+const LIVE = `FROM aws_connections c JOIN organizations o ON o.id=c.org_id AND o.status='active' JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status IN ('active','trial') WHERE c.source_kind='aws_trust_role' AND c.status='active' AND c.partition IN ('aws','aws-us-gov') AND c.permission_pack_version IN (${AWS_HEALTH_RUNTIME_PERMISSION_PACK_SQL})`;
 
 export interface AwsHealthProviderContext {
   readonly candidateAccounts: readonly { readonly accountId: string; readonly connectionId: string }[];
@@ -84,8 +88,7 @@ export class AwsHealthRuntimeRepository implements AwsHealthRuntimeHandoff {
     const accounts = new Set<string>(); const connections = new Set<string>();
     const candidateAccounts = values.map((row) => {
       if (!/^\d{12}$/u.test(row.account_id) || !CONNECTION.test(row.connection_id)
-        || (row.permission_pack_version !== "standard-2026-08.8"
-          && row.permission_pack_version !== "standard-2026-08.9")
+        || !isAwsHealthRuntimePermissionPack(row.permission_pack_version)
         || accounts.has(row.account_id) || connections.has(row.connection_id)) reject("STORED_STATE_INVALID");
       accounts.add(row.account_id); connections.add(row.connection_id); return Object.freeze({ accountId: row.account_id, connectionId: row.connection_id });
     });

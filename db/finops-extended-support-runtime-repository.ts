@@ -5,6 +5,8 @@ import type {
   ExtendedSupportRuntimeResult,
 } from "../lib/finops-extended-support-runtime-binding.ts";
 import type { ExtendedSupportTenantBoundary } from "../lib/finops-extended-support-projection.ts";
+import { EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACK_SQL } from
+  "../lib/finops-permission-pack-successors.ts";
 import type { ExtendedSupportPersistenceScope } from "./finops-extended-support-repository.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
@@ -185,7 +187,7 @@ export class ExtendedSupportRuntimeRepository implements ExtendedSupportReplaySt
            AND cu.status IN ('active','trial')
         WHERE c.org_id=? AND c.customer_id=? AND c.id=?
           AND c.source_kind='aws_trust_role' AND c.status='active'
-          AND c.permission_pack_version IN ('standard-2026-08.6','standard-2026-08.7','standard-2026-08.8','standard-2026-08.9') LIMIT 1`,
+          AND c.permission_pack_version IN (${EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACK_SQL}) LIMIT 1`,
     ).bind(scope.organizationId, scope.customerId, scope.connectionId).first<ConnectionRow>();
     if (row === null) reject("SCOPE_NOT_FOUND");
     return row;
@@ -226,7 +228,7 @@ export class ExtendedSupportRuntimeRepository implements ExtendedSupportReplaySt
          JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id
            AND cu.status IN ('active','trial')
         WHERE c.source_kind='aws_trust_role' AND c.status='active'
-          AND c.permission_pack_version IN ('standard-2026-08.6','standard-2026-08.7','standard-2026-08.8','standard-2026-08.9')
+          AND c.permission_pack_version IN (${EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACK_SQL})
         ORDER BY c.org_id,c.customer_id,c.id LIMIT ?`,
     ).bind(MAXIMUM_SCOPES + 1).all<ConnectionRow>();
     const received = rows.results ?? [];

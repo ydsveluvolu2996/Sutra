@@ -128,6 +128,7 @@ const migrationFiles = [
   "0114_finops_extended_support_runtime.sql",
   "0115_finops_aws_health_runtime.sql",
   "0116_finops_resilience_vue_runtime.sql",
+  "0117_finops_dcf_runtime.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

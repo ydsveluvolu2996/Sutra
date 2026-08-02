@@ -92,6 +92,7 @@ import {
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -212,6 +213,17 @@ import {
   parseResilienceVueProviderRouteRequest,
   runResilienceVueProviderRoute,
 } from "./resilience-vue-provider-route.js";
+import {
+  DCF_PROVIDER_BOUNDS,
+  DcfProviderAdapterError,
+  type DcfProviderReader,
+} from "./dcf-step-functions-provider-adapter.js";
+import { createDcfStepFunctionsSdkReader } from "./dcf-step-functions-sdk-reader.js";
+import {
+  DCF_STEP_FUNCTIONS_PROVIDER_ROUTE,
+  parseDcfProviderRouteRequest,
+  runDcfProviderRoute,
+} from "./dcf-step-functions-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -222,6 +234,8 @@ const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const AWS_SUPPORT_CASES_RESPONSE_LIMIT = 65 * 1024 * 1024;
 const AWS_HEALTH_RESPONSE_LIMIT = 50 * 1024 * 1024;
 const RESILIENCE_VUE_RESPONSE_LIMIT = 13 * 1024 * 1024;
+const DCF_STEP_FUNCTIONS_BODY_LIMIT = 1_048_576;
+const DCF_STEP_FUNCTIONS_RESPONSE_LIMIT = 65 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -262,7 +276,8 @@ function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permi
     || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
     || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
     || value === AWS_HEALTH_PERMISSION_PACK_VERSION
-    || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION;
+    || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION
+    || value === DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -444,6 +459,16 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedResilienceVueSession">;
+  readonly dcfStepFunctionsReaderFactory?: (input: {
+    readonly credentials: AwsTemporaryCredentials;
+    readonly partition: LocalAwsPartition;
+    readonly region: string;
+  }) => DcfProviderReader;
+  readonly dcfStepFunctionsRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedDcfStepFunctionsSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -570,6 +595,12 @@ interface ServerContext {
   readonly resilienceVueProviderClientFactory?: ResilienceVueProviderClientFactory;
   readonly resilienceVueRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["resilienceVueRoleBrokerFactory"]
+  >;
+  readonly dcfStepFunctionsReaderFactory: NonNullable<
+    LocalCollectorServerOptions["dcfStepFunctionsReaderFactory"]
+  >;
+  readonly dcfStepFunctionsRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["dcfStepFunctionsRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -758,6 +789,10 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       : { resilienceVueProviderClientFactory: options.resilienceVueProviderClientFactory }),
     resilienceVueRoleBrokerFactory:
       options.resilienceVueRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    dcfStepFunctionsReaderFactory:
+      options.dcfStepFunctionsReaderFactory ?? createDcfStepFunctionsSdkReader,
+    dcfStepFunctionsRoleBrokerFactory:
+      options.dcfStepFunctionsRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1002,7 +1037,10 @@ async function dispatch(
   const path = safeRequestTarget(rawUrl);
   const nonce = responseNonce(request);
   try {
-    const body = await readBody(request);
+    const body = await readBody(
+      request,
+      path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE ? DCF_STEP_FUNCTIONS_BODY_LIMIT : BODY_LIMIT,
+    );
     if (context.hostedRuntime && request.method === "GET" && path === "/readyz") {
       if (body.length !== 0) throw invalidRequest();
       const ready = await context.readiness();
@@ -1195,6 +1233,68 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE) {
+    const providerRequest = parseDcfProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const boundaryId = exactHeader(headers, "x-sutra-boundary-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || boundaryId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(
+        providerRequest.boundary.scope.orgId,
+        providerRequest.boundary.scope.connectionId,
+      ),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      DCF_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.dcfStepFunctionsRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.boundary.scope.region,
+      });
+      const result = await runDcfProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, boundaryId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedDcfStepFunctionsSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.boundaryId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              stateMachineArns: input.stateMachineArns,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.dcfStepFunctionsReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === RESILIENCE_VUE_PROVIDER_ROUTE) {
     const providerRequest = parseResilienceVueProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -4538,11 +4638,14 @@ function canonicalIsoDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) || date.toISOString() !== value ? null : date;
 }
 
-async function readBody(request: IncomingMessage): Promise<string> {
+async function readBody(
+  request: IncomingMessage,
+  maximumBytes: number = BODY_LIMIT,
+): Promise<string> {
   const declared = request.headers["content-length"];
   if (typeof declared === "string") {
     const bytes = Number(declared);
-    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > BODY_LIMIT) {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > maximumBytes) {
       throw new LocalHttpError(413, "INVALID_REQUEST", "The collector request body is too large");
     }
   }
@@ -4551,7 +4654,7 @@ async function readBody(request: IncomingMessage): Promise<string> {
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
     total += bytes.length;
-    if (total > BODY_LIMIT) {
+    if (total > maximumBytes) {
       throw new LocalHttpError(413, "INVALID_REQUEST", "The collector request body is too large");
     }
     chunks.push(bytes);
@@ -4574,6 +4677,8 @@ async function sendSigned(
   let body = JSON.stringify(payload);
   const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
     ? AWS_BUDGETS_RESPONSE_LIMIT
+    : path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE
+      ? DCF_STEP_FUNCTIONS_RESPONSE_LIMIT
     : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
       ? AWS_SUPPORT_CASES_RESPONSE_LIMIT
     : path === AWS_HEALTH_PROVIDER_ROUTE
@@ -4643,6 +4748,16 @@ function safeHttpError(error: unknown): LocalHttpError {
       status,
       error.code,
       "AWS Resilience Hub evidence collection did not complete",
+    );
+  }
+  if (error instanceof DcfProviderAdapterError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "Data Collection Monitor evidence collection did not complete",
     );
   }
   if (error instanceof ComputeOptimizerExportObjectChunkError) {

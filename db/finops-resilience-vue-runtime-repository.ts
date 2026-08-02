@@ -16,6 +16,8 @@ import type {
   ResilienceVueRuntimeFailureCode,
 } from "../lib/finops-resilience-vue-runtime-binding.ts";
 import type { ResilienceVueCollectorTarget } from "../lib/finops-resilience-vue-job.ts";
+import { RESILIENCE_VUE_RUNTIME_PERMISSION_PACK_SQL } from
+  "../lib/finops-permission-pack-successors.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION = /^conn_[a-f0-9]{32}$/u;
@@ -110,7 +112,8 @@ async function leaseToken(): Promise<string> {
 const LIVE = `FROM aws_connections c
   JOIN organizations o ON o.id=c.org_id AND o.status='active'
   JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status IN ('active','trial')
-  WHERE c.source_kind='aws_trust_role' AND c.status='active'`;
+  WHERE c.source_kind='aws_trust_role' AND c.status='active'
+    AND c.permission_pack_version IN (${RESILIENCE_VUE_RUNTIME_PERMISSION_PACK_SQL})`;
 
 export class ResilienceVueRuntimeRepository implements ResilienceVueImmutableEvidenceHandoff {
   private readonly snapshots: ResilienceVueRepository;

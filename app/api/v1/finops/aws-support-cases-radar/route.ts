@@ -7,6 +7,8 @@ import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { AWS_SUPPORT_CASES_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-support-cases-official-definition";
 import { AWS_SUPPORT_CASES_PRODUCTION_COMPOSITION_STATUS } from "../../../../../lib/finops-aws-support-cases-production-composition";
+import { isAwsSupportCasesRuntimePermissionPack } from
+  "../../../../../lib/finops-permission-pack-successors";
 import {
   AWS_SUPPORT_CASES_COLLECTION_BOUNDS,
   buildAwsSupportCasesRadar,
@@ -81,9 +83,9 @@ export async function GET(request: Request): Promise<Response> {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     }
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
-    const permissionPackReady = connection.permissionPackVersion === "standard-2026-08.7"
-      || connection.permissionPackVersion === "standard-2026-08.8"
-      || connection.permissionPackVersion === "standard-2026-08.9";
+    const permissionPackReady = isAwsSupportCasesRuntimePermissionPack(
+      connection.permissionPackVersion,
+    );
     const runtimeRepository = new AwsSupportCasesRuntimeRepository();
     const anchor = permissionPackReady ? await runtimeRepository.loadCanonicalScope({
       organizationId: authenticated.subject.orgId,

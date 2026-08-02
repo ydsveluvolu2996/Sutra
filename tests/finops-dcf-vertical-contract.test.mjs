@@ -18,7 +18,8 @@ test("DCF vertical is same-tenant immutable and runtime-honest", async () => {
   );
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /assertSessionCapability/u);
-  assert.match(route, /DCF_STEP_FUNCTIONS_INSTRUMENTATION_NOT_REGISTERED/u);
+  assert.match(route, /DcfRuntimeRepository/u);
+  assert.match(route, /getRuntimeStatus/u);
   assert.equal((route.match(/officialDefinition:\s*DATA_COLLECTION_MONITOR_OFFICIAL_DEFINITION/gu) ?? []).length, 2);
   const ui = await readFile(
     new URL(
@@ -84,6 +85,12 @@ test("DCF native UI renders the exact public artifact and sheet audit with execu
     const report = {
       connectionId: `conn_${"a".repeat(32)}`,
       officialDefinition: definitionModule.DATA_COLLECTION_MONITOR_OFFICIAL_DEFINITION,
+      collection: {
+        state: "ready",
+        reason: "DCF_COLLECTION_READY",
+        sourceState: "READY",
+        lastAttemptAt: "2026-08-02T00:00:00.000Z",
+      },
       generatedAtIso: "2026-08-02T00:00:00.000Z",
       summary: {
         moduleCount: 1,

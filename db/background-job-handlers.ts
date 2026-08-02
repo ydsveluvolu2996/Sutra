@@ -179,6 +179,10 @@ import { RESILIENCE_VUE_RUNTIME_JOB_KIND } from
   "../lib/finops-resilience-vue-runtime-binding.ts";
 import { createResilienceVueProductionComposition } from
   "../lib/finops-resilience-vue-production-composition.ts";
+import { DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND } from
+  "../lib/finops-dcf-durable-runtime-binding.ts";
+import { createDcfProductionComposition } from
+  "../lib/finops-dcf-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -299,6 +303,25 @@ function resilienceVueProductionComposition() {
 /** Daily deterministic ADV-10 connection-scoped ResilienceVue scheduler hook. */
 export async function scheduleResilienceVueTick(scheduledAtMs = Date.now()) {
   return (await resilienceVueProductionComposition()).scheduleTick(scheduledAtMs);
+}
+
+function dcfStepFunctionsProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("DCF_STEP_FUNCTIONS_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createDcfProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Hourly deterministic ADV-12 connection-scoped Step Functions scheduler. */
+export function scheduleDcfStepFunctionsTick(scheduledAtMs = Date.now()) {
+  return dcfStepFunctionsProductionComposition().scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1423,6 +1446,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       awsHealthProductionComposition().handler(job),
     [RESILIENCE_VUE_RUNTIME_JOB_KIND]: async (job) =>
       (await resilienceVueProductionComposition()).handler(job),
+    [DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND]: (job) =>
+      dcfStepFunctionsProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

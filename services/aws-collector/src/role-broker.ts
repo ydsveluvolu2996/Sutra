@@ -57,6 +57,7 @@ import {
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -112,6 +113,15 @@ import {
   RESILIENCE_VUE_SESSION_ACTIONS,
 } from "./resilience-vue-permission-contract.js";
 import { resilienceVueProviderSessionPolicy } from "./resilience-vue-session-policy.js";
+import {
+  DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS,
+  DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME,
+  exactDcfPermissionResources,
+} from "./dcf-step-functions-permission-contract.js";
+import { DCF_PROVIDER_SESSION_ACTIONS } from
+  "./dcf-step-functions-provider-adapter.js";
+import { dcfStepFunctionsSessionPolicy } from
+  "./dcf-step-functions-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -153,6 +163,7 @@ const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1
 const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
 const AWS_HEALTH_PACK_VERSION = AWS_HEALTH_PERMISSION_PACK_VERSION;
 const RESILIENCE_VUE_PACK_VERSION = RESILIENCE_VUE_PERMISSION_PACK_VERSION;
+const DCF_STEP_FUNCTIONS_PACK_VERSION = DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -207,6 +218,14 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_health_organization",
     "aws_resilience_hub",
   ]),
+  [DCF_STEP_FUNCTIONS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+  ]),
 });
 
 function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
@@ -214,7 +233,8 @@ function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): bool
     || value === EXTENDED_SUPPORT_PACK_VERSION
     || value === AWS_SUPPORT_CASES_PACK_VERSION
     || value === AWS_HEALTH_PACK_VERSION
-    || value === RESILIENCE_VUE_PACK_VERSION;
+    || value === RESILIENCE_VUE_PACK_VERSION
+    || value === DCF_STEP_FUNCTIONS_PACK_VERSION;
 }
 
 function permissionPackSupportsSource(
@@ -955,7 +975,8 @@ function assertExpectedPermissionPolicy(
     | typeof EXTENDED_SUPPORT_PACK_VERSION
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
     | typeof AWS_HEALTH_PACK_VERSION
-    | typeof RESILIENCE_VUE_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof RESILIENCE_VUE_PACK_VERSION
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -992,6 +1013,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
@@ -1000,6 +1022,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
@@ -1007,25 +1030,33 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
           : []),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? AWS_HEALTH_PERMISSION_ACTIONS
           : []),
         ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? RESILIENCE_VUE_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          ? DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -1102,6 +1133,34 @@ function assertResilienceVuePolicy(value: string | undefined): void {
     || statement.Effect !== "Allow" || statement.Resource !== "*"
     || !sameStringSet(stringList(statement.Action), RESILIENCE_VUE_PERMISSION_ACTIONS)) {
     throw new Error("unexpected ResilienceVue policy");
+  }
+}
+
+function assertDcfStepFunctionsPolicy(
+  value: string | undefined,
+  stateMachineArns: readonly string[],
+): void {
+  const resources = exactDcfPermissionResources(stateMachineArns);
+  const executionArns = resources.slice(stateMachineArns.length);
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 2) throw new Error("unexpected DCF policy");
+  const statements = document.Statement.map(record);
+  const machines = statements.find((statement) => statement.Sid === "ReadExactDcfStateMachines");
+  const executions = statements.find((statement) => statement.Sid === "ReadExactDcfExecutions");
+  if (machines === undefined || executions === undefined) throw new Error("unexpected DCF policy");
+  for (const statement of [machines, executions]) {
+    exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+    if (statement.Effect !== "Allow") throw new Error("unexpected DCF policy");
+  }
+  if (!sameStringSet(
+    stringList(machines.Action),
+    DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS.filter((action) => action !== "states:DescribeExecution"),
+  ) || !sameStringSet(stringList(machines.Resource), stateMachineArns)
+    || !sameStringSet(stringList(executions.Action), ["states:DescribeExecution"])
+    || !sameStringSet(stringList(executions.Resource), executionArns)) {
+    throw new Error("unexpected DCF policy");
   }
 }
 
@@ -1188,7 +1247,8 @@ function assertExpectedRole(
     | typeof EXTENDED_SUPPORT_PACK_VERSION
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
     | typeof AWS_HEALTH_PACK_VERSION
-    | typeof RESILIENCE_VUE_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof RESILIENCE_VUE_PACK_VERSION
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1563,7 +1623,8 @@ export class AwsRoleBroker {
     if ((resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1606,7 +1667,8 @@ export class AwsRoleBroker {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1659,7 +1721,8 @@ export class AwsRoleBroker {
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1713,7 +1776,8 @@ export class AwsRoleBroker {
     }
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
-    if (resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+    if ((resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1735,8 +1799,80 @@ export class AwsRoleBroker {
       undefined,
       undefined,
       undefined,
-      RESILIENCE_VUE_PACK_VERSION,
+      resolved.connection.permissionPackVersion,
       input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-12 session with an exact `.8.10` read-only intersection for the
+   * server-resolved Step Functions state machines and their executions.
+   */
+  public async assumeValidatedDcfStepFunctionsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    boundaryId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof DCF_PROVIDER_SESSION_ACTIONS;
+      readonly stateMachineArns: readonly string[];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (!/^dcfb_[a-f0-9]{64}$/u.test(boundaryId)
+      || typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions",
+        "signal", "stateMachineArns",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, DCF_PROVIDER_SESSION_ACTIONS)
+      || !Array.isArray(input.stateMachineArns)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The DCF Step Functions session request is invalid");
+    }
+    try {
+      exactDcfPermissionResources(input.stateMachineArns);
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The DCF Step Functions resource scope is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const expectedArnPrefix = `arn:${input.partition}:states:${input.region}:${input.expectedAccountId}:stateMachine:`;
+    if (input.stateMachineArns.some((arn) => !arn.startsWith(expectedArnPrefix))) {
+      throw new ConnectionIntegrityError("The DCF Step Functions resource scope is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${boundaryId.slice(0, 24)}-dcf`,
+      () => dcfStepFunctionsSessionPolicy({ stateMachineArns: input.stateMachineArns }),
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      DCF_STEP_FUNCTIONS_PACK_VERSION,
+      input.signal,
+      input.stateMachineArns,
     );
     return validated;
   }
@@ -1880,7 +2016,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
-        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION) ||
+        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -2512,8 +2649,10 @@ export class AwsRoleBroker {
       | typeof EXTENDED_SUPPORT_PACK_VERSION
       | typeof AWS_SUPPORT_CASES_PACK_VERSION
       | typeof AWS_HEALTH_PACK_VERSION
-      | typeof RESILIENCE_VUE_PACK_VERSION,
+      | typeof RESILIENCE_VUE_PACK_VERSION
+      | typeof DCF_STEP_FUNCTIONS_PACK_VERSION,
     signal?: AbortSignal,
+    suppliedDcfStateMachineArns?: readonly string[],
   ): Promise<void> {
     try {
       assertActiveProvisioningSignal(signal);
@@ -2529,7 +2668,15 @@ export class AwsRoleBroker {
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
+      if (permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        && suppliedDcfStateMachineArns !== undefined) {
+        exactDcfPermissionResources(suppliedDcfStateMachineArns);
+      } else if (permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && suppliedDcfStateMachineArns !== undefined) {
+        throw new Error("DCF state-machine scope is unexpected");
+      }
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
         throw new Error("principal partition mismatch");
@@ -2608,19 +2755,26 @@ export class AwsRoleBroker {
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? [EXTENDED_SUPPORT_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? [AWS_HEALTH_PERMISSION_POLICY_NAME]
           : []),
         ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
           ? [RESILIENCE_VUE_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          ? [DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME]
           : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
@@ -2643,7 +2797,8 @@ export class AwsRoleBroker {
       if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
         || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
         || permissionPackVersion === AWS_HEALTH_PACK_VERSION
-        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2655,7 +2810,8 @@ export class AwsRoleBroker {
       }
       if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
         || permissionPackVersion === AWS_HEALTH_PACK_VERSION
-        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2666,7 +2822,8 @@ export class AwsRoleBroker {
         assertAwsSupportCasesPolicy(policy.policyDocument);
       }
       if (permissionPackVersion === AWS_HEALTH_PACK_VERSION
-        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2676,7 +2833,8 @@ export class AwsRoleBroker {
         );
         assertAwsHealthPolicy(policy.policyDocument);
       }
-      if (permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
+      if (permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2685,6 +2843,20 @@ export class AwsRoleBroker {
           ),
         );
         assertResilienceVuePolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        && suppliedDcfStateMachineArns !== undefined) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertDcfStepFunctionsPolicy(
+          policy.policyDocument,
+          suppliedDcfStateMachineArns,
+        );
       }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(

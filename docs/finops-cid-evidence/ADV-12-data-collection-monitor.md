@@ -101,28 +101,29 @@ return `IN_PROGRESS`, while claim, provider, repository, and secondary failure
 details are reduced to stable codes. `READY` and `STALE` captures may advance;
 `PARTIAL` and `UNAVAILABLE` captures remain immutable history only.
 
-Focused verification: **14/14 tests passed** with zero failures, skips, or
+Focused verification: **22/22 tests passed** with zero failures, skips, or
 cancellations using the official-definition, vertical-contract, execution-history,
-and Step Functions activation suites. The suite covers the four pinned artifact
+Step Functions activation, production composition, shared registration, permission,
+credential route, and hosted-route suites. The suite covers the four pinned artifact
 hashes, exact published object counts and controls, exact scope, pagination,
 metadata-only reads, raw-data exclusion, cross-account rejection, token replay,
 retries, cancellation, authorization state, deterministic scheduling, immutable
 lineage, receipt replay, substitution, corrupt receipts, sanitized failures, and
-native server-rendered evidence. Root TypeScript, targeted ESLint, and
-`git diff --check` pass on the current tree.
+native server-rendered evidence. Root and collector TypeScript checks, collector build,
+the 12-template CloudFormation lint suite, targeted ESLint, repository secret
+scan, predecessor immutability, and `git diff --check` pass on the current tree.
 
 Remaining production gates:
 
-1. Register the new job handler and hourly eligible-connection tick in the
-   shared runtime.
-2. Bind the production durable replay store, server-owned DCF stack/module
-   resolver, and least-privilege Step Functions provider client or signed broker.
-3. Accept real DCF 3.11+ module mappings and AWS success, eventual-consistency,
+1. Deploy the immutable `standard-2026-08.10` customer role with the exact
+   server-resolved state-machine and corresponding execution ARN lists.
+2. Accept real DCF 3.11+ module mappings and AWS success, eventual-consistency,
    token-expiry, throttling, authorization, timeout, recovery, partition, and
    Standard/Express state-machine behavior.
-4. Run retention, alert/observability, signed-in two-tenant visual, exact-tree
+3. Run retention, alert/observability, signed-in two-tenant visual, exact-tree
    CI/build, immutable-image, deployment, rollback, and browser acceptance.
 
-The API continues to report
-`DCF_STEP_FUNCTIONS_INSTRUMENTATION_NOT_REGISTERED`; activation remains false
-until those bindings are registered. No live AWS or production claim is made.
+The API now reports `DCF_STEP_FUNCTIONS_DURABLE_RUNTIME_REGISTERED`; the shared
+hourly scheduler, durable handler, signed broker, credential-owning hosted route,
+and pinned SDK reader are registered. No live AWS or production deployment claim
+is made by this code-only verification.

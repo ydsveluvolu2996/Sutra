@@ -1,4 +1,5 @@
 import { DcfRepository } from "../../../../../db/finops-dcf-repository";
+import { DcfRuntimeRepository } from "../../../../../db/finops-dcf-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
@@ -29,25 +30,20 @@ export async function GET(request: Request) {
         customerId: connection.customerId,
         connectionId: id,
       },
-      heads = await new DcfRepository().listAcceptedHistory(scope);
+      heads = await new DcfRepository().listAcceptedHistory(scope),
+      collection = await new DcfRuntimeRepository().getRuntimeStatus(scope);
     if (!heads.length)
       return jsonResponse({
         connectionId: id,
         officialDefinition: DATA_COLLECTION_MONITOR_OFFICIAL_DEFINITION,
         dashboard: null,
-        collection: {
-          available: false,
-          reason: "DCF_STEP_FUNCTIONS_INSTRUMENTATION_NOT_REGISTERED",
-        },
+        collection,
       });
     return jsonResponse({
       connectionId: id,
       officialDefinition: DATA_COLLECTION_MONITOR_OFFICIAL_DEFINITION,
       ...buildDcfDashboard(heads),
-      collection: {
-        available: false,
-        reason: "DCF_STEP_FUNCTIONS_INSTRUMENTATION_NOT_REGISTERED",
-      },
+      collection,
     });
   } catch (e) {
     return errorResponse(e);

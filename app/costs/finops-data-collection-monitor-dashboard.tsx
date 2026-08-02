@@ -13,12 +13,19 @@ type DcfDashboard = ReturnType<
 type DcfDashboardEnvelope = DcfDashboard & {
   connectionId: string;
   officialDefinition: DataCollectionMonitorOfficialDefinition;
+  collection: DcfCollectionState;
+};
+type DcfCollectionState = {
+  state: "unavailable" | "collecting" | "failed" | "ready";
+  reason: string;
+  sourceState: "READY" | "PARTIAL" | "STALE" | "UNAVAILABLE" | null;
+  lastAttemptAt: string | null;
 };
 type DcfUnavailableEnvelope = {
   connectionId: string;
   officialDefinition: DataCollectionMonitorOfficialDefinition;
   dashboard: null;
-  collection: { available: false; reason: string };
+  collection: DcfCollectionState;
 };
 type DcfApiState = DcfDashboardEnvelope | DcfUnavailableEnvelope | null;
 
@@ -92,8 +99,9 @@ export function DataCollectionMonitorView({
     <section className={styles.root} aria-label="Data Collection Monitor">
       <OfficialDefinitionPanel definition={report.officialDefinition} />
       <div className={styles.notice} role="status">
-        <strong>Execution telemetry, not source truth.</strong> Real scheduler and
-        Step Functions bindings must be active for current evidence.
+        <strong>Execution telemetry, not source truth.</strong>{" "}
+        Collection {report.collection.state} · {report.collection.reason}
+        {report.collection.lastAttemptAt === null ? "" : ` · last attempt ${report.collection.lastAttemptAt}`}
       </div>
       <div className={styles.controls} aria-label="Official Data Collection Monitor controls">
         <label>Module<select value={moduleId} onChange={(event) => setModuleId(event.target.value)}><option value="">All modules</option>{report.modules.map((item) => <option key={item.moduleId} value={item.moduleId}>{item.moduleName}</option>)}</select></label>
@@ -207,7 +215,13 @@ export function FinopsDataCollectionMonitorDashboard({
   if (state && "dashboard" in state) {
     return <section className={styles.root}>
       <OfficialDefinitionPanel definition={state.officialDefinition} />
-      <div className={styles.notice} role="status">DCF instrumentation is not registered. The official source inventory remains available above; no execution state is synthesized.</div>
+      <div className={styles.notice} role={state.collection.state === "failed" ? "alert" : "status"}>
+        <strong>{state.collection.state === "collecting" ? "DCF collection is running."
+          : state.collection.state === "failed" ? "DCF collection failed."
+            : "DCF execution evidence is unavailable."}</strong>{" "}
+        {state.collection.reason}
+        {state.collection.lastAttemptAt === null ? "" : ` · last attempt ${state.collection.lastAttemptAt}`}. The official source inventory remains available above; no execution state is synthesized.
+      </div>
     </section>;
   }
   return state ? (
