@@ -81,6 +81,7 @@ test("native EUC report renders the mapped official areas with explicit privacy 
   const vite = await createServer({ root, configFile: false, logLevel: "silent", plugins: [react()], server: { middlewareMode: true } });
   try {
     const dashboardModule = await vite.ssrLoadModule("/app/costs/finops-end-user-computing-dashboard.tsx");
+    const definitionModule = await vite.ssrLoadModule("/lib/finops-end-user-computing-official-definition.ts");
     const dashboard = {
       schemaVersion: "sutra.end-user-computing-dashboard.v1", state: "PARTIAL",
       sourceEvidence: { captureId: `euc_${"a".repeat(64)}`, observedAt: "2026-08-01T01:00:00.000Z", billingGenerationId: `fbg_${"b".repeat(64)}`, billingPeriod: "2026-08", freshness: { inventory: "CURRENT", activity: "CURRENT", metrics: "CURRENT", costs: "CURRENT" } },
@@ -104,5 +105,10 @@ test("native EUC report renders the mapped official areas with explicit privacy 
     for (const text of ["Pinned AWS CID definition coverage", "Official visuals", "Linked account ID", "Region", "Canonical cost by linked account", "WorkSpaces by running mode", "WorkSpaces by bundle", "Service and cost summary", "WorkSpaces insights", "WorkSpaces usage and logons", "Optional CloudWatch performance", "WorkSpaces Applications summary", "AppStream 2.0 provider evidence", "Fleets by type", "Cost-optimization review candidates", "neither persisted nor returned", "not savings claims", "three-month", "Last logon", "Evidence, coverage"]) assert.match(html, new RegExp(text, "iu"));
     assert.doesNotMatch(html, /\bsample\b|fixture|placeholder/iu);
     assert.match(html, /target="_blank" rel="noopener noreferrer"/u);
+    const officialHtml = renderToStaticMarkup(createElement(dashboardModule.EndUserComputingOfficialDefinitionPanel, { definition: definitionModule.END_USER_COMPUTING_OFFICIAL_DEFINITION }));
+    for (const text of ["Pinned AWS CID definition coverage", "Official sheets", "Official visuals", "Official controls", "82", "24", "artifact SHA-256", "Frozen source coverage remains visible"]) assert.match(officialHtml, new RegExp(text, "iu"));
+    const uiSource = await readFile(path.join(root, "app/costs/finops-end-user-computing-dashboard.tsx"), "utf8");
+    assert.match(uiSource, /EndUserComputingConfigurationEnvelope[\s\S]*officialDefinition/u);
+    assert.match(uiSource, /EndUserComputingOfficialDefinitionPanel definition=\{state\.officialDefinition\}/u);
   } finally { await vite.close(); }
 });

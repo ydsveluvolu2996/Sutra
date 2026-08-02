@@ -29,6 +29,12 @@ from this source. Sutra records the control inventory as
 `NOT_DISCLOSED_IN_IMMUTABLE_SOURCE`, keeps the QuickSight visual-object count
 `null`, and makes no pixel-parity claim.
 
+The API returns this same frozen audit in configuration-required and
+report-bearing responses. The browser validates its commit, manifest hash,
+five-tab and 23-area identity and renders the audit independently during
+disconnected, loading, configuration-required, failed, and report states. It
+does not turn catalog metadata into Marketplace procurement or CUR2 evidence.
+
 AWS's official guidance page documents five tabs and 23 named visual areas:
 
 | Documented tab | Named areas |

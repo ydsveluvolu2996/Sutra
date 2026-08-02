@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AwsBudgetsOfficialDefinition } from "../../lib/finops-aws-budgets-official-definition";
+import { AWS_BUDGETS_OFFICIAL_DEFINITION, type AwsBudgetsOfficialDefinition } from "../../lib/finops-aws-budgets-official-definition";
 import type { AwsBudgetsDashboard } from "../../lib/finops-aws-budgets-organization";
 import styles from "./finops-aws-budgets-organization-dashboard.module.css";
 
@@ -37,6 +37,26 @@ export interface AwsBudgetsDashboardEnvelope {
 const EMPTY_FILTERS: AwsBudgetsDashboardFilters = {
   currency: "", budgetType: "", accountId: "", budgetLevel: "", budgetStatus: "", namePrefix: "",
 };
+
+interface AwsBudgetsConfigurationEnvelope {
+  readonly sourceState: "configuration_required";
+  readonly dashboard: null;
+  readonly officialDefinition: AwsBudgetsOfficialDefinition;
+}
+
+function hasPinnedOfficialDefinition(value: unknown): value is AwsBudgetsOfficialDefinition {
+  if (typeof value !== "object" || value === null) return false;
+  const definition = value as Readonly<Record<string, unknown>>;
+  const source = definition.source;
+  const totals = definition.totals;
+  return typeof source === "object" && source !== null
+    && typeof totals === "object" && totals !== null
+    && (source as Readonly<Record<string, unknown>>).commit === AWS_BUDGETS_OFFICIAL_DEFINITION.source.commit
+    && (source as Readonly<Record<string, unknown>>).sha256 === AWS_BUDGETS_OFFICIAL_DEFINITION.source.sha256
+    && (totals as Readonly<Record<string, unknown>>).sheets === 2
+    && (totals as Readonly<Record<string, unknown>>).visuals === 11
+    && Array.isArray(definition.sheets) && definition.sheets.length === 2;
+}
 
 function money(micros: string | null, unit: string | null): string {
   if (micros === null || unit === null) return "Not supplied by AWS";
@@ -91,6 +111,17 @@ function sums(report: AwsBudgetsDashboardEnvelope) {
   return [...map.entries()].sort(([left], [right]) => left.localeCompare(right));
 }
 
+export function AwsBudgetsOfficialDefinitionPanel({ definition }: { readonly definition: AwsBudgetsOfficialDefinition }) {
+  return <section className={styles.official} aria-label="Official AWS Budgets definition coverage">
+    <header className={styles.panelHead}>
+      <div><h3>Official AWS definition coverage</h3><p>{definition.totals.sheets} sheets · {definition.totals.visuals} visuals · {definition.totals.parameterControls + definition.totals.filterControls} controls</p></div>
+      <small>Definition {definition.source.commit.slice(0, 12)} · {definition.source.sha256.slice(0, 16)}…</small>
+    </header>
+    <div className={styles.officialSheets}>{definition.sheets.map((sheet) => <article key={sheet.id}><header><strong>{sheet.name}</strong><span>{sheet.visualCount} visuals</span></header><p>{sheet.parameterControls.length} parameter controls · {sheet.filterControls.length} filter controls</p><small>{[...sheet.parameterControls, ...sheet.filterControls].join(" · ") || "Source and limitation evidence"}</small>{sheet.visuals.length === 0 ? <p>Immutable source, semantics, freshness and limitations are exposed independently of provider delivery.</p> : <ul>{sheet.visuals.map((visual) => <li key={`${visual.name}:${visual.type}`} data-coverage={visual.coverage}><strong>{visual.name}</strong><span>{visual.type} · {visual.coverage.replaceAll("_", " ")}</span><small>{visual.note}</small></li>)}</ul>}</article>)}</div>
+    <p>Frozen source identity remains visible without a provider report. Native views do not claim QuickSight pixel, geometry, or interaction parity.</p>
+  </section>;
+}
+
 export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFiltersChange }: {
   readonly report: AwsBudgetsDashboardEnvelope;
   readonly filters: AwsBudgetsDashboardFilters;
@@ -107,27 +138,7 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
       <strong>AWS Budgets provider evidence</strong>
       <span>This dashboard never includes or merges Sutra-authored budget guardrails. {report.separation.reason}</span>
     </div>
-    <section className={styles.official} aria-label="Official AWS Budgets definition coverage">
-      <header className={styles.panelHead}>
-        <div>
-          <h3>Official AWS definition coverage</h3>
-          <p>{report.officialDefinition.totals.sheets} sheets · {report.officialDefinition.totals.visuals} visuals · {report.officialDefinition.totals.parameterControls + report.officialDefinition.totals.filterControls} controls</p>
-        </div>
-        <small>Definition {report.officialDefinition.source.commit.slice(0, 12)} · {report.officialDefinition.source.sha256.slice(0, 16)}…</small>
-      </header>
-      <div className={styles.officialSheets}>
-        {report.officialDefinition.sheets.map((sheet) => (
-          <article key={sheet.id}>
-            <header><strong>{sheet.name}</strong><span>{sheet.visualCount} visuals</span></header>
-            <p>{sheet.parameterControls.length} parameter controls · {sheet.filterControls.length} filter controls</p>
-            <small>{[...sheet.parameterControls, ...sheet.filterControls].join(" · ") || "Source and limitation evidence"}</small>
-            {sheet.visuals.length === 0 ? <p>Immutable source, semantics, freshness and limitations are exposed below.</p> : (
-              <ul>{sheet.visuals.map((visual) => <li key={`${visual.name}:${visual.type}`} data-coverage={visual.coverage}><strong>{visual.name}</strong><span>{visual.type} · {visual.coverage.replaceAll("_", " ")}</span><small>{visual.note}</small></li>)}</ul>
-            )}
-          </article>
-        ))}
-      </div>
-    </section>
+    <AwsBudgetsOfficialDefinitionPanel definition={report.officialDefinition} />
     {message ? <div role={report.sourceState === "failed" ? "alert" : "status"} className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="AWS Budgets hierarchy and grouping filters">
       <label>Currency<select value={filters.currency} onChange={(event) => set("currency", event.target.value)}><option value="">All currencies</option>{report.dashboard.coverage.currencies.map((value) => <option key={value}>{value}</option>)}</select></label>
@@ -172,7 +183,7 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
 
 export function FinopsAwsBudgetsOrganizationDashboard({ connectionId }: { readonly connectionId: string | null }) {
   const [filters, setFilters] = useState(EMPTY_FILTERS);
-  const [state, setState] = useState<{ view: "loading" | "configuration_required" | "partial" | "stale" | "failed" | "empty" | "complete"; report: AwsBudgetsDashboardEnvelope | null }>({ view: "loading", report: null });
+  const [state, setState] = useState<{ view: "loading" | "configuration_required" | "partial" | "stale" | "failed" | "empty" | "complete"; report: AwsBudgetsDashboardEnvelope | null; officialDefinition: AwsBudgetsOfficialDefinition }>({ view: "loading", report: null, officialDefinition: AWS_BUDGETS_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -181,19 +192,18 @@ export function FinopsAwsBudgetsOrganizationDashboard({ connectionId }: { readon
     fetch(`/api/v1/finops/aws-budgets-organization?${parameters.toString()}`, { signal: controller.signal, credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(async (response) => {
         if (!response.ok) throw new Error("AWS Budgets provider request failed");
-        return response.json() as Promise<AwsBudgetsDashboardEnvelope | { readonly sourceState: "configuration_required"; readonly dashboard: null }>;
+        return response.json() as Promise<AwsBudgetsDashboardEnvelope | AwsBudgetsConfigurationEnvelope>;
       })
       .then((report) => {
-        if (report.dashboard === null) { setState({ view: "configuration_required", report: null }); return; }
+        if (!hasPinnedOfficialDefinition(report.officialDefinition)) throw new Error("Sutra returned an unrecognized AWS Budgets official definition");
+        if (report.dashboard === null) { setState({ view: "configuration_required", report: null, officialDefinition: report.officialDefinition }); return; }
         const typed = report as AwsBudgetsDashboardEnvelope;
-        setState({ view: typed.sourceState, report: typed });
+        setState({ view: typed.sourceState, report: typed, officialDefinition: typed.officialDefinition });
       })
-      .catch(() => { if (!controller.signal.aborted) setState({ view: "failed", report: null }); });
+      .catch(() => { if (!controller.signal.aborted) setState((current) => ({ view: "failed", report: null, officialDefinition: current.officialDefinition })); });
     return () => controller.abort();
   }, [connectionId, filters]);
-  if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting provider AWS Budgets.</div>;
-  if (state.view === "configuration_required" && state.report === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>AWS Budgets + Organizations evidence is not available. The permanent signed-broker adapter and cid:budget-level tags are required.</div>;
-  if (state.view === "failed" && state.report === null) return <div role="alert" className={`${styles.state} ${styles.error}`}>The AWS Budgets provider dashboard could not be loaded.</div>;
-  if (state.view === "loading" || state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading provider AWS Budgets evidence…</div>;
-  return <FinopsAwsBudgetsOrganizationReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
+  if (state.report !== null && state.report.connectionId === connectionId) return <FinopsAwsBudgetsOrganizationReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
+  const status = connectionId === null ? <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting provider AWS Budgets.</div> : state.view === "configuration_required" ? <div role="status" className={`${styles.state} ${styles.warning}`}>AWS Budgets + Organizations evidence is not available. The permanent signed-broker adapter and cid:budget-level tags are required.</div> : state.view === "failed" ? <div role="alert" className={`${styles.state} ${styles.error}`}>The AWS Budgets provider dashboard could not be loaded.</div> : <div role="status" className={styles.state}>Loading provider AWS Budgets evidence…</div>;
+  return <section className={styles.root}>{status}<AwsBudgetsOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

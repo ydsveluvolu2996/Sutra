@@ -7,7 +7,7 @@ import type {
   EndUserComputingDimensionCount,
   EndUserComputingService,
 } from "../../lib/finops-end-user-computing";
-import type { END_USER_COMPUTING_OFFICIAL_DEFINITION } from "../../lib/finops-end-user-computing-official-definition";
+import { END_USER_COMPUTING_OFFICIAL_DEFINITION } from "../../lib/finops-end-user-computing-official-definition";
 import type { END_USER_COMPUTING_RUNTIME_BINDING } from "../../lib/finops-end-user-computing-runtime-binding";
 import styles from "./finops-end-user-computing-dashboard.module.css";
 
@@ -35,7 +35,10 @@ export interface EndUserComputingDashboardEnvelope {
 interface EndUserComputingConfigurationEnvelope {
   readonly dashboard: null;
   readonly collection: typeof END_USER_COMPUTING_RUNTIME_BINDING;
+  readonly officialDefinition: typeof END_USER_COMPUTING_OFFICIAL_DEFINITION;
 }
+
+function hasPinnedOfficialDefinition(value: unknown): value is typeof END_USER_COMPUTING_OFFICIAL_DEFINITION { if (typeof value !== "object" || value === null) return false; const definition = value as Readonly<Record<string, unknown>>; return definition.schemaVersion === END_USER_COMPUTING_OFFICIAL_DEFINITION.schemaVersion && definition.commit === END_USER_COMPUTING_OFFICIAL_DEFINITION.commit && definition.artifactSha256 === END_USER_COMPUTING_OFFICIAL_DEFINITION.artifactSha256 && definition.sheetCount === 7 && definition.visualCount === 82 && definition.controlCount === 24 && Array.isArray(definition.sheets) && definition.sheets.length === 7; }
 
 function integerMoney(micros: string | null, currency: string): string {
   if (micros === null) return "Unknown";
@@ -67,6 +70,8 @@ function stateText(state: SourceState): string | null {
   return "The latest collection is unavailable. Failed evidence cannot replace an accepted complete head.";
 }
 
+export function EndUserComputingOfficialDefinitionPanel({ definition }: { readonly definition: typeof END_USER_COMPUTING_OFFICIAL_DEFINITION }) { return <section className={styles.panel} aria-label="Pinned AWS CID definition coverage"><h3>Pinned AWS CID definition coverage</h3><div className={styles.grid}><article className={styles.card}><small>Official sheets</small><strong>{definition.sheetCount}</strong><span>pinned definition {definition.dashboardVersion}</span></article><article className={styles.card}><small>Official visuals</small><strong>{definition.visualCount}</strong><span>audited, not claimed as pixel parity</span></article><article className={styles.card}><small>Official controls</small><strong>{definition.controlCount}</strong><span>source controls mapped without synthetic provider evidence</span></article></div><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Official sheet</th><th>Visuals</th><th>Controls</th><th>Sutra area</th><th>Coverage</th></tr></thead><tbody>{definition.sheets.map((sheet) => <tr key={sheet.name}><td>{sheet.name}</td><td>{sheet.visualCount}</td><td>{sheet.controlCount}</td><td>{sheet.localArea}</td><td><span className={styles.pill}>{sheet.coverage.replaceAll("_", " ")}</span></td></tr>)}</tbody></table></div><p className={styles.muted}>Source: <a href={definition.sourceUrl} target="_blank" rel="noopener noreferrer">AWS CID commit {definition.commit}</a> · artifact SHA-256 <code>{definition.artifactSha256}</code>. Frozen source coverage remains visible without a provider report; native views do not claim QuickSight pixel parity.</p></section>; }
+
 export function FinopsEndUserComputingReportView({ report, service, onServiceChange, accountId = "ALL", region = "ALL", onAccountIdChange = () => undefined, onRegionChange = () => undefined }: {
   readonly report: EndUserComputingDashboardEnvelope;
   readonly service: EndUserComputingService | "ALL";
@@ -85,7 +90,7 @@ export function FinopsEndUserComputingReportView({ report, service, onServiceCha
     {status ? <div role="status" className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{status}</div> : null}
     <div className={styles.filters} aria-label="End User Computing filters"><label>Service<select value={service} onChange={(event) => onServiceChange(event.target.value as EndUserComputingService | "ALL")}><option value="ALL">All EUC services</option><option value="WORKSPACES">Amazon WorkSpaces</option><option value="APPSTREAM">WorkSpaces Applications</option></select></label><label>Linked account ID<select value={accountId} onChange={(event) => onAccountIdChange(event.target.value)}><option value="ALL">All linked accounts</option>{report.filterOptions.accountIds.map((value) => <option value={value} key={value}>{value}</option>)}</select></label><label>Region<select value={region} onChange={(event) => onRegionChange(event.target.value)}><option value="ALL">All Regions</option>{report.filterOptions.regions.map((value) => <option value={value} key={value}>{value}</option>)}</select></label><label>Billing period<output>{dashboard.sourceEvidence.billingPeriod ?? "Canonical CUR2 unavailable"}</output></label></div>
 
-    <section className={styles.panel} aria-label="Pinned AWS CID definition coverage"><h3>Pinned AWS CID definition coverage</h3><div className={styles.grid}><article className={styles.card}><small>Official sheets</small><strong>{report.officialDefinition.sheetCount}</strong><span>pinned definition {report.officialDefinition.dashboardVersion}</span></article><article className={styles.card}><small>Official visuals</small><strong>{report.officialDefinition.visualCount}</strong><span>audited, not claimed as pixel parity</span></article><article className={styles.card}><small>Official controls</small><strong>{report.officialDefinition.controlCount}</strong><span>account and Region controls are active here</span></article><article className={styles.card}><small>Runtime cadence</small><strong>6h</strong><span>{report.collection.registeredInSharedRuntime ? "shared runtime registered" : "shared runtime not registered"}</span></article></div><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Official sheet</th><th>Visuals</th><th>Controls</th><th>Sutra area</th><th>Coverage</th></tr></thead><tbody>{report.officialDefinition.sheets.map((sheet) => <tr key={sheet.name}><td>{sheet.name}</td><td>{sheet.visualCount}</td><td>{sheet.controlCount}</td><td>{sheet.localArea}</td><td><span className={styles.pill}>{sheet.coverage.replaceAll("_", " ")}</span></td></tr>)}</tbody></table></div><p className={styles.muted}>Source: <a href={report.officialDefinition.sourceUrl} target="_blank" rel="noopener noreferrer">AWS CID commit {report.officialDefinition.commit}</a>. Native Sutra visuals preserve source lineage and privacy boundaries; they do not claim QuickSight pixel parity.</p></section>
+    <EndUserComputingOfficialDefinitionPanel definition={report.officialDefinition} />
 
     <section className={styles.panel} aria-label="Three month service and cost summary"><h3>Service and cost summary</h3>
       <div className={styles.grid}><article className={styles.card}><small>WorkSpaces</small><strong>{dashboard.inventory.workspaceCount}</strong><span>point-in-time resources</span></article><article className={styles.card}><small>AppStream fleets</small><strong>{dashboard.inventory.fleetCount}</strong><span>{dashboard.inventory.runningFleets} running</span></article>{dashboard.costViews.map((view) => <article className={styles.card} key={`${view.service}:${view.currency}`}><small>{view.service} · {view.currency}</small><strong>{integerMoney(view.totals.find((item) => item.basis === "net")?.totalMicros ?? view.totals.find((item) => item.basis === "amortized")?.totalMicros ?? view.totals.find((item) => item.basis === "unblended")?.totalMicros ?? null, view.currency)}</strong><span>{view.lineCount} canonical CUR2 lines · billing period {dashboard.sourceEvidence.billingPeriod ?? "unknown"}</span></article>)}</div>
@@ -111,7 +116,7 @@ export function FinopsEndUserComputingDashboard({ connectionId }: { readonly con
   const [service, setService] = useState<EndUserComputingService | "ALL">("ALL");
   const [accountId, setAccountId] = useState<string | "ALL">("ALL");
   const [region, setRegion] = useState<string | "ALL">("ALL");
-  const [state, setState] = useState<{ report: EndUserComputingDashboardEnvelope | null; error: string | null; configuration: EndUserComputingConfigurationEnvelope | null }>({ report: null, error: null, configuration: null });
+  const [state, setState] = useState<{ report: EndUserComputingDashboardEnvelope | null; error: string | null; configuration: EndUserComputingConfigurationEnvelope | null; officialDefinition: typeof END_USER_COMPUTING_OFFICIAL_DEFINITION }>({ report: null, error: null, configuration: null, officialDefinition: END_USER_COMPUTING_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -121,13 +126,11 @@ export function FinopsEndUserComputingDashboard({ connectionId }: { readonly con
     if (region !== "ALL") parameters.append("region", region);
     fetch(`/api/v1/finops/end-user-computing?${parameters.toString()}`, { signal: controller.signal, headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error("End User Computing dashboard request failed"); return response.json() as Promise<EndUserComputingDashboardEnvelope | EndUserComputingConfigurationEnvelope>; })
-      .then((report) => { if (report.dashboard === null) setState({ report: null, error: null, configuration: report }); else setState({ report: report as EndUserComputingDashboardEnvelope, error: null, configuration: null }); })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "End User Computing dashboard request failed", configuration: null }); });
+      .then((report) => { if (!hasPinnedOfficialDefinition(report.officialDefinition)) throw new Error("Sutra returned an unrecognized End User Computing official definition"); if (report.dashboard === null) setState({ report: null, error: null, configuration: report, officialDefinition: report.officialDefinition }); else setState({ report: report as EndUserComputingDashboardEnvelope, error: null, configuration: null, officialDefinition: report.officialDefinition }); })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState((current) => ({ report: null, error: error instanceof Error ? error.message : "End User Computing dashboard request failed", configuration: null, officialDefinition: current.officialDefinition })); });
     return () => controller.abort();
   }, [accountId, connectionId, region, service]);
-  if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account to collect End User Computing evidence.</div>;
-  if (state.configuration !== null) return <div role="status" className={`${styles.state} ${styles.warning}`}>The six-hour scheduler, durable handler, signed transport, and immutable attempt ledger are implemented. Register the shared runtime and deploy the signed EUC broker adapter before provider evidence can render.</div>;
-  if (state.error !== null) return <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div>;
-  if (state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading End User Computing evidence…</div>;
-  return <FinopsEndUserComputingReportView report={state.report} service={service} onServiceChange={setService} accountId={accountId} onAccountIdChange={setAccountId} region={region} onRegionChange={setRegion} />;
+  if (state.report !== null && state.report.connectionId === connectionId) return <FinopsEndUserComputingReportView report={state.report} service={service} onServiceChange={setService} accountId={accountId} onAccountIdChange={setAccountId} region={region} onRegionChange={setRegion} />;
+  const status = connectionId === null ? <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account to collect End User Computing evidence.</div> : state.configuration !== null ? <div role="status" className={`${styles.state} ${styles.warning}`}>The six-hour scheduler, durable handler, signed transport, and immutable attempt ledger are implemented. Register the shared runtime and deploy the signed EUC broker adapter before provider evidence can render.</div> : state.error !== null ? <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div> : <div role="status" className={styles.state}>Loading End User Computing evidence…</div>;
+  return <section className={styles.root}>{status}<EndUserComputingOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

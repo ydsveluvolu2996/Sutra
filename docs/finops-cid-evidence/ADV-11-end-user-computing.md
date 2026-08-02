@@ -13,6 +13,12 @@ and 24 controls. The complete sheet/control/visual title inventory and local
 mapping is recorded in
 [`ADV-11-official-definition-audit.md`](ADV-11-official-definition-audit.md).
 
+The configuration-required and report-bearing API responses return the same
+frozen definition. The UI validates its schema, commit, artifact hash, counts,
+and seven-sheet inventory, then renders it independently during disconnected,
+loading, configuration-required, failed, and report states without inventing
+EUC inventory, activity, performance, cost, or savings evidence.
+
 | Official UI area | Local implementation | Honest gap |
 |---|---|---|
 | Three-month service/cost summary and top accounts | Current accepted CUR2 cost bases by service/currency plus server-side linked-account and Region cost breakdowns, resource totals, billing lineage, and immutable snapshot history | Rolling three-month daily/monthly cost facts, payer aliases, and account names are not materialized yet |

@@ -569,6 +569,11 @@ test("native visual renders executive, CPU/GPU/RAM, explorers, frameworks, showb
       "newer incomplete or corrected delivery",
     ])
       assert.match(html, new RegExp(expected, "iu"));
+    const officialHtml = renderToStaticMarkup(createElement(dashboardModule.ScadOfficialDefinitionPanel, { definition: SCAD_OFFICIAL_DEFINITION }));
+    for (const expected of ["Official AWS SCAD coverage", "5 named sections", "AWS states 3 tabs", "SHA-256", "Workloads Explorer", "Data on EKS", "Frozen source coverage remains visible"]) assert.match(officialHtml, new RegExp(expected, "iu"));
+    const uiSource = await readFile(path.join(root, "app/costs/finops-scad-allocation-dashboard.tsx"), "utf8");
+    assert.match(uiSource, /ScadConfigurationEnvelope[\s\S]*officialDefinition/u);
+    assert.match(uiSource, /ScadOfficialDefinitionPanel definition=\{state\.officialDefinition\}/u);
   } finally {
     await vite.close();
   }

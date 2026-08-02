@@ -28,6 +28,12 @@ Sutra records the three-tab claim and five-section inventory separately. The
 first three sections are supported from SCAD evidence; tagged non-SCAD resource
 TCO and EMR service cost remain partial until a governed CUR2 join exists.
 
+Both successful API states expose the same frozen audit. The browser validates
+the pinned commit, manifest hash, three-tab claim and five-section inventory,
+and keeps that audit visible in disconnected, loading,
+configuration-required, failed, and report-bearing states. Source coverage is
+not treated as an accepted SCAD export or allocation result.
+
 | Official lens | Sutra evidence-backed implementation | Boundary |
 |---|---|---|
 | EKS/ECS/AWS Batch pod/task allocation | Exact CUR2 SCAD lineage through account, Region, platform, cluster, namespace, workload and pod/task | AWS SCAD does not publish container IDs |

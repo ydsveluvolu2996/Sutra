@@ -45,6 +45,12 @@ Group By/pivot/Sankey purposes are explicitly partial: account and
 `cid:budget-level` relationship evidence is present, but arbitrary QuickSight
 grouping and geometry are not claimed.
 
+The same commit/hash-validated official inventory is returned by both
+successful API states and is rendered independently in disconnected, loading,
+configuration-required, failed, and report-bearing UI states. Provider
+delivery remains fail-closed; showing this frozen audit does not synthesize a
+budget, hierarchy, spend value, or collector result.
+
 ## G1-G6 status
 
 | Gate | Status | Evidence / remaining work |

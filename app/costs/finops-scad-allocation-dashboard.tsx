@@ -5,27 +5,12 @@ import type {
   ScadDashboardFilters,
   ScadDashboardProjection,
 } from "../../lib/finops-scad-dashboard";
+import { SCAD_OFFICIAL_DEFINITION, type ScadOfficialDefinition } from "../../lib/finops-scad-official-definition";
 import styles from "./finops-scad-allocation-dashboard.module.css";
 interface Envelope extends ScadDashboardProjection {
   readonly connectionId: string;
   readonly sourceState: string;
-  readonly officialDefinition: {
-    readonly documentedTabCountClaim: number;
-    readonly documentedSectionCount: number;
-    readonly catalogNote: string;
-    readonly source: {
-      readonly commit: string;
-      readonly sha256: string;
-      readonly quickSightControlInventory: string;
-    };
-    readonly sections: readonly {
-      readonly id: string;
-      readonly label: string;
-      readonly support: "SUPPORTED" | "PARTIAL";
-      readonly documentedAreas: readonly string[];
-      readonly limitation?: string;
-    }[];
-  };
+  readonly officialDefinition: ScadOfficialDefinition;
   readonly freshness: {
     readonly dataThroughAt: string | null;
     readonly ageHours: number | null;
@@ -44,6 +29,8 @@ interface Envelope extends ScadDashboardProjection {
   readonly evidence: Readonly<Record<string, unknown>>;
   readonly collection: { readonly available: false; readonly reason: string };
 }
+interface ScadConfigurationEnvelope { readonly dashboard: null; readonly officialDefinition: ScadOfficialDefinition }
+function hasPinnedOfficialDefinition(value: unknown): value is ScadOfficialDefinition { if (typeof value !== "object" || value === null) return false; const definition = value as Readonly<Record<string, unknown>>; const source = definition.source; return typeof source === "object" && source !== null && (source as Readonly<Record<string, unknown>>).commit === SCAD_OFFICIAL_DEFINITION.source.commit && (source as Readonly<Record<string, unknown>>).sha256 === SCAD_OFFICIAL_DEFINITION.source.sha256 && definition.documentedTabCountClaim === 3 && definition.documentedSectionCount === 5 && Array.isArray(definition.sections) && definition.sections.length === 5; }
 const EMPTY: ScadDashboardFilters = {
   accountId: null,
   region: null,
@@ -142,6 +129,9 @@ function Select({
     </label>
   );
 }
+export function ScadOfficialDefinitionPanel({ definition }: { readonly definition: ScadOfficialDefinition }) {
+  return <section className={styles.official} aria-label="Official AWS SCAD coverage"><header><div><small>Immutable AWS catalog · {definition.source.commit.slice(0, 12)} · SHA-256 {definition.source.sha256.slice(0, 16)}…</small><h3>{definition.documentedSectionCount} named sections</h3><p>AWS states {definition.documentedTabCountClaim} tabs; exact QuickSight controls are {definition.source.quickSightControlInventory.toLocaleLowerCase().replaceAll("_", " ")}.</p></div></header><p>{definition.catalogNote}</p><nav>{definition.sections.map((section) => <a key={section.id} href={`#scad-${section.id}`}><span className={section.support === "SUPPORTED" ? styles.supported : styles.partial}>{section.support}</span><strong>{section.label}</strong><small>{section.documentedAreas.length} documented areas</small></a>)}</nav><p>Frozen source coverage remains visible without an accepted SCAD report; unpublished QuickSight object counts, geometry, and controls are not inferred.</p></section>;
+}
 export function ScadAllocationReportView({
   report,
   filters,
@@ -182,48 +172,7 @@ export function ScadAllocationReportView({
           Refine filters to inspect omitted detail and aggregate values.
         </div>
       ) : null}
-      <section
-        className={styles.official}
-        aria-label="Official AWS SCAD coverage"
-      >
-        <header>
-          <div>
-            <small>
-              Immutable AWS catalog ·{" "}
-              {report.officialDefinition.source.commit.slice(0, 12)}
-            </small>
-            <h3>
-              {report.officialDefinition.documentedSectionCount} named sections
-            </h3>
-            <p>
-              AWS states {report.officialDefinition.documentedTabCountClaim}{" "}
-              tabs; exact QuickSight controls are{" "}
-              {report.officialDefinition.source.quickSightControlInventory
-                .toLocaleLowerCase()
-                .replaceAll("_", " ")}
-              .
-            </p>
-          </div>
-        </header>
-        <p>{report.officialDefinition.catalogNote}</p>
-        <nav>
-          {report.officialDefinition.sections.map((section) => (
-            <a key={section.id} href={`#scad-${section.id}`}>
-              <span
-                className={
-                  section.support === "SUPPORTED"
-                    ? styles.supported
-                    : styles.partial
-                }
-              >
-                {section.support}
-              </span>
-              <strong>{section.label}</strong>
-              <small>{section.documentedAreas.length} documented areas</small>
-            </a>
-          ))}
-        </nav>
-      </section>
+      <ScadOfficialDefinitionPanel definition={report.officialDefinition} />
       <div className={styles.filters}>
         <Select
           label="Account"
@@ -602,7 +551,8 @@ export function FinopsScadAllocationDashboard({
     report: Envelope | null;
     error: string | null;
     configuration: boolean;
-  }>({ report: null, error: null, configuration: false });
+    officialDefinition: ScadOfficialDefinition;
+  }>({ report: null, error: null, configuration: false, officialDefinition: SCAD_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -616,61 +566,42 @@ export function FinopsScadAllocationDashboard({
       .then(async (response) => {
         if (!response.ok) throw new Error("SCAD allocation request failed");
         return response.json() as Promise<
-          Envelope | { readonly dashboard: null }
+          Envelope | ScadConfigurationEnvelope
         >;
       })
       .then((report) => {
+        if (!hasPinnedOfficialDefinition(report.officialDefinition)) throw new Error("Sutra returned an unrecognized SCAD official definition");
         if ("dashboard" in report && report.dashboard === null)
-          setState({ report: null, error: null, configuration: true });
+          setState({ report: null, error: null, configuration: true, officialDefinition: report.officialDefinition });
         else
           setState({
             report: report as Envelope,
             error: null,
             configuration: false,
+            officialDefinition: report.officialDefinition,
           });
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted)
-          setState({
+          setState((current) => ({
             report: null,
             error:
               error instanceof Error
                 ? error.message
                 : "SCAD allocation request failed",
             configuration: false,
-          });
+            officialDefinition: current.officialDefinition,
+          }));
       });
     return () => controller.abort();
   }, [connectionId, filters]);
-  if (connectionId === null)
-    return (
-      <div role="status" className={styles.warning}>
-        Connect an active AWS trust-role account before collecting SCAD.
-      </div>
-    );
-  if (state.configuration)
-    return (
-      <div role="status" className={styles.warning}>
-        No complete SCAD billing-period generation has been accepted.
-      </div>
-    );
-  if (state.error)
-    return (
-      <div role="alert" className={styles.error}>
-        {state.error}
-      </div>
-    );
-  if (state.report === null || state.report.connectionId !== connectionId)
-    return (
-      <div role="status" className={styles.warning}>
-        Loading SCAD allocation evidence…
-      </div>
-    );
-  return (
+  if (state.report !== null && state.report.connectionId === connectionId) return (
     <ScadAllocationReportView
       report={state.report}
       filters={filters}
       onFiltersChange={setFilters}
     />
   );
+  const status = connectionId === null ? <div role="status" className={styles.warning}>Connect an active AWS trust-role account before collecting SCAD.</div> : state.configuration ? <div role="status" className={styles.warning}>No complete SCAD billing-period generation has been accepted.</div> : state.error ? <div role="alert" className={styles.error}>{state.error}</div> : <div role="status" className={styles.warning}>Loading SCAD allocation evidence…</div>;
+  return <section className={styles.root}>{status}<ScadOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

@@ -207,5 +207,10 @@ test("native report renders hierarchy, budgeted/actual/forecast, honest status, 
     const html = renderToStaticMarkup(createElement(dashboardModule.FinopsAwsBudgetsOrganizationReportView, { report, filters: { currency: "", budgetType: "", accountId: "", budgetLevel: "", budgetStatus: "", namePrefix: "" }, onFiltersChange: () => undefined }));
     for (const text of ["never includes or merges Sutra-authored", "Official AWS definition coverage", "2 sheets · 11 visuals · 7 controls", "Budget Summary", "Forecast VS Budget This Month", "Actual VS Budget This Month", "Budget Distribution from Group By to Budget Level", "PARTIAL EVIDENCE", "About", "cid:budget-level", "Budget status", "Healthy budgets", "Unhealthy budgets", "Forecasted unhealthy budgets", "Unclassified evidence", "Budgeted", "Actual spend", "Forecasted spend", "Platform budget", "Provider status", "Budget performance history", "Collection evidence history", "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED", "Coverage is partial"]) assert.ok(html.includes(text), `Expected rendered report to include: ${text}`);
     assert.doesNotMatch(html, /fixture|sample|placeholder/iu);
+    const officialHtml = renderToStaticMarkup(createElement(dashboardModule.AwsBudgetsOfficialDefinitionPanel, { definition: AWS_BUDGETS_OFFICIAL_DEFINITION }));
+    for (const text of ["Official AWS Budgets definition coverage", "2 sheets · 11 visuals · 7 controls", "Frozen source identity remains visible", "Budget Summary", "About"]) assert.match(officialHtml, new RegExp(text, "iu"));
+    const uiSource = await readFile(path.join(root, "app/costs/finops-aws-budgets-organization-dashboard.tsx"), "utf8");
+    assert.match(uiSource, /AwsBudgetsConfigurationEnvelope[\s\S]*officialDefinition/u);
+    assert.match(uiSource, /AwsBudgetsOfficialDefinitionPanel definition=\{state\.officialDefinition\}/u);
   } finally { await vite.close(); }
 });

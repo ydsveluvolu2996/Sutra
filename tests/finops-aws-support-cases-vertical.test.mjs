@@ -67,6 +67,11 @@ test("native report renders plan states, filters, trends, provenance and privacy
     const html = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesRadarReportView, { report, filters: { accountId: "", status: "", severity: "", serviceCode: "", categoryCode: "" }, onFiltersChange: () => undefined }));
     for (const text of ["Privacy-minimized", "Official AWS source coverage", "Managed QuickSight definition not publicly committed", "Cases Summary", "Contact Summary", "About", "support_cases_status_view", "support_cases_communications_view", "Cases by Service", "Management Account", "Exact object counts are not inferred", "Support-plan readiness", "Case history", "Open case age", "Response cadence", "Average AWS response", "Top case topics", "Severity and service signals", "Case metadata drilldown", "Optional Bedrock summaries", "Not claimed", "Account coverage"]) assert.ok(html.includes(text), `Expected rendered report to include: ${text}`);
     for (const forbidden of ["subjectEvidenceHash", "contactEvidenceHash", "bodyEvidenceHash"]) assert.doesNotMatch(html, new RegExp(forbidden, "u"));
+    const officialHtml = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesOfficialDefinitionPanel, { definition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION }));
+    for (const text of ["Official AWS Support Cases Radar coverage", "Managed QuickSight definition not publicly committed", "Cases Summary", "support_cases_status_view", "Frozen source evidence remains visible"]) assert.match(officialHtml, new RegExp(text, "iu"));
+    const uiSource = await readFile(new URL("../app/costs/finops-aws-support-cases-radar-dashboard.tsx", import.meta.url), "utf8");
+    assert.match(uiSource, /dashboard === null\) return \{ report: null, officialDefinition:/u);
+    assert.match(uiSource, /report === null \? <AwsSupportCasesOfficialDefinitionPanel/u);
   } finally { await vite.close(); }
 });
 

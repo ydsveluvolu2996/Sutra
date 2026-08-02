@@ -67,6 +67,12 @@ native source inventory shows the preview's Cases Summary, Contact Summary and
 About tabs, 5 named visual purposes and 8 visible controls without treating
 those screenshot observations as exact object counts.
 
+Both successful API envelopes expose this frozen source audit. The browser
+validates the pinned commit and manifest hash, preserves it when the dashboard
+is `null`, and renders it independently in loading, configuration-required,
+failed, and report-bearing states. This never substitutes source metadata for
+Support entitlement, case evidence, or provider collection.
+
 ## Privacy and plan states
 
 The stored snapshot contains only the engine allowlist. Raw subjects,
