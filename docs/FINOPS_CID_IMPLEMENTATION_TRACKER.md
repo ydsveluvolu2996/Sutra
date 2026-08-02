@@ -66,21 +66,21 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 6 | 7 | 0 | 0 | 0 | 0 |
+| Advanced | 13 | 7 | 6 | 0 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
-| **Total** | **29** | **11** | **18** | **0** | **0** | **0** | **0** |
+| **Total** | **29** | **12** | **17** | **0** | **0** | **0** | **0** |
 
 ### Current release-scope view
 
 | Release scope | Catalog rows | Candidate | Partial pipeline | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|
-| In scope — AWS-backed dashboards | 27 | 11 | 16 | 0 | 0 |
+| In scope — AWS-backed dashboards | 27 | 12 | 15 | 0 | 0 |
 | Excluded from this build — Azure CID and GCP CID | 2 | 0 | 2 | 0 | 0 |
-| **Official catalog retained** | **29** | **11** | **18** | **0** | **0** |
+| **Official catalog retained** | **29** | **12** | **17** | **0** | **0** |
 
-The eleven candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Compute Optimizer, Extended Support Cost Projection, AWS News Feeds, AWS Budgets, Support Cases Radar, Trends, and Data Transfer. The eighteen partial pipelines are Trusted
-Advisor Organizational, Graviton Savings, Health Events,
+The twelve candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
+Anomaly, Compute Optimizer, Extended Support Cost Projection, Health Events, AWS News Feeds, AWS Budgets, Support Cases Radar, Trends, and Data Transfer. The seventeen partial pipelines are Trusted
+Advisor Organizational, Graviton Savings,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -99,7 +99,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md): the pinned 2-sheet/6-visual/12-control definition, bounded null-aware provider analysis, actual/expected evidence, four-dimensional contribution, lifecycle/monitor/subscription coverage, safe export and all-six native mapping are present. Four visual semantics remain explicitly partial; standalone query parity is unclaimed. Controlled payer/two-tenant reconciliation, exact-tree and live acceptance remain. |
 | ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-04-extended-support.md): the pinned 5-sheet/60-visual/17-control definition, deterministic daily scheduler, durable replay/failure ledger, immutable READY-only history, Ed25519 tenant-bound broker, exact STS ceiling, credential-owning collector route, pinned AWS SDK reader across EKS/RDS/Aurora/OpenSearch/ElastiCache/Pricing, same-tenant API, exact signed-micro output and native 3/6/12-month UI are fully wired and locally tested. Immutable `standard-2026-08.6` preserves Compute Optimizer `.8.5` and adds exactly the 14 required read actions. Approved AWS role attestation, authoritative CUR2/lifecycle/rate supplements, controlled bill reconciliation, exact layout, two-tenant/live acceptance, fixed-tree gates and deployment remain; missing evidence stays configuration-required and no live claim is made. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-05-graviton-savings.md): the pinned v3.0.2 inventory maps 7 sheets, 122 visuals and 53 controls; EC2/ASG, RDS/Aurora, OpenSearch and ElastiCache contracts, prevalidated scheduling, signed replay, exact-micro CUR2 economics, immutable history, same-tenant API and native per-sheet evidence exist. Shared provider/runtime wiring, standalone instance mapping, richer service controls, reconciliation, exact layout and live acceptance remain. |
-| ADV-06 | Health Events Dashboard | `health_events` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-06-health-events.md): the pinned v3.1.0 inventory maps 3 sheets, 33 visuals and 28 controls; organization past/current/upcoming history, same-tenant API, prerequisite/provider states, native per-sheet planning UI and safe export retain explicit 48-hour-or-more/not-real-time semantics. Production broker/handler, eligible-plan/Organizations validation, real pagination/retention/initial-load, exact layout and live acceptance remain. |
+| ADV-06 | Health Events Dashboard | `health_events` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-06-health-events.md): the pinned v3.1.0 inventory maps 3 sheets, 33 visuals and 28 controls. The exact `.8.8` customer role, read-only STS ceiling, pinned Health/Organizations SDK reader, entitlement/Organizations/delegated-admin checks, fully paged account/entity/detail capture, conservative initial-load proof, signed local/hosted broker, durable replay/failure ledger, daily shared handler/tick, same-tenant API, four-state collection UI and native 3-sheet planning/export views are fully wired and locally tested. Controlled entitled-organization reconciliation, real 90-day/24-hour provider evidence, exact layout, two-tenant/live acceptance, fixed-tree release gates and deployment remain; no live claim is made. |
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): the pinned 6-sheet/21-visual/12-control definition, five exact server-owned sources, hardened controlled-egress XML gateway, durable tenant-bound replay/failure ledger, deterministic six-hour scheduler, shared worker handler, immutable READY-only head, same-tenant API and native four-family/per-sheet inventory are fully wired and locally tested. Provider/live reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree release gates and deployment remain; therefore no live claim is made. |
 | ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-08-aws-budgets.md): the pinned 2-sheet/11-visual/7-control definition, exact AWS Budgets/Organizations adapter, bounded pagination and response limits, read-only STS ceiling, signed tenant-bound collector route, immutable hierarchy/actual/forecast history, six-hour server scheduler, shared durable handler, same-tenant API and all 11 native visual purposes are fully wired and locally tested. Customer-role permission rollout, deployed asymmetric broker configuration, controlled provider reconciliation, exact Sankey geometry, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
 | ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): the pinned manifest/changelog/preview and 2 published dataset contracts are mapped; managed QuickSight counts remain explicitly unavailable. Privacy-minimized credential-owning collection, HMAC-redacted case evidence, entitlement probing, immutable history, signed local/hosted transport, deterministic cohort scheduler, durable shared handler, same-tenant API, native case/account/age/cadence/topic views and optional-summary state are fully wired and locally tested. Immutable `standard-2026-08.7` preserves `.8.6` and adds exactly `DescribeCases` and `DescribeCommunications`; dedicated production evidence-key wiring and route-specific bounded responses are included. Controlled provider reconciliation, authorized exact template definition, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
@@ -182,7 +182,7 @@ not sufficient proof.
 3. Complete Trusted Advisor Organizational using standard-check organizational data plus a separately labelled Priority supplement.
 4. Complete each remaining engine-only row as a full vertical slice.
 5. Finish Data Collection Monitor and FOCUS rather than inheriting optimistic handover labels.
-6. Audit and close all gates for the eleven local candidates.
+6. Audit and close all gates for the twelve local candidates.
 7. Build Azure CID and GCP CID with provider-specific connection/runtime contracts.
 8. Run exact-tree local, controlled-provider, GitHub, image, deployment, rollback, and live-site gates.
 

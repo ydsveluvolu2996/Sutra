@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 11 of 29 |
-| Partial pipelines | 18 of 29: 16 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 12 of 29 |
+| Partial pipelines | 17 of 29: 15 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -467,4 +467,16 @@ Next gate:
 | Permission and scale integrity | Immutable `standard-2026-08.7` preserves `.8.6` and adds exactly two read actions; one organization fan-out is scheduled per tenant/customer/partition cohort, preventing the prior O(N²) account multiplication |
 | Focused verification | 34/34 ADV-09 tests, root and collector typechecks, targeted lint, secret scan of 2,328 files, diff check, `.8.7` and production-HA CFN lint, 10/10 HA infrastructure tests and 3/3 runtime-secret tests passed |
 | Remaining gates | Deploy and attest `.8.7`, provision its unique evidence key, reconcile controlled provider evidence, complete authorized template/two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — AWS Health Events local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-06 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 12 candidates and 17 partial pipelines, including 15 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `6dab352` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-06 vertical commit |
+| Delivery | Exact Health/Organizations SDK reader, entitlement and delegated-admin checks, full pagination, conservative initial-load proof, signed bounded route, durable leases/replay/failures, daily handler/tick, immutable history, same-tenant API and four-state 3-sheet UI |
+| Permission integrity | Immutable `standard-2026-08.8` preserves `.8.7` and adds exactly seven Health/prerequisite role reads with an eight-action STS ceiling; Extended Support and Support Cases compatibility remains green |
+| Focused verification | 45/45 root Health tests, 10/10 collector Health tests, 30/30 broker/registry tests, 18/18 shared/runtime compatibility and 9/9 predecessor-template tests passed; root and collector typechecks, lint, CFN lint, secret scan of 2,350 files and diff check passed |
+| Remaining gates | Deploy and attest `.8.8`, capture controlled entitled Organization evidence including management/delegated-admin pagination and retention windows, apply PostgreSQL 0115, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
