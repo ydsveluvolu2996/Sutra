@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 13 of 29 |
-| Partial pipelines | 16 of 29: 14 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 14 of 29 |
+| Partial pipelines | 15 of 29: 13 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -491,4 +491,16 @@ Next gate:
 | Permission integrity | Immutable `standard-2026-08.9` preserves `.8.8` and adds the dedicated exact Resilience Hub read policy; Health, Support Cases and Extended Support successor compatibility remains enabled |
 | Focused verification | 12/12 ADV-10 integration tests, 4/4 permission/inheritance tests and 5/5 collector tests passed; root/collector typechecks, collector and production builds, lint, diff, secret scan of 2,370 files and `.8.9` CFN lint passed |
 | Remaining gates | Deploy and attest `.8.9`, validate controlled live Resilience Hub applications and all 14 reads, apply PostgreSQL 0116, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — Data Collection Monitor local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-12 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 14 candidates and 15 partial pipelines, including 13 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `24c78c9` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-12 vertical commit |
+| Delivery | Pinned Step Functions SDK/default reader, exact state-machine/execution ARN policy, strict signed route, 16-minute CAS lease/replay, immutable complete head, hourly handler/tick, same-tenant API and native four-state 2-sheet/10-visual UI |
+| Successor integrity | Immutable `standard-2026-08.10` preserves `.8.9`; centralized explicit allowlists keep Extended Support, Support Cases, Health and ResilienceVue active while rejecting `.8.010`, `.8.11`, `.8.90`, cross-period and attacker values |
+| Focused verification | 22/22 ADV-12 tests, 4/4 successor regression tests and 32/32 predecessor suites passed; root/collector typechecks, collector build, lint, 12-template CFN lint, secret scan of 2,402 files and diff check passed |
+| Remaining gates | Deploy and attest `.8.10`, reconcile controlled DCF Step Functions evidence, apply PostgreSQL 0117, complete exact geometry/two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |

@@ -66,20 +66,20 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 8 | 5 | 0 | 0 | 0 | 0 |
+| Advanced | 13 | 9 | 4 | 0 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
-| **Total** | **29** | **13** | **16** | **0** | **0** | **0** | **0** |
+| **Total** | **29** | **14** | **15** | **0** | **0** | **0** | **0** |
 
 ### Current release-scope view
 
 | Release scope | Catalog rows | Candidate | Partial pipeline | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|
-| In scope — AWS-backed dashboards | 27 | 13 | 14 | 0 | 0 |
+| In scope — AWS-backed dashboards | 27 | 14 | 13 | 0 | 0 |
 | Excluded from this build — Azure CID and GCP CID | 2 | 0 | 2 | 0 | 0 |
-| **Official catalog retained** | **29** | **13** | **16** | **0** | **0** |
+| **Official catalog retained** | **29** | **14** | **15** | **0** | **0** |
 
-The thirteen candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Compute Optimizer, Extended Support Cost Projection, Health Events, AWS News Feeds, AWS Budgets, Support Cases Radar, ResilienceVue, Trends, and Data Transfer. The sixteen partial pipelines are Trusted
+The fourteen candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
+Anomaly, Compute Optimizer, Extended Support Cost Projection, Health Events, AWS News Feeds, AWS Budgets, Support Cases Radar, ResilienceVue, Data Collection Monitor, Trends, and Data Transfer. The fifteen partial pipelines are Trusted
 Advisor Organizational, Graviton Savings,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
@@ -105,7 +105,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): the pinned manifest/changelog/preview and 2 published dataset contracts are mapped; managed QuickSight counts remain explicitly unavailable. Privacy-minimized credential-owning collection, HMAC-redacted case evidence, entitlement probing, immutable history, signed local/hosted transport, deterministic cohort scheduler, durable shared handler, same-tenant API, native case/account/age/cadence/topic views and optional-summary state are fully wired and locally tested. Immutable `standard-2026-08.7` preserves `.8.6` and adds exactly `DescribeCases` and `DescribeCommunications`; dedicated production evidence-key wiring and route-specific bounded responses are included. Controlled provider reconciliation, authorized exact template definition, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
 | ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-10-resiliencevue.md): the pinned v1.0.0 inventory maps 4 sheets, 47 visuals and 9 controls. The credential-owning Resilience Hub client executes all 14 bounded read operations, while durable lease/replay/status persistence, signed tenant-bound transport, migration registration, daily shared handler/tick, same-tenant API, four-state UI and native policy/score/RPO/RTO/recommendation views are fully wired and locally tested. Immutable `standard-2026-08.9` preserves `.8.8` and adds exactly the Resilience Hub reads. Estimated cost, optimization type, architecture and App Component dimensions remain configuration-required until an authoritative versioned schema exists. Controlled provider reconciliation, exact layout, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
 | ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-11-end-user-computing.md): the pinned v1.2.0 definition audit covers 7 sheets/82 visuals/24 controls; prevalidated failure-isolated scheduling, exact-byte signed transport, privacy-safe WorkSpaces/Applications/metrics/CUR2 evidence, complete account/Region/mode/bundle/fleet aggregates and native visuals exist; shared runtime/broker registration, rolling three-month and privacy-approved usage dimensions, provider reconciliation and live acceptance remain. |
-| ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-12-data-collection-monitor.md): the pinned v1.0.1 manifest and complete embedded definition map exactly 2 sheets, 10 visuals, 6 controls, 5 parameters, 21 calculated fields, 15 filter groups, and 1 dataset. A bounded metadata-only adapter, hourly runtime/replay contract, immutable DCF history, same-tenant API, and native execution/error/retry/latency/coverage UI exist; shared scheduler/handler/replay/provider registration, exact geometry, real DCF reconciliation, and live acceptance remain. |
+| ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-12-data-collection-monitor.md): the pinned v1.0.1 manifest and complete embedded definition map exactly 2 sheets, 10 visuals, 6 controls, 5 parameters, 21 calculated fields, 15 filter groups, and 1 dataset. The credential-owning Step Functions reader, exact state-machine/execution ARN policy, bounded signed route, 16-minute durable lease/replay ledger, immutable complete-head history, deterministic hourly handler/tick, same-tenant API and native unavailable/collecting/failed/ready execution/error/retry/latency/coverage UI are fully wired and locally tested. Immutable `standard-2026-08.10` preserves `.8.9` and malformed lexical successors are rejected. Controlled DCF/provider reconciliation, exact geometry, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
 | ADV-13 | Media Services Insights Hub | `media_services_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-13-media-services-insights.md): the complete public v2.2.1 definition is hash-pinned at 9 sheets, 144 visuals, 92 control placements, 44 parameters, 175 calculated fields, 241 filter groups and 3 SPICE datasets, with 52 documented purposes mapped into report-independent UI evidence. The replay-safe five-workflow/46-read runtime and immutable CUR2 lineage exist; reservation savings, Budgets, CloudWatch/performance evidence, provider registration, reconciliation and live acceptance remain unavailable. |
 | ADD-01 | CORA Dashboard | `cora` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-01-cora.md) and [export activation contract](finops-cid-evidence/ADD-01-cora-export-activation.md): the pinned v0.0.11 inventory maps 5 sheets, 28 visuals and 52 control placements, including the exact embedded Athena SQL. Export materialization, immutable history, retry identity, resource-safe deduplication, same-tenant API and native per-sheet inventory exist; SP/RI dimensions, credential-owning S3/Parquet/runtime adapter, provider reconciliation, exact layout and live acceptance remain. |
 | ADD-02 | Cloud Intelligence Dashboard for Azure | `azure_cid` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-02-azure-cid.md): 11 official source/deployment/transformation/query artifacts plus the 21-column dataset and embedded query are hash-pinned. The service-hosted QuickSight definition is unpublished, so object totals remain explicitly null. Native six-month/30-day/allocation/pricing/charge/tag/resource evidence exists; Azure identity, recurring export/Blob delivery, provider adapter, price sheet, reservation recommendations, exact geometry, reconciliation and live acceptance remain. |
@@ -182,7 +182,7 @@ not sufficient proof.
 3. Complete Trusted Advisor Organizational using standard-check organizational data plus a separately labelled Priority supplement.
 4. Complete each remaining engine-only row as a full vertical slice.
 5. Finish Data Collection Monitor and FOCUS rather than inheriting optimistic handover labels.
-6. Audit and close all gates for the thirteen local candidates.
+6. Audit and close all gates for the fourteen local candidates.
 7. Build Azure CID and GCP CID with provider-specific connection/runtime contracts.
 8. Run exact-tree local, controlled-provider, GitHub, image, deployment, rollback, and live-site gates.
 
