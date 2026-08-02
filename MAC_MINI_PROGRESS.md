@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 12 of 29 |
-| Partial pipelines | 17 of 29: 15 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 13 of 29 |
+| Partial pipelines | 16 of 29: 14 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -479,4 +479,16 @@ Next gate:
 | Permission integrity | Immutable `standard-2026-08.8` preserves `.8.7` and adds exactly seven Health/prerequisite role reads with an eight-action STS ceiling; Extended Support and Support Cases compatibility remains green |
 | Focused verification | 45/45 root Health tests, 10/10 collector Health tests, 30/30 broker/registry tests, 18/18 shared/runtime compatibility and 9/9 predecessor-template tests passed; root and collector typechecks, lint, CFN lint, secret scan of 2,350 files and diff check passed |
 | Remaining gates | Deploy and attest `.8.8`, capture controlled entitled Organization evidence including management/delegated-admin pagination and retention windows, apply PostgreSQL 0115, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — ResilienceVue local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-10 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 13 candidates and 16 partial pipelines, including 14 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `d1e91bf` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-10 vertical commit |
+| Delivery | Pinned Resilience Hub SDK/default client, exact 14-operation bounded collection, strict signed route, durable tenant/account/Region lease/replay/status, migrations, daily handler/tick, same-tenant API and native four-state 4-sheet/47-visual/9-control UI |
+| Permission integrity | Immutable `standard-2026-08.9` preserves `.8.8` and adds the dedicated exact Resilience Hub read policy; Health, Support Cases and Extended Support successor compatibility remains enabled |
+| Focused verification | 12/12 ADV-10 integration tests, 4/4 permission/inheritance tests and 5/5 collector tests passed; root/collector typechecks, collector and production builds, lint, diff, secret scan of 2,370 files and `.8.9` CFN lint passed |
+| Remaining gates | Deploy and attest `.8.9`, validate controlled live Resilience Hub applications and all 14 reads, apply PostgreSQL 0116, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
