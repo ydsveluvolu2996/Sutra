@@ -53,6 +53,7 @@ import {
   getConnectionForOrg,
   getLatestConnectionForOrg,
   listHostedCollectorOperationRuns,
+  listActiveAwsConnectionsForCustomer,
   listConnectionsForOrg,
   markConnectionNeedsAttention,
   persistSnapshot,
@@ -82,6 +83,7 @@ import {
   runCollectorSync,
   runFinopsExportChunkRead,
   runFinopsSourceCollection,
+  runSignedOrganizationsTaxonomy,
   safeCollectionFailureCode,
 } from "../lib/pilot-server";
 import {
@@ -96,13 +98,189 @@ import {
   runFinopsSourceCollectJob,
 } from "../lib/finops-source-collect-job";
 import { FinopsEvidenceReferenceSealer } from "../lib/finops-source-evidence-reference";
+import {
+  FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND,
+  TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+  runTrustedAdvisorAccountCollectionJob,
+  runTrustedAdvisorManifestFinalizeJob,
+  runTrustedAdvisorOrganizationActivationJob,
+  type TrustedAdvisorServerConnection,
+} from "../lib/finops-trusted-advisor-standard-orchestration";
+import {
+  FINOPS_TA_ACCOUNT_COLLECT_JOB_KIND,
+  FINOPS_TA_MANIFEST_FINALIZE_JOB_KIND,
+} from "../lib/finops-trusted-advisor-organization-job";
+import {
+  createTrustedAdvisorTaxonomySignatureVerifier,
+} from "../lib/finops-trusted-advisor-taxonomy-kms";
 import { FinopsSourceJobLedgerRepository } from "./finops-source-job-ledger-repository";
 import { FinopsSourceSnapshotRepository } from "./finops-source-snapshot-repository";
+import { TrustedAdvisorOrganizationRepository } from "./finops-trusted-advisor-organization-repository";
 import { EvidenceRepository } from "./evidence-repository";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
 ]);
+
+const TRUSTED_ADVISOR_ORGANIZATIONS_CONTRACT_ID =
+  "aws-organizations-taxonomy-read-v1";
+const TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK = "standard-2026-08.2";
+
+function trustedAdvisorServerConnection(
+  organizationId: string,
+  connection: Awaited<ReturnType<typeof getConnectionForOrg>>,
+): TrustedAdvisorServerConnection | null {
+  if (
+    connection === null
+    || connection.sourceKind !== "aws_trust_role"
+    || connection.status !== "active"
+    || connection.partition !== "aws"
+    || connection.permissionPackVersion !== TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK
+  ) return null;
+  return {
+    organizationId,
+    customerId: connection.customerId,
+    connectionId: connection.id,
+    awsAccountId: connection.awsAccountId,
+    partition: connection.partition,
+    sourceKind: connection.sourceKind,
+    status: connection.status,
+  };
+}
+
+/** Production composition for the signed Organizations activation job. */
+export async function runTrustedAdvisorOrganizationActivationHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  const verifier = createTrustedAdvisorTaxonomySignatureVerifier(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  await runTrustedAdvisorOrganizationActivationJob(job, {
+    repository,
+    queue: new JobQueueRepository(),
+    getAnchorConnection: async (scope) => trustedAdvisorServerConnection(
+      scope.organizationId,
+      await getConnectionForOrg(scope.organizationId, scope.connectionId),
+    ),
+    listCustomerConnections: async (scope) => (await listActiveAwsConnectionsForCustomer(
+      scope.organizationId,
+      scope.customerId,
+      TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK,
+    )).flatMap((connection) => {
+      const mapped = trustedAdvisorServerConnection(scope.organizationId, connection);
+      return mapped === null ? [] : [mapped];
+    }),
+    collectSignedTaxonomy: (input) => {
+      if (input.operations !== TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS) {
+        throw new Error("trusted-advisor-taxonomy-operations-invalid");
+      }
+      return runSignedOrganizationsTaxonomy({
+        tenantId: input.scope.organizationId,
+        customerId: input.scope.customerId,
+        connectionId: input.scope.connectionId,
+        jobId: job.id,
+        contractId: TRUSTED_ADVISOR_ORGANIZATIONS_CONTRACT_ID,
+      });
+    },
+    verifyTaxonomySignature: verifier.verify,
+    expectedSignerKeyId: verifier.expectedSignerKeyId,
+    now: Date.now,
+  });
+}
+
+/** Production composition for one frozen member-account standard-check job. */
+export async function runTrustedAdvisorAccountCollectionHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  const snapshots = new FinopsSourceSnapshotRepository();
+  const evidence = new EvidenceRepository();
+  const sealer = await FinopsEvidenceReferenceSealer.fromEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  await runTrustedAdvisorAccountCollectionJob(job, {
+    repository,
+    queue: new JobQueueRepository(),
+    findManifest: (input) => repository.getManifestByIdentity(input),
+    collectCompletedStandardChecks: async (input) => {
+      const sourceJob: RunnableJob = {
+        ...job,
+        connectionId: input.connectionId,
+        kind: FINOPS_SOURCE_COLLECT_JOB_KIND,
+        payload: {
+          connectionId: input.connectionId,
+          sourceId: input.sourceId,
+          contractId: input.contractId,
+        },
+      };
+      await runFinopsSourceCollectJob(sourceJob, {
+        getConnection: (organizationId, connectionId) =>
+          getConnectionForOrg(organizationId, connectionId),
+        collect: runFinopsSourceCollection,
+        ledger: new FinopsSourceJobLedgerRepository(),
+        evidence,
+        snapshots,
+        evidenceReferenceSealer: sealer,
+        now: Date.now,
+      });
+      const scope = {
+        organizationId: input.organizationId,
+        customerId: input.customerId,
+        connectionId: input.connectionId,
+      };
+      const snapshot = await snapshots.getSnapshotForAttempt(
+        scope,
+        TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+        input.orchestrationJobId,
+        input.attempt,
+      );
+      if (
+        snapshot === null
+        || (snapshot.status !== "complete" && snapshot.status !== "partial")
+        || snapshot.sourceId !== TRUSTED_ADVISOR_STANDARD_SOURCE_ID
+      ) throw new Error("trusted-advisor-standard-snapshot-unavailable");
+      const objectId = await sealer.open(snapshot.evidenceReference, {
+        ...scope,
+        sourceId: TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+        generationId: snapshot.generationId,
+      });
+      const stored = await evidence.readFinopsSourceSnapshot({
+        scope: {
+          orgId: scope.organizationId,
+          customerId: scope.customerId,
+          connectionId: scope.connectionId,
+        },
+        objectId,
+        snapshotId: snapshot.generationId,
+        contentSha256: snapshot.contentSha256,
+      });
+      return {
+        snapshot: {
+          ...snapshot,
+          sourceId: TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+          status: snapshot.status,
+          schemaVersion: "sutra.finops-source-evidence.v2" as const,
+        },
+        verifiedBody: stored.body,
+      };
+    },
+    now: Date.now,
+  });
+}
+
+/** Production composition for the retrying manifest finalizer. */
+export async function runTrustedAdvisorManifestFinalizeHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  await runTrustedAdvisorManifestFinalizeJob(job, {
+    repository,
+    findManifest: (input) => repository.getManifestByIdentity(input),
+    now: Date.now,
+  });
+}
 
 interface ItsmDispatchPayload {
   readonly customerId: string;
@@ -885,6 +1063,15 @@ export function buildJobHandlers(): Record<string, JobHandler> {
           ),
         now: Date.now,
       }),
+    [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorOrganizationActivationHandler(job);
+    },
+    [FINOPS_TA_ACCOUNT_COLLECT_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorAccountCollectionHandler(job);
+    },
+    [FINOPS_TA_MANIFEST_FINALIZE_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorManifestFinalizeHandler(job);
+    },
     "agentless-teardown-sweep": (job) => {
       const repository = new AgentlessScanRepository();
       return runAgentlessTeardownSweepJob(job, {

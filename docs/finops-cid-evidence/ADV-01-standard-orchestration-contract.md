@@ -23,10 +23,10 @@ canonical account set, SHA-256 digest, signer identity, and
 
 The credential-owning collector adapter and immutable
 `standard-2026-08.2` least-privilege customer-role candidate are implemented
-but intentionally not represented as active until the exact template bytes are
-published and attested, server-owned source bindings are persisted, and durable
-handlers are registered. Its stable activation reason remains
-`AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`. It may call only
+and all three durable app handlers are registered. Activation remains
+fail-closed until the exact template bytes are published and attested, exact
+server-owned source bindings are persisted, and the independent evidence key
+is present in the active production secret version. It may call only
 `organizations:DescribeOrganization` and `organizations:ListAccounts`, must
 exhaust pagination, and must sign the canonical capture using the server-pinned
 signer identity. Fabricated, browser-provided, stale, unsigned, partially paged,
@@ -47,7 +47,7 @@ the immutable `standard-2026-08.1` ceiling and grants them through the exact
 `SutraFinopsTrustedAdvisorStandardReadV1` and
 `SutraFinopsOrganizationsTaxonomyReadV1` inline policies. The advanced source
 contract remains limited to the commercial `aws` partition and `us-east-1`.
-The template is an unpublished candidate and does not change either mutable
+The template is an undeployed candidate and does not change either mutable
 onboarding default.
 
 ## Fan-out and evidence consumption
@@ -64,7 +64,10 @@ provider errors are never persisted.
 
 Manifest/account replay is idempotent: terminal accounts are not recollected,
 queue identities are manifest/account-bound, and an existing terminal manifest
-is not fanned out again. Finalization rejects any manifest with a pending or
-running member. Complete organization heads remain possible only when every
+is not fanned out again. Transient provider failures rethrow into the durable
+queue until the bounded final attempt. The deterministic finalizer is queued
+only after a terminal account write observes that no pending/running members
+remain; terminal replay repairs a crash between persistence and enqueue.
+Finalization rejects any manifest with a pending or running member. Complete organization heads remain possible only when every
 frozen account has complete accepted standard-check evidence; partial and
 failed generations remain history-only under the existing repository guards.

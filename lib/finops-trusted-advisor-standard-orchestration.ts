@@ -31,9 +31,6 @@ export const TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS = Object.freeze([
   "organizations:DescribeOrganization",
   "organizations:ListAccounts",
 ] as const);
-export const TRUSTED_ADVISOR_ORGANIZATIONS_ADAPTER_ACTIVATION_REASON =
-  "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED" as const;
-
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^[0-9]{12}$/u;
@@ -189,6 +186,7 @@ export interface TrustedAdvisorActivationDependencies {
 
 export interface TrustedAdvisorAccountDependencies {
   readonly repository: TrustedAdvisorManifestPort;
+  readonly queue: TrustedAdvisorOrganizationQueue;
   readonly findManifest: (input: {
     readonly organizationId: string;
     readonly customerId: string;
@@ -217,6 +215,18 @@ export interface TrustedAdvisorFinalizeDependencies {
   readonly repository: TrustedAdvisorManifestPort;
   readonly findManifest: TrustedAdvisorAccountDependencies["findManifest"];
   readonly now?: () => number;
+}
+
+export interface TrustedAdvisorActivationQueue {
+  enqueue(input: {
+    readonly orgId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly kind: typeof FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND;
+    readonly payload: { readonly connectionId: string };
+    readonly maxAttempts: number;
+    readonly idempotencyKey: string;
+  }, nowMs?: number): Promise<{ readonly id: string }>;
 }
 
 export class TrustedAdvisorStandardOrchestrationError extends Error {
@@ -344,6 +354,32 @@ function scopeFromJob(job: RunnableJob): TrustedAdvisorOrganizationScope {
     customerId: job.customerId,
     connectionId: job.connectionId,
   };
+}
+
+/** Browser-safe activation edge: only a persisted connection identity crosses it. */
+export async function enqueueTrustedAdvisorOrganizationActivation(
+  queue: TrustedAdvisorActivationQueue,
+  scope: TrustedAdvisorOrganizationScope,
+  nowMs = Date.now(),
+): Promise<{ readonly jobId: string }> {
+  if (
+    !Number.isSafeInteger(nowMs) || nowMs < 0
+    || !IDENTIFIER.test(scope.organizationId)
+    || !IDENTIFIER.test(scope.customerId)
+    || !CONNECTION_ID.test(scope.connectionId)
+  ) reject("INVALID_SCOPE");
+  const window = Math.floor(nowMs / (5 * 60_000));
+  const queued = await queue.enqueue({
+    orgId: scope.organizationId,
+    customerId: scope.customerId,
+    connectionId: scope.connectionId,
+    kind: FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND,
+    payload: { connectionId: scope.connectionId },
+    maxAttempts: 6,
+    idempotencyKey: `finops-ta-activate:${scope.connectionId}:${window}`,
+  }, nowMs);
+  if (!/^job_[a-f0-9]{32}$/u.test(queued.id)) reject("INVALID_JOB");
+  return { jobId: queued.id };
 }
 
 function assertConnection(
@@ -519,6 +555,18 @@ export async function runTrustedAdvisorOrganizationActivationJob(
   if (new Set(["complete", "partial", "failed"]).has(manifest.status)) {
     return { manifestId: manifest.manifestId, accountJobIds: [], finalizerJobId: null };
   }
+  if (manifest.status === "finalizing") {
+    return {
+      manifestId: manifest.manifestId,
+      accountJobIds: [],
+      finalizerJobId: await enqueueTrustedAdvisorManifestFinalization(
+        dependencies.queue,
+        scope,
+        manifest,
+        nowMs,
+      ),
+    };
+  }
   const collecting = await dependencies.repository.startManifest(
     scope,
     manifest.manifestId,
@@ -545,12 +593,14 @@ export async function runTrustedAdvisorOrganizationActivationJob(
     refreshed,
     nowMs,
   );
-  const finalizerJobId = await enqueueTrustedAdvisorManifestFinalization(
-    dependencies.queue,
-    scope,
-    refreshed,
-    nowMs,
-  );
+  const finalizerJobId = accountJobIds.length === 0
+    ? await enqueueTrustedAdvisorManifestFinalization(
+      dependencies.queue,
+      scope,
+      refreshed,
+      nowMs,
+    )
+    : null;
   return { manifestId: refreshed.manifestId, accountJobIds, finalizerJobId };
 }
 
@@ -820,7 +870,25 @@ export async function runTrustedAdvisorAccountCollectionJob(
     payload.connectionId,
   );
   const member = manifest.accounts.find((account) => account.accountId === payload.accountId)!;
-  if (new Set(["accepted", "partial"]).has(member.status)) return { status: "replayed" };
+  const enqueueFinalizerWhenTerminal = async (): Promise<void> => {
+    const refreshed = await dependencies.repository.getManifest(scope, manifest.manifestId);
+    if (
+      refreshed !== null
+      && refreshed.accounts.every((account) =>
+        !new Set(["pending", "running"]).has(account.status))
+    ) {
+      await enqueueTrustedAdvisorManifestFinalization(
+        dependencies.queue,
+        scope,
+        refreshed,
+        now(dependencies.now),
+      );
+    }
+  };
+  if (new Set(["accepted", "partial", "failed"]).has(member.status)) {
+    await enqueueFinalizerWhenTerminal();
+    return { status: "replayed" };
+  }
   if (member.status !== "pending" && member.status !== "running") {
     reject("MANIFEST_REJECTED");
   }
@@ -841,7 +909,8 @@ export async function runTrustedAdvisorAccountCollectionJob(
       orchestrationJobId: job.id,
       attempt: job.attempt,
     });
-  } catch {
+  } catch (error) {
+    if (job.attempt < job.maxAttempts) throw error;
     await dependencies.repository.markAccountUnavailable(
       scope,
       manifest.manifestId,
@@ -850,6 +919,7 @@ export async function runTrustedAdvisorAccountCollectionJob(
       "STANDARD_CHECK_COLLECTION_FAILED",
       nowMs,
     );
+    await enqueueFinalizerWhenTerminal();
     return { status: "failed" };
   }
   let snapshot: RecordTrustedAdvisorAccountSnapshotInput;
@@ -882,6 +952,7 @@ export async function runTrustedAdvisorAccountCollectionJob(
     snapshot,
     nowMs,
   );
+  await enqueueFinalizerWhenTerminal();
   return { status: snapshot.status === "complete" ? "accepted" : "partial" };
 }
 

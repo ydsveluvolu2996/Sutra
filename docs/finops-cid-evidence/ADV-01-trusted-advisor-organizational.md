@@ -62,29 +62,34 @@ charts, 18 insights, 8 KPIs, 5 pivot tables, and 43 tables.
 | Gate | Status | Evidence |
 |---|---|---|
 | G0 requirements | `VERIFIED` | Official AWS narrative plus the pinned v4.0.1 manifest/definition, exact sheet/visual/control inventory, and immutable SHA-256 evidence above, reviewed 2026-08-01. |
-| G1 source contract | `IMPLEMENTED_UNVERIFIED` | Standard account checks use the read-only AWS Support operations `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult` through the fixed commercial-partition `us-east-1` endpoint. The immutable unpublished `standard-2026-08.2` candidate adds exact dedicated policies for those two Support reads and the two Organizations taxonomy reads while preserving prior trust and ceilings. Trusted Advisor Priority organization recommendations remain a separate supplemental source and are never substituted. Eligible Support-plan and Organizations taxonomy prerequisites remain explicit. |
-| G2 collector and orchestration | `IMPLEMENTED_UNVERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. The credential-owning Organizations adapter now uses the fixed commercial endpoint, fully paginates with replay and size/deadline limits, retains all five official `Account.State` values without names/emails, signs the canonical SHA-256 digest with a dedicated workload-account RSA-3072 KMS key, and exposes only an authenticated exact-contract broker route. App-side KMS verification and infrastructure enforce broker-only Sign/app-only Verify with digest-mode RSA-PSS. Orchestration freezes the manifest, maps active same-tenant trust-role accounts, queues manifest-bound account/finalizer jobs, consumes exact immutable standard-check evidence bytes, and finalizes only terminal manifests. Immutable 08.2 publication/attestation, server-owned source binding, and durable handler registrations remain unavailable. |
-| G3 persistence | `IMPLEMENTED_UNVERIFIED` | Server-owned account manifests, account/check/resource snapshots, organization generations, and active heads are tenant/customer/connection scoped. Evidence is checksum-bound and append-only; database guards prevent incomplete or partial generations from advancing the complete active head. |
-| G4 API | `IMPLEMENTED_VERIFIED` | Authenticated same-tenant `GET /api/v1/finops/trusted-advisor-organizational` accepts one bounded connection/account/check/status/Region/category/suppression value, queries only the immutable active standard-check generation, exposes the pinned official definition, bounds output, minimizes metadata, and preserves explicit source states. |
-| G5 visual UI | `IMPLEMENTED_VERIFIED` | ADV-01 renders all 11 official sheet entries with exact upstream object/control counts and honest coverage badges, evidence-backed category/status/Region visuals, coverage KPIs, generation history, account/check/resource drilldowns, native Category and IsSuppressed controls, responsive layouts, and immutable source evidence. The frozen definition remains visible during loading, configuration-required, failed and null-report states. Provider-only sheets remain visible and unavailable rather than substituted. |
+| G1 source contract | `IMPLEMENTED_VERIFIED` | Standard account checks use the read-only AWS Support operations `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult` through the fixed commercial-partition `us-east-1` endpoint. The immutable `standard-2026-08.2` candidate adds exact dedicated policies for those two Support reads and the two Organizations taxonomy reads while preserving prior trust and ceilings. Local template, broker-attestation, permission-coverage, and pinned CloudFormation lint gates pass. Trusted Advisor Priority organization recommendations remain a separate supplemental source and are never substituted. Eligible Support-plan and Organizations taxonomy prerequisites remain explicit. |
+| G2 collector and orchestration | `IMPLEMENTED_VERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. The credential-owning Organizations adapter uses the fixed commercial endpoint, fully paginates with replay and size/deadline limits, retains all five official `Account.State` values without names/emails, signs the canonical SHA-256 digest with a dedicated workload-account RSA-3072 KMS key, and exposes only an authenticated exact-contract broker route. App-side KMS verification and infrastructure enforce broker-only Sign/app-only Verify with digest-mode RSA-PSS. All three shared durable handlers are registered lazily. Activation freezes the signed manifest and queues only frozen member identities; exact source snapshots are recovered by job/attempt and reopened through tenant/source/generation-bound encrypted references. Transient account failures retry, terminal/crash replays enqueue the same deterministic finalizer, and finalization is never queued while member work remains non-terminal. Live 08.2/source-binding acceptance remains G8. |
+| G3 persistence | `IMPLEMENTED_VERIFIED` | Server-owned account manifests, account/check/resource snapshots, organization generations, and active heads are tenant/customer/connection scoped. Evidence is checksum-bound and append-only; exact manifest-identity and source-attempt reads cannot cross tenants. Database guards prevent incomplete or partial generations from advancing the complete active head, and exact immutable race replays are accepted without allowing conflicting content. |
+| G4 API | `IMPLEMENTED_VERIFIED` | Authenticated same-tenant `GET /api/v1/finops/trusted-advisor-organizational` accepts one bounded connection/account/check/status/Region/category/suppression value, queries only the immutable active standard-check generation, exposes the pinned official definition, bounds output, minimizes metadata, and preserves explicit source states. The protected `POST` accepts exactly `{connectionId}`, requires `sync:run`, active 08.2 trust-role ownership and configured signing/evidence keys, and enqueues a five-minute-idempotent server-owned activation; no account list, AWS operation, contract, taxonomy, Region, or credential is browser-controlled. |
+| G5 visual UI | `IMPLEMENTED_VERIFIED` | ADV-01 renders all 11 official sheet entries with exact upstream object/control counts and honest coverage badges, evidence-backed category/status/Region visuals, coverage KPIs, generation history, account/check/resource drilldowns, native Category and IsSuppressed controls, responsive layouts, and immutable source evidence. The frozen definition remains visible during loading, configuration-required, failed and null-report states. A guarded Start organization collection control shows queued/failure state and refreshes the report without accepting a browser account list. Provider-only sheets remain visible and unavailable rather than substituted. |
 | G6 focused verification | `VERIFIED` | Exact-definition arithmetic, repository filters/isolation, catalog/navigation/render/accessibility, manifest-job/migration/signed-taxonomy/fan-out/evidence/finalization, TypeScript, targeted ESLint, and diff checks pass. Exact current command counts are recorded below. |
 | G7 exact-tree gate | `NOT_STARTED` | The complete eventual release SHA still requires the full application, collector, migration, PostgreSQL, build, rendered, security, and image scan gates after all capability work is integrated. |
 | G8 provider acceptance | `NOT_STARTED` | Controlled eligible-Support-plan AWS accounts, accepted server-owned Organizations taxonomy, standard-check reconciliation, failure/partial/freshness exercises, and two-tenant isolation evidence remain. |
 | G9 release acceptance | `NOT_STARTED` | Reviewed merge, immutable image digest, SBOM/security approval, database rollout, rollback rehearsal, and deployment authorization remain. |
 | G10 live acceptance | `NOT_STARTED` | The deployed digest must pass authenticated live dashboard, API, responsive visual, accessibility, freshness, evidence, and rollback checks. |
 
-## Configuration-required activation blocker
+## Provider activation prerequisites
 
 The signed taxonomy adapter, immutable `standard-2026-08.2` customer-role
-candidate, and immutable fan-out contract now exist, but the template has not
-been published or attested and Sutra does not yet persist its server-owned
-source binding or register durable production handlers. The browser is not allowed to supply
-or expand the account set. Consequently, collection activation is reported as
-`configuration_required` with
-`AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`; no collection is
-started from UI input and no Priority recommendation source is used as a
-fallback. Provider acceptance additionally requires a real eligible Support
-plan organization and reconciliation across its accepted account manifest.
+candidate, exact-contract fan-out, protected activation API/UI, and shared
+durable handlers now exist and pass local gates. The browser is not allowed to
+supply or expand the account set. Activation becomes available only when the
+selected persisted connection uses 08.2 and the app has both the KMS verifier
+ARN and the independent FinOps evidence-reference key. The next production
+secret version must therefore add `SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY`; the
+task definition supplies the fixed version label
+`production-finops-evidence-v1`. The collector registry must also hold the
+exact Organizations and standard-check source contracts for each activated
+connection. Until those prerequisites are applied, the API and UI remain
+fail-closed with a configuration reason. No Priority recommendation source is
+used as a fallback. Provider acceptance additionally requires a real eligible
+Support-plan organization and reconciliation across its accepted account
+manifest.
 
 This activation blocker affects new standard-check collection. Two official
 sheet sources remain separate even after that adapter is registered:
@@ -113,7 +118,7 @@ node --experimental-strip-types --test --test-concurrency=1 \
   tests/finops-trusted-advisor-organizational-dashboard-ui-contract.test.mjs
 ```
 
-Result: **11 passed, 0 failed, 0 skipped**.
+Result: **12 passed, 0 failed, 0 skipped**.
 
 Catalog, navigation, signed taxonomy, fan-out, standard-check evidence, replay,
 migration parity, and finalization command:
@@ -127,16 +132,25 @@ node --experimental-strip-types --test --test-concurrency=1 \
   tests/finops-trusted-advisor-standard-orchestration.test.ts
 ```
 
-Result: **19 passed, 0 failed, 0 skipped**.
+Result: **21 passed, 0 failed, 0 skipped**.
 
 Focused ADV-01 and directly related catalog/orchestration total:
-**30 passed, 0 failed, 0 skipped**.
+**33 passed, 0 failed, 0 skipped**.
+
+Exact-attempt source persistence and shared handler registration add **6/6**
+passing cases. The managed production evidence-key/HA contract adds **14/14**
+passing cases. Across these non-overlapping ADV-01 activation and deployment
+readiness commands, **53 passed, 0 failed, 0 skipped**.
 
 Additional checks:
 
 ```text
 pnpm typecheck
-pnpm exec eslint app/api/v1/finops/trusted-advisor-organizational/route.ts app/costs/finops-trusted-advisor-organizational-dashboard.tsx db/finops-trusted-advisor-organization-repository.ts lib/finops-trusted-advisor-organizational-official-definition.ts tests/finops-trusted-advisor-organizational-official-definition.test.ts tests/finops-trusted-advisor-organization-repository.test.mjs tests/finops-trusted-advisor-organizational-dashboard-ui-contract.test.mjs
+pnpm typecheck:collector
+pnpm --dir services/aws-collector build
+pnpm build
+pnpm exec eslint app/api/v1/finops/trusted-advisor-organizational/route.ts app/costs/finops-trusted-advisor-organizational-dashboard.tsx db/background-job-handlers.ts db/finops-source-snapshot-repository.ts db/finops-trusted-advisor-organization-repository.ts db/pilot-repository.ts lib/finops-trusted-advisor-standard-orchestration.ts
+PATH=/private/tmp/sutra-cfn-lint.iVkPWR/bin:$PATH pnpm lint:cloudformation
 git diff --check
 ```
 

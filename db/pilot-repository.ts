@@ -700,6 +700,41 @@ export async function listConnectionsForOrg(orgId: string): Promise<readonly Pil
   return (rows.results ?? []).map(toPilotConnection);
 }
 
+/**
+ * Bounded server-owned member-account discovery for ADV-01. This is narrower
+ * than the org-wide administrative listing: only runnable commercial AWS
+ * connections for one exact customer and permission pack are returned.
+ * LIMIT 10001 lets the orchestration reject an organization beyond its 10k
+ * account evidence bound without loading an unbounded result.
+ */
+export async function listActiveAwsConnectionsForCustomer(
+  orgId: string,
+  customerId: string,
+  permissionPackVersion: string,
+): Promise<readonly PilotConnection[]> {
+  const db = await readyDatabase();
+  const rows = await db.prepare(
+    `SELECT c.id, c.customer_id, cu.name AS customer_name, c.source_kind,
+            c.fixture_id, c.fixture_version, c.partition,
+            c.aws_account_id, c.role_arn, c.status, c.enabled_regions_json,
+            c.permission_pack_version, c.role_provisioning_mode,
+            c.expected_role_path, c.expected_role_name, c.permission_capabilities_json,
+            c.last_validated_at,
+            c.last_successful_sync_at, c.created_at, c.updated_at
+       FROM aws_connections c
+       JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
+       JOIN customers cu
+         ON cu.id = c.customer_id AND cu.org_id = c.org_id
+        AND cu.status IN ('active', 'trial')
+      WHERE c.org_id = ? AND c.customer_id = ?
+        AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        AND c.partition = 'aws' AND c.permission_pack_version = ?
+      ORDER BY c.aws_account_id ASC, c.id ASC
+      LIMIT 10001`,
+  ).bind(orgId, customerId, permissionPackVersion).all<ConnectionRow>();
+  return (rows.results ?? []).map(toPilotConnection);
+}
+
 export function commitVerifiedConnectionRole(
   input: CommitVerifiedConnectionRoleInput,
 ): Promise<PilotConnection> {

@@ -566,6 +566,50 @@ export class TrustedAdvisorOrganizationRepository {
     return this.readManifest(database, scope, manifestId);
   }
 
+  /**
+   * Resolve a manifest from durable job identity when the job is bound to a
+   * member-account connection rather than the manifest's anchor connection.
+   * The anchor is recovered only from a live, same-tenant manifest row; no
+   * connection id from a job payload participates in this lookup.
+   */
+  public async getManifestByIdentity(input: {
+    readonly organizationId: string;
+    readonly customerId: string;
+    readonly manifestId: string;
+  }): Promise<StoredTrustedAdvisorManifest | null> {
+    if (
+      typeof input !== "object" || input === null
+      || !IDENTIFIER.test(input.organizationId)
+      || !IDENTIFIER.test(input.customerId)
+      || !/^tam_[a-f0-9]{64}$/u.test(input.manifestId)
+    ) reject();
+    const database = await this.ready();
+    const row = await database.prepare(
+      `SELECT m.anchor_connection_id
+         FROM finops_ta_collection_manifests m
+         JOIN aws_connections c
+           ON c.id = m.anchor_connection_id AND c.org_id = m.org_id
+          AND c.customer_id = m.customer_id
+         JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
+         JOIN customers cu
+           ON cu.id = c.customer_id AND cu.org_id = c.org_id
+          AND cu.status = 'active'
+        WHERE m.org_id = ? AND m.customer_id = ? AND m.manifest_id = ?
+          AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        LIMIT 1`,
+    ).bind(
+      input.organizationId,
+      input.customerId,
+      input.manifestId,
+    ).first<{ anchor_connection_id: string }>();
+    if (row === null) return null;
+    return this.readManifest(database, {
+      organizationId: input.organizationId,
+      customerId: input.customerId,
+      connectionId: row.anchor_connection_id,
+    }, input.manifestId);
+  }
+
   public async getLatestManifest(
     scope: TrustedAdvisorOrganizationScope,
   ): Promise<StoredTrustedAdvisorManifest | null> {
@@ -795,6 +839,29 @@ export class TrustedAdvisorOrganizationRepository {
     try {
       await database.batch(statements);
     } catch {
+      const raced = await database.prepare(
+        `SELECT s.account_snapshot_id, s.content_sha256, a.status AS account_status
+           FROM finops_ta_account_snapshots s
+           JOIN finops_ta_manifest_accounts a
+             ON a.manifest_id = s.manifest_id AND a.account_id = s.account_id
+          WHERE s.manifest_id = ? AND s.org_id = ? AND s.customer_id = ?
+            AND s.anchor_connection_id = ? AND s.account_id = ? LIMIT 1`,
+      ).bind(
+        manifestId,
+        scope.organizationId,
+        scope.customerId,
+        scope.connectionId,
+        input.accountId,
+      ).first<{
+        account_snapshot_id: string;
+        content_sha256: string;
+        account_status: string;
+      }>();
+      if (
+        raced?.account_snapshot_id === accountSnapshotId
+        && raced.content_sha256 === input.contentSha256
+        && raced.account_status === (input.status === "complete" ? "accepted" : "partial")
+      ) return raced.account_snapshot_id;
       reject("IMMUTABLE_CONFLICT");
     }
     return accountSnapshotId;
@@ -912,6 +979,20 @@ export class TrustedAdvisorOrganizationRepository {
     try {
       await database.batch(statements);
     } catch {
+      const raced = await database.prepare(
+        `SELECT * FROM finops_ta_organization_snapshots
+          WHERE generation_id = ? AND manifest_id = ? AND org_id = ?
+            AND customer_id = ? AND anchor_connection_id = ? LIMIT 1`,
+      ).bind(
+        generationId,
+        manifestId,
+        scope.organizationId,
+        scope.customerId,
+        scope.connectionId,
+      ).first<OrganizationSnapshotRow>();
+      if (raced !== null && raced.content_sha256 === digest) {
+        return storedOrganizationSnapshot(raced);
+      }
       reject("IMMUTABLE_CONFLICT");
     }
     return storedOrganizationSnapshot(await database.prepare(

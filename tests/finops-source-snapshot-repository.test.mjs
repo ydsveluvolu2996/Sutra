@@ -190,6 +190,15 @@ test("only fresh, fully covered and reconciled generations atomically advance th
     );
     assert.equal(first.becameActive, true);
     assert.equal(first.activeGenerationId, firstInput.generationId);
+    assert.equal(
+      (await snapshots.getSnapshotForAttempt(SCOPE_A, SOURCE_ID, "cur-july", 1))
+        ?.generationId,
+      firstInput.generationId,
+    );
+    assert.equal(
+      await snapshots.getSnapshotForAttempt(SCOPE_B, SOURCE_ID, "cur-july", 1),
+      null,
+    );
 
     const retry = await snapshots.recordSnapshot(
       SCOPE_A,

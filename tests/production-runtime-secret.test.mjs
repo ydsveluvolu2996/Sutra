@@ -34,6 +34,7 @@ function fixture() {
     SUTRA_CONTACT_FROM: "Sutra Contact <contact@sutracmdb.com>",
     SUTRA_CONTACT_RECIPIENT: "contact@sutracmdb.com",
     SUTRA_INVITATION_FROM: "Sutra Support <support@sutracmdb.com>",
+    SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY: Buffer.alloc(32, 5).toString("base64url"),
     SUTRA_JOB_RUNNER_TOKEN: "ab".repeat(32),
     SUTRA_MANAGED_OUTBOUND_APP_KEY_ID: "production-outbound-app",
     SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY: outboundApp.privateKey,

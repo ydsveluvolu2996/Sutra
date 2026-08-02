@@ -3,12 +3,12 @@ import test from "node:test";
 
 import {
   FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND,
-  TRUSTED_ADVISOR_ORGANIZATIONS_ADAPTER_ACTIVATION_REASON,
   TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS,
   TRUSTED_ADVISOR_STANDARD_CONTRACT_ID,
   TRUSTED_ADVISOR_STANDARD_REGION,
   TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
   TrustedAdvisorStandardOrchestrationError,
+  enqueueTrustedAdvisorOrganizationActivation,
   runTrustedAdvisorAccountCollectionJob,
   runTrustedAdvisorManifestFinalizeJob,
   runTrustedAdvisorOrganizationActivationJob,
@@ -185,6 +185,26 @@ function expectCode(code: TrustedAdvisorStandardOrchestrationError["code"]) {
   };
 }
 
+test("activation enqueue freezes exact scope and a five-minute idempotency window", async () => {
+  const calls: Array<Readonly<Record<string, unknown>>> = [];
+  const first = await enqueueTrustedAdvisorOrganizationActivation({
+    async enqueue(input) {
+      calls.push(input);
+      return { id: `job_${"1".repeat(32)}` };
+    },
+  }, SCOPE, NOW);
+  assert.equal(first.jobId, `job_${"1".repeat(32)}`);
+  assert.deepEqual(calls[0], {
+    orgId: ORG,
+    customerId: CUSTOMER,
+    connectionId: ANCHOR,
+    kind: FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND,
+    payload: { connectionId: ANCHOR },
+    maxAttempts: 6,
+    idempotencyKey: `finops-ta-activate:${ANCHOR}:${Math.floor(NOW / 300_000)}`,
+  });
+});
+
 test("freezes only signed Organizations evidence and queues manifest-bound active accounts", async () => {
   const database = memoryRepository();
   const queueCalls: Array<Readonly<Record<string, unknown>>> = [];
@@ -215,24 +235,20 @@ test("freezes only signed Organizations evidence and queues manifest-bound activ
     now: () => NOW,
   });
   assert.equal(result.accountJobIds.length, 1);
-  assert.ok(result.finalizerJobId);
+  assert.equal(result.finalizerJobId, null);
   assert.equal(queueCalls[0]?.kind, "finops-ta-account-collect");
   assert.deepEqual(queueCalls[0]?.payload, {
     manifestId: MANIFEST_ID,
     accountId: ACCOUNT,
     connectionId: ANCHOR,
   });
-  assert.equal(queueCalls[1]?.kind, "finops-ta-manifest-finalize");
+  assert.equal(queueCalls.length, 1);
   assert.equal(JSON.stringify(queueCalls).includes("trusted_advisor_organization"), false);
   assert.deepEqual(database.get()?.accounts.map((entry) => [entry.accountId, entry.status, entry.errorCode]), [
     [ACCOUNT, "pending", null],
     [MISSING, "unconfigured", "ACCOUNT_CONNECTION_MISSING"],
     [SUSPENDED, "unconfigured", "AWS_ACCOUNT_NOT_ACTIVE"],
   ]);
-  assert.equal(
-    TRUSTED_ADVISOR_ORGANIZATIONS_ADAPTER_ACTIVATION_REASON,
-    "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED",
-  );
 });
 
 test("rejects unsigned, stale, cross-tenant, or hash-conflicting taxonomy before persistence", async () => {
@@ -336,13 +352,17 @@ async function standardEvidence(input: {
   };
 }
 
-function accountManifest(status: "pending" | "running" | "accepted" = "pending") {
+function accountManifest(
+  status: "pending" | "running" | "accepted" | "partial" | "failed" = "pending",
+) {
   return manifest([{
     accountId: ACCOUNT,
     accountPosition: 0,
     targetConnectionId: TARGET,
     status,
-    accountSnapshotId: status === "accepted" ? `tas_${"f".repeat(64)}` : null,
+    accountSnapshotId: status === "accepted" || status === "partial"
+      ? `tas_${"f".repeat(64)}`
+      : null,
     errorCode: null,
   }]);
 }
@@ -356,11 +376,21 @@ function accountJob(): RunnableJob {
   });
 }
 
+function accountQueue(calls: Array<Readonly<Record<string, unknown>>> = []) {
+  return {
+    async enqueue(input: Readonly<Record<string, unknown>>) {
+      calls.push(input);
+      return { id: `job_${String(calls.length).padStart(32, "0")}` };
+    },
+  };
+}
+
 test("consumes only the exact completed standard-check artifact and seals account lineage", async () => {
   const database = memoryRepository(accountManifest());
   let request: unknown;
   const result = await runTrustedAdvisorAccountCollectionJob(accountJob(), {
     repository: database.port,
+    queue: accountQueue(),
     findManifest: async () => database.get(),
     collectCompletedStandardChecks: async (value) => {
       request = value;
@@ -395,6 +425,7 @@ test("consumes only the exact completed standard-check artifact and seals accoun
   let collected = false;
   assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(accountJob(), {
     repository: replayDatabase.port,
+    queue: accountQueue(),
     findManifest: async () => replayDatabase.get(),
     collectCompletedStandardChecks: async () => {
       collected = true;
@@ -406,8 +437,15 @@ test("consumes only the exact completed standard-check artifact and seals accoun
 
 test("marks provider failure and mismatched evidence honestly without accepting a snapshot", async () => {
   const providerFailure = memoryRepository(accountManifest());
-  assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(accountJob(), {
+  assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(job({
+    id: "job_ta_account_1",
+    connectionId: TARGET,
+    kind: "finops-ta-account-collect",
+    payload: { manifestId: MANIFEST_ID, accountId: ACCOUNT, connectionId: TARGET },
+    attempt: 6,
+  }), {
     repository: providerFailure.port,
+    queue: accountQueue(),
     findManifest: async () => providerFailure.get(),
     collectCompletedStandardChecks: async () => {
       throw new Error("raw provider detail must not persist");
@@ -421,6 +459,7 @@ test("marks provider failure and mismatched evidence honestly without accepting 
   const mismatch = memoryRepository(accountManifest());
   assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(accountJob(), {
     repository: mismatch.port,
+    queue: accountQueue(),
     findManifest: async () => mismatch.get(),
     collectCompletedStandardChecks: async () => standardEvidence({ accountId: "999900001111" }),
     now: () => NOW,
@@ -429,6 +468,52 @@ test("marks provider failure and mismatched evidence honestly without accepting 
   assert.deepEqual(mismatch.get()?.accounts.map((entry) => [entry.status, entry.errorCode]), [
     ["failed", "STANDARD_CHECK_EVIDENCE_REJECTED"],
   ]);
+});
+
+test("retries transient account collection and queues finalization only after terminal persistence", async () => {
+  const database = memoryRepository(accountManifest());
+  const queueCalls: Array<Readonly<Record<string, unknown>>> = [];
+  const transientJob = accountJob();
+  await assert.rejects(runTrustedAdvisorAccountCollectionJob(transientJob, {
+    repository: database.port,
+    queue: accountQueue(queueCalls),
+    findManifest: async () => database.get(),
+    collectCompletedStandardChecks: async () => {
+      throw new Error("temporary provider failure");
+    },
+    now: () => NOW,
+  }), /temporary provider failure/u);
+  assert.equal(database.get()?.accounts[0]?.status, "running");
+  assert.equal(queueCalls.length, 0);
+
+  const finalAttempt = { ...transientJob, attempt: transientJob.maxAttempts };
+  assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(finalAttempt, {
+    repository: database.port,
+    queue: accountQueue(queueCalls),
+    findManifest: async () => database.get(),
+    collectCompletedStandardChecks: async () => {
+      throw new Error("provider still unavailable");
+    },
+    now: () => NOW,
+  }), { status: "failed" });
+  assert.equal(database.get()?.accounts[0]?.status, "failed");
+  assert.equal(queueCalls.length, 1);
+  assert.equal(queueCalls[0]?.kind, "finops-ta-manifest-finalize");
+
+  let collected = false;
+  assert.deepEqual(await runTrustedAdvisorAccountCollectionJob(finalAttempt, {
+    repository: database.port,
+    queue: accountQueue(queueCalls),
+    findManifest: async () => database.get(),
+    collectCompletedStandardChecks: async () => {
+      collected = true;
+      return standardEvidence();
+    },
+    now: () => NOW,
+  }), { status: "replayed" });
+  assert.equal(collected, false);
+  assert.equal(queueCalls.length, 2);
+  assert.equal(queueCalls[1]?.idempotencyKey, queueCalls[0]?.idempotencyKey);
 });
 
 test("finalization rejects non-terminal manifests and is replay-safe for terminal members", async () => {

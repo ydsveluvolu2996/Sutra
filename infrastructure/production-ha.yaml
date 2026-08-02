@@ -1626,12 +1626,14 @@ Resources:
             - { Name: SUTRA_EVIDENCE_BUCKET, Value: !Ref EvidenceBucket }
             - { Name: SUTRA_EVIDENCE_KMS_KEY_ARN, Value: !Ref KmsKeyArn }
             - { Name: SUTRA_EVIDENCE_RETENTION_DAYS, Value: !Ref EvidenceRetentionDays }
+            - { Name: SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION, Value: production-finops-evidence-v1 }
             - { Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN, Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
             - { Name: SUTRA_AUTH_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AUTH_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_CONNECTION_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONNECTION_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_TURNSTILE_SITE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SITE_KEY::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_TURNSTILE_SECRET_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SECRET_KEY::${ApplicationRuntimeSecretVersionId}" }

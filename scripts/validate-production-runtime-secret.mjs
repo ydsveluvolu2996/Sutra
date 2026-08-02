@@ -49,6 +49,7 @@ export const PRODUCTION_RUNTIME_SECRET_KEYS = Object.freeze([
   "SUTRA_CONNECTION_ENCRYPTION_KEY",
   "SUTRA_CONTACT_FROM",
   "SUTRA_CONTACT_RECIPIENT",
+  "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY",
   "SUTRA_INVITATION_FROM",
   "SUTRA_JOB_RUNNER_TOKEN",
   "SUTRA_MANAGED_OUTBOUND_APP_KEY_ID",
@@ -367,6 +368,10 @@ export function validateProductionRuntimeSecret(candidate, expectedIdentityMode)
   const encryptionKeys = [
     exactBase64Url256(secret.SUTRA_AUTH_ENCRYPTION_KEY, "SUTRA_AUTH_ENCRYPTION_KEY"),
     exactBase64Url256(secret.SUTRA_CONNECTION_ENCRYPTION_KEY, "SUTRA_CONNECTION_ENCRYPTION_KEY"),
+    exactBase64Url256(
+      secret.SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY,
+      "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY",
+    ),
     exactBase64Url256(secret.SUTRA_REGISTRY_ENCRYPTION_KEY, "SUTRA_REGISTRY_ENCRYPTION_KEY"),
   ];
   if (new Set(encryptionKeys).size !== encryptionKeys.length) {

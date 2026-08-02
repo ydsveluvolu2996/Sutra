@@ -27,6 +27,21 @@ test("TAO catalog entry is wired to its authenticated same-tenant standard-check
   assert.match(repository, /WHERE h\.org_id = \? AND h\.customer_id = \? AND h\.anchor_connection_id = \?/u);
 });
 
+test("TAO activation is a bounded same-tenant sync POST with no browser account taxonomy", () => {
+  assert.match(route, /export async function POST\(request: Request\)/u);
+  assert.match(route, /readBoundedJson\(request, BODY_BYTES\)/u);
+  assert.match(route, /Object\.keys\(body\)\.length !== 1/u);
+  assert.match(route, /assertSessionCapability\(authenticated, "sync:run", connection\.customerId\)/u);
+  assert.match(route, /REQUIRED_PERMISSION_PACK = "standard-2026-08\.2"/u);
+  assert.match(route, /enqueueTrustedAdvisorOrganizationActivation/u);
+  assert.match(route, /status: 202/u);
+  assert.doesNotMatch(route, /body\.(?:accountId|accounts|operations|contractId|taxonomy|region)/u);
+  assert.match(component, /method: "POST"/u);
+  assert.match(component, /body: JSON\.stringify\(\{ connectionId \}\)/u);
+  assert.match(component, /Start organization collection/u);
+  assert.match(component, /Trusted Advisor organization collection control/u);
+});
+
 test("TAO API accepts only bounded official controls and never reads or substitutes Priority recommendations", () => {
   assert.match(route, /"connectionId", "accountId", "checkId", "status", "region", "category", "suppressed"/u);
   assert.match(route, /parameters\.getAll\(key\)\.length > 1/u);
@@ -54,7 +69,7 @@ test("TAO UI exposes honest states, activation gap, filters, and drilldowns", ()
     "Official Trusted Advisor dashboard sheets",
     "Evidence-backed Trusted Advisor visual summaries",
   ]) assert.match(component, new RegExp(label, "u"), label);
-  assert.match(component, /signed server-owned AWS Organizations taxonomy|signed Organizations adapter/iu);
+  assert.match(component, /signed AWS Organizations account set|signs the Organizations taxonomy/iu);
   assert.match(component, /browser-provided account list/iu);
   assert.match(component, /Priority is never substituted|Priority recommendations are supplemental only/iu);
   assert.match(component, /IsSuppressed/u);
@@ -100,7 +115,7 @@ test("TAO report renders accepted account, check, resource, history, and evidenc
       resources: [{ resourceKey: "a".repeat(64), accountId: "111122223333", checkId: "check-1", checkName: "Idle EC2 instances", checkCategory: "cost_optimizing", resourceId: "i-render", region: "us-east-1", status: "warning", suppressed: false, metadata: [{ name: "reason", value: "idle" }], metadataSha256: "b".repeat(64) }],
       history: [{ generationId: `tao_${"c".repeat(64)}`, status: "complete", collectedAtIso: "2026-08-01T01:00:00.000Z", expectedAccountCount: 1, acceptedAccountCount: 1, rejectedAccountCount: 0, checkCount: 1, resourceCount: 1 }],
       evidence: { generationId: `tao_${"c".repeat(64)}`, manifestId: `tam_${"d".repeat(64)}`, contentSha256: "e".repeat(64) },
-      activation: { available: false, reason: "AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED" },
+      activation: { available: false, reason: "ADVANCED_FINOPS_PERMISSION_PACK_REQUIRED" },
       limitations: ["Priority is never substituted."],
     };
     const markup = renderToStaticMarkup(createElement(

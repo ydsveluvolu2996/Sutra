@@ -148,6 +148,19 @@ test("manifests validate frozen account checksums and exact live connection owne
     const retry = await createManifest(repository, "ta-valid", [...accounts].reverse(), 4);
     assert.equal(retry.manifestId, manifest.manifestId);
     assert.equal(retry.createdAtIso, new Date(3).toISOString());
+    assert.equal(
+      (await repository.getManifestByIdentity({
+        organizationId: ORG_A,
+        customerId: CUSTOMER_A,
+        manifestId: manifest.manifestId,
+      }))?.scope.connectionId,
+      CONNECTION_A,
+    );
+    assert.equal(await repository.getManifestByIdentity({
+      organizationId: ORG_B,
+      customerId: CUSTOMER_B,
+      manifestId: manifest.manifestId,
+    }), null);
     assert.equal(await repository.getManifest(SCOPE_B, manifest.manifestId), null);
   });
 });

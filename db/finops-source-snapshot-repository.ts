@@ -784,6 +784,46 @@ export class FinopsSourceSnapshotRepository {
     return row === null ? null : baseSnapshot(row);
   }
 
+  /** Exact immutable generation written by one durable source-job attempt. */
+  public async getSnapshotForAttempt(
+    scope: FinopsSourceSnapshotScope,
+    sourceId: FinopsSourceId,
+    jobId: string,
+    attempt: number,
+  ): Promise<RecordFinopsSourceSnapshotResult["snapshot"] | null> {
+    if (
+      !SOURCE_IDS.has(sourceId)
+      || !JOB_ID.test(jobId)
+      || !Number.isSafeInteger(attempt)
+      || attempt < 1
+      || attempt > MAX_ATTEMPT
+    ) reject();
+    const database = await this.assertLiveScope(scope);
+    const row = await database.prepare(
+      `SELECT s.*
+         FROM finops_source_snapshots s
+         JOIN aws_connections c
+           ON c.id = s.connection_id AND c.org_id = s.org_id
+          AND c.customer_id = s.customer_id
+         JOIN organizations o ON o.id = c.org_id AND o.status = 'active'
+         JOIN customers cu
+           ON cu.id = c.customer_id AND cu.org_id = c.org_id
+          AND cu.status = 'active'
+        WHERE s.org_id = ? AND s.customer_id = ? AND s.connection_id = ?
+          AND s.source_id = ? AND s.job_id = ? AND s.attempt = ?
+          AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        LIMIT 1`,
+    ).bind(
+      scope.organizationId,
+      scope.customerId,
+      scope.connectionId,
+      sourceId,
+      jobId,
+      attempt,
+    ).first<SnapshotRow>();
+    return row === null ? null : baseSnapshot(row);
+  }
+
   public async listActiveSnapshots(
     scope: FinopsSourceSnapshotScope,
     options: { readonly limit?: number } = {},

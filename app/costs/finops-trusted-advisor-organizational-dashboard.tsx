@@ -94,7 +94,9 @@ interface TrustedAdvisorDashboardEnvelope {
     readonly manifestId: string;
     readonly contentSha256: string;
   };
-  readonly activation: { readonly available: false; readonly reason: string };
+  readonly activation:
+    | { readonly available: true; readonly reason: null }
+    | { readonly available: false; readonly reason: string };
   readonly limitations?: readonly string[];
 }
 
@@ -111,6 +113,12 @@ type RequestState =
   | { readonly status: "loading"; readonly connectionId: string | null }
   | { readonly status: "failed"; readonly connectionId: string; readonly message: string }
   | { readonly status: "loaded"; readonly envelope: TrustedAdvisorDashboardEnvelope };
+
+type ActivationRequestState =
+  | { readonly status: "idle" }
+  | { readonly status: "starting"; readonly connectionId: string }
+  | { readonly status: "queued"; readonly connectionId: string; readonly jobId: string }
+  | { readonly status: "failed"; readonly connectionId: string; readonly message: string };
 
 const EMPTY_FILTERS: Filters = {
   accountId: "", checkId: "", status: "", region: "", category: "", suppressed: "",
@@ -162,8 +170,9 @@ function parseEnvelope(value: unknown, connectionId: string): TrustedAdvisorDash
     || typeof value.sourceState !== "string"
     || !new Set(["configuration_required", "waiting", "empty", "partial", "stale", "failed", "complete"])
       .has(value.sourceState)
-    || !isRecord(value.activation) || value.activation.available !== false
-    || typeof value.activation.reason !== "string"
+    || !isRecord(value.activation) || typeof value.activation.available !== "boolean"
+    || (value.activation.available === true && value.activation.reason !== null)
+    || (value.activation.available === false && typeof value.activation.reason !== "string")
     || (value.freshness !== undefined && (
       !isRecord(value.freshness)
       || !validIso(value.freshness.dataThroughAt, true)
@@ -226,6 +235,33 @@ async function loadReport(connectionId: string, filters: Filters, signal: AbortS
   return parseEnvelope(body, connectionId);
 }
 
+async function startOrganizationCollection(connectionId: string): Promise<string> {
+  const response = await fetch(
+    "/api/v1/finops/trusted-advisor-organizational",
+    {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ connectionId }),
+    },
+  );
+  const body = await response.json() as unknown;
+  if (
+    !response.ok
+    || !isRecord(body)
+    || body.ok !== true
+    || typeof body.jobId !== "string"
+    || !/^job_[a-f0-9]{32}$/u.test(body.jobId)
+  ) {
+    const message = isRecord(body) && isRecord(body.error)
+      && typeof body.error.message === "string"
+      ? body.error.message
+      : "Sutra could not queue Trusted Advisor organization collection.";
+    throw new Error(message);
+  }
+  return body.jobId;
+}
+
 function timestamp(value: string | null | undefined): string {
   if (value === null || value === undefined) return "Not reported";
   const epoch = Date.parse(value);
@@ -261,8 +297,12 @@ function statePresentation(
   const { sourceState } = request.envelope;
   if (sourceState === "configuration_required") return {
     view: "configuration_required",
-    title: "Server-owned account discovery is not configured",
-    detail: "The signed server-owned AWS Organizations taxonomy and fan-out contracts exist, but their production adapter and durable handlers are not registered. A browser-provided account list is never accepted.",
+    title: request.envelope.activation.available
+      ? "Organization collection is ready to start"
+      : "Server-owned account discovery requires configuration",
+    detail: request.envelope.activation.available
+      ? "Start a signed Organizations discovery from the selected management-account connection. A browser-provided account list is never accepted."
+      : `Activation is unavailable: ${request.envelope.activation.reason}. A browser-provided account list is never accepted.`,
   };
   if (sourceState === "waiting") return {
     view: "waiting",
@@ -552,7 +592,7 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
 
       <aside className={styles.taoActivationNote} role="note">
         <strong>Collection activation is intentionally server-owned</strong>
-        <p>The dashboard cannot start account fan-out from a browser-provided list. Activation remains configuration required until the signed Organizations adapter and durable handlers are registered and can freeze an accepted manifest. Priority recommendations are supplemental only.</p>
+        <p>The dashboard can request collection only for the selected persisted management-account connection. The server discovers and signs the Organizations taxonomy, freezes the manifest, and owns every member-account fan-out. Priority recommendations are supplemental only.</p>
       </aside>
     </div>
   );
@@ -567,6 +607,8 @@ export function FinopsTrustedAdvisorOrganizationalDashboard({
 }) {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [request, setRequest] = useState<RequestState>({ status: "loading", connectionId });
+  const [activationRequest, setActivationRequest] = useState<ActivationRequestState>({ status: "idle" });
+  const [refreshVersion, setRefreshVersion] = useState(0);
   useEffect(() => {
     if (connectionId === null) return;
     const abort = new AbortController();
@@ -584,12 +626,33 @@ export function FinopsTrustedAdvisorOrganizationalDashboard({
       window.cancelAnimationFrame(frame);
       abort.abort();
     };
-  }, [connectionId, filters]);
+  }, [connectionId, filters, refreshVersion]);
   const presentation = statePresentation(connectionId, request);
   const envelope = request.status === "loaded" && request.envelope.connectionId === connectionId
     ? request.envelope : null;
   const definition = envelope?.officialDefinition
     ?? TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION;
+  const visibleActivationRequest = activationRequest.status !== "idle"
+    && activationRequest.connectionId !== connectionId
+    ? { status: "idle" } as const
+    : activationRequest;
+  const startCollection = async (): Promise<void> => {
+    if (connectionId === null || envelope?.activation.available !== true) return;
+    setActivationRequest({ status: "starting", connectionId });
+    try {
+      const jobId = await startOrganizationCollection(connectionId);
+      setActivationRequest({ status: "queued", connectionId, jobId });
+      setRefreshVersion((version) => version + 1);
+    } catch (error) {
+      setActivationRequest({
+        status: "failed",
+        connectionId,
+        message: error instanceof Error
+          ? error.message
+          : "Sutra could not queue Trusted Advisor organization collection.",
+      });
+    }
+  };
   return (
     <>
       <FinopsCapabilityShell dashboard={dashboard} state={presentation.view} stateTitle={presentation.title} stateDetail={presentation.detail} evidence={evidenceFor(envelope)}>
@@ -602,6 +665,33 @@ export function FinopsTrustedAdvisorOrganizationalDashboard({
           <TrustedAdvisorOfficialDefinitionPanel definition={definition} />
         </div>
       ) : null}
+      {envelope === null ? null : (
+        <section className={styles.taoActivationNote} aria-label="Trusted Advisor organization collection control">
+          <strong>Server-owned organization collection</strong>
+          {envelope.activation.available ? (
+            <>
+              <p>Discover the signed AWS Organizations account set and collect standard checks only for persisted member-account connections.</p>
+              <button
+                className="button button-primary"
+                disabled={visibleActivationRequest.status === "starting"}
+                onClick={() => void startCollection()}
+                type="button"
+              >
+                {visibleActivationRequest.status === "starting"
+                  ? "Queueing collection…"
+                  : "Start organization collection"}
+              </button>
+            </>
+          ) : (
+            <p>Activation unavailable: <code>{envelope.activation.reason}</code>.</p>
+          )}
+          {visibleActivationRequest.status === "queued" ? (
+            <p role="status">Collection queued as <code>{visibleActivationRequest.jobId}</code>. The dashboard will show the accepted generation after finalization.</p>
+          ) : visibleActivationRequest.status === "failed" ? (
+            <p role="alert">{visibleActivationRequest.message}</p>
+          ) : null}
+        </section>
+      )}
     </>
   );
 }
