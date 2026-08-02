@@ -12,10 +12,11 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 | Item | Current truth |
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
+| Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
 | Local vertical candidates | 6 of 29 |
-| Partial pipelines | 17 of 29 |
-| Engine-only capabilities | 4 of 29 |
-| Absent capabilities | 2 of 29: Azure CID and GCP CID |
+| Partial pipelines | 23 of 29: 21 in-scope AWS-backed plus 2 excluded provider rows |
+| Engine-only capabilities | 0 of 29 |
+| Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
 | Production accepted | 0 of 29 |
 | Current AWS runtime registry | 27 rows; Azure/GCP require separate provider runtimes and KPI label is outdated |
@@ -80,9 +81,9 @@ repeat both checks after deployment and record the exact new workflow run.
 | 4 | Remaining 18 engine-only rows | Each gains source/collector/persistence/API/UI/tests/evidence |
 | 5 | Data Collection Monitor and FOCUS | Both satisfy their official dashboard contracts |
 | 6 | Audit and finish six candidates | Every local gate is proven for all six |
-| 7 | Azure CID and GCP CID | Provider-specific connections, collectors, persistence, APIs, visuals, and controlled validation complete |
-| 8 | Full exact-tree verification | Every local gate, PostgreSQL, Docker, rendered and accessibility audit passes |
-| 9 | Controlled provider acceptance | AWS/Azure/GCP/specialized sources reconciled; two-tenant evidence attached |
+| 7 | Audit all 27 in-scope AWS dashboards | Every source/collector/persistence/API/UI/state contract and evidence row is exact; Azure/GCP exclusions remain explicit |
+| 8 | Full exact-tree verification | Every in-scope local gate, PostgreSQL, Docker, rendered and accessibility audit passes |
+| 9 | Controlled provider acceptance | AWS and specialized in-scope sources reconciled; two-tenant evidence attached |
 | 10 | GitHub and immutable release | Scoped commits pushed/reviewed, exact-SHA checks, image provenance, deployment, rollback, and live proof complete |
 
 ## Checkpoint log
@@ -395,3 +396,15 @@ Next gate:
 | Focused verification | Runtime/coordinator/readers/object/generation/plan-reader 103/103; handler registry 1/1; persistence 9/9; prior handler regression 4/4; whole-tree TypeScript, focused ESLint and diff checks pass |
 | Explicit open gate | No non-test producer yet creates/finalizes activation and plan-set lineage or enqueues this worker. The app registry does not own the collector-private regional launch/source contract IDs, so fabricating them or accepting browser-supplied contracts is forbidden |
 | Release evidence | Partial runtime checkpoint only; API collection remains unavailable and no image publication or deployment is authorized |
+
+### 2026-08-02 — Compute Optimizer signed activation transport checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; no production/provider/live acceptance or release-image claim |
+| Commit | `f59aa6584251e704f13ad7b274c7461875570c08` pushed to `origin/agent/mac-mini-finops-continuation`; local, remote, and draft PR 26 heads matched exactly |
+| Delivery | Active `.8.5` encrypted-registry manifest reader; signed tenant/customer/connection-bound collector route; app-side signed request/response transport with an absolute deadline and streaming 64 KiB response ceiling |
+| Broker security | The default production adapter performs only `sts:GetCallerIdentity`, verifies exact account/partition/assumed-role identity, and never returns or retains AWS credentials; cross-tenant, inactive, implicit-Region, partial-matrix and identity-drift requests fail closed |
+| Focused verification | 16 collector broker/manifest/route tests and 3 app transport tests passed; root and collector typechecks, repository secret scan of 2,244 source files, and `git diff --check` passed |
+| Remaining gate | Complete the durable capability/outbox scheduler and crash-safe sealed-reference handoff before registering the full producer; controlled all-Region/two-tenant/provider/live acceptance remains open |
+| Release evidence | Source checkpoint only; no image was published or deployed and the production digest remains unchanged |
