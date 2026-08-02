@@ -242,7 +242,7 @@ test("source data-through freshness never suppresses a newer operational failure
   assert.equal(source.freshness.dataThroughAt, "2026-07-31T11:45:00.000Z");
 });
 
-test("the adapter projects all 24 registered sources from active immutable metadata", () => {
+test("the adapter projects all 25 registered sources from active immutable metadata", () => {
   const activeSnapshots = FINOPS_SOURCE_DEFINITIONS.map((source, index) => {
     const generationId = `fss_${index.toString(16).padStart(64, "0")}`;
     return snapshot(source.id, {
@@ -262,10 +262,10 @@ test("the adapter projects all 24 registered sources from active immutable metad
     evidence,
     nowMs: NOW,
   });
-  assert.equal(FINOPS_SOURCE_DEFINITIONS.length, 24);
-  assert.equal(evidence.length, 24);
-  assert.equal(report.sources.length, 24);
-  assert.equal(report.summary.sources.healthy, 24);
+  assert.equal(FINOPS_SOURCE_DEFINITIONS.length, 25);
+  assert.equal(evidence.length, 25);
+  assert.equal(report.sources.length, 25);
+  assert.equal(report.summary.sources.healthy, 25);
 });
 
 test("foreign tenant metadata fails closed and private evidence never reaches health output", () => {
