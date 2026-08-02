@@ -334,3 +334,15 @@ Next gate:
 | Controlled-live evidence | None. TAO lacks accepted Organizations taxonomy; Compute Optimizer lacks export-object ingestion; provider/two-tenant acceptance remains open |
 | Release evidence | PR checks started for exact head; no image was published or deployed and the current live digest remains unchanged |
 | Next gate | Complete the next engine-only verticals (CORA, Config Resource Compliance, Pricing Change), then exact-tree/provider/release gates |
+
+### 2026-08-02 — Compute Optimizer sealed export-launch checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; this checkpoint makes no tracker maturity transition and does not claim a verified or live dashboard |
+| Delivery | Immutable content-addressed daily regional attempt for all eight Compute Optimizer export families; exact typed SDK command dispatch; sequential fail-stop execution; hard command/overall deadlines; immutable complete/partial execution evidence; exact completed-Describe proof required before regional plan adaptation |
+| IAM / destination | `standard-2026-08.4` is byte-for-byte unchanged. New candidate `standard-2026-08.5` opens only the explicit deny ceiling needed by the eight exports and documented dependencies, while the separately versioned `compute-optimizer-export-launch-v1` add-on owns a retained private versioned SSE-S3 bucket, exact three-statement service policy, exact 25-action launch/dependency Allow set, and prefix-scoped object reads |
+| Exact source files | `docs/finops-compute-optimizer-export-launch-v1.md`; `infrastructure/customer-onboarding-role-standard-2026-08.5.yaml`; `infrastructure/finops-compute-optimizer-export-launch-v1.yaml`; `lib/finops-compute-optimizer-export-launch.ts`; `services/aws-collector/src/compute-optimizer-export-launcher.ts`; `services/aws-collector/test/compute-optimizer-export-launcher.test.ts`; `tests/finops-compute-optimizer-export-launch-infrastructure.test.mjs`; `tests/finops-compute-optimizer-export-launch.test.ts` |
+| Focused verification | 29 passed: 10 attempt/execution/plan tests via Node 22.23.2 `--experimental-transform-types`; 12 immutable `.8.4`/`.8.5`/add-on infrastructure tests; 7 built collector launcher tests. `pnpm typecheck`, `pnpm typecheck:collector`, touched-file ESLint, cfn-lint 1.46.0 for both new templates, `pnpm security:secrets` (2,206 source files), and `git diff --check` passed |
+| Evidence boundaries | No signed launch route, durable attempt/execution persistence, accepted generation/head transition, exact object materialization, controlled provider run, live acceptance, image publication, or deployment is included; production remains unchanged |
+| Next gate | Complete exact-ID `DescribeRecommendationExportJobs`, then wire the authenticated signed collector route and narrowly attested `.8.5` broker/session contract before persistence and materialization |
