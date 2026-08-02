@@ -320,6 +320,121 @@ PATH=/Users/Shared/sutra-codex/tools/cfnlint-venv/bin:$PATH pnpm lint:cloudforma
 
 Use Node `v22.23.2` for authoritative full-suite evidence. A prior 365/367 collector run under Node 22.16 had two environment-only dynamic `.ts` import failures in compiled local-server tests; rerun with the repository-approved Node before classifying them as product failures.
 
+## Ten-minute bootstrap for Claude Code
+
+Run this before editing anything. Stop if the branch is wrong, the handover checkpoint is missing, the pull is not fast-forward, or the worktree is unexpectedly dirty.
+
+```bash
+cd /Users/Shared/sutra-codex/Sutra
+git fetch origin
+git switch agent/mac-mini-finops-continuation
+git pull --ff-only origin agent/mac-mini-finops-continuation
+git merge-base --is-ancestor 6a9b4f5 HEAD
+git status --short --branch
+node --version                         # expected v22.23.2
+pnpm --version
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm typecheck:collector
+pnpm security:secrets
+git diff --check
+PATH=/Users/Shared/sutra-codex/tools/cfnlint-venv/bin:$PATH pnpm lint:cloudformation
+```
+
+The `6a9b4f5` check proves that the complete execution ledger is an ancestor; the branch tip may legitimately be newer. If the working tree is dirty before Claude edits it, preserve and identify those changes instead of resetting, overwriting or folding them into the next vertical.
+
+## Canonical file and responsibility map
+
+| Concern | Canonical locations | Required handling |
+|---|---|---|
+| Truthful program status | `docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md`, this handover, `docs/finops-cid-evidence/` | Tracker maturity is authoritative. Update the vertical evidence and tracker only after same-SHA promotion gates pass. |
+| Native dashboard/UI | `app/costs/finops-*-dashboard.tsx`, matching CSS modules, `lib/finops-*-dashboard.ts` | Preserve unavailable/collecting/failed/ready states and never present absent provider evidence as zero. |
+| Authenticated report APIs | `app/api/v1/finops/*/route.ts` | Enforce same-tenant authorization, bounded responses, explicit failure states and no credential exposure. |
+| Domain/runtime composition | `lib/finops-*`, especially `*-job.ts`, `*-runtime-binding.ts`, `*-production-composition.ts`, `*-signed-broker.ts` | Keep scheduler identity, replay, deadlines, evidence signing and immutable READY-head semantics consistent. |
+| Durable storage | `db/finops-*`, `drizzle/*.sql`, `postgres/migrations/*.sql` | Preserve tenant keys, leases/CAS, replay identity and immutable evidence. Register each new migration in all three registries. |
+| Collector provider boundary | `services/aws-collector/src/*-provider-adapter.ts`, `*-provider-route.ts`, SDK readers, `role-broker.ts`, `local-server.ts` | Collector owns AWS credentials. Use bounded/paginated reads, exact session ceilings, signed responses and explicit provider contracts. |
+| Shared scheduler | `lib/finops-daily.ts` and dashboard-specific jobs/compositions | A unique vertical is not closed until shared handler/tick registration and durable failure behavior are tested. |
+| Permission packs | `infrastructure/customer-onboarding-role-standard-2026-08.*.yaml`, `scripts/cfn-lint.mjs`, permission contract tests | Add immutable successors only; preserve all predecessors; update explicit allowlists and CFN lint inputs. |
+| Dependency pins | root and collector `package.json` files plus `pnpm-lock.yaml` | Use exact approved SDK versions (`3.1087.0` in this sequence), regenerate the lockfile with pnpm and review transitive/license impact. |
+| Release verification | root `package.json` scripts, `tests/`, collector tests | Focused tests support iteration; `pnpm verify` is the repository-wide release gate, not a substitute for provider/live acceptance. |
+
+For a vertical, locate its complete surface before editing:
+
+```bash
+dashboard_term=graviton
+rg --files app lib db services/aws-collector/src tests infrastructure docs \
+  | rg "$dashboard_term"
+rg -n "$dashboard_term|standard-2026-08" \
+  lib/finops-daily.ts services/aws-collector/src/local-server.ts \
+  services/aws-collector/src/role-broker.ts db/runtime-migrations.ts \
+  db/postgres-runtime-migrations.ts scripts/postgres-migrate.mjs
+```
+
+Use a task-specific variable such as `dashboard_term`; do not repurpose system variables. Repeat the inventory with the dashboard's alternate identifiers (for example `config-compliance` and `aws_config_resource_compliance`) so no shared registration is missed.
+
+## Candidate definition of done
+
+| Gate | Required evidence at one commit | Candidate may be promoted? |
+|---|---|---|
+| G0 Official contract | Version/hash-pinned AWS source, honest published/unpublished QuickSight inventory, supported dimensions explicitly separated from unavailable ones. | No |
+| G1 Collector/provider | Credential-owning adapter and SDK reader, exact actions/resources, pagination/bounds/deadlines, strict route validation and signed tenant-bound response. | No |
+| G2 Persistence | Drizzle and PostgreSQL schemas, all three runtime registries, tenant isolation, lease/replay/CAS behavior and migration parity tests. | No |
+| G3 Orchestration | Deterministic scheduler, shared handler/tick, retry/failure isolation, immutable complete/READY head and production composition. | No |
+| G4 API/security | Same-tenant authenticated route, bounded payloads, explicit unavailable/collecting/failed/ready states, no secrets or raw sensitive provider fields. | No |
+| G5 Native UI | Dashboard-specific visuals/controls backed by real API fields, four-state behavior, accessibility/render contract and no fabricated zero/parity claims. | No |
+| G6 Local verification | Focused vertical, collector, route/UI, shared-registration, permission, migration and predecessor regression tests; both typechecks/builds, lint, secret and CFN checks green. | Yes—`LOCAL_VERTICAL_CANDIDATE` only |
+| G7 Release acceptance | `pnpm verify`, fixed-tree checks, controlled AWS reconciliation, signed-in two-tenant acceptance, image/SBOM/Trivy/rollback evidence at one fixed SHA. | Required for release/deployment, not for local candidate promotion |
+
+Every promotion commit must link or update the matching `docs/finops-cid-evidence/<ID>-*.md` record with the exact test commands and observed results. Reported test counts from interrupted work are navigation aids, not reusable proof; rerun them after the final shared integration.
+
+## Safe per-vertical commit and push protocol
+
+1. Start from a clean, pulled branch and record the starting SHA.
+2. Inventory the entire vertical across UI, API, `lib`, `db`, collector, infrastructure, tests and evidence.
+3. Implement one vertical only. Do not combine the next permission successor or unrelated WIP cleanup.
+4. Run focused tests while iterating, then the G0–G6 candidate matrix at the final feature SHA.
+5. Inspect `git diff --check`, `git status --short`, `git diff --stat` and `git diff --cached` before committing.
+6. Commit the implementation with explicit paths and push it immediately.
+7. In a second commit, update the evidence record, execution ledger and authoritative tracker count; push again.
+8. Verify `git rev-parse HEAD` equals `git ls-remote origin refs/heads/agent/mac-mini-finops-continuation` before moving to the next vertical.
+
+Do not amend, squash, force-push or rewrite the checkpoint commits. The draft PR is the safety journal until the final reviewed merge.
+
+## Known traps and fail-closed decisions
+
+| Trap | Required response |
+|---|---|
+| WIP code looks nearly complete | Reuse it, but keep the tracker `PARTIAL_PIPELINE` until shared registration and same-SHA tests pass. |
+| Permission version comparison | Use exact enumerated allowlists; never lexical comparison, permissive regexes or “latest” matching. |
+| Successor permission template | Create a new immutable file, preserve prior policies, extend CFN lint/tests and prove predecessor apps still work. Never edit an older standard in place. |
+| Migration exists as a SQL file | It is incomplete until registered in `db/runtime-migrations.ts`, `db/postgres-runtime-migrations.ts` and `scripts/postgres-migrate.mjs`, with SQLite/PostgreSQL parity proof. |
+| Provider returns no evidence | Render unavailable/collecting/failed as appropriate; never coerce absence to zero, healthy, compliant or optimized. |
+| Unpublished AWS/QuickSight objects | Keep counts/geometry/dimensions explicitly unavailable unless an authorized versioned artifact proves them. |
+| Optional proxy or alternate source | Keep it visually and semantically separated from authoritative provider measurements; never merge carbon proxies, OpenCost, Security Hub or CloudTrail into provider-native claims. |
+| Monetary calculations | Preserve exact micros/currency separation and source lineage; do not use floating-point aggregation or combine currencies. |
+| Tenant/provider boundary | AWS credentials stay in the collector. Bind tenant, connection, account, request identity, deadline and evidence signature end to end. |
+| Tests pass under a different Node version | Reproduce under Node `v22.23.2` before treating results as release evidence. |
+| Full local suite passes | Do not deploy. Controlled AWS, two-tenant, image security and rollback gates still remain. |
+| Azure/GCP code is visible | Preserve ADD-02/ADD-03 catalog/tracker rows but do not work on or count them in this 27-dashboard release. |
+
+## Ready-to-paste Claude Code continuation prompt
+
+```text
+Continue the Sutra AWS FinOps dashboard program from
+agent/mac-mini-finops-continuation. Read
+docs/CLAUDE_CODE_FINOPS_HANDOVER_2026-08-02.md completely, then read
+docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md and the evidence record for the
+vertical you are closing. Do not rebuild existing WIP. Begin with ADV-05
+Graviton and the missing PostgreSQL 0118 runtime-registry entry. Complete one
+vertical end to end across collector, IAM, persistence, scheduler, API, native
+four-state UI, tests and evidence before starting another. Preserve immutable
+permission versions and the exact migration reservations. Keep ADD-02 Azure
+and ADD-03 GCP excluded. Promote a tracker row only after G0-G6 pass at the
+same SHA. Commit and push the feature, then commit and push the evidence/tracker
+update separately. Do not merge, publish an image or deploy until all 27
+in-scope rows and G7 release acceptance pass.
+```
+
 ## Release safety rules
 
 - Do not merge the WIP snapshot directly to main as a completed release.
