@@ -55,6 +55,7 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
+  AWS_HEALTH_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -98,6 +99,12 @@ import { AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS } from
   "./aws-support-cases-provider-adapter.js";
 import { awsSupportCasesProviderSessionPolicy } from
   "./aws-support-cases-session-policy.js";
+import {
+  AWS_HEALTH_PERMISSION_ACTIONS,
+  AWS_HEALTH_PERMISSION_POLICY_NAME,
+  AWS_HEALTH_SESSION_ACTIONS,
+} from "./aws-health-permission-contract.js";
+import { awsHealthSessionPolicy } from "./aws-health-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -137,6 +144,7 @@ const COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION =
 const EXTENDED_SUPPORT_PACK_VERSION = EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
 const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1";
 const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
+const AWS_HEALTH_PACK_VERSION = AWS_HEALTH_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -176,12 +184,20 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_organizations_taxonomy",
     "compute_optimizer_organization_export",
   ]),
+  [AWS_HEALTH_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+  ]),
 });
 
 function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
   return value === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     || value === EXTENDED_SUPPORT_PACK_VERSION
-    || value === AWS_SUPPORT_CASES_PACK_VERSION;
+    || value === AWS_SUPPORT_CASES_PACK_VERSION
+    || value === AWS_HEALTH_PACK_VERSION;
 }
 
 function permissionPackSupportsSource(
@@ -920,7 +936,8 @@ function assertExpectedPermissionPolicy(
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     | typeof EXTENDED_SUPPORT_PACK_VERSION
-    | typeof AWS_SUPPORT_CASES_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION
+    | typeof AWS_HEALTH_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -955,25 +972,33 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
           : []),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+          ? AWS_HEALTH_PERMISSION_ACTIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -1022,6 +1047,20 @@ function assertAwsSupportCasesPolicy(value: string | undefined): void {
     || statement.Effect !== "Allow" || statement.Resource !== "*"
     || !sameStringSet(stringList(statement.Action), AWS_SUPPORT_CASES_PERMISSION_ACTIONS)) {
     throw new Error("unexpected AWS Support Cases policy");
+  }
+}
+
+function assertAwsHealthPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected AWS Health policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactHealthOrganizationRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), AWS_HEALTH_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected AWS Health policy");
   }
 }
 
@@ -1106,7 +1145,8 @@ function assertExpectedRole(
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     | typeof EXTENDED_SUPPORT_PACK_VERSION
-    | typeof AWS_SUPPORT_CASES_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION
+    | typeof AWS_HEALTH_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1478,7 +1518,9 @@ export class AwsRoleBroker {
     }
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
-    if (resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+    if ((resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1519,7 +1561,8 @@ export class AwsRoleBroker {
     }
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
-    if (resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+    if ((resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1538,6 +1581,58 @@ export class AwsRoleBroker {
       undefined,
       undefined,
       AWS_SUPPORT_CASES_PACK_VERSION,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-06 session with the exact .8.8 Health/Organizations read intersection.
+   * The server pins identity, partition, action set and immutable pack before STS.
+   */
+  public async assumeValidatedAwsHealthSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: "aws" | "aws-us-gov";
+      readonly sessionActions: typeof AWS_HEALTH_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_HEALTH_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Health session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId}-health`,
+      awsHealthSessionPolicy,
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      AWS_HEALTH_PACK_VERSION,
       input.signal,
     );
     return validated;
@@ -1680,7 +1775,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
-        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION) ||
+        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -2310,7 +2406,8 @@ export class AwsRoleBroker {
       | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
       | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
       | typeof EXTENDED_SUPPORT_PACK_VERSION
-      | typeof AWS_SUPPORT_CASES_PACK_VERSION,
+      | typeof AWS_SUPPORT_CASES_PACK_VERSION
+      | typeof AWS_HEALTH_PACK_VERSION,
     signal?: AbortSignal,
   ): Promise<void> {
     try {
@@ -2325,6 +2422,7 @@ export class AwsRoleBroker {
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -2402,10 +2500,15 @@ export class AwsRoleBroker {
         ...launchContracts.map(({ policyName }) => policyName),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? [EXTENDED_SUPPORT_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
           ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+          ? [AWS_HEALTH_PERMISSION_POLICY_NAME]
           : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
@@ -2426,7 +2529,8 @@ export class AwsRoleBroker {
         actionsForFinopsSourceContracts(sourceContracts),
       );
       if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
-        || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION) {
+        || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2436,7 +2540,8 @@ export class AwsRoleBroker {
         );
         assertExtendedSupportProjectionPolicy(policy.policyDocument);
       }
-      if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION) {
+      if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2445,6 +2550,16 @@ export class AwsRoleBroker {
           ),
         );
         assertAwsSupportCasesPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            AWS_HEALTH_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertAwsHealthPolicy(policy.policyDocument);
       }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(

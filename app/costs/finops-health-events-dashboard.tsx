@@ -28,7 +28,12 @@ type Report = ReturnType<typeof import(
   } | null;
   readonly officialDefinition: FinopsAwsHealthOfficialDefinition;
   readonly evidence: Readonly<Record<string, unknown>>;
-  readonly collection: { readonly available: false; readonly reason: string };
+  readonly collection: {
+    readonly available: boolean;
+    readonly state: "unavailable" | "collecting" | "failed" | "ready";
+    readonly reason: string;
+    readonly lastAttemptAt: string | null;
+  };
 };
 
 const EMPTY: AwsHealthDashboardFilters = {
@@ -137,6 +142,9 @@ export function HealthEventsReportView({ report, filters, onFiltersChange }: {
   return (
     <section className={styles.root} aria-label="AWS Health Events planning dashboard">
       <div role="status" className={styles.lag}><strong>Planning view — not real time.</strong> AWS Health organization data can lag by 48 hours or more. Use AWS Health and your incident tooling for current response.</div>
+      {report.collection.state === "collecting" ? <div role="status" className={styles.warning}><strong>Collection in progress.</strong> The last complete accepted history remains visible and is not relabeled as current.</div> : null}
+      {report.collection.state === "failed" ? <div role="alert" className={styles.error}><strong>Latest collection failed.</strong> Accepted history remains visible; retry uses a sanitized failure code ({report.collection.reason}).</div> : null}
+      {report.collection.state === "unavailable" ? <div role="status" className={styles.warning}><strong>Scheduled collection unavailable.</strong> {report.collection.reason}</div> : null}
       <div className={styles.privacy}><strong>Tenant-private evidence.</strong> Event descriptions, account IDs, affected entities and metadata are visible only to authenticated users authorized for this connection.</div>
       <HealthEventsOfficialDefinitionPanel definition={report.officialDefinition} />
       <section className={styles.prereq}>
@@ -185,8 +193,9 @@ export function FinopsHealthEventsDashboard({ connectionId }: { readonly connect
     readonly report: Report | null;
     readonly error: string | null;
     readonly availability: Report["availability"];
+    readonly collection: Report["collection"] | null;
     readonly officialDefinition: FinopsAwsHealthOfficialDefinition;
-  }>({ connectionId: null, loading: true, report: null, error: null, availability: null, officialDefinition: FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION });
+  }>({ connectionId: null, loading: true, report: null, error: null, availability: null, collection: null, officialDefinition: FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -202,12 +211,12 @@ export function FinopsHealthEventsDashboard({ connectionId }: { readonly connect
           throw new Error("Sutra returned an unrecognized official AWS Health definition");
         }
         if (value.dashboard === null) {
-          setState({ connectionId, loading: false, report: null, error: null, availability: value.availability as Report["availability"], officialDefinition: value.officialDefinition });
+          setState({ connectionId, loading: false, report: null, error: null, availability: value.availability as Report["availability"], collection: value.collection as Report["collection"], officialDefinition: value.officialDefinition });
         } else {
-          setState({ connectionId, loading: false, report: value as unknown as Report, error: null, availability: value.availability as Report["availability"], officialDefinition: value.officialDefinition });
+          setState({ connectionId, loading: false, report: value as unknown as Report, error: null, availability: value.availability as Report["availability"], collection: value.collection as Report["collection"], officialDefinition: value.officialDefinition });
         }
       })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState((current) => ({ ...current, connectionId, loading: false, report: null, error: error instanceof Error ? error.message : "Request failed", availability: null })); });
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState((current) => ({ ...current, connectionId, loading: false, report: null, error: error instanceof Error ? error.message : "Request failed", availability: null, collection: null })); });
     return () => controller.abort();
   }, [connectionId, filters]);
   if (state.report !== null && state.report.connectionId === connectionId) {
@@ -218,7 +227,7 @@ export function FinopsHealthEventsDashboard({ connectionId }: { readonly connect
   else if (state.connectionId === connectionId && state.error !== null) status = <div role="alert" className={styles.error}>{state.error}</div>;
   else if (state.connectionId !== connectionId || state.loading) status = <div role="status" className={styles.warning}>Loading immutable AWS Health planning evidence…</div>;
   else {
-    const reason = state.availability?.eligibleSupport === false ? "Eligible AWS support/API entitlement is not validated." : state.availability?.organizationViewStatus === "DISABLED" ? "AWS Health Organizational View is disabled." : state.availability?.organizationsAllFeaturesEnabled === false ? "AWS Organizations all-features access is not enabled." : "No complete organization Health snapshot has been accepted.";
+    const reason = state.collection?.state === "collecting" ? "Collection is in progress; no partial history is shown as current." : state.collection?.state === "failed" ? `The latest collection failed (${state.collection.reason}); no complete replacement was accepted.` : state.availability?.eligibleSupport === false ? "Eligible AWS support/API entitlement is not validated." : state.availability?.organizationViewStatus === "DISABLED" ? "AWS Health Organizational View is disabled." : state.availability?.organizationsAllFeaturesEnabled === false ? "AWS Organizations all-features access is not enabled." : "No complete organization Health snapshot has been accepted.";
     status = <div role="status" className={styles.warning}><strong>Planning view unavailable.</strong> {reason} Data can lag by 48 hours or more and discovery is not real-time.</div>;
   }
   return <section className={styles.root}>{status}<HealthEventsOfficialDefinitionPanel definition={state.officialDefinition} /></section>;

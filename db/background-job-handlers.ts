@@ -171,6 +171,10 @@ import { AWS_SUPPORT_CASES_RUNTIME_JOB_KIND } from
   "../lib/finops-aws-support-cases-runtime-binding.ts";
 import { createAwsSupportCasesProductionComposition } from
   "../lib/finops-aws-support-cases-production-composition.ts";
+import { AWS_HEALTH_RUNTIME_JOB_KIND } from
+  "../lib/finops-aws-health-runtime-binding.ts";
+import { createAwsHealthProductionComposition } from
+  "../lib/finops-aws-health-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -243,6 +247,25 @@ function awsSupportCasesProductionComposition() {
 /** Daily deterministic ADV-09 organization scheduler hook. */
 export function scheduleAwsSupportCasesTick(scheduledAtMs = Date.now()) {
   return awsSupportCasesProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+function awsHealthProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_HEALTH_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsHealthProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-06 organization-view scheduler hook. */
+export function scheduleAwsHealthTick(scheduledAtMs = Date.now()) {
+  return awsHealthProductionComposition().scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1363,6 +1386,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       extendedSupportProductionComposition().handler(job),
     [AWS_SUPPORT_CASES_RUNTIME_JOB_KIND]: (job) =>
       awsSupportCasesProductionComposition().handler(job),
+    [AWS_HEALTH_RUNTIME_JOB_KIND]: (job) =>
+      awsHealthProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

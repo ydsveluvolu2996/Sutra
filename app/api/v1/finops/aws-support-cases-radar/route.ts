@@ -81,7 +81,8 @@ export async function GET(request: Request): Promise<Response> {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     }
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
-    const permissionPackReady = connection.permissionPackVersion === "standard-2026-08.7";
+    const permissionPackReady = connection.permissionPackVersion === "standard-2026-08.7"
+      || connection.permissionPackVersion === "standard-2026-08.8";
     const runtimeRepository = new AwsSupportCasesRuntimeRepository();
     const anchor = permissionPackReady ? await runtimeRepository.loadCanonicalScope({
       organizationId: authenticated.subject.orgId,

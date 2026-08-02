@@ -27,6 +27,7 @@
     "@aws-sdk/client-elastic-load-balancing-v2": "3.1087.0",
     "@aws-sdk/client-elasticache": "3.1087.0",
     "@aws-sdk/client-guardduty": "3.1087.0",
+    "@aws-sdk/client-health": "3.1087.0",
     "@aws-sdk/client-iam": "3.1087.0",
     "@aws-sdk/client-inspector2": "3.1087.0",
     "@aws-sdk/client-kms": "3.1087.0",

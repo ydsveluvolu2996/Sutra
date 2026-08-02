@@ -22,7 +22,7 @@ Current AWS Health API/organization references:
 Assessment revision: exact-definition audit plus local native ADV-06 vertical
 (not yet provider-validated).
 
-Current maturity: `PARTIAL_PIPELINE`
+Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 
 ## Exact official inventory
 
@@ -76,11 +76,11 @@ plan label.
 |---|---|---|
 | G0 requirements | `VERIFIED` | Immutable official manifest/definition hashes, exact independent object counts and current AWS guidance above, reviewed 2026-08-01. |
 | G1 source contract | `IMPLEMENTED_UNVERIFIED` | Bounded read-only organization event/account/entity/detail operations; support-plan, Organization View, partition/endpoint, account and initial-load states; replay/concurrency controls; server-derived query scope. |
-| G2 collector | `IMPLEMENTED_UNVERIFIED` | `lib/finops-aws-health-collector-job.ts` pins organization scope and exact reads. `lib/finops-aws-health-runtime-binding.ts` adds daily identity-only scheduling, trusted endpoint resolution, five-operation request construction, deterministic request identity/replay, sanitized failure recording and an atomic handoff contract. The production credential adapter, handoff implementation and shared handler registration remain absent. |
-| G3 persistence | `IMPLEMENTED_UNVERIFIED` | `db/finops-aws-health-repository.ts`, SQLite `0104` and PostgreSQL `0099` persist every attempt immutably, retain all complete history, and advance only a newer complete head. Bounded API history selects the newest snapshots before restoring chronological order. Disabled, ineligible, pending and partial attempts cannot displace accepted history. |
-| G4 API | `IMPLEMENTED_UNVERIFIED` | Authenticated same-tenant `app/api/v1/finops/health-events/route.ts` reads accepted history, returns the frozen official definition, and exposes distinct eligible-support, Organizations access, Organizational View, delegated-admin, initial-load and provider states. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Native accessible planning UI renders all three official sheet names, exact visual/control inventory, every official control label and honest partial-coverage gaps alongside the 48-hour-or-greater/not-real-time warning, planning visuals, entity details, privacy notice, evidence hashes and formula-safe CSV. The client validates the frozen definition identity and retains the audited inventory during loading, connection/configuration, failure and null-report states. Deprecating versions render only from explicit `deprecated_versions` metadata; otherwise the panel states unavailable. |
-| G6 focused verification | `VERIFIED_LOCAL` | Engine, runtime, vertical and frozen-definition tests cover source pins/counts, all controls, scheduler identity/replay/scope, absent adapter, sanitized failures, repository immutability, partial-safe heads, history selection, event transitions, route, migrations and SSR visual contract. |
+| G2 collector | `IMPLEMENTED_UNVERIFIED` | The daily runtime has a signed exact-body broker client, concrete pinned AWS SDK reader, strict local/hosted provider route, exact `.8.8` STS intersection and bounded provider adapter. The adapter validates Organizations all-features state, management/delegated-administrator identity, management-only Organizational View status, actual API entitlement, non-replayed pagination, every account/entity/detail drilldown, a hard deadline and a conservative 24-hour initial-load wait. The shared worker and daily tick are registered. |
+| G3 persistence | `IMPLEMENTED_UNVERIFIED` | The immutable snapshot history is joined by `db/finops-aws-health-runtime-repository.ts`, SQLite `0119` and PostgreSQL `0115`: deterministic request leases, sanitized failures, sealed replay/orphan recovery, configuration evidence and `.8.8`-gated same-tenant candidate-account resolution. Disabled, ineligible, pending and partial attempts cannot displace accepted complete history. |
+| G4 API | `IMPLEMENTED_UNVERIFIED` | Authenticated same-tenant `app/api/v1/finops/health-events/route.ts` reads accepted history plus durable runtime state and exposes distinct unavailable, collecting, failed and ready collection states without relabeling old history as current. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Native accessible planning UI renders all three official sheet names, exact visual/control inventory, every official control label and honest partial-coverage gaps alongside the 48-hour-or-greater/not-real-time warning, planning visuals, entity details, privacy notice, evidence hashes and formula-safe CSV. Explicit runtime banners distinguish unavailable, collecting, failed and ready; a failed or in-progress attempt leaves the prior accepted history visibly dated. |
+| G6 focused verification | `VERIFIED_LOCAL` | Engine, runtime, vertical, provider, signed-response, durable replay, migration-parity, hard-deadline, four-state SSR and frozen-definition tests cover source pins/counts, controls, tenant scope, entitlement, delegation, pagination replay, sanitized failures, immutable heads and forged broker responses. Root and collector typechecks, focused lint and repository secret scan pass. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled eligible-plan/provider, two-tenant, reviewed release, deployment and live acceptance remain. |
 
 ## Evidence-honesty limits
@@ -102,8 +102,9 @@ null-report dashboard state instead of treating source-code token matches as UI
 coverage. The shared report-independent contract is in
 `tests/finops-report-independent-official-ui.test.mjs`.
 
-Current ADV-06 focused result: **28 passed, 0 failed, 0 skipped**. The broader
-four-vertical report-independent verification run completed with **73 passed,
+Current ADV-06 root focused result: **45 passed, 0 failed, 0 skipped** across
+engine/runtime/API/UI/provider composition suites. The service-local provider,
+SDK-reader, strict-route and immutable permission/session suites add **10 passed,
 0 failed, 0 skipped**.
 
 ## Vertical files and remaining live gates
@@ -112,16 +113,18 @@ four-vertical report-independent verification run completed with **73 passed,
 - Projection: `lib/finops-aws-health-dashboard.ts`
 - Scheduled collection contract: `lib/finops-aws-health-collector-job.ts`
 - Durable runtime boundary: `lib/finops-aws-health-runtime-binding.ts`
+- Signed broker and production composition: `lib/finops-aws-health-signed-broker.ts`, `lib/finops-aws-health-production-composition.ts`
 - Persistence: `db/finops-aws-health-repository.ts`
-- Migrations: `drizzle/0104_finops_aws_health_events.sql`, `postgres/migrations/0099_finops_aws_health_events.sql`
+- Durable runtime persistence: `db/finops-aws-health-runtime-repository.ts`
+- Migrations: `drizzle/0104_finops_aws_health_events.sql`, `drizzle/0119_finops_aws_health_runtime.sql`, `postgres/migrations/0099_finops_aws_health_events.sql`, `postgres/migrations/0115_finops_aws_health_runtime.sql`
+- Credential-owning boundary: `services/aws-collector/src/aws-health-provider-adapter.ts`, `services/aws-collector/src/aws-health-provider-route.ts`
 - API/UI: `app/api/v1/finops/health-events/route.ts`, `app/costs/finops-health-events-dashboard.tsx`
 - Vertical tests: `tests/finops-aws-health-vertical.test.mjs`, `tests/finops-aws-health-official-definition.test.mjs`
 
-Remaining gates are the permanent credential-broker adapter, atomic handoff
-repository and shared durable job-handler registration, controlled validation
-in an organization with an eligible Support plan and Organizational View, real
-provider pagination/retention/initial-load evidence, release migration and
-PostgreSQL parity, signed-in visual and negative tenant-isolation review, and
-live post-deploy smoke evidence. Until those pass, the API reports
-`AWS_HEALTH_ORGANIZATION_JOB_HANDLER_NOT_REGISTERED`, catalog maturity remains
-`PARTIAL_PIPELINE`, and production activation remains false.
+The concrete AWS SDK reader, shared signed-route, daily worker registration,
+immutable `.8.8` permission successor and both migration registries are locally
+closed. Remaining external gates are controlled validation
+in an organization with current API entitlement and Organizational View, real
+provider pagination/retention/initial-load evidence, signed-in two-tenant visual
+review, release application of PostgreSQL migration `0115`, fixed-tree release
+gates and live post-deploy smoke evidence. No provider/live claim is made.

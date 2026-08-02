@@ -1,5 +1,7 @@
 import { AwsHealthRepository } from
   "../../../../../db/finops-aws-health-repository";
+import { AwsHealthRuntimeRepository } from
+  "../../../../../db/finops-aws-health-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
@@ -11,6 +13,8 @@ import {
 } from "../../../../../lib/finops-aws-health-dashboard";
 import { FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION } from
   "../../../../../lib/finops-aws-health-official-definition";
+import { AWS_HEALTH_PRODUCTION_COMPOSITION_STATUS } from
+  "../../../../../lib/finops-aws-health-production-composition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -122,10 +126,19 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
     };
     const repository = new AwsHealthRepository();
-    const [heads, latest] = await Promise.all([
+    const [heads, latest, runtimeStatus] = await Promise.all([
       repository.listAcceptedHistory(scope, 180),
       repository.getLatestAttempt(scope),
+      new AwsHealthRuntimeRepository().getRuntimeStatus(scope),
     ]);
+    const collection = AWS_HEALTH_PRODUCTION_COMPOSITION_STATUS.sharedWorkerRegistered
+      ? { available: runtimeStatus.state === "ready", ...runtimeStatus }
+      : {
+          available: false,
+          state: "unavailable" as const,
+          reason: "AWS_HEALTH_ORGANIZATION_JOB_HANDLER_NOT_REGISTERED",
+          lastAttemptAt: runtimeStatus.lastAttemptAt,
+        };
     const availability = latest === null ? null : {
       configurationState: latest.snapshot.configurationState,
       collectionState: latest.snapshot.collectionState,
@@ -157,10 +170,7 @@ export async function GET(request: Request): Promise<Response> {
           captureId: latest.snapshot.captureId,
         },
         officialDefinition: FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION,
-        collection: {
-          available: false,
-          reason: "AWS_HEALTH_ORGANIZATION_JOB_HANDLER_NOT_REGISTERED",
-        },
+        collection,
         planningSemantics: {
           notRealTime: true,
           minimumDocumentedLagHours: 48,
@@ -194,10 +204,7 @@ export async function GET(request: Request): Promise<Response> {
           captureId: head.snapshot.captureId,
         })),
       },
-      collection: {
-        available: false,
-        reason: "AWS_HEALTH_ORGANIZATION_JOB_HANDLER_NOT_REGISTERED",
-      },
+      collection,
       limitations: [
         ...dashboard.limitations,
         ...(latestIncomplete

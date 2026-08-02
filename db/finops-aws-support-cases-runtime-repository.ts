@@ -80,7 +80,7 @@ const LIVE_CONNECTION = `
   WHERE c.source_kind = 'aws_trust_role' AND c.status = 'active'
     AND c.partition IN ('aws','aws-us-gov')`;
 const LIVE_SCOPE = `${LIVE_CONNECTION}
-    AND c.permission_pack_version = 'standard-2026-08.7'`;
+    AND c.permission_pack_version IN ('standard-2026-08.7','standard-2026-08.8')`;
 
 export class AwsSupportCasesRuntimeRepository
 implements AwsSupportCasesTargetResolver, AwsSupportCasesSnapshotWriter {
@@ -112,7 +112,7 @@ implements AwsSupportCasesTargetResolver, AwsSupportCasesSnapshotWriter {
             WHERE anchor.org_id = c.org_id AND anchor.customer_id = c.customer_id
               AND anchor.partition = c.partition
               AND anchor.source_kind = 'aws_trust_role' AND anchor.status = 'active'
-              AND anchor.permission_pack_version = 'standard-2026-08.7'
+              AND anchor.permission_pack_version IN ('standard-2026-08.7','standard-2026-08.8')
               AND (anchor.aws_account_id < c.aws_account_id
                 OR (anchor.aws_account_id = c.aws_account_id AND anchor.id < c.id))
          )
@@ -190,7 +190,8 @@ implements AwsSupportCasesTargetResolver, AwsSupportCasesSnapshotWriter {
     const accounts = new Set<string>();
     const connections = new Set<string>();
     return values.map((row) => {
-      if (row.permission_pack_version !== "standard-2026-08.7") {
+      if (row.permission_pack_version !== "standard-2026-08.7"
+        && row.permission_pack_version !== "standard-2026-08.8") {
         return reject("PERMISSION_PACK_UPGRADE_REQUIRED");
       }
       if (!ACCOUNT_ID.test(row.account_id) || !CONNECTION_ID.test(row.connection_id)

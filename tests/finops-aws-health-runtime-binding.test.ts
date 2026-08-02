@@ -291,7 +291,7 @@ test("an absent broker adapter is explicit and performs no evidence writes", asy
   });
   assert.equal(state.commits(), 0);
   assert.deepEqual(state.failures, []);
-  assert.equal(AWS_HEALTH_RUNTIME_BINDING.registeredInSharedRuntime, false);
+  assert.equal(AWS_HEALTH_RUNTIME_BINDING.registeredInSharedRuntime, true);
 });
 
 test("job payload and trusted scope substitutions fail closed", async () => {

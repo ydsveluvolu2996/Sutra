@@ -90,6 +90,7 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
+  AWS_HEALTH_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -187,6 +188,19 @@ import {
   parseAwsSupportCasesProviderRouteRequest,
   runAwsSupportCasesProviderRoute,
 } from "./aws-support-cases-provider-route.js";
+import {
+  AWS_HEALTH_PROVIDER_BOUNDS,
+  AwsHealthProviderAdapterError,
+  type AwsHealthProviderReader,
+  type AwsHealthProviderRequest,
+  type AwsHealthProviderTarget,
+} from "./aws-health-provider-adapter.js";
+import { createAwsHealthSdkReader } from "./aws-health-sdk-reader.js";
+import {
+  AWS_HEALTH_PROVIDER_ROUTE,
+  parseAwsHealthProviderRouteRequest,
+  runAwsHealthProviderRoute,
+} from "./aws-health-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -195,6 +209,7 @@ const RESPONSE_LIMIT = 12 * 1024 * 1024;
 const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
 const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const AWS_SUPPORT_CASES_RESPONSE_LIMIT = 65 * 1024 * 1024;
+const AWS_HEALTH_RESPONSE_LIMIT = 50 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -233,7 +248,8 @@ const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permissionPackVersion"]): boolean {
   return value === COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
     || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
-    || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
+    || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+    || value === AWS_HEALTH_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -397,6 +413,18 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedAwsSupportCasesSession">;
+  readonly awsHealthReaderFactory?: (input: {
+    readonly request: AwsHealthProviderRequest;
+    readonly sessionForTarget: (
+      target: AwsHealthProviderTarget,
+      signal: AbortSignal,
+    ) => Promise<AwsTemporaryCredentials>;
+  }) => AwsHealthProviderReader;
+  readonly awsHealthRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsHealthSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -513,6 +541,12 @@ interface ServerContext {
   >;
   readonly awsSupportCasesRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["awsSupportCasesRoleBrokerFactory"]
+  >;
+  readonly awsHealthReaderFactory: NonNullable<
+    LocalCollectorServerOptions["awsHealthReaderFactory"]
+  >;
+  readonly awsHealthRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsHealthRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -692,6 +726,10 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       options.awsSupportCasesProviderClientFactory ?? createAwsSupportCasesProviderClient,
     awsSupportCasesRoleBrokerFactory:
       options.awsSupportCasesRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    awsHealthReaderFactory:
+      options.awsHealthReaderFactory ?? createAwsHealthSdkReader,
+    awsHealthRoleBrokerFactory:
+      options.awsHealthRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -703,11 +741,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   const server = createServer((request, response) => {
     void dispatch(context, request, response);
   });
-  // Hosted inventory is bounded at five minutes and the app waits 330 seconds.
-  // Keep the broker request lifetime beyond that bound; the old 190-second
-  // local-fixture ceiling otherwise killed a healthy collection mid-flight.
+  // Hosted AWS Health is bounded at fifteen minutes. Keep the socket lifetime
+  // beyond the longest credential-owning route so Node never kills a healthy
+  // request before the route's own absolute deadline and abort controller.
   server.requestTimeout = options.hostedRuntime
-    ? LIVE_AWS_BROKER_TIMEOUT_MS + 10_000
+    ? Math.max(LIVE_AWS_BROKER_TIMEOUT_MS, AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs)
+      + 10_000
     : 190_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;
@@ -1124,6 +1163,63 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === AWS_HEALTH_PROVIDER_ROUTE) {
+    const providerRequest = parseAwsHealthProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const requestId = exactHeader(headers, "x-sutra-request-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || requestId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.scope.orgId, providerRequest.scope.connectionId),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.awsHealthRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.scope.endpointRegion,
+      });
+      const result = await runAwsHealthProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, requestId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsHealthSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.requestId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition as "aws" | "aws-us-gov",
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.awsHealthReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === AWS_SUPPORT_CASES_PROVIDER_ROUTE) {
     const providerRequest = parseAwsSupportCasesProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -3776,7 +3872,8 @@ async function requireFinopsSourceActiveConnection(
       && connection.permissionPackVersion !==
         COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
-      && connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION)
+      && connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
@@ -3799,6 +3896,8 @@ async function requireComputeOptimizerObjectActiveConnection(
     (connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined) &&
     (connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined))
   ) throw new RegistryStateError();
   return connection;
@@ -4383,6 +4482,8 @@ async function sendSigned(
     ? AWS_BUDGETS_RESPONSE_LIMIT
     : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
       ? AWS_SUPPORT_CASES_RESPONSE_LIMIT
+    : path === AWS_HEALTH_PROVIDER_ROUTE
+      ? AWS_HEALTH_RESPONSE_LIMIT
     : path === EXTENDED_SUPPORT_PROVIDER_ROUTE
       ? EXTENDED_SUPPORT_RESPONSE_LIMIT
       : RESPONSE_LIMIT;
@@ -4518,6 +4619,14 @@ function safeHttpError(error: unknown): LocalHttpError {
         : error.code === "BOUND_REACHED" ? 413 : 504,
       error.code,
       "The bounded AWS Support Cases provider collection did not complete",
+    );
+  }
+  if (error instanceof AwsHealthProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Health provider collection did not complete",
     );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {

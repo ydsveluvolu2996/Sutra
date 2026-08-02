@@ -14,6 +14,7 @@ import {
   scheduleAwsNewsFeedsTick,
   scheduleExtendedSupportTick,
   scheduleAwsSupportCasesTick,
+  scheduleAwsHealthTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -91,6 +92,9 @@ export async function POST(request: Request): Promise<Response> {
     // ADV-09 schedules one canonical organization anchor per daily UTC window;
     // account fan-out is resolved only inside the claimed server-owned job.
     const awsSupportCases = await scheduleAwsSupportCasesTick();
+    // ADV-06 schedules one canonical organization-view capture per UTC day;
+    // credentials and candidate-account fan-out remain server-owned.
+    const awsHealth = await scheduleAwsHealthTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -115,6 +119,7 @@ export async function POST(request: Request): Promise<Response> {
       awsBudgets,
       extendedSupport,
       awsSupportCases,
+      awsHealth,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

@@ -74,6 +74,12 @@ export const EXTENDED_SUPPORT_PERMISSION_PACK_VERSION =
 export const AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION =
   "standard-2026-08.7" as const;
 /**
+ * Immutable successor for ADV-06. It preserves .8.7 and adds only the exact
+ * AWS Health organization-view reads and Organizations prerequisite proofs.
+ */
+export const AWS_HEALTH_PERMISSION_PACK_VERSION =
+  "standard-2026-08.8" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -93,6 +99,7 @@ export type PermissionPackVersion =
   | typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
   | typeof EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
   | typeof AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+  | typeof AWS_HEALTH_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

@@ -99,8 +99,9 @@ Authoritative AWS references:
 
 ## Production acceptance gates
 
-This slice is implemented and locally testable, but it is not
-production-accepted until all of the following are complete:
+The unique ADV-06 provider, runtime, persistence, API and UI components are
+locally implemented and tested, but the vertical is not production-accepted
+until all of the following are complete:
 
 1. the versioned customer role and its session ceiling grant exactly the four
    event reads (and the management-only status read where applicable);
@@ -115,5 +116,9 @@ production-accepted until all of the following are complete:
    resources, pagination, access denial, subscription denial, initial loading,
    stale snapshots, and adversarial cross-tenant requests.
 
-No IAM role, broker route, database schema, application route, UI, customer
-account, or live environment is changed by this source-only slice.
+The shared `.8.8` permission successor, concrete AWS SDK reader, hosted route,
+worker/tick registration and migration registries are locally integrated and
+tested. Controlled entitled-organization reconciliation, release-time
+PostgreSQL migration application, two-tenant acceptance and deployment/live
+smoke evidence remain. No customer account or live environment has been changed
+by this local implementation.

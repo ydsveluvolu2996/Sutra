@@ -97,6 +97,12 @@ export type AwsHealthRuntimeFailureCode =
  * without claiming that a credential broker or production ledger is installed.
  */
 export interface AwsHealthRuntimeHandoff {
+  /** Durable implementations create the request identity before claiming it. */
+  prepareAttempt?(
+    scope: AwsHealthPersistenceScope,
+    requestId: string,
+    scheduledWindow: string,
+  ): Promise<void>;
   getAccepted(
     scope: AwsHealthPersistenceScope,
     requestId: string,
@@ -384,6 +390,17 @@ export async function runAwsHealthOrganizationRuntimeHandler(
     reject("SCOPE_REJECTED");
   }
   const requestId = await requestIdFor(trusted, parsed.scheduledWindow);
+  if (dependencies.handoff.prepareAttempt !== undefined) {
+    try {
+      await dependencies.handoff.prepareAttempt(
+        parsed.scope,
+        requestId,
+        parsed.scheduledWindow,
+      );
+    } catch {
+      reject("PERSISTENCE_REJECTED");
+    }
+  }
   let replay: AwsHealthAcceptedRuntimeAttempt | null;
   try {
     replay = await dependencies.handoff.getAccepted(parsed.scope, requestId);
@@ -415,7 +432,7 @@ export async function runAwsHealthOrganizationRuntimeHandler(
     AWS_HEALTH_ORGANIZATION_COLLECTION_BOUNDS.maximumDurationMs,
   );
   try {
-    const capture = await dependencies.adapter.collect(Object.freeze({
+    const adapterPromise = dependencies.adapter.collect(Object.freeze({
       schemaVersion: "sutra.aws-health-runtime-request.v1",
       requestId,
       scheduledWindow: parsed.scheduledWindow,
@@ -434,6 +451,14 @@ export async function runAwsHealthOrganizationRuntimeHandler(
         requireExhaustionEvidence: true,
       }),
     }), controller.signal);
+    const capture = await new Promise<AwsHealthOrganizationCapture>((resolve, rejectPromise) => {
+      const abort = () => rejectPromise(new DOMException("Collection deadline reached", "AbortError"));
+      if (controller.signal.aborted) abort();
+      else controller.signal.addEventListener("abort", abort, { once: true });
+      adapterPromise.then(resolve, rejectPromise).finally(() => {
+        controller.signal.removeEventListener("abort", abort);
+      });
+    });
     let normalized: AwsHealthOrganizationSnapshot;
     try {
       normalized = normalizeAwsHealthOrganizationCapture(
@@ -500,6 +525,6 @@ export const AWS_HEALTH_RUNTIME_BINDING = Object.freeze({
   cadence: AWS_HEALTH_RUNTIME_CADENCE,
   scheduler: scheduleAwsHealthOrganizationCollections,
   handler: runAwsHealthOrganizationRuntimeHandler,
-  registeredInSharedRuntime: false,
+  registeredInSharedRuntime: true,
   activationReason: AWS_HEALTH_RUNTIME_ACTIVATION_REASON,
 });
