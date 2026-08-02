@@ -11,6 +11,7 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS,
   IMPLEMENTED_READ_ACTIONS,
   TRUST_ATTESTATION_ACTIONS,
+  computeOptimizerActivationIdentitySessionPolicy,
   computeOptimizerExportDescribeSessionPolicy,
   computeOptimizerExportLaunchSessionPolicy,
 } from "../src/role-broker.js";
@@ -269,6 +270,49 @@ test("launch and Describe policies are disjoint, exact and bounded", () => {
   const describe = computeOptimizerExportDescribeSessionPolicy();
   assert.match(describe, /DescribeRecommendationExportJobs/u);
   assert.doesNotMatch(describe, /ExportEC2|GetEnrollment|s3:|kms:|iam:/u);
+});
+
+test("activation manifest attestation returns identity only under the exact STS action", async () => {
+  const value = fixture();
+  const result = await value.broker.attestComputeOptimizerActivationManifestIdentity(
+    SCOPE,
+    CONNECTION_ID,
+    "activation-manifest",
+    {
+      expectedAccountId: ACCOUNT,
+      partition: "aws",
+      sessionActions: ["sts:GetCallerIdentity"],
+      signal: new AbortController().signal,
+    },
+  );
+  assert.deepEqual(result, {
+    verified: true,
+    connectionId: CONNECTION_ID,
+    accountId: ACCOUNT,
+    partition: "aws",
+  });
+  assert.equal(value.assume.calls.length, 1);
+  assert.equal(value.assume.calls[0]?.Policy,
+    computeOptimizerActivationIdentitySessionPolicy());
+  assert.doesNotMatch(JSON.stringify(result), /credential|roleArn|sessionToken|secret/u);
+
+  for (const input of [
+    { expectedAccountId: ACCOUNT, partition: "aws", sessionActions: [],
+      signal: new AbortController().signal },
+    { expectedAccountId: ACCOUNT, partition: "aws",
+      sessionActions: ["sts:GetCallerIdentity", "iam:GetRole"],
+      signal: new AbortController().signal },
+    { expectedAccountId: "999988887777", partition: "aws",
+      sessionActions: ["sts:GetCallerIdentity"], signal: new AbortController().signal },
+  ]) {
+    const rejected = fixture();
+    await assert.rejects(
+      rejected.broker.attestComputeOptimizerActivationManifestIdentity(
+        SCOPE, CONNECTION_ID, "activation-manifest-tamper", input as never,
+      ),
+    );
+    assert.equal(rejected.assume.calls.length, 0);
+  }
 });
 
 test("persisted launch output is exact and rejects account, partition, prefix and version tamper", () => {

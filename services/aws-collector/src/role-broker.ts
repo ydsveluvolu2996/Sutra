@@ -607,6 +607,21 @@ export function computeOptimizerExportAttestationSessionPolicy(roleArn: string):
   return policy;
 }
 
+/** The activation-manifest route needs identity proof, never AWS data access. */
+export function computeOptimizerActivationIdentitySessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "VerifyCallerIdentityOnly",
+      Effect: "Allow",
+      Action: "sts:GetCallerIdentity",
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
 /** Second-stage launch ceiling: caller identity plus the exact 25 operations. */
 export function computeOptimizerExportLaunchSessionPolicy(): string {
   const policy = JSON.stringify({
@@ -1268,6 +1283,64 @@ export class AwsRoleBroker {
     // expand the compact read-family session cap.
     await this.attestRoleContract(resolved, validated.credentials);
     return validated;
+  }
+
+  /**
+   * Prove the ACTIVE .8.5 connection identity without returning credentials or
+   * granting any provider read/launch action to the manifest route.
+   */
+  public async attestComputeOptimizerActivationManifestIdentity(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: readonly ["sts:GetCallerIdentity"];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<{
+    readonly verified: true;
+    readonly connectionId: string;
+    readonly accountId: string;
+    readonly partition: AwsPartition;
+  }> {
+    if (
+      typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || typeof input.expectedAccountId !== "string"
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || (input.partition !== "aws" && input.partition !== "aws-us-gov"
+        && input.partition !== "aws-cn")
+      || !Array.isArray(input.sessionActions)
+      || input.sessionActions.length !== 1
+      || input.sessionActions[0] !== "sts:GetCallerIdentity"
+      || !(input.signal instanceof AbortSignal)
+    ) throw new ConnectionIntegrityError("The activation identity request is invalid");
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    assertActiveProvisioningSignal(input.signal);
+    if (
+      resolved.connection.permissionPackVersion
+        !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition
+    ) throw new ConnectionStateError();
+    const identity = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-co85-identity`,
+      computeOptimizerActivationIdentitySessionPolicy,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    return Object.freeze({
+      verified: true,
+      connectionId: identity.connectionId,
+      accountId: identity.accountId,
+      partition: identity.partition,
+    });
   }
 
   /**

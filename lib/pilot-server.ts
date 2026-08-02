@@ -48,6 +48,9 @@ import type {
 } from "../services/aws-collector/src/compute-optimizer-export-exact-describe";
 import type { ComputeOptimizerExportLaunchAttempt } from
   "../services/aws-collector/src/compute-optimizer-export-launcher";
+import type {
+  ComputeOptimizerMaterializationActivationManifestRequest,
+} from "../services/aws-collector/src/compute-optimizer-materialization-activation-manifest";
 import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
@@ -242,7 +245,16 @@ async function brokerFetchEnvelope<T>(
   payload?: unknown,
   timeoutMs = 20_000,
   externalSignal?: AbortSignal,
+  maximumResponseBytes = 12 * 1024 * 1024,
 ): Promise<{ readonly value: T; readonly authenticatedBody: Uint8Array }> {
+  if (!Number.isSafeInteger(maximumResponseBytes) || maximumResponseBytes < 1
+    || maximumResponseBytes > 12 * 1024 * 1024) {
+    throw new PilotServerError(
+      500,
+      "BROKER_CONFIGURATION_INVALID",
+      "The collector response limit configuration is invalid",
+    );
+  }
   const config = getPilotSecrets();
   const body = payload === undefined ? "" : JSON.stringify(payload);
   const nonce = crypto.randomUUID();
@@ -287,66 +299,72 @@ async function brokerFetchEnvelope<T>(
       signal: requestSignal,
     });
   } catch {
+    clearTimeout(timeout);
     throw new PilotServerError(503, "BROKER_UNAVAILABLE", "The AWS collector is not reachable");
+  }
+
+  // Keep the same timeout alive through the bounded stream read and signature
+  // verification. Clearing it after headers would let a peer drip an unsigned
+  // body forever despite the caller's deadline.
+  try {
+    const declaredLength = Number(response.headers.get("content-length") ?? "0");
+    if (Number.isFinite(declaredLength) && declaredLength > maximumResponseBytes) {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
+    }
+    const responseBody = await readLimitedResponseText(response, maximumResponseBytes);
+    const responseText = responseBody.text;
+    if (config.brokerAuthentication.mode === "hmac") {
+      const responseSignature = response.headers.get("x-sutra-response-signature") ?? "";
+      const expectedResponseSignature = await hmacHex(
+        config.brokerAuthentication.sharedSecret,
+        `${response.status}\n${path}\n${nonce}\n${await sha256Hex(responseBody.bytes)}`,
+      );
+      if (!constantTimeEqual(responseSignature, expectedResponseSignature)) {
+        throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
+      }
+    } else {
+      try {
+        await verifyHostedBrokerResponse({
+          status: response.status,
+          path,
+          nonce,
+          body: responseBody.bytes,
+          headers: response.headers,
+          config: config.brokerAuthentication,
+        });
+      } catch (error) {
+        if (error instanceof HostedBrokerClientSecurityError) {
+          throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
+        }
+        throw error;
+      }
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(responseText) as unknown;
+    } catch {
+      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector returned invalid JSON");
+    }
+    if (!response.ok) {
+      const record = typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {};
+      const code = safeBrokerErrorCode(record.code);
+      throw new PilotServerError(
+        response.status >= 500 ? 502 : response.status,
+        code,
+        publicBrokerMessage(code),
+      );
+    }
+    return {
+      value: parsed as T,
+      // This is the exact UTF-8 body whose digest was authenticated immediately
+      // above. Keep it beside the parsed value so evidence archival cannot
+      // accidentally serialize a semantically-equivalent but different payload.
+      authenticatedBody: responseBody.bytes,
+    };
   } finally {
     clearTimeout(timeout);
   }
-
-  const declaredLength = Number(response.headers.get("content-length") ?? "0");
-  if (Number.isFinite(declaredLength) && declaredLength > 12 * 1024 * 1024) {
-    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response exceeded the service limit");
-  }
-  const responseBody = await readLimitedResponseText(response, 12 * 1024 * 1024);
-  const responseText = responseBody.text;
-  if (config.brokerAuthentication.mode === "hmac") {
-    const responseSignature = response.headers.get("x-sutra-response-signature") ?? "";
-    const expectedResponseSignature = await hmacHex(
-      config.brokerAuthentication.sharedSecret,
-      `${response.status}\n${path}\n${nonce}\n${await sha256Hex(responseBody.bytes)}`,
-    );
-    if (!constantTimeEqual(responseSignature, expectedResponseSignature)) {
-      throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
-    }
-  } else {
-    try {
-      await verifyHostedBrokerResponse({
-        status: response.status,
-        path,
-        nonce,
-        body: responseBody.bytes,
-        headers: response.headers,
-        config: config.brokerAuthentication,
-      });
-    } catch (error) {
-      if (error instanceof HostedBrokerClientSecurityError) {
-        throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector response signature is invalid");
-      }
-      throw error;
-    }
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(responseText) as unknown;
-  } catch {
-    throw new PilotServerError(502, "BROKER_RESPONSE_INVALID", "The collector returned invalid JSON");
-  }
-  if (!response.ok) {
-    const record = typeof parsed === "object" && parsed !== null ? parsed as Record<string, unknown> : {};
-    const code = safeBrokerErrorCode(record.code);
-    throw new PilotServerError(
-      response.status >= 500 ? 502 : response.status,
-      code,
-      publicBrokerMessage(code),
-    );
-  }
-  return {
-    value: parsed as T,
-    // This is the exact UTF-8 body whose digest was authenticated immediately
-    // above. Keep it beside the parsed value so evidence archival cannot
-    // accidentally serialize a semantically-equivalent but different payload.
-    authenticatedBody: responseBody.bytes,
-  };
 }
 
 async function brokerFetch<T>(
@@ -1028,6 +1046,41 @@ export async function runComputeOptimizerExportLaunch(
     attempt,
     Math.min(130_000, remainingMs),
     context.signal,
+  )).value;
+}
+
+/**
+ * Reads the collector-owned, exact regional .8.5 activation matrix through
+ * the authenticated broker channel. The 64 KiB transport ceiling is enforced
+ * while streaming, before JSON parsing or the hostile manifest reader sees it.
+ */
+export async function runComputeOptimizerMaterializationActivationManifest(
+  request: ComputeOptimizerMaterializationActivationManifestRequest,
+  context: { readonly signal: AbortSignal; readonly deadlineAtMs: number },
+): Promise<unknown> {
+  if (!(context.signal instanceof AbortSignal)
+    || !Number.isSafeInteger(context.deadlineAtMs)) {
+    throw new PilotServerError(
+      400,
+      "INVALID_REQUEST",
+      "The Compute Optimizer activation manifest boundary was invalid",
+    );
+  }
+  const remainingMs = context.deadlineAtMs - Date.now();
+  if (context.signal.aborted || remainingMs <= 0) {
+    throw new PilotServerError(
+      408,
+      "REQUEST_TIMEOUT",
+      "The Compute Optimizer activation manifest deadline elapsed",
+    );
+  }
+  return (await brokerFetchEnvelope<unknown>(
+    `/v1/connections/${request.connectionId}/compute-optimizer-materialization-activation-manifest`,
+    "POST",
+    request,
+    Math.min(15_000, remainingMs),
+    context.signal,
+    64 * 1_024,
   )).value;
 }
 

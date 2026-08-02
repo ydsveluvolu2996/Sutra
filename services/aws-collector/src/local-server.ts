@@ -131,6 +131,11 @@ import {
   ComputeOptimizerExportLaunchLedgerError,
   type ComputeOptimizerExportLaunchExecutionLedger,
 } from "./compute-optimizer-export-launch-ledger.js";
+import {
+  ComputeOptimizerMaterializationActivationManifestError,
+  projectComputeOptimizerMaterializationActivationManifest,
+  type ComputeOptimizerMaterializationActivationManifestRequest,
+} from "./compute-optimizer-materialization-activation-manifest.js";
 import { resolveComputeOptimizerExportLaunchContractForRegion } from
   "./compute-optimizer-export-launch-contract.js";
 import {
@@ -155,7 +160,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|finops-source|organizations-taxonomy|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|compute-optimizer-materialization-activation-manifest|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -177,11 +182,30 @@ const LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES = 1024 * 1024;
 const LIVE_SNAPSHOT_FINDING_BUDGET_BYTES = 2 * 1024 * 1024;
 export const LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES = 10 * 1024 * 1024;
 const SECURITY_EVENT_OPERATION_DEADLINE_MS = 105_000;
+const COMPUTE_OPTIMIZER_ACTIVATION_MANIFEST_DEADLINE_MS = 15_000;
 const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
 const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
+
+export interface ComputeOptimizerActivationManifestIdentityAttestor {
+  attest(input: {
+    readonly scope: ConnectionScope;
+    readonly connectionId: string;
+    readonly jobId: string;
+    readonly expectedAccountId: string;
+    readonly partition: LocalAwsPartition;
+    /** The implementation must create a session capped to this exact action set. */
+    readonly sessionActions: readonly ["sts:GetCallerIdentity"];
+    readonly signal: AbortSignal;
+  }): Promise<{
+    readonly verified: true;
+    readonly connectionId: string;
+    readonly accountId: string;
+    readonly partition: LocalAwsPartition;
+  }>;
+}
 
 export interface LocalCollectorServerOptions {
   readonly sharedSecret?: string;
@@ -268,6 +292,11 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportDescribeSession">;
+  readonly computeOptimizerActivationManifestRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "attestComputeOptimizerActivationManifestIdentity">;
   readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
   readonly computeOptimizerExportLaunchClientFactory?: (
     partition: LocalAwsPartition,
@@ -279,6 +308,13 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportLaunchSession">;
+  /**
+   * Fail-closed seam for the dedicated identity-only .8.5 attestation. The
+   * production role broker must implement a session policy containing only
+   * sts:GetCallerIdentity before this route is enabled.
+   */
+  readonly computeOptimizerActivationManifestIdentityAttestor?:
+    ComputeOptimizerActivationManifestIdentityAttestor;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -365,6 +401,9 @@ interface ServerContext {
   readonly computeOptimizerExactDescribeRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["computeOptimizerExactDescribeRoleBrokerFactory"]
   >;
+  readonly computeOptimizerActivationManifestRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerActivationManifestRoleBrokerFactory"]
+  >;
   readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
   readonly computeOptimizerExportLaunchClientFactory: NonNullable<
     LocalCollectorServerOptions["computeOptimizerExportLaunchClientFactory"]
@@ -372,6 +411,8 @@ interface ServerContext {
   readonly computeOptimizerExportLaunchRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["computeOptimizerExportLaunchRoleBrokerFactory"]
   >;
+  readonly computeOptimizerActivationManifestIdentityAttestor?:
+    ComputeOptimizerActivationManifestIdentityAttestor;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
@@ -448,16 +489,18 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     mode === "fixture"
       ? createLocalJobsContext(options, now)
       : null;
+  const registry = options.registry ?? new EncryptedFileConnectionRegistry({
+    filePath: options.registryPath ?? (() => { throw new Error("registryPath is required"); })(),
+    encryptionKey: options.registryEncryptionKey ??
+      (() => { throw new Error("registryEncryptionKey is required"); })(),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   const context: ServerContext = {
     mode,
     principalArn,
     sourceAccountId: parsedPrincipal.accountId,
     now,
-    registry: options.registry ?? new EncryptedFileConnectionRegistry({
-      filePath: options.registryPath ?? (() => { throw new Error("registryPath is required"); })(),
-      encryptionKey: options.registryEncryptionKey ?? (() => { throw new Error("registryEncryptionKey is required"); })(),
-      ...(options.now === undefined ? {} : { now: options.now }),
-    }),
+    registry,
     authenticator: options.authenticator ?? new RequestAuthenticator({
       sharedSecret: options.sharedSecret ?? (() => { throw new Error("sharedSecret is required"); })(),
       ...(options.now === undefined ? {} : { now: () => options.now!().getTime() }),
@@ -506,6 +549,9 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     computeOptimizerExactDescribeRoleBrokerFactory:
       options.computeOptimizerExactDescribeRoleBrokerFactory ??
         createWorkloadIdentityRoleBroker,
+    computeOptimizerActivationManifestRoleBrokerFactory:
+      options.computeOptimizerActivationManifestRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
     ...(options.computeOptimizerExportLaunchLedger === undefined
       ? {}
       : { computeOptimizerExportLaunchLedger: options.computeOptimizerExportLaunchLedger }),
@@ -515,6 +561,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     computeOptimizerExportLaunchRoleBrokerFactory:
       options.computeOptimizerExportLaunchRoleBrokerFactory ??
         createWorkloadIdentityRoleBroker,
+    ...(options.computeOptimizerActivationManifestIdentityAttestor === undefined
+      ? {}
+      : {
+          computeOptimizerActivationManifestIdentityAttestor:
+            options.computeOptimizerActivationManifestIdentityAttestor,
+        }),
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1436,6 +1488,16 @@ async function route(
       const attempt = parseComputeOptimizerExportLaunchHttpRequest(body, pathConnectionId);
       return { status: 200, body: await collectComputeOptimizerExportLaunch(context, attempt) };
     }
+    if (action === "compute-optimizer-materialization-activation-manifest") {
+      const request = parseComputeOptimizerActivationManifestHttpRequest(
+        body,
+        pathConnectionId,
+      );
+      return {
+        status: 200,
+        body: await collectComputeOptimizerActivationManifest(context, request),
+      };
+    }
     if (action === "finops-source") {
       const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
       return {
@@ -1464,6 +1526,145 @@ async function route(
   }
 
   throw new LocalHttpError(404, "INVALID_REQUEST", "The collector endpoint does not exist");
+}
+
+function parseComputeOptimizerActivationManifestHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): ComputeOptimizerMaterializationActivationManifestRequest {
+  const record = exactJson(body, [
+    "schema", "requestId", "tenantId", "connectionId", "accountId", "partition",
+    "requiredPermissionPackVersion",
+  ]);
+  if (
+    record.schema
+      !== "sutra.compute-optimizer-materialization-activation-manifest-request.v1"
+    || typeof record.requestId !== "string" || !IDENTIFIER.test(record.requestId)
+    || typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId)
+    || record.connectionId !== pathConnectionId
+    || typeof record.accountId !== "string" || !ACCOUNT_ID.test(record.accountId)
+    || (record.partition !== "aws" && record.partition !== "aws-us-gov"
+      && record.partition !== "aws-cn")
+    || record.requiredPermissionPackVersion
+      !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+  ) throw invalidRequest();
+  return record as unknown as ComputeOptimizerMaterializationActivationManifestRequest;
+}
+
+async function collectComputeOptimizerActivationManifest(
+  context: ServerContext,
+  request: ComputeOptimizerMaterializationActivationManifestRequest,
+): Promise<unknown> {
+  const connection = await requireConnection(context.registry, {
+    tenantId: request.tenantId,
+    connectionId: request.connectionId,
+    jobId: request.requestId,
+  });
+  if (
+    connection.status !== "ACTIVE"
+    || connection.permissionPackVersion
+      !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+    || connection.expectedAccountId !== request.accountId
+    || connection.partition !== request.partition
+    || connection.enabledRegions.length < 1
+    || connection.enabledRegions.length > 50
+    || connection.enabledRegions.includes("all-enabled")
+    || connection.finopsSourceContracts === undefined
+    || connection.computeOptimizerExportObjectContracts === undefined
+    || connection.computeOptimizerExportLaunchContracts === undefined
+  ) throw new RegistryStateError();
+
+  let manifest;
+  try {
+    manifest = projectComputeOptimizerMaterializationActivationManifest({
+      owner: {
+        tenantId: connection.tenantId,
+        connectionId: connection.connectionId,
+        expectedAccountId: connection.expectedAccountId,
+        partition: connection.partition,
+        permissionPackVersion: connection.permissionPackVersion,
+        enabledRegions: connection.enabledRegions,
+      },
+      request,
+      sourceContracts: connection.finopsSourceContracts,
+      launchContracts: connection.computeOptimizerExportLaunchContracts,
+      objectReadContracts: connection.computeOptimizerExportObjectContracts,
+    });
+  } catch (error) {
+    if (error instanceof ComputeOptimizerMaterializationActivationManifestError
+      && error.code === "INVALID_REQUEST") throw invalidRequest();
+    throw new RegistryStateError();
+  }
+
+  const attestor = context.computeOptimizerActivationManifestIdentityAttestor;
+  const identityInput = {
+    scope: { tenantId: connection.tenantId },
+    connectionId: connection.connectionId,
+    jobId: request.requestId,
+    expectedAccountId: connection.expectedAccountId,
+    partition: connection.partition,
+    sessionActions: ["sts:GetCallerIdentity"],
+  } as const;
+  const identity = await withComputeOptimizerManifestDeadline((signal) => {
+    if (attestor !== undefined) return attestor.attest({ ...identityInput, signal });
+    const broker = context.computeOptimizerActivationManifestRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    return broker.attestComputeOptimizerActivationManifestIdentity(
+      identityInput.scope,
+      identityInput.connectionId,
+      identityInput.jobId,
+      {
+        expectedAccountId: identityInput.expectedAccountId,
+        partition: identityInput.partition,
+        sessionActions: identityInput.sessionActions,
+        signal,
+      },
+    );
+  });
+  if (
+    !isPlainRecord(identity)
+    || Object.keys(identity).sort().join(",")
+      !== "accountId,connectionId,partition,verified"
+    || identity.verified !== true
+    || identity.connectionId !== connection.connectionId
+    || identity.accountId !== connection.expectedAccountId
+    || identity.partition !== connection.partition
+  ) throw new RegistryStateError();
+  return manifest;
+}
+
+function withComputeOptimizerManifestDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+    const timer = setTimeout(() => {
+      controller.abort();
+      finish(() => reject(new LocalHttpError(
+        504,
+        "COLLECTION_FAILED",
+        "The Compute Optimizer activation identity check did not complete",
+      )));
+    }, COMPUTE_OPTIMIZER_ACTIVATION_MANIFEST_DEADLINE_MS);
+    Promise.resolve().then(() => operation(controller.signal)).then(
+      (value) => finish(() => resolve(value)),
+      () => finish(() => reject(new LocalHttpError(
+        502,
+        "COLLECTION_FAILED",
+        "The Compute Optimizer activation identity check did not complete",
+      ))),
+    );
+  });
 }
 
 function parseFinopsSourceHttpRequest(
