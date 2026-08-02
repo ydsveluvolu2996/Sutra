@@ -12,5 +12,7 @@ test("pins the exact Sustainability sheet, visual, and control inventory", () =>
   assert.equal(definition.sheets.reduce((sum, sheet) => sum + sheet.controlCount, 0), 17);
   assert.deepEqual(definition.sheets.map((sheet) => sheet.name), ["Regional Footprint", "Compute Proxies",
     "Storage Proxies", "Data Transfer / Networking Proxies", "Carbon Emissions", "About"]);
-  assert.equal(definition.sheets.find((sheet) => sheet.name === "Regional Footprint")?.coverage, "SCHEMA_GAP");
+  assert.equal(definition.sheets.find((sheet) => sheet.name === "Regional Footprint")?.coverage, "EVIDENCE_GATED");
+  assert.equal(definition.dimensionContractVersion, "sutra.sustainability-proxy-dimensions.v2");
+  assert.equal(definition.evidenceGatedDimensions.length, 6);
 });

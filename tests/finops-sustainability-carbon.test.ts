@@ -221,6 +221,12 @@ test("rejects tenant scope and payer ARN substitutions", () => {
   );
 });
 
+test("accepts the documented Data Exports name-plus-UUID ARN form", () => {
+  const input = capture();
+  input.carbonEvidence!.exportArn = `arn:aws:bcm-data-exports:us-east-1:${SCOPE.accountId}:export/sutra_carbon_monthly-12345678-1234-4123-8123-123456789abc`;
+  assert.equal(normalizeSustainabilityCarbonCapture(input, SCOPE, NOW).providerCarbon.rows.length, 1);
+});
+
 test("rejects usage accounts outside the authenticated account boundary", () => {
   const input = capture();
   input.proxyEvidence!.rows[0]!.usageAccountId = "333333333333";

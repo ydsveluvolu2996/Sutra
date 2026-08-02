@@ -1,9 +1,9 @@
 import { AwsMarketplaceSpgRepository } from "../../../../../db/finops-marketplace-spg-repository";
+import { MarketplaceSpgRuntimeRepository } from "../../../../../db/finops-marketplace-spg-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { projectMarketplaceSpgDashboard, type MarketplaceSpgDashboardFilters } from "../../../../../lib/finops-marketplace-spg-dashboard";
 import { MARKETPLACE_SPG_OFFICIAL_DEFINITION } from "../../../../../lib/finops-marketplace-spg-official-definition";
-import { MARKETPLACE_SPG_RUNTIME_BINDING } from "../../../../../lib/finops-marketplace-spg-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -33,11 +33,11 @@ export async function GET(request: Request): Promise<Response> {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };
-    const repository = new AwsMarketplaceSpgRepository(); const [active, latest, history] = await Promise.all([
-      repository.getActiveSnapshot(scope), repository.getLatestSnapshot(scope), repository.listHistory(scope, 30)]);
+    const repository = new AwsMarketplaceSpgRepository(); const runtimeRepository = new MarketplaceSpgRuntimeRepository(); const [active, latest, history, runtime] = await Promise.all([
+      repository.getActiveSnapshot(scope), repository.getLatestSnapshot(scope), repository.listHistory(scope, 30), runtimeRepository.getRuntimeStatus(scope)]);
     const selected = active ?? latest; if (selected === null) return jsonResponse({ schema: "sutra.finops-marketplace-spg-dashboard.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null, officialDefinition: MARKETPLACE_SPG_OFFICIAL_DEFINITION,
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: MARKETPLACE_SPG_RUNTIME_BINDING.activationReason } });
+      collection: { jobContractAvailable: true, providerAdapterAvailable: true, state: runtime.state, reason: runtime.reason, lastAttemptAt: runtime.lastAttemptAt } });
     const ageHours = Math.round(Math.max(0, (Date.now() - Date.parse(selected.snapshot.freshness.dataThroughAt)) / 3_600_000) * 100) / 100;
     const newerIncomplete = active !== null && latest !== null && active.generationId !== latest.generationId;
     const projected = projectMarketplaceSpgDashboard(selected.snapshot, query.filters); const sourceState = newerIncomplete ? "partial" : active === null ? selected.snapshot.state.toLowerCase()
@@ -51,9 +51,9 @@ export async function GET(request: Request): Promise<Response> {
         cur2GenerationId: selected.snapshot.spend.generationId, cur2SourceEvidenceId: selected.snapshot.spend.sourceEvidenceId, cur2Predicate: selected.snapshot.spend.predicate },
       separation: { realizedSpendSource: "ACTIVE_RECONCILED_CUR2_ONLY", agreementsLicensesAndGrantsSource: "AWS_MARKETPLACE_CONTROL_PLANE", crossSourceEntitlementInference: false,
         agreementEstimatedChargesMeaning: "KNOWN_LIFECYCLE_COMMITMENT_NOT_USAGE_ACTUAL" },
-      collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: MARKETPLACE_SPG_RUNTIME_BINDING.activationReason },
+      collection: { jobContractAvailable: true, providerAdapterAvailable: true, state: runtime.state, reason: runtime.reason, lastAttemptAt: runtime.lastAttemptAt },
       unsupportedOfficialViews: ["Offer classification as public self-service versus private offer is not supplied by the current buyer evidence contract.",
-        "Software, data, and professional-services product-type classification is not supplied by the current minimized product metadata contract.",
+        "Product typing is shown only when bound to the approved product-taxonomy evidence ledger; unapproved products remain explicitly untyped.",
         "Deployment telemetry is limited to Marketplace product deployedOnAws metadata; resource-level deployment inventory is not inferred."] });
   } catch (error) { return errorResponse(error); }
 }

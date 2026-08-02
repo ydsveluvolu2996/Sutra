@@ -240,19 +240,21 @@ There is no join that attributes AWS provider carbon estimates to CUR2 tags,
 workloads, or resources. Such an allocation would be a Sutra model rather than
 provider evidence and requires a separately versioned, approved methodology.
 
-## Remaining production gates
+## Implemented runtime and remaining production gates
 
-This source/engine slice and its focused tests are not production acceptance.
-The remaining gates are:
+The unique implementation now includes a bounded credential-owning S3 export
+adapter, strict signed route, immutable accepted-attempt replay, redacted
+failure audit, production composition, tenant-scoped dashboard/target APIs,
+append-only governed target versions, and evidence-gated official dimensions.
+The optional direct Sustainability API comparator is separately typed and can
+neither enter Data Export history nor replace export completeness/freshness.
 
-1. create a version-pinned `CARBON_EMISSIONS` export with all 23 columns using
-   the separate provisioner role;
-2. add its exact S3 bucket/prefix/object permission binding to the read-only
-   collector and broker attestation;
-3. implement CSV/Parquet normalization that preserves source decimal strings;
-4. atomically persist generations, objects, periods, rows, and source-health
-   evidence under the tenant boundary;
-5. add tenant-scoped route, UI, download, and audit behavior;
-6. validate a first monthly delivery, a historical backfill, an empty file, a
-   model correction, member-account churn, stale/partial states, and cross-
-   tenant rejection in production-like E2E tests.
+These assets do not by themselves claim deployment. Remaining gates are:
+
+1. register the handler/route and `standard-2026-08.15` successor in the shared
+   collector, role broker, runtime and onboarding registries;
+2. create and bind the version-pinned 23-column export, exact-prefix S3 read and
+   optional customer-KMS decrypt to the active trust-role connection;
+3. bind the active reconciled CUR2 classifier and pinned regional reference;
+4. validate first delivery, backfill, correction, empty delivery, model change,
+   account churn, freshness and cross-tenant rejection with live AWS evidence.

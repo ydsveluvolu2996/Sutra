@@ -189,6 +189,9 @@ import { createEndUserComputingProductionComposition } from
   "../lib/finops-end-user-computing-production-composition.ts";
 import { EndUserComputingRuntimeContextRepository } from
   "./finops-end-user-computing-runtime-context-repository.ts";
+import { GRAVITON_MATERIALIZATION_JOB_KIND } from "../lib/finops-graviton-runtime-binding.ts";
+import { createGravitonProductionComposition } from "../lib/finops-graviton-production-composition.ts";
+import { createGravitonEvidenceSignerFromEnvironment } from "../lib/finops-graviton-evidence-signer.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -351,6 +354,27 @@ function endUserComputingProductionComposition() {
 export function scheduleEndUserComputingTick(scheduledAtMs = Date.now()) {
   return endUserComputingProductionComposition().scheduleTick(scheduledAtMs);
 }
+
+function gravitonProductionComposition(){const secrets=getPilotSecrets();
+  if(secrets.brokerAuthentication.mode!=="asymmetric")throw new Error("GRAVITON_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  const runtimeEnv=env as unknown as Readonly<Record<string,string|undefined>>;
+  const required=(name:string)=>{const value=runtimeEnv[name]?.trim();if(value===undefined||value.length===0)
+    throw new Error("GRAVITON_AUTHORITY_NOT_CONFIGURED");return value;};
+  return createGravitonProductionComposition({brokerConfiguration:{brokerOrigin:secrets.brokerUrl,
+    signing:secrets.brokerAuthentication},fetcher:(input,init)=>fetch(input,init),
+    signer:createGravitonEvidenceSignerFromEnvironment(runtimeEnv),authorityConfiguration:{
+      pricingCatalogVersion:required("SUTRA_GRAVITON_PRICING_CATALOG_VERSION"),
+      pricingContentSha256:required("SUTRA_GRAVITON_PRICING_CONTENT_SHA256"),
+      compatibilityPolicyVersion:required("SUTRA_GRAVITON_COMPATIBILITY_POLICY_VERSION"),
+      compatibilityContentSha256:required("SUTRA_GRAVITON_COMPATIBILITY_CONTENT_SHA256"),
+      workloadAttestationSetId:required("SUTRA_GRAVITON_WORKLOAD_ATTESTATION_SET_ID"),
+      workloadAttestationSha256:required("SUTRA_GRAVITON_WORKLOAD_ATTESTATION_SHA256"),
+      licenseAttestationSetId:required("SUTRA_GRAVITON_LICENSE_ATTESTATION_SET_ID"),
+      licenseAttestationSha256:required("SUTRA_GRAVITON_LICENSE_ATTESTATION_SHA256"),
+    }});}
+/** Daily deterministic ADV-05 Graviton Savings scheduler. */
+export function scheduleGravitonSavingsTick(scheduledAtMs=Date.now()){
+  return gravitonProductionComposition().scheduleTick(scheduledAtMs);}
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -1478,6 +1502,7 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       dcfStepFunctionsProductionComposition().handler(job),
     [END_USER_COMPUTING_DURABLE_JOB_KIND]: (job) =>
       endUserComputingProductionComposition().handler(job),
+    [GRAVITON_MATERIALIZATION_JOB_KIND]:(job)=>gravitonProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

@@ -366,7 +366,7 @@ function validBoundary(
   const scope = value.scope;
   const cur2 = value.activeCur2;
   const carbon = value.carbonExport;
-  const expectedArn = `arn:aws:bcm-data-exports:${carbon.exportRegion}:${scope.accountId}:export/${carbon.exportName}`;
+  const expectedArn = new RegExp(`^arn:aws:bcm-data-exports:${carbon.exportRegion}:${scope.accountId}:export/${carbon.exportName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?:-[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})?$`, "u");
   return exactKeys(value, ["scope", "allowedUsageAccountIds", "activeCur2", "carbonExport"])
     && exactKeys(scope, ["orgId", "customerId", "connectionId", "accountId", "partition"])
     && samePersistenceScope(persistenceScope(scope), expected)
@@ -398,7 +398,7 @@ function validBoundary(
     && carbon.source === "AWS_SUSTAINABILITY_CARBON_DATA_EXPORT"
     && carbon.tableName === "CARBON_EMISSIONS"
     && EXPORT_NAME.test(carbon.exportName) && REGION.test(carbon.exportRegion)
-    && carbon.exportArn === expectedArn && S3_BUCKET.test(carbon.bucket)
+    && expectedArn.test(carbon.exportArn) && S3_BUCKET.test(carbon.bucket)
     && validPrefix(carbon.prefix) && ACCOUNT.test(carbon.expectedBucketOwner)
     && carbon.expectedBucketOwner === scope.accountId
     && BILLING_GENERATION.test(carbon.generationId)

@@ -55,8 +55,8 @@ export const GRAVITON_SAVINGS_READ_OPERATIONS = Object.freeze([
   "autoscaling:DescribeAutoScalingGroups",
   "rds:DescribeDBInstances",
   "rds:DescribeDBClusters",
-  "opensearch:ListDomainNames",
-  "opensearch:DescribeDomain",
+  "es:ListDomainNames",
+  "es:DescribeDomain",
   "elasticache:DescribeCacheClusters",
   "elasticache:DescribeReplicationGroups",
   "pricing:ListPriceLists",
@@ -353,6 +353,28 @@ export interface GravitonUsagePeriod {
   readonly resourceCount: number;
 }
 
+/** Versioned, evidence-backed pricing/metadata mapping; no family-name inference. */
+export interface GravitonInstanceMappingRow {
+  readonly mappingId: string;
+  readonly role: "CURRENT" | "TARGET";
+  readonly resourceType: GravitonResourceType;
+  readonly region: string;
+  readonly configuration: string;
+  readonly architecture: "X86_64" | "ARM64";
+  readonly operatingSystem: string;
+  readonly tenancy: string;
+  readonly purchaseOption: "ON_DEMAND";
+  readonly currency: string;
+  readonly unitPriceMicros: string;
+  readonly priceListVersion: string;
+  readonly productSku: string;
+  readonly effectiveFromAt: string;
+  readonly effectiveToAt: string | null;
+  readonly vcpu: number | null;
+  readonly memoryMiB: number | null;
+  readonly evidenceIds: readonly string[];
+}
+
 export interface GravitonSavingsSnapshot {
   readonly schemaVersion: "sutra.graviton-savings.snapshot.v1";
   readonly scope: FinopsSourceScope;
@@ -370,6 +392,7 @@ export interface GravitonSavingsSnapshot {
   };
   /** Canonical CUR2 usage only; ARM64 rows quantify existing Graviton usage. */
   readonly currentUsage: readonly GravitonUsagePeriod[];
+  readonly instanceMapping: readonly GravitonInstanceMappingRow[];
   readonly opportunities: readonly GravitonOpportunity[];
 }
 
@@ -689,7 +712,7 @@ function recommendation(
   const computeOptimizerSource = source.operation.startsWith("compute-optimizer:Get");
   const managedServiceAuthoritativeSource =
     (resource.resourceType === "OPENSEARCH_DOMAIN"
-      && source.operation === "opensearch:DescribeDomain")
+      && source.operation === "es:DescribeDomain")
     || (resource.resourceType === "ELASTICACHE_REPLICATION_GROUP"
       && source.operation === "elasticache:DescribeReplicationGroups");
   const recommendationAuthority = authoritySupplied
@@ -1323,6 +1346,39 @@ function usagePeriods(costs: Iterable<GravitonCur2CostRecord>): readonly Gravito
   }));
 }
 
+function instanceMappings(
+  recommendations: Iterable<GravitonComputeOptimizerRecommendation>,
+  metadata: ReadonlyMap<string, GravitonInstanceMetadata>,
+  pricing: ReadonlyMap<string, GravitonPricingRecord>,
+): readonly GravitonInstanceMappingRow[] {
+  const rows = new Map<string, GravitonInstanceMappingRow>();
+  for (const recommendation of recommendations) {
+    const references = [["CURRENT", recommendation.currentPriceId], ["TARGET", recommendation.targetPriceId]] as const;
+    for (const [role, priceId] of references) {
+      const price = pricing.get(priceId); if (price === undefined) continue;
+      const targetMetadata = role === "TARGET" ? metadata.get(recommendation.targetMetadataId) : undefined;
+      const metadataMatches = targetMetadata !== undefined
+        && targetMetadata.resourceType === price.resourceType && targetMetadata.region === price.region
+        && targetMetadata.configuration === price.configuration && targetMetadata.architecture === price.architecture;
+      const mappingId = `${role.toLowerCase()}_${price.priceId}`;
+      rows.set(mappingId, {
+        mappingId, role, resourceType: price.resourceType, region: price.region,
+        configuration: price.configuration, architecture: price.architecture,
+        operatingSystem: price.operatingSystem, tenancy: price.tenancy,
+        purchaseOption: price.purchaseOption, currency: price.currency,
+        unitPriceMicros: price.unitPriceMicros, priceListVersion: price.priceListVersion,
+        productSku: price.productSku, effectiveFromAt: price.effectiveFromAt,
+        effectiveToAt: price.effectiveToAt, vcpu: metadataMatches ? targetMetadata.vcpu : null,
+        memoryMiB: metadataMatches ? targetMetadata.memoryMiB : null,
+        evidenceIds: [price.source.id, ...(metadataMatches ? [targetMetadata.source.id] : [])].sort(),
+      });
+    }
+  }
+  return [...rows.values()].sort((left, right) => left.resourceType.localeCompare(right.resourceType)
+    || left.region.localeCompare(right.region) || left.configuration.localeCompare(right.configuration)
+    || left.role.localeCompare(right.role) || left.mappingId.localeCompare(right.mappingId));
+}
+
 function containsSensitiveKey(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsSensitiveKey);
   if (!isRecord(value)) return false;
@@ -1488,6 +1544,7 @@ export function buildGravitonSavingsSnapshot(
       )),
     },
     currentUsage: usagePeriods(costMap.values()),
+    instanceMapping: instanceMappings(recommendationMap.values(), metadataMap, pricingMap),
     opportunities,
   };
   const outputBytes = new TextEncoder().encode(JSON.stringify(snapshot)).byteLength;

@@ -120,15 +120,15 @@ export const KUBECOST_OFFICIAL_DEFINITION = Object.freeze({
       name: "Workloads Explorer",
       documentedPurpose: "Interactive stacked-bar and pivot exploration of Kubernetes cost across in-dashboard aggregations and filters.",
       nativeCoverage: "PARTIAL",
-      nativeEvidence: "Tenant-bounded account, cluster, namespace, allocation-kind and currency filters, exact workload rows, pivots, and hourly allocation are native.",
+      nativeEvidence: "Tenant-bounded account, cluster, namespace, capacity-type, instance-type, allocation-kind and currency filters, exact workload rows, pivots, and daily official-export allocation are native.",
       remainingGap: "The upstream stacked-bar geometry, exact pivot fields, controls, and cross-visual interactions are unpublished and are not inferred.",
     }),
     Object.freeze({
       name: "EKS Breakdown",
       documentedPurpose: "Pod distribution and coverage by capacity type and instance type, plus namespace drilldown by cost metric.",
       nativeCoverage: "PARTIAL",
-      nativeEvidence: "Cluster allocation groups and namespace/component-cost drilldown are available.",
-      remainingGap: "Sutra's accepted export contract does not carry node capacity type or instance type, so those documented graphs remain unavailable.",
+      nativeEvidence: "The pinned 62-column CCA export carries node, capacity type, instance type, availability zone, architecture, OS, node group and image dimensions; native exact-cost breakdowns and namespace/component drilldown are available.",
+      remainingGap: "The service-hosted QuickSight definition is unpublished, so exact visual geometry and cross-visual interaction parity cannot be claimed.",
     }),
   ]),
   supplementalOpenCost: Object.freeze({
@@ -139,7 +139,7 @@ export const KUBECOST_OFFICIAL_DEFINITION = Object.freeze({
   }),
   limitations: Object.freeze([
     "The customer Kubecost exporter, credential-owning signed ingest adapter, and live provider evidence are not deployed.",
-    "Node capacity type and EC2 instance type are absent from Sutra's accepted export contract and are not inferred.",
+    "Node dimensions are accepted only from the pinned official 62-column export and are never inferred from names or prices.",
     "QuickSight object totals and exact geometry remain unknown because the complete definition is service-hosted and unpublished.",
   ]),
 });

@@ -120,3 +120,25 @@ test("CORA filters exact resource, restart and rollback flags and can exclude Fi
   assert.equal(result.resultCount, 1);
   assert.equal(result.rows[0]?.resourceId, "i-1");
 });
+
+test("CORA builds resource-safe Savings Plans and RI option matrices without inventing unknown dimensions", () => {
+  const rows = [recommendation({
+    actionType: "PurchaseSavingsPlans", optimizationClass: "RATE_COMMITMENT_OPTIMIZATION",
+    currentResourceType: "ComputeSavingsPlans", recommendedResourceType: "ComputeSavingsPlans",
+    currentResourceSummary: "Payer eligible usage",
+    recommendedResourceSummary: "0.50/hour for m7i in Payer one year NoUpfront",
+    commitmentDimensions: { level: "PAYER", term: "ONE_YEAR", upfront: "NO_UPFRONT", offeringType: "ComputeSavingsPlans", service: "COMPUTE", hourlyCommitment: "0.50", instanceType: "m7i" },
+  }), recommendation({
+    trackingKey: `cor_${"7".repeat(64)}`, recommendationId: "rec-ri", resourceId: "ri-options",
+    actionType: "PurchaseReservedInstances", optimizationClass: "RATE_COMMITMENT_OPTIMIZATION",
+    currentResourceType: "RdsReservedInstances", recommendedResourceType: "RdsReservedInstances",
+    currentResourceSummary: "Linked eligible usage", recommendedResourceSummary: "2 db.r7g.large in Linked three years PartialUpfront",
+    commitmentDimensions: { level: "LINKED", term: "THREE_YEARS", upfront: "PARTIAL_UPFRONT", offeringType: "RdsReservedInstances", service: "RDS", hourlyCommitment: null, instanceType: "db.r7g.large" },
+  })];
+  const result = buildCoraDashboardProjection(snapshot(rows), [], FILTERS);
+  assert.deepEqual(result.commitmentMatrices.map((item) => [item.actionType, item.service, item.level, item.term, item.upfront]), [
+    ["PurchaseReservedInstances", "RDS", "LINKED", "THREE_YEARS", "PARTIAL_UPFRONT"],
+    ["PurchaseSavingsPlans", "COMPUTE", "PAYER", "ONE_YEAR", "NO_UPFRONT"],
+  ]);
+  assert.ok(result.commitmentMatrices.every((item) => item.aggregationMeaning === "RESOURCE_SAFE_MAX_RECOMMENDATION_THEN_OPTION_MATRIX_SUM"));
+});

@@ -1,4 +1,5 @@
 import { ScadAllocationRepository } from "../../../../../db/finops-scad-allocation-repository";
+import { ScadCur2RuntimeAttemptRepository } from "../../../../../db/finops-scad-runtime-attempt-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
@@ -13,6 +14,7 @@ import type {
   ScadPlatform,
 } from "../../../../../lib/finops-scad-allocation";
 import { SCAD_OFFICIAL_DEFINITION } from "../../../../../lib/finops-scad-official-definition";
+import { SCAD_CUR2_RUNTIME_BINDING } from "../../../../../lib/finops-scad-durable-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 export const dynamic = "force-dynamic";
 const CONNECTION = /^conn_[a-f0-9]{32}$/u;
@@ -55,6 +57,22 @@ const ALLOWED = new Set([
   "showbackBy",
 ]);
 const FRESH = 48;
+async function collectionState(scope: { readonly organizationId: string; readonly customerId: string;
+  readonly connectionId: string }): Promise<{ readonly available: boolean;
+    readonly lifecycleState: "UNAVAILABLE" | "COLLECTING" | "FAILED" | "READY";
+    readonly reason: string | null; readonly latestAttempt: unknown }> {
+  // Compatibility reason remains SCAD_CUR2_MATERIALIZER_JOB_HANDLER_NOT_REGISTERED until shared registration.
+  if (!SCAD_CUR2_RUNTIME_BINDING.registeredInSharedRuntime) return { available: false,
+    lifecycleState: "UNAVAILABLE", reason: SCAD_CUR2_RUNTIME_BINDING.activationReason, latestAttempt: null };
+  const latest = await new ScadCur2RuntimeAttemptRepository().latest(scope);
+  if (latest === null || latest.state === "IN_PROGRESS" || latest.state === "PERSISTED") {
+    return { available: true, lifecycleState: "COLLECTING", reason: null, latestAttempt: latest };
+  }
+  if (latest.state === "FAILED" || latest.state === "RETRYABLE_FAILED") {
+    return { available: true, lifecycleState: "FAILED", reason: latest.failureCode, latestAttempt: latest };
+  }
+  return { available: true, lifecycleState: "READY", reason: null, latestAttempt: latest };
+}
 function bad(): never {
   throw Object.assign(new Error("The SCAD allocation request is invalid"), {
     code: "INVALID_INPUT",
@@ -146,9 +164,10 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
     };
     const repository = new ScadAllocationRepository();
-    const [heads, history] = await Promise.all([
+    const [heads, history, collection] = await Promise.all([
       repository.listActiveSnapshots(scope),
       repository.listHistory(scope),
+      collectionState(scope),
     ]);
     if (heads.length === 0)
       return jsonResponse({
@@ -157,11 +176,8 @@ export async function GET(request: Request): Promise<Response> {
         sourceState: history[0]?.state ?? "CONFIGURATION_REQUIRED",
         dashboard: null,
         officialDefinition: SCAD_OFFICIAL_DEFINITION,
-        latestAttempt: history[0] ?? null,
-        collection: {
-          available: false,
-          reason: "SCAD_CUR2_MATERIALIZER_JOB_HANDLER_NOT_REGISTERED",
-        },
+        latestAttempt: collection.latestAttempt,
+        collection,
         limitations: [
           "No complete accepted SCAD billing-period generation is available.",
         ],
@@ -210,14 +226,12 @@ export async function GET(request: Request): Promise<Response> {
           billingPeriodStartAt: head.snapshot.billingPeriodStartAt,
         })),
       },
-      latestAttempt: history[0] ?? null,
-      collection: {
-        available: false,
-        reason: "SCAD_CUR2_MATERIALIZER_JOB_HANDLER_NOT_REGISTERED",
-      },
+      latestAttempt: collection.latestAttempt,
+      collection,
       limitations: [
         ...dashboard.limitations,
-        "The permanent S3/CUR2 materializer and durable job handler remain provider-validation gates.",
+        ...(collection.lifecycleState === "UNAVAILABLE"
+          ? ["The permanent S3/CUR2 materializer is complete but remains outside the shared runtime registry."] : []),
         ...(newerIncomplete
           ? [
               "A newer incomplete or corrected delivery did not displace its complete accepted billing-period head.",

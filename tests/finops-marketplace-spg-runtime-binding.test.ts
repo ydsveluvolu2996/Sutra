@@ -75,6 +75,11 @@ const BOUNDARY: MarketplaceSpgServerBoundary = {
     amountColumns: "BILLED_AND_AMORTIZED_SEPARATE",
     currencyHandling: "MULTI_CURRENCY_ROW_LEVEL",
   },
+  approvedProductTypes: [{
+    productId: "prod-001",
+    type: "SOFTWARE",
+    evidenceId: `fss_${"d".repeat(64)}`,
+  }],
 };
 const JOB: RunnableJob = {
   id: `job_${"9".repeat(32)}`,

@@ -280,7 +280,7 @@ export const PRICING_CHANGE_OFFICIAL_DEFINITION = Object.freeze({
   disclosures: Object.freeze([
     "The complete public definition proves exact QuickSight object inventory, not pixel, geometry, interaction-tree or runtime parity.",
     "The pinned manifest is v1.1.0 while its public changelog currently documents v1.0.1; neither value is rewritten.",
-    "The upstream Athena view detects historical billed-rate changes in CUR, while Sutra's unfinished engine compares version-pinned public Price List files against held-constant CUR2 usage; the two methods are not represented as equivalent.",
+    "The upstream Athena view detects historical billed-rate changes in CUR, while Sutra compares version-pinned public Price List files against held-constant CUR2 usage; the two methods are not represented as equivalent.",
     "Historical AWS Price List provider registration, full-generation CUR2 reading, mapping reconciliation, two-tenant proof, release-SHA review, immutable image deployment and production acceptance remain open.",
   ]),
 } as const);

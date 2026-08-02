@@ -94,6 +94,7 @@ import {
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   END_USER_COMPUTING_PERMISSION_PACK_VERSION,
+  GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -236,6 +237,11 @@ import {
   parseEndUserComputingProviderRouteRequest,
   runEndUserComputingProviderRoute,
 } from "./end-user-computing-provider-route.js";
+import { GravitonProviderAdapterError, type GravitonProviderReader,
+  GRAVITON_PROVIDER_BOUNDS } from "./graviton-savings-provider-adapter.js";
+import { createGravitonSavingsSdkReader } from "./graviton-savings-sdk-reader.js";
+import { GRAVITON_PROVIDER_ROUTE, parseGravitonProviderRouteRequest,
+  runGravitonProviderRoute } from "./graviton-savings-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -250,6 +256,8 @@ const DCF_STEP_FUNCTIONS_BODY_LIMIT = 1_048_576;
 const DCF_STEP_FUNCTIONS_RESPONSE_LIMIT = 65 * 1024 * 1024;
 const END_USER_COMPUTING_BODY_LIMIT = 256 * 1024;
 const END_USER_COMPUTING_RESPONSE_LIMIT = 66 * 1024 * 1024;
+const GRAVITON_BODY_LIMIT = 64 * 1024;
+const GRAVITON_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -292,7 +300,8 @@ function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permi
     || value === AWS_HEALTH_PERMISSION_PACK_VERSION
     || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION
     || value === DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
-    || value === END_USER_COMPUTING_PERMISSION_PACK_VERSION;
+    || value === END_USER_COMPUTING_PERMISSION_PACK_VERSION
+    || value === GRAVITON_SAVINGS_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -504,6 +513,9 @@ export interface LocalCollectorServerOptions {
     readonly accountIds: readonly string[];
     readonly regions: readonly string[];
   }) => Promise<EndUserComputingCanonicalCostProjection>;
+  readonly gravitonSavingsReaderFactory?: (input:{readonly request:ReturnType<typeof parseGravitonProviderRouteRequest>})=>GravitonProviderReader;
+  readonly gravitonSavingsRoleBrokerFactory?: (input:{readonly registry:ScopedConnectionRegistry;
+    readonly principalArn:string;readonly region:string})=>Pick<AwsRoleBroker,"assumeValidatedGravitonSavingsSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -646,6 +658,8 @@ interface ServerContext {
   readonly endUserComputingCostProjectionLoader: NonNullable<
     LocalCollectorServerOptions["endUserComputingCostProjectionLoader"]
   >;
+  readonly gravitonSavingsReaderFactory:NonNullable<LocalCollectorServerOptions["gravitonSavingsReaderFactory"]>;
+  readonly gravitonSavingsRoleBrokerFactory:NonNullable<LocalCollectorServerOptions["gravitonSavingsRoleBrokerFactory"]>;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
@@ -846,6 +860,8 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
         if (input.cur2.availability === "UNAVAILABLE") return { billingEvidence: null, costs: [] };
         throw new EndUserComputingProviderError("PROVIDER_RESPONSE_INVALID");
       }),
+    gravitonSavingsReaderFactory:options.gravitonSavingsReaderFactory??(()=>createGravitonSavingsSdkReader()),
+    gravitonSavingsRoleBrokerFactory:options.gravitonSavingsRoleBrokerFactory??createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1094,7 +1110,7 @@ async function dispatch(
       request,
       path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE ? DCF_STEP_FUNCTIONS_BODY_LIMIT
         : path === END_USER_COMPUTING_PROVIDER_ROUTE ? END_USER_COMPUTING_BODY_LIMIT
-          : BODY_LIMIT,
+          : path === GRAVITON_PROVIDER_ROUTE ? GRAVITON_BODY_LIMIT : BODY_LIMIT,
     );
     if (context.hostedRuntime && request.method === "GET" && path === "/readyz") {
       if (body.length !== 0) throw invalidRequest();
@@ -1288,6 +1304,27 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if(method==="POST"&&path===GRAVITON_PROVIDER_ROUTE){
+    const providerRequest=parseGravitonProviderRouteRequest(body),tenantId=exactHeader(headers,"x-sutra-tenant-id"),
+      customerId=exactHeader(headers,"x-sutra-customer-id"),connectionId=exactHeader(headers,"x-sutra-connection-id"),
+      requestId=exactHeader(headers,"x-sutra-request-id");
+    if(tenantId===null||customerId===null||connectionId===null||requestId===null)throw invalidRequest();
+    const lease=await claimConnectionOperation(context,connectionOperationKey(providerRequest.boundary.scope.orgId,
+      providerRequest.boundary.scope.connectionId));const controller=new AbortController();
+    const remaining=Math.max(1,Math.min(GRAVITON_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso)-context.now().getTime()));
+    const timer=setTimeout(()=>controller.abort(),remaining);timer.unref?.();
+    try{const broker=context.gravitonSavingsRoleBrokerFactory({registry:context.registry,
+      principalArn:context.principalArn,region:providerRequest.boundary.regions[0]!});
+      const result=await runGravitonProviderRoute({body,headers:{tenantId,customerId,connectionId,requestId},
+        signal:controller.signal},{now:()=>context.now().getTime(),readerFactory:context.gravitonSavingsReaderFactory,
+        assumeReadOnlySession:async input=>{const session=await broker.assumeValidatedGravitonSavingsSession(
+          {tenantId:input.tenantId},input.connectionId,input.requestId,{expectedAccountId:input.expectedAccountId,
+            partition:input.partition,region:input.region,sessionActions:input.sessionActions,signal:input.signal});
+          return{accountId:session.accountId,partition:session.partition,credentials:session.credentials};}});
+      return{status:200,body:result};
+    }finally{clearTimeout(timer);await context.operationCoordinator.release(lease);}
+  }
   if (method === "POST" && path === END_USER_COMPUTING_PROVIDER_ROUTE) {
     const providerRequest = parseEndUserComputingProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -4789,6 +4826,8 @@ async function sendSigned(
     ? AWS_BUDGETS_RESPONSE_LIMIT
     : path === END_USER_COMPUTING_PROVIDER_ROUTE
       ? END_USER_COMPUTING_RESPONSE_LIMIT
+    : path === GRAVITON_PROVIDER_ROUTE
+      ? GRAVITON_RESPONSE_LIMIT
     : path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE
       ? DCF_STEP_FUNCTIONS_RESPONSE_LIMIT
     : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
@@ -4881,6 +4920,10 @@ function safeHttpError(error: unknown): LocalHttpError {
       error.code,
       "End User Computing evidence collection did not complete",
     );
+  }
+  if(error instanceof GravitonProviderAdapterError){
+    const status=error.code==="INVALID_REQUEST"?400:error.code==="BOUND_REACHED"?413:error.code==="ABORTED"?504:502;
+    return new LocalHttpError(status,error.code,"Graviton Savings evidence collection did not complete");
   }
   if (error instanceof ComputeOptimizerExportObjectChunkError) {
     const status = error.code === "INVALID_REQUEST"

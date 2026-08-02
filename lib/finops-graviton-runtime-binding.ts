@@ -74,6 +74,11 @@ export interface GravitonRuntimeDependencies {
   }) => Promise<GravitonTenantBoundary>;
   readonly collector: GravitonSignedCollector | null;
   readonly store: GravitonSnapshotStore;
+  readonly prepareAttempt?: (
+    scope: GravitonTenantBoundary["scope"],
+    requestKey: `gvrq_${string}`,
+    scheduledWindow: string,
+  ) => Promise<void>;
   readonly loadReceipt: (
     scope: GravitonTenantBoundary["scope"],
     requestKey: `gvrq_${string}`,
@@ -81,6 +86,11 @@ export interface GravitonRuntimeDependencies {
   readonly verifyReceipt: (receipt: GravitonRuntimeReceipt) => Promise<boolean>;
   readonly sealEvidence: (evidence: Readonly<Record<string, unknown>>) => Promise<GravitonRuntimeReceipt["signature"]>;
   readonly recordReceipt: (receipt: GravitonRuntimeReceipt) => Promise<void>;
+  readonly recordFailure?: (
+    scope: GravitonTenantBoundary["scope"],
+    requestKey: `gvrq_${string}`,
+    code: "COLLECTION_FAILED" | "EVIDENCE_REJECTED",
+  ) => Promise<void>;
   readonly now?: () => number;
 }
 
@@ -293,6 +303,7 @@ export async function runGravitonDurableJob(
   };
   if (!validBoundary(boundary) || !sameScope(boundary.scope, expectedScope)) reject("SCOPE_MISMATCH");
   const requestKey = await deriveGravitonRequestKey(boundary, parsed.scheduledWindow);
+  await dependencies.prepareAttempt?.(boundary.scope, requestKey, parsed.scheduledWindow);
   const prior = await dependencies.loadReceipt(boundary.scope, requestKey);
   if (prior !== null) {
     if (!validReceipt(prior)
@@ -311,37 +322,55 @@ export async function runGravitonDurableJob(
       activationReason: null,
     };
   }
-  if (dependencies.collector === null) return {
-    status: "configuration_required" as const,
-    requestKey,
-    generationId: null,
-    sourceCollectionId: null,
-    state: "CONFIGURATION_REQUIRED",
-    becameActive: false,
-    replayed: false,
-    activationReason: GRAVITON_PROVIDER_ADAPTER_UNAVAILABLE,
-  };
+  if (dependencies.collector === null) {
+    await dependencies.recordFailure?.(boundary.scope, requestKey, "COLLECTION_FAILED");
+    return {
+      status: "configuration_required" as const,
+      requestKey,
+      generationId: null,
+      sourceCollectionId: null,
+      state: "CONFIGURATION_REQUIRED",
+      becameActive: false,
+      replayed: false,
+      activationReason: GRAVITON_PROVIDER_ADAPTER_UNAVAILABLE,
+    };
+  }
   const now = dependencies.now?.() ?? Date.now();
   if (!Number.isSafeInteger(now) || now < 0) reject("INVALID_JOB");
-  const result = await runGravitonMaterializationJob({
-    requestKey,
-    scheduledWindow: parsed.scheduledWindow,
-    boundary,
-    collector: dependencies.collector,
-    store: dependencies.store,
-    nowMs: now,
-  });
+  let result: Awaited<ReturnType<typeof runGravitonMaterializationJob>>;
+  try {
+    result = await runGravitonMaterializationJob({
+      requestKey,
+      scheduledWindow: parsed.scheduledWindow,
+      boundary,
+      collector: dependencies.collector,
+      store: dependencies.store,
+      nowMs: now,
+    });
+  } catch (error) {
+    await dependencies.recordFailure?.(boundary.scope, requestKey, "COLLECTION_FAILED");
+    throw error;
+  }
   if (!GENERATION.test(result.generationId) || !ID.test(result.sourceCollectionId)
     || !SOURCE_STATES.has(result.state) || typeof result.becameActive !== "boolean") {
+    await dependencies.recordFailure?.(boundary.scope, requestKey, "EVIDENCE_REJECTED");
     reject("EVIDENCE_REJECTED");
   }
   const completedAtIso = new Date(now).toISOString();
   const evidence = receiptEvidence({ requestKey, boundary, scheduledWindow: parsed.scheduledWindow, result, completedAtIso });
   const evidenceSha256 = await sha256(JSON.stringify(evidence));
-  const signature = await dependencies.sealEvidence({ ...evidence, evidenceSha256 });
+  let signature: GravitonRuntimeReceipt["signature"];
+  try { signature = await dependencies.sealEvidence({ ...evidence, evidenceSha256 }); }
+  catch {
+    await dependencies.recordFailure?.(boundary.scope, requestKey, "EVIDENCE_REJECTED");
+    reject("EVIDENCE_REJECTED");
+  }
   if (!ID.test(signature.keyId)
     || (signature.algorithm !== "ED25519" && signature.algorithm !== "ECDSA_P256_SHA256")
-    || !SIGNATURE_VALUE.test(signature.value)) reject("EVIDENCE_REJECTED");
+    || !SIGNATURE_VALUE.test(signature.value)) {
+    await dependencies.recordFailure?.(boundary.scope, requestKey, "EVIDENCE_REJECTED");
+    reject("EVIDENCE_REJECTED");
+  }
   const receipt: GravitonRuntimeReceipt = {
     schemaVersion: "sutra.graviton-runtime-receipt.v1",
     requestKey,

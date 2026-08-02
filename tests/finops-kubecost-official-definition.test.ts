@@ -43,7 +43,8 @@ test("ADD-06 maps only AWS-documented purposes and isolates supplemental OpenCos
     ["EKS Breakdown", "PARTIAL"],
   ]);
   assert.equal(definition.documentedControlTitles, null);
-  assert.match(definition.documentedAreas[2]?.remainingGap ?? "", /node capacity type or instance type/u);
+  assert.match(definition.documentedAreas[2]?.nativeEvidence ?? "", /62-column.*capacity type.*instance type/u);
+  assert.match(definition.documentedAreas[2]?.remainingGap ?? "", /QuickSight definition is unpublished/u);
   assert.equal(definition.supplementalOpenCost.supportedByOfficialAwsDashboard, false);
   assert.equal(definition.supplementalOpenCost.designation, "SUPPLEMENTAL_NOT_AWS_DASHBOARD_PARITY");
   assert.match(definition.supplementalOpenCost.disclosure, /never counted as official Kubecost dashboard coverage/u);

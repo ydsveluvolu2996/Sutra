@@ -141,6 +141,10 @@ export class AwsMarketplaceSpgRepository {
       .bind(scope.organizationId, scope.customerId, scope.connectionId, generationId).first<SnapshotRow>();
     return row === null ? null : materialize(row);
   }
+  public async getSnapshotByGeneration(scope: AwsMarketplaceSpgPersistenceScope, generationId: string) {
+    if (!GENERATION_ID.test(generationId)) reject();
+    return this.byGeneration(await this.live(scope), scope, generationId);
+  }
   public async recordCapture(expectedScope: AwsMarketplaceSpgScope, capture: AwsMarketplaceSpgCapture, nowMs = Date.now()) {
     const scope = { organizationId: expectedScope.orgId, customerId: expectedScope.customerId, connectionId: expectedScope.connectionId };
     assertScope(scope);

@@ -63,7 +63,7 @@ export type ScadCur2RuntimeResult =
   };
 
 export type ScadCur2ReplayClaim =
-  | { readonly state: "ACQUIRED"; readonly leaseToken: string }
+  | { readonly state: "ACQUIRED"; readonly leaseToken: string; readonly recoveredResult?: ScadCur2RuntimeResult | null }
   | { readonly state: "IN_PROGRESS" }
   | { readonly state: "COMPLETED"; readonly result: ScadCur2RuntimeResult; readonly resultSha256: string };
 
@@ -71,8 +71,10 @@ export interface ScadCur2ReplayStore {
   claim(input: { readonly key: string; readonly jobId: string; readonly leaseDurationMs: 1_860_000 }): Promise<ScadCur2ReplayClaim>;
   complete(input: { readonly key: string; readonly jobId: string; readonly leaseToken: string;
     readonly result: ScadCur2RuntimeResult; readonly resultSha256: string }): Promise<void>;
+  checkpoint?(input: { readonly key: string; readonly jobId: string; readonly leaseToken: string;
+    readonly result: ScadCur2RuntimeResult; readonly resultSha256: string }): Promise<void>;
   fail(input: { readonly key: string; readonly jobId: string; readonly leaseToken: string;
-    readonly failureCode: "SCAD_CUR2_RUNTIME_FAILED" }): Promise<void>;
+    readonly failureCode: "SCAD_CUR2_RUNTIME_FAILED"; readonly terminal?: boolean }): Promise<void>;
 }
 
 export interface ScadCur2RuntimeDependencies {
@@ -157,8 +159,11 @@ function validResult(value: unknown): value is ScadCur2RuntimeResult {
 function validClaim(value: unknown): value is ScadCur2ReplayClaim {
   if (!record(value) || typeof value.state !== "string") return false;
   if (value.state === "IN_PROGRESS") return exactKeys(value, ["state"]);
-  if (value.state === "ACQUIRED") return exactKeys(value, ["leaseToken", "state"])
-    && typeof value.leaseToken === "string" && LEASE.test(value.leaseToken);
+  if (value.state === "ACQUIRED") return (exactKeys(value, ["leaseToken", "state"])
+      && typeof value.leaseToken === "string" && LEASE.test(value.leaseToken))
+    || (exactKeys(value, ["leaseToken", "recoveredResult", "state"])
+      && typeof value.leaseToken === "string" && LEASE.test(value.leaseToken)
+      && (value.recoveredResult === null || validResult(value.recoveredResult)));
   return value.state === "COMPLETED" && exactKeys(value, ["result", "resultSha256", "state"])
     && validResult(value.result) && typeof value.resultSha256 === "string" && SHA.test(value.resultSha256);
 }
@@ -221,6 +226,12 @@ export async function runScadCur2RuntimeHandler(job: RunnableJob,
     if (await digest(claim.result) !== claim.resultSha256) reject("RUNTIME_FAILED");
     return { disposition: "REPLAYED", result: claim.result };
   }
+  if (claim.recoveredResult !== undefined && claim.recoveredResult !== null) {
+    const resultSha256 = await digest(claim.recoveredResult);
+    await dependencies.replayStore.complete({ key, jobId: job.id, leaseToken: claim.leaseToken,
+      result: claim.recoveredResult, resultSha256 });
+    return { disposition: "REPLAYED", result: claim.recoveredResult };
+  }
   try {
     const loadedBoundary = await dependencies.loadBoundary(parsed.scope);
     if (loadedBoundary.scope.orgId !== parsed.scope.organizationId
@@ -255,12 +266,15 @@ export async function runScadCur2RuntimeHandler(job: RunnableJob,
         becameActive: false, failureCodes: [error.code] };
     }
     if (!validResult(result)) reject("RUNTIME_FAILED");
+    const resultSha256 = await digest(result);
+    if (result.generationId !== null) await dependencies.replayStore.checkpoint?.({ key, jobId: job.id,
+      leaseToken: claim.leaseToken, result, resultSha256 });
     await dependencies.replayStore.complete({ key, jobId: job.id, leaseToken: claim.leaseToken,
-      result, resultSha256: await digest(result) });
+      result, resultSha256 });
     return { disposition: "EXECUTED", result };
   } catch {
     try { await dependencies.replayStore.fail({ key, jobId: job.id, leaseToken: claim.leaseToken,
-      failureCode: "SCAD_CUR2_RUNTIME_FAILED" }); } catch { /* preserve the primary failure */ }
+      failureCode: "SCAD_CUR2_RUNTIME_FAILED", terminal: job.attempt >= job.maxAttempts }); } catch { /* preserve the primary failure */ }
     reject("RUNTIME_FAILED");
   }
 }

@@ -26,7 +26,7 @@ const CAPTURE_ID = /^sustainability_[a-f0-9]{64}$/u;
 const GENERATION_ID = /^fbg_[a-f0-9]{64}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const EXPORT_NAME = /^[A-Za-z0-9_-]{1,128}$/u;
-const EXPORT_ARN = /^arn:aws:bcm-data-exports:[a-z0-9-]+:\d{12}:export\/[A-Za-z0-9_-]{1,128}$/u;
+const EXPORT_ARN = /^arn:aws:bcm-data-exports:[a-z0-9-]+:\d{12}:export\/[A-Za-z0-9_-]{1,200}$/u;
 const MODEL_VERSION = /^v\d+\.\d+\.\d+$/u;
 const MONTH = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const NON_NEGATIVE_INTEGER = /^(?:0|[1-9]\d{0,30})$/u;
@@ -122,6 +122,25 @@ export interface SustainabilityProxyNormalization {
   readonly evidenceVersion: string | null;
 }
 
+export type SustainabilityDimensionState = "ready" | "unavailable";
+export interface SustainabilityDimensionEvidence {
+  readonly state: SustainabilityDimensionState;
+  readonly value: string | null;
+  /** Exact provider/CUR2/reference column or governed classifier identifier. */
+  readonly sourceField: string | null;
+  readonly sourceVersion: string | null;
+}
+export interface SustainabilityProxyDimensions {
+  readonly processorArchitecture: SustainabilityDimensionEvidence;
+  readonly instanceFamily: SustainabilityDimensionEvidence;
+  readonly storageClass: SustainabilityDimensionEvidence;
+  readonly transferPath: SustainabilityDimensionEvidence;
+  readonly idleNetworkResource: SustainabilityDimensionEvidence;
+  readonly regionLatitudeE6: SustainabilityDimensionEvidence;
+  readonly regionLongitudeE6: SustainabilityDimensionEvidence;
+  readonly renewableEnergyClass: SustainabilityDimensionEvidence;
+}
+
 export interface SustainabilityCur2ProxyRow {
   readonly lineItemId: string;
   readonly usageAccountId: string;
@@ -139,6 +158,8 @@ export interface SustainabilityCur2ProxyRow {
   /** Only an explicitly selected CUR2 cost-allocation tag may populate these. */
   readonly workloadTagKey: string | null;
   readonly workloadTagValue: string | null;
+  /** v2 enrichment is optional for compatibility; absent means unavailable. */
+  readonly dimensions?: SustainabilityProxyDimensions;
 }
 
 export interface SustainabilityCur2ProxyEvidence {
@@ -455,16 +476,59 @@ function proxyNormalization(value: unknown): SustainabilityProxyNormalization {
   return { kind, numerator, denominator, evidenceSource, evidenceVersion };
 }
 
+function dimension(value: unknown): SustainabilityDimensionEvidence {
+  const record = exact(value, ["state", "value", "sourceField", "sourceVersion"]);
+  const state = choice(record.state, ["ready", "unavailable"] as const);
+  const parsedValue = nullableText(record.value, 256);
+  const sourceField = nullableText(record.sourceField, 256);
+  const sourceVersion = nullableText(record.sourceVersion, 256);
+  if (state === "ready") {
+    if (parsedValue === null || sourceField === null || sourceVersion === null) reject("INCOMPLETE_LINEAGE");
+  } else if (parsedValue !== null || sourceField !== null || sourceVersion !== null) {
+    reject("INCOMPLETE_LINEAGE");
+  }
+  return { state, value: parsedValue, sourceField, sourceVersion };
+}
+
+function proxyDimensions(value: unknown): SustainabilityProxyDimensions {
+  const record = exact(value, [
+    "processorArchitecture", "instanceFamily", "storageClass", "transferPath",
+    "idleNetworkResource", "regionLatitudeE6", "regionLongitudeE6",
+    "renewableEnergyClass",
+  ]);
+  const result = {
+    processorArchitecture: dimension(record.processorArchitecture),
+    instanceFamily: dimension(record.instanceFamily),
+    storageClass: dimension(record.storageClass),
+    transferPath: dimension(record.transferPath),
+    idleNetworkResource: dimension(record.idleNetworkResource),
+    regionLatitudeE6: dimension(record.regionLatitudeE6),
+    regionLongitudeE6: dimension(record.regionLongitudeE6),
+    renewableEnergyClass: dimension(record.renewableEnergyClass),
+  };
+  const coordinates = [result.regionLatitudeE6, result.regionLongitudeE6];
+  if (coordinates.some((entry) => entry.state === "ready")
+    && !coordinates.every((entry) => entry.state === "ready")) reject("INCOMPLETE_LINEAGE");
+  if (result.regionLatitudeE6.value !== null
+    && (!/^-?(?:[0-8]?\d|90)\d{6}$/u.test(result.regionLatitudeE6.value)
+      || !/^-?(?:1[0-7]\d|[0-9]?\d|180)\d{6}$/u.test(result.regionLongitudeE6.value ?? ""))) {
+    reject("INVALID_INPUT");
+  }
+  return result;
+}
+
 function proxyRow(
   value: unknown,
   allowedAccounts: ReadonlySet<string>,
   maximumMs: number,
 ): NormalizedSustainabilityProxyRow {
+  if (!isRecord(value)) reject("INVALID_INPUT");
+  const enhanced = Object.hasOwn(value, "dimensions");
   const record = exact(value, [
     "lineItemId", "usageAccountId", "service", "region", "resourceId",
     "usageStartIso", "usageEndIso", "usageType", "sourceUsageUnit",
     "sourceUsageQuantityMicros", "metric", "normalization", "workloadTagKey",
-    "workloadTagValue",
+    "workloadTagValue", ...(enhanced ? ["dimensions"] : []),
   ]);
   const usageAccountId = text(record.usageAccountId, 12);
   if (!ACCOUNT_ID.test(usageAccountId) || !allowedAccounts.has(usageAccountId)) reject("SCOPE_MISMATCH");
@@ -525,6 +589,7 @@ function proxyRow(
     workloadTagValue,
     metricUnit: PROXY_UNITS[metric],
     metricValueMicros: (product / denominator).toString(),
+    ...(enhanced ? { dimensions: proxyDimensions(record.dimensions) } : {}),
   };
 }
 
@@ -661,7 +726,10 @@ function carbonEvidence(
     || prefix.split("/").some((part) => part === "." || part === "..")
     || !GENERATION_ID.test(generationId) || !SHA256.test(manifestSha256)) reject("INVALID_INPUT");
   const arnMatch = /^arn:aws:bcm-data-exports:([a-z0-9-]+):(\d{12}):export\/([A-Za-z0-9_-]+)$/u.exec(exportArn);
-  if (arnMatch?.[1] !== exportRegion || arnMatch[2] !== scope.accountId || arnMatch[3] !== exportName) {
+  const exportResource = arnMatch?.[3] ?? "";
+  const resourceMatchesName = exportResource === exportName
+    || new RegExp(`^${exportName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}-[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`, "u").test(exportResource);
+  if (arnMatch?.[1] !== exportRegion || arnMatch[2] !== scope.accountId || !resourceMatchesName) {
     reject("SCOPE_MISMATCH");
   }
   if (!Array.isArray(record.schemaColumns)
@@ -952,6 +1020,7 @@ export interface SustainabilityCarbonDashboard {
     readonly unit: SustainabilityProxyUnit;
     readonly valueMicros: string;
     readonly sourceRowCount: number;
+    readonly dimensions?: SustainabilityProxyDimensions;
   })[];
   readonly providerCarbonSeries: readonly ({
     readonly usagePeriod: string;
@@ -982,7 +1051,7 @@ export function buildSustainabilityCarbonDashboard(
   const proxy = new Map<string, SustainabilityCarbonDashboard["proxySeries"][number]>();
   for (const row of snapshot.proxy.rows) {
     const usagePeriod = row.usageStartIso.slice(0, 7);
-    const key = [usagePeriod, row.usageAccountId, row.region ?? "", row.service, row.workloadTagKey ?? "", row.workloadTagValue ?? "", row.metric, row.metricUnit].join("\u0000");
+    const key = [usagePeriod, row.usageAccountId, row.region ?? "", row.service, row.workloadTagKey ?? "", row.workloadTagValue ?? "", row.metric, row.metricUnit, JSON.stringify(row.dimensions ?? null)].join("\u0000");
     const previous = proxy.get(key);
     proxy.set(key, {
       usagePeriod,
@@ -995,6 +1064,7 @@ export function buildSustainabilityCarbonDashboard(
       unit: row.metricUnit,
       valueMicros: ((previous === undefined ? BigInt(0) : BigInt(previous.valueMicros)) + BigInt(row.metricValueMicros)).toString(),
       sourceRowCount: (previous?.sourceRowCount ?? 0) + 1,
+      ...(row.dimensions === undefined ? {} : { dimensions: row.dimensions }),
     });
   }
   const providerCarbonSeries = snapshot.providerCarbon.rows.map((row) => ({

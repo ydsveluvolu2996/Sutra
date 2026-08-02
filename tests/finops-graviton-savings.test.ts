@@ -278,6 +278,13 @@ test("builds separate evidence-backed potential, provider, and realized savings"
   assert.equal(opportunity.realizedSavings?.observedSavings.amountMicros, "3000000");
   assert.equal(opportunity.realizedSavings?.kind, "MEASURED_REALIZED");
   assert.ok(opportunity.potentialSavings?.assumptionCodes.includes("NOT_A_SAVINGS_PROMISE"));
+  assert.equal(result.instanceMapping.length, 2);
+  const target = result.instanceMapping.find((row) => row.role === "TARGET")!;
+  assert.equal(target.architecture, "ARM64");
+  assert.equal(target.vcpu, 2);
+  assert.equal(target.memoryMiB, 8_192);
+  assert.equal(target.priceListVersion, "20260701000000");
+  assert.ok(target.evidenceIds.includes("source_metadata"));
 });
 
 test("does not infer compatibility from a Graviton-looking target name", () => {
@@ -426,7 +433,7 @@ function managedServiceCapture(
   const recommendation = value.recommendations[0]!;
   recommendation.recommendationAuthority = "AWS_SERVICE_INVENTORY_PRICING";
   recommendation.source.operation = resourceType === "OPENSEARCH_DOMAIN"
-    ? "opensearch:DescribeDomain"
+    ? "es:DescribeDomain"
     : "elasticache:DescribeReplicationGroups";
   recommendation.estimatedMonthlySavingsMicros = null;
   recommendation.estimatedSavingsCurrency = null;

@@ -1,11 +1,11 @@
 import { AwsConfigComplianceRepository } from "../../../../../db/finops-aws-config-compliance-repository";
+import { AwsConfigComplianceRuntimeRepository } from "../../../../../db/finops-aws-config-compliance-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
   requireApiSession,
 } from "../../../../../lib/api-auth";
 import { AWS_CONFIG_COMPLIANCE_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-config-compliance-official-definition";
-import { AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON } from "../../../../../lib/finops-aws-config-compliance-runtime-binding";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -102,14 +102,20 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
     };
     const repository = new AwsConfigComplianceRepository();
-    const [active, history] = await Promise.all([
+    const runtime = new AwsConfigComplianceRuntimeRepository();
+    const [active, history, collection] = await Promise.all([
       repository.getActiveSnapshot(scope),
       repository.getHistory(scope),
+      runtime.getRuntimeStatus(scope),
     ]);
     const latest = history[0] ?? null;
     if (active === null) {
       const sourceState =
-        latest === null || latest.state === "CONFIGURATION_REQUIRED"
+        collection.state === "collecting"
+          ? "collecting"
+          : collection.state === "failed"
+            ? "failed"
+        : latest === null || latest.state === "CONFIGURATION_REQUIRED"
           ? "configuration_required"
           : latest.state === "FAILED"
             ? "failed"
@@ -132,10 +138,8 @@ export async function GET(request: Request): Promise<Response> {
                 capturedAt: latest.capturedAt,
                 contentSha256: latest.contentSha256,
               },
-        activation: {
-          available: false,
-          reason: AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON,
-        },
+        collection,
+        activation: { available: true, reason: collection.reason },
       });
     }
 
@@ -249,14 +253,12 @@ export async function GET(request: Request): Promise<Response> {
               capturedAt: latest.capturedAt,
               contentSha256: latest.contentSha256,
             },
-      activation: {
-        available: false,
-        reason: AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON,
-      },
+      collection,
+      activation: { available: true, reason: collection.reason },
       limitations: [
         ...snapshot.limitations,
-        "The bounded server-owned collector/job contract is implemented; activation remains unavailable until its credential-owning adapter and durable handler are registered and provider-validated.",
-        "Tag-compliance fields and resource-specific configuration attributes are not collected by the minimized v1 inventory projection.",
+        "Tag-compliance fields and resource-specific configuration attributes remain unavailable until an authoritative versioned Config projection is configured.",
+        "Threat-informed and configuration-item event views remain unavailable; Security Hub and CloudTrail are not substituted for absent AWS Config evidence.",
       ],
     });
   } catch (error) {

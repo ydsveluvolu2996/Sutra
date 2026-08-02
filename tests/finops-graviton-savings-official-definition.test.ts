@@ -66,8 +66,9 @@ test("ADV-05 preserves the exact official sheet, visual, control and analysis ob
 
 test("ADV-05 sheet mappings expose native evidence limits without layout-parity claims", () => {
   const mapping = definition.sheets.find((sheet) => sheet.name === "Graviton Instance Mapping");
-  assert.equal(mapping?.coverage, "MODEL_ONLY");
-  assert.match(mapping?.remainingGap ?? "", /not implemented/u);
+  assert.equal(mapping?.coverage, "NATIVE_EVIDENCE_PARTIAL");
+  assert.match(mapping?.evidenceNote ?? "", /standalone mapping table/u);
+  assert.match(mapping?.remainingGap ?? "", /offering-class/u);
   assert.deepEqual(definition.sheets.find((sheet) => sheet.name === "EC2")?.nativeResourceTypes, [
     "EC2_INSTANCE",
     "AUTO_SCALING_GROUP",

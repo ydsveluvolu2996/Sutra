@@ -225,6 +225,18 @@ export type AmazonConnectCostRuntimeFailureCode =
   | "PERSISTENCE_REJECTED";
 
 export interface AmazonConnectCostImmutableEvidenceHandoff {
+  /**
+   * Durable implementations acquire the request lease before replay is read.
+   * The optional shape preserves the pure in-memory test seam while production
+   * repositories fail closed on concurrent or expired work.
+   */
+  prepareAttempt?(input: {
+    readonly scope: AmazonConnectCostInsightPersistenceScope;
+    readonly requestId: string;
+    readonly scheduledWindow: string;
+    readonly sourceBoundarySha256: string;
+    readonly nowMs: number;
+  }): Promise<void>;
   getAccepted(
     scope: AmazonConnectCostInsightPersistenceScope,
     requestId: string,
@@ -697,6 +709,17 @@ export async function runAmazonConnectCostRuntimeHandler(
     return { status: "unavailable", reason: AMAZON_CONNECT_COST_RUNTIME_ACTIVATION_REASONS.adapter };
   }
   const identity = await identityFor(boundary, parsed.scheduledWindow);
+  try {
+    await dependencies.handoff.prepareAttempt?.({
+      scope: parsed.scope,
+      requestId: identity.requestId,
+      scheduledWindow: parsed.scheduledWindow,
+      sourceBoundarySha256: identity.sourceBoundarySha256,
+      nowMs: currentTime(dependencies.now),
+    });
+  } catch {
+    reject("PERSISTENCE_REJECTED");
+  }
   let prior: AmazonConnectCostAcceptedRuntimeAttempt | null = null;
   try { prior = await dependencies.handoff.getAccepted(parsed.scope, identity.requestId); }
   catch {
@@ -727,9 +750,14 @@ export async function runAmazonConnectCostRuntimeHandler(
   );
   let result: AmazonConnectCostVerifiedMaterializerResult | null = null;
   try { result = await dependencies.materializer.collect(request, controller.signal); }
-  catch {
+  catch (error) {
+    const providerCode = typeof error === "object" && error !== null && "code" in error
+      ? String((error as { readonly code: unknown }).code) : "";
     const code: AmazonConnectCostRuntimeFailureCode = controller.signal.aborted
-      ? "MATERIALIZER_TIMEOUT" : "MATERIALIZER_UNAVAILABLE";
+      || providerCode === "TIMEOUT" ? "MATERIALIZER_TIMEOUT"
+      : providerCode === "AUTHENTICATION_FAILED" ? "MATERIALIZER_AUTHENTICATION_FAILED"
+      : providerCode === "RESPONSE_INVALID" || providerCode === "CAPTURE_REJECTED"
+        ? "CAPTURE_REJECTED" : "MATERIALIZER_UNAVAILABLE";
     await fail(dependencies, {
       scope: parsed.scope, requestId: identity.requestId,
       scheduledWindow: parsed.scheduledWindow, code,

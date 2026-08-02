@@ -24,6 +24,7 @@ export interface PricingChangeDashboardEnvelope {
   readonly connectionId: string;
   readonly source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE";
   readonly sourceState: SourceState;
+  readonly runtimeState: "unavailable" | "collecting" | "failed" | "ready";
   readonly officialDefinition: PricingChangeOfficialDefinition;
   readonly latestAttemptStatus: string | null;
   readonly report: PricingChangeSnapshot | null;
@@ -66,6 +67,8 @@ function parseEnvelope(value: unknown, connectionId: string): PricingChangeDashb
     || !new Set<SourceState>([
       "configuration_required", "waiting", "partial", "stale", "failed", "empty", "complete",
     ]).has(value.sourceState as SourceState)
+    || typeof value.runtimeState !== "string"
+    || !new Set(["unavailable", "collecting", "failed", "ready"]).has(value.runtimeState)
     || !isRecord(value.officialDefinition)
     || value.officialDefinition.schema !== PRICING_CHANGE_OFFICIAL_DEFINITION.schema
     || !isRecord(value.officialDefinition.source)

@@ -17,7 +17,7 @@ export interface CoraDashboardEnvelope extends CoraDashboardProjection {
   readonly officialDefinition: CoraOfficialDefinition;
   readonly freshness: { readonly dataThroughAt: string | null; readonly ageHours: number | null; readonly staleAfterHours: number };
   readonly evidence: Readonly<Record<string, unknown>>;
-  readonly collection: { readonly available: false; readonly reason: string };
+  readonly collection: { readonly state: "unavailable" | "collecting" | "failed" | "ready"; readonly reason: string; readonly lastAttemptAt: string | null };
   readonly disclosures: readonly string[];
 }
 
@@ -26,7 +26,7 @@ interface CoraConfigurationEnvelope {
   readonly sourceState: "configuration_required";
   readonly officialDefinition: CoraOfficialDefinition;
   readonly dashboard: null;
-  readonly collection: { readonly available: false; readonly reason: string };
+  readonly collection: CoraDashboardEnvelope["collection"];
 }
 
 const EMPTY_FILTERS: CoraDashboardFilters = {
@@ -108,6 +108,21 @@ function RecommendationTable({ rows, emptyMessage }: {
   </table></div>;
 }
 
+function CommitmentMatrix({ report, actionType }: {
+  readonly report: CoraDashboardEnvelope;
+  readonly actionType: "PurchaseSavingsPlans" | "PurchaseReservedInstances";
+}) {
+  const rows = (report.commitmentMatrices ?? []).filter((row) => row.actionType === actionType);
+  if (rows.length === 0) return <p className={styles.empty}>No normalized option matrix matches the current filters.</p>;
+  return <div className={styles.scroll}><table className={styles.table}>
+    <thead><tr><th>Service / offering</th><th>Level</th><th>Term</th><th>Upfront</th><th>Actions</th><th>Resource-safe monthly opportunity</th></tr></thead>
+    <tbody>{rows.map((row) => <tr key={[row.actionType, row.currencyCode, row.service, row.offeringType, row.level, row.term, row.upfront].join(":")}>
+      <td>{row.service}<br />{row.offeringType}</td><td>{row.level}</td><td>{row.term}</td><td>{row.upfront}</td>
+      <td>{row.deduplicatedActionCount}</td><td className={styles.estimate}>{money(row.estimatedMonthlySavingsAfterDiscountMicros ?? row.estimatedMonthlySavingsBeforeDiscountMicros, row.currencyCode)}</td>
+    </tr>)}</tbody>
+  </table><p className={styles.evidence}>Each matrix first retains the highest recommendation per identified resource within Rate and currency. Unknown provider text remains UNKNOWN; missing resource IDs remain separate.</p></div>;
+}
+
 function OfficialDefinitionCoverage({ definition }: {
   readonly definition: CoraOfficialDefinition;
 }) {
@@ -127,7 +142,7 @@ function OfficialDefinitionCoverage({ definition }: {
           {sheet.visuals.length === 0 ? <p>The pinned sheet contains no visual objects.</p> : <ul className={styles.definitionVisuals}>{sheet.visuals.map((item) => <li key={item.id}><span>{item.title}</span><small>{item.type} · <code>{item.id}</code></small></li>)}</ul>}
         </details>)}
       </div>
-      <p><strong>Preserved runtime gaps:</strong> The published Athena view SQL is pinned, but the credential-owning S3/Parquet adapter, live provider reconciliation, two-tenant proof, release-SHA gate, immutable image deployment, and production acceptance remain open. No pixel, layout, interaction-tree, or QuickSight runtime parity is claimed.</p>
+      <p><strong>Preserved runtime gaps:</strong> The published Athena view SQL, credential-owning bounded S3/Parquet adapter contract and strict signed route are implemented locally. The default SDK/Parquet factory, live provider reconciliation, two-tenant proof, release-SHA gate, immutable image deployment, and production acceptance remain open. No pixel, layout, interaction-tree, or QuickSight runtime parity is claimed.</p>
     </div>
   </details>;
 }
@@ -186,13 +201,13 @@ export function CoraDashboardReportView({ report, filters, onFiltersChange }: {
     </section>
     <section className={styles.section} aria-label="Rate Optimization - Savings Plans">
       <header className={styles.sectionHead}><h3>Rate Optimization — Savings Plans · Estimated savings</h3></header>
+      <CommitmentMatrix report={report} actionType="PurchaseSavingsPlans" />
       <RecommendationTable rows={savingsPlanRows} emptyMessage="No Savings Plans recommendations match the current filters." />
-      <p className={styles.evidence}>Term, upfront, and SP-level comparisons remain unavailable until those provider dimensions are normalized from the export.</p>
     </section>
     <section className={styles.section} aria-label="Rate Optimization - Reserved Instances">
       <header className={styles.sectionHead}><h3>Rate Optimization — Reserved Instances · Potential savings</h3></header>
+      <CommitmentMatrix report={report} actionType="PurchaseReservedInstances" />
       <RecommendationTable rows={reservedInstanceRows} emptyMessage="No Reserved Instance recommendations match the current filters." />
-      <p className={styles.evidence}>Service, term, upfront, and RI-level comparisons remain unavailable until those provider dimensions are normalized from the export.</p>
       {report.rowsTruncated ? <p className={styles.evidence}>Only the first 500 sorted rows are rendered. Refine filters before exporting.</p> : null}
     </section>
     <section className={styles.section} aria-label="Top Potential Savings Over Time"><header className={styles.sectionHead}><h3>Top Potential Savings Over Time · Daily evidence history</h3></header><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Collected</th><th>Data through</th><th>State</th><th>Recommendations</th><th>Raw per-currency opportunity evidence</th></tr></thead><tbody>{report.history.map((point) => <tr key={point.generationId}><td>{point.collectedAtIso}</td><td>{point.dataThroughAtIso ?? "Unavailable"}</td><td>{point.sourceState}</td><td>{point.recommendationCount}</td><td>{point.summaries.map((summary) => `${summary.optimizationClass}: ${money(summary.estimatedMonthlySavingsAfterDiscountMicros ?? summary.estimatedMonthlySavingsBeforeDiscountMicros, summary.currencyCode)}`).join(" · ") || "No accepted recommendations"}</td></tr>)}</tbody></table></div></section>
@@ -207,8 +222,9 @@ export function FinopsCoraDashboard({ connectionId }: { readonly connectionId: s
     report: CoraDashboardEnvelope | null;
     error: string | null;
     configurationRequired: boolean;
+    collectionState: CoraDashboardEnvelope["collection"] | null;
     officialDefinition: CoraOfficialDefinition | null;
-  }>({ report: null, error: null, configurationRequired: false, officialDefinition: null });
+  }>({ report: null, error: null, configurationRequired: false, collectionState: null, officialDefinition: null });
   useEffect(() => {
     if (connectionId === null) {
       return;
@@ -223,21 +239,27 @@ export function FinopsCoraDashboard({ connectionId }: { readonly connectionId: s
       })
       .then((report) => {
         if ("dashboard" in report && report.dashboard === null) {
-          setState({ report: null, error: null, configurationRequired: true, officialDefinition: report.officialDefinition });
+          setState({ report: null, error: null, configurationRequired: true, collectionState: report.collection, officialDefinition: report.officialDefinition });
           return;
         }
         setState({
           report: report as CoraDashboardEnvelope,
           error: null,
           configurationRequired: false,
+          collectionState: report.collection,
           officialDefinition: report.officialDefinition,
         });
       })
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "CORA dashboard request failed", configurationRequired: false, officialDefinition: null }); });
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "CORA dashboard request failed", configurationRequired: false, collectionState: null, officialDefinition: null }); });
     return () => controller.abort();
   }, [connectionId, filters]);
   if (connectionId === null) return <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before configuring CORA.</div>;
-  if (state.configurationRequired) return <section className={styles.root}><div role="status" className={`${styles.state} ${styles.warning}`}>Enable Cost Optimization Hub and bind an unfiltered COST_OPTIMIZATION_RECOMMENDATIONS Data Export before CORA can render provider evidence.</div>{state.officialDefinition === null ? null : <OfficialDefinitionCoverage definition={state.officialDefinition} />}</section>;
+  if (state.configurationRequired) {
+    const message = state.collectionState?.state === "collecting" ? "CORA collection is in progress. The dashboard will activate only after a complete immutable export is accepted."
+      : state.collectionState?.state === "failed" ? "The latest CORA collection failed. Review the sanitized collection reason and retry without replacing prior accepted history."
+        : "Enable Cost Optimization Hub and bind an unfiltered COST_OPTIMIZATION_RECOMMENDATIONS Data Export before CORA can render provider evidence.";
+    return <section className={styles.root}><div role="status" className={`${styles.state} ${state.collectionState?.state === "failed" ? styles.error : styles.warning}`}>{message}{state.collectionState === null ? null : <><br /><small>{state.collectionState.reason} · {state.collectionState.lastAttemptAt ?? "not started"}</small></>}</div>{state.officialDefinition === null ? null : <OfficialDefinitionCoverage definition={state.officialDefinition} />}</section>;
+  }
   if (state.error !== null) return <div role="alert" className={`${styles.state} ${styles.error}`}>{state.error}</div>;
   if (state.report === null || state.report.connectionId !== connectionId) return <div role="status" className={styles.state}>Loading CORA evidence…</div>;
   return <CoraDashboardReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;

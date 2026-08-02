@@ -88,6 +88,11 @@ export interface MarketplaceSpgServerBoundary {
     readonly crossAccountDiscoveryRequired: true;
   };
   readonly activeCur2: MarketplaceSpgActiveCur2Boundary;
+  readonly approvedProductTypes: readonly {
+    readonly productId: string;
+    readonly type: "SOFTWARE" | "DATA" | "PROFESSIONAL_SERVICES";
+    readonly evidenceId: string;
+  }[];
 }
 
 export interface MarketplaceSpgRuntimeBrokerRequest {
@@ -108,6 +113,7 @@ export interface MarketplaceSpgRuntimeBrokerRequest {
   };
   readonly buyerParty: "Acceptor";
   readonly billing: MarketplaceSpgActiveCur2Boundary;
+  readonly approvedProductTypes: MarketplaceSpgServerBoundary["approvedProductTypes"];
   readonly pagination: {
     readonly agreementPageSize: 50;
     readonly licenseManagerPageSize: 100;
@@ -343,7 +349,8 @@ function validBoundary(
   const coverage = value.accountCoverage;
   const license = value.licenseManager;
   const cur2 = value.activeCur2;
-  return exactKeys(value, ["scope", "accountCoverage", "licenseManager", "activeCur2"])
+  const approved = value.approvedProductTypes;
+  return exactKeys(value, ["scope", "accountCoverage", "licenseManager", "activeCur2", "approvedProductTypes"])
     && exactKeys(scope, [
       "orgId", "customerId", "connectionId", "accountId", "partition",
       "awsOrganizationId",
@@ -388,7 +395,14 @@ function validBoundary(
       === JSON.stringify(coverage.expectedAccountIds)
     && cur2.rowsExhausted === true
     && cur2.amountColumns === "BILLED_AND_AMORTIZED_SEPARATE"
-    && cur2.currencyHandling === "MULTI_CURRENCY_ROW_LEVEL";
+    && cur2.currencyHandling === "MULTI_CURRENCY_ROW_LEVEL"
+    && Array.isArray(approved) && approved.length <= AWS_MARKETPLACE_SPG_COLLECTION_BOUNDS.maximumAgreements
+    && approved.every((entry) => exactKeys(entry, ["productId", "type", "evidenceId"])
+      && /^[A-Za-z0-9][A-Za-z0-9_-]{0,254}$/u.test(entry.productId)
+      && new Set(["SOFTWARE", "DATA", "PROFESSIONAL_SERVICES"]).has(entry.type)
+      && SOURCE_GENERATION.test(entry.evidenceId))
+    && JSON.stringify(approved) === JSON.stringify([...approved].sort((left, right) => left.productId.localeCompare(right.productId)))
+    && new Set(approved.map((entry) => entry.productId)).size === approved.length;
 }
 
 function currentTime(now: (() => number) | undefined): number {
@@ -481,6 +495,7 @@ function requestFor(
         ...boundary.activeCur2.allowedLinkedAccountIds,
       ]),
     }),
+    approvedProductTypes: Object.freeze(boundary.approvedProductTypes.map((entry) => Object.freeze({ ...entry }))),
     pagination: Object.freeze({
       agreementPageSize: AWS_MARKETPLACE_SPG_COLLECTION_BOUNDS.agreementApiPageSize,
       licenseManagerPageSize:
@@ -527,6 +542,16 @@ function captureMatches(
     && capture.licenseManagerRegion === boundary.licenseManager.region
     && capture.licenseManagerSettings.organizationIntegrationEnabled === true
     && capture.licenseManagerSettings.crossAccountDiscoveryEnabled === true
+    && capture.agreements.every((agreement) => agreement.product === null
+      || (() => {
+        const approved = boundary.approvedProductTypes.find((entry) =>
+          entry.productId === agreement.product!.productId);
+        return approved === undefined
+          ? agreement.product!.approvedProductType === null
+            && agreement.product!.approvedProductTypeEvidenceId === null
+          : agreement.product!.approvedProductType === approved.type
+            && agreement.product!.approvedProductTypeEvidenceId === approved.evidenceId;
+      })())
     && cur2 !== null && sameScope(cur2.scope, boundary.scope)
     && cur2.generationId === boundary.activeCur2.generationId
     && cur2.sourceEvidenceId === boundary.activeCur2.sourceEvidenceId

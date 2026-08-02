@@ -1,8 +1,9 @@
 # AWS Pricing Change Analysis evidence contract
 
-Status: the pure normalization/repricing engine and focused tests are
-implemented. Collector, durable persistence, authenticated API, dashboard UI,
-and live AWS acceptance are not implemented by this slice.
+Status: the unique engine, complete active-generation reader, historical Price
+List collector, strict signed transport, durable replay/persistence,
+authenticated API, and dashboard UI are implemented locally. Shared runtime and
+IAM registration plus live AWS acceptance remain; production is not claimed.
 
 ## Capability boundary
 
@@ -154,24 +155,15 @@ client-safe errors.
 
 ## Remaining production gates
 
-1. Add timeout- and page-bounded `ListPriceLists` and
-   `GetPriceListFileUrl` collection through the authenticated AWS broker; hash
-   the exact responses/files before parsing and never pass credentials to the
-   web process.
-2. Add the two Pricing reads with `Resource: "*"` to the versioned collector
-   policy and exact broker attestation. This slice intentionally does not
-   change the central permission plan.
-3. Build the CUR 2.0-to-catalog applicability adapter, including an explicit
-   product/term mapping coverage report and tier-allocation evidence for any
-   non-flat price dimension.
-4. Persist immutable pricing snapshots/terms, active CUR generation IDs,
-   source hashes, comparison captures, and active heads under exact
-   organization/customer/connection scope.
-5. Add an authenticated tenant-scoped route and professional dashboard views
-   for service, payer, linked account, Region, effective-date timeline,
-   increases/decreases, exclusions, coverage, and source evidence.
-6. Run live tests in an approved AWS account against at least two known
+1. Register the completed signed route/client, durable handler and daily
+   scheduler, server-owned policy loader, complete CUR2 reader, and migrations
+   0128/0124 in the shared runtime.
+2. Add exactly the two Pricing reads with `Resource: "*"` to immutable
+   permission successor `standard-2026-08.17`; no package update is required
+   because `@aws-sdk/client-pricing` is already pinned at `3.1087.0`.
+3. Provider-verify the explicit CUR2 applicability subset and separately
+   approve tier-allocation evidence before non-flat dimensions can be modeled.
+4. Run live tests in an approved AWS account against at least two known
    historical catalog versions; independently reproduce rational totals, test
    stale/partial/no-usage/tier/cross-currency states, and retain signed
    acceptance evidence before production activation.
-

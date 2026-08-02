@@ -3,9 +3,9 @@
 Status: **PARTIAL_PIPELINE (local vertical)**. The pure Kubecost/OpenCost engine
 is now backed by a permanent six-hour scheduler/handler contract, strict
 exact-byte Ed25519 broker transport, version-pinned export acceptance,
-immutable attempt and accepted-head persistence, authenticated same-tenant API,
-and native UI. No exporter adapter or customer evidence is deployed by this
-change.
+immutable attempt and accepted-head persistence, a credential-owning exact-prefix
+provider adapter, authenticated same-tenant API, and native UI. No customer
+exporter or provider evidence is deployed by this change.
 
 ## Official scope coverage
 
@@ -46,11 +46,11 @@ official parity.
 
 | Official area | Implemented locally | Honest remaining gap |
 |---|---|---|
-| Self-hosted Kubecost, any tier | `KUBECOST` versioned S3 export contract; supplemental `OPENCOST` is disclosed separately | Customer exporter and signed ingest adapter are not deployed |
+| Self-hosted Kubecost, any tier | `KUBECOST` versioned S3 export contract plus strict signed, version-pinned Snappy Parquet provider route; supplemental `OPENCOST` is disclosed separately | Customer exporter and provider evidence are not deployed |
 | Container/pod/namespace/controller allocation | Full account → cluster → namespace → controller → workload → pod → container lineage with special allocations preserved | None for accepted source rows; null lineage stays unallocated |
 | Executive Summary | Exact total and CPU/RAM/GPU/network/PV/load-balancer/shared/external component cost by currency, CPU/RAM usage-vs-request efficiency, cost by account, and top clusters | None for accepted component-cost evidence |
-| Workloads Explorer | Tenant-bounded filters, exact rows, namespace/controller/workload pivots, allocation categories, pagination, efficiency, and filtered hourly allocated-cost trend | Exact QuickSight geometry remains a browser/live gate |
-| EKS Breakdown | Cluster distribution, coverage, group counts, and workload drilldown | Capacity type and instance type exist in the official dataset but are absent from Sutra's accepted export contract and are not inferred |
+| Workloads Explorer | Tenant-bounded filters, exact rows, namespace/controller/workload/node pivots, allocation categories, pagination, efficiency, and filtered daily allocated-cost trend | Exact QuickSight geometry remains a browser/live gate |
+| EKS Breakdown | Exact cluster, capacity type, instance type, node group, architecture, namespace and component-cost breakdown from the pinned 62-column export | Exact unpublished QuickSight geometry remains a browser/live gate |
 | Showback/chargeback | Reconciled namespace showback and usage-vs-request evidence | Read-only dashboard creates no invoices, journals, transfers, or chargeback posting |
 
 ## End-to-end assets
@@ -60,6 +60,13 @@ official parity.
 - Materialization job: `lib/finops-kubecost-allocation-job.ts`
 - Permanent runtime binding: `lib/finops-kubecost-runtime-binding.ts`
 - Signed export broker: `lib/finops-kubecost-signed-export-broker.ts`
+- Production composition: `lib/finops-kubecost-production-composition.ts`
+- Credential-owning provider adapter:
+  `services/aws-collector/src/kubecost-versioned-export-provider-adapter.ts`
+- Concrete head-then-version-pinned S3 SDK reader:
+  `services/aws-collector/src/kubecost-s3-sdk-reader.ts`
+- Strict signed provider route:
+  `services/aws-collector/src/kubecost-versioned-export-provider-route.ts`
 - Repository: `db/finops-kubecost-allocation-repository.ts`
 - Runtime-attempt repository: `db/finops-kubecost-runtime-attempt-repository.ts`
 - SQLite 0097: `drizzle/0097_finops_kubecost_allocation.sql`
@@ -129,25 +136,24 @@ special idle/shared/external/unallocated/unmounted costs are not redistributed.
    `KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED`.
 2. Provision the managed HTTPS broker origin, client signing key, broker
    verification key, nonce/replay store, and secret rotation process.
-3. Deploy its credential-owning read adapter for the exact tenant prefix and
-   keep the exporter writer on a separate identity.
+3. Register the implemented credential-owning read adapter for the exact tenant
+   prefix in the shared collector; keep the exporter writer on a separate identity.
 4. Bind it to an active reconciled CUR2 generation and validate S3 bucket-owner,
    prefix, object-versioning, Object Lock/lifecycle where applicable, KMS and IAM
    restrictions with real objects.
-5. Version the accepted schema for EKS node capacity and instance-type
-   dimensions; current evidence does not carry them and they are not inferred.
-6. Run live multi-account/cluster acceptance across complete, empty, mismatch,
+5. Run live multi-account/cluster acceptance across complete, empty, mismatch,
    partial, stale, waiting, error, and cross-tenant attacks.
-7. Run the exact-tree G7 gate, controlled provider/two-tenant G8 acceptance,
+6. Run the exact-tree G7 gate, controlled provider/two-tenant G8 acceptance,
    reviewed GitHub/release G9 gate, and deployed-digest/rollback G10 acceptance.
 
-Until those gates pass, the API returns
-`KUBECOST_SIGNED_VERSIONED_EXPORT_RUNTIME_NOT_REGISTERED` and this vertical is
-not locally verified or live.
+Until shared registration lands, the API reports the production composition as
+`AWAITING_SHARED_REGISTRY_HOOK` with runtime state `unavailable`. Provider/live
+and deployment gates remain separate after local registration.
 
 ## Focused verification
 
 The allocation engine, persistence/API/UI vertical, official-definition audit,
-and durable runtime suites pass **28/28 tests** with zero failures, skips, or
-cancellations. Root TypeScript, targeted ESLint, and `git diff --check` pass on
-the integrated tree.
+durable runtime, production composition, and provider-boundary suites pass
+**36/36 tests** with zero failures, skips, or cancellations. Root TypeScript,
+targeted collector TypeScript, targeted ESLint, secret scan, and
+`git diff --check` pass on the integrated tree.

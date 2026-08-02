@@ -97,25 +97,22 @@ QuickSight interaction parity.
 
 ## Acceptance state and exact gaps
 
-This is a **partial pipeline**, not a local vertical candidate or a
-production-accepted capability. The bounded job contract is implemented, but
-its credential-owning AWS adapter, replay store, and shared durable handler are
-not registered, so
-API activation is deliberately `available: false` with
-`AWS_CONFIG_COMPLIANCE_DURABLE_RUNTIME_NOT_REGISTERED`. No fixture or sample
+This is a complete unique vertical awaiting integration-owned shared registry
+wiring. The credential-owning AWS adapter, strict signed route, durable replay
+store, immutable history, deterministic scheduler, and production composition
+are implemented. API activation is `available: true` and reports explicit
+`unavailable`, `collecting`, `failed`, or `ready` state. No fixture or sample
 data is substituted.
 
 Remaining gates:
 
-1. Implement and provider-test the credential-owning adapter for the exact
-   bounded aggregator, Organizations, recorder, and rule-lifecycle operations,
-   including empty-page pagination; then register it with a permanent replay
-   store and the shared scheduler/handler runtime.
-2. Bind optional Config S3 delivery objects and reconciled active CUR 2.0 rows
-   to the capture without accepting browser-supplied AWS scope.
-3. Extend the minimized projection for required-tag compliance and the
+1. Provider-validate the bounded aggregator, Organizations, recorder, and
+   rule-lifecycle operations in each supported partition.
+2. Extend the minimized projection for required-tag compliance and the
    resource-specific EC2/EBS/S3/RDS/Lambda inventory fields used by the
    official dashboard; raw configuration documents remain forbidden.
+3. Add threat and configuration-item event views only after their authoritative
+   versioned evidence contracts exist; Security Hub and CloudTrail are not substitutes.
 4. Run controlled multi-account/Region AWS acceptance, cross-tenant rejection,
    partial recorder, insufficient-data, duplicate-rule, stale, denial,
    rollback, and exact deployed-digest tests.

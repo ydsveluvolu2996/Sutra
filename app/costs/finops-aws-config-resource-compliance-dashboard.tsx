@@ -14,6 +14,7 @@ import styles from "./finops-aws-config-resource-compliance-dashboard.module.css
 
 type SourceState =
   | "configuration_required"
+  | "collecting"
   | "partial"
   | "stale"
   | "failed"
@@ -139,7 +140,12 @@ interface ConfigComplianceReport {
     readonly rules: number;
     readonly nonCompliantResources: number;
   }[];
-  readonly activation: { readonly available: false; readonly reason: string };
+  readonly collection?: {
+    readonly state: "unavailable" | "collecting" | "failed" | "ready";
+    readonly reason: string;
+    readonly lastAttemptAt: string | null;
+  };
+  readonly activation: { readonly available: true; readonly reason: string };
   readonly limitations?: readonly string[];
 }
 
@@ -189,6 +195,7 @@ function parseReport(
     typeof value.sourceState !== "string" ||
     ![
       "configuration_required",
+      "collecting",
       "partial",
       "stale",
       "failed",
@@ -197,7 +204,7 @@ function parseReport(
     ].includes(value.sourceState) ||
     !hasPinnedOfficialDefinition(value.officialDefinition) ||
     !isRecord(value.activation) ||
-    value.activation.available !== false ||
+    value.activation.available !== true ||
     typeof value.activation.reason !== "string" ||
     (value.rules !== undefined && !Array.isArray(value.rules)) ||
     (value.evaluations !== undefined && !Array.isArray(value.evaluations)) ||
@@ -257,12 +264,19 @@ function statePresentation(
       detail: request.message,
     };
   const state = request.report.sourceState;
+  if (state === "collecting")
+    return {
+      view: "loading",
+      title: "AWS Config collection is in progress",
+      detail:
+        "The durable collector owns an active lease; the last accepted generation is never replaced until normalization and persistence complete.",
+    };
   if (state === "configuration_required")
     return {
       view: state,
-      title: "The permanent AWS Config collector is not active",
+      title: "AWS Config evidence is not configured",
       detail:
-        "The bounded server-owned collector/job contract exists, but activation is disabled until its credential-owning adapter and durable handler are registered.",
+        "Configure the exact organization aggregator, account evidence, expected Regions, and role connections before collection starts.",
     };
   if (state === "partial")
     return {
@@ -475,6 +489,19 @@ export function FinopsAwsConfigResourceComplianceReportView({
   ].sort();
   return (
     <div className={styles.workspace}>
+      <section className={styles.panel} aria-label="AWS Config collection runtime status">
+        <header>
+          <div>
+            <p>Collection runtime</p>
+            <h3>{report.collection?.state ?? "unavailable"}</h3>
+          </div>
+          <span>{report.collection?.reason ?? report.activation.reason}</span>
+        </header>
+        <p>
+          Credential-owning collection is enabled. Tag, threat-informed, and configuration-item event
+          projections remain explicitly unavailable until their authoritative versioned contracts exist.
+        </p>
+      </section>
       <section
         className={styles.filters}
         aria-label="AWS Config compliance filters"

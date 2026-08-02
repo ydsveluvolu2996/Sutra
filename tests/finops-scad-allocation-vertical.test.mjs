@@ -537,7 +537,9 @@ test("native visual renders executive, CPU/GPU/RAM, explorers, frameworks, showb
       evidence: { acceptedHeads: [`scg_${"e".repeat(64)}`] },
       collection: {
         available: false,
+        lifecycleState: "UNAVAILABLE",
         reason: "SCAD_CUR2_MATERIALIZER_JOB_HANDLER_NOT_REGISTERED",
+        latestAttempt: null,
       },
     };
     const html = renderToStaticMarkup(

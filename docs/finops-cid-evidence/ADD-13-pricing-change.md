@@ -3,12 +3,13 @@
 Reviewed: **2026-08-01** against AWS Guidance and immutable AWS CID framework
 commit `f9e36d88c47709f10e8fa784ad11d5cc0e728021`.
 
-Status: **PARTIAL_PIPELINE**. A bounded exact-arithmetic engine, server-owned
-CUR2-to-catalog materialization job, immutable sealed-evidence metadata
-repository, authenticated same-tenant read API, and native responsive dashboard
-view now exist locally. The historical AWS Price List provider adapter, durable
-job-handler registration, live AWS acceptance, and production activation remain
-open.
+Status: **IMPLEMENTED_AWAITING_SHARED_REGISTRATION_AND_LIVE_ACCEPTANCE**. The
+unique vertical includes the exact-arithmetic engine, full-generation CUR2
+reader, credential-owning historical Price List adapter, replay-protected signed
+route/client, durable accepted replay and failure audit, sealed-evidence
+metadata, authenticated same-tenant API, explicit runtime states, and native
+responsive UI. Shared runtime/IAM registration, live AWS acceptance, and
+production activation remain open and are not claimed here.
 
 ## Official capability audit
 
@@ -101,6 +102,21 @@ as equivalent.
   organization/customer/connection/policy/window tuple, jobs have exactly five
   attempts, and the shared-runner adapter treats unavailable activation as a
   failed job instead of silently completing it.
+- `db/finops-pricing-change-cur2-reader.ts` keyset-pages every line in the exact
+  active generation, verifies the active manifest/count/object boundary, and
+  emits only explicit CUR2 usage dimensions. It has no 1,000-row UI ceiling.
+- `services/aws-collector/src/pricing-change-aws-sdk-reader.ts`,
+  `pricing-change-provider-adapter.ts`, and `pricing-change-provider-route.ts`
+  exhaust the two historical Price List operations, bound downloads and terms,
+  reject replay/substitution, and retain ambiguous or unsupported mappings as
+  missing rather than choosing a neighboring product, rate, or current price.
+- `lib/finops-pricing-change-signed-broker.ts` signs exact request bytes that
+  include the content-bound CUR2 artifact and verifies the signed response,
+  request hash, capture hash, tenant boundary, and engine semantics.
+- `drizzle/0128_finops_pricing_change_runtime.sql`, PostgreSQL `0124`,
+  `db/finops-pricing-change-runtime-repository.ts`, and
+  `lib/finops-pricing-change-production-composition.ts` add immutable accepted
+  replay, redacted failure audit, and production composition.
 - `drizzle/0088_finops_pricing_change_materializations.sql` and
   `postgres/migrations/0083_finops_pricing_change_materializations.sql` add
   append-only lineage/count metadata and complete-only monotonic active heads.
@@ -179,25 +195,28 @@ No state treats missing delivery as zero usage or zero impact.
   `tests/finops-pricing-change-route-ui-contract.test.mjs`
 - Pinned artifacts, exact QuickSight totals, source-proven purposes and dataset
   boundaries: `tests/finops-pricing-change-official-definition.test.ts`
+- Full CUR2 exhaustion, immutable runtime replay, signed broker capture-hash
+  substitution, exact historical SDK matching, ambiguous-SKU denial, and route
+  replay: `tests/finops-pricing-change-production-closure.test.mjs`,
+  `tests/finops-pricing-change-signed-broker.test.ts`, and
+  `services/aws-collector/test/pricing-change-provider.test.ts`
 
 ## Remaining production gates
 
-1. Register the existing durable handler for
+1. Register the completed durable handler for
    `finops-pricing-change-materialize`, its daily scheduler, and its server
-   policy and active-CUR2 loaders. The existing billing repository is
-   authoritative, but a bounded materializer reader must page the complete
-   selected `fbg_` generation rather than using its 1,000-row UI query ceiling.
-2. Implement and register the timeout/page/byte-bounded authenticated AWS
-   adapter for historical `pricing:ListPriceLists` and
-   `pricing:GetPriceListFileUrl` JSON files. No adapter is currently claimed.
-3. Build and provider-verify the complete CUR2 product/term applicability map,
-   including explicit tier allocation evidence. Unmapped or tier-ambiguous rows
-   must remain exclusions.
-4. Run controlled AWS acceptance against at least two known historical catalog
+   policy/active-CUR2 loaders, signed provider route, migrations 0128/0124, and
+   immutable `standard-2026-08.17` successor containing only the two Pricing
+   reads. The SDK dependency is already pinned; no package delta is required.
+2. Provider-verify the versioned exact CUR2 product/term applicability subset
+   and add separately governed tier-allocation evidence before any tiered rate
+   can be modeled. Unmapped, ambiguous, Savings Plan, and tiered rows remain
+   explicit exclusions meanwhile.
+3. Run controlled AWS acceptance against at least two known historical catalog
    versions, independently reproduce totals, prove cross-tenant denial, retain
    signed evidence, and pass exact-image rollback/post-deploy gates.
 
 Until these gates pass, activation is deliberately returned as
 `available: false` with
 `AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED`, and ADD-13 must not be
-marked local-verified, live-accepted, or production-ready.
+marked live-accepted or production-ready.

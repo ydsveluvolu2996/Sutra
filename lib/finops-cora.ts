@@ -274,6 +274,23 @@ export interface CoraRecommendationCapture {
   readonly restartNeeded: boolean;
   readonly rollbackPossible: boolean;
   readonly tags: readonly CoraRecommendationTag[];
+  /**
+   * Normalized only from the pinned CORA v0.0.11 calculated-field contract.
+   * Provider adapters should populate this value, but the domain boundary
+   * independently derives and verifies it so a caller cannot substitute rate
+   * option dimensions or turn a summary string into invented savings.
+   */
+  readonly commitmentDimensions?: CoraCommitmentDimensions | null;
+}
+
+export interface CoraCommitmentDimensions {
+  readonly level: "PAYER" | "LINKED" | "UNKNOWN";
+  readonly term: "ONE_YEAR" | "THREE_YEARS" | "UNKNOWN";
+  readonly upfront: "NO_UPFRONT" | "PARTIAL_UPFRONT" | "ALL_UPFRONT" | "UNKNOWN";
+  readonly offeringType: string;
+  readonly service: "EC2" | "RDS" | "OPEN_SEARCH" | "ELASTICACHE" | "REDSHIFT" | "DYNAMODB" | "MEMORYDB" | "SAGEMAKER" | "COMPUTE" | "UNKNOWN";
+  readonly hourlyCommitment: string | null;
+  readonly instanceType: string | null;
 }
 
 export interface CoraHistoricalRecommendation {
@@ -566,6 +583,53 @@ function recommendationClass(actionType: CoraActionType): CoraOptimizationClass 
     : "RESOURCE_USAGE_OPTIMIZATION";
 }
 
+const RATE_DIMENSION_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:+/-]{0,255}$/u;
+const HOURLY_COMMITMENT = /^(?:0|[1-9]\d{0,18})(?:\.\d{1,12})?$/u;
+
+/**
+ * Reproduces the pinned v0.0.11 CORA calculated-field semantics without fuzzy
+ * provider inference. Unknown or changed provider text remains UNKNOWN/null.
+ */
+export function deriveCoraCommitmentDimensions(
+  item: Pick<CoraRecommendationCapture,
+    "actionType" | "currentResourceType" | "recommendedResourceType" | "currentResourceSummary" | "recommendedResourceSummary">,
+): CoraCommitmentDimensions | null {
+  if (item.actionType !== "PurchaseSavingsPlans" && item.actionType !== "PurchaseReservedInstances") return null;
+  const current = item.currentResourceSummary ?? "";
+  const recommended = item.recommendedResourceSummary ?? "";
+  const combined = `${current} ${recommended}`;
+  const level = /\bPayer\b/u.test(combined) ? "PAYER" as const
+    : /\bLinked\b/u.test(combined) ? "LINKED" as const : "UNKNOWN" as const;
+  const term = /\bthree years?\b/iu.test(recommended) ? "THREE_YEARS" as const
+    : /\bone years?\b/iu.test(recommended) ? "ONE_YEAR" as const : "UNKNOWN" as const;
+  const upfront = /\bPartialUpfront\b/u.test(recommended) ? "PARTIAL_UPFRONT" as const
+    : /\bAllUpfront\b/u.test(recommended) ? "ALL_UPFRONT" as const
+      : /\bNoUpfront\b/u.test(recommended) ? "NO_UPFRONT" as const : "UNKNOWN" as const;
+  const type = item.recommendedResourceType ?? item.currentResourceType ?? "Unknown";
+  const service = /^(?:Ec2|Compute)/u.test(type) ? (item.actionType === "PurchaseSavingsPlans" ? "COMPUTE" : "EC2")
+    : /^Rds/u.test(type) ? "RDS"
+      : /^OpenSearch/u.test(type) ? "OPEN_SEARCH"
+        : /^ElastiCache/u.test(type) ? "ELASTICACHE"
+          : /^Redshift/u.test(type) ? "REDSHIFT"
+            : /^Dynamo/u.test(type) ? "DYNAMODB"
+              : /^MemoryDb/u.test(type) ? "MEMORYDB"
+                : /^SageMaker/u.test(type) ? "SAGEMAKER" : "UNKNOWN";
+  const hourly = /^([^\s/]+)\/hour(?:\s|$)/u.exec(recommended)?.[1] ?? null;
+  const afterFor = /\/hour for ([^\s]+) in /u.exec(recommended)?.[1] ?? null;
+  const riInstance = item.actionType === "PurchaseReservedInstances"
+    ? /^\S+\s+(\S+)/u.exec(recommended)?.[1] ?? null : null;
+  return {
+    level,
+    term,
+    upfront,
+    offeringType: RATE_DIMENSION_TOKEN.test(type) ? type : "Unknown",
+    service,
+    hourlyCommitment: hourly !== null && HOURLY_COMMITMENT.test(hourly) ? hourly : null,
+    instanceType: afterFor !== null && RATE_DIMENSION_TOKEN.test(afterFor) ? afterFor
+      : riInstance !== null && RATE_DIMENSION_TOKEN.test(riInstance) ? riInstance : null,
+  };
+}
+
 function validateRecommendation(
   item: CoraRecommendationCapture,
   allowedAccounts: ReadonlySet<string>,
@@ -617,8 +681,14 @@ function validateRecommendation(
   const afterCost = money(item.estimatedMonthlyCostAfterDiscount, false);
   const beforeSavings = money(item.estimatedMonthlySavingsBeforeDiscount, true);
   const afterSavings = money(item.estimatedMonthlySavingsAfterDiscount, false);
+  const commitmentDimensions = deriveCoraCommitmentDimensions(item);
+  if (item.commitmentDimensions !== undefined
+    && JSON.stringify(item.commitmentDimensions) !== JSON.stringify(commitmentDimensions)) {
+    fail("INVALID_INPUT");
+  }
   return {
     ...item,
+    commitmentDimensions,
     optimizationClass: recommendationClass(item.actionType),
     estimates: {
       currencyCode: item.currencyCode,

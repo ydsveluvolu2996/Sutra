@@ -27,9 +27,13 @@ interface Envelope extends ScadDashboardProjection {
     readonly activeBillingGenerationId: string;
   }[];
   readonly evidence: Readonly<Record<string, unknown>>;
-  readonly collection: { readonly available: false; readonly reason: string };
+  readonly collection: CollectionState;
 }
-interface ScadConfigurationEnvelope { readonly dashboard: null; readonly officialDefinition: ScadOfficialDefinition }
+interface CollectionState { readonly available: boolean;
+  readonly lifecycleState: "UNAVAILABLE" | "COLLECTING" | "FAILED" | "READY";
+  readonly reason: string | null; readonly latestAttempt: unknown }
+interface ScadConfigurationEnvelope { readonly dashboard: null; readonly sourceState: string;
+  readonly officialDefinition: ScadOfficialDefinition; readonly collection: CollectionState }
 function hasPinnedOfficialDefinition(value: unknown): value is ScadOfficialDefinition { if (typeof value !== "object" || value === null) return false; const definition = value as Readonly<Record<string, unknown>>; const source = definition.source; return typeof source === "object" && source !== null && (source as Readonly<Record<string, unknown>>).commit === SCAD_OFFICIAL_DEFINITION.source.commit && (source as Readonly<Record<string, unknown>>).sha256 === SCAD_OFFICIAL_DEFINITION.source.sha256 && definition.documentedTabCountClaim === 3 && definition.documentedSectionCount === 5 && Array.isArray(definition.sections) && definition.sections.length === 5; }
 const EMPTY: ScadDashboardFilters = {
   accountId: null,
@@ -161,6 +165,17 @@ export function ScadAllocationReportView({
         ECS tasks, not container IDs. Shared/idle means AWS-attributed unused
         cost, not complete platform overhead.
       </div>
+      {report.collection.lifecycleState !== "READY" ? (
+        <div role={report.collection.lifecycleState === "FAILED" ? "alert" : "status"}
+          className={report.collection.lifecycleState === "FAILED" ? styles.error : styles.warning}>
+          Collection {report.collection.lifecycleState.toLocaleLowerCase().replaceAll("_", " ")}.
+          {report.collection.lifecycleState === "UNAVAILABLE"
+            ? " Accepted immutable evidence remains visible while shared runtime registration is pending."
+            : report.collection.lifecycleState === "COLLECTING"
+              ? " The accepted head remains stable until the new generation is complete."
+              : " The sanitized failure is retained in collection evidence; the accepted head was not displaced."}
+        </div>
+      ) : null}
       {warning ? (
         <div role="status" className={styles.warning}>
           {warning}
@@ -551,8 +566,10 @@ export function FinopsScadAllocationDashboard({
     report: Envelope | null;
     error: string | null;
     configuration: boolean;
+    collection: CollectionState | null;
     officialDefinition: ScadOfficialDefinition;
-  }>({ report: null, error: null, configuration: false, officialDefinition: SCAD_OFFICIAL_DEFINITION });
+  }>({ report: null, error: null, configuration: false, collection: null,
+    officialDefinition: SCAD_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -572,12 +589,14 @@ export function FinopsScadAllocationDashboard({
       .then((report) => {
         if (!hasPinnedOfficialDefinition(report.officialDefinition)) throw new Error("Sutra returned an unrecognized SCAD official definition");
         if ("dashboard" in report && report.dashboard === null)
-          setState({ report: null, error: null, configuration: true, officialDefinition: report.officialDefinition });
+          setState({ report: null, error: null, configuration: true, collection: report.collection,
+            officialDefinition: report.officialDefinition });
         else
           setState({
             report: report as Envelope,
             error: null,
             configuration: false,
+            collection: (report as Envelope).collection,
             officialDefinition: report.officialDefinition,
           });
       })
@@ -590,6 +609,7 @@ export function FinopsScadAllocationDashboard({
                 ? error.message
                 : "SCAD allocation request failed",
             configuration: false,
+            collection: null,
             officialDefinition: current.officialDefinition,
           }));
       });
@@ -602,6 +622,17 @@ export function FinopsScadAllocationDashboard({
       onFiltersChange={setFilters}
     />
   );
-  const status = connectionId === null ? <div role="status" className={styles.warning}>Connect an active AWS trust-role account before collecting SCAD.</div> : state.configuration ? <div role="status" className={styles.warning}>No complete SCAD billing-period generation has been accepted.</div> : state.error ? <div role="alert" className={styles.error}>{state.error}</div> : <div role="status" className={styles.warning}>Loading SCAD allocation evidence…</div>;
+  const status = connectionId === null
+    ? <div role="status" className={styles.warning}>Connect an active AWS trust-role account before collecting SCAD.</div>
+    : state.error ? <div role="alert" className={styles.error}>{state.error}</div>
+      : state.collection?.lifecycleState === "UNAVAILABLE"
+        ? <div role="status" className={styles.warning}>SCAD collection is unavailable until the provider and daily handler are registered. Existing immutable evidence remains readable.</div>
+        : state.collection?.lifecycleState === "FAILED"
+          ? <div role="alert" className={styles.error}>The latest SCAD collection failed. Its sanitized failure code is available in collection evidence.</div>
+          : state.collection?.lifecycleState === "COLLECTING"
+            ? <div role="status" className={styles.warning}>SCAD collection is running or waiting for its first immutable CUR2 delivery.</div>
+            : state.configuration
+              ? <div role="status" className={styles.warning}>Collection is ready, but no complete SCAD billing-period generation has been accepted yet.</div>
+              : <div role="status" className={styles.warning}>Loading SCAD allocation evidence…</div>;
   return <section className={styles.root}>{status}<ScadOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

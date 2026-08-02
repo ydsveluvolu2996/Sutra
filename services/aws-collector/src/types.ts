@@ -97,6 +97,9 @@ export const DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION =
  */
 export const END_USER_COMPUTING_PERMISSION_PACK_VERSION =
   "standard-2026-08.11" as const;
+/** Immutable successor for ADV-05 Graviton Savings exact read-only APIs. */
+export const GRAVITON_SAVINGS_PERMISSION_PACK_VERSION =
+  "standard-2026-08.12" as const;
 /**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
@@ -121,6 +124,7 @@ export type PermissionPackVersion =
   | typeof RESILIENCE_VUE_PERMISSION_PACK_VERSION
   | typeof DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
   | typeof END_USER_COMPUTING_PERMISSION_PACK_VERSION
+  | typeof GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

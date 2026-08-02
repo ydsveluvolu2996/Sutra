@@ -4,6 +4,7 @@ import type { KubecostAllocationGroup, KubecostAllocationKind, KubecostAllocatio
 export interface KubecostDashboardFilters {
   readonly accountId?: string; readonly clusterId?: string; readonly namespace?: string;
   readonly controllerKind?: string; readonly controller?: string; readonly workload?: string;
+  readonly nodeCapacityType?: string; readonly nodeInstanceType?: string;
   readonly allocationKind?: KubecostAllocationKind; readonly currency?: string;
   readonly limit?: number; readonly cursor?: string;
 }
@@ -67,6 +68,8 @@ export function buildKubecostDashboard(snapshot: KubecostAllocationSnapshot, fil
   const groups = snapshot.groups.filter((group) => matches(group.usageAccountId, filters.accountId) && matches(group.clusterId, filters.clusterId)
     && matches(group.namespace, filters.namespace) && matches(group.controllerKind, filters.controllerKind)
     && matches(group.controller, filters.controller) && matches(group.workload, filters.workload)
+    && matches(group.nodeCapacityType, filters.nodeCapacityType)
+    && matches(group.nodeInstanceType, filters.nodeInstanceType)
     && matches(group.allocationKind, filters.allocationKind) && matches(group.currency, filters.currency));
   const offset = cursor === "" ? 0 : Number(cursor.slice(3)); if (!Number.isSafeInteger(offset) || offset > groups.length) throw new Error("INVALID_KUBECOST_DASHBOARD_QUERY");
   const rows = groups.slice(offset, offset + limit); const nextCursor = offset + rows.length < groups.length ? `v1:${offset + rows.length}` : null;
@@ -82,10 +85,14 @@ export function buildKubecostDashboard(snapshot: KubecostAllocationSnapshot, fil
       namespaces: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.namespace ?? "UNALLOCATED")),
       controllers: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => `${group.controllerKind ?? "NONE"}/${group.controller ?? "UNALLOCATED"}`)),
       workloads: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.workload ?? "UNALLOCATED")),
+      nodes: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.node ?? "UNALLOCATED")),
+    },
+    eksBreakdown: {
+      capacityTypes: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.nodeCapacityType ?? "UNAVAILABLE")),
+      instanceTypes: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.nodeInstanceType ?? "UNAVAILABLE")),
+      nodeGroups: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.nodeGroup ?? "UNAVAILABLE")),
+      architectures: currencies.flatMap((currency) => aggregate(groups.filter((group) => group.currency === currency), (group) => group.nodeArchitecture ?? "UNAVAILABLE")),
     },
     reconciliation: snapshot.reconciliation, coverage: snapshot.coverage, source: snapshot.exportLineage,
-    unsupported: {
-      eksCapacityInstanceType: "The Kubecost allocation contract does not carry EKS node capacity type or EC2 instance type dimensions.",
-    },
   };
 }

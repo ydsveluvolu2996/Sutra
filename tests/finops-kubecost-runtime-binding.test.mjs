@@ -79,7 +79,7 @@ function emptyCapture(overrides = {}) {
       exporterName: "sutra-kubecost-exporter",
       exporterVersion: "1.0.0",
       schemaName: "sutra.kubecost-opencost-allocation",
-      schemaVersion: "1.0.0",
+      schemaVersion: "2.0.0",
       schemaSha256: "1".repeat(64),
       manifestSha256: "2".repeat(64),
       querySha256: "3".repeat(64),
@@ -89,7 +89,7 @@ function emptyCapture(overrides = {}) {
       query: {
         windowStartIso: "2026-07-01T00:00:00.000Z",
         windowEndIso: "2026-08-01T00:00:00.000Z",
-        step: "1h",
+        step: "1d",
         accumulate: false,
         rawAllocationLineage: true,
         shareIdle: false,

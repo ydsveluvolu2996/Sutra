@@ -2,8 +2,8 @@
 import { getRawDb } from "./index";
 import type { EndUserComputingBoundary } from "../lib/finops-end-user-computing.ts";
 import type { EndUserComputingRuntimeContext } from "../lib/finops-end-user-computing-runtime-binding.ts";
+import { END_USER_COMPUTING_RUNTIME_PERMISSION_PACK_SQL } from "../lib/finops-permission-pack-successors.ts";
 
-const PACK = "standard-2026-08.11";
 const ACCOUNT = /^\d{12}$/u;
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
 const CONNECTION = /^conn_[a-f0-9]{32}$/u;
@@ -49,7 +49,7 @@ export class EndUserComputingRuntimeContextRepository {
   public constructor(private readonly database:D1Database=getRawDb()){}
   private live=`FROM aws_connections c JOIN organizations o ON o.id=c.org_id AND o.status='active'
     JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status IN ('active','trial')
-    WHERE c.source_kind='aws_trust_role' AND c.status='active' AND c.permission_pack_version='${PACK}'`;
+    WHERE c.source_kind='aws_trust_role' AND c.status='active' AND c.permission_pack_version IN (${END_USER_COMPUTING_RUNTIME_PERMISSION_PACK_SQL})`;
   public async listEligibleBoundaries():Promise<readonly EndUserComputingBoundary[]>{const result=await this.database.prepare(
     `SELECT c.org_id,c.customer_id,c.id AS connection_id,c.aws_account_id AS account_id,c.partition,c.enabled_regions_json ${this.live} ORDER BY c.id ASC LIMIT ?`)
     .bind(MAX_BOUNDARIES+1).all<ConnectionRow>();const rows=result.results??[];if(rows.length>MAX_BOUNDARIES)throw new Error("END_USER_COMPUTING_BOUND_REACHED");

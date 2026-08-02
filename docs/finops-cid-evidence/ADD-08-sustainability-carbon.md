@@ -1,11 +1,12 @@
 # ADD-08 — Sustainability Proxy Metrics and Carbon Emissions
 
-Status: **PARTIAL_PIPELINE (runtime not registered or deployed)**. The fail-closed
-engine now has a server-owned dual-source boundary, deterministic daily
-scheduler identity, signed materializer response verification, canonical
-immutable evidence archive, sealed tenant-bound reference, accepted-attempt
-replay, immutable accepted head, authenticated tenant API, filtered trend
-projection, and native UI. It is still not a deployed provider pipeline.
+Status: **IMPLEMENTED_AWAITING_SHARED_REGISTRATION_AND_LIVE_ACCEPTANCE**. The
+unique vertical now includes the credential-owning export adapter, strict signed
+route, deterministic daily composition, durable accepted-attempt replay,
+redacted immutable failure audit, separated comparator, governed target version
+ledger/write route, versioned official dimensions, authenticated API, and native
+UI. Shared runtime/IAM registration and customer-account acceptance remain
+integration/deployment work and are not claimed here.
 
 ## Non-negotiable separation
 
@@ -31,13 +32,13 @@ Networking Proxies (4/4), Carbon Emissions (7/5), and About (2/0).
 
 | Capability | Local implementation | Honest gap |
 |---|---|---|
-| Regional Footprint | Region-filtered resource proxy evidence | Renewable-energy classification and map coordinates are absent from v1 and are not inferred |
-| Compute proxies | Exact normalized vCPU/resource monthly series with account, Region, service, metric and workload-tag filters | Processor architecture, EC2 instance family and official business-KPI denominator controls require a versioned schema |
-| Storage proxies | Exact normalized storage monthly series | EBS volume type and S3 storage class require a versioned schema |
-| Data-transfer/networking proxies | Exact normalized data-transfer monthly series | Transfer-path type and idle NAT Gateway/ELB resource evidence require a versioned schema |
-| Provider carbon export | Complete 23-column schema, objects/periods/model/publication lineage and separate monthly trends | Version-pinned export and S3 adapter not deployed |
+| Regional Footprint | Versioned coordinate and renewable-class evidence with source/version per value | Explicitly `unavailable` until a pinned regional reference is delivered; never inferred |
+| Compute proxies | Exact normalized monthly series plus evidence-gated processor architecture and instance family | Missing product columns remain `unavailable` |
+| Storage proxies | Exact normalized storage series plus evidence-gated EBS/S3 class | Missing storage classifier lineage remains `unavailable` |
+| Data-transfer/networking proxies | Exact normalized transfer series plus evidence-gated path and idle NAT/ELB dimensions | Missing classifier/query lineage remains `unavailable` |
+| Provider carbon export | Complete 23-column schema, objects/periods/model/publication lineage, versioned S3 adapter and separate monthly trends | Shared route/role registration and live export acceptance remain |
 | Trends | Independent exact proxy and provider-carbon trends | No mathematical combination or correlation claim |
-| Targets/workload-tag goals | Workload-tag goal inventory and explicit `NOT_CONFIGURED` states | Durable server-owned target configuration/write workflow remains open |
+| Targets/workload-tag goals | Authorized same-origin write route, append-only versions, immutable audit/history, active heads and `COLLECTING`/above/at-or-below evaluation | Live operator acceptance remains |
 | Technical resource plans | Metric-specific technical review actions with latest/prior direction | Each plan is explicitly not a carbon-reduction claim |
 | Provenance/states | Channel freshness, generation hashes, history, filters, configuration/waiting/empty/partial/stale/current states | Live customer acceptance remains open |
 
@@ -48,10 +49,18 @@ Networking Proxies (4/4), Carbon Emissions (7/5), and About (2/0).
 - Pinned official inventory: `lib/finops-sustainability-official-definition.ts`
 - Materialization contract: `lib/finops-sustainability-carbon-job.ts`
 - Permanent runtime boundary: `lib/finops-sustainability-carbon-runtime-binding.ts`
+- Production composition: `lib/finops-sustainability-carbon-runtime-composition.ts`
+- App-side signed broker: `lib/finops-sustainability-carbon-signed-broker.ts`
+- Credential adapter: `services/aws-collector/src/sustainability-carbon-provider-adapter.ts`
+- Strict signed route: `services/aws-collector/src/sustainability-carbon-route.ts`
 - Repository: `db/finops-sustainability-carbon-repository.ts`
+- Durable replay/failure repository: `db/finops-sustainability-runtime-repository.ts`
+- Target version repository: `db/finops-sustainability-target-repository.ts`
 - SQLite 0099: `drizzle/0099_finops_sustainability_carbon.sql`
 - PostgreSQL 0094: `postgres/migrations/0094_finops_sustainability_carbon.sql`
+- SQLite 0126 / PostgreSQL 0122: governed targets and durable runtime attempts
 - API: `app/api/v1/finops/sustainability-carbon/route.ts`
+- Target API: `app/api/v1/finops/sustainability-carbon/targets/route.ts`
 - UI: `app/costs/finops-sustainability-carbon-dashboard.tsx`
 
 The permanent runtime queues only organization/customer/connection identity and
@@ -95,26 +104,19 @@ hash, counts, and sheet inventory before accepting provider-backed envelopes,
 and renders the pinned source audit independently of report availability in
 disconnected, loading, configuration-required, and failed states.
 
-## Activation gaps
+## Remaining integration/deployment gates
 
-1. Register the daily job/handler and replace the API's legacy activation reason
-   after the runtime composition exists.
-2. Implement and deploy the server boundary loader, signed materializer adapter,
-   immutable evidence archive/sealer and transactional handoff ports.
-3. Deploy the active-CUR2 resource-proxy classifier with governed multiplier
-   metadata snapshots and reconciliation evidence.
-4. Provision and bind a version-pinned 23-column `CARBON_EMISSIONS` export with
-   exact-prefix S3 permissions and expected-owner enforcement.
-5. Add durable, authorized target configuration and audit history.
-6. Validate monthly/backfill/correction/empty/model-change/account-churn cases,
-   proxy freshness, carbon freshness, and cross-tenant attacks live.
+1. Register the unique daily handler and strict route in shared collector/runtime
+   registries and advance the shared onboarding/role-broker permission pack.
+2. Bind the production boundary loader, archive/sealer, exact-prefix S3 reader,
+   optional KMS decrypt, and the active reconciled CUR2 classifier.
+3. Provision the customer `CARBON_EMISSIONS` export and validate monthly,
+   backfill, correction, empty, model-change, account-churn and cross-tenant
+   cases against live AWS evidence.
 
-Until those pass, the current API continues to report
-`SUSTAINABILITY_CUR2_CARBON_MATERIALIZER_NOT_DEPLOYED`. The isolated binding
-also returns `SUSTAINABILITY_SERVER_DUAL_SOURCE_BOUNDARY_NOT_CONFIGURED` or
-`SUSTAINABILITY_SIGNED_MATERIALIZER_ADAPTER_NOT_DEPLOYED` explicitly. Its
-`registeredInSharedRuntime` marker remains `false`; this evidence does not claim
-provider acceptance, live data, production registration or deployment.
+Until shared registration passes, the API reports `runtimeState=unavailable`
+with `SUSTAINABILITY_CUR2_CARBON_MATERIALIZER_NOT_REGISTERED`. This evidence
+does not claim provider acceptance, production registration or deployment.
 
 ## Local verification
 
@@ -126,3 +128,7 @@ provider acceptance, live data, production registration or deployment.
   policy pins, signed archive evidence, deterministic replay, unavailable
   states, partial-carbon non-activation, boundary/signature/CUR2/carbon/archive
   substitution, and provider-error redaction.
+- Closure tests cover versioned dimension lineage, unavailable values, governed
+  target evaluation, immutable target/runtime migrations and authorized writes.
+- Collector tests cover export/comparator separation, prefix substitution,
+  comparator exhaustion, read-only action pins and bounded credential-side data.

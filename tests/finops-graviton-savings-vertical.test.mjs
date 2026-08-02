@@ -253,7 +253,7 @@ test("materialization job pins all four service families and rejects tenant subs
     "OPENSEARCH",
     "ELASTICACHE",
   ]);
-  assert.ok(request.operations.includes("opensearch:DescribeDomain"));
+  assert.ok(request.operations.includes("es:DescribeDomain"));
   assert.ok(
     request.operations.includes("elasticache:DescribeReplicationGroups"),
   );
@@ -284,6 +284,22 @@ test("materialization job pins all four service families and rejects tenant subs
   );
 });
 
+test("materialization deadline fails closed when a collector ignores AbortSignal", async () => {
+  const { runGravitonMaterializationJob, GravitonMaterializationJobError } = await import("../lib/finops-graviton-savings-job.ts");
+  const originalSetTimeout = globalThis.setTimeout, originalClearTimeout = globalThis.clearTimeout;
+  globalThis.setTimeout = ((callback) => { queueMicrotask(callback); return 1; });
+  globalThis.clearTimeout = (() => undefined);
+  try {
+    await assert.rejects(runGravitonMaterializationJob({ requestKey: `gvrq_${"9".repeat(64)}`,
+      scheduledWindow: "2026-08-01T00:00:00.000Z",
+      boundary: { scope, managementAccountId: account, partition: "aws", accountIds: [account], regions: [region] },
+      collector: { collect: async () => new Promise(() => undefined) },
+      store: { recordCapture: async () => { throw new Error("must not persist"); } },
+      nowMs: Date.parse("2026-08-01T01:00:00.000Z"),
+    }), (error) => error instanceof GravitonMaterializationJobError);
+  } finally { globalThis.setTimeout = originalSetTimeout; globalThis.clearTimeout = originalClearTimeout; }
+});
+
 test("repository and route enforce normalized complete heads and authenticated same-tenant reads", async () => {
   const [repository, route, ui, css] = await Promise.all([
     readFile(
@@ -311,7 +327,8 @@ test("repository and route enforce normalized complete heads and authenticated s
     route,
     /assertSessionCapability\(\s*authenticated,\s*"connection:read",\s*connection\.customerId/u,
   );
-  assert.match(route, /GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED/u);
+  assert.match(route, /providerAdapterAvailable: true/u);
+  assert.match(route, /runtimeRepository\.getRuntimeStatus/u);
   assert.match(route, /GRAVITON_SAVINGS_OFFICIAL_DEFINITION/u);
   assert.match(ui, /\^\[=\+\\-@\\t\\r\]/u);
   assert.match(ui, /Official Graviton Savings definition coverage/u);
@@ -370,7 +387,7 @@ test("native Graviton UI renders services, usage, trends, evidence classes, dril
       "7 sheets",
       "122 upstream visuals mapped",
       "Graviton Instance Mapping",
-      "Model evidence only",
+      "Native evidence · partial parity",
       "Existing Graviton usage",
       "EC2, RDS/Aurora, OpenSearch, and ElastiCache",
       "Monthly savings trends",

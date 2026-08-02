@@ -15,7 +15,7 @@ test("CORA route authenticates and tenant-scopes before reading immutable projec
   assert.match(route, /getConnectionForOrg\(authenticated\.subject\.orgId/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /repository\.getActiveSnapshot\(scope\)/u);
-  assert.match(route, /CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND/u);
+  assert.match(route, /CoraRuntimeStatusRepository/u);
   assert.equal(route.match(/officialDefinition: CORA_OFFICIAL_DEFINITION/gu)?.length, 2);
   assert.doesNotMatch(route, /ListRecommendations|GetRecommendation/u);
 });
@@ -25,7 +25,7 @@ test("CORA UI exposes exact official inventory in report and configuration-requi
   assert.match(dashboard, /Official AWS CORA definition/u);
   assert.match(dashboard, /Exact official CORA sheet inventory/u);
   assert.match(dashboard, /embedded <code>cora_view<\/code> SQL/u);
-  assert.match(dashboard, /credential-owning S3\/Parquet adapter/u);
+  assert.match(dashboard, /credential-owning bounded S3\/Parquet adapter contract/u);
   assert.match(dashboard, /No pixel, layout, interaction-tree, or QuickSight runtime parity is claimed/u);
   assert.match(dashboard, /state\.officialDefinition === null \? null : <OfficialDefinitionCoverage/u);
 });
@@ -54,7 +54,7 @@ test("CORA report actually renders filters, honest disclosures, history, drilldo
     freshness: { dataThroughAt: "2026-07-31T00:00:00.000Z", ageHours: 1, staleAfterHours: 48 }, evidence: { organizationCoverage: "COMPLETE" }, collection: { available: false, reason: "CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND" }, disclosures: ["AWS estimates are not realized savings or invoices."],
   };
   const html = renderToStaticMarkup(createElement(dashboardModule.CoraDashboardReportView, { report, filters, onFiltersChange: () => undefined }));
-  for (const text of ["not realized savings", "rate estimates are not adjusted", "Cost allocation tag", "Resource ID", "FinopsException", "Drill down", "Daily evidence history", "About · Evidence and coverage", "Export visible rows", "Coverage is partial", "Usage Optimization", "Savings Plans", "Reserved Instances", "Resource-deduplicated opportunity summaries", "Official AWS CORA definition", "28 visuals", "Logarithmic Scale", "PROVIDER DIMENSIONS BLOCKED", "6486f50810f40558423cffb90c245a658678597fccdda8445e26a40e02e6a644", "S3/Parquet adapter"]) assert.match(html, new RegExp(text, "iu"));
+  for (const text of ["not realized savings", "rate estimates are not adjusted", "Cost allocation tag", "Resource ID", "FinopsException", "Drill down", "Daily evidence history", "About · Evidence and coverage", "Export visible rows", "Coverage is partial", "Usage Optimization", "Savings Plans", "Reserved Instances", "Resource-deduplicated opportunity summaries", "Official AWS CORA definition", "28 visuals", "Logarithmic Scale", "NATIVE EVIDENCE IMPLEMENTED", "6486f50810f40558423cffb90c245a658678597fccdda8445e26a40e02e6a644", "S3/Parquet adapter"]) assert.match(html, new RegExp(text, "iu"));
   } finally {
     await vite.close();
   }

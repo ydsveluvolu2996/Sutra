@@ -18,6 +18,7 @@ import {
   scheduleResilienceVueTick,
   scheduleDcfStepFunctionsTick,
   scheduleEndUserComputingTick,
+  scheduleGravitonSavingsTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -107,6 +108,7 @@ export async function POST(request: Request): Promise<Response> {
     // ADV-11 resolves the trusted account/Region boundary and active reconciled
     // CUR2 lineage only after the deterministic six-hour job is claimed.
     const endUserComputing = await scheduleEndUserComputingTick();
+    const gravitonSavings = await scheduleGravitonSavingsTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -135,6 +137,7 @@ export async function POST(request: Request): Promise<Response> {
       resilienceVue,
       dataCollectionMonitor,
       endUserComputing,
+      gravitonSavings,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

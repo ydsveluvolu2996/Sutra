@@ -15,6 +15,12 @@ interface Filters {
   readonly resourceType?: string;
   readonly state?: string;
   readonly currency?: string;
+  readonly migrationEffort?: string;
+  readonly recommendationAuthority?: string;
+  readonly architecture?: string;
+  readonly operatingSystem?: string;
+  readonly purchaseOption?: string;
+  readonly priceListVersion?: string;
 }
 interface Period {
   readonly periodStartAt: string;
@@ -60,6 +66,26 @@ export interface GravitonDashboardEnvelope {
     readonly modeledPotentialMicros: string;
     readonly realizedMicros: string;
   }[];
+  readonly instanceMapping: readonly {
+    readonly mappingId: string;
+    readonly role: "CURRENT" | "TARGET";
+    readonly resourceType: string;
+    readonly region: string;
+    readonly configuration: string;
+    readonly architecture: string;
+    readonly operatingSystem: string;
+    readonly tenancy: string;
+    readonly purchaseOption: string;
+    readonly currency: string;
+    readonly unitPriceMicros: string;
+    readonly priceListVersion: string;
+    readonly productSku: string;
+    readonly effectiveFromAt: string;
+    readonly effectiveToAt: string | null;
+    readonly vcpu: number | null;
+    readonly memoryMiB: number | null;
+    readonly evidenceIds: readonly string[];
+  }[];
   readonly history: readonly Readonly<Record<string, unknown>>[];
   readonly filterOptions: {
     readonly accounts: readonly string[];
@@ -67,10 +93,21 @@ export interface GravitonDashboardEnvelope {
     readonly resourceTypes: readonly string[];
     readonly states: readonly string[];
     readonly currencies: readonly string[];
+    readonly migrationEfforts: readonly string[];
+    readonly recommendationAuthorities: readonly string[];
+    readonly architectures: readonly string[];
+    readonly operatingSystems: readonly string[];
+    readonly purchaseOptions: readonly string[];
+    readonly priceListVersions: readonly string[];
   };
   readonly freshness: Readonly<Record<string, unknown>>;
   readonly evidence: Readonly<Record<string, unknown>>;
-  readonly collection: Readonly<Record<string, unknown>>;
+  readonly collection: {
+    readonly jobContractAvailable: boolean;
+    readonly providerAdapterAvailable: boolean;
+    readonly reason: string;
+    readonly runtimeStatus: { readonly state: "unavailable" | "collecting" | "failed" | "ready"; readonly reason: string; readonly lastAttemptAt: string | null };
+  };
   readonly disclosures: readonly string[];
 }
 function money(value: string | null, currency: string) {
@@ -252,6 +289,9 @@ export function FinopsGravitonSavingsReportView({
         realized savings are separate. A Graviton-looking family name never
         proves compatibility.
       </div>
+      <div role="status" className={report.collection.runtimeStatus?.state === "failed" ? `${styles.state} ${styles.error}` : styles.state}>
+        Collection: {report.collection.runtimeStatus?.state ?? "unavailable"} · {(report.collection.reason ?? "GRAVITON_COLLECTION_NOT_STARTED").replaceAll("_", " ").toLowerCase()}
+      </div>
       {status ? (
         <div role="status" className={`${styles.state} ${styles.warning}`}>
           {status}
@@ -288,6 +328,12 @@ export function FinopsGravitonSavingsReportView({
           options={report.filterOptions.currencies}
           onChange={(v) => set("currency", v)}
         />
+        <Select label="Migration effort" value={filters.migrationEffort} options={report.filterOptions.migrationEfforts ?? []} onChange={(v) => set("migrationEffort", v)} />
+        <Select label="Recommendation authority" value={filters.recommendationAuthority} options={report.filterOptions.recommendationAuthorities ?? []} onChange={(v) => set("recommendationAuthority", v)} />
+        <Select label="Architecture" value={filters.architecture} options={report.filterOptions.architectures ?? []} onChange={(v) => set("architecture", v)} />
+        <Select label="Operating system / platform" value={filters.operatingSystem} options={report.filterOptions.operatingSystems ?? []} onChange={(v) => set("operatingSystem", v)} />
+        <Select label="Purchase option" value={filters.purchaseOption} options={report.filterOptions.purchaseOptions ?? []} onChange={(v) => set("purchaseOption", v)} />
+        <Select label="Price list version" value={filters.priceListVersion} options={report.filterOptions.priceListVersions ?? []} onChange={(v) => set("priceListVersion", v)} />
       </div>
       <section className={styles.panel} aria-label="Existing Graviton usage">
         <h3>Existing Graviton usage</h3>
@@ -340,6 +386,23 @@ export function FinopsGravitonSavingsReportView({
                 </tr>
               ))}
             </tbody>
+          </table>
+        </div>
+      </section>
+      <section className={styles.panel} aria-label="Graviton Instance Mapping">
+        <h3>Graviton Instance Mapping · {report.instanceMapping.length}</h3>
+        <p>Only versioned AWS pricing and instance metadata referenced by accepted workload evidence appear here. Family names never establish compatibility.</p>
+        <div className={styles.scroll}>
+          <table className={styles.table}>
+            <thead><tr><th>Service / Region</th><th>Role / Configuration</th><th>Architecture / platform</th><th>Capacity</th><th>On-demand price</th><th>Version / evidence</th></tr></thead>
+            <tbody>{report.instanceMapping.map((row) => <tr key={row.mappingId}>
+              <td>{row.resourceType}<br />{row.region}</td>
+              <td><span className={styles.pill}>{row.role}</span><br />{row.configuration}</td>
+              <td>{row.architecture}<br />{row.operatingSystem} · {row.tenancy}</td>
+              <td>{row.vcpu === null ? "Unavailable" : `${row.vcpu} vCPU`}<br />{row.memoryMiB === null ? "Unavailable" : `${row.memoryMiB} MiB`}</td>
+              <td>{money(row.unitPriceMicros, row.currency)} / hour<br />{row.purchaseOption.replaceAll("_", " ")}</td>
+              <td>{row.priceListVersion}<br />{row.productSku}<br />{row.evidenceIds.length} references</td>
+            </tr>)}</tbody>
           </table>
         </div>
       </section>
@@ -514,6 +577,7 @@ export function FinopsGravitonSavingsDashboard({
       error: string | null;
       configurationRequired: boolean;
       configurationDefinition?: GravitonSavingsOfficialDefinition;
+      configurationCollection?: GravitonDashboardEnvelope["collection"];
     }>({ report: null, error: null, configurationRequired: false });
   useEffect(() => {
     if (connectionId === null) return;
@@ -530,6 +594,7 @@ export function FinopsGravitonSavingsDashboard({
         return response.json() as Promise<GravitonDashboardEnvelope | {
           readonly dashboard: null;
           readonly officialDefinition: GravitonSavingsOfficialDefinition;
+          readonly collection: GravitonDashboardEnvelope["collection"];
         }>;
       })
       .then((report) => {
@@ -537,7 +602,7 @@ export function FinopsGravitonSavingsDashboard({
           if (!hasPinnedOfficialDefinition(report.officialDefinition)) {
             throw new Error("Sutra returned an unrecognized Graviton dashboard definition");
           }
-          setState({ report: null, error: null, configurationRequired: true, configurationDefinition: report.officialDefinition });
+          setState({ report: null, error: null, configurationRequired: true, configurationDefinition: report.officialDefinition, configurationCollection: report.collection });
           return;
         }
         if (!hasPinnedOfficialDefinition(report.officialDefinition)) {
@@ -574,10 +639,7 @@ export function FinopsGravitonSavingsDashboard({
       <section className={styles.root}>
         <OfficialDefinitionPanel definition={state.configurationDefinition ?? GRAVITON_SAVINGS_OFFICIAL_DEFINITION} />
         <div role="status" className={`${styles.state} ${styles.warning}`}>
-          Deploy the cross-service materializer and bind Compute Optimizer or
-          authoritative service evidence, CUR2, pricing, inventory, and
-          compatibility. The official sheet inventory remains available above,
-          but no workload values are synthesized.
+          Collection {state.configurationCollection?.runtimeStatus.state ?? "unavailable"}: {state.configurationCollection?.reason.replaceAll("_", " ").toLowerCase() ?? "collection has not started"}. Bind authoritative Compute Optimizer or service inventory, CUR2, pricing, metadata, workload, license, and compatibility evidence. No workload values are synthesized.
         </div>
       </section>
     );

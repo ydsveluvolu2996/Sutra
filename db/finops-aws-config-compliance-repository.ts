@@ -105,6 +105,16 @@ async function storedSnapshot(row: SnapshotRow): Promise<StoredAwsConfigComplian
 }
 
 export class AwsConfigComplianceRepository {
+  public constructor(
+    private readonly database: D1Database = getRawDb(),
+    private readonly options: { readonly skipRuntimeSchema?: boolean } = {},
+  ) {}
+
+  private async ready(): Promise<D1Database> {
+    if (this.options.skipRuntimeSchema !== true) await ensureRuntimeSchema(this.database);
+    return this.database;
+  }
+
   public async recordSnapshot(
     scope: AwsConfigComplianceRepositoryScope,
     snapshot: AwsConfigComplianceSnapshot,
@@ -117,8 +127,7 @@ export class AwsConfigComplianceRepository {
     if (new TextEncoder().encode(payload).byteLength > 16 * 1_024 * 1_024) reject();
     const contentSha256 = await sha256(payload);
     const snapshotId = `acc_${contentSha256}`;
-    const db = getRawDb();
-    await ensureRuntimeSchema(db);
+    const db = await this.ready();
     await db.prepare(`INSERT INTO finops_config_compliance_snapshots (
       snapshot_id, org_id, customer_id, connection_id, capture_id, state, captured_at,
       content_sha256, payload_json, rule_count, evaluation_count, resource_count, created_at
@@ -159,8 +168,7 @@ export class AwsConfigComplianceRepository {
     scope: AwsConfigComplianceRepositoryScope,
   ): Promise<StoredAwsConfigComplianceSnapshot | null> {
     assertScope(scope);
-    const db = getRawDb();
-    await ensureRuntimeSchema(db);
+    const db = await this.ready();
     const row = await db.prepare(`SELECT s.snapshot_id, s.org_id, s.customer_id,
       s.connection_id, s.state, s.captured_at, s.content_sha256, s.payload_json, s.created_at
       FROM finops_config_compliance_heads h
@@ -175,8 +183,7 @@ export class AwsConfigComplianceRepository {
     scope: AwsConfigComplianceRepositoryScope,
   ): Promise<readonly StoredAwsConfigComplianceSnapshot[]> {
     assertScope(scope);
-    const db = getRawDb();
-    await ensureRuntimeSchema(db);
+    const db = await this.ready();
     const result = await db.prepare(`SELECT snapshot_id, org_id, customer_id,
       connection_id, state, captured_at, content_sha256, payload_json, created_at
       FROM finops_config_compliance_snapshots
@@ -184,5 +191,36 @@ export class AwsConfigComplianceRepository {
       ORDER BY captured_at DESC, snapshot_id DESC LIMIT ?`)
       .bind(scope.organizationId, scope.customerId, scope.connectionId, MAX_HISTORY).all<SnapshotRow>();
     return Promise.all((result.results ?? []).map(storedSnapshot));
+  }
+
+  public async getSnapshotById(
+    scope: AwsConfigComplianceRepositoryScope,
+    snapshotId: string,
+  ): Promise<StoredAwsConfigComplianceSnapshot | null> {
+    assertScope(scope);
+    if (!SNAPSHOT_ID.test(snapshotId)) reject();
+    const row = await (await this.ready()).prepare(`SELECT snapshot_id, org_id, customer_id,
+      connection_id, state, captured_at, content_sha256, payload_json, created_at
+      FROM finops_config_compliance_snapshots
+      WHERE snapshot_id = ? AND org_id = ? AND customer_id = ? AND connection_id = ? LIMIT 1`)
+      .bind(snapshotId, scope.organizationId, scope.customerId, scope.connectionId)
+      .first<SnapshotRow>();
+    return row === null ? null : storedSnapshot(row);
+  }
+
+  public async getSnapshotByCaptureId(
+    scope: AwsConfigComplianceRepositoryScope,
+    captureId: string,
+  ): Promise<StoredAwsConfigComplianceSnapshot | null> {
+    assertScope(scope);
+    if (!/^config_[a-f0-9]{64}$/u.test(captureId)) reject();
+    const row = await (await this.ready()).prepare(`SELECT snapshot_id, org_id, customer_id,
+      connection_id, state, captured_at, content_sha256, payload_json, created_at
+      FROM finops_config_compliance_snapshots
+      WHERE capture_id = ? AND org_id = ? AND customer_id = ? AND connection_id = ?
+      ORDER BY captured_at DESC, snapshot_id DESC LIMIT 1`)
+      .bind(captureId, scope.organizationId, scope.customerId, scope.connectionId)
+      .first<SnapshotRow>();
+    return row === null ? null : storedSnapshot(row);
   }
 }

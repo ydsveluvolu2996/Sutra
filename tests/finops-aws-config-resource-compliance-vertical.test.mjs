@@ -76,7 +76,7 @@ test("Config compliance persistence is immutable and advances only complete mono
   assert.match(repository, /MAX_HISTORY = 36/u);
 });
 
-test("Config compliance API is authenticated, same-tenant, bounded, and cannot activate collection", () => {
+test("Config compliance API is authenticated, same-tenant, bounded, and exposes durable runtime state", () => {
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(
     route,
@@ -88,8 +88,9 @@ test("Config compliance API is authenticated, same-tenant, bounded, and cannot a
   );
   assert.match(route, /RESULT_BOUND = 500/u);
   assert.match(route, /parameters|getAll\(key\)\.length > 1/u);
-  assert.match(route, /AWS_CONFIG_COMPLIANCE_RUNTIME_ACTIVATION_REASON/u);
-  assert.match(route, /activation:\s*\{\s*available: false/u);
+  assert.match(route, /AwsConfigComplianceRuntimeRepository/u);
+  assert.match(route, /runtime\.getRuntimeStatus\(scope\)/u);
+  assert.match(route, /activation:\s*\{ available: true/u);
   assert.equal(
     (
       route.match(
@@ -108,6 +109,7 @@ test("Config compliance UI has all honest states, drilldowns, evidence planes, a
   for (const state of [
     "loading",
     "configuration_required",
+    "collecting",
     "partial",
     "stale",
     "failed",
@@ -266,9 +268,10 @@ test("Config compliance report renders provider evidence without fixtures or com
         },
       ],
       activation: {
-        available: false,
-        reason: "AWS_CONFIG_COMPLIANCE_DURABLE_RUNTIME_NOT_REGISTERED",
+        available: true,
+        reason: "AWS_CONFIG_COMPLIANCE_COLLECTION_READY",
       },
+      collection: { state: "ready", reason: "AWS_CONFIG_COMPLIANCE_COLLECTION_READY", lastAttemptAt: "2026-08-01T00:00:00.000Z" },
       limitations: ["No compliance inference."],
     };
     const markup = renderToStaticMarkup(
@@ -294,7 +297,7 @@ test("Config compliance report renders provider evidence without fixtures or com
       "AWS::EC2::Volume",
       "USD 1.234567",
       "9007199254740993",
-      "AWS_CONFIG_COMPLIANCE_DURABLE_RUNTIME_NOT_REGISTERED",
+      "AWS_CONFIG_COMPLIANCE_COLLECTION_READY",
     ])
       assert.match(markup, new RegExp(value, "u"));
     assert.doesNotMatch(markup, /fixture|sample|placeholder/iu);

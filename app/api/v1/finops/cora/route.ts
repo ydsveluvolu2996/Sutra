@@ -1,4 +1,5 @@
 import { CoraRepository } from "../../../../../db/finops-cora-repository";
+import { CoraRuntimeStatusRepository } from "../../../../../db/finops-cora-runtime-status";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import {
@@ -109,10 +110,11 @@ export async function GET(request: Request): Promise<Response> {
       connectionId: connection.id,
     };
     const repository = new CoraRepository();
-    const [active, latest, persistedHistory] = await Promise.all([
+    const [active, latest, persistedHistory, collection] = await Promise.all([
       repository.getActiveSnapshot(scope),
       repository.getLatestSnapshot(scope),
       repository.listHistory(scope, 30),
+      new CoraRuntimeStatusRepository().getStatus(scope),
     ]);
     const selected = active ?? latest;
     if (selected === null) return jsonResponse({
@@ -121,7 +123,7 @@ export async function GET(request: Request): Promise<Response> {
       sourceState: "configuration_required",
       officialDefinition: CORA_OFFICIAL_DEFINITION,
       dashboard: null,
-      collection: { available: false, reason: "CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND" },
+      collection,
     });
     const freshnessAgeHours = ageHours(selected.snapshot.sourceDataThroughAt);
     const projection = buildCoraDashboardProjection(
@@ -168,7 +170,7 @@ export async function GET(request: Request): Promise<Response> {
         channelStates: selected.snapshot.channelStates,
         limitations: selected.snapshot.limitations,
       },
-      collection: { available: false, reason: "CORA_COLLECTOR_ORCHESTRATION_NOT_BOUND" },
+      collection,
       disclosures: [
         "AWS estimates are not realized savings or invoices.",
         "Opportunity cards select the maximum recommendation per resource within Usage or Rate; rows without resource IDs remain non-deduplicated.",

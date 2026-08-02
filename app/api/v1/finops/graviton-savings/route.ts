@@ -1,4 +1,5 @@
 import { GravitonSavingsRepository } from "../../../../../db/finops-graviton-savings-repository";
+import { GravitonRuntimeRepository } from "../../../../../db/finops-graviton-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
   assertSessionCapability,
@@ -41,6 +42,12 @@ const CONNECTION = /^conn_[a-f0-9]{32}$/u,
     "resourceType",
     "state",
     "currency",
+    "migrationEffort",
+    "recommendationAuthority",
+    "architecture",
+    "operatingSystem",
+    "purchaseOption",
+    "priceListVersion",
     "limit",
     "cursor",
   ]);
@@ -60,6 +67,12 @@ function parse(request: Request) {
     resourceType = values.get("resourceType") ?? undefined,
     state = values.get("state") ?? undefined,
     currency = values.get("currency") ?? undefined,
+    migrationEffort = values.get("migrationEffort") ?? undefined,
+    recommendationAuthority = values.get("recommendationAuthority") ?? undefined,
+    architecture = values.get("architecture") ?? undefined,
+    operatingSystem = values.get("operatingSystem") ?? undefined,
+    purchaseOption = values.get("purchaseOption") ?? undefined,
+    priceListVersion = values.get("priceListVersion") ?? undefined,
     cursor = values.get("cursor") ?? undefined,
     limit = values.get("limit") === null ? 100 : Number(values.get("limit"));
   if (
@@ -69,6 +82,12 @@ function parse(request: Request) {
     (resourceType !== undefined && !TYPES.has(resourceType)) ||
     (state !== undefined && !STATES.has(state)) ||
     (currency !== undefined && !CURRENCY.test(currency)) ||
+    (migrationEffort !== undefined && !new Set(["VERY_LOW", "LOW", "MEDIUM", "HIGH"]).has(migrationEffort)) ||
+    (recommendationAuthority !== undefined && !new Set(["AWS_COMPUTE_OPTIMIZER", "AWS_SERVICE_INVENTORY_PRICING"]).has(recommendationAuthority)) ||
+    (architecture !== undefined && architecture !== "X86_64" && architecture !== "ARM64") ||
+    (operatingSystem !== undefined && (!/^[A-Za-z0-9 ._+:/()-]{1,128}$/u.test(operatingSystem))) ||
+    (purchaseOption !== undefined && purchaseOption !== "ON_DEMAND") ||
+    (priceListVersion !== undefined && !/^[A-Za-z0-9._:@+-]{1,128}$/u.test(priceListVersion)) ||
     (cursor !== undefined && !CURSOR.test(cursor)) ||
     !Number.isSafeInteger(limit) ||
     limit < 1 ||
@@ -83,6 +102,12 @@ function parse(request: Request) {
       resourceType: resourceType as GravitonResourceType | undefined,
       state: state as GravitonOpportunityState | undefined,
       currency,
+      migrationEffort: migrationEffort as GravitonDashboardFilters["migrationEffort"],
+      recommendationAuthority: recommendationAuthority as GravitonDashboardFilters["recommendationAuthority"],
+      architecture: architecture as GravitonDashboardFilters["architecture"],
+      operatingSystem,
+      purchaseOption: purchaseOption as GravitonDashboardFilters["purchaseOption"],
+      priceListVersion,
       limit,
       cursor,
     } satisfies GravitonDashboardFilters,
@@ -121,10 +146,12 @@ export async function GET(request: Request): Promise<Response> {
         connectionId: connection.id,
       },
       repository = new GravitonSavingsRepository(),
-      [active, latest, history] = await Promise.all([
+      runtimeRepository = new GravitonRuntimeRepository(),
+      [active, latest, history, runtimeStatus] = await Promise.all([
         repository.getActiveSnapshot(scope),
         repository.getLatestSnapshot(scope),
         repository.listHistory(scope, 24),
+        runtimeRepository.getRuntimeStatus(scope),
       ]),
       selected = active ?? latest;
     if (selected === null)
@@ -136,8 +163,9 @@ export async function GET(request: Request): Promise<Response> {
         dashboard: null,
         collection: {
           jobContractAvailable: true,
-          providerAdapterAvailable: false,
-          reason: "GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED",
+          providerAdapterAvailable: true,
+          runtimeStatus,
+          reason: runtimeStatus.reason,
         },
       });
     const unfiltered = buildGravitonDashboard(selected.snapshot),
@@ -190,6 +218,12 @@ export async function GET(request: Request): Promise<Response> {
           ...unfiltered.serviceSummaries.map((item) => item.currency),
           ...unfiltered.existingUsage.series.map((item) => item.currency),
         ]),
+        migrationEfforts: unique(unfiltered.opportunities.map((item) => item.migrationEffort)),
+        recommendationAuthorities: unique(unfiltered.opportunities.map((item) => item.recommendationAuthority)),
+        architectures: unique(unfiltered.instanceMapping.map((item) => item.architecture)),
+        operatingSystems: unique(unfiltered.instanceMapping.map((item) => item.operatingSystem)),
+        purchaseOptions: unique(unfiltered.instanceMapping.map((item) => item.purchaseOption)),
+        priceListVersions: unique(unfiltered.instanceMapping.map((item) => item.priceListVersion)),
       },
       freshness: {
         generatedAt: selected.snapshot.generatedAt,
@@ -206,8 +240,9 @@ export async function GET(request: Request): Promise<Response> {
       },
       collection: {
         jobContractAvailable: true,
-        providerAdapterAvailable: false,
-        reason: "GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED",
+        providerAdapterAvailable: true,
+        runtimeStatus,
+        reason: runtimeStatus.reason,
       },
     });
   } catch (error) {

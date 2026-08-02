@@ -17,6 +17,8 @@ const { ResilienceVueRuntimeRepository } = await import(
   "../db/finops-resilience-vue-runtime-repository.ts");
 const { DcfRuntimeRepository } = await import(
   "../db/finops-dcf-runtime-repository.ts");
+const { EndUserComputingRuntimeContextRepository } = await import(
+  "../db/finops-end-user-computing-runtime-context-repository.ts");
 
 const ORG = "org_pack_successors";
 const CUSTOMER = "customer_pack_successors";
@@ -27,11 +29,12 @@ const PACKS = [
   "standard-2026-08.9",
   "standard-2026-08.10",
   "standard-2026-08.11",
+  "standard-2026-08.12",
   "standard-2026-08.90",
 ];
 const CONNECTIONS = PACKS.map((_, index) => `conn_${(index + 1).toString(16).repeat(32)}`);
 
-test("runtime repositories accept only explicit .8.6-.8.11 successor chains", async () => {
+test("runtime repositories accept only explicit .8.6-.8.12 successor chains", async () => {
   const miniflare = new Miniflare({
     modules: true,
     script: "export default{fetch(){return new Response('ok')}}",
@@ -59,9 +62,9 @@ test("runtime repositories accept only explicit .8.6-.8.11 successor chains", as
         `arn:aws:iam::${String(111122223330 + index).padStart(12, "0")}:role/sutra/SutraCollectorRole`,
         permissionPack,
       )),
-      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.10' WHERE id IN (?,?,?)")
-        .bind(CONNECTIONS[4],CONNECTIONS[5],CONNECTIONS[6]),
-      ...[4,5,6].map((index) => database.prepare(`INSERT INTO finops_dcf_module_bindings(
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.10' WHERE id IN (?,?,?,?)")
+        .bind(CONNECTIONS[4],CONNECTIONS[5],CONNECTIONS[6],CONNECTIONS[7]),
+      ...[4,5,6,7].map((index) => database.prepare(`INSERT INTO finops_dcf_module_bindings(
         org_id,customer_id,connection_id,module_id,module_name,source_id,region,state_machine_arn,
         enabled,expected_cadence_minutes,verified_at)VALUES(?,?,?,'cur','CUR','aws_cur2_data_export',
         'us-east-1',?,1,60,?)`).bind(ORG,CUSTOMER,CONNECTIONS[index],
@@ -69,29 +72,33 @@ test("runtime repositories accept only explicit .8.6-.8.11 successor chains", as
         1785542400000)),
       database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.11' WHERE id=?")
         .bind(CONNECTIONS[5]),
-      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.90' WHERE id=?")
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.12' WHERE id=?")
         .bind(CONNECTIONS[6]),
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.90' WHERE id=?")
+        .bind(CONNECTIONS[7]),
     ]);
 
     const ids = (values) => values.map((value) => value.connectionId).sort();
     assert.deepEqual(ids(await new ExtendedSupportRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(0, 6));
+      .listEligibleScopes()), CONNECTIONS.slice(0, 7));
     assert.deepEqual(ids(await new AwsHealthRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(2, 6));
+      .listEligibleScopes()), CONNECTIONS.slice(2, 7));
     assert.deepEqual(ids(await new ResilienceVueRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(3, 6));
+      .listEligibleScopes()), CONNECTIONS.slice(3, 7));
     assert.deepEqual(ids(await new DcfRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(4, 6));
+      .listEligibleScopes()), CONNECTIONS.slice(4, 7));
+    assert.deepEqual((await new EndUserComputingRuntimeContextRepository(database)
+      .listEligibleBoundaries()).map(value=>value.scope.connectionId),CONNECTIONS.slice(5,7));
 
     const support = new AwsSupportCasesRuntimeRepository(database);
-    for (const connectionId of CONNECTIONS.slice(1, 6)) {
+    for (const connectionId of CONNECTIONS.slice(1, 7)) {
       assert.equal((await support.loadScope({
         organizationId: ORG,
         customerId: CUSTOMER,
         connectionId,
       })).parentConnectionId, connectionId);
     }
-    for (const connectionId of [CONNECTIONS[0], ...CONNECTIONS.slice(6)]) {
+    for (const connectionId of [CONNECTIONS[0], ...CONNECTIONS.slice(7)]) {
       await assert.rejects(
         support.loadScope({ organizationId: ORG, customerId: CUSTOMER, connectionId }),
         (error) => error instanceof AwsSupportCasesRuntimeRepositoryError

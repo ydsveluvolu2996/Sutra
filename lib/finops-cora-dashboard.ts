@@ -81,6 +81,21 @@ export interface CoraDashboardRow {
     readonly updatedAt: string;
   };
   readonly observedCostEvidenceCount: number;
+  readonly commitmentDimensions: CoraSnapshot["recommendations"][number]["commitmentDimensions"];
+}
+
+export interface CoraCommitmentMatrixRow {
+  readonly actionType: "PurchaseSavingsPlans" | "PurchaseReservedInstances";
+  readonly currencyCode: string;
+  readonly level: "PAYER" | "LINKED" | "UNKNOWN";
+  readonly term: "ONE_YEAR" | "THREE_YEARS" | "UNKNOWN";
+  readonly upfront: "NO_UPFRONT" | "PARTIAL_UPFRONT" | "ALL_UPFRONT" | "UNKNOWN";
+  readonly offeringType: string;
+  readonly service: string;
+  readonly deduplicatedActionCount: number;
+  readonly estimatedMonthlySavingsBeforeDiscountMicros: string;
+  readonly estimatedMonthlySavingsAfterDiscountMicros: string | null;
+  readonly aggregationMeaning: "RESOURCE_SAFE_MAX_RECOMMENDATION_THEN_OPTION_MATRIX_SUM";
 }
 
 export interface CoraDashboardProjection {
@@ -101,6 +116,7 @@ export interface CoraDashboardProjection {
   readonly rows: readonly CoraDashboardRow[];
   readonly summaries: CoraSnapshot["summaries"];
   readonly opportunitySummaries: readonly CoraDashboardOpportunitySummary[];
+  readonly commitmentMatrices: readonly CoraCommitmentMatrixRow[];
   readonly officialSheetCoverage: readonly CoraOfficialSheetCoverage[];
   readonly history: readonly CoraDashboardHistoryPoint[];
 }
@@ -168,15 +184,9 @@ function savingsForOrdering(
     ?? row.estimates.monthlySavingsBeforeDiscountMicros);
 }
 
-/**
- * AWS CORA removes duplicate recommendations by resource ID independently for
- * Usage and Rate. Account, Region, and currency are included in the key so a
- * provider-local resource identifier cannot collide across scopes. Rows with no
- * resource ID remain separate because collapsing them would invent identity.
- */
-function deduplicatedOpportunitySummaries(
+function deduplicatedRows(
   rows: readonly CoraSnapshot["recommendations"][number][],
-): readonly CoraDashboardOpportunitySummary[] {
+): readonly CoraSnapshot["recommendations"][number][] {
   const selected = new Map<string, CoraSnapshot["recommendations"][number]>();
   for (const row of rows) {
     const identity = row.resourceId === null
@@ -187,10 +197,21 @@ function deduplicatedOpportunitySummaries(
     if (current === undefined
       || savingsForOrdering(row) > savingsForOrdering(current)
       || (savingsForOrdering(row) === savingsForOrdering(current)
-        && row.trackingKey.localeCompare(current.trackingKey) < 0)) {
-      selected.set(key, row);
-    }
+        && row.trackingKey.localeCompare(current.trackingKey) < 0)) selected.set(key, row);
   }
+  return [...selected.values()];
+}
+
+/**
+ * AWS CORA removes duplicate recommendations by resource ID independently for
+ * Usage and Rate. Account, Region, and currency are included in the key so a
+ * provider-local resource identifier cannot collide across scopes. Rows with no
+ * resource ID remain separate because collapsing them would invent identity.
+ */
+function deduplicatedOpportunitySummaries(
+  rows: readonly CoraSnapshot["recommendations"][number][],
+): readonly CoraDashboardOpportunitySummary[] {
+  const selected = deduplicatedRows(rows);
 
   const grouped = new Map<string, CoraDashboardOpportunitySummary>();
   const rawCounts = new Map<string, number>();
@@ -198,7 +219,7 @@ function deduplicatedOpportunitySummaries(
     const key = `${row.optimizationClass}:${row.estimates.currencyCode}`;
     rawCounts.set(key, (rawCounts.get(key) ?? 0) + 1);
   }
-  for (const row of selected.values()) {
+  for (const row of selected) {
     const key = `${row.optimizationClass}:${row.estimates.currencyCode}`;
     const current = grouped.get(key);
     const hasResource = row.resourceId !== null;
@@ -237,6 +258,54 @@ function deduplicatedOpportunitySummaries(
     || left.currencyCode.localeCompare(right.currencyCode));
 }
 
+function commitmentMatrices(
+  rows: readonly CoraSnapshot["recommendations"][number][],
+): readonly CoraCommitmentMatrixRow[] {
+  const groups = new Map<string, CoraCommitmentMatrixRow>();
+  for (const row of deduplicatedRows(rows)) {
+    const dimensions = row.commitmentDimensions;
+    if (dimensions == null || (row.actionType !== "PurchaseSavingsPlans"
+      && row.actionType !== "PurchaseReservedInstances")) continue;
+    const key = [row.actionType, row.estimates.currencyCode, dimensions.level,
+      dimensions.term, dimensions.upfront, dimensions.offeringType, dimensions.service].join(":");
+    const current = groups.get(key);
+    if (current === undefined) {
+      groups.set(key, {
+        actionType: row.actionType,
+        currencyCode: row.estimates.currencyCode,
+        level: dimensions.level,
+        term: dimensions.term,
+        upfront: dimensions.upfront,
+        offeringType: dimensions.offeringType,
+        service: dimensions.service,
+        deduplicatedActionCount: 1,
+        estimatedMonthlySavingsBeforeDiscountMicros: row.estimates.monthlySavingsBeforeDiscountMicros,
+        estimatedMonthlySavingsAfterDiscountMicros: row.estimates.monthlySavingsAfterDiscountMicros,
+        aggregationMeaning: "RESOURCE_SAFE_MAX_RECOMMENDATION_THEN_OPTION_MATRIX_SUM",
+      });
+      continue;
+    }
+    groups.set(key, {
+      ...current,
+      deduplicatedActionCount: current.deduplicatedActionCount + 1,
+      estimatedMonthlySavingsBeforeDiscountMicros: sum(
+        current.estimatedMonthlySavingsBeforeDiscountMicros,
+        row.estimates.monthlySavingsBeforeDiscountMicros,
+      ),
+      estimatedMonthlySavingsAfterDiscountMicros:
+        current.estimatedMonthlySavingsAfterDiscountMicros === null
+        || row.estimates.monthlySavingsAfterDiscountMicros === null ? null
+          : sum(current.estimatedMonthlySavingsAfterDiscountMicros,
+            row.estimates.monthlySavingsAfterDiscountMicros),
+    });
+  }
+  return [...groups.values()].sort((left, right) => left.actionType.localeCompare(right.actionType)
+    || left.currencyCode.localeCompare(right.currencyCode)
+    || left.service.localeCompare(right.service) || left.offeringType.localeCompare(right.offeringType)
+    || left.level.localeCompare(right.level) || left.term.localeCompare(right.term)
+    || left.upfront.localeCompare(right.upfront));
+}
+
 function hasFinopsException(row: CoraSnapshot["recommendations"][number]): boolean {
   return row.tags.some((tag) => tag.key.toLowerCase() === "finopsexception");
 }
@@ -244,8 +313,8 @@ function hasFinopsException(row: CoraSnapshot["recommendations"][number]): boole
 const OFFICIAL_SHEET_COVERAGE: readonly CoraOfficialSheetCoverage[] = Object.freeze([
   { sheet: "Summary", status: "PARTIAL", localEvidence: "Resource-deduplicated usage/rate opportunity summaries, raw counts, action details, filters, export and history", limitation: "The official scatter, Sankey, pivot, pie and calculated GroupBy visual geometry is not reproduced one-for-one." },
   { sheet: "Usage Optimization", status: "PARTIAL", localEvidence: "Rightsize, idle/stop, delete, scale-in, upgrade, and migration actions with resource drilldown", limitation: "The official pie, pivot, bar and arbitrary GroupBy interaction tree is not reproduced one-for-one." },
-  { sheet: "Rate Optimization - Saving Plans", status: "PARTIAL", localEvidence: "Savings Plans recommendation evidence and estimate details", limitation: "The export domain does not yet normalize SP level, term, or upfront-option dimensions." },
-  { sheet: "Rate Optimization - Reserved Instances", status: "PARTIAL", localEvidence: "Reserved Instance recommendation evidence and estimate details", limitation: "The export domain does not yet normalize RI service, level, term, or upfront-option dimensions." },
+  { sheet: "Rate Optimization - Saving Plans", status: "IMPLEMENTED", localEvidence: "Resource-safe Savings Plans level, term, upfront, type and service matrices derived from the pinned v0.0.11 contract", limitation: null },
+  { sheet: "Rate Optimization - Reserved Instances", status: "IMPLEMENTED", localEvidence: "Resource-safe Reserved Instance service, level, term, upfront and offering matrices derived from the pinned v0.0.11 contract", limitation: null },
   { sheet: "About", status: "IMPLEMENTED", localEvidence: "Freshness, coverage, generation lineage, limitations, and estimate disclosures", limitation: null },
 ]);
 
@@ -323,9 +392,11 @@ export function buildCoraDashboardProjection(
         updatedAt: row.workflow.updatedAt,
       },
       observedCostEvidenceCount: row.observedCosts.length,
+      commitmentDimensions: row.commitmentDimensions,
     })),
     summaries: summaries(matched),
     opportunitySummaries: deduplicatedOpportunitySummaries(matched),
+    commitmentMatrices: commitmentMatrices(matched),
     officialSheetCoverage: OFFICIAL_SHEET_COVERAGE,
     history: history.slice(0, CORA_DASHBOARD_BOUNDS.maximumHistoryPoints),
   };

@@ -195,9 +195,9 @@ export const GRAVITON_SAVINGS_OFFICIAL_DEFINITION = Object.freeze({
         control("Dropdown", "Platform"),
       ]),
       nativeResourceTypes: Object.freeze([]),
-      coverage: "MODEL_ONLY",
-      evidenceNote: "Versioned target metadata and price-list records participate in compatibility and economics validation but are not exposed as a standalone reference dataset.",
-      remainingGap: "A bounded tenant-safe mapping table and the six upstream commercial filters are not implemented.",
+      coverage: "NATIVE_EVIDENCE_PARTIAL",
+      evidenceNote: "A tenant-safe standalone mapping table exposes only workload-referenced, versioned AWS pricing and instance metadata with Region, platform, purchase-option, price-list, capacity and evidence lineage controls.",
+      remainingGap: "The full unreferenced AWS catalog plus offering-class, lease-term, term-type and exact upstream commercial-control parity remain outside the accepted snapshot.",
     }),
     Object.freeze({
       id: "b8db1149-0d6b-4fcb-9d20-e5b03ab2e898",

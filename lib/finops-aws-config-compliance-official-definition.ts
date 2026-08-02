@@ -345,9 +345,9 @@ export const AWS_CONFIG_COMPLIANCE_OFFICIAL_DEFINITION = Object.freeze({
     }),
   ]),
   limitations: Object.freeze([
-    "Credential-owning AWS provider adapter, durable replay store, and shared runtime handler are not registered.",
+    "The credential-owning adapter, strict signed route, durable replay store, immutable persistence, and production composition are implemented; shared runtime registration is integration-owned.",
     "The native UI maps documented purposes and exact object counts; it does not claim pixel or QuickSight geometry parity.",
-    "Tag, resource-specific, threat-classification, and configuration-item event fields remain outside the minimized provider projection.",
+    "Tag, resource-specific, threat-classification, and configuration-item event fields remain outside the minimized provider projection; Security Hub and CloudTrail are not substituted.",
   ]),
 });
 

@@ -65,15 +65,15 @@ test("ADD-01 keeps native and provider gaps explicit for every official sheet", 
   assert.deepEqual(definition.sheets.map((sheet) => sheet.coverage), [
     "NATIVE_EVIDENCE_PARTIAL",
     "NATIVE_EVIDENCE_PARTIAL",
-    "PROVIDER_DIMENSIONS_BLOCKED",
-    "PROVIDER_DIMENSIONS_BLOCKED",
+    "NATIVE_EVIDENCE_IMPLEMENTED",
+    "NATIVE_EVIDENCE_IMPLEMENTED",
     "ABOUT_EVIDENCE",
   ]);
   for (const sheet of definition.sheets) {
     assert.ok(sheet.nativeEvidence.length > 30);
     assert.ok(sheet.remainingGap.length > 30);
   }
-  assert.match(definition.disclosures.join(" "), /S3\/Parquet execution adapter/iu);
-  assert.match(definition.disclosures.join(" "), /level, term, upfront and RI service/iu);
+  assert.match(definition.disclosures.join(" "), /bounded adapter and signed route are implemented locally/iu);
+  assert.match(definition.disclosures.join(" "), /option dimensions reproduce the pinned v0\.0\.11/iu);
   assert.match(definition.disclosures.join(" "), /production acceptance remain open/iu);
 });

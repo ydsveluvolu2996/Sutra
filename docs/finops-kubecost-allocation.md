@@ -4,19 +4,19 @@
 
 The AWS CID dashboard's official scope is self-hosted Kubecost. The engine's
 OpenCost input is a supplemental Sutra extension and is never represented as
-official AWS dashboard parity. Accepted hourly rows retain exact component
-costs and are projected into filtered hourly trend evidence before resource
+official AWS dashboard parity. Accepted daily rows retain exact component
+costs and are projected into filtered daily trend evidence before resource
 pagination.
 
 The source is an attribution view, not a second spend ledger. AWS CUR 2.0 remains authoritative spend. A Kubecost snapshot cannot become `READY` until its aggregate currency totals reconcile to the exact immutable `ACTIVE` CUR2 generation named in the tenant scope. The presentation policy is always `ATTRIBUTION_VIEW_ONLY_DO_NOT_ADD_TO_CUR2`.
 
 ## Evidence contract
 
-The normalized export schema is `sutra.kubecost-opencost-allocation` version `1.0.0`. Every capture pins:
+The normalized export schema is `sutra.kubecost-opencost-allocation` version `2.0.0`. Every capture pins:
 
 - provider and exporter name/version;
 - schema, manifest, query, and cost-model SHA-256 hashes;
-- explicit UTC query window, hourly step, and output format;
+- explicit UTC query window, official daily step, Snappy Parquet format, and all 62 pinned columns;
 - exact S3 bucket and tenant/export prefix;
 - object key, ETag, optional version ID, SHA-256, and size;
 - source object, row number, row identifier, and row SHA-256 for every allocation;
@@ -33,7 +33,7 @@ Null lineage stays null. The engine never maps an unallocated row to a made-up n
 The export query contract is:
 
 - an explicit RFC3339 UTC start/end pair;
-- `step=1h`;
+- `step=1d`;
 - `accumulate=false`;
 - raw allocation lineage retained;
 - `shareIdle=false` and `splitIdle=true`;
@@ -126,7 +126,7 @@ No `s3:PutObject`, `s3:DeleteObject`, Kubernetes mutation, Billing mutation, IAM
 The export-producing identity is separate from Sutra's permanent collector. Before enabling the source, the owner must provide:
 
 1. A supported Kubecost or OpenCost installation in every registered cluster, with a stable cluster identifier and sufficient retention for the requested windows.
-2. An authenticated exporter that can query the Allocation API at raw lineage, hourly resolution for explicit UTC windows, page or split windows within configured limits, and reject partial responses.
+2. The pinned authenticated CCA exporter querying raw lineage at daily resolution for explicit UTC windows and rejecting partial responses.
 3. Cost model and query configuration captured and hashed with each generation.
 4. Explicit currency and cost basis for every row. If Kubecost cloud-bill reconciliation is used, the cloud integration must be healthy and the export must declare `CLOUD_BILL_RECONCILED`.
 5. A complete authorized mapping of AWS account IDs to cluster IDs. The exporter may not infer tenant ownership from user-supplied labels.
@@ -141,7 +141,7 @@ A production source is not accepted until focused tests and live evidence prove:
 - the exact tenant/customer/connection scope and complete account/cluster membership;
 - all objects processed, no failed objects, and row exhaustion;
 - deterministic manifest, object, and row hashes;
-- non-overlapping hourly windows and preserved container lineage;
+- non-overlapping daily windows and preserved container/node lineage;
 - exact row-component, category, efficiency, and currency arithmetic;
 - active CUR2 generation identity and reconciliation within the approved micro-unit tolerance;
 - stale, partial, empty, error, unknown, waiting, and configuration-required state behavior;

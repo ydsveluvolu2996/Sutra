@@ -9,19 +9,20 @@ export const SUSTAINABILITY_OFFICIAL_DEFINITION = Object.freeze({
   visualCount: 25,
   controlCount: 17,
   sheets: Object.freeze([
-    Object.freeze({ name: "Regional Footprint", visualCount: 3, controlCount: 0, coverage: "SCHEMA_GAP", localArea: "Region-filtered resource proxies" }),
-    Object.freeze({ name: "Compute Proxies", visualCount: 5, controlCount: 4, coverage: "PARTIAL", localArea: "Compute resource-use proxy trends" }),
-    Object.freeze({ name: "Storage Proxies", visualCount: 4, controlCount: 4, coverage: "PARTIAL", localArea: "Storage resource-use proxy trends" }),
-    Object.freeze({ name: "Data Transfer / Networking Proxies", visualCount: 4, controlCount: 4, coverage: "PARTIAL", localArea: "Data-transfer resource-use proxy trends" }),
+    Object.freeze({ name: "Regional Footprint", visualCount: 3, controlCount: 0, coverage: "EVIDENCE_GATED", localArea: "Authoritative coordinates, renewable classification, and Region proxies" }),
+    Object.freeze({ name: "Compute Proxies", visualCount: 5, controlCount: 4, coverage: "EVIDENCE_GATED", localArea: "Compute trends by processor and instance family" }),
+    Object.freeze({ name: "Storage Proxies", visualCount: 4, controlCount: 4, coverage: "EVIDENCE_GATED", localArea: "Storage trends by EBS/S3 class" }),
+    Object.freeze({ name: "Data Transfer / Networking Proxies", visualCount: 4, controlCount: 4, coverage: "EVIDENCE_GATED", localArea: "Transfer path and idle NAT/ELB evidence" }),
     Object.freeze({ name: "Carbon Emissions", visualCount: 7, controlCount: 5, coverage: "EVIDENCE_BACKED", localArea: "Provider carbon trends and scopes" }),
     Object.freeze({ name: "About", visualCount: 2, controlCount: 0, coverage: "CONTEXTUAL_EQUIVALENT", localArea: "Provenance, separation and limitations" }),
   ]),
-  unavailableDimensions: Object.freeze([
+  evidenceGatedDimensions: Object.freeze([
     "regional renewable-energy classification and map coordinates",
     "EC2 processor architecture and instance family",
     "EBS volume type and S3 storage class",
     "data-transfer path classification",
     "idle NAT Gateway and Elastic Load Balancer resource evidence",
-    "server-owned business KPI denominators and targets",
+    "server-owned technical proxy targets",
   ]),
+  dimensionContractVersion: "sutra.sustainability-proxy-dimensions.v2",
 } as const);

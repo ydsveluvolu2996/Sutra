@@ -204,22 +204,23 @@ provider failure never becomes an empty success.
 
 ## Production acceptance gates
 
-The pure engine and focused tests do not constitute production acceptance.
-Remaining gates are:
+The unique vertical now includes the bounded credential-owning adapter, strict
+signed route, permanent replay/lease repository, immutable generation history,
+deterministic daily scheduler, authenticated API states, and native UI. It is
+gated to permission pack `standard-2026-08.18`; all account and Region targets
+come from server-owned configuration. Remaining integration and live gates are:
 
-1. wire the exact operations, resources, S3 prefix conditions, and account
-   fan-out into the permanent read-only collector/session ceiling;
-2. configure or identify the organization aggregator and Config delivery
-   prefix, and prove every intended recorder/account/Region;
-3. implement bounded adapters that emit this exact minimized schema and follow
-   empty-page pagination tokens;
-4. persist immutable generations and job attempts under exact tenant scope;
-5. expose authenticated APIs and professional compliance, lifecycle,
-   coverage, inventory, activity, and cost views; and
-6. run live tests for complete/partial organizations, disabled/limited/service-
+1. register the exact Config, Organizations, and optional contract-bound S3
+   permissions in the shared role broker and onboarding artifacts;
+2. mount the provider route and scheduler/handler in the shared collector and
+   migration registries;
+3. configure the organization aggregator and prove every intended
+   recorder/account/Region; and
+4. run live tests for complete/partial organizations, disabled/limited/service-
    linked recorders, no rules, rules without results, capped counts,
    insufficient-data packs, duplicate rules, mixed currencies, stale data,
    access denial, pagination, and cross-tenant rejection.
 
-Until those gates pass, Config compliance remains in progress and must not be
-reported as production accepted.
+Tag, resource-specific, threat-informed, and configuration-item event views
+remain explicitly unavailable until their own authoritative versioned evidence
+contracts exist. Security Hub and CloudTrail are not accepted substitutes.

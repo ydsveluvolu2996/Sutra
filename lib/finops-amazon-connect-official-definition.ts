@@ -242,7 +242,7 @@ export const AMAZON_CONNECT_OFFICIAL_DEFINITION = Object.freeze({
     "AWS Guidance documents seven analytical purposes; those purposes are not treated as proof of seven visual objects.",
     "The public source publishes the complete dashboard definition but not the resource_connect_view dataset body or producing query.",
     "The ordinary Sutra UI deliberately excludes raw contact IDs, phone numbers, endpoints, caller identity and HMAC tokens.",
-    "Provider registration, supporting-service evidence, controlled live reconciliation, two-tenant proof, release review, image deployment and production acceptance remain open.",
+    "The signed credential-owning provider and durable local runtime are implemented; shared registration, controlled live reconciliation, two-tenant proof, release review, image deployment and production acceptance remain open.",
   ]),
 } as const);
 

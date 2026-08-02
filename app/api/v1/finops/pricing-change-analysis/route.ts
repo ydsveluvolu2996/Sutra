@@ -129,6 +129,8 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState,
+        runtimeState: sourceState === "waiting" ? "collecting"
+          : sourceState === "failed" ? "failed" : "unavailable",
         officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report: null,
@@ -197,6 +199,8 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState: attemptState ?? sourceStateFor(report),
+        runtimeState: attemptState === "waiting" ? "collecting"
+          : attemptState === "failed" ? "failed" : "ready",
         officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report,
@@ -215,7 +219,7 @@ export async function GET(request: Request): Promise<Response> {
           "Actual usage is held constant while public catalog rates at two effective dates are compared.",
           "Private pricing, credits, taxes, support, refunds, commitment-benefit allocation, and currency conversion are excluded.",
           "AWS Price List files are informational; this dashboard is not an invoice, quote, forecast, discount calculation, or savings claim.",
-          "Local server-owned CUR2-to-catalog orchestration is implemented; activation remains disabled until its historical AWS Price List provider adapter and durable job handler are registered and provider-accepted.",
+          "The historical Price List adapter, exact CUR2 reader, signed transport, and durable replay are implemented locally; activation remains disabled until shared runtime registration and provider acceptance complete.",
         ],
       });
     } catch {
@@ -224,6 +228,7 @@ export async function GET(request: Request): Promise<Response> {
         connectionId,
         source: "VERSIONED_AWS_PRICE_LIST_BULK_FILES_AND_ACTIVE_CUR2_USAGE",
         sourceState: "failed",
+        runtimeState: "failed",
         officialDefinition: PRICING_CHANGE_OFFICIAL_DEFINITION,
         latestAttemptStatus: latestAttempt?.status ?? null,
         report: null,

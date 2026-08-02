@@ -35,6 +35,7 @@ const NON_NEGATIVE_INTEGER = /^(?:0|[1-9]\d{0,60})$/u;
 const SAFE_ERROR_CODE = /^[A-Z][A-Z0-9_]{0,95}$/u;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
+const DAY_MS = 24 * HOUR_MS;
 
 export const KUBECOST_ALLOCATION_BOUNDS = Object.freeze({
   maximumCaptureBytes: 128 * 1_024 * 1_024,
@@ -78,10 +79,19 @@ export const KUBECOST_EXPORTER_S3_WRITE_IAM_ACTIONS = Object.freeze([
 
 export const KUBECOST_EXPORT_CONTRACT = Object.freeze({
   schemaName: "sutra.kubecost-opencost-allocation",
-  schemaVersion: "1.0.0",
+  schemaVersion: "2.0.0",
+  officialAwsCca: Object.freeze({
+    sourceCommit: "8a581332a70ae55d53464e52a0bb8b3dd64cb425",
+    cidManifestSha256: "2bde67113c8f585d13fc43fe537c3bee3eecf3a416b81cd0f57295226b4ed45b",
+    datasetSha256: "3cd36937146500be79d7cfe3f6fa78012f999378dd9729ec17a300888c7962a6",
+    athenaViewQuerySha256: "2a5db62703b857a19d56a50661e5a20be4d02776aad3d1065422c7bab8b2e07c",
+    exporterSha256: "48f44e9147ed57fa2252a6867473fac82fd362b612fe59041b8dc9f4df81fdf3",
+    format: "SNAPPY_PARQUET",
+    inputColumnCount: 62,
+  }),
   query: Object.freeze({
     window: "EXPLICIT_UTC_RFC3339_PAIR",
-    step: "1h",
+    step: "1d",
     accumulate: false,
     rawAllocationLineage: true,
     shareIdle: false,
@@ -162,7 +172,7 @@ export interface KubecostExportMetadata {
   readonly query: {
     readonly windowStartIso: string;
     readonly windowEndIso: string;
-    readonly step: "1h";
+    readonly step: "1d";
     readonly accumulate: false;
     readonly rawAllocationLineage: true;
     readonly shareIdle: false;
@@ -231,6 +241,14 @@ export interface KubecostAllocationRow {
   readonly workload: string | null;
   readonly pod: string | null;
   readonly container: string | null;
+  readonly node: string | null;
+  readonly nodeInstanceType: string | null;
+  readonly nodeAvailabilityZone: string | null;
+  readonly nodeCapacityType: string | null;
+  readonly nodeArchitecture: string | null;
+  readonly nodeOs: string | null;
+  readonly nodeGroup: string | null;
+  readonly nodeGroupImage: string | null;
   readonly allocationKind: KubecostAllocationKind;
   readonly currency: string;
   readonly costs: KubecostAllocationCosts;
@@ -326,6 +344,14 @@ export interface KubecostAllocationGroup {
   readonly workload: string | null;
   readonly pod: string | null;
   readonly container: string | null;
+  readonly node: string | null;
+  readonly nodeInstanceType: string | null;
+  readonly nodeAvailabilityZone: string | null;
+  readonly nodeCapacityType: string | null;
+  readonly nodeArchitecture: string | null;
+  readonly nodeOs: string | null;
+  readonly nodeGroup: string | null;
+  readonly nodeGroupImage: string | null;
   readonly allocationKind: KubecostAllocationKind;
   readonly currency: string;
   readonly rowCount: number;
@@ -577,13 +603,17 @@ function validRow(row: unknown): row is KubecostAllocationRow {
     && typeof row.sourceObjectId === "string" && IDENTIFIER.test(row.sourceObjectId)
     && safeCount(row.sourceRowNumber) && row.sourceRowNumber > 0
     && typeof row.sourceRowSha256 === "string" && SHA256.test(row.sourceRowSha256)
-    && validIso(row.windowStartIso) && validIso(row.windowEndIso) && end > start && end - start <= HOUR_MS
+    && validIso(row.windowStartIso) && validIso(row.windowEndIso) && end > start && end - start <= DAY_MS
     && typeof row.usageAccountId === "string" && ACCOUNT_ID.test(row.usageAccountId)
     && (row.region === null || (typeof row.region === "string" && REGION.test(row.region)))
     && typeof row.clusterId === "string" && CLUSTER_ID.test(row.clusterId)
     && nullableSafeText(row.namespace) && nullableSafeText(row.controllerKind)
     && nullableSafeText(row.controller) && nullableSafeText(row.workload)
     && nullableSafeText(row.pod) && nullableSafeText(row.container)
+    && nullableSafeText(row.node) && nullableSafeText(row.nodeInstanceType)
+    && nullableSafeText(row.nodeAvailabilityZone) && nullableSafeText(row.nodeCapacityType)
+    && nullableSafeText(row.nodeArchitecture) && nullableSafeText(row.nodeOs)
+    && nullableSafeText(row.nodeGroup) && nullableSafeText(row.nodeGroupImage)
     && ["WORKLOAD", "IDLE", "SHARED", "EXTERNAL", "UNALLOCATED", "UNMOUNTED"].includes(String(row.allocationKind))
     && typeof row.currency === "string" && FINOPS_RECONCILIATION_CURRENCIES.has(row.currency as never)
     && validCosts(row.costs) && validMetrics(row.metrics);
@@ -660,7 +690,7 @@ function validateCapture(
     || !SAFE_TEXT.test(capture.export.exporterName) || !SAFE_TEXT.test(capture.export.exporterVersion)
     || !SHA256.test(capture.export.schemaSha256) || !SHA256.test(capture.export.manifestSha256)
     || !SHA256.test(capture.export.querySha256) || !SHA256.test(capture.export.costModelSha256)
-    || query.step !== "1h" || query.accumulate !== false || query.rawAllocationLineage !== true
+    || query.step !== "1d" || query.accumulate !== false || query.rawAllocationLineage !== true
     || query.shareIdle !== false || query.splitIdle !== true
     || query.includeSharedCostBreakdown !== true || query.external !== true
     || !validIso(query.windowStartIso) || !validIso(query.windowEndIso)
@@ -824,7 +854,9 @@ function efficiency(rows: readonly KubecostAllocationRow[], metric: KubecostMetr
 function groupKey(row: KubecostAllocationRow): string {
   return [
     row.usageAccountId, row.region, row.clusterId, row.namespace, row.controllerKind,
-    row.controller, row.workload, row.pod, row.container, row.allocationKind, row.currency,
+    row.controller, row.workload, row.pod, row.container, row.node, row.nodeInstanceType,
+    row.nodeAvailabilityZone, row.nodeCapacityType, row.nodeArchitecture, row.nodeOs,
+    row.nodeGroup, row.nodeGroupImage, row.allocationKind, row.currency,
   ].map((value) => value ?? "").join("\u001f");
 }
 
@@ -852,6 +884,14 @@ function buildGroups(rows: readonly KubecostAllocationRow[]): readonly KubecostA
         workload: row.workload,
         pod: row.pod,
         container: row.container,
+        node: row.node,
+        nodeInstanceType: row.nodeInstanceType,
+        nodeAvailabilityZone: row.nodeAvailabilityZone,
+        nodeCapacityType: row.nodeCapacityType,
+        nodeArchitecture: row.nodeArchitecture,
+        nodeOs: row.nodeOs,
+        nodeGroup: row.nodeGroup,
+        nodeGroupImage: row.nodeGroupImage,
         allocationKind: row.allocationKind,
         currency: row.currency,
         rowCount: group.rows.length,

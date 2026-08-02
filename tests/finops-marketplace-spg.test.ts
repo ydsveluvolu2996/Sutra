@@ -115,6 +115,8 @@ function capture(): Mutable<AwsMarketplaceSpgCapture> {
         sellerProfileId: "seller-001",
         deployedOnAws: "DEPLOYED",
         fulfillmentTypes: ["SAAS"],
+        approvedProductType: "SOFTWARE",
+        approvedProductTypeEvidenceId: `fss_${"d".repeat(64)}`,
       },
       terms: [{
         termId: "term-legal",

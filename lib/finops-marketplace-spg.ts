@@ -280,6 +280,13 @@ export interface AwsMarketplaceProductCapture {
   readonly sellerProfileId: string | null;
   readonly deployedOnAws: "DEPLOYED" | "NOT_DEPLOYED" | "NOT_APPLICABLE";
   readonly fulfillmentTypes: readonly string[];
+  /** Server-approved procurement taxonomy; never inferred from product names. */
+  readonly approvedProductType:
+    | "SOFTWARE"
+    | "DATA"
+    | "PROFESSIONAL_SERVICES"
+    | null;
+  readonly approvedProductTypeEvidenceId: string | null;
   /** Descriptions, media, support contacts, phone numbers and emails are omitted. */
 }
 
@@ -749,7 +756,8 @@ function normalizeAgreement(
   if (product !== null) {
     exactKeys(product, [
       "productId", "productName", "sellerDisplayName", "sellerProfileId",
-      "deployedOnAws", "fulfillmentTypes",
+      "deployedOnAws", "fulfillmentTypes", "approvedProductType",
+      "approvedProductTypeEvidenceId",
     ]);
     text(product.productId, PRODUCT_ID);
     text(product.productName);
@@ -759,6 +767,14 @@ function normalizeAgreement(
       fail("INVALID_INPUT");
     }
     uniqueStrings(product.fulfillmentTypes, 20);
+    if (product.approvedProductType !== null
+      && !new Set(["SOFTWARE", "DATA", "PROFESSIONAL_SERVICES"])
+        .has(product.approvedProductType)) fail("INVALID_INPUT");
+    if ((product.approvedProductType === null)
+      !== (product.approvedProductTypeEvidenceId === null)) fail("INVALID_INPUT");
+    if (product.approvedProductTypeEvidenceId !== null) {
+      text(product.approvedProductTypeEvidenceId, EVIDENCE_ID);
+    }
     if (productId !== null && product.productId !== productId) fail("INVALID_INPUT");
   }
   const estimated = value.estimatedCharges === null ? null : money(value.estimatedCharges);

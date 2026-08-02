@@ -1,4 +1,5 @@
 export type CoraOfficialSheetCoverage =
+  | "NATIVE_EVIDENCE_IMPLEMENTED"
   | "NATIVE_EVIDENCE_PARTIAL"
   | "PROVIDER_DIMENSIONS_BLOCKED"
   | "ABOUT_EVIDENCE";
@@ -154,9 +155,9 @@ export const CORA_OFFICIAL_DEFINITION = Object.freeze({
         "Region", "Resource Type", "FinopsException Tag", "Terms (years)",
         "Level", "Upfront Options", "Type",
       ]),
-      coverage: "PROVIDER_DIMENSIONS_BLOCKED",
-      nativeEvidence: "Savings Plans recommendation rows and before/after-discount estimates remain separate from usage optimization.",
-      remainingGap: "SP level, term, upfront-option and type dimensions are not normalized, so both official pivot matrices remain partial.",
+      coverage: "NATIVE_EVIDENCE_IMPLEMENTED",
+      nativeEvidence: "Savings Plans rows include resource-safe level, term, upfront, type and service option matrices; before/after-discount estimates remain separate from usage optimization.",
+      remainingGap: "The native table is responsive HTML rather than QuickSight pivot geometry; no pixel/runtime parity is claimed.",
     }),
     Object.freeze({
       id: "28b4e248-fab2-4e92-87f2-4c77fbbe2ea5",
@@ -179,9 +180,9 @@ export const CORA_OFFICIAL_DEFINITION = Object.freeze({
         "RI SP Term equals", "RI SP Upfront equals", "RI Service equals",
         "Top equals",
       ]),
-      coverage: "PROVIDER_DIMENSIONS_BLOCKED",
-      nativeEvidence: "Reserved Instance recommendation rows, resource details, Region and before/after-discount estimate evidence.",
-      remainingGap: "RI service, level, term and upfront dimensions are not normalized, so the official pivots and comparison bars remain partial.",
+      coverage: "NATIVE_EVIDENCE_IMPLEMENTED",
+      nativeEvidence: "Reserved Instance rows include resource-safe service, level, term, upfront and offering matrices with Region and discount-separated estimates.",
+      remainingGap: "The native tables do not claim QuickSight pivot/bar pixel geometry or arbitrary GroupBy runtime parity.",
     }),
     Object.freeze({
       id: "79b758c8-d5c3-42c1-b73d-7601b14007b9",
@@ -198,8 +199,8 @@ export const CORA_OFFICIAL_DEFINITION = Object.freeze({
   ]),
   disclosures: Object.freeze([
     "The public definition proves structural objects; it does not prove native pixel, layout, interaction-tree, or QuickSight runtime parity.",
-    "The manifest publishes the cora_view Athena SQL inline, but Sutra has not deployed the credential-owning S3/Parquet execution adapter.",
-    "Savings Plans and Reserved Instance level, term, upfront and RI service dimensions remain unnormalized.",
+    "The manifest publishes the cora_view Athena SQL inline; the credential-owning bounded adapter and signed route are implemented locally, while the default SDK/Parquet factory and live deployment remain gated.",
+    "Savings Plans and Reserved Instance option dimensions reproduce the pinned v0.0.11 calculated-field semantics; changed or ambiguous provider text remains UNKNOWN.",
     "Live provider reconciliation, two-tenant proof, release-SHA review, immutable image deployment and production acceptance remain open.",
   ]),
 } as const);

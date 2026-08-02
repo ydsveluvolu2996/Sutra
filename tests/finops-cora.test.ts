@@ -14,10 +14,20 @@ import {
   CoraBoundaryError,
   coraSourceEvidence,
   normalizeCoraCapture,
+  deriveCoraCommitmentDimensions,
   type CoraCapture,
   type CoraRecommendationCapture,
   type CoraScope,
 } from "../lib/finops-cora.ts";
+
+test("pinned v0.0.11 rate dimensions fail closed to UNKNOWN instead of fuzzy inference", () => {
+  assert.deepEqual(deriveCoraCommitmentDimensions({ actionType: "PurchaseSavingsPlans", currentResourceType: "ComputeSavingsPlans", recommendedResourceType: "ComputeSavingsPlans", currentResourceSummary: "Payer eligible usage", recommendedResourceSummary: "0.50/hour for m7i in Payer one year NoUpfront" }), {
+    level: "PAYER", term: "ONE_YEAR", upfront: "NO_UPFRONT", offeringType: "ComputeSavingsPlans", service: "COMPUTE", hourlyCommitment: "0.50", instanceType: "m7i",
+  });
+  assert.deepEqual(deriveCoraCommitmentDimensions({ actionType: "PurchaseReservedInstances", currentResourceType: "RdsReservedInstances", recommendedResourceType: "RdsReservedInstances", currentResourceSummary: null, recommendedResourceSummary: "provider changed its format" }), {
+    level: "UNKNOWN", term: "UNKNOWN", upfront: "UNKNOWN", offeringType: "RdsReservedInstances", service: "RDS", hourlyCommitment: null, instanceType: "changed",
+  });
+});
 
 const NOW = Date.parse("2026-07-31T12:00:00.000Z");
 const MANAGEMENT = "111111111111";

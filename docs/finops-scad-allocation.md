@@ -127,13 +127,23 @@ is returned before data-object reads. Rows are accepted only after every page
 of their immutable object is exhausted; a failed object contributes no rows and
 the capture stays `PARTIAL`.
 
+The credential-owning path is `services/aws-collector/src/scad-cur2-provider-*`.
+It accepts only the signed same-tenant route, the already-attested
+`foundational-cur2-export-v1` contract, and the exact immutable
+`SutraFoundationalCur2ReadV1` export binding. `lib/finops-scad-signed-provider.ts`
+then rechecks request and signed-response hashes before the runtime adapter sees
+provider data. No new SDK or permission pack is introduced; known `.8.1` through
+`.8.14` successor records reuse the same exact add-on.
+
 Collection is bounded to 20,000 objects, 750,000 rows, 25,000 attempted
 requests, three attempts per request and 30 minutes. Stable failure codes cross
 the boundary; raw provider messages and credentials do not. The independent
 daily runtime binding uses tenant/window idempotency, a 31-minute durable lease,
 content-hashed completion receipts and immutable repository verification. It is
-deliberately exported with `registeredInSharedRuntime: false` until production
-bindings and live evidence are approved.
+backed by dedicated D1/PostgreSQL CAS ledgers with a snapshot-persisted recovery
+checkpoint, generation foreign key, terminal immutability and sanitized failure
+state. It is deliberately exported with `registeredInSharedRuntime: false`
+until the shared registry and live evidence are approved.
 
 ## Permission design
 
@@ -148,7 +158,7 @@ The runtime role remains read-only and S3-only:
 | `s3:GetObject` | exact `bucket/prefix/*` object ARN |
 | `s3:GetObjectAttributes` | exact `bucket/prefix/*` object ARN, for immutable size/ETag/checksum evidence before activation |
 
-The role has no `ce:*`, `bcm-data-exports:*`, `cur:*`, `iam:*`, S3 write, or
+The minted SCAD runtime session has no `ce:*`, `bcm-data-exports:*`, `cur:*`, `iam:*`, S3 write, or
 wildcard-provider permission. Existing platform controls must also require TLS
 and pin the AWS account/role trust boundary.
 

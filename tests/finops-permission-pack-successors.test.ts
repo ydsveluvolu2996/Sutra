@@ -8,11 +8,13 @@ import {
   EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACKS,
   RESILIENCE_VUE_RUNTIME_PERMISSION_PACKS,
   DCF_RUNTIME_PERMISSION_PACKS,
+  END_USER_COMPUTING_RUNTIME_PERMISSION_PACKS,
   isAwsHealthRuntimePermissionPack,
   isAwsSupportCasesRuntimePermissionPack,
   isExtendedSupportRuntimePermissionPack,
   isResilienceVueRuntimePermissionPack,
   isDcfRuntimePermissionPack,
+  isEndUserComputingRuntimePermissionPack,
 } from "../lib/finops-permission-pack-successors.ts";
 
 const PACKS = [
@@ -22,14 +24,16 @@ const PACKS = [
   "standard-2026-08.9",
   "standard-2026-08.10",
   "standard-2026-08.11",
+  "standard-2026-08.12",
 ] as const;
 
-test(".8.11 explicitly preserves every predecessor runtime capability", () => {
+test(".8.12 explicitly preserves every predecessor runtime capability", () => {
   assert.deepEqual(EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACKS, PACKS);
   assert.deepEqual(AWS_SUPPORT_CASES_RUNTIME_PERMISSION_PACKS, PACKS.slice(1));
   assert.deepEqual(AWS_HEALTH_RUNTIME_PERMISSION_PACKS, PACKS.slice(2));
   assert.deepEqual(RESILIENCE_VUE_RUNTIME_PERMISSION_PACKS, PACKS.slice(3));
   assert.deepEqual(DCF_RUNTIME_PERMISSION_PACKS, PACKS.slice(4));
+  assert.deepEqual(END_USER_COMPUTING_RUNTIME_PERMISSION_PACKS,PACKS.slice(5));
 
   for (const value of PACKS) {
     assert.equal(isExtendedSupportRuntimePermissionPack(value), true);
@@ -37,13 +41,14 @@ test(".8.11 explicitly preserves every predecessor runtime capability", () => {
     assert.equal(isAwsHealthRuntimePermissionPack(value), PACKS.indexOf(value) >= 2);
     assert.equal(isResilienceVueRuntimePermissionPack(value), PACKS.indexOf(value) >= 3);
     assert.equal(isDcfRuntimePermissionPack(value), PACKS.indexOf(value) >= 4);
+    assert.equal(isEndUserComputingRuntimePermissionPack(value),PACKS.indexOf(value)>=5);
   }
 });
 
 test("runtime capability checks reject fabricated lexical successors", () => {
   const fabricated = [
     "standard-2026-08.010",
-    "standard-2026-08.12",
+    "standard-2026-08.13",
     "standard-2026-08.90",
     "standard-2027-08.10",
     "standard-2026-09.10",
@@ -55,6 +60,7 @@ test("runtime capability checks reject fabricated lexical successors", () => {
     assert.equal(isAwsHealthRuntimePermissionPack(value), false);
     assert.equal(isResilienceVueRuntimePermissionPack(value), false);
     assert.equal(isDcfRuntimePermissionPack(value), false);
+    assert.equal(isEndUserComputingRuntimePermissionPack(value),false);
   }
 });
 
@@ -66,6 +72,7 @@ test("every predecessor repository and route consumes the explicit catalog", asy
     "../db/finops-resilience-vue-runtime-repository.ts",
     "../db/finops-resilience-vue-repository.ts",
     "../db/finops-dcf-runtime-repository.ts",
+    "../db/finops-end-user-computing-runtime-context-repository.ts",
     "../app/api/v1/finops/aws-support-cases-radar/route.ts",
     "../app/api/v1/finops/resilience-vue/route.ts",
   ];
