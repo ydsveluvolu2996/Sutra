@@ -1,6 +1,6 @@
 # FND-03 — KPI and Modernization Dashboard evidence record
 
-Reviewed: 2026-08-01
+Reviewed: 2026-08-02
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#kpi-dashboard>
 
@@ -53,11 +53,11 @@ visual. The native inventory is encoded in
 
 | Gate | Status | Evidence |
 |---|---|---|
-| G0 requirements | `VERIFIED` | Immutable v2.2.1 source, sheet, visual and control inventory above, reviewed 2026-08-01. |
+| G0 requirements | `VERIFIED` | Immutable v2.2.1 source, sheet, visual and control inventory above, reviewed 2026-08-02. |
 | G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Active CUR2 generations plus versioned tenant KPI goals and immutable taxonomy publications. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | Tenant-resolved read-only KPI report with bounded billing-period, linked-account and payer-account filters, plus separately authorized goal-management and taxonomy routes. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 10-sheet navigation, immutable 91-visual/94-control inventory, versioned 19-formula scorecard, account/payer/period filters, goal state, progress bars, evidence window, sheet-specific formula views, and unavailable/partial disclosures. |
-| G6 focused verification | `VERIFIED` | Goal overlap/RBAC, exact formulas, source scope, currencies/units, missing compatibility/savings evidence, routes, migrations, repository, official inventory and UI pass in the focused 31-test set. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 10-sheet navigation, immutable 91-visual/94-control inventory, versioned 19-formula scorecard, account/payer/period filters, goal state, progress bars, evidence window, sheet-specific formula views, and unavailable/partial disclosures. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, version, manifest SHA-256, and definition SHA-256; the local constant is only the no-response fallback. |
+| G6 focused verification | `VERIFIED` | Goal overlap/RBAC, exact formulas, source scope, currencies/units, missing compatibility/savings evidence, routes, migrations, repository, official inventory and UI pass in the focused 32-test set. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled AWS reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
 
 ## Evidence-honesty limits
@@ -68,8 +68,9 @@ Graviton eligibility claims. Goals do not mutate source data or authorize
 remediation. Resource-ID controls, S3 request inactivity, EBS snapshot age,
 architecture compatibility, migration rates and commitment purchase
 recommendations remain explicit gaps until their authoritative data sources are
-registered and accepted.
+registered and accepted. The report-independent audit exposes frozen definition
+metadata only and never fabricates spend, usage, savings, or provider evidence.
 
-Focused result: **31 passed, 0 failed, 0 skipped** across the KPI engine, goal
+Focused result: **32 passed, 0 failed, 0 skipped** across the KPI engine, goal
 configuration migrations/repository/routes, exact official definition, native
 SSR view, API contract and shared Foundational UI contract tests.

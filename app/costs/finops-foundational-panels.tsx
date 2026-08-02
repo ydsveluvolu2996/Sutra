@@ -15,22 +15,28 @@ import type {
   FinopsCudosResult,
   FinopsCudosTrendBucket,
 } from "../../lib/finops-cudos";
-import type { FinopsCudosOfficialDefinition } from
-  "../../lib/finops-cudos-official-definition";
+import {
+  FINOPS_CUDOS_OFFICIAL_DEFINITION,
+  type FinopsCudosOfficialDefinition,
+} from "../../lib/finops-cudos-official-definition";
 import type {
   FinopsCostIntelligenceResult,
   FinopsCurrencyAllocation,
   FinopsTaxonomyAllocationNode,
 } from "../../lib/finops-cost-intelligence";
-import type { FinopsCostIntelligenceOfficialDefinition } from
-  "../../lib/finops-cost-intelligence-official-definition";
+import {
+  FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION,
+  type FinopsCostIntelligenceOfficialDefinition,
+} from "../../lib/finops-cost-intelligence-official-definition";
 import {
   FINOPS_KPI_IDS,
   type FinopsKpiMeasurement,
   type FinopsKpiResult,
 } from "../../lib/finops-kpi";
-import type { FinopsKpiOfficialDefinition } from
-  "../../lib/finops-kpi-official-definition";
+import {
+  FINOPS_KPI_OFFICIAL_DEFINITION,
+  type FinopsKpiOfficialDefinition,
+} from "../../lib/finops-kpi-official-definition";
 import { FinopsCurIntelligencePanels } from "./finops-cur-intelligence-panels";
 import styles from "./costs.module.css";
 
@@ -156,7 +162,6 @@ const CURRENCY = /^[A-Z]{3}$/u;
 const BILLING_PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const GENERATION_ID = /^fbg_[a-f0-9]{64}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
-const GIT_COMMIT = /^[a-f0-9]{40}$/u;
 const AWS_ACCOUNT_ID = /^\d{12}$/u;
 
 /**
@@ -387,6 +392,10 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     && validSourceEvidence(sourceEvidence)
     && isRecord(value.officialDefinition)
     && isRecord(value.officialDefinition.source)
+    && value.officialDefinition.source.commit
+      === "f9e36d88c47709f10e8fa784ad11d5cc0e728021"
+    && value.officialDefinition.source.path
+      === "dashboards/cudos/CUDOS-v5-definition.yaml"
     && value.officialDefinition.source.sha256
       === "7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1"
     && isRecord(value.officialDefinition.totals)
@@ -413,10 +422,11 @@ function validCostIntelligenceEnvelope(
     )
     && validSourceEvidence(value.sourceEvidence)
     && isRecord(definition)
-    && typeof definition.commit === "string"
-    && GIT_COMMIT.test(definition.commit)
-    && typeof definition.sha256 === "string"
-    && SHA256.test(definition.sha256)
+    && definition.commit === "f9e36d88c47709f10e8fa784ad11d5cc0e728021"
+    && definition.path
+      === "dashboards/cost-intelligence/cost-intelligence-definition.yaml"
+    && definition.sha256
+      === "71795647fd09a17c3a2e1ea2f1308d6aecb150efe339a0950866ad766ef10ab0"
     && definition.exactVisualCount === 77
     && definition.exactFilterControlCount === 11
     && definition.exactParameterControlCount === 33
@@ -457,7 +467,13 @@ function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
       typeof account === "string" && AWS_ACCOUNT_ID.test(account))
     && isRecord(definition)
     && isRecord(definition.source)
+    && definition.source.commit
+      === "f9e36d88c47709f10e8fa784ad11d5cc0e728021"
     && definition.source.version === "v2.2.1"
+    && definition.source.manifestSha256
+      === "fd669f207c5589b4b54b981d6d85affb3af449871e908b85a4c1b9b357c35b1a"
+    && definition.source.definitionSha256
+      === "299c6d39c55c28221b0d0d771358f526931d60fb5f4d00ba4f663d22554b89a1"
     && isRecord(definition.totals)
     && definition.totals.sheets === 10
     && definition.totals.visuals === 91
@@ -1899,6 +1915,154 @@ function BoundaryAndContent({
   );
 }
 
+interface OfficialEvidenceSheet {
+  readonly key: string;
+  readonly name: string;
+  readonly visualCount: number;
+  readonly parameterControlCount: number;
+  readonly filterControlCount: number;
+  readonly support: string;
+  readonly gap: string | null;
+}
+
+function OfficialEvidencePanel({
+  ariaLabel,
+  title,
+  meta,
+  commit,
+  definitionSha256,
+  sheets,
+}: {
+  readonly ariaLabel: string;
+  readonly title: string;
+  readonly meta: string;
+  readonly commit: string;
+  readonly definitionSha256: string;
+  readonly sheets: readonly OfficialEvidenceSheet[];
+}) {
+  return (
+    <section className={styles.foundationalPanel} aria-label={ariaLabel}>
+      <PanelHeading
+        eyebrow="Immutable official source"
+        title={title}
+        meta={meta}
+      />
+      <p className={styles.foundationalEmpty}>
+        Definition {compactEvidence(definitionSha256, 16)} · commit{" "}
+        {compactEvidence(commit, 12)}. This source audit remains visible without
+        a billing report and does not fabricate spend, usage, savings, or
+        provider evidence.
+      </p>
+      <details>
+        <summary>{sheets.length} official sheets and native evidence gaps</summary>
+        <section
+          className={styles.foundationalModuleGrid}
+          aria-label={`${title} sheet inventory`}
+        >
+          {sheets.map((sheet) => (
+            <article key={sheet.key}>
+              <header>
+                <span>{sheet.name.trim()}</span>
+                <strong>{sheet.visualCount}</strong>
+              </header>
+              <p>{sheet.gap ?? "Native evidence-backed coverage is available."}</p>
+              <dl>
+                <div><dt>Parameters</dt><dd>{sheet.parameterControlCount}</dd></div>
+                <div><dt>Filters</dt><dd>{sheet.filterControlCount}</dd></div>
+                <div><dt>Parity</dt><dd>{readableToken(sheet.support.toLowerCase())}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </section>
+      </details>
+    </section>
+  );
+}
+
+export function CudosOfficialEvidence({
+  definition,
+}: {
+  readonly definition: FinopsCudosOfficialDefinition;
+}) {
+  return (
+    <OfficialEvidencePanel
+      ariaLabel="Report-independent official AWS CUDOS definition"
+      title="Official CUDOS v5 source audit"
+      meta={`${definition.totals.sheets} sheets · ${definition.totals.visuals} visuals · ${definition.totals.parameterControls + definition.totals.filterControls} controls`}
+      commit={definition.source.commit}
+      definitionSha256={definition.source.sha256}
+      sheets={definition.sheets.map((sheet) => ({
+        key: sheet.name,
+        name: sheet.name,
+        visualCount: sheet.visualCount,
+        parameterControlCount: sheet.parameterControlCount,
+        filterControlCount: sheet.filterControlCount,
+        support: sheet.support,
+        gap: sheet.gap,
+      }))}
+    />
+  );
+}
+
+export function CostIntelligenceOfficialEvidence({
+  definition,
+}: {
+  readonly definition: FinopsCostIntelligenceOfficialDefinition;
+}) {
+  return (
+    <OfficialEvidencePanel
+      ariaLabel="Report-independent official AWS Cost Intelligence definition"
+      title="Official Cost Intelligence source audit"
+      meta={`${definition.sheets.length} sheets · ${definition.exactVisualCount} visuals · ${definition.exactParameterControlCount + definition.exactFilterControlCount} controls`}
+      commit={definition.commit}
+      definitionSha256={definition.sha256}
+      sheets={definition.sheets.map((sheet) => ({
+        key: sheet.name,
+        name: sheet.name,
+        visualCount: sheet.visualCount,
+        parameterControlCount: sheet.parameterControlCount,
+        filterControlCount: sheet.filterControlCount,
+        support: sheet.support,
+        gap: sheet.gaps.length === 0 ? null : sheet.gaps.join(" "),
+      }))}
+    />
+  );
+}
+
+export function KpiOfficialEvidence({
+  definition,
+}: {
+  readonly definition: FinopsKpiOfficialDefinition;
+}) {
+  return (
+    <OfficialEvidencePanel
+      ariaLabel="Report-independent official AWS KPI definition"
+      title="Official KPI v2.2.1 source audit"
+      meta={`${definition.totals.sheets} sheets · ${definition.totals.visuals} visuals · ${definition.totals.parameterControls + definition.totals.filterControls} controls`}
+      commit={definition.source.commit}
+      definitionSha256={definition.source.definitionSha256}
+      sheets={definition.sheets.map((sheet) => ({
+        key: sheet.id,
+        name: sheet.name,
+        visualCount: sheet.visualCount,
+        parameterControlCount: sheet.parameterControls.length,
+        filterControlCount: Object.values(sheet.filterControls).reduce(
+          (sum, count) => sum + count,
+          0,
+        ),
+        support: sheet.support,
+        gap: sheet.gaps.length === 0 ? null : sheet.gaps.join(" "),
+      }))}
+    />
+  );
+}
+
+function stateEnvelope<T>(state: EndpointState<T>): T | null {
+  return "envelope" in state && state.envelope !== undefined
+    ? state.envelope
+    : null;
+}
+
 export function FinopsFoundationalPanels({
   connectionId,
   section,
@@ -2039,6 +2203,13 @@ export function FinopsFoundationalPanels({
 
   if (connectionId === null) return null;
 
+  const cudosOfficialDefinition = stateEnvelope(cudos)?.officialDefinition
+    ?? FINOPS_CUDOS_OFFICIAL_DEFINITION;
+  const costIntelligenceOfficialDefinition = stateEnvelope(costIntelligence)
+    ?.officialDefinition ?? FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION;
+  const kpiOfficialDefinition = stateEnvelope(kpi)?.officialDefinition
+    ?? FINOPS_KPI_OFFICIAL_DEFINITION;
+
   return (
     <div className={styles.foundationalRoot}>
       {section === "overview" || section === "services" ? (
@@ -2054,6 +2225,7 @@ export function FinopsFoundationalPanels({
           state={cudos}
           onRetry={retry}
         >
+          <CudosOfficialEvidence definition={cudosOfficialDefinition} />
           {statusReady(cudos) && cudos.envelope.connectionId === connectionId && section === "overview"
             ? <CudosOverview envelope={cudos.envelope} />
             : null}
@@ -2074,6 +2246,9 @@ export function FinopsFoundationalPanels({
           state={costIntelligence}
           onRetry={retry}
         >
+          <CostIntelligenceOfficialEvidence
+            definition={costIntelligenceOfficialDefinition}
+          />
           {statusReady(costIntelligence) && costIntelligence.envelope.connectionId === connectionId && section === "allocation"
             ? <CostIntelligenceAllocation envelope={costIntelligence.envelope} />
             : null}
@@ -2088,6 +2263,7 @@ export function FinopsFoundationalPanels({
           state={kpi}
           onRetry={retry}
         >
+          <KpiOfficialEvidence definition={kpiOfficialDefinition} />
           {statusReady(kpi) && kpi.envelope.connectionId === connectionId
             ? <KpiScorecard
                 envelope={kpi.envelope}

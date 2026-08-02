@@ -1,6 +1,6 @@
 # FND-01 — CUDOS Dashboard evidence record
 
-Reviewed: 2026-08-01
+Reviewed: 2026-08-02
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cudos-dashboard>
 
@@ -59,7 +59,7 @@ layout parity.
 | G2 collector | `IMPLEMENTED_UNVERIFIED` | Data Export manifest/object ingestion and correction-safe generation path; no claim that every official supplemental resource source is collected. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Active billing generation repository, tenant/export/period/generation scope, immutable canonical rows, correction head. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | `GET /api/v1/finops/cudos`; exact query allowlist, authenticated live AWS connection, active-generation-only reads. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 19-sheet/407-visual/142-control coverage navigator, executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, and all official service-family projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 19-sheet/407-visual/142-control coverage navigator, executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, and all official service-family projections in `finops-foundational-panels.tsx`; missing source fields remain unavailable. The immutable official-source audit renders independently in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, path, and SHA-256; the local constant is only the no-response fallback. |
 | G6 focused verification | `VERIFIED` | CUDOS engine, route, immutable definition, native SSR and shared Foundational UI tests pass with no failures/skips. |
 | G7 exact-tree gate | `NOT_STARTED` | Must be rerun on the eventual release SHA with PostgreSQL, Docker, rendered, and full repository gates. |
 | G8–G10 | `NOT_STARTED` | Controlled source reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
@@ -70,7 +70,8 @@ Billing-derived opportunities are estimates with bounded source-line evidence,
 not AWS recommendations or approved remediation. Idle-resource telemetry,
 architecture compatibility, and commitment completeness remain unavailable when
 the canonical export does not prove them. Currencies and usage units are never
-combined.
+combined. The report-independent audit exposes only frozen definition metadata;
+it never manufactures spend, usage, savings, or provider evidence.
 
 Focused command:
 
@@ -83,4 +84,4 @@ npx tsx --test \
   tests/finops-foundational-ui-contract.test.mjs
 ```
 
-Result: **22 passed, 0 failed, 0 skipped**.
+Result: **23 passed, 0 failed, 0 skipped**.

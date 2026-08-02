@@ -34,6 +34,18 @@ test("native CUDOS overview renders the exact official sheet inventory", async (
       vite.ssrLoadModule("/app/costs/finops-foundational-panels.tsx"),
       vite.ssrLoadModule("/lib/finops-cudos-official-definition.ts"),
     ]);
+    const auditHtml = renderToStaticMarkup(createElement(
+      panel.CudosOfficialEvidence,
+      { definition: definition.FINOPS_CUDOS_OFFICIAL_DEFINITION },
+    ));
+    for (const expected of [
+      "Report-independent official AWS CUDOS definition",
+      "Official CUDOS v5 source audit",
+      "19 sheets · 407 visuals · 142 controls",
+      "This source audit remains visible without a billing report",
+      "19 official sheets and native evidence gaps",
+    ]) assert.match(auditHtml, new RegExp(expected, "iu"), expected);
+    assert.doesNotMatch(auditHtml, /sample spend|placeholder spend|mock spend/iu);
     const envelope = {
       connectionId: `conn_${"a".repeat(32)}`,
       selectedPeriod: "2026-07",

@@ -1,6 +1,6 @@
 # FND-02 — Cost Intelligence Dashboard evidence record
 
-Reviewed: 2026-08-01
+Reviewed: 2026-08-02
 
 Official guidance: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cost-intelligence-dashboard-cid>
 
@@ -64,7 +64,7 @@ different cost basis.
 | G0 requirements | `VERIFIED` | Immutable commit/path/hash plus exact 10-sheet/77-visual/44-control inventory is enforced by `finops-cost-intelligence-official-definition.test.mjs`. |
 | G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Shares the correction-safe CUR2 ingestion and active-generation persistence path with FND-01; exact-tree and controlled provider evidence remain outstanding. |
 | G4 API | `VERIFIED_LOCAL` | Authenticated tenant scope, one canonical export history, 36-period/250,000-row bounds, strict query allow-list, activated bounded explorer, explicit forecast options, and conservative commitment completeness. |
-| G5 visual UI | `VERIFIED_LOCAL` | Immutable 10-sheet coverage navigator, per-sheet parity gaps, billing summary, trend, movers, forecast, spend pivot, bounded explorer, expiry tracker, allocation, evidence/freshness states, and exact-currency rendering are under UI contract tests. |
+| G5 visual UI | `VERIFIED_LOCAL` | Immutable 10-sheet coverage navigator, per-sheet parity gaps, billing summary, trend, movers, forecast, spend pivot, bounded explorer, expiry tracker, allocation, evidence/freshness states, and exact-currency rendering are under UI contract tests. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, path, and SHA-256; the local constant is only the no-response fallback. |
 | G6 focused verification | `VERIFIED` | Focused engine, route, official-definition, and UI contract suite passes locally; commands and count are recorded below. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled two-tenant/provider, release, deployment, rollback, and live visual evidence remain release-level gates. |
 
@@ -77,6 +77,8 @@ different cost basis.
   prove unused charges, public on-demand cost, and usage quantity completeness.
 - “No observed expiry evidence” is not presented as “no commitments exist.”
 - Allocation is reporting attribution, not a mutation of an invoice.
+- The report-independent audit exposes frozen definition metadata only and does
+  not fabricate spend, usage, savings, or provider evidence.
 
 Focused verification command:
 
@@ -89,4 +91,4 @@ node --experimental-strip-types --test \
   tests/finops-foundational-ui-contract.test.mjs
 ```
 
-Result: **23 passed, 0 failed, 0 skipped**.
+Result: **24 passed, 0 failed, 0 skipped**.

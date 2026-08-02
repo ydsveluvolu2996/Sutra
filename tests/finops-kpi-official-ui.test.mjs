@@ -19,6 +19,18 @@ test("native KPI workspace renders the exact official sheet inventory and eviden
       vite.ssrLoadModule("/lib/finops-kpi.ts"),
       vite.ssrLoadModule("/lib/finops-kpi-official-definition.ts"),
     ]);
+    const auditHtml = renderToStaticMarkup(createElement(
+      panel.KpiOfficialEvidence,
+      { definition: definition.FINOPS_KPI_OFFICIAL_DEFINITION },
+    ));
+    for (const expected of [
+      "Report-independent official AWS KPI definition",
+      "Official KPI v2.2.1 source audit",
+      "10 sheets · 91 visuals · 94 controls",
+      "This source audit remains visible without a billing report",
+      "10 official sheets and native evidence gaps",
+    ]) assert.match(auditHtml, new RegExp(expected, "iu"), expected);
+    assert.doesNotMatch(auditHtml, /sample spend|placeholder spend|mock spend/iu);
     const measurements = kpi.FINOPS_KPI_FORMULAS.map((formula) => ({
       kpiId: formula.id,
       formulaVersion: formula.formulaVersion,

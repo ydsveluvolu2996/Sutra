@@ -21,6 +21,18 @@ test("native Cost Intelligence workspace renders official sheets and decision vi
       vite.ssrLoadModule("/app/costs/finops-foundational-panels.tsx"),
       vite.ssrLoadModule("/lib/finops-cost-intelligence-official-definition.ts"),
     ]);
+    const auditHtml = renderToStaticMarkup(createElement(
+      panel.CostIntelligenceOfficialEvidence,
+      { definition: definition.FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION },
+    ));
+    for (const expected of [
+      "Report-independent official AWS Cost Intelligence definition",
+      "Official Cost Intelligence source audit",
+      "10 sheets · 77 visuals · 44 controls",
+      "This source audit remains visible without a billing report",
+      "10 official sheets and native evidence gaps",
+    ]) assert.match(auditHtml, new RegExp(expected, "iu"), expected);
+    assert.doesNotMatch(auditHtml, /sample spend|placeholder spend|mock spend/iu);
     const envelope = {
       connectionId: `conn_${"a".repeat(32)}`,
       selectedPeriods: ["2026-06", "2026-07"],

@@ -77,6 +77,40 @@ test("every honest canonical source state is visible and actionable", () => {
   assert.match(panel, />Retry</u);
 });
 
+test("official audits remain visible independently of report readiness and validate server pins", () => {
+  assert.match(
+    panel,
+    /<CudosOfficialEvidence definition=\{cudosOfficialDefinition\} \/>[\s\S]*\{statusReady\(cudos\)/u,
+  );
+  assert.match(
+    panel,
+    /<CostIntelligenceOfficialEvidence[\s\S]*definition=\{costIntelligenceOfficialDefinition\}[\s\S]*\{statusReady\(costIntelligence\)/u,
+  );
+  assert.match(
+    panel,
+    /<KpiOfficialEvidence definition=\{kpiOfficialDefinition\} \/>[\s\S]*\{statusReady\(kpi\)/u,
+  );
+  assert.match(
+    panel,
+    /stateEnvelope\(cudos\)\?\.officialDefinition[\s\S]*FINOPS_CUDOS_OFFICIAL_DEFINITION/u,
+  );
+  assert.match(
+    panel,
+    /stateEnvelope\(costIntelligence\)[\s\S]*FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION/u,
+  );
+  assert.match(
+    panel,
+    /stateEnvelope\(kpi\)\?\.officialDefinition[\s\S]*FINOPS_KPI_OFFICIAL_DEFINITION/u,
+  );
+  for (const identity of [
+    "7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1",
+    "71795647fd09a17c3a2e1ea2f1308d6aecb150efe339a0950866ad766ef10ab0",
+    "fd669f207c5589b4b54b981d6d85affb3af449871e908b85a4c1b9b357c35b1a",
+    "299c6d39c55c28221b0d0d771358f526931d60fb5f4d00ba4f663d22554b89a1",
+  ]) assert.match(panel, new RegExp(identity, "u"), identity);
+  assert.match(panel, /does not fabricate spend, usage, savings, or/u);
+});
+
 test("KPI scorecard is driven by the complete versioned 19-formula registry", () => {
   assert.equal(FINOPS_KPI_IDS.length, 19);
   assert.equal(FINOPS_KPI_FORMULAS.length, 19);
