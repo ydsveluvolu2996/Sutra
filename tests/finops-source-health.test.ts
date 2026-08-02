@@ -210,7 +210,7 @@ test("Trusted Advisor readiness requires taxonomy plus standard checks and treat
     ],
   }).capabilities.find((entry) => entry.id === "trusted_advisor_organizational");
   assert.equal(completeStandard?.sourceReady, true);
-  assert.equal(completeStandard?.implementationMaturity, "ENGINE_ONLY");
+  assert.equal(completeStandard?.implementationMaturity, "PARTIAL_PIPELINE");
   assert.equal(completeStandard?.ready, false);
   assert.equal(completeStandard?.state, "healthy");
   assert.deepEqual(completeStandard?.blockingSourceIds, []);
