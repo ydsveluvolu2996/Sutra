@@ -5,6 +5,7 @@ export const EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACKS = Object.freeze([
   "standard-2026-08.8",
   "standard-2026-08.9",
   "standard-2026-08.10",
+  "standard-2026-08.11",
 ] as const);
 
 export const AWS_SUPPORT_CASES_RUNTIME_PERMISSION_PACKS = Object.freeze(
@@ -15,6 +16,9 @@ export const AWS_HEALTH_RUNTIME_PERMISSION_PACKS = Object.freeze(
 );
 export const RESILIENCE_VUE_RUNTIME_PERMISSION_PACKS = Object.freeze(
   EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACKS.slice(3),
+);
+export const DCF_RUNTIME_PERMISSION_PACKS = Object.freeze(
+  EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACKS.slice(4),
 );
 
 function accepts(allowed: readonly string[], value: string): boolean {
@@ -33,6 +37,9 @@ export function isAwsHealthRuntimePermissionPack(value: string): boolean {
 export function isResilienceVueRuntimePermissionPack(value: string): boolean {
   return accepts(RESILIENCE_VUE_RUNTIME_PERMISSION_PACKS, value);
 }
+export function isDcfRuntimePermissionPack(value: string): boolean {
+  return accepts(DCF_RUNTIME_PERMISSION_PACKS, value);
+}
 
 function sqlList(values: readonly string[]): string {
   if (values.some((value) => !/^standard-2026-08\.\d{1,2}$/u.test(value))) {
@@ -49,3 +56,4 @@ export const AWS_HEALTH_RUNTIME_PERMISSION_PACK_SQL =
   sqlList(AWS_HEALTH_RUNTIME_PERMISSION_PACKS);
 export const RESILIENCE_VUE_RUNTIME_PERMISSION_PACK_SQL =
   sqlList(RESILIENCE_VUE_RUNTIME_PERMISSION_PACKS);
+export const DCF_RUNTIME_PERMISSION_PACK_SQL = sqlList(DCF_RUNTIME_PERMISSION_PACKS);

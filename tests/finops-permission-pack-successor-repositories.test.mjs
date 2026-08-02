@@ -15,6 +15,8 @@ const { AwsHealthRuntimeRepository } = await import(
   "../db/finops-aws-health-runtime-repository.ts");
 const { ResilienceVueRuntimeRepository } = await import(
   "../db/finops-resilience-vue-runtime-repository.ts");
+const { DcfRuntimeRepository } = await import(
+  "../db/finops-dcf-runtime-repository.ts");
 
 const ORG = "org_pack_successors";
 const CUSTOMER = "customer_pack_successors";
@@ -29,7 +31,7 @@ const PACKS = [
 ];
 const CONNECTIONS = PACKS.map((_, index) => `conn_${(index + 1).toString(16).repeat(32)}`);
 
-test("runtime repositories accept only explicit .8.6-.8.10 successor chains", async () => {
+test("runtime repositories accept only explicit .8.6-.8.11 successor chains", async () => {
   const miniflare = new Miniflare({
     modules: true,
     script: "export default{fetch(){return new Response('ok')}}",
@@ -57,25 +59,39 @@ test("runtime repositories accept only explicit .8.6-.8.10 successor chains", as
         `arn:aws:iam::${String(111122223330 + index).padStart(12, "0")}:role/sutra/SutraCollectorRole`,
         permissionPack,
       )),
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.10' WHERE id IN (?,?,?)")
+        .bind(CONNECTIONS[4],CONNECTIONS[5],CONNECTIONS[6]),
+      ...[4,5,6].map((index) => database.prepare(`INSERT INTO finops_dcf_module_bindings(
+        org_id,customer_id,connection_id,module_id,module_name,source_id,region,state_machine_arn,
+        enabled,expected_cadence_minutes,verified_at)VALUES(?,?,?,'cur','CUR','aws_cur2_data_export',
+        'us-east-1',?,1,60,?)`).bind(ORG,CUSTOMER,CONNECTIONS[index],
+        `arn:aws:states:us-east-1:${String(111122223330 + index).padStart(12, "0")}:stateMachine:CID-CUR`,
+        1785542400000)),
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.11' WHERE id=?")
+        .bind(CONNECTIONS[5]),
+      database.prepare("UPDATE aws_connections SET permission_pack_version='standard-2026-08.90' WHERE id=?")
+        .bind(CONNECTIONS[6]),
     ]);
 
     const ids = (values) => values.map((value) => value.connectionId).sort();
     assert.deepEqual(ids(await new ExtendedSupportRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(0, 5));
+      .listEligibleScopes()), CONNECTIONS.slice(0, 6));
     assert.deepEqual(ids(await new AwsHealthRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(2, 5));
+      .listEligibleScopes()), CONNECTIONS.slice(2, 6));
     assert.deepEqual(ids(await new ResilienceVueRuntimeRepository(database)
-      .listEligibleScopes()), CONNECTIONS.slice(3, 5));
+      .listEligibleScopes()), CONNECTIONS.slice(3, 6));
+    assert.deepEqual(ids(await new DcfRuntimeRepository(database)
+      .listEligibleScopes()), CONNECTIONS.slice(4, 6));
 
     const support = new AwsSupportCasesRuntimeRepository(database);
-    for (const connectionId of CONNECTIONS.slice(1, 5)) {
+    for (const connectionId of CONNECTIONS.slice(1, 6)) {
       assert.equal((await support.loadScope({
         organizationId: ORG,
         customerId: CUSTOMER,
         connectionId,
       })).parentConnectionId, connectionId);
     }
-    for (const connectionId of [CONNECTIONS[0], ...CONNECTIONS.slice(5)]) {
+    for (const connectionId of [CONNECTIONS[0], ...CONNECTIONS.slice(6)]) {
       await assert.rejects(
         support.loadScope({ organizationId: ORG, customerId: CUSTOMER, connectionId }),
         (error) => error instanceof AwsSupportCasesRuntimeRepositoryError

@@ -93,6 +93,7 @@ import {
   AWS_HEALTH_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -224,6 +225,17 @@ import {
   parseDcfProviderRouteRequest,
   runDcfProviderRoute,
 } from "./dcf-step-functions-provider-route.js";
+import {
+  EndUserComputingProviderError,
+  type EndUserComputingCanonicalCostProjection,
+  type EndUserComputingProviderReader,
+} from "./end-user-computing-provider-adapter.js";
+import { createEndUserComputingSdkReader } from "./end-user-computing-sdk-reader.js";
+import {
+  END_USER_COMPUTING_PROVIDER_ROUTE,
+  parseEndUserComputingProviderRouteRequest,
+  runEndUserComputingProviderRoute,
+} from "./end-user-computing-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -236,6 +248,8 @@ const AWS_HEALTH_RESPONSE_LIMIT = 50 * 1024 * 1024;
 const RESILIENCE_VUE_RESPONSE_LIMIT = 13 * 1024 * 1024;
 const DCF_STEP_FUNCTIONS_BODY_LIMIT = 1_048_576;
 const DCF_STEP_FUNCTIONS_RESPONSE_LIMIT = 65 * 1024 * 1024;
+const END_USER_COMPUTING_BODY_LIMIT = 256 * 1024;
+const END_USER_COMPUTING_RESPONSE_LIMIT = 66 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -277,7 +291,8 @@ function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permi
     || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
     || value === AWS_HEALTH_PERMISSION_PACK_VERSION
     || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION
-    || value === DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION;
+    || value === DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+    || value === END_USER_COMPUTING_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -469,6 +484,26 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedDcfStepFunctionsSession">;
+  readonly endUserComputingReaderFactory?: (input: {
+    readonly credentials: AwsTemporaryCredentials;
+    readonly accountId: string;
+    readonly partition: LocalAwsPartition;
+    readonly region: string;
+  }) => EndUserComputingProviderReader;
+  readonly endUserComputingRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedEndUserComputingSession">;
+  readonly endUserComputingCostProjectionLoader?: (input: {
+    readonly tenantId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly requestId: string;
+    readonly cur2: Readonly<Record<string, unknown>>;
+    readonly accountIds: readonly string[];
+    readonly regions: readonly string[];
+  }) => Promise<EndUserComputingCanonicalCostProjection>;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -601,6 +636,15 @@ interface ServerContext {
   >;
   readonly dcfStepFunctionsRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["dcfStepFunctionsRoleBrokerFactory"]
+  >;
+  readonly endUserComputingReaderFactory: NonNullable<
+    LocalCollectorServerOptions["endUserComputingReaderFactory"]
+  >;
+  readonly endUserComputingRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["endUserComputingRoleBrokerFactory"]
+  >;
+  readonly endUserComputingCostProjectionLoader: NonNullable<
+    LocalCollectorServerOptions["endUserComputingCostProjectionLoader"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -793,6 +837,15 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       options.dcfStepFunctionsReaderFactory ?? createDcfStepFunctionsSdkReader,
     dcfStepFunctionsRoleBrokerFactory:
       options.dcfStepFunctionsRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    endUserComputingReaderFactory:
+      options.endUserComputingReaderFactory ?? createEndUserComputingSdkReader,
+    endUserComputingRoleBrokerFactory:
+      options.endUserComputingRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    endUserComputingCostProjectionLoader:
+      options.endUserComputingCostProjectionLoader ?? (async (input) => {
+        if (input.cur2.availability === "UNAVAILABLE") return { billingEvidence: null, costs: [] };
+        throw new EndUserComputingProviderError("PROVIDER_RESPONSE_INVALID");
+      }),
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1039,7 +1092,9 @@ async function dispatch(
   try {
     const body = await readBody(
       request,
-      path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE ? DCF_STEP_FUNCTIONS_BODY_LIMIT : BODY_LIMIT,
+      path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE ? DCF_STEP_FUNCTIONS_BODY_LIMIT
+        : path === END_USER_COMPUTING_PROVIDER_ROUTE ? END_USER_COMPUTING_BODY_LIMIT
+          : BODY_LIMIT,
     );
     if (context.hostedRuntime && request.method === "GET" && path === "/readyz") {
       if (body.length !== 0) throw invalidRequest();
@@ -1233,6 +1288,61 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === END_USER_COMPUTING_PROVIDER_ROUTE) {
+    const providerRequest = parseEndUserComputingProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || jobId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(
+        providerRequest.boundary.scope.orgId,
+        providerRequest.boundary.scope.connectionId,
+      ),
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), providerRequest.maximumDurationMs);
+    timer.unref?.();
+    try {
+      const broker = context.endUserComputingRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.boundary.regions[0]!,
+      });
+      const result = await runEndUserComputingProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedEndUserComputingSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return { accountId: session.accountId, partition: session.partition,
+            credentials: session.credentials };
+        },
+        readerFactory: context.endUserComputingReaderFactory,
+        loadCanonicalCostProjection: context.endUserComputingCostProjectionLoader,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE) {
     const providerRequest = parseDcfProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -4677,6 +4787,8 @@ async function sendSigned(
   let body = JSON.stringify(payload);
   const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
     ? AWS_BUDGETS_RESPONSE_LIMIT
+    : path === END_USER_COMPUTING_PROVIDER_ROUTE
+      ? END_USER_COMPUTING_RESPONSE_LIMIT
     : path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE
       ? DCF_STEP_FUNCTIONS_RESPONSE_LIMIT
     : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
@@ -4758,6 +4870,16 @@ function safeHttpError(error: unknown): LocalHttpError {
       status,
       error.code,
       "Data Collection Monitor evidence collection did not complete",
+    );
+  }
+  if (error instanceof EndUserComputingProviderError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "End User Computing evidence collection did not complete",
     );
   }
   if (error instanceof ComputeOptimizerExportObjectChunkError) {

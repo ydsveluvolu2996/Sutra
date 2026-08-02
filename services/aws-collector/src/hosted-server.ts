@@ -309,6 +309,8 @@ export async function startHostedCollectorServer(): Promise<{
         state.authorizeAgentlessCleanup(tenantId, resources),
       record: (input) => state.recordAgentlessCleanupOutcome(input),
     },
+    endUserComputingCostProjectionLoader:
+      state.loadEndUserComputingCostProjection.bind(state),
     ...(agentless.executionApproved
       ? { hostedAgentlessSettings: agentless.settings }
       : {}),

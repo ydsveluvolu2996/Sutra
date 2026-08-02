@@ -183,6 +183,12 @@ import { DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND } from
   "../lib/finops-dcf-durable-runtime-binding.ts";
 import { createDcfProductionComposition } from
   "../lib/finops-dcf-production-composition.ts";
+import { END_USER_COMPUTING_DURABLE_JOB_KIND } from
+  "../lib/finops-end-user-computing-runtime-binding.ts";
+import { createEndUserComputingProductionComposition } from
+  "../lib/finops-end-user-computing-production-composition.ts";
+import { EndUserComputingRuntimeContextRepository } from
+  "./finops-end-user-computing-runtime-context-repository.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -322,6 +328,28 @@ function dcfStepFunctionsProductionComposition() {
 /** Hourly deterministic ADV-12 connection-scoped Step Functions scheduler. */
 export function scheduleDcfStepFunctionsTick(scheduledAtMs = Date.now()) {
   return dcfStepFunctionsProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+function endUserComputingProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("END_USER_COMPUTING_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  const runtime = new EndUserComputingRuntimeContextRepository();
+  return createEndUserComputingProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+    loadEligibleBoundaries: runtime.listEligibleBoundaries.bind(runtime),
+    loadRuntimeContext: runtime.loadRuntimeContext.bind(runtime),
+  });
+}
+
+/** Six-hour deterministic ADV-11 End User Computing scheduler. */
+export function scheduleEndUserComputingTick(scheduledAtMs = Date.now()) {
+  return endUserComputingProductionComposition().scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1448,6 +1476,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       (await resilienceVueProductionComposition()).handler(job),
     [DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND]: (job) =>
       dcfStepFunctionsProductionComposition().handler(job),
+    [END_USER_COMPUTING_DURABLE_JOB_KIND]: (job) =>
+      endUserComputingProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

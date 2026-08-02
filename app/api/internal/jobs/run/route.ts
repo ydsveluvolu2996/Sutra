@@ -17,6 +17,7 @@ import {
   scheduleAwsHealthTick,
   scheduleResilienceVueTick,
   scheduleDcfStepFunctionsTick,
+  scheduleEndUserComputingTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -103,6 +104,9 @@ export async function POST(request: Request): Promise<Response> {
     // ADV-12 schedules one server-resolved Step Functions collection per
     // connection and UTC hour; the queue payload contains no provider data.
     const dataCollectionMonitor = await scheduleDcfStepFunctionsTick();
+    // ADV-11 resolves the trusted account/Region boundary and active reconciled
+    // CUR2 lineage only after the deterministic six-hour job is claimed.
+    const endUserComputing = await scheduleEndUserComputingTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -130,6 +134,7 @@ export async function POST(request: Request): Promise<Response> {
       awsHealth,
       resilienceVue,
       dataCollectionMonitor,
+      endUserComputing,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

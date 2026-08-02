@@ -47,6 +47,8 @@ import type {
   AgentlessResourceTracker,
 } from "./agentless-execution.js";
 import type { AgentlessScanExecution } from "./scan-runner.js";
+import type { EndUserComputingCanonicalCostProjection } from
+  "./end-user-computing-provider-adapter.js";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const OPERATION_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+\u001f-]{1,255}$/u;
@@ -61,6 +63,35 @@ interface ConnectionRow {
   state_sha256: string | null;
   tombstoned_at: string | number | null;
 }
+
+interface EndUserComputingPartitionRow {
+  id:string;export_name:string;billing_period:string;active_generation_id:string;
+  active_manifest_sha256:string;active_source_updated_at:string;active_committed_at:string;
+  active_accepted_rows:number|string;
+}
+interface EndUserComputingCostRow { line_item_id:string;usage_account_id:string;service:string;
+  product_code:string|null;product_name:string|null;resource_id:string|null;region:string|null;
+  usage_start:string;usage_end:string|null;amount_micros:number|string;
+  net_unblended_cost_micros:number|string|null;amortized_micros:number|string|null;
+  list_cost_micros:number|string|null;contracted_cost_micros:number|string|null;
+  public_on_demand_cost_micros:number|string|null;currency:string;commitment_type:string|null;
+  charge_category:string }
+
+function eucMicros(value:number|string|null):string|null { if(value===null)return null;const result=String(value);
+  if(!/^-?\d+$/u.test(result))throw new RegistryIntegrityError();return result }
+function eucService(row:EndUserComputingCostRow):"WORKSPACES"|"APPSTREAM"|null { const value=
+  `${row.service} ${row.product_code??""} ${row.product_name??""}`.toLowerCase();
+  if(value.includes("appstream")||value.includes("workspaces applications"))return "APPSTREAM";
+  return value.includes("workspace")?"WORKSPACES":null }
+function eucCost(row:EndUserComputingCostRow) { const service=eucService(row);if(service===null)return null;
+  const commitmentClass=/saving/iu.test(row.commitment_type??"")?"SAVINGS_PLAN":/reserved/iu.test(row.commitment_type??"")?"RESERVED":
+    /on.?demand/iu.test(`${row.commitment_type??""} ${row.charge_category}`)?"ON_DEMAND":"UNCLASSIFIED";
+  return Object.freeze({lineItemId:row.line_item_id,service,accountId:row.usage_account_id,region:row.region,
+    resourceId:service==="WORKSPACES"&&row.resource_id!==null&&/^ws-[0-9a-z]{8,63}$/u.test(row.resource_id)?row.resource_id:null,
+    usageStartAt:row.usage_start,usageEndAt:row.usage_end,currency:row.currency,
+    amountsMicros:Object.freeze({unblended:eucMicros(row.amount_micros),net:eucMicros(row.net_unblended_cost_micros),
+      amortized:eucMicros(row.amortized_micros),list:eucMicros(row.list_cost_micros),contracted:eucMicros(row.contracted_cost_micros),
+      public:eucMicros(row.public_on_demand_cost_micros)}),usageAmountMicros:null,usageUnit:null,commitmentClass}) }
 
 export interface HostedOperationLease {
   readonly operationKey: string;
@@ -222,6 +253,38 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
 
   public async close(): Promise<void> {
     await this.pool.end();
+  }
+
+  /** Loads only the exact active reconciled generation named by the signed ADV-11 request. */
+  public async loadEndUserComputingCostProjection(input:{readonly tenantId:string;readonly customerId:string;
+    readonly connectionId:string;readonly requestId:string;readonly cur2:Readonly<Record<string,unknown>>;
+    readonly accountIds:readonly string[];readonly regions:readonly string[]}):Promise<EndUserComputingCanonicalCostProjection>{
+    if(input.cur2.availability==="UNAVAILABLE")return Object.freeze({billingEvidence:null,costs:Object.freeze([])});
+    const partitionResult=await this.pool.query<EndUserComputingPartitionRow>(`SELECT id,export_name,billing_period,
+      active_generation_id,active_manifest_sha256,active_source_updated_at,active_committed_at,active_accepted_rows
+      FROM finops_export_partitions WHERE org_id=$1 AND customer_id=$2 AND connection_id=$3
+        AND id=$4 AND billing_period=$5 AND active_generation_id=$6 AND active_manifest_sha256=$7
+        AND active_source_format='aws-cur' AND active_source_version='2.0' LIMIT 1`,[input.tenantId,input.customerId,
+      input.connectionId,input.cur2.sourceEvidenceId,input.cur2.billingPeriod,input.cur2.generationId,input.cur2.manifestSha256]);
+    const partition=partitionResult.rows[0];
+    if(partition===undefined||partition.active_source_updated_at!==input.cur2.sourceUpdatedAt
+      ||partition.active_committed_at!==input.cur2.committedAt
+      ||Number(partition.active_accepted_rows)!==input.cur2.activeGenerationRowCount)throw new RegistryIntegrityError();
+    const lines=await this.pool.query<EndUserComputingCostRow>(`SELECT line_item_id,usage_account_id,service,product_code,
+      product_name,resource_id,region,usage_start,usage_end,amount_micros,net_unblended_cost_micros,amortized_micros,
+      list_cost_micros,contracted_cost_micros,public_on_demand_cost_micros,currency,commitment_type,charge_category
+      FROM finops_billing_lines_v2 WHERE org_id=$1 AND customer_id=$2 AND connection_id=$3 AND export_name=$4
+        AND billing_period=$5 AND generation_id=$6 AND usage_account_id=ANY($7::text[]) AND region=ANY($8::text[])
+      ORDER BY line_item_id ASC LIMIT 250001`,[input.tenantId,input.customerId,input.connectionId,partition.export_name,
+      partition.billing_period,partition.active_generation_id,input.accountIds,input.regions]);
+    const costs=lines.rows.map(eucCost).filter((value):value is NonNullable<ReturnType<typeof eucCost>>=>value!==null);
+    if(costs.length>250_000||costs.length!==input.cur2.matchedLineItemCount
+      ||sha256(JSON.stringify(costs))!==input.cur2.projectedCostLinesSha256)throw new RegistryIntegrityError();
+    return Object.freeze({billingEvidence:Object.freeze({generationId:partition.active_generation_id,
+      billingPeriod:partition.billing_period,sourceEvidenceId:partition.id,manifestSha256:partition.active_manifest_sha256,
+      sourceUpdatedAt:partition.active_source_updated_at,committedAt:partition.active_committed_at,sourceFormat:"aws-cur",
+      sourceVersion:"2.0",reconciled:true,activeGenerationRowCount:Number(partition.active_accepted_rows),
+      matchedLineItemCount:costs.length}),costs:Object.freeze(costs)});
   }
 
   public async resolve(scope: ConnectionScope, connectionId: string): Promise<StoredAwsConnection | null> {

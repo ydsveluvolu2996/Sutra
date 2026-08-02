@@ -1256,6 +1256,12 @@ export interface EndUserComputingDashboard {
     readonly byAccount: readonly EndUserComputingCostBreakdown[];
     readonly byRegion: readonly EndUserComputingCostBreakdown[];
   };
+  readonly costTrend: {
+    readonly windowDays: 93;
+    readonly coverage: "OBSERVED_ACTIVE_CUR2_ONLY";
+    readonly daily: readonly EndUserComputingCostTrendPoint[];
+    readonly monthly: readonly EndUserComputingCostTrendPoint[];
+  };
   readonly resources: readonly (EndUserComputingWorkspace | EndUserComputingAppStreamFleet | EndUserComputingAppStreamStack)[];
   readonly nextCursor: string | null;
   readonly separation: {
@@ -1265,6 +1271,14 @@ export interface EndUserComputingDashboard {
     readonly crossSourceInference: false;
   };
   readonly limitations: readonly string[];
+}
+
+export interface EndUserComputingCostTrendPoint {
+  readonly period: string;
+  readonly service: EndUserComputingService;
+  readonly currency: string;
+  readonly lineCount: number;
+  readonly displayTotal: EndUserComputingCostBreakdown["displayTotal"];
 }
 
 function parseQuery(value: unknown, snapshot: EndUserComputingSnapshot): Required<EndUserComputingDashboardQuery> {
@@ -1372,6 +1386,19 @@ function costBreakdowns(
   });
 }
 
+function costTrend(lines: readonly EndUserComputingCostLine[], observedAt: string): EndUserComputingDashboard["costTrend"] {
+  const end=Date.parse(observedAt),start=end-93*24*60*60*1_000;
+  const build=(grain:"DAY"|"MONTH")=>{
+    const groups=new Map<string,EndUserComputingCostLine[]>();
+    for(const line of lines){const at=Date.parse(line.usageStartAt);if(at<start||at>end)continue;
+      const period=grain==="DAY"?line.usageStartAt.slice(0,10):line.usageStartAt.slice(0,7);
+      const key=`${period}|${line.service}|${line.currency}`,group=groups.get(key)??[];group.push(line);groups.set(key,group);}
+    return [...groups.entries()].map(([key,group])=>{const [period,service,currency]=key.split("|") as [string,EndUserComputingService,string];
+      return{period,service,currency,lineCount:group.length,displayTotal:displayTotal(totals(group))};})
+      .sort((left,right)=>left.period.localeCompare(right.period)||`${left.service}|${left.currency}`.localeCompare(`${right.service}|${right.currency}`));};
+  return{windowDays:93,coverage:"OBSERVED_ACTIVE_CUR2_ONLY",daily:build("DAY"),monthly:build("MONTH")};
+}
+
 export function buildEndUserComputingDashboard(
   snapshot: EndUserComputingSnapshot,
   query?: EndUserComputingDashboardQuery,
@@ -1450,6 +1477,7 @@ export function buildEndUserComputingDashboard(
       byAccount: costBreakdowns(costs, (item) => item.accountId),
       byRegion: costBreakdowns(costs, (item) => item.region),
     },
+    costTrend: costTrend(costs, snapshot.observedAt),
     resources, nextCursor,
     separation: { inventoryActivitySource: "AWS_CONTROL_PLANE", performanceSource: "CLOUDWATCH_ONLY", costSource: "ACTIVE_RECONCILED_CUR2_ONLY", crossSourceInference: false },
     limitations: [...snapshot.limitations, "Telemetry entries marked UNKNOWN have no authoritative observation and must render as unknown/partial, never as 0."],

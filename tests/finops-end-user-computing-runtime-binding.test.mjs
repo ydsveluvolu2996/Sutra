@@ -182,15 +182,15 @@ test("signed transport accepts exact privacy-minimized bytes and rejects forged 
   await assert.rejects(forged.collect(request()), (error) => error.code === "BROKER_AUTHENTICATION_FAILED");
 });
 
-test("privacy flags cannot be enabled and activation remains explicitly unavailable", async () => {
+test("privacy flags cannot be enabled and shared runtime activation is explicit", async () => {
   const keyPair = keys();
   const broker = transport.createEndUserComputingSignedBroker({ brokerOrigin: "https://euc-broker.internal",
     signing: keyPair.signing, fetcher: fetcher(keyPair), now: () => NOW });
   await assert.rejects(broker.collect({ ...request(), privacy: { ...request().privacy,
     includeSessionIdentifiers: true } }), (error) => error.code === "PRIVACY_REJECTED");
-  assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.registeredInSharedRuntime, false);
+  assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.registeredInSharedRuntime, true);
   assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.schedulerFailureIsolationImplemented, true);
-  assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.activationReason, "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED");
+  assert.equal(runtime.END_USER_COMPUTING_RUNTIME_BINDING.activationReason, "REGISTERED_LOCAL_RUNTIME");
 });
 
 test("runtime-attempt migrations retain immutable same-tenant execution evidence", async () => {

@@ -92,6 +92,12 @@ export const RESILIENCE_VUE_PERMISSION_PACK_VERSION =
 export const DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION =
   "standard-2026-08.10" as const;
 /**
+ * Immutable successor for ADV-11. It preserves .8.10 and adds only the exact
+ * eight AppStream, WorkSpaces, and CloudWatch reads used by End User Computing.
+ */
+export const END_USER_COMPUTING_PERMISSION_PACK_VERSION =
+  "standard-2026-08.11" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -114,6 +120,7 @@ export type PermissionPackVersion =
   | typeof AWS_HEALTH_PERMISSION_PACK_VERSION
   | typeof RESILIENCE_VUE_PERMISSION_PACK_VERSION
   | typeof DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+  | typeof END_USER_COMPUTING_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

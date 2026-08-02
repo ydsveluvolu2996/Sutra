@@ -353,6 +353,10 @@ test("normalizes inventory, aggregate activity, CloudWatch evidence, and reconci
   assert.equal(dashboard.costBreakdowns.byAccount.length, 2);
   assert.equal(dashboard.costBreakdowns.byAccount.every((item) => item.value === ACCOUNT_ID), true);
   assert.equal(dashboard.costBreakdowns.byRegion.every((item) => item.value === REGION), true);
+  assert.equal(dashboard.costTrend.windowDays, 93);
+  assert.equal(dashboard.costTrend.coverage, "OBSERVED_ACTIVE_CUR2_ONLY");
+  assert.deepEqual(dashboard.costTrend.monthly.map((item) => item.period), ["2026-07", "2026-07"]);
+  assert.equal(dashboard.costTrend.daily.every((item) => item.period === "2026-07-30"), true);
   assert.equal(dashboard.separation.crossSourceInference, false);
 
   const missing = dashboard.telemetry.find((item) =>

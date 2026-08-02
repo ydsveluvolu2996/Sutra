@@ -113,6 +113,9 @@ importers:
 
   services/aws-collector:
     dependencies:
+      '@aws-sdk/client-appstream':
+        specifier: 3.1087.0
+        version: 3.1087.0
       '@aws-sdk/client-bedrock':
         specifier: 3.1087.0
         version: 3.1087.0
@@ -197,6 +200,9 @@ importers:
       '@aws-sdk/client-support':
         specifier: 3.1087.0
         version: 3.1087.0
+      '@aws-sdk/client-workspaces':
+        specifier: 3.1087.0
+        version: 3.1087.0
       pg:
         specifier: 8.22.0
         version: 8.22.0
@@ -241,6 +247,10 @@ packages:
 
   '@aws-sdk/checksums@3.1000.17':
     resolution: {integrity: sha512-k45iXM7w8Pyknnz/vTXSS/IkLDNFdgnBQI7Hmq+uhsrW7NGT/BiUJGlv20QSKzihmH1XDvSCRILICaKi57/35w==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-appstream@3.1087.0':
+    resolution: {integrity: sha512-lwr9+XZQ/oRvw71Xkq98eM2p3/v48sUV4f/Tj0EjyG87b5qwKuXH/aW3dp9+nCsZErLrkk26w07wUlaApChWiA==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-bedrock@3.1087.0':
@@ -365,6 +375,10 @@ packages:
 
   '@aws-sdk/client-support@3.1087.0':
     resolution: {integrity: sha512-ctrDxkv0OVY7Zqy2dJQVY+3dEMZYyRjWbTM8A32RTk04DVExOHjlE9XCSZsB+1cFIJYpojr0CQjSqOkQ56p/zA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-workspaces@3.1087.0':
+    resolution: {integrity: sha512-lUsweejNUCZF6PvdRCRBSfmMm0ghgq3GUe30t22AlvKHvlaFTsBsxJ4hxZDS1wlHd0PLLBThffSjFEfdb/GUkw==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/core@3.975.2':
@@ -3828,6 +3842,17 @@ snapshots:
       '@smithy/types': 4.16.1
       tslib: 2.8.1
 
+  '@aws-sdk/client-appstream@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
   '@aws-sdk/client-bedrock@3.1087.0':
     dependencies:
       '@aws-sdk/core': 3.975.2
@@ -4171,6 +4196,17 @@ snapshots:
       tslib: 2.8.1
 
   '@aws-sdk/client-support@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-workspaces@3.1087.0':
     dependencies:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/credential-provider-node': 3.972.68

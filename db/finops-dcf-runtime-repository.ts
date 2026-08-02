@@ -18,6 +18,8 @@ import type {
   DcfStepFunctionsBoundary,
   DcfStepFunctionsModuleBinding,
 } from "../lib/finops-dcf-step-functions-adapter.ts";
+import { DCF_RUNTIME_PERMISSION_PACK_SQL, isDcfRuntimePermissionPack } from
+  "../lib/finops-permission-pack-successors.ts";
 
 export const DCF_REQUIRED_PERMISSION_PACK = "standard-2026-08.10" as const;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
@@ -136,7 +138,7 @@ const LIVE_CONNECTION = `FROM aws_connections c
   JOIN organizations o ON o.id=c.org_id AND o.status='active'
   JOIN customers cu ON cu.id=c.customer_id AND cu.org_id=c.org_id AND cu.status IN ('active','trial')
   WHERE c.source_kind='aws_trust_role' AND c.status='active'
-    AND c.permission_pack_version='standard-2026-08.10'`;
+    AND c.permission_pack_version IN (${DCF_RUNTIME_PERMISSION_PACK_SQL})`;
 
 export class DcfRuntimeRepository implements DcfStepFunctionsReplayStore {
   private readonly snapshots: DcfRepository;
@@ -173,7 +175,7 @@ export class DcfRuntimeRepository implements DcfStepFunctionsReplayStore {
       const scope = { organizationId: row.org_id, customerId: row.customer_id, connectionId: row.connection_id };
       if (!validScope(scope) || !/^\d{12}$/u.test(row.account_id)
         || !new Set(["aws", "aws-us-gov", "aws-cn"]).has(row.partition)
-        || row.permission_pack_version !== DCF_REQUIRED_PERMISSION_PACK) reject("STORED_STATE_INVALID");
+        || !isDcfRuntimePermissionPack(row.permission_pack_version)) reject("STORED_STATE_INVALID");
       return Object.freeze(scope);
     });
   }
@@ -188,7 +190,7 @@ export class DcfRuntimeRepository implements DcfStepFunctionsReplayStore {
     if (connection === null) reject("SCOPE_NOT_FOUND");
     if (!/^\d{12}$/u.test(connection.account_id)
       || !new Set(["aws", "aws-us-gov", "aws-cn"]).has(connection.partition)
-      || connection.permission_pack_version !== DCF_REQUIRED_PERMISSION_PACK) reject("STORED_STATE_INVALID");
+      || !isDcfRuntimePermissionPack(connection.permission_pack_version)) reject("STORED_STATE_INVALID");
     const rows = await db.prepare(`SELECT module_id,module_name,source_id,region,state_machine_arn,
       enabled,expected_cadence_minutes FROM finops_dcf_module_bindings
       WHERE org_id=? AND customer_id=? AND connection_id=?

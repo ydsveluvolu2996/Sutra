@@ -34,6 +34,7 @@ import {
   AWS_HEALTH_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
@@ -963,6 +964,7 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
     && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+    && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
   }
@@ -1010,6 +1012,7 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
       && permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
       && permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
       && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
     ) throw new RegistryIntegrityError();
     try {
       computeOptimizerExportObjectContracts = parseComputeOptimizerExportObjectContracts(
@@ -1035,6 +1038,7 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
       && permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
       && permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
       && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
     ) throw new RegistryIntegrityError();
     try {
       computeOptimizerExportLaunchContracts = parseComputeOptimizerExportLaunchContracts(

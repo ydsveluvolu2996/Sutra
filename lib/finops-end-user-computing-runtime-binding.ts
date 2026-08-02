@@ -27,7 +27,7 @@ export const END_USER_COMPUTING_DURABLE_JOB_KIND = "finops.end-user-computing.co
 export const END_USER_COMPUTING_SCHEDULER_CADENCE = "rate(6 hours)";
 export const END_USER_COMPUTING_RUNTIME_TIMEOUT_MS = 5 * 60 * 1_000;
 export const END_USER_COMPUTING_RUNTIME_ACTIVATION_REASON =
-  "EUC_SIGNED_BROKER_RUNTIME_NOT_REGISTERED";
+  "REGISTERED_LOCAL_RUNTIME";
 
 export interface EndUserComputingCur2Lineage {
   readonly availability: "ACTIVE_RECONCILED" | "UNAVAILABLE";
@@ -351,7 +351,7 @@ export const END_USER_COMPUTING_RUNTIME_BINDING = Object.freeze({
   handlerImplemented: true,
   signedBrokerTransportImplemented: true,
   immutableAttemptStoreImplemented: true,
-  registeredInSharedRuntime: false,
-  providerAdapterAvailable: false,
+  registeredInSharedRuntime: true,
+  providerAdapterAvailable: true,
   activationReason: END_USER_COMPUTING_RUNTIME_ACTIVATION_REASON,
 });

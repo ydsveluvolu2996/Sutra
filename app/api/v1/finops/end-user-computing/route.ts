@@ -70,6 +70,7 @@ export async function GET(request: Request): Promise<Response> {
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: connection.id,
       sourceState: "configuration_required", dashboard: null,
+      runtimeState: END_USER_COMPUTING_RUNTIME_BINDING.registeredInSharedRuntime ? "collecting" : "unavailable",
       collection: END_USER_COMPUTING_RUNTIME_BINDING,
       officialDefinition: END_USER_COMPUTING_OFFICIAL_DEFINITION,
       filterOptions: { services: ["WORKSPACES", "APPSTREAM"], accountIds: [], regions: [] },
@@ -83,6 +84,7 @@ export async function GET(request: Request): Promise<Response> {
         : dashboard.inventory.workspaceCount + dashboard.inventory.fleetCount === 0 ? "empty" : "complete";
     return jsonResponse({
       schema: "sutra.finops-end-user-computing-dashboard.v1", connectionId: connection.id, sourceState,
+      runtimeState: sourceState === "failed" ? "failed" : "ready",
       filters: parsed.query, dashboard, history,
       freshness: { dataThroughAt: through, ageHours, staleAfterHours: 48 },
       evidence: { generationId: selected.generationId, activeGenerationId: active?.generationId ?? null,
@@ -95,7 +97,7 @@ export async function GET(request: Request): Promise<Response> {
       unsupportedOfficialViews: [
         "WorkSpaces protocol and operating-system dimensions are not present in the current privacy-minimized collector contract.",
         "Per-user last logon, low usage, and never-used classifications require an approved privacy-preserving aggregate contract.",
-        "The current immutable snapshot is point-in-time plus canonical CUR2 evidence; three-month daily/monthly series are not yet materialized.",
+        "The rolling 93-day daily/monthly series contains only observed active-generation CUR2 rows; absent periods remain unknown and are not synthesized as zero.",
       ],
     });
   } catch (error) { return errorResponse(error); }

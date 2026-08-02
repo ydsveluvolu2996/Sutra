@@ -58,6 +58,7 @@ import {
   AWS_HEALTH_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -122,6 +123,12 @@ import { DCF_PROVIDER_SESSION_ACTIONS } from
   "./dcf-step-functions-provider-adapter.js";
 import { dcfStepFunctionsSessionPolicy } from
   "./dcf-step-functions-session-policy.js";
+import {
+  END_USER_COMPUTING_PERMISSION_ACTIONS,
+  END_USER_COMPUTING_PERMISSION_POLICY_NAME,
+  END_USER_COMPUTING_SESSION_ACTIONS,
+} from "./end-user-computing-permission-contract.js";
+import { endUserComputingSessionPolicy } from "./end-user-computing-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -164,6 +171,7 @@ const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
 const AWS_HEALTH_PACK_VERSION = AWS_HEALTH_PERMISSION_PACK_VERSION;
 const RESILIENCE_VUE_PACK_VERSION = RESILIENCE_VUE_PERMISSION_PACK_VERSION;
 const DCF_STEP_FUNCTIONS_PACK_VERSION = DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION;
+const END_USER_COMPUTING_PACK_VERSION = END_USER_COMPUTING_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -226,6 +234,15 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_health_organization",
     "aws_resilience_hub",
   ]),
+  [END_USER_COMPUTING_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+    "end_user_computing",
+  ]),
 });
 
 function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
@@ -234,7 +251,8 @@ function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): bool
     || value === AWS_SUPPORT_CASES_PACK_VERSION
     || value === AWS_HEALTH_PACK_VERSION
     || value === RESILIENCE_VUE_PACK_VERSION
-    || value === DCF_STEP_FUNCTIONS_PACK_VERSION;
+    || value === DCF_STEP_FUNCTIONS_PACK_VERSION
+    || value === END_USER_COMPUTING_PACK_VERSION;
 }
 
 function permissionPackSupportsSource(
@@ -976,7 +994,8 @@ function assertExpectedPermissionPolicy(
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
     | typeof AWS_HEALTH_PACK_VERSION
     | typeof RESILIENCE_VUE_PACK_VERSION
-    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+    | typeof END_USER_COMPUTING_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -1014,6 +1033,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
@@ -1023,6 +1043,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
@@ -1031,6 +1052,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
           : []),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
@@ -1038,25 +1060,33 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? AWS_HEALTH_PERMISSION_ACTIONS
           : []),
         ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? RESILIENCE_VUE_PERMISSION_ACTIONS
           : []),
-        ...(permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        ...((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION)
           ? DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+          ? END_USER_COMPUTING_PERMISSION_ACTIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -1133,6 +1163,20 @@ function assertResilienceVuePolicy(value: string | undefined): void {
     || statement.Effect !== "Allow" || statement.Resource !== "*"
     || !sameStringSet(stringList(statement.Action), RESILIENCE_VUE_PERMISSION_ACTIONS)) {
     throw new Error("unexpected ResilienceVue policy");
+  }
+}
+
+function assertEndUserComputingPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected End User Computing policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactEndUserComputingRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), END_USER_COMPUTING_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected End User Computing policy");
   }
 }
 
@@ -1248,7 +1292,8 @@ function assertExpectedRole(
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
     | typeof AWS_HEALTH_PACK_VERSION
     | typeof RESILIENCE_VUE_PACK_VERSION
-    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+    | typeof END_USER_COMPUTING_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1624,7 +1669,8 @@ export class AwsRoleBroker {
         && resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1668,7 +1714,8 @@ export class AwsRoleBroker {
     if ((resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1722,7 +1769,8 @@ export class AwsRoleBroker {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1777,7 +1825,8 @@ export class AwsRoleBroker {
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1852,7 +1901,8 @@ export class AwsRoleBroker {
     }
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
-    if (resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+    if ((resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1870,11 +1920,55 @@ export class AwsRoleBroker {
       undefined,
       undefined,
       undefined,
-      DCF_STEP_FUNCTIONS_PACK_VERSION,
+      resolved.connection.permissionPackVersion,
       input.signal,
       input.stateMachineArns,
     );
     return validated;
+  }
+
+  /** ADV-11 session with the exact `.8.11` read-only account/Region cap. */
+  public async assumeValidatedEndUserComputingSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof END_USER_COMPUTING_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, END_USER_COMPUTING_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The End User Computing session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId.slice(0, 40)}-euc`,
+      () => endUserComputingSessionPolicy({
+        accountId: input.expectedAccountId,
+        partition: input.partition,
+        region: input.region,
+      }),
+      input.signal,
+    );
   }
 
   /**
@@ -2017,7 +2111,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
-        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION) ||
+        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -2650,7 +2745,8 @@ export class AwsRoleBroker {
       | typeof AWS_SUPPORT_CASES_PACK_VERSION
       | typeof AWS_HEALTH_PACK_VERSION
       | typeof RESILIENCE_VUE_PACK_VERSION
-      | typeof DCF_STEP_FUNCTIONS_PACK_VERSION,
+      | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+      | typeof END_USER_COMPUTING_PACK_VERSION,
     signal?: AbortSignal,
     suppliedDcfStateMachineArns?: readonly string[],
   ): Promise<void> {
@@ -2669,11 +2765,14 @@ export class AwsRoleBroker {
         && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
         && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
         && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
-      if (permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+      if ((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION)
         && suppliedDcfStateMachineArns !== undefined) {
         exactDcfPermissionResources(suppliedDcfStateMachineArns);
       } else if (permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
         && suppliedDcfStateMachineArns !== undefined) {
         throw new Error("DCF state-machine scope is unexpected");
       }
@@ -2756,25 +2855,33 @@ export class AwsRoleBroker {
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? [EXTENDED_SUPPORT_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
             || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? [AWS_HEALTH_PERMISSION_POLICY_NAME]
           : []),
         ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
             || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
           ? [RESILIENCE_VUE_PERMISSION_POLICY_NAME]
           : []),
-        ...(permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        ...((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION)
           ? [DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+          ? [END_USER_COMPUTING_PERMISSION_POLICY_NAME]
           : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
@@ -2798,7 +2905,8 @@ export class AwsRoleBroker {
         || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
         || permissionPackVersion === AWS_HEALTH_PACK_VERSION
         || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
-        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2811,7 +2919,8 @@ export class AwsRoleBroker {
       if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
         || permissionPackVersion === AWS_HEALTH_PACK_VERSION
         || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
-        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2823,7 +2932,8 @@ export class AwsRoleBroker {
       }
       if (permissionPackVersion === AWS_HEALTH_PACK_VERSION
         || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
-        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2834,7 +2944,8 @@ export class AwsRoleBroker {
         assertAwsHealthPolicy(policy.policyDocument);
       }
       if (permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
-        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION) {
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2844,7 +2955,8 @@ export class AwsRoleBroker {
         );
         assertResilienceVuePolicy(policy.policyDocument);
       }
-      if (permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+      if ((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION)
         && suppliedDcfStateMachineArns !== undefined) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
@@ -2857,6 +2969,16 @@ export class AwsRoleBroker {
           policy.policyDocument,
           suppliedDcfStateMachineArns,
         );
+      }
+      if (permissionPackVersion === END_USER_COMPUTING_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            END_USER_COMPUTING_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertEndUserComputingPolicy(policy.policyDocument);
       }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(
