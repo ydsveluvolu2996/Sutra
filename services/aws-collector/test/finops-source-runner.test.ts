@@ -230,6 +230,7 @@ const FINOPS_FOUNDATIONAL_CEILING = [
   "s3:GetBucketLocation",
   "s3:GetObject",
   "s3:GetObjectAttributes",
+  "kms:Decrypt",
   "bcm-data-exports:ListExports",
   "bcm-data-exports:GetExport",
 ] as const;

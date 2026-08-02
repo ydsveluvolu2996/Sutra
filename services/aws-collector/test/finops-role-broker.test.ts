@@ -13,6 +13,7 @@ import {
   IMPLEMENTED_READ_ACTIONS,
   TRUST_ATTESTATION_ACTIONS,
   finopsDataExportSessionPolicy,
+  finopsSourceSessionPolicy,
 } from "../src/role-broker.js";
 import {
   ConnectionIntegrityError,
@@ -21,6 +22,7 @@ import {
   type AssumeRoleClient,
   type CallerIdentityClient,
   type ConnectionScope,
+  type FinopsSourceContract,
   type FoundationalFinopsAddOnContract,
   type OnboardingTrustVerification,
   type RoleContractClient,
@@ -35,9 +37,54 @@ const FINOPS_ACTIONS = [
   "s3:GetBucketLocation",
   "s3:GetObject",
   "s3:GetObjectAttributes",
+  "kms:Decrypt",
   "bcm-data-exports:ListExports",
   "bcm-data-exports:GetExport",
 ] as const;
+const SOURCE_DEFINITIONS = Object.freeze({
+  cost_anomaly_detection: Object.freeze({
+    permissionContractId: "aws-cost-anomaly-read-v1",
+    policyName: "SutraFinopsCostAnomalyReadV1",
+    actions: Object.freeze([
+      "ce:GetAnomalies",
+      "ce:GetAnomalyMonitors",
+      "ce:GetAnomalySubscriptions",
+    ]),
+  }),
+  trusted_advisor_standard_checks: Object.freeze({
+    permissionContractId: "aws-trusted-advisor-standard-checks-read-v1",
+    policyName: "SutraFinopsTrustedAdvisorStandardReadV1",
+    actions: Object.freeze([
+      "support:DescribeTrustedAdvisorCheckResult",
+      "support:DescribeTrustedAdvisorChecks",
+    ]),
+  }),
+  aws_organizations_taxonomy: Object.freeze({
+    permissionContractId: "aws-organizations-taxonomy-read-v1",
+    policyName: "SutraFinopsOrganizationsTaxonomyReadV1",
+    actions: Object.freeze([
+      "organizations:DescribeOrganization",
+      "organizations:ListAccounts",
+    ]),
+  }),
+});
+
+function sourceContract(
+  sourceId: keyof typeof SOURCE_DEFINITIONS,
+): FinopsSourceContract {
+  const definition = SOURCE_DEFINITIONS[sourceId];
+  return {
+    tenantId: "tenant-finops",
+    connectionId: "conn-finops",
+    contractId: `${sourceId}-contract`,
+    sourceId,
+    accountId: "123456789012",
+    partition: "aws",
+    region: "us-east-1",
+    permissionContractId: definition.permissionContractId,
+    policyName: definition.policyName,
+  };
+}
 
 function contract(
   kind: "cur2" | "focus" = "cur2",
@@ -149,11 +196,15 @@ function roleClient(
   options: RoleOptions = {},
 ): RoleContractClient {
   const contracts = stored.foundationalFinopsContracts ?? [];
+  const sourceContracts = stored.finopsSourceContracts ?? [];
   const policies = new Map<string, Record<string, unknown>>([
-    ["SutraImplementedMetadataCollectors", basePolicy(stored.roleArn)],
+    ["SutraImplementedMetadataCollectors", basePolicy(stored.roleArn, sourceContracts)],
     ...contracts.map((item) =>
       [item.policyName, addOnPolicy(item)] as const
     ),
+    ...sourceContracts.flatMap((item) => item.policyName === null
+      ? []
+      : [[item.policyName, sourcePolicy(item)] as const]),
   ]);
   return {
     getRole: async () => ({
@@ -178,7 +229,7 @@ function roleClient(
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "standard-2026-08.1" },
+        { key: "sutra:permission-pack", value: stored.permissionPackVersion },
         { key: "sutra:managed-by", value: "cloudformation" },
       ],
     }),
@@ -196,7 +247,10 @@ function roleClient(
   };
 }
 
-function basePolicy(roleArn: string): Record<string, unknown> {
+function basePolicy(
+  roleArn: string,
+  sourceContracts: readonly FinopsSourceContract[] = [],
+): Record<string, unknown> {
   return {
     Version: "2012-10-17",
     Statement: [
@@ -207,6 +261,9 @@ function basePolicy(roleArn: string): Record<string, unknown> {
           ...IMPLEMENTED_READ_ACTIONS,
           ...TRUST_ATTESTATION_ACTIONS,
           ...FINOPS_ACTIONS,
+          ...sourceContracts.flatMap((item) =>
+            SOURCE_DEFINITIONS[item.sourceId as keyof typeof SOURCE_DEFINITIONS]?.actions ?? []
+          ),
         ],
         Resource: "*",
       },
@@ -223,6 +280,22 @@ function basePolicy(roleArn: string): Record<string, unknown> {
         Resource: roleArn,
       },
     ],
+  };
+}
+
+function sourcePolicy(item: FinopsSourceContract): Record<string, unknown> {
+  const definition = SOURCE_DEFINITIONS[
+    item.sourceId as keyof typeof SOURCE_DEFINITIONS
+  ];
+  assert.ok(definition);
+  return {
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ExactFinopsSourceRead",
+      Effect: "Allow",
+      Action: definition.actions,
+      Resource: "*",
+    }],
   };
 }
 
@@ -474,4 +547,93 @@ test("exact FOCUS composition succeeds independently", async () => {
   );
   assert.equal(session.connectionId, stored.connectionId);
   assert.equal(setup.assume.calls.length, 1);
+});
+
+test("exact 08.2 source composition attests all three named policies", async () => {
+  const sourceContracts = [
+    sourceContract("cost_anomaly_detection"),
+    sourceContract("trusted_advisor_standard_checks"),
+    sourceContract("aws_organizations_taxonomy"),
+  ];
+  const {
+    foundationalFinopsContracts: _omittedFoundational,
+    ...stored
+  } = connection({
+    permissionPackVersion: "standard-2026-08.2",
+    finopsSourceContracts: sourceContracts,
+  });
+  void _omittedFoundational;
+  const target = sourceContracts[2]!;
+  const setup = broker(stored);
+  const session = await setup.broker.assumeValidatedFinopsSourceSession(
+    SCOPE,
+    stored.connectionId,
+    "job-organizations-taxonomy",
+    target.contractId,
+  );
+  assert.equal(session.connectionId, stored.connectionId);
+  assert.equal(setup.assume.calls.length, 1);
+  assert.equal(
+    setup.assume.calls[0]?.Policy,
+    finopsSourceSessionPolicy(stored.roleArn, target),
+  );
+  const policy = setup.assume.calls[0]?.Policy ?? "";
+  assert.match(policy, /organizations:DescribeOrganization/u);
+  assert.match(policy, /organizations:ListAccounts/u);
+  assert.doesNotMatch(policy, /support:|ce:GetAnomal/u);
+});
+
+test("missing, widened, or noncanonical 08.2 source policies fail attestation", async () => {
+  const sourceContracts = [
+    sourceContract("cost_anomaly_detection"),
+    sourceContract("trusted_advisor_standard_checks"),
+    sourceContract("aws_organizations_taxonomy"),
+  ];
+  const {
+    foundationalFinopsContracts: _omittedFoundational,
+    ...stored
+  } = connection({
+    permissionPackVersion: "standard-2026-08.2",
+    finopsSourceContracts: sourceContracts,
+  });
+  void _omittedFoundational;
+  const expectedNames = [
+    "SutraImplementedMetadataCollectors",
+    ...sourceContracts.map(({ policyName }) => policyName!),
+  ];
+  const cases: RoleOptions[] = [
+    { policyNames: expectedNames.slice(0, -1) },
+    {
+      mutatePolicy: (name, document) => {
+        if (name !== "SutraFinopsOrganizationsTaxonomyReadV1") return document;
+        const source = (document.Statement as Array<Record<string, unknown>>)[0]!;
+        source.Action = [
+          ...SOURCE_DEFINITIONS.aws_organizations_taxonomy.actions,
+          "organizations:ListRoots",
+        ];
+        return document;
+      },
+    },
+    {
+      mutatePolicy: (name, document) => {
+        if (name !== "SutraFinopsTrustedAdvisorStandardReadV1") return document;
+        const source = (document.Statement as Array<Record<string, unknown>>)[0]!;
+        source.Sid = "DifferentStatement";
+        return document;
+      },
+    },
+  ];
+  for (const [index, options] of cases.entries()) {
+    const setup = broker(stored, options);
+    await assert.rejects(
+      setup.broker.assumeValidatedFinopsSourceSession(
+        SCOPE,
+        stored.connectionId,
+        `job-source-reject-${index}`,
+        sourceContracts[2]!.contractId,
+      ),
+      UnsafeTrustPolicyError,
+    );
+    assert.equal(setup.assume.calls.length, 1);
+  }
 });

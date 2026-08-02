@@ -8,7 +8,7 @@ const collectorSrc = resolve(root, "services/aws-collector/src");
 const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml");
 const finopsTemplatePath = resolve(
   root,
-  "infrastructure/customer-onboarding-role-standard-2026-08.1.yaml",
+  "infrastructure/customer-onboarding-role-standard-2026-08.2.yaml",
 );
 
 /**
@@ -19,16 +19,19 @@ const finopsTemplatePath = resolve(
  * scope:
  *   "customer" — runs under the assumed customer onboarding role and therefore
  *                MUST be permitted by the default onboarding template.
- *   "finops_source" — runs under the successor FinOps permission pack and an
- *                exact, separately attested source policy. These actions MUST
- *                remain absent from the current default metadata role.
+ *   "finops_source" — runs under the immutable advanced FinOps permission pack
+ *                and an exact, separately attested source policy. These actions
+ *                MUST remain absent from the current default metadata role.
  *   "finops_source_unprovisioned" — implemented read-only collector contract,
  *                but no onboarding role artifact grants it yet. Mapping keeps
  *                command drift visible without falsely widening the active
- *                Cost Anomaly-only successor permission pack.
+ *                reviewed advanced successor permission pack.
  *   "vendor"   — runs under Sutra's own workload identity (the initial
  *                AssumeRole into the customer role) and is NOT part of the
  *                customer role's permission policy.
+ *   "vendor_cryptographic" — runs under Sutra's broker task role against the
+ *                exact server-owned signing key. It never uses the assumed
+ *                customer session and is not an onboarding-role permission.
  *   "agentless" — runs under the AGENTLESS STS ceiling
  *                (agentlessSnapshotSessionPolicy) or in Sutra's own scan account.
  *                These are NOT read-only: agentless scanning creates a snapshot in
@@ -45,6 +48,7 @@ const finopsTemplatePath = resolve(
  */
 const COLLECTOR_COMMANDS = {
   AssumeRoleCommand: { action: "sts:AssumeRole", scope: "vendor" },
+  SignCommand: { action: "kms:Sign", scope: "vendor_cryptographic" },
   // Reads an agentless scan's published findings from SUTRA's OWN bucket. Vendor
   // scope, deliberately: this is never a customer permission, and putting it in the
   // onboarding template would misrepresent what Sutra asks customers to grant.
@@ -138,11 +142,19 @@ const COLLECTOR_COMMANDS = {
   },
   DescribeTrustedAdvisorChecksCommand: {
     action: "support:DescribeTrustedAdvisorChecks",
-    scope: "finops_source_unprovisioned",
+    scope: "finops_source",
   },
   DescribeTrustedAdvisorCheckResultCommand: {
     action: "support:DescribeTrustedAdvisorCheckResult",
-    scope: "finops_source_unprovisioned",
+    scope: "finops_source",
+  },
+  DescribeOrganizationCommand: {
+    action: "organizations:DescribeOrganization",
+    scope: "finops_source",
+  },
+  ListAccountsCommand: {
+    action: "organizations:ListAccounts",
+    scope: "finops_source",
   },
   GetMetricDataCommand: { action: "cloudwatch:GetMetricData", scope: "customer" },
   ListMetricsCommand: { action: "cloudwatch:ListMetrics", scope: "customer" },
@@ -161,6 +173,21 @@ function actionsInStatement(source, sid) {
   const following = source.indexOf("\n              - Sid:", start + marker.length);
   const block = source.slice(start, following === -1 ? source.length : following);
   return [...block.matchAll(/^\s+- ([a-z0-9*]+:[A-Za-z0-9*]+)\s*$/gmu)].map((m) => m[1]);
+}
+
+function actionsInPolicy(source, policyName) {
+  const marker = `- PolicyName: ${policyName}`;
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, `missing policy ${policyName}`);
+  const candidates = [
+    source.indexOf("\n        - PolicyName:", start + marker.length),
+    source.indexOf("\n      Tags:", start + marker.length),
+  ].filter((value) => value >= 0);
+  assert.ok(candidates.length > 0, `unbounded policy ${policyName}`);
+  const block = source.slice(start, Math.min(...candidates));
+  assert.match(block, /- Sid: ExactFinopsSourceRead/u);
+  return [...block.matchAll(/^\s+- ([a-z0-9*]+:[A-Za-z0-9*]+)\s*$/gmu)]
+    .map((match) => match[1]);
 }
 
 async function commandsConstructedInCollector() {
@@ -189,7 +216,7 @@ test("every AWS command the collector constructs is mapped to a read-only action
   // genuinely writes — but not thereby unbounded: the next test pins the exact set,
   // so a new write verb cannot be slipped in under this label.
   for (const [command, { action, scope }] of Object.entries(COLLECTOR_COMMANDS)) {
-    if (scope === "agentless") continue;
+    if (scope === "agentless" || scope === "vendor_cryptographic") continue;
     assert.match(action, READ_ONLY_VERBS, `${command} maps to non-read-only action ${action}`);
   }
 });
@@ -231,7 +258,11 @@ test("default onboarding template permits every read-only action the collector c
 test("FinOps source commands require the exact successor source policy and deny ceiling", async () => {
   const currentTemplate = await readFile(templatePath, "utf8");
   const finopsTemplate = await readFile(finopsTemplatePath, "utf8");
-  const sourceAllowed = new Set(actionsInStatement(finopsTemplate, "ExactFinopsSourceRead"));
+  const sourceAllowed = new Set([
+    ...actionsInPolicy(finopsTemplate, "SutraFinopsCostAnomalyReadV1"),
+    ...actionsInPolicy(finopsTemplate, "SutraFinopsTrustedAdvisorStandardReadV1"),
+    ...actionsInPolicy(finopsTemplate, "SutraFinopsOrganizationsTaxonomyReadV1"),
+  ]);
   const denyCeiling = new Set(actionsInStatement(finopsTemplate, "DenyUnimplementedActions"));
   const sourceActions = [...new Set(
     Object.values(COLLECTOR_COMMANDS)
@@ -240,7 +271,10 @@ test("FinOps source commands require the exact successor source policy and deny 
   )];
 
   assert.match(finopsTemplate, /PolicyName: SutraFinopsCostAnomalyReadV1/u);
-  assert.deepEqual([...sourceAllowed], sourceActions);
+  assert.match(finopsTemplate, /PolicyName: SutraFinopsTrustedAdvisorStandardReadV1/u);
+  assert.match(finopsTemplate, /PolicyName: SutraFinopsOrganizationsTaxonomyReadV1/u);
+  assert.equal(finopsTemplate.includes("- kms:Sign"), false);
+  assert.deepEqual([...sourceAllowed].sort(), [...sourceActions].sort());
   for (const action of sourceActions) {
     assert.ok(
       denyCeiling.has(action),

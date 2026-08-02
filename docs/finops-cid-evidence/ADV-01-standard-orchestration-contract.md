@@ -21,8 +21,10 @@ management account, AWS organization ID, collection time, exact operation set,
 canonical account set, SHA-256 digest, signer identity, and
 `AWS_KMS_RSASSA_PSS_SHA_256` signature are validated before persistence.
 
-The credential-owning collector adapter is implemented but intentionally not
-represented as active until the successor customer-role binding and durable
+The credential-owning collector adapter and immutable
+`standard-2026-08.2` least-privilege customer-role candidate are implemented
+but intentionally not represented as active until the exact template bytes are
+published and attested, server-owned source bindings are persisted, and durable
 handlers are registered. Its stable activation reason remains
 `AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`. It may call only
 `organizations:DescribeOrganization` and `organizations:ListAccounts`, must
@@ -39,6 +41,14 @@ its SHA-256 digest with a retained workload-account RSA-3072 KMS key. The
 broker task can only `kms:Sign`; the application task can only `kms:Verify`;
 both IAM grants are pinned to `DIGEST` plus `RSASSA_PSS_SHA_256`. The customer
 assumed-role credentials are never supplied to KMS.
+
+The successor role adds only the two Support and two Organizations reads to
+the immutable `standard-2026-08.1` ceiling and grants them through the exact
+`SutraFinopsTrustedAdvisorStandardReadV1` and
+`SutraFinopsOrganizationsTaxonomyReadV1` inline policies. The advanced source
+contract remains limited to the commercial `aws` partition and `us-east-1`.
+The template is an unpublished candidate and does not change either mutable
+onboarding default.
 
 ## Fan-out and evidence consumption
 

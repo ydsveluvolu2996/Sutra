@@ -94,6 +94,7 @@ const FINOPS_CEILING_ACTIONS = [
   "s3:GetBucketLocation",
   "s3:GetObject",
   "s3:GetObjectAttributes",
+  "kms:Decrypt",
   "bcm-data-exports:ListExports",
   "bcm-data-exports:GetExport",
 ] as const;

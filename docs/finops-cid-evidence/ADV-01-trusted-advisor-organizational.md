@@ -62,8 +62,8 @@ charts, 18 insights, 8 KPIs, 5 pivot tables, and 43 tables.
 | Gate | Status | Evidence |
 |---|---|---|
 | G0 requirements | `VERIFIED` | Official AWS narrative plus the pinned v4.0.1 manifest/definition, exact sheet/visual/control inventory, and immutable SHA-256 evidence above, reviewed 2026-08-01. |
-| G1 source contract | `IMPLEMENTED_UNVERIFIED` | Standard account checks use the read-only AWS Support operations `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult` through the fixed commercial-partition `us-east-1` endpoint. Trusted Advisor Priority organization recommendations remain a separate supplemental source and are never substituted. Eligible Support-plan and Organizations taxonomy prerequisites remain explicit. |
-| G2 collector and orchestration | `IMPLEMENTED_UNVERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. The credential-owning Organizations adapter now uses the fixed commercial endpoint, fully paginates with replay and size/deadline limits, retains all five official `Account.State` values without names/emails, signs the canonical SHA-256 digest with a dedicated workload-account RSA-3072 KMS key, and exposes only an authenticated exact-contract broker route. App-side KMS verification and infrastructure enforce broker-only Sign/app-only Verify with digest-mode RSA-PSS. Orchestration freezes the manifest, maps active same-tenant trust-role accounts, queues manifest-bound account/finalizer jobs, consumes exact immutable standard-check evidence bytes, and finalizes only terminal manifests. The successor customer-role binding and durable handler registrations remain unavailable. |
+| G1 source contract | `IMPLEMENTED_UNVERIFIED` | Standard account checks use the read-only AWS Support operations `support:DescribeTrustedAdvisorChecks` and `support:DescribeTrustedAdvisorCheckResult` through the fixed commercial-partition `us-east-1` endpoint. The immutable unpublished `standard-2026-08.2` candidate adds exact dedicated policies for those two Support reads and the two Organizations taxonomy reads while preserving prior trust and ceilings. Trusted Advisor Priority organization recommendations remain a separate supplemental source and are never substituted. Eligible Support-plan and Organizations taxonomy prerequisites remain explicit. |
+| G2 collector and orchestration | `IMPLEMENTED_UNVERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. The credential-owning Organizations adapter now uses the fixed commercial endpoint, fully paginates with replay and size/deadline limits, retains all five official `Account.State` values without names/emails, signs the canonical SHA-256 digest with a dedicated workload-account RSA-3072 KMS key, and exposes only an authenticated exact-contract broker route. App-side KMS verification and infrastructure enforce broker-only Sign/app-only Verify with digest-mode RSA-PSS. Orchestration freezes the manifest, maps active same-tenant trust-role accounts, queues manifest-bound account/finalizer jobs, consumes exact immutable standard-check evidence bytes, and finalizes only terminal manifests. Immutable 08.2 publication/attestation, server-owned source binding, and durable handler registrations remain unavailable. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Server-owned account manifests, account/check/resource snapshots, organization generations, and active heads are tenant/customer/connection scoped. Evidence is checksum-bound and append-only; database guards prevent incomplete or partial generations from advancing the complete active head. |
 | G4 API | `IMPLEMENTED_VERIFIED` | Authenticated same-tenant `GET /api/v1/finops/trusted-advisor-organizational` accepts one bounded connection/account/check/status/Region/category/suppression value, queries only the immutable active standard-check generation, exposes the pinned official definition, bounds output, minimizes metadata, and preserves explicit source states. |
 | G5 visual UI | `IMPLEMENTED_VERIFIED` | ADV-01 renders all 11 official sheet entries with exact upstream object/control counts and honest coverage badges, evidence-backed category/status/Region visuals, coverage KPIs, generation history, account/check/resource drilldowns, native Category and IsSuppressed controls, responsive layouts, and immutable source evidence. The frozen definition remains visible during loading, configuration-required, failed and null-report states. Provider-only sheets remain visible and unavailable rather than substituted. |
@@ -75,9 +75,10 @@ charts, 18 insights, 8 KPIs, 5 pivot tables, and 43 tables.
 
 ## Configuration-required activation blocker
 
-The signed taxonomy adapter and immutable fan-out contract now exist, but
-Sutra does not yet have the immutable successor customer-role policy/binding or
-durable production handlers registered. The browser is not allowed to supply
+The signed taxonomy adapter, immutable `standard-2026-08.2` customer-role
+candidate, and immutable fan-out contract now exist, but the template has not
+been published or attested and Sutra does not yet persist its server-owned
+source binding or register durable production handlers. The browser is not allowed to supply
 or expand the account set. Consequently, collection activation is reported as
 `configuration_required` with
 `AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`; no collection is
@@ -141,10 +142,12 @@ git diff --check
 
 Result: **all passed**.
 
-The new collector/KMS boundary adds **12 focused tests** (8 collector and 4
-app verifier). The exact collector tree passes **231/231** tests under the
-pinned Node runtime; root and collector typechecks, focused ESLint, the 21
-production/bootstrap infrastructure contract tests, and diff checks pass. The
-local `cfn-lint` binary is not installed in this Mac-mini workspace, so the
-CloudFormation semantic lint remains an exact-tree CI gate rather than claimed
-local evidence.
+The collector/KMS boundary adds **12 focused tests** (8 collector and 4 app
+verifier). The immutable permission-pack slice adds **9 focused tests** (7
+template/runbook and 2 broker-attestation cases), while the combined prior
+pack and permission-coverage command passes **19/19**. The exact collector tree
+passes **233/233** tests under the pinned Node runtime; root and collector
+typechecks, focused ESLint, the 21 production/bootstrap infrastructure contract
+tests, and diff checks pass. Pinned `cfn-lint 1.46.0` passes all 10 configured
+templates locally, including both immutable successor packs; the same semantic
+check remains required in exact-tree CI.
