@@ -83,6 +83,7 @@ import {
   CollectorError,
   CURRENT_PERMISSION_PACK_VERSION,
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
@@ -2936,6 +2937,7 @@ async function requireFinopsSourceActiveConnection(
   if (
     connection.status !== "ACTIVE" ||
     (connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();

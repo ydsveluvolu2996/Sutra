@@ -23,7 +23,10 @@ const REGION = /^[a-z0-9-]{1,128}$/u;
 const CATEGORY = new Set(["security", "cost_optimizing", "fault_tolerance", "performance", "service_limits"]);
 const STALE_AFTER_HOURS = 24;
 const BODY_BYTES = 2 * 1_024;
-const REQUIRED_PERMISSION_PACK = "standard-2026-08.2";
+const REQUIRED_PERMISSION_PACKS = new Set([
+  "standard-2026-08.2",
+  "standard-2026-08.3",
+]);
 const ALLOWED_PARAMETERS = new Set([
   "connectionId", "accountId", "checkId", "status", "region", "category", "suppressed",
 ]);
@@ -119,7 +122,7 @@ async function activationState(permissionPackVersion: string): Promise<
   | { readonly available: true; readonly reason: null }
   | { readonly available: false; readonly reason: string }
 > {
-  if (permissionPackVersion !== REQUIRED_PERMISSION_PACK) {
+  if (!REQUIRED_PERMISSION_PACKS.has(permissionPackVersion)) {
     return { available: false, reason: "ADVANCED_FINOPS_PERMISSION_PACK_REQUIRED" };
   }
   const environment = env as unknown as Readonly<Record<string, string | undefined>>;

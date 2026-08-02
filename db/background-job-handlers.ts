@@ -125,7 +125,10 @@ const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
 
 const TRUSTED_ADVISOR_ORGANIZATIONS_CONTRACT_ID =
   "aws-organizations-taxonomy-read-v1";
-const TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK = "standard-2026-08.2";
+const TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS = new Set([
+  "standard-2026-08.2",
+  "standard-2026-08.3",
+]);
 
 function trustedAdvisorServerConnection(
   organizationId: string,
@@ -136,7 +139,7 @@ function trustedAdvisorServerConnection(
     || connection.sourceKind !== "aws_trust_role"
     || connection.status !== "active"
     || connection.partition !== "aws"
-    || connection.permissionPackVersion !== TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK
+    || !TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS.has(connection.permissionPackVersion)
   ) return null;
   return {
     organizationId,
@@ -147,6 +150,40 @@ function trustedAdvisorServerConnection(
     sourceKind: connection.sourceKind,
     status: connection.status,
   };
+}
+
+async function listTrustedAdvisorCustomerConnections(scope: {
+  readonly organizationId: string;
+  readonly customerId: string;
+}): Promise<readonly TrustedAdvisorServerConnection[]> {
+  const batches = await Promise.all(
+    [...TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS].map((permissionPackVersion) =>
+      listActiveAwsConnectionsForCustomer(
+        scope.organizationId,
+        scope.customerId,
+        permissionPackVersion,
+      )
+    ),
+  );
+  // During a permission-pack rollout the same AWS account can temporarily have
+  // both an .8.2 and .8.3 connection. Prefer the successor and fan out once per
+  // account so a safe role upgrade cannot create duplicate TA evidence.
+  const selected = new Map<string, (typeof batches)[number][number]>();
+  for (const connection of batches.flat().sort((left, right) =>
+    right.permissionPackVersion.localeCompare(left.permissionPackVersion)
+      || left.awsAccountId.localeCompare(right.awsAccountId)
+      || left.id.localeCompare(right.id)
+  )) {
+    if (!selected.has(connection.awsAccountId)) {
+      selected.set(connection.awsAccountId, connection);
+    }
+  }
+  return [...selected.values()].sort((left, right) =>
+    left.awsAccountId.localeCompare(right.awsAccountId) || left.id.localeCompare(right.id)
+  ).slice(0, 10_001).flatMap((connection) => {
+    const mapped = trustedAdvisorServerConnection(scope.organizationId, connection);
+    return mapped === null ? [] : [mapped];
+  });
 }
 
 /** Production composition for the signed Organizations activation job. */
@@ -164,14 +201,7 @@ export async function runTrustedAdvisorOrganizationActivationHandler(
       scope.organizationId,
       await getConnectionForOrg(scope.organizationId, scope.connectionId),
     ),
-    listCustomerConnections: async (scope) => (await listActiveAwsConnectionsForCustomer(
-      scope.organizationId,
-      scope.customerId,
-      TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACK,
-    )).flatMap((connection) => {
-      const mapped = trustedAdvisorServerConnection(scope.organizationId, connection);
-      return mapped === null ? [] : [mapped];
-    }),
+    listCustomerConnections: listTrustedAdvisorCustomerConnections,
     collectSignedTaxonomy: (input) => {
       if (input.operations !== TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS) {
         throw new Error("trusted-advisor-taxonomy-operations-invalid");

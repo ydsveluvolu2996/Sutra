@@ -35,7 +35,13 @@ export const FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.1" 
  * Trusted Advisor standard checks. It remains separate from the regular .4
  * inventory pack and the .8.1 Foundational-only successor.
  */
-export const ADVANCED_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.2" as const;
+export const ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.2" as const;
+/**
+ * Immutable successor that adds only Compute Optimizer enrollment and completed
+ * export-job discovery. Export creation and S3 object access remain outside the
+ * base role and require separate server-owned contracts.
+ */
+export const ADVANCED_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.3" as const;
 /**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
@@ -50,6 +56,7 @@ export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
   | typeof FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+  | typeof ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
   | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION

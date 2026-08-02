@@ -8,7 +8,7 @@ const collectorSrc = resolve(root, "services/aws-collector/src");
 const templatePath = resolve(root, "infrastructure/customer-onboarding-role.yaml");
 const finopsTemplatePath = resolve(
   root,
-  "infrastructure/customer-onboarding-role-standard-2026-08.2.yaml",
+  "infrastructure/customer-onboarding-role-standard-2026-08.3.yaml",
 );
 
 /**
@@ -22,10 +22,6 @@ const finopsTemplatePath = resolve(
  *   "finops_source" — runs under the immutable advanced FinOps permission pack
  *                and an exact, separately attested source policy. These actions
  *                MUST remain absent from the current default metadata role.
- *   "finops_source_unprovisioned" — implemented read-only collector contract,
- *                but no onboarding role artifact grants it yet. Mapping keeps
- *                command drift visible without falsely widening the active
- *                reviewed advanced successor permission pack.
  *   "vendor"   — runs under Sutra's own workload identity (the initial
  *                AssumeRole into the customer role) and is NOT part of the
  *                customer role's permission policy.
@@ -130,15 +126,15 @@ const COLLECTOR_COMMANDS = {
   },
   GetEnrollmentStatusCommand: {
     action: "compute-optimizer:GetEnrollmentStatus",
-    scope: "finops_source_unprovisioned",
+    scope: "finops_source",
   },
   GetEnrollmentStatusesForOrganizationCommand: {
     action: "compute-optimizer:GetEnrollmentStatusesForOrganization",
-    scope: "finops_source_unprovisioned",
+    scope: "finops_source",
   },
   DescribeRecommendationExportJobsCommand: {
     action: "compute-optimizer:DescribeRecommendationExportJobs",
-    scope: "finops_source_unprovisioned",
+    scope: "finops_source",
   },
   DescribeTrustedAdvisorChecksCommand: {
     action: "support:DescribeTrustedAdvisorChecks",
@@ -172,7 +168,7 @@ function actionsInStatement(source, sid) {
   assert.notEqual(start, -1, `missing statement ${sid}`);
   const following = source.indexOf("\n              - Sid:", start + marker.length);
   const block = source.slice(start, following === -1 ? source.length : following);
-  return [...block.matchAll(/^\s+- ([a-z0-9*]+:[A-Za-z0-9*]+)\s*$/gmu)].map((m) => m[1]);
+  return [...block.matchAll(/^\s+- ([a-z0-9*-]+:[A-Za-z0-9*]+)\s*$/gmu)].map((m) => m[1]);
 }
 
 function actionsInPolicy(source, policyName) {
@@ -186,7 +182,7 @@ function actionsInPolicy(source, policyName) {
   assert.ok(candidates.length > 0, `unbounded policy ${policyName}`);
   const block = source.slice(start, Math.min(...candidates));
   assert.match(block, /- Sid: ExactFinopsSourceRead/u);
-  return [...block.matchAll(/^\s+- ([a-z0-9*]+:[A-Za-z0-9*]+)\s*$/gmu)]
+  return [...block.matchAll(/^\s+- ([a-z0-9*-]+:[A-Za-z0-9*]+)\s*$/gmu)]
     .map((match) => match[1]);
 }
 
@@ -262,6 +258,7 @@ test("FinOps source commands require the exact successor source policy and deny 
     ...actionsInPolicy(finopsTemplate, "SutraFinopsCostAnomalyReadV1"),
     ...actionsInPolicy(finopsTemplate, "SutraFinopsTrustedAdvisorStandardReadV1"),
     ...actionsInPolicy(finopsTemplate, "SutraFinopsOrganizationsTaxonomyReadV1"),
+    ...actionsInPolicy(finopsTemplate, "SutraFinopsComputeOptimizerExportReadV1"),
   ]);
   const denyCeiling = new Set(actionsInStatement(finopsTemplate, "DenyUnimplementedActions"));
   const sourceActions = [...new Set(
@@ -273,6 +270,7 @@ test("FinOps source commands require the exact successor source policy and deny 
   assert.match(finopsTemplate, /PolicyName: SutraFinopsCostAnomalyReadV1/u);
   assert.match(finopsTemplate, /PolicyName: SutraFinopsTrustedAdvisorStandardReadV1/u);
   assert.match(finopsTemplate, /PolicyName: SutraFinopsOrganizationsTaxonomyReadV1/u);
+  assert.match(finopsTemplate, /PolicyName: SutraFinopsComputeOptimizerExportReadV1/u);
   assert.equal(finopsTemplate.includes("- kms:Sign"), false);
   assert.deepEqual([...sourceAllowed].sort(), [...sourceActions].sort());
   for (const action of sourceActions) {
@@ -286,24 +284,6 @@ test("FinOps source commands require the exact successor source policy and deny 
       `${action} must not widen the current default metadata role`,
     );
     assert.match(action, READ_ONLY_VERBS, `${action} is not a read-only FinOps source action`);
-  }
-});
-
-test("unprovisioned FinOps source commands remain outside every active onboarding role", async () => {
-  const [currentTemplate, finopsTemplate] = await Promise.all([
-    readFile(templatePath, "utf8"),
-    readFile(finopsTemplatePath, "utf8"),
-  ]);
-  const actions = [...new Set(
-    Object.values(COLLECTOR_COMMANDS)
-      .filter((entry) => entry.scope === "finops_source_unprovisioned")
-      .map((entry) => entry.action),
-  )];
-  assert.ok(actions.length > 0);
-  for (const action of actions) {
-    assert.equal(currentTemplate.includes(`- ${action}`), false);
-    assert.equal(finopsTemplate.includes(`- ${action}`), false);
-    assert.match(action, READ_ONLY_VERBS);
   }
 });
 

@@ -578,6 +578,29 @@ test("persisted successor records accept only exact tenant-bound FinOps contract
     "SutraFoundationalCur2ReadV1",
   );
 
+  const { foundationalFinopsContracts: _foundational, ...advancedBase } = persisted;
+  void _foundational;
+  const advanced = parsePersistedConnection({
+    ...advancedBase,
+    permissionPackVersion: "standard-2026-08.3",
+    finopsSourceContracts: [{
+      tenantId: "org_local_sutra",
+      connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      contractId: "compute-optimizer-export-primary-v1",
+      sourceId: "compute_optimizer_organization_export",
+      accountId: "123456789012",
+      partition: "aws",
+      region: "us-east-1",
+      permissionContractId: "aws-compute-optimizer-organization-export-read-v1",
+      policyName: "SutraFinopsComputeOptimizerExportReadV1",
+    }],
+  });
+  assert.equal(advanced.permissionPackVersion, "standard-2026-08.3");
+  assert.equal(
+    advanced.finopsSourceContracts?.[0]?.sourceId,
+    "compute_optimizer_organization_export",
+  );
+
   const crossTenant = structuredClone(persisted);
   crossTenant.foundationalFinopsContracts[0]!.tenantId = "other_tenant";
   assert.throws(

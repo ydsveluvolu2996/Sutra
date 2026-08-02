@@ -32,7 +32,7 @@ test("TAO activation is a bounded same-tenant sync POST with no browser account 
   assert.match(route, /readBoundedJson\(request, BODY_BYTES\)/u);
   assert.match(route, /Object\.keys\(body\)\.length !== 1/u);
   assert.match(route, /assertSessionCapability\(authenticated, "sync:run", connection\.customerId\)/u);
-  assert.match(route, /REQUIRED_PERMISSION_PACK = "standard-2026-08\.2"/u);
+  assert.match(route, /REQUIRED_PERMISSION_PACKS = new Set\(\[[\s\S]*"standard-2026-08\.2"[\s\S]*"standard-2026-08\.3"/u);
   assert.match(route, /enqueueTrustedAdvisorOrganizationActivation/u);
   assert.match(route, /status: 202/u);
   assert.doesNotMatch(route, /body\.(?:accountId|accounts|operations|contractId|taxonomy|region)/u);

@@ -67,6 +67,15 @@ const SOURCE_DEFINITIONS = Object.freeze({
       "organizations:ListAccounts",
     ]),
   }),
+  compute_optimizer_organization_export: Object.freeze({
+    permissionContractId: "aws-compute-optimizer-organization-export-read-v1",
+    policyName: "SutraFinopsComputeOptimizerExportReadV1",
+    actions: Object.freeze([
+      "compute-optimizer:DescribeRecommendationExportJobs",
+      "compute-optimizer:GetEnrollmentStatus",
+      "compute-optimizer:GetEnrollmentStatusesForOrganization",
+    ]),
+  }),
 });
 
 function sourceContract(
@@ -636,4 +645,63 @@ test("missing, widened, or noncanonical 08.2 source policies fail attestation", 
     );
     assert.equal(setup.assume.calls.length, 1);
   }
+});
+
+test("exact 08.3 source composition admits bounded Compute Optimizer discovery", async () => {
+  const sourceContracts = [
+    sourceContract("cost_anomaly_detection"),
+    sourceContract("trusted_advisor_standard_checks"),
+    sourceContract("aws_organizations_taxonomy"),
+    sourceContract("compute_optimizer_organization_export"),
+  ];
+  const {
+    foundationalFinopsContracts: _omittedFoundational,
+    ...stored
+  } = connection({
+    permissionPackVersion: "standard-2026-08.3",
+    finopsSourceContracts: sourceContracts,
+  });
+  void _omittedFoundational;
+  const target = sourceContracts[3]!;
+  const setup = broker(stored);
+  const session = await setup.broker.assumeValidatedFinopsSourceSession(
+    SCOPE,
+    stored.connectionId,
+    "job-compute-optimizer-discovery",
+    target.contractId,
+  );
+  assert.equal(session.connectionId, stored.connectionId);
+  assert.equal(setup.assume.calls.length, 1);
+  assert.equal(
+    setup.assume.calls[0]?.Policy,
+    finopsSourceSessionPolicy(stored.roleArn, target),
+  );
+  const policy = setup.assume.calls[0]?.Policy ?? "";
+  assert.match(policy, /compute-optimizer:DescribeRecommendationExportJobs/u);
+  assert.match(policy, /compute-optimizer:GetEnrollmentStatus/u);
+  assert.match(policy, /compute-optimizer:GetEnrollmentStatusesForOrganization/u);
+  assert.doesNotMatch(policy, /compute-optimizer:Export|s3:/u);
+});
+
+test("08.2 cannot activate the 08.3 Compute Optimizer source", async () => {
+  const target = sourceContract("compute_optimizer_organization_export");
+  const {
+    foundationalFinopsContracts: _omittedFoundational,
+    ...stored
+  } = connection({
+    permissionPackVersion: "standard-2026-08.2",
+    finopsSourceContracts: [target],
+  });
+  void _omittedFoundational;
+  const setup = broker(stored);
+  await assert.rejects(
+    setup.broker.assumeValidatedFinopsSourceSession(
+      SCOPE,
+      stored.connectionId,
+      "job-compute-optimizer-wrong-pack",
+      target.contractId,
+    ),
+    ConnectionStateError,
+  );
+  assert.equal(setup.assume.calls.length, 0);
 });
