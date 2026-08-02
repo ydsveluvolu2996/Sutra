@@ -73,6 +73,9 @@ export {
   COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
   COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
   COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+  AWS_ORGANIZATIONS_TAXONOMY_SOURCE_ACTIONS,
+  AWS_ORGANIZATIONS_TAXONOMY_SOURCE_PERMISSION_CONTRACT_ID,
+  AWS_ORGANIZATIONS_TAXONOMY_SOURCE_POLICY_NAME,
   type FinopsCollectorSourceId,
   type FinopsSourceContractOwner,
 } from "./finops-source-contract.js";
@@ -251,6 +254,22 @@ export async function executeFinopsSourceDispatch(
       region: contract.region,
       errorCode: "SOURCE_ADAPTER_NOT_IMPLEMENTED",
       limitations: ["SOURCE_ADAPTER_NOT_IMPLEMENTED", "NO_PROVIDER_DATA_RETURNED"],
+    });
+  }
+  if (contract.sourceId === "aws_organizations_taxonomy") {
+    return emptyResult({
+      request,
+      connection,
+      collectedAt,
+      sourceId: contract.sourceId,
+      configured: true,
+      implementationState: "IMPLEMENTED",
+      region: contract.region,
+      errorCode: "DEDICATED_SIGNED_ADAPTER_REQUIRED",
+      limitations: [
+        "DEDICATED_SIGNED_ADAPTER_REQUIRED",
+        "NO_PROVIDER_DATA_RETURNED",
+      ],
     });
   }
 

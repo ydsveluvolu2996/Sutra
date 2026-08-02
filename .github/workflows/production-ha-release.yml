@@ -168,7 +168,8 @@ jobs:
             MigrationTaskDefinitionArn WorkerTaskDefinitionArn BrokerTaskDefinitionArn \
             VulnerabilityFeedTaskDefinitionArn VulnerabilityFeedScheduleRuleName \
             ApplicationSecurityGroupId BrokerSecurityGroupId EndpointSecurityGroupId \
-            S3GatewayPrefixListId NetworkFirewallArn PrivateAppSubnetIds EvidenceBucketName KmsKeyArn
+            S3GatewayPrefixListId NetworkFirewallArn PrivateAppSubnetIds EvidenceBucketName KmsKeyArn \
+            TrustedAdvisorTaxonomySigningKeyArn
           do
             value="$(output "${key}")"
             [[ -n "${value}" && "${value}" != "null" ]]
@@ -182,6 +183,19 @@ jobs:
           [[ "${customer_role_template_url}" == "$(output CustomerRoleTemplateUrl)" ]]
           [[ "${customer_role_template_url}" =~ ^https://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\.s3\.ap-south-1\.amazonaws\.com/templates/standard-2026-07\.4/1f08f008ab024bc9c440340340e7a7cfbad7ed394e6704c3df7173766f727fc8\.yaml\?versionId=[A-Za-z0-9._~%+=/-]+$ ]]
           [[ "${customer_role_template_url}" != *"?versionId=null" ]]
+          taxonomy_signing_key_arn="$(output TrustedAdvisorTaxonomySigningKeyArn)"
+          [[ "${taxonomy_signing_key_arn}" =~ ^arn:aws:kms:${AWS_REGION}:${AWS_ACCOUNT_ID}:key/[0-9a-f-]{36}$ ]]
+          taxonomy_signing_key="$(aws kms describe-key \
+            --region "${AWS_REGION}" \
+            --key-id "${taxonomy_signing_key_arn}" \
+            --output json)"
+          jq -e --arg arn "${taxonomy_signing_key_arn}" '
+            .KeyMetadata.Arn == $arn
+            and .KeyMetadata.Enabled == true
+            and .KeyMetadata.KeyUsage == "SIGN_VERIFY"
+            and .KeyMetadata.KeySpec == "RSA_3072"
+            and .KeyMetadata.MultiRegion == false
+          ' <<< "${taxonomy_signing_key}" >/dev/null
           echo "ApplicationRuntimeSecretArn=${runtime_secret_arn}" >> "${GITHUB_OUTPUT}"
           echo "IdentityMode=${identity_mode}" >> "${GITHUB_OUTPUT}"
           [[ "$(output ReleaseActivation)" == "active-after-successful-migration" ]]

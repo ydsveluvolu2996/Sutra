@@ -350,6 +350,29 @@ Conditions:
   AgentlessExecutionApproved: !Equals [!Ref AgentlessLiveValidationApproval, approved-after-live-end-to-end-agentless-validation]
 
 Resources:
+  TrustedAdvisorTaxonomySigningKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Retained asymmetric key for signed AWS Organizations taxonomy captures.
+      Enabled: true
+      KeySpec: RSA_3072
+      KeyUsage: SIGN_VERIFY
+      MultiRegion: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - { Key: "sutra:component", Value: trusted-advisor-taxonomy-signing }
+        - { Key: "sutra:environment", Value: production }
+
   ApplicationLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -1394,6 +1417,19 @@ Resources:
             Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
+        - PolicyName: VerifyOnlyTrustedAdvisorTaxonomyDigests
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: VerifyOnlyPinnedTaxonomyDigest
+                Effect: Allow
+                Action: kms:Verify
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+                    kms:MessageType: DIGEST
+                    kms:SigningAlgorithm: RSASSA_PSS_SHA_256
         - PolicyName: ReadWriteOnlyOpaqueManagedEvidence
           PolicyDocument:
             Version: "2012-10-17"
@@ -1458,6 +1494,19 @@ Resources:
             Principal: { Service: ecs-tasks.amazonaws.com }
             Action: sts:AssumeRole
       Policies:
+        - PolicyName: SignOnlyTrustedAdvisorTaxonomyDigests
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SignOnlyPinnedTaxonomyDigest
+                Effect: Allow
+                Action: kms:Sign
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+                    kms:MessageType: DIGEST
+                    kms:SigningAlgorithm: RSASSA_PSS_SHA_256
         - PolicyName: AssumeOnlyDedicatedCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"
@@ -1577,6 +1626,7 @@ Resources:
             - { Name: SUTRA_EVIDENCE_BUCKET, Value: !Ref EvidenceBucket }
             - { Name: SUTRA_EVIDENCE_KMS_KEY_ARN, Value: !Ref KmsKeyArn }
             - { Name: SUTRA_EVIDENCE_RETENTION_DAYS, Value: !Ref EvidenceRetentionDays }
+            - { Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN, Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
             - { Name: SUTRA_AUTH_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AUTH_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
@@ -1843,6 +1893,7 @@ Resources:
             - { Name: SUTRA_AGENTLESS_SECURITY_GROUP_ID, Value: !Ref AgentlessSecurityGroupId }
             - { Name: SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN, Value: !Ref AgentlessInstanceProfileArn }
             - { Name: SUTRA_AGENTLESS_FINDINGS_BUCKET, Value: !Ref AgentlessFindingsBucket }
+            - { Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN, Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn }
           Secrets:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
             - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
@@ -2518,6 +2569,13 @@ Resources:
                 Effect: Allow
                 Action: network-firewall:DescribeFirewall
                 Resource: !Ref NetworkFirewallArn
+              - Sid: VerifyTrustedAdvisorTaxonomySigningKey
+                Effect: Allow
+                Action: kms:DescribeKey
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
               - Sid: ReadExactRuntimeSecretForReleasePreflight
                 Effect: Allow
                 Action: secretsmanager:GetSecretValue
@@ -2584,5 +2642,7 @@ Outputs:
     Value: !Ref EvidenceBucket
   KmsKeyArn:
     Value: !Ref KmsKeyArn
+  TrustedAdvisorTaxonomySigningKeyArn:
+    Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
   GitHubProductionReleaseRoleArn:
     Value: !GetAtt GitHubProductionReleaseRole.Arn

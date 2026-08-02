@@ -83,6 +83,7 @@ import {
   CollectorError,
   CURRENT_PERMISSION_PACK_VERSION,
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type InventoryCollectorCoverage,
@@ -104,8 +105,12 @@ import {
 import {
   executeFinopsSourceDispatch,
   parseFinopsSourceDispatchRequest,
+  resolveFinopsSourceContract,
   type FinopsSourceDispatchRequest,
 } from "./finops-source-runner.js";
+import {
+  collectSignedOrganizationsTaxonomy,
+} from "./aws-organizations-taxonomy-runner.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -119,7 +124,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|finops-source|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -212,6 +217,8 @@ export interface LocalCollectorServerOptions {
    * inject a deterministic client. The web/control-plane never receives this.
    */
   readonly finopsExportChunkClientFactory?: FinopsExportChunkClientFactory;
+  /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
+  readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
 export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
@@ -285,6 +292,7 @@ interface ServerContext {
   readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
   readonly agentlessCleanupLedger?: LocalCollectorServerOptions["agentlessCleanupLedger"];
   readonly finopsExportChunkClientFactory: FinopsExportChunkClientFactory;
+  readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
 interface LocalJobsContext {
@@ -298,6 +306,11 @@ interface ScopedJob {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly jobId: string;
+}
+
+interface OrganizationsTaxonomyHttpRequest extends ScopedJob {
+  readonly customerId: string;
+  readonly contractId: string;
 }
 
 interface LocalFixtureJobInput {
@@ -401,6 +414,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       : { agentlessCleanupLedger: options.agentlessCleanupLedger }),
     finopsExportChunkClientFactory:
       options.finopsExportChunkClientFactory ?? createAwsFinopsExportChunkClient,
+    ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
+      ? {}
+      : {
+          trustedAdvisorTaxonomySigningKeyId:
+            options.trustedAdvisorTaxonomySigningKeyId,
+        }),
   };
 
   const server = createServer((request, response) => {
@@ -1305,6 +1324,13 @@ async function route(
         body: await collectFinopsSource(context, request),
       };
     }
+    if (action === "organizations-taxonomy") {
+      const request = parseOrganizationsTaxonomyHttpRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectOrganizationsTaxonomy(context, request),
+      };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
       return { status: 200, body: await attestOnboardingTrust(context, job) };
@@ -1360,6 +1386,100 @@ async function collectFinopsSource(
     return executeFinopsSourceDispatch(request, {
       registry: context.registry,
       broker,
+      now: context.now,
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+function parseOrganizationsTaxonomyHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): OrganizationsTaxonomyHttpRequest {
+  const record = exactJson(body, [
+    "tenantId", "customerId", "connectionId", "jobId", "contractId",
+  ]);
+  if (
+    typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId)
+    || typeof record.customerId !== "string" || !IDENTIFIER.test(record.customerId)
+    || typeof record.connectionId !== "string"
+    || record.connectionId !== pathConnectionId
+    || !IDENTIFIER.test(record.connectionId)
+    || typeof record.jobId !== "string" || !IDENTIFIER.test(record.jobId)
+    || typeof record.contractId !== "string" || !IDENTIFIER.test(record.contractId)
+  ) throw invalidRequest();
+  return {
+    tenantId: record.tenantId,
+    customerId: record.customerId,
+    connectionId: record.connectionId,
+    jobId: record.jobId,
+    contractId: record.contractId,
+  };
+}
+
+async function collectOrganizationsTaxonomy(
+  context: ServerContext,
+  request: OrganizationsTaxonomyHttpRequest,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, request);
+    if (
+      context.mode !== "live"
+      || context.trustedAdvisorTaxonomySigningKeyId === undefined
+      || connection.finopsSourceContracts === undefined
+    ) {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "Signed AWS Organizations taxonomy collection is not activated",
+      );
+    }
+    let contract;
+    try {
+      contract = resolveFinopsSourceContract(
+        connection.finopsSourceContracts,
+        {
+          tenantId: connection.tenantId,
+          connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId,
+          partition: connection.partition,
+        },
+        request.contractId,
+      );
+    } catch {
+      throw invalidRequest();
+    }
+    if (
+      contract === null
+      || contract.sourceId !== "aws_organizations_taxonomy"
+      || contract.accountId !== connection.expectedAccountId
+      || contract.partition !== "aws"
+      || contract.region !== "us-east-1"
+    ) throw invalidRequest();
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: "us-east-1",
+    });
+    const session = await broker.assumeValidatedFinopsSourceSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.jobId,
+      request.contractId,
+    );
+    return await collectSignedOrganizationsTaxonomy({
+      scope: {
+        organizationId: request.tenantId,
+        customerId: request.customerId,
+        connectionId: request.connectionId,
+      },
+      managementAccountId: connection.expectedAccountId,
+      partition: connection.partition,
+      credentials: session.credentials,
+      signerKeyId: context.trustedAdvisorTaxonomySigningKeyId,
       now: context.now,
     });
   } finally {
@@ -2815,7 +2935,8 @@ async function requireFinopsSourceActiveConnection(
   const connection = await requireConnection(registry, job);
   if (
     connection.status !== "ACTIVE" ||
-    connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+    (connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }

@@ -53,6 +53,8 @@ const MAX_METADATA_FIELDS = 100;
 
 export type TrustedAdvisorTaxonomyAccountState =
   | "ACTIVE"
+  | "CLOSED"
+  | "PENDING_ACTIVATION"
   | "SUSPENDED"
   | "PENDING_CLOSURE";
 
@@ -426,7 +428,9 @@ async function acceptTaxonomy(
       || typeof account.accountId !== "string"
       || !ACCOUNT_ID.test(account.accountId)
       || typeof account.state !== "string"
-      || !new Set(["ACTIVE", "SUSPENDED", "PENDING_CLOSURE"]).has(account.state))
+      || !new Set([
+        "ACTIVE", "CLOSED", "PENDING_ACTIVATION", "SUSPENDED", "PENDING_CLOSURE",
+      ]).has(account.state))
     || new Set(accounts.map((account) => account.accountId)).size !== accounts.length
     || !accounts.some((account) =>
       account.accountId === managementAccountId && account.state === "ACTIVE")

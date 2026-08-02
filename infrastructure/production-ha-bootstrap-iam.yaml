@@ -342,6 +342,26 @@ Resources:
             Condition:
               StringEquals:
                 aws:RequestedRegion: !Ref AWS::Region
+          - Sid: CreateOnlyTaggedTaxonomySigningKey
+            Effect: Allow
+            Action: kms:CreateKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                kms:KeySpec: RSA_3072
+                kms:KeyUsage: SIGN_VERIFY
+                aws:RequestTag/sutra:component: trusted-advisor-taxonomy-signing
+                aws:RequestTag/sutra:environment: production
+          - Sid: ManageOnlyTaggedTaxonomySigningKey
+            Effect: Allow
+            Action: [kms:DescribeKey, kms:GetKeyPolicy, kms:PutKeyPolicy, kms:ListResourceTags, kms:TagResource, kms:UntagResource]
+            Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${ExpectedAccountId}:key/*
+            Condition:
+              StringEquals:
+                aws:RequestedRegion: !Ref AWS::Region
+                aws:ResourceTag/sutra:component: trusted-advisor-taxonomy-signing
+                aws:ResourceTag/sutra:environment: production
           - Sid: AliasReads
             Effect: Allow
             Action: kms:ListAliases

@@ -67,6 +67,15 @@ export const COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS = Object.freeze([
   "compute-optimizer:GetEnrollmentStatusesForOrganization",
 ] as const);
 
+export const AWS_ORGANIZATIONS_TAXONOMY_SOURCE_PERMISSION_CONTRACT_ID =
+  "aws-organizations-taxonomy-read-v1" as const;
+export const AWS_ORGANIZATIONS_TAXONOMY_SOURCE_POLICY_NAME =
+  "SutraFinopsOrganizationsTaxonomyReadV1" as const;
+export const AWS_ORGANIZATIONS_TAXONOMY_SOURCE_ACTIONS = Object.freeze([
+  "organizations:DescribeOrganization",
+  "organizations:ListAccounts",
+] as const);
+
 export interface FinopsSourceDefinition {
   readonly implementationState: "IMPLEMENTED" | "NOT_IMPLEMENTED";
   readonly permissionContractId: string | null;
@@ -99,6 +108,12 @@ const IMPLEMENTED_SOURCE_DEFINITIONS = Object.freeze({
     permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
     policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
     actions: COMPUTE_OPTIMIZER_EXPORT_SOURCE_ACTIONS,
+  }),
+  aws_organizations_taxonomy: Object.freeze({
+    implementationState: "IMPLEMENTED" as const,
+    permissionContractId: AWS_ORGANIZATIONS_TAXONOMY_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: AWS_ORGANIZATIONS_TAXONOMY_SOURCE_POLICY_NAME,
+    actions: AWS_ORGANIZATIONS_TAXONOMY_SOURCE_ACTIONS,
   }),
 });
 
@@ -200,7 +215,11 @@ function parseContract(
     record.policyName !== definition.policyName ||
     (record.policyName !== null &&
       (typeof record.policyName !== "string" || !IAM_POLICY_NAME.test(record.policyName))) ||
-    (new Set(["cost_anomaly_detection", "trusted_advisor_standard_checks"])
+    (new Set([
+      "cost_anomaly_detection",
+      "trusted_advisor_standard_checks",
+      "aws_organizations_taxonomy",
+    ])
       .has(record.sourceId) &&
       (owner.partition !== "aws" || record.region !== "us-east-1"))
   ) failContract();

@@ -21,14 +21,24 @@ management account, AWS organization ID, collection time, exact operation set,
 canonical account set, SHA-256 digest, signer identity, and
 `AWS_KMS_RSASSA_PSS_SHA_256` signature are validated before persistence.
 
-The external adapter is intentionally not represented as active until it is
-registered. Its stable activation reason is
+The credential-owning collector adapter is implemented but intentionally not
+represented as active until the successor customer-role binding and durable
+handlers are registered. Its stable activation reason remains
 `AWS_ORGANIZATIONS_SIGNED_TAXONOMY_ADAPTER_NOT_REGISTERED`. It may call only
 `organizations:DescribeOrganization` and `organizations:ListAccounts`, must
 exhaust pagination, and must sign the canonical capture using the server-pinned
 signer identity. Fabricated, browser-provided, stale, unsigned, partially paged,
 cross-tenant, non-commercial-partition, or management-account-mismatched
 captures fail closed.
+
+The collector uses the fixed commercial Organizations endpoint, exhausts and
+replay-checks at most 1,024 pages and 10,000 accounts, reads `Account.State`
+rather than the retiring `Status` field, excludes provider names and email
+addresses, canonicalizes the complete lifecycle-aware account set, and signs
+its SHA-256 digest with a retained workload-account RSA-3072 KMS key. The
+broker task can only `kms:Sign`; the application task can only `kms:Verify`;
+both IAM grants are pinned to `DIGEST` plus `RSASSA_PSS_SHA_256`. The customer
+assumed-role credentials are never supplied to KMS.
 
 ## Fan-out and evidence consumption
 

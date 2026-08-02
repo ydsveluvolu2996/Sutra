@@ -46,6 +46,7 @@ import {
   type ValidatedRoleSession,
   CURRENT_PERMISSION_PACK_VERSION,
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -87,6 +88,7 @@ const UNSAFE_SHARED_ROLE_NAME =
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
 const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
 const FINOPS_PERMISSION_PACK_VERSION = FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION;
+const ADVANCED_FINOPS_PACK_VERSION = ADVANCED_FINOPS_PERMISSION_PACK_VERSION;
 const FINOPS_CEILING_ACTIONS = [
   "s3:ListBucket",
   "s3:GetBucketLocation",
@@ -555,7 +557,8 @@ function assertExpectedPermissionPolicy(
   provisioningMode: AwsRoleProvisioningMode,
   permissionPackVersion:
     | typeof PERMISSION_PACK_VERSION
-    | typeof FINOPS_PERMISSION_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof FINOPS_PERMISSION_PACK_VERSION
+    | typeof ADVANCED_FINOPS_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -584,6 +587,7 @@ function assertExpectedPermissionPolicy(
         ...IMPLEMENTED_READ_ACTIONS,
         ...TRUST_ATTESTATION_ACTIONS,
         ...(permissionPackVersion === FINOPS_PERMISSION_PACK_VERSION
+            || permissionPackVersion === ADVANCED_FINOPS_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...additionalCeilingActions,
@@ -645,7 +649,8 @@ function assertExpectedRole(
   expectedPrincipalArn: string,
   permissionPackVersion:
     | typeof PERMISSION_PACK_VERSION
-    | typeof FINOPS_PERMISSION_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof FINOPS_PERMISSION_PACK_VERSION
+    | typeof ADVANCED_FINOPS_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -957,8 +962,10 @@ export class AwsRoleBroker {
     contractId: string,
   ): Promise<ValidatedRoleSession> {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    const permissionPackVersion = resolved.connection.permissionPackVersion;
     if (
-      resolved.connection.permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION ||
+      (permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
+        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -1157,6 +1164,11 @@ export class AwsRoleBroker {
     suppliedSourceContracts?: readonly FinopsSourceContract[],
   ): Promise<void> {
     try {
+      const permissionPackVersion = resolved.connection.permissionPackVersion;
+      if (
+        permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
+        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
+      ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
         throw new Error("principal partition mismatch");
@@ -1180,7 +1192,7 @@ export class AwsRoleBroker {
         role,
         resolved,
         expectedPrincipal.arn,
-        FINOPS_PERMISSION_PACK_VERSION,
+        permissionPackVersion,
       );
       const attachedPolicies = await allAttachedManagedPolicies(
         client,
@@ -1211,7 +1223,7 @@ export class AwsRoleBroker {
         basePolicy.policyDocument,
         resolved.connection.roleArn,
         resolved.roleProvisioningMode,
-        FINOPS_PERMISSION_PACK_VERSION,
+        permissionPackVersion,
         actionsForFinopsSourceContracts(sourceContracts),
       );
       for (const contract of contracts) {

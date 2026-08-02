@@ -24,6 +24,7 @@ import type {
 import {
   CURRENT_PERMISSION_PACK_VERSION,
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
@@ -788,7 +789,8 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PRIOR_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION &&
-    permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+    permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
   }

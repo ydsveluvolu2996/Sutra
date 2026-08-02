@@ -26,6 +26,10 @@ const appEntrypoint = readFileSync(
   new URL("../deploy/production/entrypoint.sh", import.meta.url),
   "utf8",
 );
+const brokerEntrypoint = readFileSync(
+  new URL("../deploy/production/broker-entrypoint.sh", import.meta.url),
+  "utf8",
+);
 const workerEntrypoint = readFileSync(
   new URL("../services/notification-worker/production-entrypoint.mjs", import.meta.url),
   "utf8",
@@ -87,6 +91,69 @@ test("managed production is a separate multi-AZ ECS and RDS topology", () => {
   assert.match(template, /DeletionProtection:\s+true/u);
   assert.match(template, /BackupRetentionPeriod:\s+!Ref DatabaseBackupRetentionDays/u);
   assert.match(template, /PrivateDatabaseSubnetIds/u);
+});
+
+test("Trusted Advisor taxonomy uses one retained digest-only asymmetric KMS boundary", () => {
+  const key = template.match(
+    /  TrustedAdvisorTaxonomySigningKey:[\s\S]*?(?=\n  ApplicationLogGroup:)/u,
+  )?.[0];
+  assert.ok(key, "the dedicated taxonomy signing key must remain present");
+  assert.match(key, /Type: AWS::KMS::Key/u);
+  assert.match(key, /DeletionPolicy: Retain/u);
+  assert.match(key, /UpdateReplacePolicy: Retain/u);
+  assert.match(key, /KeySpec: RSA_3072/u);
+  assert.match(key, /KeyUsage: SIGN_VERIFY/u);
+  assert.match(key, /MultiRegion: false/u);
+  assert.doesNotMatch(key, /EnableKeyRotation/u);
+  assert.match(key, /sutra:component", Value: trusted-advisor-taxonomy-signing/u);
+
+  const appVerify = template.match(
+    /- PolicyName: VerifyOnlyTrustedAdvisorTaxonomyDigests[\s\S]*?(?=\n        - PolicyName:)/u,
+  )?.[0];
+  const brokerSign = template.match(
+    /- PolicyName: SignOnlyTrustedAdvisorTaxonomyDigests[\s\S]*?(?=\n        - PolicyName:)/u,
+  )?.[0];
+  assert.ok(appVerify);
+  assert.ok(brokerSign);
+  assert.match(appVerify, /Action: kms:Verify/u);
+  assert.doesNotMatch(
+    appVerify,
+    /Action:\s+kms:(?:Sign|GetPublicKey|Encrypt|Decrypt|GenerateDataKey)/u,
+  );
+  assert.match(brokerSign, /Action: kms:Sign/u);
+  assert.doesNotMatch(
+    brokerSign,
+    /Action:\s+kms:(?:Verify|GetPublicKey|Encrypt|Decrypt|GenerateDataKey)/u,
+  );
+  for (const policy of [appVerify, brokerSign]) {
+    assert.match(policy, /Resource: !GetAtt TrustedAdvisorTaxonomySigningKey\.Arn/u);
+    assert.match(policy, /aws:RequestedRegion: !Ref "AWS::Region"/u);
+    assert.match(policy, /kms:MessageType: DIGEST/u);
+    assert.match(policy, /kms:SigningAlgorithm: RSASSA_PSS_SHA_256/u);
+  }
+  assert.equal(
+    [...template.matchAll(/Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN/gu)].length,
+    2,
+  );
+  assert.match(appEntrypoint, /^SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN$/mu);
+  assert.match(brokerEntrypoint, /^SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN$/mu);
+  assert.match(
+    template,
+    /TrustedAdvisorTaxonomySigningKeyArn:\s+Value: !GetAtt TrustedAdvisorTaxonomySigningKey\.Arn/u,
+  );
+  assert.match(workflow, /TrustedAdvisorTaxonomySigningKeyArn/u);
+  assert.match(workflow, /aws kms describe-key/u);
+  assert.match(workflow, /\.KeyMetadata\.KeyUsage == "SIGN_VERIFY"/u);
+  assert.match(workflow, /\.KeyMetadata\.KeySpec == "RSA_3072"/u);
+  const releaseRole = template.match(
+    /  GitHubProductionReleaseRole:[\s\S]*?(?=\nOutputs:)/u,
+  )?.[0];
+  assert.ok(releaseRole);
+  assert.match(
+    releaseRole,
+    /Sid: VerifyTrustedAdvisorTaxonomySigningKey[\s\S]*?Action: kms:DescribeKey[\s\S]*?TrustedAdvisorTaxonomySigningKey\.Arn/u,
+  );
+  assert.doesNotMatch(releaseRole, /Action: kms:(?:Sign|Verify|GetPublicKey)/u);
 });
 
 test("managed production fails closed around ingress, health, secrets, and immutable images", () => {

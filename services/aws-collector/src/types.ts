@@ -31,6 +31,12 @@ export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.4" as const;
  */
 export const FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.1" as const;
 /**
+ * Successor ceiling for signed organization taxonomy and account-local
+ * Trusted Advisor standard checks. It remains separate from the regular .4
+ * inventory pack and the .8.1 Foundational-only successor.
+ */
+export const ADVANCED_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.2" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -44,6 +50,7 @@ export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
   | typeof FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+  | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

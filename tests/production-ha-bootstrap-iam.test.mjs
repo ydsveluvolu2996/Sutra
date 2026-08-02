@@ -116,6 +116,35 @@ test("bootstrap data-plane access is limited to four repos, runtime preflight, m
   assert.match(template, /kms:ViaService: !Sub s3\.\$\{AWS::Region\}\.amazonaws\.com/u);
 });
 
+test("CloudFormation may create and manage only the tagged taxonomy signing key shape", () => {
+  const create = template.match(
+    /- Sid: CreateOnlyTaggedTaxonomySigningKey[\s\S]*?(?=\n          - Sid:)/u,
+  )?.[0];
+  const manage = template.match(
+    /- Sid: ManageOnlyTaggedTaxonomySigningKey[\s\S]*?(?=\n          - Sid:)/u,
+  )?.[0];
+  assert.ok(create);
+  assert.ok(manage);
+  assert.match(create, /Action: kms:CreateKey/u);
+  assert.match(create, /Resource: "\*"/u);
+  assert.match(create, /kms:KeySpec: RSA_3072/u);
+  assert.match(create, /kms:KeyUsage: SIGN_VERIFY/u);
+  assert.match(create, /aws:RequestTag\/sutra:component: trusted-advisor-taxonomy-signing/u);
+  assert.match(create, /aws:RequestTag\/sutra:environment: production/u);
+  assert.match(manage, /arn:\$\{AWS::Partition\}:kms:\$\{AWS::Region\}:\$\{ExpectedAccountId\}:key\/\*/u);
+  for (const action of [
+    "kms:DescribeKey",
+    "kms:GetKeyPolicy",
+    "kms:PutKeyPolicy",
+    "kms:ListResourceTags",
+    "kms:TagResource",
+    "kms:UntagResource",
+  ]) assert.match(manage, new RegExp(action, "u"));
+  assert.match(manage, /aws:ResourceTag\/sutra:component: trusted-advisor-taxonomy-signing/u);
+  assert.match(manage, /aws:ResourceTag\/sutra:environment: production/u);
+  assert.doesNotMatch(`${create}\n${manage}`, /kms:(?:Sign|Verify|GetPublicKey|Decrypt|ScheduleKeyDeletion)/u);
+});
+
 test("execution role is CloudFormation-only and enumerates the production template services", () => {
   const executionRole = template.match(
     /  CloudFormationExecutionRole:[\s\S]*?(?=\n  GitHubBootstrapRole:)/u,

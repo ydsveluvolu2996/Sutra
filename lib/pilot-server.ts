@@ -1137,6 +1137,45 @@ export async function runFinopsSourceCollection(input: {
   return parseFinopsSourceCollectionResult(value, input);
 }
 
+/**
+ * Requests a complete, broker-signed Organizations account taxonomy for one
+ * pinned management-account connection. The app never supplies AWS operations,
+ * endpoint, region, credentials, pagination tokens, or the signing key.
+ */
+export async function runSignedOrganizationsTaxonomy(input: {
+  readonly tenantId: string;
+  readonly customerId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly contractId: string;
+}): Promise<unknown> {
+  if (
+    !FINOPS_SOURCE_IDENTIFIER.test(input.tenantId)
+    || !FINOPS_SOURCE_IDENTIFIER.test(input.customerId)
+    || !FINOPS_SOURCE_CONNECTION_ID.test(input.connectionId)
+    || !FINOPS_SOURCE_IDENTIFIER.test(input.jobId)
+    || !FINOPS_SOURCE_IDENTIFIER.test(input.contractId)
+  ) {
+    throw new PilotServerError(
+      400,
+      "INVALID_INPUT",
+      "The signed Organizations taxonomy identity is invalid",
+    );
+  }
+  return await brokerFetch<unknown>(
+    `/v1/connections/${input.connectionId}/organizations-taxonomy`,
+    "POST",
+    {
+      tenantId: input.tenantId,
+      customerId: input.customerId,
+      connectionId: input.connectionId,
+      jobId: input.jobId,
+      contractId: input.contractId,
+    },
+    150_000,
+  );
+}
+
 export async function runCollectorCostCollection(input: {
   readonly tenantId: string;
   readonly connectionId: string;

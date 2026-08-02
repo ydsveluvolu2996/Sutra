@@ -64,6 +64,19 @@ function requiredPattern(name: string, pattern: RegExp): string {
   return value;
 }
 
+function hostedTaxonomySigningKey(accountId: string, region: string): string {
+  const keyArn = requiredPattern(
+    "SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN",
+    /^arn:aws:kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/u,
+  );
+  if (!keyArn.startsWith(`arn:aws:kms:${region}:${accountId}:key/`)) {
+    throw new Error(
+      "Trusted Advisor taxonomy signing key must remain in the broker workload account and region",
+    );
+  }
+  return keyArn;
+}
+
 function hostedAgentlessConfiguration(
   accountId: string,
   region: string,
@@ -242,6 +255,7 @@ export async function startHostedCollectorServer(): Promise<{
   const identity = await runSandboxIdentityPreflight(principalArn);
   const region = required("AWS_REGION");
   const agentless = hostedAgentlessConfiguration(identity.accountId, region);
+  const taxonomySigningKeyId = hostedTaxonomySigningKey(identity.accountId, region);
 
   const state = new HostedPostgresState({
     connectionString: required("DATABASE_URL"),
@@ -265,6 +279,7 @@ export async function startHostedCollectorServer(): Promise<{
     authenticator,
     operationCoordinator: state,
     hostedRuntime: true,
+    trustedAdvisorTaxonomySigningKeyId: taxonomySigningKeyId,
     readiness: () => state.ready(),
     agentlessRunStore: state.agentlessRunStore(),
     agentlessResourceTracker: (scope) => state.agentlessResourceTracker(scope),
