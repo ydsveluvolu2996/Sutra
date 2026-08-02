@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 7 of 29 |
-| Partial pipelines | 22 of 29: 20 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 8 of 29 |
+| Partial pipelines | 21 of 29: 19 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -419,4 +419,16 @@ Next gate:
 | Security and integrity | Caller URLs, redirects, credentials, active content, DTD/entities/XInclude, MIME confusion, oversized bodies/items, tenant substitution, corrupt receipts, partial-head promotion and raw provider failures fail closed |
 | Focused verification | 39/39 engine/gateway/repository/runtime/API/UI tests, 5/5 shared handler tests, 2/2 transport-boundary tests, migration parity, root typecheck, scoped ESLint, PostgreSQL migration/runtime suite and repository secret scan passed |
 | Remaining gates | Controlled provider reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree full verification and live deployment proof |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — Compute Optimizer local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 8 candidates and 21 partial pipelines, including 19 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `f96b73a` pushed to `origin/agent/mac-mini-finops-continuation`; the scoped commit excludes concurrent AWS Budgets and Extended Support work |
+| Delivery | Strict launch, discovery, reconcile and materialization ordering; immutable activation/capability state; leased CAS outbox; crash-safe sealed-plan handoff; exact `.8.5` signed capability transport; all shared scheduler handlers; same-tenant API; durable unavailable/collecting/failed/ready UI |
+| Security and integrity | Identity-only broker requests, exact tenant/account/partition binding, absolute deadlines and abort propagation, signed canonical bodies, replay/tamper rejection, deterministic UTC scheduling, immutable generations, exact currency/channel separation and failure-closed materialization |
+| Focused verification | 31 activation/capability/production/UI tests, 10 exact-route/transport tests and 5 repository tests passed independently; root and collector typechecks, scoped lint, migration parity, diff checks and repository secret scan passed |
+| Remaining gates | Activate the `.8.5` AWS stack and evidence keys, reconcile controlled all-Region exports in two tenants, complete authorized exact-layout/accessibility and fixed-tree release gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
