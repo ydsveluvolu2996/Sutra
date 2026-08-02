@@ -222,12 +222,15 @@ export class PricingChangeMaterializationJobError extends Error {
 }
 
 export class PricingChangeMaterializationUnavailableError extends Error {
-  public constructor(public readonly reason: Extract<
+  public readonly reason: Extract<
     PricingChangeMaterializationJobResult,
     { status: "unavailable" }
-  >["reason"]) {
+  >["reason"];
+
+  public constructor(reason: PricingChangeMaterializationUnavailableError["reason"]) {
     super(reason);
     this.name = "PricingChangeMaterializationUnavailableError";
+    this.reason = reason;
   }
 }
 
