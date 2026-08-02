@@ -19,3 +19,13 @@ test(".8.12 runtime has concrete SDK, migrations, broker, authority, worker and 
     "GRAVITON_PROVIDER_ROUTE","0122_finops_graviton_runtime","0118_finops_graviton_runtime","bindProductionAuthorities",
     "GRAVITON_MATERIALIZATION_JOB_KIND","scheduleGravitonSavingsTick","REGISTERED_LOCAL_RUNTIME","standard-2026-08.12"])
     assert.ok(all.includes(token),token);});
+test("each Graviton migration registry independently registers its reserved id", async () => {
+  const [d1, postgres, migrator] = await Promise.all([
+    read("db/runtime-migrations.ts"),
+    read("db/postgres-runtime-migrations.ts"),
+    read("scripts/postgres-migrate.mjs"),
+  ]);
+  assert.match(d1, /0122_finops_graviton_runtime/u);
+  assert.match(postgres, /0118_finops_graviton_runtime/u);
+  assert.match(migrator, /0118_finops_graviton_runtime\.sql/u);
+});
