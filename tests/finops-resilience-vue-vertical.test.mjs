@@ -31,7 +31,7 @@ function capture(character, completedAt, exhaustive = true) {
 function connection(database, id, orgId, customerId, accountId) {
   return database.prepare(`INSERT INTO aws_connections (id,org_id,customer_id,source_kind,partition,aws_account_id,role_arn,
     external_id_ciphertext,external_id_key_version,permission_pack_version,status,enabled_regions_json)
-    VALUES (?,?,?,'aws_trust_role','aws',?,?,'ct','v1','standard-2026-08.1','active','[]')`)
+    VALUES (?,?,?,'aws_trust_role','aws',?,?,'ct','v1','standard-2026-08.9','active','[]')`)
     .bind(id, orgId, customerId, accountId, `arn:aws:iam::${accountId}:role/sutra/SutraCollectorRole`);
 }
 async function withRepository(run) {
@@ -134,7 +134,10 @@ test("route is authenticated, same-tenant, immutable-head only, bounded, and act
   assert.doesNotMatch(route, /RESILIENCE_VUE_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED/u);
   assert.match(route, /assessmentFrom/u); assert.match(route, /assessmentTo/u); assert.match(route, /recommendationEvidence/u);
   assert.match(route, /RESILIENCE_VUE_OFFICIAL_DEFINITION/u);
-  assert.equal((route.match(/officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION/gu) ?? []).length, 2);
+  assert.equal(
+    (route.match(/officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION/gu) ?? []).length,
+    (route.match(/return jsonResponse\(/gu) ?? []).length,
+  );
   assert.match(route, /versioned capture-schema migration/u);
   assert.doesNotMatch(route, /searchParams\.get\("orgId"\)|searchParams\.get\("customerId"\)/u);
 });
