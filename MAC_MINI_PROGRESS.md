@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 9 of 29 |
-| Partial pipelines | 20 of 29: 18 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 10 of 29 |
+| Partial pipelines | 19 of 29: 17 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -443,4 +443,16 @@ Next gate:
 | Security and integrity | Server-owned scope, tenant/account/connection/header substitution protection, immutable complete generations, currency separation, sanitized provider failures and no browser-controlled credentials or provider targets |
 | Focused verification | 37/37 focused root and collector tests; root and collector typechecks, collector build, full production build, scoped lint, secret scan of 2,289 files and `git diff --check` passed |
 | Remaining gates | Roll out the exact customer permission contract and deployed asymmetric broker configuration, execute registered migrations, reconcile controlled provider evidence, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — Extended Support local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-04 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 10 candidates and 19 partial pipelines, including 17 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `963a54e` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-04 vertical commit |
+| Delivery | Deterministic daily scheduling, durable replay/failure receipts, immutable READY-only history, Ed25519 signed broker, exact STS intersection, credential-owning route, pinned multi-service AWS SDK reader, same-tenant API, and native 5-sheet/60-visual/17-control states |
+| Permission integrity | Immutable `standard-2026-08.6` preserves `.8.5` and adds exactly ADV-04's 14 read actions; 25 predecessor compatibility tests prove Compute Optimizer remains authorized after upgrade |
+| Focused verification | 33/33 ADV-04 tests plus 25/25 predecessor tests passed; root and collector typechecks, targeted lint, collector and root production builds, diff check and repository secret scan of 2,309 files passed |
+| Remaining gates | Deploy and independently attest `.8.6`, configure authoritative CUR2/lifecycle/rate supplements, reconcile controlled bills and provider evidence, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |

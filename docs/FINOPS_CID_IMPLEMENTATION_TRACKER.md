@@ -66,21 +66,21 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 4 | 9 | 0 | 0 | 0 | 0 |
+| Advanced | 13 | 5 | 8 | 0 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
-| **Total** | **29** | **9** | **20** | **0** | **0** | **0** | **0** |
+| **Total** | **29** | **10** | **19** | **0** | **0** | **0** | **0** |
 
 ### Current release-scope view
 
 | Release scope | Catalog rows | Candidate | Partial pipeline | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|
-| In scope — AWS-backed dashboards | 27 | 9 | 18 | 0 | 0 |
+| In scope — AWS-backed dashboards | 27 | 10 | 17 | 0 | 0 |
 | Excluded from this build — Azure CID and GCP CID | 2 | 0 | 2 | 0 | 0 |
-| **Official catalog retained** | **29** | **9** | **20** | **0** | **0** |
+| **Official catalog retained** | **29** | **10** | **19** | **0** | **0** |
 
-The nine candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Compute Optimizer, AWS News Feeds, AWS Budgets, Trends, and Data Transfer. The twenty partial pipelines are Trusted
-Advisor Organizational, Extended Support Cost Projection, Graviton Savings, Health Events, Support Cases Radar,
+The ten candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
+Anomaly, Compute Optimizer, Extended Support Cost Projection, AWS News Feeds, AWS Budgets, Trends, and Data Transfer. The nineteen partial pipelines are Trusted
+Advisor Organizational, Graviton Savings, Health Events, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -97,7 +97,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md) and [orchestration contract](finops-cid-evidence/ADV-01-standard-orchestration-contract.md): the pinned v4.0.1 inventory maps 11 sheets, 147 visuals and 22 controls; native category/suppression analysis and source-safe sheet navigation exist. The credential-owning fully paged Organizations adapter, exact signed broker route, dedicated RSA-3072 digest-signing key, app-side KMS verifier, immutable `standard-2026-08.2` least-privilege role, protected activation POST/UI control, exact-attempt evidence read, bounded member discovery, and all three durable handlers are implemented and locally tested. The finalizer is queued only after terminal fan-out and transient member failures retain durable retries. Production secret rotation, 08.2 role/source-contract activation, eligible-Support-plan reconciliation, authoritative TA Priority/Well-Architected sources, conditional Security Hub classification and live acceptance remain. Standard checks are never substituted for provider-only datasets. |
 | ADV-02 | Compute Optimizer Dashboard | `compute_optimizer` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-02-compute-optimizer.md): the pinned public source proves 9 module families and 14 preview visual purposes; the unpublished QuickSight definition keeps exact sheet/control totals explicitly unavailable. The canonical eight-export materialization projection, replay-safe launch and activation ledgers, exact-ID Describe barrier, version-bound S3 reader, strict CSVW mapping, all-Region coordinator, immutable exact-generation persistence, durable capability/outbox scheduler, crash-safe sealed-reference handoff, all four shared handlers, same-tenant v2 API, and native exact-micros UI for all 14 purposes are fully wired and locally tested. The exact `.8.5` activation manifest is exposed only through a signed tenant-bound collector route, and the default broker performs identity-only STS attestation with signed responses and absolute deadlines. Partial or ambiguous runs never head; discovery/direct APIs never substitute; alternative savings channels and currencies never merge. Secret/IAM activation, controlled multi-Region provider reconciliation, two-tenant/live acceptance, authorized exact QuickSight geometry, fixed-tree release gates, and deployment remain; no live claim is made. |
 | ADV-03 | Cost Anomaly Dashboard | `cost_anomaly` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/ADV-03-cost-anomaly.md): the pinned 2-sheet/6-visual/12-control definition, bounded null-aware provider analysis, actual/expected evidence, four-dimensional contribution, lifecycle/monitor/subscription coverage, safe export and all-six native mapping are present. Four visual semantics remain explicitly partial; standalone query parity is unclaimed. Controlled payer/two-tenant reconciliation, exact-tree and live acceptance remain. |
-| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-04-extended-support.md): the pinned 5-sheet/60-visual/17-control definition, five-service multi-account/Region contract, prevalidated scheduling, replay-safe durable boundary, immutable READY-only history, same-tenant API, exact signed-micro output and native 3/6/12-month UI exist; credential-owning provider adapter, shared runtime registration/IAM, decimal-string provider inputs, real calendar/rate/CUR2 reconciliation, exact layout and live acceptance remain. |
+| ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-04-extended-support.md): the pinned 5-sheet/60-visual/17-control definition, deterministic daily scheduler, durable replay/failure ledger, immutable READY-only history, Ed25519 tenant-bound broker, exact STS ceiling, credential-owning collector route, pinned AWS SDK reader across EKS/RDS/Aurora/OpenSearch/ElastiCache/Pricing, same-tenant API, exact signed-micro output and native 3/6/12-month UI are fully wired and locally tested. Immutable `standard-2026-08.6` preserves Compute Optimizer `.8.5` and adds exactly the 14 required read actions. Approved AWS role attestation, authoritative CUR2/lifecycle/rate supplements, controlled bill reconciliation, exact layout, two-tenant/live acceptance, fixed-tree gates and deployment remain; missing evidence stays configuration-required and no live claim is made. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-05-graviton-savings.md): the pinned v3.0.2 inventory maps 7 sheets, 122 visuals and 53 controls; EC2/ASG, RDS/Aurora, OpenSearch and ElastiCache contracts, prevalidated scheduling, signed replay, exact-micro CUR2 economics, immutable history, same-tenant API and native per-sheet evidence exist. Shared provider/runtime wiring, standalone instance mapping, richer service controls, reconciliation, exact layout and live acceptance remain. |
 | ADV-06 | Health Events Dashboard | `health_events` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-06-health-events.md): the pinned v3.1.0 inventory maps 3 sheets, 33 visuals and 28 controls; organization past/current/upcoming history, same-tenant API, prerequisite/provider states, native per-sheet planning UI and safe export retain explicit 48-hour-or-more/not-real-time semantics. Production broker/handler, eligible-plan/Organizations validation, real pagination/retention/initial-load, exact layout and live acceptance remain. |
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): the pinned 6-sheet/21-visual/12-control definition, five exact server-owned sources, hardened controlled-egress XML gateway, durable tenant-bound replay/failure ledger, deterministic six-hour scheduler, shared worker handler, immutable READY-only head, same-tenant API and native four-family/per-sheet inventory are fully wired and locally tested. Provider/live reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree release gates and deployment remain; therefore no live claim is made. |
@@ -182,7 +182,7 @@ not sufficient proof.
 3. Complete Trusted Advisor Organizational using standard-check organizational data plus a separately labelled Priority supplement.
 4. Complete each remaining engine-only row as a full vertical slice.
 5. Finish Data Collection Monitor and FOCUS rather than inheriting optimistic handover labels.
-6. Audit and close all gates for the nine local candidates.
+6. Audit and close all gates for the ten local candidates.
 7. Build Azure CID and GCP CID with provider-specific connection/runtime contracts.
 8. Run exact-tree local, controlled-provider, GitHub, image, deployment, rollback, and live-site gates.
 
