@@ -93,7 +93,8 @@ function launchContract(
     policyName: "SutraComputeOptimizerExportLaunchV1-us-east-1",
     bucket, bucketArn: `arn:aws:s3:::${bucket}`, basePrefix, effectivePrefix,
     objectArnPrefix: `arn:aws:s3:::${bucket}/${effectivePrefix}*`,
-    encryptionMode: "SSE_S3", bucketVersioningStatus: "Enabled",
+    encryptionMode: "SSE_KMS", bucketVersioningStatus: "Enabled",
+    kmsKeyArn: `arn:aws:kms:us-east-1:${ACCOUNT}:key/compute-optimizer-key`,
     servicePrincipal: "compute-optimizer.amazonaws.com", ...overrides,
   };
 }
@@ -109,7 +110,9 @@ function objectContract(
     permissionContractId: "compute-optimizer-export-read-v1",
     policyName: `SutraComputeOptimizerExportReadV1-${launch.region}-${launch.bucket}`,
     bucket: launch.bucket, effectivePrefix: launch.effectivePrefix,
-    encryptionMode: "SSE_S3", kmsKeyArn: null, ...overrides,
+    encryptionMode: "SSE_KMS",
+    kmsKeyArn: `arn:aws:kms:${launch.region}:${ACCOUNT}:key/compute-optimizer-key`,
+    ...overrides,
   };
 }
 
@@ -188,7 +191,13 @@ function objectPolicy(item: ComputeOptimizerExportObjectContract): Record<string
     Sid: "ReadSealedComputeOptimizerExportPrefix", Effect: "Allow",
     Action: ["s3:GetObject", "s3:GetObjectVersion"],
     Resource: `arn:${item.partition}:s3:::${item.bucket}/${item.effectivePrefix}*`,
-  }] };
+  }, ...(item.encryptionMode === "SSE_KMS" ? [{
+    Sid: "UseExactExportKeyThroughRegionalS3", Effect: "Allow",
+    Action: ["kms:Decrypt", "kms:GenerateDataKey"], Resource: item.kmsKeyArn,
+    Condition: { StringEquals: {
+      "kms:ViaService": `s3.${item.region}.amazonaws.com`,
+    } },
+  }] : [])] };
 }
 
 function roleClient(
@@ -520,6 +529,12 @@ test(".8.5 object read mints one exact current/version ARN and rejects sibling t
   );
   const currentPolicy = current.assume.calls[1]?.Policy ?? "";
   assert.match(currentPolicy, /s3:GetObject/u);
+  assert.match(currentPolicy, /kms:Decrypt/u);
+  assert.match(currentPolicy, /kms:GenerateDataKey/u);
+  assert.match(currentPolicy, new RegExp(
+    `arn:aws:kms:us-east-1:${ACCOUNT}:key/compute-optimizer-key`, "u",
+  ));
+  assert.match(currentPolicy, /s3\.us-east-1\.amazonaws\.com/u);
   assert.doesNotMatch(currentPolicy, /GetObjectVersion|ListBucket/u);
   const currentDocument = JSON.parse(currentPolicy) as {
     Statement: Array<{ Action: string; Resource: string }>;

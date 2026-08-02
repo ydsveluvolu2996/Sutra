@@ -2,7 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   Regional Compute Optimizer export launch/provision add-on for the immutable
   standard-2026-08.5 Sutra collector role. It creates one dedicated private,
-  versioned, SSE-S3 bucket; grants the Compute Optimizer service only the three
+  versioned, SSE-KMS bucket with a dedicated customer-managed key; grants the
+  Compute Optimizer service only the three
   documented destination operations; and grants the collector only the eight
   export operations, their documented read dependencies, and reads below the
   account-bound provider prefix. Contract: compute-optimizer-export-launch-v1.
@@ -13,7 +14,7 @@ Metadata:
     Version: compute-optimizer-export-launch-v1
     RequiredBasePermissionPack: standard-2026-08.5
     Scope: one-stack-region-one-account-one-cloudformation-owned-bucket
-    Encryption: SSE_S3
+    Encryption: SSE_KMS_CUSTOMER_MANAGED
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
@@ -98,6 +99,55 @@ Rules:
         AssertDescription: ExportRegion must equal the stack Region.
 
 Resources:
+  ComputeOptimizerExportKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description:
+        Fn::Sub: 'Sutra Compute Optimizer regional export key (${AWS::Region})'
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      MultiRegion: false
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowComputeOptimizerExportEncryption
+            Effect: Allow
+            Principal:
+              Service: compute-optimizer.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              StringLike:
+                aws:SourceArn:
+                  Fn::Sub: 'arn:${AWS::Partition}:compute-optimizer:${AWS::Region}:${AWS::AccountId}:*'
+      Tags:
+        - Key: sutra:managed-by
+          Value: cloudformation
+        - Key: sutra:contract
+          Value: compute-optimizer-export-launch-v1
+        - Key: sutra:account-id
+          Value:
+            Ref: AWS::AccountId
+        - Key: sutra:region
+          Value:
+            Ref: AWS::Region
+
   ComputeOptimizerExportBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -106,8 +156,12 @@ Resources:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-            BucketKeyEnabled: false
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt:
+                  - ComputeOptimizerExportKey
+                  - Arn
+            BucketKeyEnabled: true
       OwnershipControls:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
@@ -290,7 +344,14 @@ Outputs:
 
   EncryptionMode:
     Description: Exact destination encryption contract.
-    Value: SSE_S3
+    Value: SSE_KMS
+
+  KmsKeyArn:
+    Description: Exact regional customer-managed key used by the destination bucket.
+    Value:
+      Fn::GetAtt:
+        - ComputeOptimizerExportKey
+        - Arn
 
   BucketVersioningStatus:
     Description: Immutable object identity support required by the reader.

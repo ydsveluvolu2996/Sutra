@@ -81,7 +81,9 @@ function stored(
       effectivePrefix: `compute-optimizer/${ACCOUNT}/`,
       objectArnPrefix:
         `arn:aws:s3:::customer-compute-optimizer-use1/compute-optimizer/${ACCOUNT}/`,
-      encryptionMode: "SSE_S3",
+      encryptionMode: "SSE_KMS",
+      kmsKeyArn:
+        `arn:aws:kms:us-east-1:${ACCOUNT}:key/compute-optimizer-key`,
       bucketVersioningStatus: "Enabled",
       servicePrincipal: "compute-optimizer.amazonaws.com",
     }],

@@ -43,6 +43,7 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const KMS_KEY_ID = /^[A-Za-z0-9-]{1,128}$/u;
 const MAX_REGIONS = 50;
 const REGIONAL_OUTPUT_READ_CONCURRENCY = 4;
 export const MAX_COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PROVISIONING_DURATION_MS = 120_000;
@@ -86,6 +87,7 @@ export const COMPUTE_OPTIMIZER_REGIONAL_LAUNCH_OUTPUT_KEYS = Object.freeze([
   "ExportBucketArn",
   "ExportBucketName",
   "ExportRegion",
+  "KmsKeyArn",
   "ObjectArnPrefix",
   "RequesterAccountId",
   "RequiredBasePermissionPackVersion",
@@ -374,6 +376,8 @@ function parseRegionalObjectReadOutputs(
 ): ComputeOptimizerProvisioningOutputs {
   const outputs = exactOutputKeys(value, COMPUTE_OPTIMIZER_REGIONAL_OBJECT_READ_OUTPUT_KEYS);
   const expectedRoleName = candidate.roleArn.slice(candidate.roleArn.lastIndexOf("/") + 1);
+  const expectedKeyPrefix =
+    `arn:${candidate.partition}:kms:${region}:${candidate.expectedAccountId}:key/`;
   if (outputs.ContractVersion !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID
     || outputs.RequiredBasePermissionPackVersion
       !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
@@ -386,8 +390,10 @@ function parseRegionalObjectReadOutputs(
       !== `${outputs.ExportBasePrefix}compute-optimizer/${candidate.expectedAccountId}/`
     || outputs.ObjectArnPrefix
       !== `arn:${candidate.partition}:s3:::${outputs.ExistingBucketName}/${outputs.EffectivePrefix}*`
-    || outputs.KmsMode !== "SSE_S3"
-    || outputs.KmsKeyArn !== "NONE"
+    || outputs.KmsMode !== "SSE_KMS"
+    || typeof outputs.KmsKeyArn !== "string"
+    || !outputs.KmsKeyArn.startsWith(expectedKeyPrefix)
+    || !KMS_KEY_ID.test(outputs.KmsKeyArn.slice(expectedKeyPrefix.length))
     || outputs.AttachedPolicyName
       !== `SutraComputeOptimizerExportReadV1-${region}-${outputs.ExistingBucketName}`) {
     reject("OUTPUTS_INVALID");
@@ -416,7 +422,10 @@ function parseRegionalOutputs(
       !== `${outputs.ExportBasePrefix}compute-optimizer/${candidate.expectedAccountId}/`
     || outputs.ObjectArnPrefix
       !== `${outputs.ExportBucketArn}/${outputs.EffectivePrefix}*`
-    || outputs.EncryptionMode !== "SSE_S3"
+    || outputs.EncryptionMode !== "SSE_KMS"
+    || outputs.KmsKeyArn
+      !== `arn:${candidate.partition}:kms:${region}:${candidate.expectedAccountId}:key/${outputs.KmsKeyArn?.split("/").at(-1) ?? ""}`
+    || !KMS_KEY_ID.test(outputs.KmsKeyArn.split("/").at(-1) ?? "")
     || outputs.BucketVersioningStatus !== "Enabled"
     || outputs.ComputeOptimizerServicePrincipal !== "compute-optimizer.amazonaws.com"
     || outputs.AttachedPolicyName !== `SutraComputeOptimizerExportLaunchV1-${region}`
@@ -564,8 +573,8 @@ export function validateComputeOptimizerExportLaunchProvisioningContractSet(
       return launchContract === undefined
         || objectContract.bucket !== launchContract.bucket
         || objectContract.effectivePrefix !== launchContract.effectivePrefix
-        || objectContract.encryptionMode !== "SSE_S3"
-        || objectContract.kmsKeyArn !== null;
+        || objectContract.encryptionMode !== "SSE_KMS"
+        || objectContract.kmsKeyArn !== launchContract.kmsKeyArn;
     })) {
     reject("INVALID_INPUT");
   }
@@ -669,7 +678,9 @@ export async function stageComputeOptimizerExportLaunchProvisioning(
           if (objectReadOutputs.ExistingBucketName !== launchOutputs.ExportBucketName
             || objectReadOutputs.ExportBasePrefix !== launchOutputs.ExportBasePrefix
             || objectReadOutputs.EffectivePrefix !== launchOutputs.EffectivePrefix
-            || objectReadOutputs.ObjectArnPrefix !== launchOutputs.ObjectArnPrefix) {
+            || objectReadOutputs.ObjectArnPrefix !== launchOutputs.ObjectArnPrefix
+            || objectReadOutputs.KmsMode !== launchOutputs.EncryptionMode
+            || objectReadOutputs.KmsKeyArn !== launchOutputs.KmsKeyArn) {
             reject("OUTPUTS_INVALID");
           }
           return { region, launchOutputs, objectReadOutputs };
@@ -763,8 +774,8 @@ export async function stageComputeOptimizerExportLaunchProvisioning(
       policyName: readOutputs.AttachedPolicyName!,
       bucket: readOutputs.ExistingBucketName!,
       effectivePrefix: readOutputs.EffectivePrefix!,
-      encryptionMode: "SSE_S3",
-      kmsKeyArn: null,
+      encryptionMode: "SSE_KMS",
+      kmsKeyArn: readOutputs.KmsKeyArn!,
     });
     launchContracts.push({
       tenantId: candidate.tenantId,
@@ -781,7 +792,8 @@ export async function stageComputeOptimizerExportLaunchProvisioning(
       basePrefix: outputs.ExportBasePrefix!,
       effectivePrefix: outputs.EffectivePrefix!,
       objectArnPrefix: outputs.ObjectArnPrefix!,
-      encryptionMode: "SSE_S3",
+      encryptionMode: "SSE_KMS",
+      kmsKeyArn: outputs.KmsKeyArn!,
       bucketVersioningStatus: "Enabled",
       servicePrincipal: "compute-optimizer.amazonaws.com",
     });

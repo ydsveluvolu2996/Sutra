@@ -69,7 +69,8 @@ RegisteredAwsConnection {
       bucketArn: `arn:aws:s3:::${BUCKET}`, basePrefix: "organization/history/",
       effectivePrefix: `organization/history/compute-optimizer/${ACCOUNT}/`,
       objectArnPrefix: `arn:aws:s3:::${BUCKET}/organization/history/compute-optimizer/${ACCOUNT}/*`,
-      encryptionMode: "SSE_S3", bucketVersioningStatus: "Enabled",
+      encryptionMode: "SSE_KMS", bucketVersioningStatus: "Enabled",
+      kmsKeyArn: `arn:aws:kms:${REGION}:${ACCOUNT}:key/compute-optimizer-key`,
       servicePrincipal: "compute-optimizer.amazonaws.com" }] };
 }
 

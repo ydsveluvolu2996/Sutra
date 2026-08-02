@@ -55,7 +55,7 @@ export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID =
  * Immutable successor required for launching the eight supported Compute
  * Optimizer recommendation exports. The base role only opens its explicit
  * deny ceiling; a separately attested, regional launch contract supplies the
- * exact 25 launch/dependency grants and the sealed destination prefix.
+ * exact 25 launch/dependency grants and the sealed SSE-KMS destination prefix.
  */
 export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION =
   "standard-2026-08.5" as const;
@@ -178,7 +178,8 @@ export interface ComputeOptimizerExportLaunchContract {
   readonly basePrefix: string;
   readonly effectivePrefix: string;
   readonly objectArnPrefix: string;
-  readonly encryptionMode: "SSE_S3";
+  readonly encryptionMode: "SSE_KMS";
+  readonly kmsKeyArn: string;
   readonly bucketVersioningStatus: "Enabled";
   readonly servicePrincipal: "compute-optimizer.amazonaws.com";
 }

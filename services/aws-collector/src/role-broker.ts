@@ -704,7 +704,7 @@ export function computeOptimizerExportObjectSessionPolicy(
   return policy;
 }
 
-/** Same exact-object/version intersection for the SSE-S3 .8.5 launch bucket. */
+/** Exact-object/version plus exact-key intersection for the SSE-KMS .8.5 bucket. */
 export function computeOptimizerExportLaunchObjectSessionPolicy(
   contract: ComputeOptimizerExportLaunchContract,
   objectArn: string,
@@ -725,6 +725,16 @@ export function computeOptimizerExportLaunchObjectSessionPolicy(
         ...(versionIdentity.kind === "VERSION"
           ? { Condition: { StringEquals: { "s3:VersionId": versionIdentity.versionId } } }
           : {}),
+      },
+      {
+        Effect: "Allow",
+        Action: ["kms:Decrypt", "kms:GenerateDataKey"],
+        Resource: contract.kmsKeyArn,
+        Condition: {
+          StringEquals: {
+            "kms:ViaService": computeOptimizerKmsViaService(contract),
+          },
+        },
       },
     ],
   });
@@ -1560,8 +1570,8 @@ export class AwsRoleBroker {
           return launchContract === undefined
             || objectContract.bucket !== launchContract.bucket
             || objectContract.effectivePrefix !== launchContract.effectivePrefix
-            || objectContract.encryptionMode !== "SSE_S3"
-            || objectContract.kmsKeyArn !== null;
+            || objectContract.encryptionMode !== "SSE_KMS"
+            || objectContract.kmsKeyArn !== launchContract.kmsKeyArn;
         })) {
         throw new Error("regional provisioning contract mismatch");
       }

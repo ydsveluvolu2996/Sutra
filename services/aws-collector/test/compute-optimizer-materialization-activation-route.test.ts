@@ -57,7 +57,8 @@ function launch(region: string) {
     policyName: `SutraComputeOptimizerExportLaunchV1-${region}`,
     bucket, bucketArn: `arn:aws:s3:::${bucket}`, basePrefix, effectivePrefix,
     objectArnPrefix: `arn:aws:s3:::${bucket}/${effectivePrefix}*`,
-    encryptionMode: "SSE_S3" as const, bucketVersioningStatus: "Enabled" as const,
+    encryptionMode: "SSE_KMS" as const, bucketVersioningStatus: "Enabled" as const,
+    kmsKeyArn: `arn:aws:kms:${region}:${ACCOUNT}:key/compute-optimizer-key`,
     servicePrincipal: "compute-optimizer.amazonaws.com" as const,
   };
 }
@@ -71,7 +72,8 @@ function objectRead(region: string) {
     permissionContractId: "compute-optimizer-export-read-v1" as const,
     policyName: `SutraComputeOptimizerExportReadV1-${region}-${destination.bucket}`,
     bucket: destination.bucket, effectivePrefix: destination.effectivePrefix,
-    encryptionMode: "SSE_S3" as const, kmsKeyArn: null,
+    encryptionMode: "SSE_KMS" as const,
+    kmsKeyArn: `arn:aws:kms:${region}:${ACCOUNT}:key/compute-optimizer-key`,
   };
 }
 

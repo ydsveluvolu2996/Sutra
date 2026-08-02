@@ -32,10 +32,12 @@ the complete 25-action launch/dependency set; the base pack still grants none
 of those newly opened actions.
 
 `finops-compute-optimizer-export-launch-v1.yaml` provisions one dedicated
-CloudFormation-owned destination bucket per Region. It is private,
+CloudFormation-owned destination bucket and symmetric customer-managed KMS key
+per Region. The bucket is private,
 non-Requester-Pays by construction, retained on deletion/replacement,
 versioned, Bucket Owner Enforced, protected by all four public-access blocks,
-and encrypted with SSE-S3 (`AES256`). The template does not accept or overwrite
+and encrypted with SSE-KMS (`aws:kms`) using the exact retained, rotation-enabled
+regional key. The template does not accept or overwrite
 an existing bucket policy.
 
 Its destination policy grants the `compute-optimizer.amazonaws.com` service
@@ -47,11 +49,13 @@ partition-correct regional Compute Optimizer `aws:SourceArn`. The collector
 gets only `s3:GetObject` and `s3:GetObjectVersion` on that same provider prefix;
 it gets no S3 list, delete, unrelated write, or object wildcard outside it.
 
-SSE-KMS is deliberately not provisioned by v1. AWS documents it as an
-alternative requiring a customer-managed symmetric key whose key policy grants
-the service principal `kms:GenerateDataKey` and `kms:Decrypt` under the same
-source constraints; AWS managed KMS keys are unsupported for these exports.
-Any future SSE-KMS launch mode must be separately versioned and attested.
+The key policy grants the account root its normal IAM delegation boundary and
+grants `compute-optimizer.amazonaws.com` only `kms:GenerateDataKey` and
+`kms:Decrypt`, constrained by exact requester `aws:SourceAccount` and the
+partition-correct regional Compute Optimizer `aws:SourceArn`. AWS managed KMS
+keys are not used because Compute Optimizer recommendation exports do not permit
+them. The separately attested object-read contract must carry this exact key ARN
+and narrows runtime decrypt use through the same regional S3 boundary.
 
 The launch response is not sufficient to create a materialization plan. In
 particular, `ExportRDSDatabaseRecommendations` has no request `resourceType`.
@@ -73,6 +77,7 @@ Authoritative AWS references (retrieved 2026-08-02):
 
 Onboarding must persist and attest the template outputs for contract/base-pack
 version, exact collector role, partition, account, Region, bucket name/ARN,
-launcher key prefix, effective provider prefix/object ARN bound, SSE-S3 mode,
+launcher key prefix, effective provider prefix/object ARN bound, SSE-KMS mode,
+exact customer-managed KMS key ARN,
 versioning status, service principal, and attached IAM/bucket-policy identities.
 The launcher must use that sealed destination and must never accept a browser-supplied destination.

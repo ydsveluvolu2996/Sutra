@@ -90,6 +90,7 @@ test("the immutable successor and launch add-on parse as strict YAML", () => {
   assert.equal(successor.AWSTemplateFormatVersion, "2010-09-09");
   assert.equal(addOn.AWSTemplateFormatVersion, "2010-09-09");
   assert.deepEqual(Object.keys(addOn.Resources), [
+    "ComputeOptimizerExportKey",
     "ComputeOptimizerExportBucket",
     "ComputeOptimizerExportBucketPolicy",
     "ComputeOptimizerExportLaunchPolicy",
@@ -148,7 +149,33 @@ test("the successor adds no grants while keeping object access ceiling-only", ()
   );
 });
 
-test("the add-on owns a retained private versioned SSE-S3 bucket", () => {
+test("the add-on owns a retained private versioned SSE-KMS bucket", () => {
+  const key = addOn.Resources.ComputeOptimizerExportKey;
+  assert.equal(key.Type, "AWS::KMS::Key");
+  assert.equal(key.DeletionPolicy, "Retain");
+  assert.equal(key.UpdateReplacePolicy, "Retain");
+  assert.equal(key.Properties.EnableKeyRotation, true);
+  assert.equal(key.Properties.KeySpec, "SYMMETRIC_DEFAULT");
+  assert.equal(key.Properties.KeyUsage, "ENCRYPT_DECRYPT");
+  assert.equal(key.Properties.MultiRegion, false);
+  assert.equal(key.Properties.PendingWindowInDays, 30);
+  const [admin, service] = key.Properties.KeyPolicy.Statement;
+  assert.deepEqual(admin.Principal, {
+    AWS: { "Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" },
+  });
+  assert.equal(admin.Action, "kms:*");
+  assert.deepEqual(service.Principal, {
+    Service: "compute-optimizer.amazonaws.com",
+  });
+  assert.deepEqual(service.Action, ["kms:GenerateDataKey", "kms:Decrypt"]);
+  assert.deepEqual(service.Condition, {
+    StringEquals: { "aws:SourceAccount": { Ref: "AWS::AccountId" } },
+    StringLike: {
+      "aws:SourceArn": {
+        "Fn::Sub": "arn:${AWS::Partition}:compute-optimizer:${AWS::Region}:${AWS::AccountId}:*",
+      },
+    },
+  });
   const bucket = addOn.Resources.ComputeOptimizerExportBucket;
   assert.equal(bucket.Type, "AWS::S3::Bucket");
   assert.equal(bucket.DeletionPolicy, "Retain");
@@ -165,8 +192,11 @@ test("the add-on owns a retained private versioned SSE-S3 bucket", () => {
   });
   assert.deepEqual(bucket.Properties.BucketEncryption, {
     ServerSideEncryptionConfiguration: [{
-      ServerSideEncryptionByDefault: { SSEAlgorithm: "AES256" },
-      BucketKeyEnabled: false,
+      ServerSideEncryptionByDefault: {
+        SSEAlgorithm: "aws:kms",
+        KMSMasterKeyID: { "Fn::GetAtt": ["ComputeOptimizerExportKey", "Arn"] },
+      },
+      BucketKeyEnabled: true,
     }],
   });
   assert.equal(addOn.Parameters.ExistingBucketName, undefined);
@@ -275,6 +305,7 @@ test("outputs form a complete non-secret onboarding attestation", () => {
     "EffectivePrefix",
     "ObjectArnPrefix",
     "EncryptionMode",
+    "KmsKeyArn",
     "BucketVersioningStatus",
     "ComputeOptimizerServicePrincipal",
     "AttachedPolicyName",
@@ -284,7 +315,10 @@ test("outputs form a complete non-secret onboarding attestation", () => {
   assert.deepEqual(addOn.Outputs.RequiredBasePermissionPackVersion.Value, {
     Ref: "BaseCollectorPermissionPackVersion",
   });
-  assert.equal(addOn.Outputs.EncryptionMode.Value, "SSE_S3");
+  assert.equal(addOn.Outputs.EncryptionMode.Value, "SSE_KMS");
+  assert.deepEqual(addOn.Outputs.KmsKeyArn.Value, {
+    "Fn::GetAtt": ["ComputeOptimizerExportKey", "Arn"],
+  });
   assert.equal(addOn.Outputs.BucketVersioningStatus.Value, "Enabled");
   assert.equal(
     addOn.Outputs.EffectivePrefix.Value["Fn::Sub"],

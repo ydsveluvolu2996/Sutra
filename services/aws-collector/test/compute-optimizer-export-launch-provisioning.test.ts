@@ -80,6 +80,7 @@ function regionalOutputs(region: string): ComputeOptimizerProvisioningOutputs {
   const basePrefix = "sutra-finops/";
   const effectivePrefix = `${basePrefix}compute-optimizer/${ACCOUNT}/`;
   const bucketArn = `arn:aws:s3:::${bucket}`;
+  const kmsKeyArn = `arn:aws:kms:${region}:${ACCOUNT}:key/${region}-compute-optimizer-key`;
   return {
     AttachedPolicyName: `SutraComputeOptimizerExportLaunchV1-${region}`,
     BucketPolicyLogicalId: "ComputeOptimizerExportBucketPolicy",
@@ -89,11 +90,12 @@ function regionalOutputs(region: string): ComputeOptimizerProvisioningOutputs {
     ComputeOptimizerServicePrincipal: "compute-optimizer.amazonaws.com",
     ContractVersion: "compute-optimizer-export-launch-v1",
     EffectivePrefix: effectivePrefix,
-    EncryptionMode: "SSE_S3",
+    EncryptionMode: "SSE_KMS",
     ExportBasePrefix: basePrefix,
     ExportBucketArn: bucketArn,
     ExportBucketName: bucket,
     ExportRegion: region,
+    KmsKeyArn: kmsKeyArn,
     ObjectArnPrefix: `${bucketArn}/${effectivePrefix}*`,
     RequesterAccountId: ACCOUNT,
     RequiredBasePermissionPackVersion: "standard-2026-08.5",
@@ -113,8 +115,8 @@ function regionalObjectReadOutputs(region: string): ComputeOptimizerProvisioning
     ExistingBucketName: launch.ExportBucketName!,
     ExportBasePrefix: launch.ExportBasePrefix!,
     ExportRegion: region,
-    KmsKeyArn: "NONE",
-    KmsMode: "SSE_S3",
+    KmsKeyArn: launch.KmsKeyArn!,
+    KmsMode: "SSE_KMS",
     ObjectArnPrefix: launch.ObjectArnPrefix!,
     RequesterAccountId: ACCOUNT,
     RequiredBasePermissionPackVersion: "standard-2026-08.4",
@@ -267,7 +269,7 @@ test("trusted staging reads exact server outputs, retains singleton sources and 
     "RequiredComputeOptimizerExportReadAddOn",
     "RequiredComputeOptimizerExportLaunchAddOn",
   ]);
-  assert.equal(COMPUTE_OPTIMIZER_REGIONAL_LAUNCH_OUTPUT_KEYS.length, 17);
+  assert.equal(COMPUTE_OPTIMIZER_REGIONAL_LAUNCH_OUTPUT_KEYS.length, 18);
 });
 
 test("browser-shaped fields and every output ownership expansion fail before attestation", async () => {
@@ -279,7 +281,9 @@ test("browser-shaped fields and every output ownership expansion fail before att
     (base) => ({ ...base, CollectorRoleArn: `arn:aws:iam::${ACCOUNT}:role/Admin` }),
     (base) => ({ ...base, EffectivePrefix: "compute-optimizer/999999999999/" }),
     (base) => ({ ...base, ObjectArnPrefix: `${base.ExportBucketArn}/*` }),
-    (base) => ({ ...base, EncryptionMode: "aws:kms" }),
+    (base) => ({ ...base, EncryptionMode: "SSE_S3" }),
+    (base) => ({ ...base, KmsKeyArn:
+      `arn:aws:kms:eu-west-1:${ACCOUNT}:key/wrong-region` }),
     (base) => ({ ...base, BucketVersioningStatus: "Suspended" }),
     (base) => ({ ...base, wildcard: "*" }),
   ];
@@ -348,8 +352,9 @@ test("regional read add-on must be complete, exact and bound to the launch desti
       void _missing;
       return missing;
     },
-    (value) => ({ ...value, KmsMode: "SSE_KMS", KmsKeyArn:
-      `arn:aws:kms:us-east-1:${ACCOUNT}:key/not-attested` }),
+    (value) => ({ ...value, KmsMode: "SSE_S3", KmsKeyArn: "NONE" }),
+    (value) => ({ ...value, KmsKeyArn:
+      `arn:aws:kms:${value.ExportRegion}:999999999999:key/not-attested` }),
     (value) => ({ ...value, AttachedPolicyName: "SutraComputeOptimizerExportReadV1-wrong" }),
     (value) => {
       const bucket = `${value.ExistingBucketName}-neighbor`;

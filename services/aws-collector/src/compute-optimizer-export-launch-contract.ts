@@ -16,12 +16,13 @@ const BUCKET =
 const PREFIX_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._=-]{0,62}$/u;
 const JOB_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/u;
 const PROVIDER_TIMESTAMP = /^[A-Za-z0-9][A-Za-z0-9:._+-]{0,127}$/u;
+const KMS_KEY_ID = /^[A-Za-z0-9-]{1,128}$/u;
 
 const CONTRACT_KEYS = [
   "tenantId", "connectionId", "accountId", "partition", "region", "contractId",
   "permissionPackVersion", "permissionContractId", "policyName", "bucket",
   "bucketArn", "basePrefix", "effectivePrefix", "objectArnPrefix",
-  "encryptionMode", "bucketVersioningStatus", "servicePrincipal",
+  "encryptionMode", "kmsKeyArn", "bucketVersioningStatus", "servicePrincipal",
 ] as const;
 
 export interface ComputeOptimizerExportLaunchContractOwner {
@@ -141,7 +142,11 @@ function parseContract(
       `${record.basePrefix}compute-optimizer/${owner.expectedAccountId}/` ||
     record.objectArnPrefix !==
       `arn:${owner.partition}:s3:::${record.bucket}/${record.effectivePrefix}*` ||
-    record.encryptionMode !== "SSE_S3" ||
+    record.encryptionMode !== "SSE_KMS" ||
+    record.kmsKeyArn !==
+      `arn:${owner.partition}:kms:${record.region}:${owner.expectedAccountId}:key/${typeof record.kmsKeyArn === "string" ? record.kmsKeyArn.split("/").at(-1) ?? "" : ""}` ||
+    typeof record.kmsKeyArn !== "string" ||
+    !KMS_KEY_ID.test(record.kmsKeyArn.split("/").at(-1) ?? "") ||
     record.bucketVersioningStatus !== "Enabled" ||
     record.servicePrincipal !== "compute-optimizer.amazonaws.com"
   ) fail();
@@ -160,7 +165,8 @@ function parseContract(
     basePrefix: record.basePrefix,
     effectivePrefix: record.effectivePrefix,
     objectArnPrefix: record.objectArnPrefix,
-    encryptionMode: "SSE_S3",
+    encryptionMode: "SSE_KMS",
+    kmsKeyArn: record.kmsKeyArn,
     bucketVersioningStatus: "Enabled",
     servicePrincipal: "compute-optimizer.amazonaws.com",
   };

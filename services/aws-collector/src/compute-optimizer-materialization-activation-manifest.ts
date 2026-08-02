@@ -290,7 +290,9 @@ export function projectComputeOptimizerMaterializationActivationManifest(input: 
     const exactLaunch = launch[0]!;
     const exactObjectRead = objectRead[0]!;
     if (exactObjectRead.bucket !== exactLaunch.bucket
-      || exactObjectRead.effectivePrefix !== exactLaunch.effectivePrefix) {
+      || exactObjectRead.effectivePrefix !== exactLaunch.effectivePrefix
+      || exactObjectRead.encryptionMode !== exactLaunch.encryptionMode
+      || exactObjectRead.kmsKeyArn !== exactLaunch.kmsKeyArn) {
       reject("CONTRACT_MATRIX_INVALID");
     }
     return {

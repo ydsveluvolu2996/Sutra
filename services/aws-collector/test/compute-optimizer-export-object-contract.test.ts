@@ -67,7 +67,8 @@ function launchContract(): ComputeOptimizerExportLaunchContract {
     policyName: "SutraComputeOptimizerExportLaunchV1-us-east-1",
     bucket, bucketArn: `arn:aws:s3:::${bucket}`, basePrefix, effectivePrefix,
     objectArnPrefix: `arn:aws:s3:::${bucket}/${effectivePrefix}*`,
-    encryptionMode: "SSE_S3", bucketVersioningStatus: "Enabled",
+    encryptionMode: "SSE_KMS", bucketVersioningStatus: "Enabled",
+    kmsKeyArn: "arn:aws:kms:us-east-1:123456789012:key/compute-optimizer-key",
     servicePrincipal: "compute-optimizer.amazonaws.com",
   };
 }
