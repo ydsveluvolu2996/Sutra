@@ -32,6 +32,7 @@ import {
   type AwsTemporaryCredentials,
   type CallerIdentityClientFactory,
   type ConnectionScope,
+  type ComputeOptimizerExportObjectContract,
   type FoundationalFinopsAddOnContract,
   type FoundationalFinopsBindingRequest,
   type FinopsSourceContract,
@@ -48,6 +49,7 @@ import {
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -60,6 +62,15 @@ import {
   parseFinopsSourceContracts,
   resolveFinopsSourceContract,
 } from "./finops-source-contract.js";
+import {
+  computeOptimizerExportObjectPrefixArn,
+  computeOptimizerKmsViaService,
+  parseComputeOptimizerExportObjectAddress,
+  parseComputeOptimizerExportObjectContracts,
+  parseComputeOptimizerExportObjectVersionIdentity,
+  resolveComputeOptimizerExportObjectContract,
+  type ComputeOptimizerExportObjectVersionIdentity,
+} from "./compute-optimizer-export-object-contract.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -91,6 +102,8 @@ const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
 const FINOPS_PERMISSION_PACK_VERSION = FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION;
 const ORGANIZATION_FINOPS_PACK_VERSION = ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION;
 const ADVANCED_FINOPS_PACK_VERSION = ADVANCED_FINOPS_PERMISSION_PACK_VERSION;
+const COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION =
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -101,6 +114,12 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_organizations_taxonomy",
   ]),
   [ADVANCED_FINOPS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
     "trusted_advisor_standard_checks",
     "aws_organizations_taxonomy",
@@ -122,6 +141,10 @@ const FINOPS_CEILING_ACTIONS = [
   "kms:Decrypt",
   "bcm-data-exports:ListExports",
   "bcm-data-exports:GetExport",
+] as const;
+const COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS = [
+  "s3:GetObjectVersion",
+  "kms:GenerateDataKey",
 ] as const;
 export const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
@@ -264,6 +287,15 @@ export interface WorkloadIdentityRoleBrokerOptions {
   readonly principalArn: string;
   readonly region?: string;
   readonly maxAttempts?: number;
+}
+
+export interface ComputeOptimizerExportObjectSessionRequest {
+  readonly contractId: string;
+  readonly plannedJobId: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly objectKey: string;
+  readonly versionIdentity: ComputeOptimizerExportObjectVersionIdentity;
 }
 
 export const AWS_BROKER_CONNECTION_TIMEOUT_MS = 5_000;
@@ -500,6 +532,79 @@ export function finopsSourceSessionPolicy(
   return policy;
 }
 
+/** IAM-only first-stage session used to attest the .8.4 role and add-ons. */
+export function computeOptimizerExportAttestationSessionPolicy(roleArn: string): string {
+  parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      { Effect: "Allow", Action: TRUST_ATTESTATION_ACTIONS, Resource: roleArn },
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/**
+ * Second-stage STS intersection for exactly one provider-created object. It
+ * deliberately contains no IAM attestation, bucket-listing, prefix wildcard,
+ * GetObjectAttributes, write action, or neighboring object permission.
+ */
+export function computeOptimizerExportObjectSessionPolicy(
+  contract: ComputeOptimizerExportObjectContract,
+  objectArn: string,
+  versionIdentity: ComputeOptimizerExportObjectVersionIdentity,
+): string {
+  const parsedRolePartition = /^arn:(aws|aws-us-gov|aws-cn):s3:::/u.exec(objectArn)?.[1];
+  if (
+    parsedRolePartition !== contract.partition ||
+    objectArn.includes("*") ||
+    !objectArn.startsWith(`arn:${contract.partition}:s3:::${contract.bucket}/`)
+  ) throw new ConnectionIntegrityError("The Compute Optimizer object address is invalid");
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: versionIdentity.kind === "CURRENT"
+          ? "s3:GetObject"
+          : "s3:GetObjectVersion",
+        Resource: objectArn,
+        ...(versionIdentity.kind === "VERSION"
+          ? {
+              Condition: {
+                StringEquals: { "s3:VersionId": versionIdentity.versionId },
+              },
+            }
+          : {}),
+      },
+      ...(contract.encryptionMode === "SSE_KMS"
+        ? [{
+            Effect: "Allow",
+            Action: ["kms:Decrypt", "kms:GenerateDataKey"],
+            Resource: contract.kmsKeyArn,
+            Condition: {
+              StringEquals: {
+                "kms:ViaService": computeOptimizerKmsViaService(contract),
+              },
+            },
+          }]
+        : []),
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+function assertAwsInlineSessionPolicyLength(policy: string): void {
+  // STS documents a 2,048-character plaintext aggregate limit for inline JSON.
+  if (policy.length > 2_048) {
+    throw new ConnectionIntegrityError("The exact STS session policy exceeds AWS limits");
+  }
+}
+
 type JsonRecord = Record<string, unknown>;
 
 function record(value: unknown): JsonRecord {
@@ -585,7 +690,8 @@ function assertExpectedPermissionPolicy(
     | typeof PERMISSION_PACK_VERSION
     | typeof FINOPS_PERMISSION_PACK_VERSION
     | typeof ORGANIZATION_FINOPS_PACK_VERSION
-    | typeof ADVANCED_FINOPS_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof ADVANCED_FINOPS_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -616,7 +722,11 @@ function assertExpectedPermissionPolicy(
         ...(permissionPackVersion === FINOPS_PERMISSION_PACK_VERSION
             || permissionPackVersion === ORGANIZATION_FINOPS_PACK_VERSION
             || permissionPackVersion === ADVANCED_FINOPS_PACK_VERSION
+            || permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
+          : []),
+        ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+          ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...additionalCeilingActions,
       ],
@@ -679,7 +789,8 @@ function assertExpectedRole(
     | typeof PERMISSION_PACK_VERSION
     | typeof FINOPS_PERMISSION_PACK_VERSION
     | typeof ORGANIZATION_FINOPS_PACK_VERSION
-    | typeof ADVANCED_FINOPS_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof ADVANCED_FINOPS_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -812,6 +923,60 @@ function assertFoundationalFinopsPolicy(
   ) {
     throw new Error("unexpected Data Export permission");
   }
+}
+
+function assertComputeOptimizerExportObjectPolicy(
+  value: string | undefined,
+  contract: ComputeOptimizerExportObjectContract,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  const expectedCount = contract.encryptionMode === "SSE_KMS" ? 2 : 1;
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== expectedCount
+  ) throw new Error("unexpected Compute Optimizer object policy shape");
+  const statements = document.Statement.map(record);
+  const objectStatements = statements.filter((statement) =>
+    statement.Sid === "ReadSealedComputeOptimizerExportPrefix"
+  );
+  if (objectStatements.length !== 1) throw new Error("missing object-prefix statement");
+  const objectStatement = objectStatements[0] as JsonRecord;
+  exactKeys(objectStatement, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    objectStatement.Effect !== "Allow" ||
+    !sameStringSet(
+      stringList(objectStatement.Action),
+      ["s3:GetObject", "s3:GetObjectVersion"],
+    ) ||
+    objectStatement.Resource !== computeOptimizerExportObjectPrefixArn(contract)
+  ) throw new Error("unexpected Compute Optimizer object-prefix permission");
+
+  const kmsStatements = statements.filter((statement) =>
+    statement.Sid === "UseExactExportKeyThroughRegionalS3"
+  );
+  if (contract.encryptionMode === "SSE_S3") {
+    if (kmsStatements.length !== 0 || contract.kmsKeyArn !== null) {
+      throw new Error("unexpected Compute Optimizer KMS permission");
+    }
+    return;
+  }
+  if (kmsStatements.length !== 1 || contract.kmsKeyArn === null) {
+    throw new Error("missing Compute Optimizer KMS permission");
+  }
+  const kms = kmsStatements[0] as JsonRecord;
+  exactKeys(kms, ["Sid", "Effect", "Action", "Resource", "Condition"]);
+  const condition = record(kms.Condition);
+  exactKeys(condition, ["StringEquals"]);
+  const equals = record(condition.StringEquals);
+  exactKeys(equals, ["kms:ViaService"]);
+  if (
+    kms.Effect !== "Allow" ||
+    !sameStringSet(stringList(kms.Action), ["kms:Decrypt", "kms:GenerateDataKey"]) ||
+    kms.Resource !== contract.kmsKeyArn ||
+    equals["kms:ViaService"] !== computeOptimizerKmsViaService(contract)
+  ) throw new Error("unexpected Compute Optimizer KMS permission");
 }
 
 async function allInlinePolicyNames(
@@ -995,7 +1160,8 @@ export class AwsRoleBroker {
     if (
       (permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
         && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
-        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION) ||
+        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -1006,6 +1172,7 @@ export class AwsRoleBroker {
     } as const;
     let sourceContracts: readonly FinopsSourceContract[];
     let foundationalContracts: readonly FoundationalFinopsAddOnContract[];
+    let objectContracts: readonly ComputeOptimizerExportObjectContract[];
     let contract: FinopsSourceContract | null;
     try {
       sourceContracts = parseFinopsSourceContracts(
@@ -1017,6 +1184,12 @@ export class AwsRoleBroker {
         ? []
         : parseFoundationalFinopsContracts(
             resolved.connection.foundationalFinopsContracts,
+            owner,
+          );
+      objectContracts = resolved.connection.computeOptimizerExportObjectContracts === undefined
+        ? []
+        : parseComputeOptimizerExportObjectContracts(
+            resolved.connection.computeOptimizerExportObjectContracts,
             owner,
           );
     } catch (cause) {
@@ -1046,8 +1219,100 @@ export class AwsRoleBroker {
       validated.credentials,
       foundationalContracts,
       sourceContracts,
+      objectContracts,
     );
     return validated;
+  }
+
+  /**
+   * Resolve a server-owned .8.4 binding, attest the complete role contract with
+   * an IAM-only session, then issue a distinct 900-second session for exactly
+   * one CSV or CSVW metadata object.
+   */
+  public async assumeValidatedComputeOptimizerExportObjectSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: ComputeOptimizerExportObjectSessionRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      resolved.connection.permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION ||
+      resolved.connection.computeOptimizerExportObjectContracts === undefined
+    ) throw new ConnectionStateError();
+    if (
+      typeof request !== "object" || request === null ||
+      !sameStringSet(
+        Object.keys(request),
+        ["contractId", "plannedJobId", "region", "bucket", "objectKey", "versionIdentity"],
+      )
+    ) throw new ConnectionIntegrityError("The Compute Optimizer object request is invalid");
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let contracts: readonly ComputeOptimizerExportObjectContract[];
+    let contract: ComputeOptimizerExportObjectContract;
+    let versionIdentity: ComputeOptimizerExportObjectVersionIdentity;
+    let objectArn: string;
+    try {
+      contracts = parseComputeOptimizerExportObjectContracts(
+        resolved.connection.computeOptimizerExportObjectContracts,
+        owner,
+      );
+      contract = resolveComputeOptimizerExportObjectContract(
+        contracts,
+        owner,
+        request.contractId,
+      );
+      versionIdentity = parseComputeOptimizerExportObjectVersionIdentity(
+        request.versionIdentity,
+      );
+      objectArn = parseComputeOptimizerExportObjectAddress(
+        contract,
+        resolved.parsedRoleArn.partition,
+        request.region,
+        request.bucket,
+        request.objectKey,
+        request.plannedJobId,
+      ).objectArn;
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The Compute Optimizer export object binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+
+    const attestation = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-attest`,
+      computeOptimizerExportAttestationSessionPolicy,
+    );
+    await this.attestComputeOptimizerExportObjectRoleContract(
+      resolved,
+      attestation.credentials,
+      contracts,
+    );
+    const objectSessionDiscriminator = createHash("sha256")
+      .update(objectArn, "utf8")
+      .update("\0", "utf8")
+      .update(versionIdentity.kind, "utf8")
+      .update("\0", "utf8")
+      .update(versionIdentity.versionId ?? "CURRENT", "utf8")
+      .digest("hex")
+      .slice(0, 16);
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-object-${objectSessionDiscriminator}`,
+      () => computeOptimizerExportObjectSessionPolicy(
+        contract,
+        objectArn,
+        versionIdentity,
+      ),
+    );
   }
 
   /**
@@ -1195,6 +1460,7 @@ export class AwsRoleBroker {
     credentials: AwsTemporaryCredentials,
     contracts: readonly FoundationalFinopsAddOnContract[],
     suppliedSourceContracts?: readonly FinopsSourceContract[],
+    suppliedObjectContracts?: readonly ComputeOptimizerExportObjectContract[],
   ): Promise<void> {
     try {
       const permissionPackVersion = resolved.connection.permissionPackVersion;
@@ -1202,6 +1468,7 @@ export class AwsRoleBroker {
         permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
         && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
         && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -1219,6 +1486,13 @@ export class AwsRoleBroker {
           ? []
           : parseFinopsSourceContracts(
               resolved.connection.finopsSourceContracts,
+              owner,
+            ));
+      const objectContracts = suppliedObjectContracts ??
+        (resolved.connection.computeOptimizerExportObjectContracts === undefined
+          ? []
+          : parseComputeOptimizerExportObjectContracts(
+              resolved.connection.computeOptimizerExportObjectContracts,
               owner,
             ));
       const role = await client.getRole(resolved.parsedRoleArn.roleName);
@@ -1248,6 +1522,7 @@ export class AwsRoleBroker {
         ...sourceContracts.flatMap(({ policyName }) =>
           policyName === null ? [] : [policyName]
         ),
+        ...objectContracts.map(({ policyName }) => policyName),
       ];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
         throw new Error("unexpected inline policy set");
@@ -1282,11 +1557,55 @@ export class AwsRoleBroker {
         );
         assertFinopsSourcePolicy(policy.policyDocument, contract);
       }
+      for (const contract of objectContracts) {
+        const policy = await client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,
+          contract.policyName,
+        );
+        assertComputeOptimizerExportObjectPolicy(policy.policyDocument, contract);
+      }
     } catch (reason) {
       const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
       (failure as { cause?: unknown }).cause = reason;
       throw failure;
     }
+  }
+
+  private async attestComputeOptimizerExportObjectRoleContract(
+    resolved: ResolvedConnection,
+    credentials: AwsTemporaryCredentials,
+    objectContracts: readonly ComputeOptimizerExportObjectContract[],
+  ): Promise<void> {
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let foundationalContracts: readonly FoundationalFinopsAddOnContract[];
+    let sourceContracts: readonly FinopsSourceContract[];
+    try {
+      foundationalContracts = resolved.connection.foundationalFinopsContracts === undefined
+        ? []
+        : parseFoundationalFinopsContracts(
+            resolved.connection.foundationalFinopsContracts,
+            owner,
+          );
+      sourceContracts = resolved.connection.finopsSourceContracts === undefined
+        ? []
+        : parseFinopsSourceContracts(resolved.connection.finopsSourceContracts, owner);
+    } catch (reason) {
+      const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
+      (failure as { cause?: unknown }).cause = reason;
+      throw failure;
+    }
+    await this.attestFinopsRoleContract(
+      resolved,
+      credentials,
+      foundationalContracts,
+      sourceContracts,
+      objectContracts,
+    );
   }
 
   private async resolveConnection(

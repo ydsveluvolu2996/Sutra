@@ -43,7 +43,10 @@ import {
   type ComputeOptimizerExportDiscoveryReader,
 } from "./compute-optimizer-export-runner.js";
 import {
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   type AwsPartition,
   type FinopsSourceContract,
   type SafeJsonObject,
@@ -83,6 +86,12 @@ export {
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const ACCOUNT_ID = /^\d{12}$/u;
 const DAY_MS = 86_400_000;
+const FINOPS_SOURCE_PERMISSION_PACKS: ReadonlySet<string> = new Set([
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+]);
 
 export const FINOPS_SOURCE_DISPATCH_LIMITS = Object.freeze({
   cost_anomaly_detection: Object.freeze({
@@ -862,7 +871,7 @@ function assertConnectionBoundary(
     connection.tenantId !== request.tenantId ||
     connection.connectionId !== request.connectionId ||
     connection.status !== "ACTIVE" ||
-    connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION ||
+    !FINOPS_SOURCE_PERMISSION_PACKS.has(connection.permissionPackVersion) ||
     !ACCOUNT_ID.test(connection.expectedAccountId) ||
     !connection.roleArn.startsWith(
       `arn:${partition}:iam::${connection.expectedAccountId}:role/`,

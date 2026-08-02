@@ -87,6 +87,14 @@ export interface FreshComputeOptimizerExportBinding {
   /** The binding must not be used at or after this safety-adjusted instant. */
   readonly expiresAtIso: string;
   readonly binding: VerifiedComputeOptimizerExportJobBinding;
+  /** Plan-ordered, exact provider chronology for every completed target. */
+  readonly jobChronology: readonly FreshComputeOptimizerExportJobChronology[];
+}
+
+export interface FreshComputeOptimizerExportJobChronology {
+  readonly jobId: string;
+  readonly creationTimestampIso: string;
+  readonly lastUpdatedTimestampIso: string;
 }
 
 export class ComputeOptimizerExportFreshResolverError extends Error {
@@ -118,6 +126,7 @@ interface EvidenceJobBinding {
 interface ResolvedJob {
   readonly target: ComputeOptimizerExportPlanTarget;
   readonly creationMs: number;
+  readonly lastUpdatedMs: number;
 }
 
 function reject(code: ComputeOptimizerExportFreshResolverError["code"]): never {
@@ -349,7 +358,7 @@ async function resolveJob(
     + COMPUTE_OPTIMIZER_EXPORT_FRESH_RESOLVER_BOUNDS.describeVisibilityMs
     - configuration.minimumVisibilityRemainingMs;
   if (observedAtMs >= safeExpiry) reject("EXPIRED");
-  return { target, creationMs };
+  return { target, creationMs, lastUpdatedMs };
 }
 
 function requestFor(
@@ -542,12 +551,21 @@ export async function resolveFreshComputeOptimizerExportBinding(
         metadataKey: target.expectedJob.metadataKey,
       })),
     };
+    const jobChronology = plan.targets.map((target) => {
+      const chronology = resolved.get(target.expectedJob.jobId) ?? reject("MISSING_JOB");
+      return {
+        jobId: target.expectedJob.jobId,
+        creationTimestampIso: new Date(chronology.creationMs).toISOString(),
+        lastUpdatedTimestampIso: new Date(chronology.lastUpdatedMs).toISOString(),
+      };
+    });
     return deepFreeze({
       schemaVersion: "sutra.compute-optimizer-export-fresh-binding.v1",
       discoveryRunId: evidence.run.runId,
       resolvedAtIso: new Date(finishedAt).toISOString(),
       expiresAtIso: new Date(expiresAt).toISOString(),
       binding,
+      jobChronology,
     });
   } catch (error) {
     if (error instanceof ComputeOptimizerExportFreshResolverError) throw error;

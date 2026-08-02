@@ -71,6 +71,7 @@ import {
   createWorkloadIdentityRoleBroker,
   IMPLEMENTED_READ_ACTIONS,
   parseIamRoleArn,
+  type AwsRoleBroker,
 } from "./role-broker.js";
 import { runSandboxIdentityPreflight } from "./aws-sandbox-preflight.js";
 import {
@@ -85,6 +86,7 @@ import {
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type InventoryCollectorCoverage,
@@ -103,6 +105,13 @@ import {
   readFinopsExportChunk,
   type FinopsExportChunkClientFactory,
 } from "./finops-export-chunk.js";
+import {
+  ComputeOptimizerExportObjectChunkError,
+  createAwsComputeOptimizerExportObjectChunkClient,
+  parseComputeOptimizerExportObjectChunkRequest,
+  readComputeOptimizerExportObjectChunk,
+  type ComputeOptimizerExportObjectChunkClientFactory,
+} from "./compute-optimizer-export-object-chunk.js";
 import {
   executeFinopsSourceDispatch,
   parseFinopsSourceDispatchRequest,
@@ -125,7 +134,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|finops-source|organizations-taxonomy|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -218,6 +227,15 @@ export interface LocalCollectorServerOptions {
    * inject a deterministic client. The web/control-plane never receives this.
    */
   readonly finopsExportChunkClientFactory?: FinopsExportChunkClientFactory;
+  /** Broker-only exact Compute Optimizer range client; never exposed upstream. */
+  readonly computeOptimizerExportObjectChunkClientFactory?:
+    ComputeOptimizerExportObjectChunkClientFactory;
+  /** Focused test seam. Production always constructs the workload-identity broker. */
+  readonly computeOptimizerExportObjectRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportObjectSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -293,6 +311,11 @@ interface ServerContext {
   readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
   readonly agentlessCleanupLedger?: LocalCollectorServerOptions["agentlessCleanupLedger"];
   readonly finopsExportChunkClientFactory: FinopsExportChunkClientFactory;
+  readonly computeOptimizerExportObjectChunkClientFactory:
+    ComputeOptimizerExportObjectChunkClientFactory;
+  readonly computeOptimizerExportObjectRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportObjectRoleBrokerFactory"]
+  >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
@@ -415,6 +438,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       : { agentlessCleanupLedger: options.agentlessCleanupLedger }),
     finopsExportChunkClientFactory:
       options.finopsExportChunkClientFactory ?? createAwsFinopsExportChunkClient,
+    computeOptimizerExportObjectChunkClientFactory:
+      options.computeOptimizerExportObjectChunkClientFactory ??
+        createAwsComputeOptimizerExportObjectChunkClient,
+    computeOptimizerExportObjectRoleBrokerFactory:
+      options.computeOptimizerExportObjectRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1318,6 +1347,13 @@ async function route(
         body: await collectFinopsExportChunk(context, request),
       };
     }
+    if (action === "compute-optimizer-export-object-chunk") {
+      const request = parseComputeOptimizerExportObjectChunkRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectComputeOptimizerExportObjectChunk(context, request),
+      };
+    }
     if (action === "finops-source") {
       const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
       return {
@@ -1534,6 +1570,57 @@ async function collectFinopsExportChunk(
       request,
       session.credentials,
       context.finopsExportChunkClientFactory,
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectComputeOptimizerExportObjectChunk(
+  context: ServerContext,
+  request: ReturnType<typeof parseComputeOptimizerExportObjectChunkRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireComputeOptimizerObjectActiveConnection(
+      context.registry,
+      request,
+    );
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "Compute Optimizer export reads require explicit live AWS mode",
+      );
+    }
+    if (!finopsRegionMatchesPartition(request.region, connection.partition)) {
+      throw invalidRequest();
+    }
+    const broker = context.computeOptimizerExportObjectRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportObjectSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      `${request.jobId}-chunk-${request.offset}`,
+      {
+        contractId: request.contractId,
+        plannedJobId: request.plannedJobId,
+        region: request.region,
+        bucket: request.bucket,
+        objectKey: request.key,
+        versionIdentity: request.versionId === null
+          ? { kind: "CURRENT", versionId: null }
+          : { kind: "VERSION", versionId: request.versionId },
+      },
+    );
+    return readComputeOptimizerExportObjectChunk(
+      request,
+      session.credentials,
+      context.computeOptimizerExportObjectChunkClientFactory,
     );
   } finally {
     await context.operationCoordinator.release(lease);
@@ -2938,10 +3025,26 @@ async function requireFinopsSourceActiveConnection(
     connection.status !== "ACTIVE" ||
     (connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
-      && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION)
+      && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
+  return connection;
+}
+
+async function requireComputeOptimizerObjectActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    connection.permissionPackVersion !==
+      COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION ||
+    connection.computeOptimizerExportObjectContracts === undefined
+  ) throw new RegistryStateError();
   return connection;
 }
 
@@ -3571,6 +3674,24 @@ function safeHttpError(error: unknown): LocalHttpError {
   }
   if (error instanceof RegistryError) {
     return new LocalHttpError(500, "COLLECTION_FAILED", "The encrypted connection registry could not complete the operation");
+  }
+  if (error instanceof ComputeOptimizerExportObjectChunkError) {
+    const status = error.code === "INVALID_REQUEST"
+      ? 400
+      : error.code === "OBJECT_CHANGED"
+        ? 409
+        : error.code === "OBJECT_RANGE_LIMIT_EXCEEDED"
+          ? 413
+          : error.code === "OBJECT_READ_TIMEOUT"
+            ? 504
+            : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      error.code === "OBJECT_CHANGED"
+        ? "The Compute Optimizer export object changed during the bounded read"
+        : "The bounded Compute Optimizer export object read did not complete",
+    );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {
     return new LocalHttpError(

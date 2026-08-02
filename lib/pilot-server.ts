@@ -40,6 +40,9 @@ import {
 } from "./hosted-broker-client-security";
 import type { AgentlessScanReadiness } from "./aws-agentless-readiness";
 import type { FinopsExportChunkRequest } from "../services/aws-collector/src/finops-export-chunk";
+import type {
+  ComputeOptimizerExportObjectChunkRequest,
+} from "../services/aws-collector/src/compute-optimizer-export-object-chunk";
 import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
@@ -233,6 +236,7 @@ async function brokerFetchEnvelope<T>(
   method: "GET" | "PUT" | "POST",
   payload?: unknown,
   timeoutMs = 20_000,
+  externalSignal?: AbortSignal,
 ): Promise<{ readonly value: T; readonly authenticatedBody: Uint8Array }> {
   const config = getPilotSecrets();
   const body = payload === undefined ? "" : JSON.stringify(payload);
@@ -263,6 +267,9 @@ async function brokerFetchEnvelope<T>(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const requestSignal = externalSignal === undefined
+    ? controller.signal
+    : AbortSignal.any([controller.signal, externalSignal]);
   let response: Response;
   try {
     response = await fetch(`${config.brokerUrl}${path}`, {
@@ -272,7 +279,7 @@ async function brokerFetchEnvelope<T>(
         ...authenticationHeaders,
       },
       body: body.length === 0 ? undefined : body,
-      signal: controller.signal,
+      signal: requestSignal,
     });
   } catch {
     throw new PilotServerError(503, "BROKER_UNAVAILABLE", "The AWS collector is not reachable");
@@ -903,6 +910,58 @@ export async function runFinopsExportChunkRead(
     },
     90_000,
   );
+}
+
+/**
+ * Sends one exact Compute Optimizer object-range request over the existing
+ * authenticated broker channel. The response is returned only after its
+ * broker signature has been verified; AWS credentials never cross this edge.
+ */
+export async function runComputeOptimizerExportObjectChunkRead(
+  input: ComputeOptimizerExportObjectChunkRequest,
+  context: {
+    readonly signal: AbortSignal;
+    readonly deadlineAtMs: number;
+  },
+): Promise<unknown> {
+  if (
+    !(context.signal instanceof AbortSignal)
+    || !Number.isSafeInteger(context.deadlineAtMs)
+  ) {
+    throw new PilotServerError(
+      400,
+      "INVALID_REQUEST",
+      "The Compute Optimizer export object read boundary was invalid",
+    );
+  }
+  const remainingMs = context.deadlineAtMs - Date.now();
+  if (context.signal.aborted || remainingMs <= 0) {
+    throw new PilotServerError(
+      408,
+      "REQUEST_TIMEOUT",
+      "The Compute Optimizer export object read deadline elapsed",
+    );
+  }
+  return (await brokerFetchEnvelope<unknown>(
+    `/v1/connections/${input.connectionId}/compute-optimizer-export-object-chunk`,
+    "POST",
+    {
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      jobId: input.jobId,
+      contractId: input.contractId,
+      plannedJobId: input.plannedJobId,
+      region: input.region,
+      bucket: input.bucket,
+      key: input.key,
+      offset: input.offset,
+      maximumBytes: input.maximumBytes,
+      versionId: input.versionId,
+      ifMatch: input.ifMatch,
+    },
+    Math.min(90_000, remainingMs),
+    context.signal,
+  )).value;
 }
 
 export interface FinopsSourceCollectionResult {

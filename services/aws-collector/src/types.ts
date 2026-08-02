@@ -43,6 +43,15 @@ export const ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.2" 
  */
 export const ADVANCED_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.3" as const;
 /**
+ * Immutable successor for exact Compute Optimizer export-object reads. The
+ * base role adds only GetObjectVersion and GenerateDataKey to the .8.3 deny
+ * ceiling; every S3 prefix and optional CMK remains in a server-owned add-on.
+ */
+export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION =
+  "standard-2026-08.4" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID =
+  "compute-optimizer-export-read-v1" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -58,6 +67,7 @@ export type PermissionPackVersion =
   | typeof FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
   | typeof ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
   | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
+  | typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION
@@ -114,6 +124,31 @@ export interface FinopsSourceContract {
   readonly policyName: string | null;
 }
 
+export type ComputeOptimizerExportObjectEncryptionMode = "SSE_S3" | "SSE_KMS";
+
+/**
+ * Server-owned immutable binding for one regional Compute Optimizer provider
+ * prefix. Public jobs carry only its opaque contractId plus an exact object
+ * address already sealed by the export plan.
+ */
+export interface ComputeOptimizerExportObjectContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly contractId: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION;
+  readonly permissionContractId:
+    typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID;
+  readonly policyName: string;
+  readonly bucket: string;
+  readonly effectivePrefix: string;
+  readonly encryptionMode: ComputeOptimizerExportObjectEncryptionMode;
+  readonly kmsKeyArn: string | null;
+}
+
 export type AwsConnectionStatus =
   | "PENDING"
   | "VERIFIED"
@@ -165,6 +200,9 @@ export interface StoredAwsConnection {
    * create or modify these source bindings.
    */
   readonly finopsSourceContracts?: readonly FinopsSourceContract[];
+  /** Exact regional S3/KMS bindings for the .8.4 object broker. */
+  readonly computeOptimizerExportObjectContracts?:
+    readonly ComputeOptimizerExportObjectContract[];
 }
 
 export interface ScopedConnectionRegistry {

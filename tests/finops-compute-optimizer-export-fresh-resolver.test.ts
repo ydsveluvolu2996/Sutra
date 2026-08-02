@@ -235,10 +235,46 @@ test("describes every sealed ID without filters and returns only a short-lived f
     result.binding.targets.map(({ jobId }) => jobId),
     value.targets.map(({ expectedJob }) => expectedJob.jobId),
   );
+  assert.deepEqual(result.jobChronology, value.targets.map((entry) => ({
+    jobId: entry.expectedJob.jobId,
+    creationTimestampIso: "2026-08-01T12:00:00.000Z",
+    lastUpdatedTimestampIso: "2026-08-02T11:00:00.000Z",
+  })));
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.binding), true);
   assert.equal(Object.isFrozen(result.binding.targets[0]), true);
+  assert.equal(Object.isFrozen(result.jobChronology[0]), true);
   assert.doesNotMatch(JSON.stringify(result), /unrelated-seven-day-job/u);
+});
+
+test("same-day provider timestamps remain canonical and chronology stays in sealed-plan order", async () => {
+  const value = await plan();
+  const first = value.targets[0]!;
+  const second = value.targets[1]!;
+  const result = await resolveFreshComputeOptimizerExportBinding(
+    value,
+    evidence(value),
+    readerFor([{ recommendationExportJobs: [
+      describeJob(second, {
+        creationTimestamp: "2026-08-02T08:30:00.000Z",
+        lastUpdatedTimestamp: new Date("2026-08-02T10:45:00.000Z"),
+      }),
+      describeJob(first, {
+        creationTimestamp: new Date("2026-08-02T09:15:00.000Z"),
+        lastUpdatedTimestamp: "2026-08-02T11:15:00.000Z",
+      }),
+    ] }]),
+    { now: () => NOW },
+  );
+  assert.deepEqual(result.jobChronology, [{
+    jobId: first.expectedJob.jobId,
+    creationTimestampIso: "2026-08-02T09:15:00.000Z",
+    lastUpdatedTimestampIso: "2026-08-02T11:15:00.000Z",
+  }, {
+    jobId: second.expectedJob.jobId,
+    creationTimestampIso: "2026-08-02T08:30:00.000Z",
+    lastUpdatedTimestampIso: "2026-08-02T10:45:00.000Z",
+  }]);
 });
 
 test("finalized hashed evidence must bind every planned job exactly once", async () => {

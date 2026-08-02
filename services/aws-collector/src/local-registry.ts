@@ -26,6 +26,7 @@ import {
   FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
@@ -33,6 +34,9 @@ import {
 } from "./types.js";
 import { parseFoundationalFinopsContracts } from "./finops-permission-contract.js";
 import { parseFinopsSourceContracts } from "./finops-source-contract.js";
+import {
+  parseComputeOptimizerExportObjectContracts,
+} from "./compute-optimizer-export-object-contract.js";
 import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
@@ -151,6 +155,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ...(connection.finopsSourceContracts === undefined
         ? {}
         : { finopsSourceContracts: structuredClone(connection.finopsSourceContracts) }),
+      ...(connection.computeOptimizerExportObjectContracts === undefined
+        ? {}
+        : {
+            computeOptimizerExportObjectContracts: structuredClone(
+              connection.computeOptimizerExportObjectContracts,
+            ),
+          }),
     };
   }
 
@@ -213,6 +224,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
               ? {
                   finopsSourceContracts: structuredClone(
                     previous.finopsSourceContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.computeOptimizerExportObjectContracts !== undefined
+              ? {
+                  computeOptimizerExportObjectContracts: structuredClone(
+                    previous.computeOptimizerExportObjectContracts,
                   ),
                 }
               : {}),
@@ -736,6 +754,9 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     ...(Object.hasOwn(value, "finopsSourceContracts")
       ? ["finopsSourceContracts"]
       : []),
+    ...(Object.hasOwn(value, "computeOptimizerExportObjectContracts")
+      ? ["computeOptimizerExportObjectContracts"]
+      : []),
   ];
   const record = exactRecord(value, [...selectedKeys, ...optionalContractKeys]);
   if (
@@ -792,7 +813,8 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION &&
-    permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION
+    permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
   }
@@ -828,6 +850,26 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
       throw new RegistryIntegrityError();
     }
   }
+  let computeOptimizerExportObjectContracts;
+  if (Object.hasOwn(record, "computeOptimizerExportObjectContracts")) {
+    if (
+      permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+    ) throw new RegistryIntegrityError();
+    try {
+      computeOptimizerExportObjectContracts = parseComputeOptimizerExportObjectContracts(
+        record.computeOptimizerExportObjectContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
   return {
     ...parsed,
     status: record.status,
@@ -838,6 +880,9 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     ...(finopsSourceContracts === undefined
       ? {}
       : { finopsSourceContracts }),
+    ...(computeOptimizerExportObjectContracts === undefined
+      ? {}
+      : { computeOptimizerExportObjectContracts }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

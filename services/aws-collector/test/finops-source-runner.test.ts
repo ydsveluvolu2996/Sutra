@@ -679,7 +679,7 @@ test("returns honest not-configured and not-implemented envelopes without assumi
   assert.equal(unsupportedDeps.broker.calls.length, 0);
 });
 
-test("the signed collector route accepts only an opaque source-contract identity", async (t) => {
+test("the signed collector discovery gate accepts an active .8.4 connection and only an opaque contract identity", async (t) => {
   const unsupported = sourceContract({
     contractId: "contract-budgets-http-v1",
     sourceId: "aws_budgets",
@@ -690,7 +690,10 @@ test("the signed collector route accepts only an opaque source-contract identity
     mode: "live",
     allowLiveAws: true,
     principalArn: PRINCIPAL_ARN,
-    registry: new HttpRegistry(registeredConnection([unsupported])),
+    registry: new HttpRegistry({
+      ...registeredConnection([unsupported]),
+      permissionPackVersion: "standard-2026-08.4",
+    }),
     authenticator: {
       verify: () => ({ nonce: "test-nonce", timestamp: NOW.getTime() }),
       responseSignature: () => "test-signature",
