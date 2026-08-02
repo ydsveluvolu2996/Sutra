@@ -8,6 +8,7 @@
 
 import {
   COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG,
+  COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION,
   validateComputeOptimizerFieldsToExport,
 } from "./finops-compute-optimizer-export-field-catalog.ts";
 import type {
@@ -422,32 +423,6 @@ function datatypesFor(apiField: string, role: FieldRole): ReadonlySet<Datatype> 
   return STRING;
 }
 
-function additionalProjection(family: ComputeOptimizerExportFamily): readonly string[] {
-  if (family === "IDLE_RESOURCE") return ["LookbackPeriodInDays"];
-  const additions = ["LookbackPeriodInDays"];
-  if (["EC2_INSTANCE", "AUTO_SCALING_GROUP", "EBS_VOLUME", "LAMBDA_FUNCTION", "ECS_SERVICE"]
-    .includes(family)) {
-    additions.push(
-      "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-    );
-  }
-  if (family === "RDS_DATABASE") {
-    additions.push(
-      "InstanceRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "InstanceRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "InstanceRecommendationOptionsRank",
-      "InstanceRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-      "StorageRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "StorageRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "StorageRecommendationOptionsRank",
-      "StorageRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-    );
-  }
-  return additions;
-}
-
 function buildProfile(
   family: ComputeOptimizerExportFamily,
   requestedProjection: readonly string[],
@@ -455,7 +430,7 @@ function buildProfile(
   const catalog = COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG[family];
   const apiProjection = Object.freeze([...requestedProjection]);
   validateComputeOptimizerFieldsToExport(family, catalog.operation, apiProjection);
-  const supported = new Set([...catalog.minimumProjection, ...additionalProjection(family)]);
+  const supported = new Set(COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION[family]);
   if (
     !apiProjection.includes("LookbackPeriodInDays")
     || apiProjection.some((field) => !supported.has(field))

@@ -17,6 +17,12 @@ import {
   type ComputeOptimizerExportLaunchCompletedJobObservation,
 } from "../lib/finops-compute-optimizer-export-launch.ts";
 import { createComputeOptimizerExportPlan } from "../lib/finops-compute-optimizer-export-plan.ts";
+import { COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION } from
+  "../lib/finops-compute-optimizer-export-field-catalog.ts";
+import {
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION as BROKER_MATERIALIZATION_PROJECTION,
+  parseComputeOptimizerExportLaunchAttempt as parseBrokerLaunchAttempt,
+} from "../services/aws-collector/src/compute-optimizer-export-launcher.ts";
 
 const SEALED = "2026-08-02T12:00:00.000Z";
 const SCHEDULED = "2026-08-02T00:00:00.000Z";
@@ -133,6 +139,7 @@ function observations(
 
 test("seals all eight exact organization exports before provider calls", async () => {
   const attempt = await createComputeOptimizerExportLaunchAttempt(input());
+  assert.deepEqual(parseBrokerLaunchAttempt(attempt), attempt);
   assert.equal(attempt.targets.length, 8);
   assert.deepEqual(
     attempt.targets.map(({ exportFamily }) => exportFamily),
@@ -145,8 +152,13 @@ test("seals all eight exact organization exports before provider calls", async (
     assert.ok(target.request.fieldsToExport.length > 0);
     assert.deepEqual(
       target.request.fieldsToExport,
-      [...target.request.fieldsToExport].sort(),
+      COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION[target.exportFamily],
     );
+    assert.deepEqual(
+      target.request.fieldsToExport,
+      BROKER_MATERIALIZATION_PROJECTION[target.exportFamily],
+    );
+    assert.equal(target.request.fieldsToExport.includes("LookbackPeriodInDays"), true);
     assert.equal(target.request.s3DestinationConfig.keyPrefix, "organization/history");
     assert.equal(target.effectivePrefix, "organization/history/compute-optimizer/111122223333/");
   }

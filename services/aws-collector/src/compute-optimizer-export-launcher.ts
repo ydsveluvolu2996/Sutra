@@ -63,51 +63,75 @@ type ExportFamily = keyof typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_OPERATION_BY_FA
 type ExportOperation = (typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_OPERATION_BY_FAMILY)[ExportFamily];
 type Partition = "aws" | "aws-us-gov" | "aws-cn";
 
-export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION = Object.freeze({
+/** Compiled broker-side mirror of the control-plane materialization projection. */
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION = Object.freeze({
   AUTO_SCALING_GROUP: Object.freeze([
     "AccountId", "AutoScalingGroupArn", "AutoScalingGroupName", "CurrentConfigurationDesiredCapacity",
     "CurrentConfigurationInstanceType", "CurrentPerformanceRisk", "Finding", "LastRefreshTimestamp",
+    "LookbackPeriodInDays",
     "RecommendationOptionsConfigurationDesiredCapacity", "RecommendationOptionsConfigurationInstanceType",
-    "RecommendationOptionsEstimatedMonthlySavingsCurrency", "RecommendationOptionsEstimatedMonthlySavingsValue",
-    "RecommendationOptionsPerformanceRisk", "RecommendationOptionsSavingsOpportunityPercentage",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrency",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "RecommendationOptionsEstimatedMonthlySavingsValue",
+    "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+    "RecommendationOptionsPerformanceRisk", "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    "RecommendationOptionsSavingsOpportunityPercentage",
   ] satisfies readonly ExportableAutoScalingGroupField[]),
   EBS_VOLUME: Object.freeze([
     "AccountId", "CurrentConfigurationVolumeBaselineIOPS", "CurrentConfigurationVolumeBaselineThroughput",
     "CurrentConfigurationVolumeSize", "CurrentConfigurationVolumeType", "CurrentPerformanceRisk", "Finding",
-    "LastRefreshTimestamp", "RecommendationOptionsConfigurationVolumeBaselineIOPS",
+    "LastRefreshTimestamp", "LookbackPeriodInDays", "RecommendationOptionsConfigurationVolumeBaselineIOPS",
     "RecommendationOptionsConfigurationVolumeBaselineThroughput", "RecommendationOptionsConfigurationVolumeSize",
     "RecommendationOptionsConfigurationVolumeType", "RecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "RecommendationOptionsEstimatedMonthlySavingsValue", "RecommendationOptionsPerformanceRisk",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "RecommendationOptionsEstimatedMonthlySavingsValue",
+    "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts", "RecommendationOptionsPerformanceRisk",
+    "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
     "RecommendationOptionsSavingsOpportunityPercentage", "Tags", "VolumeArn",
   ] satisfies readonly ExportableVolumeField[]),
   EC2_INSTANCE: Object.freeze([
     "AccountId", "CurrentInstanceType", "CurrentPerformanceRisk", "Finding", "FindingReasonCodes", "InstanceArn",
-    "LastRefreshTimestamp", "RecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "RecommendationOptionsEstimatedMonthlySavingsValue", "RecommendationOptionsInstanceType",
-    "RecommendationOptionsPerformanceRisk", "RecommendationOptionsSavingsOpportunityPercentage", "Tags",
+    "LastRefreshTimestamp", "LookbackPeriodInDays",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrency",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "RecommendationOptionsEstimatedMonthlySavingsValue",
+    "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts", "RecommendationOptionsInstanceType",
+    "RecommendationOptionsPerformanceRisk", "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    "RecommendationOptionsSavingsOpportunityPercentage", "Tags",
   ] satisfies readonly ExportableInstanceField[]),
   ECS_SERVICE: Object.freeze([
     "AccountId", "CurrentPerformanceRisk", "CurrentServiceConfigurationCpu", "CurrentServiceConfigurationMemory",
     "CurrentServiceConfigurationTaskDefinitionArn", "Finding", "FindingReasonCodes", "LastRefreshTimestamp",
-    "LaunchType", "RecommendationOptionsCpu", "RecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "RecommendationOptionsEstimatedMonthlySavingsValue", "RecommendationOptionsMemory",
+    "LaunchType", "LookbackPeriodInDays", "RecommendationOptionsCpu",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrency",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "RecommendationOptionsEstimatedMonthlySavingsValue",
+    "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts", "RecommendationOptionsMemory",
+    "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
     "RecommendationOptionsSavingsOpportunityPercentage", "ServiceArn", "Tags",
   ] satisfies readonly ExportableECSServiceField[]),
   IDLE_RESOURCE: Object.freeze([
-    "AccountId", "Finding", "FindingDescription", "LastRefreshTimestamp", "ResourceArn", "ResourceId",
+    "AccountId", "Finding", "FindingDescription", "LastRefreshTimestamp", "LookbackPeriodInDays",
+    "ResourceArn", "ResourceId",
     "ResourceType", "SavingsOpportunity", "SavingsOpportunityAfterDiscount", "Tags",
   ] satisfies readonly ExportableIdleField[]),
   LAMBDA_FUNCTION: Object.freeze([
     "AccountId", "CurrentConfigurationMemorySize", "CurrentConfigurationTimeout", "CurrentPerformanceRisk",
     "Finding", "FindingReasonCodes", "FunctionArn", "FunctionVersion", "LastRefreshTimestamp",
-    "RecommendationOptionsConfigurationMemorySize", "RecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "RecommendationOptionsEstimatedMonthlySavingsValue", "RecommendationOptionsSavingsOpportunityPercentage", "Tags",
+    "LookbackPeriodInDays", "RecommendationOptionsConfigurationMemorySize",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrency",
+    "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "RecommendationOptionsEstimatedMonthlySavingsValue",
+    "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+    "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    "RecommendationOptionsSavingsOpportunityPercentage", "Tags",
   ] satisfies readonly ExportableLambdaFunctionField[]),
   LICENSE: Object.freeze([
     "AccountId", "CurrentLicenseConfigurationInstanceType", "CurrentLicenseConfigurationLicenseEdition",
     "CurrentLicenseConfigurationLicenseModel", "CurrentLicenseConfigurationLicenseName",
     "CurrentLicenseConfigurationLicenseVersion", "CurrentLicenseConfigurationNumberOfCores",
     "CurrentLicenseConfigurationOperatingSystem", "Finding", "FindingReasonCodes", "LastRefreshTimestamp",
+    "LookbackPeriodInDays",
     "RecommendationOptionsEstimatedMonthlySavingsCurrency", "RecommendationOptionsEstimatedMonthlySavingsValue",
     "RecommendationOptionsLicenseEdition", "RecommendationOptionsLicenseModel", "RecommendationOptionsOperatingSystem",
     "RecommendationOptionsSavingsOpportunityPercentage", "ResourceArn", "Tags",
@@ -119,15 +143,28 @@ export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION = Object.freeze(
     "CurrentStorageConfigurationStorageType", "DBClusterIdentifier", "Engine", "EngineVersion", "InstanceFinding",
     "InstanceFindingReasonCodes", "InstanceRecommendationOptionsDBInstanceClass",
     "InstanceRecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "InstanceRecommendationOptionsEstimatedMonthlySavingsValue", "InstanceRecommendationOptionsPerformanceRisk",
-    "InstanceRecommendationOptionsSavingsOpportunityPercentage", "LastRefreshTimestamp", "MultiAZDBInstance",
+    "InstanceRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "InstanceRecommendationOptionsEstimatedMonthlySavingsValue",
+    "InstanceRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+    "InstanceRecommendationOptionsPerformanceRisk", "InstanceRecommendationOptionsRank",
+    "InstanceRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    "InstanceRecommendationOptionsSavingsOpportunityPercentage", "LastRefreshTimestamp", "LookbackPeriodInDays",
+    "MultiAZDBInstance",
     "PromotionTier", "ResourceArn", "StorageFinding", "StorageFindingReasonCodes",
     "StorageRecommendationOptionsAllocatedStorage", "StorageRecommendationOptionsEstimatedMonthlySavingsCurrency",
-    "StorageRecommendationOptionsEstimatedMonthlySavingsValue", "StorageRecommendationOptionsIOPS",
-    "StorageRecommendationOptionsMaxAllocatedStorage", "StorageRecommendationOptionsSavingsOpportunityPercentage",
+    "StorageRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+    "StorageRecommendationOptionsEstimatedMonthlySavingsValue",
+    "StorageRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts", "StorageRecommendationOptionsIOPS",
+    "StorageRecommendationOptionsMaxAllocatedStorage", "StorageRecommendationOptionsRank",
+    "StorageRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    "StorageRecommendationOptionsSavingsOpportunityPercentage",
     "StorageRecommendationOptionsStorageThroughput", "StorageRecommendationOptionsStorageType", "Tags",
   ] satisfies readonly ExportableRDSDBField[]),
 }) satisfies Readonly<Record<ExportFamily, readonly string[]>>;
+
+/** @deprecated Use the materialization projection name for new code. */
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION =
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION;
 
 type ExportCommand =
   | ExportAutoScalingGroupRecommendationsCommand
@@ -417,7 +454,7 @@ function validateAttempt(value: unknown): LaunchAttempt {
         fieldIndex > 0 && target.request.fieldsToExport[fieldIndex - 1]! >= field)
       || !sameStrings(
         target.request.fieldsToExport as string[],
-        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION[family],
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION[family],
       )
       || !isRecord(target.request.s3DestinationConfig)
       || !exactKeys(target.request.s3DestinationConfig, ["bucket", "keyPrefix"])
@@ -537,56 +574,56 @@ function commandFor(target: LaunchTarget): ExportCommand {
     case "AUTO_SCALING_GROUP":
       return new ExportAutoScalingGroupRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.AUTO_SCALING_GROUP],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.AUTO_SCALING_GROUP],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "EBS_VOLUME":
       return new ExportEBSVolumeRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.EBS_VOLUME],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.EBS_VOLUME],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "EC2_INSTANCE":
       return new ExportEC2InstanceRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.EC2_INSTANCE],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.EC2_INSTANCE],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "ECS_SERVICE":
       return new ExportECSServiceRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.ECS_SERVICE],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.ECS_SERVICE],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "IDLE_RESOURCE":
       return new ExportIdleRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.IDLE_RESOURCE],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.IDLE_RESOURCE],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "LAMBDA_FUNCTION":
       return new ExportLambdaFunctionRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.LAMBDA_FUNCTION],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.LAMBDA_FUNCTION],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "LICENSE":
       return new ExportLicenseRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.LICENSE],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.LICENSE],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });
     case "RDS_DATABASE":
       return new ExportRDSDatabaseRecommendationsCommand({
         ...destination,
-        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION.RDS_DATABASE],
+        fieldsToExport: [...COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION.RDS_DATABASE],
         fileFormat: "Csv",
         includeMemberAccounts: true,
       });

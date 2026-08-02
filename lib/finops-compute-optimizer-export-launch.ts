@@ -12,6 +12,7 @@ import { canonicalJson } from "./canonical-json.ts";
 import {
   COMPUTE_OPTIMIZER_EXPORT_FAMILIES,
   COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG,
+  COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION,
   validateComputeOptimizerFieldsToExport,
 } from "./finops-compute-optimizer-export-field-catalog.ts";
 import type {
@@ -403,7 +404,7 @@ export async function createComputeOptimizerExportLaunchAttempt(
     const fieldsToExport = validateComputeOptimizerFieldsToExport(
       exportFamily,
       operation,
-      COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG[exportFamily].minimumProjection,
+      COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION[exportFamily],
     );
     if (fieldsToExport.length > COMPUTE_OPTIMIZER_EXPORT_LAUNCH_BOUNDS.maximumFieldsPerTarget) {
       reject("LIMIT_EXCEEDED");

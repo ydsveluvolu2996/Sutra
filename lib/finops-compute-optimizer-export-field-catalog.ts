@@ -383,6 +383,61 @@ export const COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG: Readonly<
   ),
 });
 
+/**
+ * The single server-owned projection used for new export materializations.
+ *
+ * `minimumProjection` remains the capability floor accepted by the immutable
+ * plan verifier. This projection additionally pins fields that the mapper
+ * requires for temporal evidence and independently retained discount/rank
+ * channels. Keeping the union here prevents launch and mapping contracts from
+ * evolving independently.
+ */
+function materializationProjection(
+  family: ComputeOptimizerExportFamily,
+): readonly string[] {
+  const additions = ["LookbackPeriodInDays"];
+  if (["EC2_INSTANCE", "AUTO_SCALING_GROUP", "EBS_VOLUME", "LAMBDA_FUNCTION", "ECS_SERVICE"]
+    .includes(family)) {
+    additions.push(
+      "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+      "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+      "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    );
+  }
+  if (family === "RDS_DATABASE") {
+    additions.push(
+      "InstanceRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+      "InstanceRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+      "InstanceRecommendationOptionsRank",
+      "InstanceRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+      "StorageRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
+      "StorageRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
+      "StorageRecommendationOptionsRank",
+      "StorageRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
+    );
+  }
+  const catalog = COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG[family];
+  const result = [...new Set([...catalog.minimumProjection, ...additions])]
+    .sort(compareCodePoints);
+  if (result.some((value) => !catalog.fieldsToExport.includes(value))) {
+    throw new Error("Materialization projection is outside its Compute Optimizer allowlist");
+  }
+  return Object.freeze(result);
+}
+
+export const COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION: Readonly<
+  Record<ComputeOptimizerExportFamily, readonly string[]>
+> = Object.freeze({
+  EC2_INSTANCE: materializationProjection("EC2_INSTANCE"),
+  AUTO_SCALING_GROUP: materializationProjection("AUTO_SCALING_GROUP"),
+  EBS_VOLUME: materializationProjection("EBS_VOLUME"),
+  LAMBDA_FUNCTION: materializationProjection("LAMBDA_FUNCTION"),
+  ECS_SERVICE: materializationProjection("ECS_SERVICE"),
+  LICENSE: materializationProjection("LICENSE"),
+  RDS_DATABASE: materializationProjection("RDS_DATABASE"),
+  IDLE_RESOURCE: materializationProjection("IDLE_RESOURCE"),
+});
+
 export const COMPUTE_OPTIMIZER_EXPORT_FIELD_EVIDENCE = Object.freeze({
   retrievedOn: "2026-08-02",
   authority: "AWS Compute Optimizer API Reference fieldsToExport Valid Values",

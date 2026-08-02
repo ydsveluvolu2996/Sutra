@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG } from
+import {
+  COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG,
+  COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION,
+} from
   "../lib/finops-compute-optimizer-export-field-catalog.ts";
 import {
   COMPUTE_OPTIMIZER_EXPORT_MAPPER_DISCLOSURE,
@@ -151,31 +154,7 @@ function rankedColumn(
 }
 
 function projection(family: ComputeOptimizerExportFamily): readonly string[] {
-  const additions = ["LookbackPeriodInDays"];
-  if (["EC2_INSTANCE", "AUTO_SCALING_GROUP", "EBS_VOLUME", "LAMBDA_FUNCTION", "ECS_SERVICE"]
-    .includes(family)) {
-    additions.push(
-      "RecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "RecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "RecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-    );
-  }
-  if (family === "RDS_DATABASE") {
-    additions.push(
-      "InstanceRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "InstanceRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "InstanceRecommendationOptionsRank",
-      "InstanceRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-      "StorageRecommendationOptionsEstimatedMonthlySavingsCurrencyAfterDiscounts",
-      "StorageRecommendationOptionsEstimatedMonthlySavingsValueAfterDiscounts",
-      "StorageRecommendationOptionsRank",
-      "StorageRecommendationOptionsSavingsOpportunityAfterDiscountsPercentage",
-    );
-  }
-  return [...new Set([
-    ...COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG[family].minimumProjection,
-    ...additions,
-  ])].sort();
+  return COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION[family];
 }
 
 const INTEGER_FIELDS = new Set([
@@ -509,6 +488,28 @@ for (const family of FAMILIES) {
         assert.equal(before.percentageBasisPoints, 1234);
       }
     }
+  });
+
+  test(`${family} blocks projections missing temporal evidence or widening materialization`, async () => {
+    const missingLookback = await fixture(family, {
+      projectedFields: projection(family).filter((field) => field !== "LookbackPeriodInDays"),
+    });
+    await assert.rejects(
+      mapComputeOptimizerExportTarget(missingLookback.bundle, missingLookback.plan),
+      hasError("PROJECTION_MISMATCH"),
+    );
+
+    const canonical = projection(family);
+    const extra = COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG[family].fieldsToExport
+      .find((field) => !canonical.includes(field));
+    assert.ok(extra, `${family} must retain an official field outside the materialization contract`);
+    const widened = await fixture(family, {
+      projectedFields: [...canonical, extra].sort(),
+    });
+    await assert.rejects(
+      mapComputeOptimizerExportTarget(widened.bundle, widened.plan),
+      hasError("PROJECTION_MISMATCH"),
+    );
   });
 }
 
