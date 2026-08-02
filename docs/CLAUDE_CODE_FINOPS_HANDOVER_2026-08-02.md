@@ -343,6 +343,42 @@ PATH=/Users/Shared/sutra-codex/tools/cfnlint-venv/bin:$PATH pnpm lint:cloudforma
 
 The `6a9b4f5` check proves that the complete execution ledger is an ancestor; the branch tip may legitimately be newer. If the working tree is dirty before Claude edits it, preserve and identify those changes instead of resetting, overwriting or folding them into the next vertical.
 
+Root `CLAUDE.md` is the mandatory repository instruction contract. Before editing a partial dashboard, create and complete the pre-edit sections of `docs/FINOPS_VERTICAL_CLOSURE_TEMPLATE.md`. This worksheet is the no-duplicate-work control: every discovered asset must be classified as reuse, repair, missing or contractually unavailable before implementation begins.
+
+## No-rework execution contract
+
+Zero rework cannot be guaranteed in software, especially before controlled AWS evidence exists. The following controls are mandatory to minimize it and to prevent avoidable duplicate or conflicting work:
+
+1. **Audit before edit:** search every alias for the dashboard across `app`, `lib`, `db`, collector, infrastructure, tests and documentation. Complete the closure worksheet before changing code.
+2. **Freeze proven work:** files classified `REUSE_AS_IS` do not change unless a named requirement or failing test proves the need. Record that proof in the worksheet first.
+3. **Bound the edit set:** list vertical-specific and shared files before work. If a new file becomes necessary, update the worksheet with the reason before touching it.
+4. **One vertical to G6:** do not begin another dashboard until the current feature and its tracker/evidence update are committed, pushed and remote-verified.
+5. **One shared-file integrator:** parallel agents may touch only disjoint vertical-specific files. A single integrator owns dependency manifests/lockfile, role broker, local server, daily scheduler, migration registries, permission successors, central allowlists and program trackers.
+6. **Sequential IAM chain:** `.8.12` through `.8.19` are integrated strictly in order by the same integrator. Never build successors in parallel against different predecessors.
+7. **No opportunistic cleanup:** no refactors, renames, formatting sweeps or unrelated dependency upgrades during closure. Record non-blocking cleanup separately.
+8. **Test at the final feature SHA:** interrupted-agent and pre-integration results establish a starting point only. Candidate evidence comes from the exact pushed feature commit.
+9. **Two-commit close:** push implementation first, then evidence/tracker promotion. This makes rollback and review precise and avoids marking unpushed code complete.
+10. **Fail closed on uncertainty:** conflicting schemas, unpublished dimensions, missing provider evidence or unclear permission scope remain unavailable until authoritative proof exists; never guess to finish a row.
+
+The following shared files are an exclusive integration lane and must never be edited by multiple agents concurrently:
+
+```text
+package.json
+pnpm-lock.yaml
+services/aws-collector/src/role-broker.ts
+services/aws-collector/src/local-server.ts
+lib/finops-daily.ts
+db/runtime-migrations.ts
+db/postgres-runtime-migrations.ts
+scripts/postgres-migrate.mjs
+infrastructure/customer-onboarding-role-standard-2026-08.*.yaml
+central permission catalogs and explicit version allowlists
+docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md
+docs/CLAUDE_CODE_FINOPS_HANDOVER_2026-08-02.md
+```
+
+An agent that finishes vertical-specific work hands the integrator its starting SHA, asset inventory, bounded file list, exact tests/results, unresolved gaps and commit SHA. The integrator reuses that commit, performs shared wiring once, and alone promotes the tracker row.
+
 ## Canonical file and responsibility map
 
 | Concern | Canonical locations | Required handling |
