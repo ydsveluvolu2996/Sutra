@@ -163,6 +163,8 @@ export function ComputeOptimizerReportView({ payload, filters, onFiltersChange }
 
 export function FinopsComputeOptimizerDashboard({ connectionId }: { readonly connectionId: string | null }) {
   const [filters, setFilters] = useState(EMPTY);
+  const [activationPending, setActivationPending] = useState(false);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [state, setState] = useState<{ readonly connectionId: string | null; readonly payload: Payload | null; readonly error: string | null }>(
     { connectionId: null, payload: null, error: null });
   const query = useMemo(() => {
@@ -182,14 +184,44 @@ export function FinopsComputeOptimizerDashboard({ connectionId }: { readonly con
       }).then((payload) => setState({ connectionId, payload, error: null }))
       .catch((error: unknown) => { if (!controller.signal.aborted) setState({ connectionId, payload: null, error: error instanceof Error ? error.message : "Request failed" }); });
     return () => controller.abort();
-  }, [connectionId, query]);
+  }, [connectionId, query, refreshVersion]);
+  const activate = async (): Promise<void> => {
+    if (connectionId === null || activationPending) return;
+    setActivationPending(true);
+    try {
+      const response = await fetch("/api/v1/finops/compute-optimizer", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ connectionId, enabled: true }),
+      });
+      if (!response.ok) throw new Error("Compute Optimizer capability verification failed");
+      setState({ connectionId, payload: null, error: null });
+      setRefreshVersion((version) => version + 1);
+    } catch (error) {
+      setState({
+        connectionId,
+        payload: null,
+        error: error instanceof Error ? error.message : "Capability verification failed",
+      });
+    } finally {
+      setActivationPending(false);
+    }
+  };
   if (state.connectionId === connectionId && state.payload?.dashboard !== null && state.payload !== null) {
     return <ComputeOptimizerReportView payload={state.payload as Payload & { readonly dashboard: ComputeOptimizerExactDashboard }} filters={filters} onFiltersChange={setFilters} />;
   }
   const status = connectionId === null ? "Connect an active AWS trust-role account."
     : state.connectionId === connectionId && state.error !== null ? state.error
       : state.connectionId === connectionId && state.payload?.sourceState === "EVIDENCE_KEY_UNAVAILABLE" ? "Accepted evidence exists, but this runtime cannot authenticate its encrypted regional plans."
-        : state.connectionId === connectionId && state.payload?.dashboard === null ? "No accepted exact all-Region export generation exists yet."
+        : state.connectionId === connectionId && state.payload?.sourceState === "COLLECTING" ? "Exact all-Region export collection is in progress. Readiness appears only after a durable accepted generation head is committed."
+          : state.connectionId === connectionId && state.payload?.sourceState === "COLLECTION_FAILED" ? "The latest durable exact-export activation failed. Failed evidence did not replace an accepted generation."
+            : state.connectionId === connectionId && state.payload?.sourceState === "EXPORT_CONFIGURATION_REQUIRED" ? "Verify and enable the standard-2026-08.5 regional Compute Optimizer export capability to begin collection."
+              : state.connectionId === connectionId && state.payload?.dashboard === null ? "No accepted exact all-Region export generation exists yet."
           : "Loading exact Compute Optimizer evidence…";
-  return <section className={styles.root}><div role={state.error === null ? "status" : "alert"} className={state.error === null ? styles.warning : styles.error}>{status}</div><ComputeOptimizerOfficialDefinitionPanel definition={state.payload?.officialDefinition ?? FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION} /></section>;
+  const configurationRequired = connectionId !== null
+    && state.connectionId === connectionId
+    && state.payload?.sourceState === "EXPORT_CONFIGURATION_REQUIRED";
+  return <section className={styles.root}><div role={state.error === null ? "status" : "alert"} className={state.error === null ? styles.warning : styles.error}>{status}{configurationRequired ? <div><button type="button" disabled={activationPending} onClick={() => { void activate(); }}>{activationPending ? "Verifying capability…" : "Verify and enable exact exports"}</button></div> : null}</div><ComputeOptimizerOfficialDefinitionPanel definition={state.payload?.officialDefinition ?? FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION} /></section>;
 }

@@ -41,11 +41,22 @@ interface ExactRouteConnection {
   readonly status: string;
 }
 
+export interface ComputeOptimizerExactCollectionState {
+  readonly state: "UNAVAILABLE" | "COLLECTING" | "FAILED";
+  readonly activationId: string | null;
+  readonly scheduledWindow: string | null;
+  readonly updatedAtIso: string | null;
+}
+
 export interface ComputeOptimizerExactRouteDependencies<TAuth extends ExactRouteAuth = ExactRouteAuth> {
   readonly requireSession: (request: Request) => Promise<TAuth>;
   readonly getConnection: (organizationId: string, connectionId: string) => Promise<ExactRouteConnection | null>;
   readonly assertRead: (auth: TAuth, customerId: string) => void;
   readonly getHeadReference: (scope: ComputeOptimizerExactGenerationScope) => Promise<ComputeOptimizerAcceptedHeadReference | null>;
+  /** Durable capability/activation projection; never derived from queue submission. */
+  readonly getCollectionState: (
+    scope: ComputeOptimizerExactGenerationScope,
+  ) => Promise<ComputeOptimizerExactCollectionState>;
   readonly getStoredPlanSet: (scope: ComputeOptimizerExactGenerationScope, planSetId: string) => Promise<StoredComputeOptimizerExportPlanSet | null>;
   readonly getStoredPlan: (scope: ComputeOptimizerExactGenerationScope, planId: string) => Promise<StoredComputeOptimizerExportPlan | null>;
   readonly createEnvelope: () => Promise<ComputeOptimizerExportPlanEnvelope>;
@@ -114,13 +125,30 @@ export function createComputeOptimizerExactGetHandler<TAuth extends ExactRouteAu
       dependencies.assertRead(auth, connection.customerId);
       const scope = Object.freeze({ organizationId: auth.subject.orgId, customerId: connection.customerId, connectionId: connection.id });
       const head = await dependencies.getHeadReference(scope);
-      if (head === null) return jsonResponse({
-        schema: "sutra.finops-compute-optimizer.v2", connectionId: connection.id,
-        sourceState: "EXPORT_CONFIGURATION_REQUIRED", dashboard: null,
-        officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
-        collection: Object.freeze({ available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" }),
-        limitations: Object.freeze(["Discovery and direct recommendation APIs are not substituted for accepted organization S3 export evidence."]),
-      });
+      if (head === null) {
+        const collection = await dependencies.getCollectionState(scope);
+        if (collection.state === "UNAVAILABLE") return jsonResponse({
+          schema: "sutra.finops-compute-optimizer.v2", connectionId: connection.id,
+          sourceState: "EXPORT_CONFIGURATION_REQUIRED", dashboard: null,
+          officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+          collection: Object.freeze({ available: true, ...collection }),
+          limitations: Object.freeze(["A verified standard-2026-08.5 regional capability is required before exact organization exports can be collected."]),
+        });
+        if (collection.state === "FAILED") return jsonResponse({
+          schema: "sutra.finops-compute-optimizer.v2", connectionId: connection.id,
+          sourceState: "COLLECTION_FAILED", dashboard: null,
+          officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+          collection: Object.freeze({ available: true, ...collection }),
+          limitations: Object.freeze(["The latest durable activation failed without advancing an accepted exact-evidence head."]),
+        });
+        return jsonResponse({
+          schema: "sutra.finops-compute-optimizer.v2", connectionId: connection.id,
+          sourceState: "COLLECTING", dashboard: null,
+          officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+          collection: Object.freeze({ available: true, ...collection }),
+          limitations: Object.freeze(["Exact export collection is in progress; readiness is reported only after an accepted generation head is persisted."]),
+        });
+      }
       const storedPlanSet = await dependencies.getStoredPlanSet(scope, head.planSetId);
       if (storedPlanSet === null || storedPlanSet.contentSha256 !== head.planSetContentSha256) fail("STORED_EVIDENCE_INVALID", 500);
       const storedPlans = await Promise.all(storedPlanSet.planIds.map((planId) => dependencies.getStoredPlan(scope, planId)));
@@ -150,7 +178,8 @@ export function createComputeOptimizerExactGetHandler<TAuth extends ExactRouteAu
         dashboard, officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
         evidence: Object.freeze({ acceptedHead: head, planIds: planSet.planIds,
           schemaAssurances: generation.schemaAssurances, unresolvedEvidence: generation.unresolvedEvidence }),
-        collection: Object.freeze({ available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" }),
+        collection: Object.freeze({ available: true, state: "READY",
+          acceptedGenerationId: head.generationId }),
       });
     } catch (error) {
       return errorResponse(error);

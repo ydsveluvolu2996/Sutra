@@ -34,7 +34,8 @@ const SCHEMA_ASSURANCES = new Set(["OFFICIAL_USER_GUIDE_CSV_LABELS", "API_FIELD_
 export interface ComputeOptimizerExactApiPayload {
   readonly schema: "sutra.finops-compute-optimizer.v2";
   readonly connectionId: string;
-  readonly sourceState: "READY" | "STALE" | "EXPORT_CONFIGURATION_REQUIRED" | "EVIDENCE_KEY_UNAVAILABLE";
+  readonly sourceState: "READY" | "STALE" | "COLLECTING" | "COLLECTION_FAILED"
+    | "EXPORT_CONFIGURATION_REQUIRED" | "EVIDENCE_KEY_UNAVAILABLE";
   readonly source?: "AWS_COMPUTE_OPTIMIZER_EXACT_ORGANIZATION_S3_EXPORT";
   readonly freshness?: { readonly dataThroughAt: string; readonly ageHours: number; readonly staleAfterHours: 48 };
   readonly dashboard: ComputeOptimizerExactDashboard | null;
@@ -240,11 +241,31 @@ function unresolvedEvidence(value: unknown, regions?: ReadonlySet<string>, famil
 }
 
 function collection(value: unknown, sourceState: unknown): void {
-  const result = record(value); exact(result, ["available", "state"]);
-  if (result.available !== false) reject();
-  const expected = sourceState === "EVIDENCE_KEY_UNAVAILABLE"
-    ? "EXACT_EVIDENCE_KEY_NOT_CONFIGURED" : "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED";
-  if (result.state !== expected) reject();
+  const result = record(value);
+  if (sourceState === "READY" || sourceState === "STALE") {
+    exact(result, ["available", "state", "acceptedGenerationId"]);
+    if (result.available !== true || result.state !== "READY"
+      || typeof result.acceptedGenerationId !== "string"
+      || !/^cog_[a-f0-9]{64}$/u.test(result.acceptedGenerationId)) reject();
+    return;
+  }
+  if (sourceState === "EVIDENCE_KEY_UNAVAILABLE") {
+    exact(result, ["available", "state"]);
+    if (result.available !== false || result.state !== "EXACT_EVIDENCE_KEY_NOT_CONFIGURED") reject();
+    return;
+  }
+  exact(result, ["available", "state", "activationId", "scheduledWindow", "updatedAtIso"]);
+  if (result.available !== true
+    || (sourceState === "EXPORT_CONFIGURATION_REQUIRED" && result.state !== "UNAVAILABLE")
+    || (sourceState === "COLLECTING" && result.state !== "COLLECTING")
+    || (sourceState === "COLLECTION_FAILED" && result.state !== "FAILED")
+    || (result.activationId !== null
+      && (typeof result.activationId !== "string"
+        || !/^comra_[a-f0-9]{64}$/u.test(result.activationId)))
+    || (result.scheduledWindow !== null
+      && (typeof result.scheduledWindow !== "string"
+        || !/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u.test(result.scheduledWindow)))
+    || (result.updatedAtIso !== null && iso(result.updatedAtIso) !== result.updatedAtIso)) reject();
 }
 
 function evidence(value: unknown, generation: Readonly<Record<string, unknown>>): void {
@@ -348,11 +369,13 @@ export function parseComputeOptimizerExactApiPayload(value: unknown, expectedCon
   const result = record(value);
   if (result.schema !== "sutra.finops-compute-optimizer.v2"
     || result.connectionId !== expectedConnectionId
-    || !["READY", "STALE", "EXPORT_CONFIGURATION_REQUIRED", "EVIDENCE_KEY_UNAVAILABLE"].includes(String(result.sourceState))
+    || !["READY", "STALE", "COLLECTING", "COLLECTION_FAILED",
+      "EXPORT_CONFIGURATION_REQUIRED", "EVIDENCE_KEY_UNAVAILABLE"].includes(String(result.sourceState))
     || !hasExactComputeOptimizerOfficialDefinition(result.officialDefinition)) reject();
   if (result.dashboard === null) {
     exact(result, ["schema", "connectionId", "sourceState", "dashboard", "officialDefinition", "collection", "limitations"]);
-    if (!["EXPORT_CONFIGURATION_REQUIRED", "EVIDENCE_KEY_UNAVAILABLE"].includes(String(result.sourceState))) reject();
+    if (!["COLLECTING", "COLLECTION_FAILED", "EXPORT_CONFIGURATION_REQUIRED",
+      "EVIDENCE_KEY_UNAVAILABLE"].includes(String(result.sourceState))) reject();
     collection(result.collection, result.sourceState); strings(result.limitations, 16);
   } else {
     exact(result, ["schema", "connectionId", "sourceState", "source", "freshness", "dashboard", "officialDefinition", "evidence", "collection"]);

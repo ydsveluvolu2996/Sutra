@@ -7,6 +7,9 @@ import {
   ensureDueScheduledReportsEnqueued,
   ensureDueVulnFeedRefreshEnqueued,
   ensureRetentionSweepsEnqueued,
+  dispatchComputeOptimizerOutboxTick,
+  recoverComputeOptimizerActivationTick,
+  scheduleComputeOptimizerDailyTick,
   scheduleAwsNewsFeedsTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
@@ -21,6 +24,8 @@ import {
 import { runDueBackgroundJobs } from "../../../../../lib/background-job-runner";
 import { verifyInternalToken } from "../../../../../lib/internal-auth";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
+import { createComputeOptimizerActivationBoundary } from
+  "../../../../../lib/finops-compute-optimizer-activation-jobs";
 
 export const dynamic = "force-dynamic";
 
@@ -72,11 +77,33 @@ export async function POST(request: Request): Promise<Response> {
     // window. The production composition owns the pinned egress and replay
     // ledger; this system tick supplies no tenant IDs or source URLs.
     const awsNewsFeeds = await scheduleAwsNewsFeedsTick();
+    // Compute Optimizer is intentionally two-phase. Seal/replay the daily
+    // activation, recover discovery-gated runs, then publish only durable
+    // materializer outbox entries. One absolute deadline covers all three.
+    const computeOptimizerBoundary = createComputeOptimizerActivationBoundary();
+    const computeOptimizerSchedule = await scheduleComputeOptimizerDailyTick(
+      computeOptimizerBoundary,
+    );
+    const computeOptimizerRecovery = await recoverComputeOptimizerActivationTick(
+      computeOptimizerBoundary,
+    );
+    const computeOptimizerOutbox = await dispatchComputeOptimizerOutboxTick(
+      computeOptimizerBoundary,
+    );
     // A hosted inventory job can legitimately use most of the broker's
     // five-minute bound. Process at most one job of each kind per 15-second
     // sidecar tick so the loopback request itself remains bounded.
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 1 });
-    return jsonResponse({ ...result, platformUptime, awsNewsFeeds });
+    return jsonResponse({
+      ...result,
+      platformUptime,
+      awsNewsFeeds,
+      computeOptimizer: {
+        schedule: computeOptimizerSchedule,
+        recovery: computeOptimizerRecovery,
+        outbox: computeOptimizerOutbox,
+      },
+    });
   } catch (error) {
     return errorResponse(error);
   }

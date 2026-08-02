@@ -108,6 +108,7 @@ import postgresFinopsComputeOptimizerExportPlanSetsSql from "../postgres/migrati
 import postgresFinopsComputeOptimizerExportPlanTimestampGuardSql from "../postgres/migrations/0109_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
 import postgresFinopsComputeOptimizerExactGenerationsSql from "../postgres/migrations/0110_finops_compute_optimizer_exact_generations.sql?raw";
 import postgresComputeOptimizerExportLaunchLedgerSql from "../postgres/migrations/0111_compute_optimizer_export_launch_ledger.sql?raw";
+import postgresFinopsComputeOptimizerActivationOutboxSql from "../postgres/migrations/0112_finops_compute_optimizer_activation_outbox.sql?raw";
 import postgresFinopsAwsNewsFeedsReplaySql from "../postgres/migrations/0113_finops_aws_news_feeds_replay.sql?raw";
 
 const migrations = [
@@ -221,6 +222,7 @@ const migrations = [
   { id: "0109_finops_compute_optimizer_export_plan_timestamp_guard", source: postgresFinopsComputeOptimizerExportPlanTimestampGuardSql },
   { id: "0110_finops_compute_optimizer_exact_generations", source: postgresFinopsComputeOptimizerExactGenerationsSql },
   { id: "0111_compute_optimizer_export_launch_ledger", source: postgresComputeOptimizerExportLaunchLedgerSql },
+  { id: "0112_finops_compute_optimizer_activation_outbox", source: postgresFinopsComputeOptimizerActivationOutboxSql },
   { id: "0113_finops_aws_news_feeds_replay", source: postgresFinopsAwsNewsFeedsReplaySql },
 ] as const;
 

@@ -123,6 +123,7 @@ const migrationFiles = [
   "0109_finops_compute_optimizer_export_plan_timestamp_guard.sql",
   "0110_finops_compute_optimizer_exact_generations.sql",
   "0111_compute_optimizer_export_launch_ledger.sql",
+  "0112_finops_compute_optimizer_activation_outbox.sql",
   "0113_finops_aws_news_feeds_replay.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {

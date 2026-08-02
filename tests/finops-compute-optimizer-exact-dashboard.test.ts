@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { COMPUTE_OPTIMIZER_EXPORT_FIELD_CATALOG } from
@@ -287,7 +288,11 @@ test("browser parser accepts the exact payload and rejects malformed evidence", 
       schemaAssurances: report.generation.schemaAssurances,
       unresolvedEvidence: report.generation.unresolvedEvidence,
     },
-    collection: { available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" },
+    collection: {
+      available: true,
+      state: "READY",
+      acceptedGenerationId: report.generation.generationId,
+    },
   };
   assert.equal(parseComputeOptimizerExactApiPayload(payload, SCOPE.connectionId).dashboard?.schemaVersion,
     "sutra.finops-compute-optimizer-exact-dashboard.v1");
@@ -351,4 +356,44 @@ test("browser parser accepts the exact payload and rejects malformed evidence", 
   const oversizedSource = structuredClone(payload);
   (oversizedSource.dashboard.rows[0]!.selectedSavings[0] as unknown as Record<string, unknown>).amountMicros = "18446744073709551614";
   rejects(oversizedSource);
+});
+
+test("browser parser preserves durable unavailable, collecting and failed states without false ready", () => {
+  for (const [sourceState, collectionState] of [
+    ["EXPORT_CONFIGURATION_REQUIRED", "UNAVAILABLE"],
+    ["COLLECTING", "COLLECTING"],
+    ["COLLECTION_FAILED", "FAILED"],
+  ] as const) {
+    const payload = {
+      schema: "sutra.finops-compute-optimizer.v2",
+      connectionId: SCOPE.connectionId,
+      sourceState,
+      dashboard: null,
+      officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+      collection: {
+        available: true,
+        state: collectionState,
+        activationId: collectionState === "UNAVAILABLE" ? null : `comra_${"b".repeat(64)}`,
+        scheduledWindow: collectionState === "UNAVAILABLE" ? null : WINDOW,
+        updatedAtIso: collectionState === "UNAVAILABLE" ? null : "2026-08-02T12:00:00.000Z",
+      },
+      limitations: ["Durable state only"],
+    };
+    const parsed = parseComputeOptimizerExactApiPayload(payload, SCOPE.connectionId);
+    assert.equal(parsed.sourceState, sourceState);
+    assert.equal(parsed.dashboard, null);
+  }
+});
+
+test("dashboard activation control sends identity-only intent and explicitly renders every durable state", async () => {
+  const source = await readFile(new URL(
+    "../app/costs/finops-compute-optimizer-dashboard.tsx",
+    import.meta.url,
+  ), "utf8");
+  assert.match(source, /JSON\.stringify\(\{ connectionId, enabled: true \}\)/u);
+  assert.doesNotMatch(source, /JSON\.stringify\(\{[^}]*regions/iu);
+  assert.match(source, /sourceState === "EXPORT_CONFIGURATION_REQUIRED"/u);
+  assert.match(source, /sourceState === "COLLECTING"/u);
+  assert.match(source, /sourceState === "COLLECTION_FAILED"/u);
+  assert.match(source, /Verify and enable exact exports/u);
 });

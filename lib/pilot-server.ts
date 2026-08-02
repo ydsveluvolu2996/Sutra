@@ -1286,6 +1286,9 @@ export async function runFinopsSourceCollection(input: {
   readonly sourceId: FinopsSourceId;
   readonly accountId: string;
   readonly partition: AwsPartition;
+}, context?: {
+  readonly signal: AbortSignal;
+  readonly deadlineAtMs: number;
 }): Promise<FinopsSourceCollectionResult> {
   if (
     !FINOPS_SOURCE_IDENTIFIER.test(input.tenantId) ||
@@ -1302,17 +1305,55 @@ export async function runFinopsSourceCollection(input: {
       "The FinOps source collection identity is invalid",
     );
   }
-  const value = await brokerFetch<unknown>(
-    `/v1/connections/${input.connectionId}/finops-source`,
-    "POST",
-    {
-      tenantId: input.tenantId,
-      connectionId: input.connectionId,
-      jobId: input.jobId,
-      contractId: input.contractId,
-    },
-    90_000,
-  );
+  if (context !== undefined && (!(context.signal instanceof AbortSignal)
+    || !Number.isSafeInteger(context.deadlineAtMs))) {
+    throw new PilotServerError(
+      400,
+      "INVALID_INPUT",
+      "The FinOps source collection boundary is invalid",
+    );
+  }
+  const remainingMs = context === undefined ? 90_000 : context.deadlineAtMs - Date.now();
+  if (context?.signal.aborted === true || remainingMs <= 0) {
+    throw new PilotServerError(
+      408,
+      "REQUEST_TIMEOUT",
+      "The FinOps source collection deadline elapsed",
+    );
+  }
+  let value: unknown;
+  try {
+    value = (await brokerFetchEnvelope<unknown>(
+      `/v1/connections/${input.connectionId}/finops-source`,
+      "POST",
+      {
+        tenantId: input.tenantId,
+        connectionId: input.connectionId,
+        jobId: input.jobId,
+        contractId: input.contractId,
+      },
+      Math.min(90_000, remainingMs),
+      context?.signal,
+    )).value;
+  } catch (error) {
+    if (context !== undefined
+      && (context.signal.aborted || Date.now() >= context.deadlineAtMs)) {
+      throw new PilotServerError(
+        408,
+        "REQUEST_TIMEOUT",
+        "The FinOps source collection deadline elapsed",
+      );
+    }
+    throw error;
+  }
+  if (context !== undefined
+    && (context.signal.aborted || Date.now() >= context.deadlineAtMs)) {
+    throw new PilotServerError(
+      408,
+      "REQUEST_TIMEOUT",
+      "The FinOps source collection deadline elapsed",
+    );
+  }
   return parseFinopsSourceCollectionResult(value, input);
 }
 

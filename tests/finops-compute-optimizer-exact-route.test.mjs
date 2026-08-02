@@ -20,6 +20,9 @@ function dependencies(overrides = {}) {
     getConnection: async () => ({ id: CONNECTION, customerId: "customer_alpha", sourceKind: "aws_trust_role", status: "active" }),
     assertRead: (auth, customerId) => calls.assert.push([auth.subject.orgId, customerId]),
     getHeadReference: async (scope) => { calls.scopes.push(scope); return null; },
+    getCollectionState: async () => ({
+      state: "UNAVAILABLE", activationId: null, scheduledWindow: null, updatedAtIso: null,
+    }),
     getStoredPlanSet: async (scope) => { calls.scopes.push(scope); return null; },
     getStoredPlan: async (scope) => { calls.scopes.push(scope); return null; },
     createEnvelope: async () => ({}),
@@ -109,9 +112,34 @@ test("immutable head ID produces a consistent ready response and exact tenant sc
   assert.equal(response.status, 200);
   assert.equal(result.sourceState, "READY");
   assert.deepEqual(result.dashboard, { marker: "exact" });
-  assert.deepEqual(result.collection, { available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" });
+  assert.deepEqual(result.collection, {
+    available: true, state: "READY", acceptedGenerationId: generation.generationId,
+  });
   assert.ok(fixture.calls.scopes.every((scope) => scope.organizationId === "org_alpha"
     && scope.customerId === "customer_alpha" && scope.connectionId === CONNECTION));
+});
+
+test("durable activation state drives collecting and failed while only accepted head drives ready", async () => {
+  for (const [durableState, sourceState] of [
+    ["COLLECTING", "COLLECTING"],
+    ["FAILED", "COLLECTION_FAILED"],
+  ]) {
+    const fixture = dependencies({
+      getCollectionState: async () => ({
+        state: durableState,
+        activationId: `comra_${"b".repeat(64)}`,
+        scheduledWindow: "2026-08-02T00:00:00.000Z",
+        updatedAtIso: "2026-08-02T12:00:00.000Z",
+      }),
+    });
+    const response = await createComputeOptimizerExactGetHandler(fixture.value)(
+      new Request(REQUEST_URL),
+    );
+    const result = await body(response);
+    assert.equal(result.sourceState, sourceState);
+    assert.equal(result.collection.state, durableState);
+    assert.equal(result.dashboard, null);
+  }
 });
 
 test("missing/corrupt stored evidence returns a sanitized 500", async () => {

@@ -48,6 +48,10 @@ import { ComputeOptimizerExportPlanRepository } from
   "./finops-compute-optimizer-export-plan-repository";
 import { ComputeOptimizerExportPlanSetRepository } from
   "./finops-compute-optimizer-export-plan-set-repository";
+import { ComputeOptimizerActivationRepository } from
+  "./finops-compute-optimizer-activation-repository";
+import { resolveComputeOptimizerMaterializationConnection } from
+  "../lib/finops-compute-optimizer-runtime-capability";
 import {
   ITSM_SECRET_CLEANUP_JOB_KIND,
   ItsmConnectorRepository,
@@ -137,10 +141,26 @@ import {
   runComputeOptimizerMaterializationJob,
   type ComputeOptimizerMaterializationOutcome,
 } from "../lib/finops-compute-optimizer-materialization-runtime.ts";
+import {
+  FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_LAUNCH_JOB_KIND,
+  FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_RECONCILE_JOB_KIND,
+} from "../lib/finops-compute-optimizer-activation-jobs.ts";
+import { FINOPS_COMPUTE_OPTIMIZER_DISCOVERY_JOB_KIND } from
+  "../lib/finops-compute-optimizer-discovery-job.ts";
+import {
+  runComputeOptimizerActivationLaunchProductionHandler,
+  runComputeOptimizerActivationReconcileProductionHandler,
+  runComputeOptimizerDiscoveryProductionHandler,
+} from "./finops-compute-optimizer-activation-composition.ts";
 import { AWS_NEWS_FEEDS_JOB_KIND } from
   "../lib/finops-aws-news-feeds-job.ts";
 import { createAwsNewsFeedsProductionComposition } from
   "../lib/finops-aws-news-feeds-production-composition.ts";
+export {
+  dispatchComputeOptimizerOutboxTick,
+  recoverComputeOptimizerActivationTick,
+  scheduleComputeOptimizerDailyTick,
+} from "./finops-compute-optimizer-activation-composition.ts";
 
 function awsNewsFeedsProductionComposition() {
   return createAwsNewsFeedsProductionComposition({
@@ -1041,7 +1061,40 @@ const COMPUTE_OPTIMIZER_MATERIALIZATION_ACTOR_ID =
 
 async function recordComputeOptimizerMaterializationOutcome(
   value: ComputeOptimizerMaterializationOutcome,
+  maximumJobAttempts?: number,
 ): Promise<void> {
+  const activationRepository = new ComputeOptimizerActivationRepository();
+  const scope = {
+    organizationId: value.organizationId,
+    customerId: value.customerId,
+    connectionId: value.connectionId,
+  };
+  if (value.status === "GENERATION_ACCEPTED" || value.status === "ALREADY_ACCEPTED") {
+    const activation = await activationRepository.getActivation(scope, value.activationId);
+    if (activation?.state === "MATERIALIZATION_PENDING") {
+      await activationRepository.transitionActivation(scope, {
+        activationId: value.activationId,
+        expectedState: "MATERIALIZATION_PENDING",
+        nextState: "COMPLETE",
+        expectedAttempt: activation.attempt,
+        nextAttempt: activation.attempt,
+        failureCode: null,
+      });
+    }
+  } else if (maximumJobAttempts !== undefined
+    && value.jobAttempt >= maximumJobAttempts) {
+    const activation = await activationRepository.getActivation(scope, value.activationId);
+    if (activation?.state === "MATERIALIZATION_PENDING") {
+      await activationRepository.transitionActivation(scope, {
+        activationId: value.activationId,
+        expectedState: "MATERIALIZATION_PENDING",
+        nextState: "FAILED",
+        expectedAttempt: activation.attempt,
+        nextAttempt: activation.attempt,
+        failureCode: "MATERIALIZATION_EXHAUSTED",
+      });
+    }
+  }
   await appendAuditEvent({
     orgId: value.organizationId,
     actorType: "system",
@@ -1075,7 +1128,11 @@ export async function runComputeOptimizerMaterializationHandler(
   const exactRepository = new ComputeOptimizerExactGenerationRepository();
   await runComputeOptimizerMaterializationJob(job, {
     getConnection: (organizationId, connectionId) =>
-      getConnectionForOrg(organizationId, connectionId),
+      resolveComputeOptimizerMaterializationConnection(organizationId, connectionId, {
+        getGenericConnection: getConnectionForOrg,
+        getCurrentCapability: (scope) =>
+          new ComputeOptimizerActivationRepository().getCurrentCapability(scope),
+      }),
     loadPersistedPlanSet: async (scope) => {
       const planSetRepository = new ComputeOptimizerExportPlanSetRepository();
       const planRepository = new ComputeOptimizerExportPlanRepository();
@@ -1129,7 +1186,8 @@ export async function runComputeOptimizerMaterializationHandler(
       readChunk: (request, context) =>
         runComputeOptimizerExportObjectChunkRead(request, context),
     },
-    recordOutcome: recordComputeOptimizerMaterializationOutcome,
+    recordOutcome: (outcome) =>
+      recordComputeOptimizerMaterializationOutcome(outcome, job.maxAttempts),
     now: Date.now,
   });
 }
@@ -1238,6 +1296,15 @@ export function buildJobHandlers(): Record<string, JobHandler> {
     },
     [FINOPS_COMPUTE_OPTIMIZER_MATERIALIZE_JOB_KIND]: async (job) => {
       await runComputeOptimizerMaterializationHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_LAUNCH_JOB_KIND]: async (job) => {
+      await runComputeOptimizerActivationLaunchProductionHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_DISCOVERY_JOB_KIND]: async (job) => {
+      await runComputeOptimizerDiscoveryProductionHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_RECONCILE_JOB_KIND]: async (job) => {
+      await runComputeOptimizerActivationReconcileProductionHandler(job);
     },
     "agentless-teardown-sweep": (job) => {
       const repository = new AgentlessScanRepository();
