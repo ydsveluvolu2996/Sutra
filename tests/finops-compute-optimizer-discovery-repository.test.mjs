@@ -6,6 +6,7 @@ import { Miniflare } from "miniflare";
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const runtimeMigrations = await import("../db/runtime-migrations.ts");
+const { canonicalJson } = await import("../lib/canonical-json.ts");
 const {
   ComputeOptimizerDiscoveryRepository,
   ComputeOptimizerDiscoveryRepositoryError,
@@ -140,6 +141,58 @@ function partialEvidence() {
   };
 }
 
+async function expectedJobSet(region = "us-east-1") {
+  const resourceTypes = [
+    "Ec2Instance", "AutoScalingGroup", "EbsVolume", "LambdaFunction",
+    "EcsService", "License", "RdsDBInstance", "Idle",
+  ];
+  const jobs = resourceTypes.map((providerResourceType, index) => ({
+    jobId: `exact-export-job-${index}`,
+    providerResourceType,
+    bucketSha256: (index + 1).toString(16).repeat(64),
+    objectKeySha256: (index + 2).toString(16).repeat(64),
+    metadataKeySha256: (index + 3).toString(16).repeat(64),
+  })).sort((left, right) => left.jobId.localeCompare(right.jobId));
+  const body = {
+    schemaVersion: "sutra.compute-optimizer-expected-discovery-job-set.v1",
+    region,
+    jobs,
+  };
+  const digest = await crypto.subtle.digest(
+    "SHA-256", new TextEncoder().encode(canonicalJson(body)),
+  );
+  return {
+    ...body,
+    contentSha256: [...new Uint8Array(digest)]
+      .map((part) => part.toString(16).padStart(2, "0")).join(""),
+  };
+}
+
+function matchingEvidence(expected, suffix) {
+  return {
+    ...partialEvidence(),
+    exportJobs: expected.jobs.map((job) => ({
+      jobId: job.jobId,
+      resourceType: job.providerResourceType,
+      status: "COMPLETE",
+      createdAt: "2026-08-02T00:00:00.000Z",
+      lastUpdatedAt: "2026-08-02T00:01:00.000Z",
+      failureCode: null,
+      destination: {
+        bucketSha256: job.bucketSha256,
+        objectKeySha256: job.objectKeySha256,
+        metadataKeySha256: job.metadataKeySha256,
+      },
+    })),
+    collectedAt: "2026-08-02T00:02:00.000Z",
+    dataThroughAt: "2026-08-02T00:01:00.000Z",
+    evidenceReference: {
+      ciphertext: `fsev1.${suffix.repeat(40)}`,
+      keyVersion: "co-evidence-v1",
+    },
+  };
+}
+
 test("run creation is tenant-bound, deterministic, replay-safe, and immutable", async () => {
   await withRepository(async ({ repository }) => {
     const input = { jobId: "compute-optimizer-1", accountId: ACCOUNT_A, partition: "aws", region: "us-east-1" };
@@ -259,5 +312,100 @@ test("database guards reject child mutation, post-finalization inserts, and part
        WHERE run_id = ?`,
     ).bind("d".repeat(64), "2026-08-01T05:00:00.000Z", "2026-08-01T04:00:00.000Z",
       `fsev1.${"B".repeat(40)}`, 360, second.runId).run(), /FINOPS_CO_EXPORT_OBJECT_BINDING_REQUIRED/u);
+  });
+});
+
+test("latest launch matcher skips newer unrelated evidence and returns only the exact complete job set", async () => {
+  await withRepository(async ({ repository }) => {
+    const expected = await expectedJobSet();
+    const baseTime = Date.parse("2026-08-02T00:00:00.000Z");
+    const matching = await repository.createRun(SCOPE_A, {
+      jobId: "compute-optimizer-matching-launch", accountId: ACCOUNT_A,
+      partition: "aws", region: "us-east-1",
+    }, baseTime);
+    await repository.startRun(SCOPE_A, matching.runId, baseTime + 1_000);
+    const matchingInput = matchingEvidence(expected, "M");
+    await repository.recordDiscovery(SCOPE_A, matching.runId, {
+      ...matchingInput,
+      contentSha256: await computeOptimizerDiscoverySha256(SCOPE_A, matchingInput),
+    }, baseTime + 120_000);
+
+    const newer = await repository.createRun(SCOPE_A, {
+      jobId: "compute-optimizer-newer-unrelated", accountId: ACCOUNT_A,
+      partition: "aws", region: "us-east-1",
+    }, baseTime + 121_000);
+    await repository.startRun(SCOPE_A, newer.runId, baseTime + 122_000);
+    const unrelatedInput = {
+      ...matchingEvidence(expected, "N"),
+      exportJobs: matchingEvidence(expected, "N").exportJobs.map((job, index) =>
+        index === 0 ? { ...job, jobId: "unrelated-export-job" } : job),
+    };
+    await repository.recordDiscovery(SCOPE_A, newer.runId, {
+      ...unrelatedInput,
+      contentSha256: await computeOptimizerDiscoverySha256(SCOPE_A, unrelatedInput),
+    }, baseTime + 180_000);
+
+    const signal = new AbortController().signal;
+    const reference = await repository.getLatestFinalizedExportEvidenceMatchingLaunch(
+      SCOPE_A,
+      {
+        accountId: ACCOUNT_A,
+        partition: "aws",
+        region: "us-east-1",
+        finalizedAtOrAfterIso: new Date(baseTime).toISOString(),
+        finalizedAtOrBeforeIso: new Date(baseTime + 300_000).toISOString(),
+        expectedJobSet: expected,
+      },
+      { signal, deadlineAtMs: baseTime + 400_000, now: () => baseTime + 300_001 },
+    );
+    assert.equal(reference?.discoveryRunId, matching.runId);
+    assert.equal(reference?.contentSha256,
+      await computeOptimizerDiscoverySha256(SCOPE_A, matchingInput));
+    assert.equal(reference?.expectedJobSetContentSha256, expected.contentSha256);
+    assert.equal(JSON.stringify(reference).includes("bucket"), false);
+
+    const wrongProof = {
+      ...expected,
+      jobs: expected.jobs.map((entry, index) => index === 0
+        ? { ...entry, bucketSha256: "f".repeat(64) } : entry),
+    };
+    await assert.rejects(
+      repository.getLatestFinalizedExportEvidenceMatchingLaunch(SCOPE_A, {
+        accountId: ACCOUNT_A, partition: "aws", region: "us-east-1",
+        finalizedAtOrAfterIso: new Date(baseTime).toISOString(),
+        finalizedAtOrBeforeIso: new Date(baseTime + 300_000).toISOString(),
+        expectedJobSet: wrongProof,
+      }, { signal, deadlineAtMs: baseTime + 400_000, now: () => baseTime + 300_001 }),
+      expectCode("CHECKSUM_MISMATCH"),
+    );
+  });
+});
+
+test("launch matcher fails closed for stale windows and aborted boundaries", async () => {
+  await withRepository(async ({ repository }) => {
+    const expected = await expectedJobSet();
+    const baseTime = Date.parse("2026-08-02T00:00:00.000Z");
+    const input = {
+      accountId: ACCOUNT_A,
+      partition: "aws",
+      region: "us-east-1",
+      finalizedAtOrAfterIso: new Date(baseTime).toISOString(),
+      finalizedAtOrBeforeIso: new Date(baseTime + 10_000).toISOString(),
+      expectedJobSet: expected,
+    };
+    assert.equal(await repository.getLatestFinalizedExportEvidenceMatchingLaunch(
+      SCOPE_A, input,
+      { signal: new AbortController().signal, deadlineAtMs: baseTime + 20_000, now: () => baseTime + 10_001 },
+    ), null);
+    const controller = new AbortController();
+    controller.abort();
+    await assert.rejects(
+      repository.getLatestFinalizedExportEvidenceMatchingLaunch(SCOPE_A, input, {
+        signal: controller.signal,
+        deadlineAtMs: baseTime + 20_000,
+        now: () => baseTime + 10_001,
+      }),
+      expectCode("INVALID_INPUT"),
+    );
   });
 });

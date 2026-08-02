@@ -731,6 +731,46 @@ test("the signed collector discovery gate accepts an active .8.4 connection and 
   assert.equal(unsafe.status, 400);
 });
 
+test("the signed collector discovery gate accepts the exact .8.5 launch successor", async () => {
+  const contract = sourceContract({
+    contractId: "contract-compute-optimizer-85-v1",
+    sourceId: "compute_optimizer_organization_export",
+    region: "us-west-2",
+    permissionContractId: COMPUTE_OPTIMIZER_EXPORT_SOURCE_PERMISSION_CONTRACT_ID,
+    policyName: COMPUTE_OPTIMIZER_EXPORT_SOURCE_POLICY_NAME,
+  });
+  const deps = dependencies(new Registry({
+    ...connection([contract]),
+    permissionPackVersion: "standard-2026-08.5",
+  }));
+  const result = await executeFinopsSourceDispatch({
+    ...request("compute-optimizer-85"),
+    contractId: contract.contractId,
+  }, {
+    ...deps,
+    computeOptimizerExportReader: {
+      async getEnrollmentStatus() {
+        return {
+          status: "Active",
+          memberAccountsEnrolled: true,
+          numberOfMemberAccountsOptedIn: 1,
+          lastUpdatedTimestamp: NOW,
+        };
+      },
+      async getEnrollmentStatusesForOrganization() {
+        return { accountEnrollmentStatuses: [], nextToken: undefined };
+      },
+      async describeRecommendationExportJobs() {
+        return { recommendationExportJobs: [], nextToken: undefined };
+      },
+    },
+  });
+  assert.equal(result.sourceId, "compute_optimizer_organization_export");
+  assert.equal(result.region, "us-west-2");
+  assert.equal(result.collectionStatus, "PARTIAL");
+  assert.equal(deps.broker.calls.length, 1);
+});
+
 test("rejects caller-supplied AWS controls and cross-boundary persisted contracts", async () => {
   assert.throws(() => parseFinopsSourceDispatchRequest({
     ...request(),

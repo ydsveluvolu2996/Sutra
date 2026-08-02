@@ -7,6 +7,7 @@
  */
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
+import { canonicalJson } from "../lib/canonical-json.ts";
 
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
@@ -19,6 +20,7 @@ const SAFE_VALUE = /^[A-Za-z0-9][A-Za-z0-9._:@+/-]{0,127}$/u;
 const SEALED_REFERENCE = /^fsev1\.[A-Za-z0-9_-]{26,8186}$/u;
 const MAX_MEMBERS = 1_000;
 const MAX_JOBS = 5_000;
+const MAX_MATCHING_EVIDENCE_CANDIDATES = 256;
 const OPERATIONS = new Set([
   "GET_ENROLLMENT_STATUS",
   "GET_ENROLLMENT_STATUSES_FOR_ORGANIZATION",
@@ -131,6 +133,47 @@ export interface StoredComputeOptimizerFinalizedExportEvidence {
   readonly exportJobs: readonly ComputeOptimizerExportJobEvidence[];
 }
 
+/** Secret-free proof emitted by exact Describe after one deterministic launch. */
+export interface ComputeOptimizerExpectedDiscoveryJobSet {
+  readonly schemaVersion: "sutra.compute-optimizer-expected-discovery-job-set.v1";
+  readonly region: string;
+  readonly jobs: readonly {
+    readonly jobId: string;
+    readonly providerResourceType: string;
+    readonly bucketSha256: string;
+    readonly objectKeySha256: string;
+    readonly metadataKeySha256: string;
+  }[];
+  readonly contentSha256: string;
+}
+
+export interface ComputeOptimizerFinalizedDiscoveryReference {
+  readonly schemaVersion: "sutra.compute-optimizer-finalized-discovery-reference.v1";
+  readonly scope: ComputeOptimizerDiscoveryScope;
+  readonly region: string;
+  readonly discoveryRunId: string;
+  readonly contentSha256: string;
+  readonly accountId: string;
+  readonly partition: "aws" | "aws-us-gov" | "aws-cn";
+  readonly finalizedAtIso: string;
+  readonly expectedJobSetContentSha256: string;
+}
+
+export interface MatchingComputeOptimizerLaunchEvidenceInput {
+  readonly accountId: string;
+  readonly partition: "aws" | "aws-us-gov" | "aws-cn";
+  readonly region: string;
+  readonly finalizedAtOrAfterIso: string;
+  readonly finalizedAtOrBeforeIso: string;
+  readonly expectedJobSet: ComputeOptimizerExpectedDiscoveryJobSet;
+}
+
+export interface ComputeOptimizerRepositoryBoundary {
+  readonly signal: AbortSignal;
+  readonly deadlineAtMs: number;
+  readonly now?: () => number;
+}
+
 export class ComputeOptimizerDiscoveryRepositoryError extends Error {
   public readonly code: "INVALID_INPUT" | "SCOPE_NOT_FOUND" | "CHECKSUM_MISMATCH" | "IMMUTABLE_CONFLICT" | "INVALID_TRANSITION" | "STORED_STATE_INVALID";
   public constructor(code: ComputeOptimizerDiscoveryRepositoryError["code"]) {
@@ -197,6 +240,55 @@ function reject(code: ComputeOptimizerDiscoveryRepositoryError["code"] = "INVALI
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((part) => part.toString(16).padStart(2, "0")).join("");
+}
+
+function assertBoundary(boundary: ComputeOptimizerRepositoryBoundary): void {
+  const now = boundary.now?.() ?? Date.now();
+  if (!(boundary.signal instanceof AbortSignal)
+    || !Number.isSafeInteger(boundary.deadlineAtMs)
+    || !Number.isSafeInteger(now) || now < 0
+    || boundary.signal.aborted || now >= boundary.deadlineAtMs) reject();
+}
+
+async function expectedJobSetSha256(
+  value: Omit<ComputeOptimizerExpectedDiscoveryJobSet, "contentSha256">,
+): Promise<string> {
+  return sha256(canonicalJson(value));
+}
+
+async function assertExpectedJobSet(
+  expected: ComputeOptimizerExpectedDiscoveryJobSet,
+  region: string,
+): Promise<readonly ComputeOptimizerExpectedDiscoveryJobSet["jobs"][number][]> {
+  if (typeof expected !== "object" || expected === null
+    || Object.keys(expected).sort().join("\0") !== [
+      "contentSha256", "jobs", "region", "schemaVersion",
+    ].sort().join("\0")
+    || expected.schemaVersion !== "sutra.compute-optimizer-expected-discovery-job-set.v1"
+    || expected.region !== region || !REGION.test(expected.region)
+    || !SHA256.test(expected.contentSha256)
+    || !Array.isArray(expected.jobs) || expected.jobs.length !== 8) reject();
+  const jobs = expected.jobs.map((job) => {
+    if (typeof job !== "object" || job === null
+      || Object.keys(job).sort().join("\0") !== [
+        "jobId", "providerResourceType", "bucketSha256", "objectKeySha256",
+        "metadataKeySha256",
+      ].sort().join("\0")
+      || !SAFE_VALUE.test(job.jobId)
+      || !EXPORT_JOB_RESOURCE_TYPES.has(job.providerResourceType)
+      || !SHA256.test(job.bucketSha256) || !SHA256.test(job.objectKeySha256)
+      || !SHA256.test(job.metadataKeySha256)) reject();
+    return { ...job };
+  }).sort((left, right) => left.jobId.localeCompare(right.jobId));
+  if (new Set(jobs.map(({ jobId }) => jobId)).size !== jobs.length
+    || JSON.stringify(expected.jobs) !== JSON.stringify(jobs)) reject();
+  const contentSha256 = await expectedJobSetSha256({
+    schemaVersion: expected.schemaVersion,
+    region: expected.region,
+    jobs,
+  });
+  if (contentSha256 !== expected.contentSha256) reject("CHECKSUM_MISMATCH");
+  return jobs;
 }
 
 function safeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER, stored = false): number {
@@ -656,6 +748,94 @@ export class ComputeOptimizerDiscoveryRepository {
       run,
       exportJobs: normalized.exportJobs,
     };
+  }
+
+  /**
+   * Returns the newest finalized discovery that proves the exact eight-job
+   * launch set. A newer unrelated discovery never substitutes for a matching
+   * run, and raw S3 coordinates never enter or leave this boundary.
+   */
+  public async getLatestFinalizedExportEvidenceMatchingLaunch(
+    scope: ComputeOptimizerDiscoveryScope,
+    input: MatchingComputeOptimizerLaunchEvidenceInput,
+    boundary: ComputeOptimizerRepositoryBoundary,
+  ): Promise<ComputeOptimizerFinalizedDiscoveryReference | null> {
+    assertBoundary(boundary);
+    assertScope(scope);
+    const lower = iso(input.finalizedAtOrAfterIso);
+    const upper = iso(input.finalizedAtOrBeforeIso);
+    if (!ACCOUNT_ID.test(input.accountId) || !REGION.test(input.region)
+      || !new Set(["aws", "aws-us-gov", "aws-cn"]).has(input.partition)
+      || lower === null || upper === null || lower > upper) reject();
+    const expectedJobs = await assertExpectedJobSet(input.expectedJobSet, input.region);
+    assertBoundary(boundary);
+    const database = await this.assertLiveScope(scope, input);
+    assertBoundary(boundary);
+    const candidateResult = await database.prepare(
+      `SELECT r.run_id FROM finops_co_discovery_runs r
+       JOIN aws_connections c ON c.id = r.connection_id
+         AND c.org_id = r.org_id AND c.customer_id = r.customer_id
+         AND c.aws_account_id = r.account_id AND c.partition = r.partition
+         AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+       JOIN organizations o ON o.id = r.org_id AND o.status = 'active'
+       JOIN customers cu ON cu.id = r.customer_id AND cu.org_id = r.org_id
+         AND cu.status = 'active'
+       WHERE r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
+         AND r.account_id = ? AND r.partition = ? AND r.region = ?
+         AND r.status = 'partial' AND r.enrollment_status = 'ACTIVE'
+         AND r.member_accounts_enrolled = 1
+         AND r.finalized_at >= ? AND r.finalized_at <= ?
+         AND r.coverage_count = 3
+         AND NOT EXISTS (
+           SELECT 1 FROM finops_co_discovery_coverage cov
+           WHERE cov.run_id = r.run_id AND (
+             cov.status <> 'SUCCEEDED' OR cov.error_code IS NOT NULL
+             OR cov.records_rejected <> 0 OR cov.records_omitted <> 0
+           )
+         )
+       ORDER BY r.finalized_at DESC, r.run_id DESC LIMIT ?`,
+    ).bind(
+      scope.organizationId, scope.customerId, scope.connectionId,
+      input.accountId, input.partition, input.region,
+      Date.parse(lower), Date.parse(upper), MAX_MATCHING_EVIDENCE_CANDIDATES + 1,
+    ).all<{ run_id: string }>();
+    assertBoundary(boundary);
+    const candidates = candidateResult.results ?? [];
+    if (candidates.length > MAX_MATCHING_EVIDENCE_CANDIDATES) {
+      reject("STORED_STATE_INVALID");
+    }
+    for (const candidate of candidates) {
+      assertBoundary(boundary);
+      if (!RUN_ID.test(candidate.run_id)) reject("STORED_STATE_INVALID");
+      const evidence = await this.getFinalizedExportEvidence(scope, candidate.run_id);
+      assertBoundary(boundary);
+      if (evidence === null || evidence.exportJobs.length !== expectedJobs.length) continue;
+      const matches = evidence.exportJobs.every((job, index) => {
+        const expected = expectedJobs[index];
+        return expected !== undefined
+          && job.status === "COMPLETE"
+          && job.failureCode === null
+          && job.jobId === expected.jobId
+          && job.resourceType === expected.providerResourceType
+          && job.destination.bucketSha256 === expected.bucketSha256
+          && job.destination.objectKeySha256 === expected.objectKeySha256
+          && job.destination.metadataKeySha256 === expected.metadataKeySha256;
+      });
+      if (!matches || evidence.run.contentSha256 === null
+        || evidence.run.finalizedAtIso === null) continue;
+      return Object.freeze({
+        schemaVersion: "sutra.compute-optimizer-finalized-discovery-reference.v1",
+        scope: Object.freeze({ ...scope }),
+        region: input.region,
+        discoveryRunId: evidence.run.runId,
+        contentSha256: evidence.run.contentSha256,
+        accountId: input.accountId,
+        partition: input.partition,
+        finalizedAtIso: evidence.run.finalizedAtIso,
+        expectedJobSetContentSha256: input.expectedJobSet.contentSha256,
+      });
+    }
+    return null;
   }
 
   public async getRun(scope: ComputeOptimizerDiscoveryScope, runId: string): Promise<StoredComputeOptimizerDiscoveryRun | null> {
