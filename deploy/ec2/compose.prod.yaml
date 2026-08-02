@@ -122,6 +122,12 @@ services:
       SUTRA_ALLOW_LIVE_AWS: "true"
       SUTRA_COLLECTOR_PRINCIPAL_ARN: ${SUTRA_COLLECTOR_PRINCIPAL_ARN:?Set the exact EC2 instance-role ARN}
       SUTRA_BROKER_URL: http://127.0.0.1:8788
+      # Exact FinOps plan references are encrypted before persistence. Compose
+      # must reject the release before creating any service when either half of
+      # this operator-provisioned pair is absent; setup-local-pilot validates
+      # the key material and copies it into the mode-0600 Worker runtime file.
+      SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY: ${SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY:?Provision the 256-bit FinOps evidence-reference key in the ignored .sutra/docker.env}
+      SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION: ${SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION:?Provision the FinOps evidence-reference key version in the ignored .sutra/docker.env}
       AWS_REGION: ${AWS_REGION:-ap-south-1}
       AWS_DEFAULT_REGION: ${AWS_REGION:-ap-south-1}
       # The UI must never claim notification delivery is configured while the
