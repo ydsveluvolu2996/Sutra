@@ -357,3 +357,15 @@ Next gate:
 | Focused verification | Full collector corpus 285 passed with Node 22 `--experimental-transform-types`; 7 app reader/signed-transport tests passed; root and collector typechecks, touched-file ESLint, repository secret scan (2,214 source files), and `git diff --check` passed |
 | Evidence boundaries | No public launch mutation route is included. Durable idempotent launch attempt/execution persistence, accepted generation/head transition, exact object materialization, controlled provider run, two-tenant/live acceptance, image publication and deployment remain pending; production is unchanged |
 | P0 / next gate | Build and prove a durable collector-side launch execution ledger before exposing any launch mutation route; then bind exact persistence/materialization and complete provider/live release gates |
+
+### 2026-08-02 — Compute Optimizer exact-generation persistence checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; this checkpoint makes no tracker maturity transition and does not claim a verified or live dashboard |
+| Delivery | Immutable tenant/customer/connection-scoped attempt and accepted-generation artifacts; content-addressed 960 KiB chunks with chained hashes; commit-last manifests; monotonic accepted-generation heads; D1 and PostgreSQL schema/runtime registration |
+| Capacity boundary | The current non-streaming writers fail closed above 8 MiB on D1/Workers and 32 MiB on hosted PostgreSQL. Larger verified generations require a future streaming writer and are not claimed as supported |
+| Integrity | Exact plan-set/account/partition scope, finalized complete plan-set membership, canonical payload hashes, chunk order and chain, whole-evidence hash, immutable artifacts/chunks/manifests and strictly newer accepted heads are enforced on write and recomputed on read |
+| Focused verification | 9/9 exact persistence/schema checks passed: 7 D1 repository behaviors and 2 isolated PostgreSQL schema/forgery checks. The isolated PostgreSQL harness applied all 109 migrations successfully; root typecheck, touched-file ESLint, repository secret scan (2,214 source files), and `git diff --check` passed |
+| Evidence boundaries | Durable collector launch execution ledger, launch orchestration, exact object materialization into accepted generations, repository-to-API/UI wiring, controlled provider run, two-tenant/live acceptance, image publication and deployment remain pending; production is unchanged |
+| Next gate | Implement the durable idempotent launch ledger and orchestration, then bind exact materialization and native API/UI evidence before provider/live release gates |

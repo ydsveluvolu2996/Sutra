@@ -123,6 +123,13 @@ try {
     ...process.env,
     SUTRA_POSTGRES_TEST_URL: runtimeDatabaseUrl,
   });
+  await run(process.execPath, [
+    "--test",
+    resolve(root, "tests/postgres-compute-optimizer-exact-generation-schema.test.mjs"),
+  ], {
+    ...process.env,
+    SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
+  });
   await run(process.execPath, ["--test", resolve(root, "tests/postgres-repositories.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
