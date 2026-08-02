@@ -24,6 +24,18 @@ const OPERATIONS = new Set([
   "GET_ENROLLMENT_STATUSES_FOR_ORGANIZATION",
   "DESCRIBE_RECOMMENDATION_EXPORT_JOBS",
 ]);
+const EXPORT_JOB_RESOURCE_TYPES = new Set([
+  "Ec2Instance",
+  "AutoScalingGroup",
+  "EbsVolume",
+  "LambdaFunction",
+  "EcsService",
+  "License",
+  "RdsDBInstance",
+  "AuroraDBClusterStorage",
+  "Idle",
+  "NotApplicable",
+]);
 
 export interface ComputeOptimizerDiscoveryScope {
   readonly organizationId: string;
@@ -113,6 +125,12 @@ export interface StoredComputeOptimizerDiscoveryRun {
   readonly finalizedAtIso: string | null;
 }
 
+export interface StoredComputeOptimizerFinalizedExportEvidence {
+  readonly run: StoredComputeOptimizerDiscoveryRun;
+  /** Provider job metadata and SHA-256 destinations only; never raw S3 identity. */
+  readonly exportJobs: readonly ComputeOptimizerExportJobEvidence[];
+}
+
 export class ComputeOptimizerDiscoveryRepositoryError extends Error {
   public readonly code: "INVALID_INPUT" | "SCOPE_NOT_FOUND" | "CHECKSUM_MISMATCH" | "IMMUTABLE_CONFLICT" | "INVALID_TRANSITION" | "STORED_STATE_INVALID";
   public constructor(code: ComputeOptimizerDiscoveryRepositoryError["code"]) {
@@ -130,6 +148,46 @@ interface RunRow {
   export_job_count: number | string; coverage_count: number | string; error_code: string | null;
   limitations_json: string | null; created_at: number | string; started_at: number | string | null;
   finalized_at: number | string | null;
+}
+
+interface FinalizedRunRow extends RunRow {
+  enrollment_status: ComputeOptimizerEnrollmentEvidence["status"] | null;
+  enrollment_reason_code: string | null;
+  member_accounts_enrolled: number | string | null;
+  number_of_member_accounts_opted_in: number | string | null;
+  enrollment_last_updated_at: string | null;
+  evidence_reference_ciphertext: string | null;
+  evidence_reference_key_version: string | null;
+}
+
+interface MemberRow {
+  account_id: string;
+  status: ComputeOptimizerMemberEvidence["status"];
+  reason_code: string | null;
+  last_updated_at: string | null;
+}
+
+interface ExportJobRow {
+  job_id: string;
+  resource_type: string;
+  status: ComputeOptimizerExportJobEvidence["status"];
+  created_at_iso: string;
+  last_updated_at_iso: string;
+  failure_code: string | null;
+  bucket_sha256: string | null;
+  object_key_sha256: string | null;
+  metadata_key_sha256: string | null;
+}
+
+interface CoverageRow {
+  operation: ComputeOptimizerCoverageEvidence["operation"];
+  status: ComputeOptimizerCoverageEvidence["status"];
+  pages_observed: number | string;
+  records_observed: number | string;
+  records_accepted: number | string;
+  records_rejected: number | string;
+  records_omitted: number | string;
+  error_code: string | null;
 }
 
 function reject(code: ComputeOptimizerDiscoveryRepositoryError["code"] = "INVALID_INPUT"): never {
@@ -187,11 +245,16 @@ function canonicalize(input: ComputeOptimizerDiscoveryHashInput): ComputeOptimiz
   for (const job of jobs) {
     const createdAt = iso(job.createdAt);
     const lastUpdatedAt = iso(job.lastUpdatedAt);
-    if (!SAFE_VALUE.test(job.jobId) || !SAFE_VALUE.test(job.resourceType)
+    if (!SAFE_VALUE.test(job.jobId) || !EXPORT_JOB_RESOURCE_TYPES.has(job.resourceType)
       || !new Set(["QUEUED", "IN_PROGRESS", "COMPLETE", "FAILED"]).has(job.status)
       || createdAt === null || lastUpdatedAt === null || lastUpdatedAt < createdAt
       || (job.failureCode !== null && !SAFE_CODE.test(job.failureCode))
-      || Object.values(job.destination).some((hash) => hash !== null && !SHA256.test(hash))) reject();
+      || (job.status === "FAILED"
+        ? job.failureCode === null
+        : job.failureCode !== null)
+      || Object.values(job.destination).some((hash) => hash !== null && !SHA256.test(hash))
+      || (job.status === "COMPLETE"
+        && Object.values(job.destination).some((hash) => hash === null))) reject();
   }
   const coverage = [...input.coverage].sort((left, right) => left.operation.localeCompare(right.operation));
   if (coverage.length < 1 || coverage.length > 3 || new Set(coverage.map(({ operation }) => operation)).size !== coverage.length) reject();
@@ -199,12 +262,17 @@ function canonicalize(input: ComputeOptimizerDiscoveryHashInput): ComputeOptimiz
     if (!OPERATIONS.has(entry.operation) || !new Set(["SUCCEEDED", "PARTIAL", "FAILED"]).has(entry.status)
       || ![entry.pagesObserved, entry.recordsObserved, entry.recordsAccepted, entry.recordsRejected, entry.recordsOmitted]
         .every((count) => Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000_000)
-      || entry.pagesObserved > 10 || (entry.errorCode !== null && !SAFE_CODE.test(entry.errorCode))) reject();
+      || entry.pagesObserved > 10 || (entry.errorCode !== null && !SAFE_CODE.test(entry.errorCode))
+      || (entry.status === "SUCCEEDED"
+        ? entry.errorCode !== null
+        : entry.errorCode === null)) reject();
   }
   if (input.enrollment !== null) {
     const enrollment = input.enrollment;
     if (!new Set(["ACTIVE", "INACTIVE", "PENDING", "FAILED"]).has(enrollment.status)
       || (enrollment.reasonCode !== null && !SAFE_CODE.test(enrollment.reasonCode))
+      || (enrollment.memberAccountsEnrolled !== null
+        && typeof enrollment.memberAccountsEnrolled !== "boolean")
       || (enrollment.numberOfMemberAccountsOptedIn !== null && safeInteger(enrollment.numberOfMemberAccountsOptedIn, 1_000_000_000) < 0)
       || (enrollment.lastUpdatedAt !== null && iso(enrollment.lastUpdatedAt) === null)) reject();
   }
@@ -237,12 +305,28 @@ function canonicalize(input: ComputeOptimizerDiscoveryHashInput): ComputeOptimiz
   };
 }
 
+function storedIso(value: unknown, nullable = false): string | null {
+  if (value === null && nullable) return null;
+  const normalized = iso(value);
+  if (normalized === null || normalized !== value) reject("STORED_STATE_INVALID");
+  return normalized;
+}
+
+function storedNullableInteger(value: unknown, maximum: number): number | null {
+  return value === null ? null : safeInteger(value, maximum, true);
+}
+
 export async function computeOptimizerDiscoverySha256(
   scope: ComputeOptimizerDiscoveryScope,
   input: ComputeOptimizerDiscoveryHashInput,
 ): Promise<string> {
   assertScope(scope);
-  return sha256(JSON.stringify({ scope, evidence: canonicalize(input) }));
+  const normalizedScope: ComputeOptimizerDiscoveryScope = {
+    organizationId: scope.organizationId,
+    customerId: scope.customerId,
+    connectionId: scope.connectionId,
+  };
+  return sha256(JSON.stringify({ scope: normalizedScope, evidence: canonicalize(input) }));
 }
 
 function storedRun(row: RunRow): StoredComputeOptimizerDiscoveryRun {
@@ -387,6 +471,191 @@ export class ComputeOptimizerDiscoveryRepository {
       normalized.evidenceReference.keyVersion, nowMs, scope.organizationId, scope.customerId, scope.connectionId, runId));
     try { await database.batch(statements); } catch { reject("IMMUTABLE_CONFLICT"); }
     return await this.read(database, scope, runId) ?? reject("STORED_STATE_INVALID");
+  }
+
+  public async getFinalizedExportEvidence(
+    scope: ComputeOptimizerDiscoveryScope,
+    runId: string,
+  ): Promise<StoredComputeOptimizerFinalizedExportEvidence | null> {
+    if (!RUN_ID.test(runId)) reject();
+    const database = await this.assertLiveScope(scope);
+    const row = await database.prepare(
+      `SELECT r.* FROM finops_co_discovery_runs r
+       JOIN aws_connections c ON c.id = r.connection_id
+         AND c.org_id = r.org_id AND c.customer_id = r.customer_id
+         AND c.aws_account_id = r.account_id AND c.partition = r.partition
+         AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+       JOIN organizations o ON o.id = r.org_id AND o.status = 'active'
+       JOIN customers cu ON cu.id = r.customer_id AND cu.org_id = r.org_id
+         AND cu.status = 'active'
+       WHERE r.org_id = ? AND r.customer_id = ? AND r.connection_id = ?
+         AND r.run_id = ? LIMIT 1`,
+    ).bind(scope.organizationId, scope.customerId, scope.connectionId, runId)
+      .first<FinalizedRunRow>();
+    if (row === null) return null;
+    if (
+      row.status !== "partial" && row.status !== "unavailable"
+    ) reject("STORED_STATE_INVALID");
+    if (
+      !RUN_ID.test(row.run_id)
+      || !IDENTIFIER.test(row.job_id)
+      || !ACCOUNT_ID.test(row.account_id)
+      || !new Set(["aws", "aws-us-gov", "aws-cn"]).has(row.partition)
+      || !REGION.test(row.region)
+      || row.content_sha256 === null
+      || !SHA256.test(row.content_sha256)
+      || row.collected_at === null
+      || row.started_at === null
+      || row.finalized_at === null
+      || row.error_code === null
+      || !SAFE_CODE.test(row.error_code)
+      || row.limitations_json === null
+      || row.evidence_reference_ciphertext === null
+      || row.evidence_reference_key_version === null
+    ) reject("STORED_STATE_INVALID");
+
+    const createdAt = safeInteger(row.created_at, Number.MAX_SAFE_INTEGER, true);
+    const startedAt = safeInteger(row.started_at, Number.MAX_SAFE_INTEGER, true);
+    const finalizedAt = safeInteger(row.finalized_at, Number.MAX_SAFE_INTEGER, true);
+    if (startedAt < createdAt || finalizedAt < startedAt) {
+      reject("STORED_STATE_INVALID");
+    }
+    const collectedAt = storedIso(row.collected_at) ?? reject("STORED_STATE_INVALID");
+    const dataThroughAt = storedIso(row.data_through_at, true);
+    if (dataThroughAt !== null && dataThroughAt > collectedAt) {
+      reject("STORED_STATE_INVALID");
+    }
+
+    const memberResult = await database.prepare(
+      `SELECT account_id, status, reason_code, last_updated_at
+       FROM finops_co_member_enrollments WHERE run_id = ? ORDER BY account_id`,
+    ).bind(runId).all<MemberRow>();
+    const exportResult = await database.prepare(
+      `SELECT job_id, resource_type, status, created_at_iso,
+        last_updated_at_iso, failure_code, bucket_sha256, object_key_sha256,
+        metadata_key_sha256
+       FROM finops_co_export_jobs WHERE run_id = ? ORDER BY job_id`,
+    ).bind(runId).all<ExportJobRow>();
+    const coverageResult = await database.prepare(
+      `SELECT operation, status, pages_observed, records_observed,
+        records_accepted, records_rejected, records_omitted, error_code
+       FROM finops_co_discovery_coverage WHERE run_id = ? ORDER BY operation`,
+    ).bind(runId).all<CoverageRow>();
+    const memberRows = memberResult.results ?? [];
+    const exportRows = exportResult.results ?? [];
+    const coverageRows = coverageResult.results ?? [];
+    if (
+      safeInteger(row.member_count, MAX_MEMBERS, true) !== memberRows.length
+      || safeInteger(row.export_job_count, MAX_JOBS, true) !== exportRows.length
+      || safeInteger(row.coverage_count, 3, true) !== coverageRows.length
+    ) reject("STORED_STATE_INVALID");
+
+    const memberEnrollments: ComputeOptimizerMemberEvidence[] = memberRows.map(
+      (member) => ({
+        accountId: member.account_id,
+        status: member.status,
+        reasonCode: member.reason_code,
+        lastUpdatedAt: storedIso(member.last_updated_at, true),
+      }),
+    );
+    const exportJobs: ComputeOptimizerExportJobEvidence[] = exportRows.map(
+      (job) => ({
+        jobId: job.job_id,
+        resourceType: job.resource_type,
+        status: job.status,
+        createdAt: storedIso(job.created_at_iso) ?? reject("STORED_STATE_INVALID"),
+        lastUpdatedAt: storedIso(job.last_updated_at_iso)
+          ?? reject("STORED_STATE_INVALID"),
+        failureCode: job.failure_code,
+        destination: {
+          bucketSha256: job.bucket_sha256,
+          objectKeySha256: job.object_key_sha256,
+          metadataKeySha256: job.metadata_key_sha256,
+        },
+      }),
+    );
+    const coverage: ComputeOptimizerCoverageEvidence[] = coverageRows.map(
+      (entry) => ({
+        operation: entry.operation,
+        status: entry.status,
+        pagesObserved: safeInteger(entry.pages_observed, 10, true),
+        recordsObserved: safeInteger(entry.records_observed, 1_000_000_000, true),
+        recordsAccepted: safeInteger(entry.records_accepted, 1_000_000_000, true),
+        recordsRejected: safeInteger(entry.records_rejected, 1_000_000_000, true),
+        recordsOmitted: safeInteger(entry.records_omitted, 1_000_000_000, true),
+        errorCode: entry.error_code,
+      }),
+    );
+
+    const enrolled = storedNullableInteger(row.member_accounts_enrolled, 1);
+    const optedIn = storedNullableInteger(
+      row.number_of_member_accounts_opted_in,
+      1_000_000_000,
+    );
+    const enrollmentLastUpdatedAt = storedIso(
+      row.enrollment_last_updated_at,
+      true,
+    );
+    if (
+      row.enrollment_status === null
+      && (row.enrollment_reason_code !== null
+        || enrolled !== null
+        || optedIn !== null
+        || enrollmentLastUpdatedAt !== null)
+    ) reject("STORED_STATE_INVALID");
+    const enrollment: ComputeOptimizerEnrollmentEvidence | null =
+      row.enrollment_status === null ? null : {
+        status: row.enrollment_status,
+        reasonCode: row.enrollment_reason_code,
+        memberAccountsEnrolled: enrolled === null ? null : enrolled === 1,
+        numberOfMemberAccountsOptedIn: optedIn,
+        lastUpdatedAt: enrollmentLastUpdatedAt,
+      };
+    const run = storedRun(row);
+    if (
+      row.limitations_json !== JSON.stringify(run.limitations)
+      || run.limitations.length < 1
+      || !SEALED_REFERENCE.test(row.evidence_reference_ciphertext)
+      || !SAFE_VALUE.test(row.evidence_reference_key_version)
+    ) reject("STORED_STATE_INVALID");
+
+    const evidence: ComputeOptimizerDiscoveryHashInput = {
+      accountId: row.account_id,
+      partition: row.partition,
+      region: row.region,
+      status: row.status,
+      collectedAt,
+      dataThroughAt,
+      enrollment,
+      memberEnrollments,
+      exportJobs,
+      coverage,
+      errorCode: row.error_code,
+      limitations: run.limitations,
+      evidenceReference: {
+        ciphertext: row.evidence_reference_ciphertext,
+        keyVersion: row.evidence_reference_key_version,
+      },
+    };
+    let normalized: ComputeOptimizerDiscoveryHashInput;
+    try {
+      normalized = canonicalize(evidence);
+    } catch {
+      reject("STORED_STATE_INVALID");
+    }
+    if (
+      JSON.stringify(evidence) !== JSON.stringify(normalized)
+      || await computeOptimizerDiscoverySha256(scope, normalized)
+        !== row.content_sha256
+    ) reject("STORED_STATE_INVALID");
+    await this.assertLiveScope(scope, {
+      accountId: row.account_id,
+      partition: row.partition,
+    });
+    return {
+      run,
+      exportJobs: normalized.exportJobs,
+    };
   }
 
   public async getRun(scope: ComputeOptimizerDiscoveryScope, runId: string): Promise<StoredComputeOptimizerDiscoveryRun | null> {
