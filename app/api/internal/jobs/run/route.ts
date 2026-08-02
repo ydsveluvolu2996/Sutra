@@ -12,6 +12,7 @@ import {
   scheduleComputeOptimizerDailyTick,
   scheduleAwsBudgetsTick,
   scheduleAwsNewsFeedsTick,
+  scheduleExtendedSupportTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -82,6 +83,10 @@ export async function POST(request: Request): Promise<Response> {
     // loads broker credentials; the server-owned handler resolves them only
     // after a scoped durable job has been claimed.
     const awsBudgets = await scheduleAwsBudgetsTick();
+    // ADV-04 is a deterministic daily, connection-scoped projection. The
+    // handler reloads the AWS boundary and signed-broker credentials only after
+    // the durable job is claimed; the queue payload contains no provider data.
+    const extendedSupport = await scheduleExtendedSupportTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -104,6 +109,7 @@ export async function POST(request: Request): Promise<Response> {
       platformUptime,
       awsNewsFeeds,
       awsBudgets,
+      extendedSupport,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

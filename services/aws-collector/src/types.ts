@@ -62,6 +62,12 @@ export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION =
 export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID =
   "compute-optimizer-export-launch-v1" as const;
 /**
+ * Immutable successor for ADV-04. It preserves .8.5 and adds only the exact
+ * fourteen Extended Support inventory, lifecycle and public-pricing reads.
+ */
+export const EXTENDED_SUPPORT_PERMISSION_PACK_VERSION =
+  "standard-2026-08.6" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -79,6 +85,7 @@ export type PermissionPackVersion =
   | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
   | typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
   | typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+  | typeof EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

@@ -1,8 +1,13 @@
 # Extended Support Projection evidence contract
 
-Status: normalization/projection engine and focused tests are implemented.
-Collector, durable persistence, authenticated route, dashboard UI, and live AWS
-acceptance are not implemented by this slice.
+Status: the normalization/projection engine, immutable READY-only persistence,
+durable replay ledger, deterministic daily scheduler, signed collector transport,
+strict credential-owning provider boundary, authenticated same-tenant API, and
+native dashboard UI are implemented and covered by focused/hostile tests. Shared
+runtime/collector registration, pinned default AWS SDK inventory clients, and
+the immutable `standard-2026-08.6` fourteen-action customer permission contract
+are also implemented. Live AWS and signed-in deployment acceptance remain
+explicit release gates; this document does not claim them.
 
 ## Trust and cost boundary
 
@@ -168,17 +173,20 @@ validated. Failed/partial collection is never displayed as zero resources.
 
 ## Remaining production gates
 
-1. Implement paginated, timeout-bounded collectors for every operation above
-   through the authenticated AWS broker. No credentials may enter the web
-   process.
-2. Add the read operations to the versioned collector policy and broker
-   attestation; publish nothing until the exact template diff is reviewed.
-3. Deploy the implemented immutable capture/head repository under exact
-   organization/customer/connection scope and bind it to the source job ledger.
-4. Deploy and signed-in verify the implemented authenticated tenant-scoped
-   aggregate route and exact-money response projection.
-5. Signed-in verify the implemented EKS, RDS, Aurora, OpenSearch, and
-   ElastiCache native lifecycle, cost, projection and evidence views.
-6. Run live collection against an approved AWS account, reconcile actual CUR
+The local vertical is complete. Its immutable `.8.6` onboarding successor,
+exact STS session intersection, credential-owning collector route, bounded SDK
+reader, migrations, daily scheduler, replay ledger, same-tenant API, and native
+UI are registered and tested. The remaining gates require a deployed customer
+environment rather than additional local implementation:
+
+1. Deploy and independently verify the `.8.6` customer role identity and exact
+   inline policies in an approved AWS account.
+2. Configure the authoritative supplemental evidence loader with the tenant's
+   active reconciled CUR2 generation and reviewed OpenSearch/ElastiCache/rate
+   documents. Missing supplements intentionally produce
+   `CONFIGURATION_REQUIRED`; the collector never fabricates cost.
+3. Deploy and signed-in verify the authenticated same-tenant aggregate route,
+   exact-money projection, all honest UI states, and last-good behavior.
+4. Run live collection against an approved AWS account, reconcile actual CUR2
    charges, compare effective rates to the AWS bill, verify empty/partial/error
    states, and retain acceptance evidence before production activation.

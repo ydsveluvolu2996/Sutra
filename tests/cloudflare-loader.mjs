@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const cloudflareWorkersStub = `data:text/javascript,${encodeURIComponent("export const env = {};")}`;
@@ -31,6 +32,14 @@ export function resolve(specifier, context, nextResolve) {
 
 export async function load(url, context, nextLoad) {
   const parsed = new URL(url);
+  if (parsed.protocol === "file:" && parsed.pathname.endsWith(".ts")) {
+    const source = await readFile(fileURLToPath(parsed), "utf8");
+    return {
+      format: "module",
+      source: stripTypeScriptTypes(source, { mode: "transform" }),
+      shortCircuit: true,
+    };
+  }
   if (parsed.protocol === "file:" && parsed.pathname.endsWith(".sql") && parsed.search === "?raw") {
     parsed.search = "";
     const source = await readFile(fileURLToPath(parsed), "utf8");

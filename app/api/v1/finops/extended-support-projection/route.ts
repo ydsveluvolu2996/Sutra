@@ -9,6 +9,7 @@ import {
   type ExtendedSupportDashboardFilters,
 } from "../../../../../lib/finops-extended-support-dashboard";
 import { EXTENDED_SUPPORT_OFFICIAL_DEFINITION } from "../../../../../lib/finops-extended-support-official-definition";
+import { EXTENDED_SUPPORT_PRODUCTION_COMPOSITION_STATUS } from "../../../../../lib/finops-extended-support-production-composition";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 export const dynamic = "force-dynamic";
 const CONNECTION = /^conn_[a-f0-9]{32}$/u,
@@ -116,8 +117,12 @@ export async function GET(request: Request): Promise<Response> {
         officialDefinition: EXTENDED_SUPPORT_OFFICIAL_DEFINITION,
         collection: {
           jobContractAvailable: true,
-          providerAdapterAvailable: false,
-          reason: "EXTENDED_SUPPORT_MULTI_ACCOUNT_ADAPTER_NOT_DEPLOYED",
+          providerAdapterAvailable: true,
+          durableReplayAvailable: true,
+          signedTransportAvailable: true,
+          sharedRuntimeRegistered:
+            EXTENDED_SUPPORT_PRODUCTION_COMPOSITION_STATUS.sharedWorkerRegistered,
+          reason: EXTENDED_SUPPORT_PRODUCTION_COMPOSITION_STATUS.activationState,
         },
       });
     const dashboard = buildExtendedSupportDashboard(
@@ -196,8 +201,12 @@ export async function GET(request: Request): Promise<Response> {
       },
       collection: {
         jobContractAvailable: true,
-        providerAdapterAvailable: false,
-        reason: "EXTENDED_SUPPORT_MULTI_ACCOUNT_ADAPTER_NOT_DEPLOYED",
+        providerAdapterAvailable: true,
+        durableReplayAvailable: true,
+        signedTransportAvailable: true,
+        sharedRuntimeRegistered:
+          EXTENDED_SUPPORT_PRODUCTION_COMPOSITION_STATUS.sharedWorkerRegistered,
+        reason: EXTENDED_SUPPORT_PRODUCTION_COMPOSITION_STATUS.activationState,
       },
     });
   } catch (error) {

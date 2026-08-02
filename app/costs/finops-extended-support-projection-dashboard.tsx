@@ -162,7 +162,10 @@ interface Report {
   };
   collection: {
     jobContractAvailable: true;
-    providerAdapterAvailable: false;
+    providerAdapterAvailable: true;
+    durableReplayAvailable: true;
+    signedTransportAvailable: true;
+    sharedRuntimeRegistered: boolean;
     reason: string;
   };
 }
@@ -588,7 +591,7 @@ export function ExtendedSupportProjectionReportView({
             <dd>{report.semantics.projectionLabel}</dd>
           </div>
           <div>
-            <dt>Provider adapter</dt>
+            <dt>Collection runtime</dt>
             <dd>{report.collection.reason}</dd>
           </div>
         </dl>
@@ -715,7 +718,7 @@ export function FinopsExtendedSupportProjectionDashboard({
                 state: "configuration_required" as const,
                 title: "Extended Support collection is not configured",
                 detail:
-                  "Deploy and bind the multi-account inventory, lifecycle, pricing and CUR2 materializer.",
+                  "Deploy and verify the standard-2026-08.6 customer role, then configure authoritative lifecycle, pricing and active CUR2 evidence for this connection.",
               }
             : {
                 state: shell(r.sourceState),

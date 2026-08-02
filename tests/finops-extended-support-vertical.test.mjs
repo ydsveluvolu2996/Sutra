@@ -178,6 +178,8 @@ test("multi-account collection contract pins five-service reads, authoritative e
     collectionId: `esp_${"b".repeat(64)}`,
   };
   const result = await m.runExtendedSupportCollectionJob({
+    jobId: `job_${"d".repeat(32)}`,
+    scheduledWindow: "2026-08-01T00:00:00.000Z",
     boundary,
     nowMs: 1785552000000,
     broker: { collect: async (x) => ((request = x), capture) },
@@ -205,6 +207,8 @@ test("multi-account collection contract pins five-service reads, authoritative e
   assert.equal(result.becameActive, true);
   await assert.rejects(
     m.runExtendedSupportCollectionJob({
+      jobId: `job_${"d".repeat(32)}`,
+      scheduledWindow: "2026-08-01T00:00:00.000Z",
       boundary,
       broker: {
         collect: async () => ({ ...capture, accountIds: ["999999999999"] }),
@@ -394,8 +398,11 @@ test("native Extended Support report renders eligibility, dates, horizons, drill
         },
         collection: {
           jobContractAvailable: true,
-          providerAdapterAvailable: false,
-          reason: "EXTENDED_SUPPORT_MULTI_ACCOUNT_ADAPTER_NOT_DEPLOYED",
+          providerAdapterAvailable: true,
+          durableReplayAvailable: true,
+          signedTransportAvailable: true,
+          sharedRuntimeRegistered: true,
+          reason: "REGISTERED_LOCAL_RUNTIME",
         },
       };
     const html = renderToStaticMarkup(

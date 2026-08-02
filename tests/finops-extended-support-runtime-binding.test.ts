@@ -85,6 +85,8 @@ function dependencies(input: {
     broker: {
       collect: async (request) => {
         brokerCalls.value += 1;
+        assert.equal(request.jobId, `job_${"e".repeat(32)}`);
+        assert.equal(request.scheduledWindow, WINDOW);
         assert.deepEqual(request.boundary, BOUNDARY);
         assert.equal(request.inventoryScope, "SERVER_PINNED_ACCOUNT_REGION_FANOUT");
         assert.equal(request.actualCostSource, "ACTIVE_RECONCILED_CUR2_GENERATION");
@@ -219,15 +221,15 @@ describe("Extended Support durable runtime binding", () => {
     assert.equal(brokerCalls.value, 0);
   });
 
-  it("uses a canonical UTC day and leaves shared activation disabled", () => {
+  it("uses a canonical UTC day and reports shared activation enabled", () => {
     assert.equal(
       extendedSupportCollectionWindow(Date.parse("2026-08-01T19:45:00.000Z")),
       WINDOW,
     );
-    assert.equal(EXTENDED_SUPPORT_RUNTIME_BINDING.registeredInSharedRuntime, false);
+    assert.equal(EXTENDED_SUPPORT_RUNTIME_BINDING.registeredInSharedRuntime, true);
     assert.equal(
       EXTENDED_SUPPORT_RUNTIME_BINDING.activationReason,
-      "EXTENDED_SUPPORT_DURABLE_RUNTIME_NOT_REGISTERED",
+      "EXTENDED_SUPPORT_DURABLE_RUNTIME_REGISTERED",
     );
   });
 });

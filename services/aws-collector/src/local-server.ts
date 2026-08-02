@@ -88,8 +88,10 @@ import {
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
+  type AwsTemporaryCredentials,
   type InventoryCollectorCoverage,
   type NormalizedAwsEvidence,
   type NormalizedAwsResource,
@@ -158,12 +160,26 @@ import {
   parseAwsBudgetsProviderRouteRequest,
   runAwsBudgetsProviderRoute,
 } from "./aws-budgets-provider-route.js";
+import {
+  ExtendedSupportProviderAdapterError,
+  EXTENDED_SUPPORT_PROVIDER_BOUNDS,
+  type ExtendedSupportAwsReader,
+  type ExtendedSupportProviderBoundary,
+} from "./extended-support-provider-adapter.js";
+import { createExtendedSupportAwsSdkReader } from
+  "./extended-support-aws-sdk-reader.js";
+import {
+  EXTENDED_SUPPORT_PROVIDER_ROUTE,
+  parseExtendedSupportProviderRouteRequest,
+  runExtendedSupportProviderRoute,
+} from "./extended-support-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
 const BODY_LIMIT = 64 * 1024;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
 const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
+const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -198,6 +214,11 @@ const COMPUTE_OPTIMIZER_ACTIVATION_MANIFEST_DEADLINE_MS = 15_000;
 const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
 const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
+
+function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permissionPackVersion"]): boolean {
+  return value === COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+    || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
+}
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
 
@@ -336,6 +357,19 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedAwsBudgetsSession">;
+  readonly extendedSupportReaderFactory?: (input: {
+    readonly boundary: ExtendedSupportProviderBoundary;
+    readonly jobId: string;
+    readonly sessionForAccount: (
+      accountId: string,
+      signal: AbortSignal,
+    ) => Promise<AwsTemporaryCredentials>;
+  }) => ExtendedSupportAwsReader;
+  readonly extendedSupportRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedExtendedSupportSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -439,6 +473,12 @@ interface ServerContext {
   >;
   readonly awsBudgetsProviderRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["awsBudgetsProviderRoleBrokerFactory"]
+  >;
+  readonly extendedSupportReaderFactory: NonNullable<
+    LocalCollectorServerOptions["extendedSupportReaderFactory"]
+  >;
+  readonly extendedSupportRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["extendedSupportRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -598,6 +638,13 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       options.awsBudgetsProviderClientFactory ?? createAwsBudgetsProviderClients,
     awsBudgetsProviderRoleBrokerFactory:
       options.awsBudgetsProviderRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    extendedSupportReaderFactory:
+      options.extendedSupportReaderFactory ?? ((input) => createExtendedSupportAwsSdkReader({
+        boundary: input.boundary,
+        sessionForAccount: input.sessionForAccount,
+      })),
+    extendedSupportRoleBrokerFactory:
+      options.extendedSupportRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -1027,6 +1074,61 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === EXTENDED_SUPPORT_PROVIDER_ROUTE) {
+    const request = parseExtendedSupportProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null) {
+      throw invalidRequest();
+    }
+    const operationKey = connectionOperationKey(request.boundary.scope.orgId,
+      request.boundary.scope.connectionId);
+    const lease = await claimConnectionOperation(context, operationKey);
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      EXTENDED_SUPPORT_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(request.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.extendedSupportRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(request.boundary.partition),
+      });
+      const result = await runExtendedSupportProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedExtendedSupportSession(
+            { tenantId: input.tenantId }, input.connectionId, input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.extendedSupportReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === AWS_BUDGETS_PROVIDER_ROUTE) {
     const request = parseAwsBudgetsProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -1644,8 +1746,7 @@ async function collectComputeOptimizerActivationManifest(
   });
   if (
     connection.status !== "ACTIVE"
-    || connection.permissionPackVersion
-      !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+    || !computeOptimizerLaunchCapablePack(connection.permissionPackVersion)
     || connection.expectedAccountId !== request.accountId
     || connection.partition !== request.partition
     || connection.enabledRegions.length < 1
@@ -2006,8 +2107,7 @@ async function collectComputeOptimizerExactDescribe(
     });
     if (
       context.mode !== "live"
-      || connection.permissionPackVersion !==
-        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      || !computeOptimizerLaunchCapablePack(connection.permissionPackVersion)
       || connection.finopsSourceContracts === undefined
       || connection.expectedAccountId !== request.accountId
       || connection.partition !== request.partition
@@ -2101,7 +2201,7 @@ async function collectComputeOptimizerExportLaunch(
     });
     if (
       context.mode !== "live" || connection.status !== "ACTIVE" ||
-      connection.permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
+      !computeOptimizerLaunchCapablePack(connection.permissionPackVersion) ||
       connection.computeOptimizerExportLaunchContracts === undefined ||
       connection.expectedAccountId !== attempt.requesterAccountId ||
       connection.partition !== attempt.partition ||
@@ -3565,7 +3665,8 @@ async function requireFinopsSourceActiveConnection(
       && connection.permissionPackVersion !==
         COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !==
-        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION)
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
@@ -3584,6 +3685,8 @@ async function requireComputeOptimizerObjectActiveConnection(
       connection.computeOptimizerExportObjectContracts === undefined) &&
     (connection.permissionPackVersion !==
         COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined))
   ) throw new RegistryStateError();
   return connection;
@@ -4165,7 +4268,10 @@ async function sendSigned(
 ): Promise<void> {
   let body = JSON.stringify(payload);
   const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
-    ? AWS_BUDGETS_RESPONSE_LIMIT : RESPONSE_LIMIT;
+    ? AWS_BUDGETS_RESPONSE_LIMIT
+    : path === EXTENDED_SUPPORT_PROVIDER_ROUTE
+      ? EXTENDED_SUPPORT_RESPONSE_LIMIT
+      : RESPONSE_LIMIT;
   if (Buffer.byteLength(body, "utf8") > responseLimit) {
     status = 502;
     body = JSON.stringify({ code: "COLLECTION_FAILED", message: "The normalized inventory exceeded the pilot response limit" });
@@ -4282,6 +4388,14 @@ function safeHttpError(error: unknown): LocalHttpError {
         : error.code === "BOUND_REACHED" ? 413 : 504,
       error.code,
       "The bounded AWS Budgets provider collection did not complete",
+    );
+  }
+  if (error instanceof ExtendedSupportProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded Extended Support provider collection did not complete",
     );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {

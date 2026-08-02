@@ -53,6 +53,7 @@ import {
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -83,6 +84,11 @@ import {
 } from "./compute-optimizer-export-launch-contract.js";
 import { AWS_BUDGETS_PROVIDER_SESSION_ACTIONS } from
   "./aws-budgets-provider-adapter.js";
+import {
+  EXTENDED_SUPPORT_PROVIDER_OPERATIONS,
+  EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS,
+} from
+  "./extended-support-provider-adapter.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -119,6 +125,8 @@ const COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION =
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION;
 const COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION =
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+const EXTENDED_SUPPORT_PACK_VERSION = EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
+const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1";
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -146,7 +154,18 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_organizations_taxonomy",
     "compute_optimizer_organization_export",
   ]),
+  [EXTENDED_SUPPORT_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
 });
+
+function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
+  return value === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    || value === EXTENDED_SUPPORT_PACK_VERSION;
+}
 
 function permissionPackSupportsSource(
   permissionPackVersion: keyof typeof FINOPS_SOURCES_BY_PACK,
@@ -639,6 +658,21 @@ export function awsBudgetsProviderSessionPolicy(): string {
   return policy;
 }
 
+/** Exact read-only STS intersection for the ADV-04 provider collector. */
+export function extendedSupportProviderSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ReadExtendedSupportInventoryAndPricing",
+      Effect: "Allow",
+      Action: EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS,
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
 /** Second-stage launch ceiling: caller identity plus the exact 25 operations. */
 export function computeOptimizerExportLaunchSessionPolicy(): string {
   const policy = JSON.stringify({
@@ -867,7 +901,8 @@ function assertExpectedPermissionPolicy(
     | typeof ORGANIZATION_FINOPS_PACK_VERSION
     | typeof ADVANCED_FINOPS_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
-    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    | typeof EXTENDED_SUPPORT_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -900,14 +935,20 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === ADVANCED_FINOPS_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
+          : []),
+        ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+          ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -929,6 +970,20 @@ function assertExpectedPermissionPolicy(
     grantedActions: IMPLEMENTED_READ_ACTIONS.filter((action) => granted.has(action)),
     missingActions: IMPLEMENTED_READ_ACTIONS.filter((action) => !granted.has(action)),
   };
+}
+
+function assertExtendedSupportProjectionPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected Extended Support policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactExtendedSupportProjectionRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), EXTENDED_SUPPORT_PROVIDER_OPERATIONS)) {
+    throw new Error("unexpected Extended Support policy");
+  }
 }
 
 function assertFinopsSourcePolicy(
@@ -1010,7 +1065,8 @@ function assertExpectedRole(
     | typeof ORGANIZATION_FINOPS_PACK_VERSION
     | typeof ADVANCED_FINOPS_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
-    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    | typeof EXTENDED_SUPPORT_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1354,6 +1410,48 @@ export class AwsRoleBroker {
   }
 
   /**
+   * ADV-04 session with an exact read-only intersection. Scope, account,
+   * partition and action set are server-pinned before STS; provider credentials
+   * never cross the collector process.
+   */
+  public async assumeValidatedExtendedSupportSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: typeof EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The Extended Support session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-extsupport`,
+      extendedSupportProviderSessionPolicy,
+      input.signal,
+    );
+  }
+
+  /**
    * Prove the ACTIVE .8.5 connection identity without returning credentials or
    * granting any provider read/launch action to the manifest route.
    */
@@ -1391,8 +1489,7 @@ export class AwsRoleBroker {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     assertActiveProvisioningSignal(input.signal);
     if (
-      resolved.connection.permissionPackVersion
-        !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition
     ) throw new ConnectionStateError();
@@ -1489,7 +1586,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
         && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
-        && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION) ||
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -1680,7 +1778,7 @@ export class AwsRoleBroker {
   ): Promise<ValidatedRoleSession> {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if (
-      resolved.connection.permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION ||
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion) ||
       resolved.connection.computeOptimizerExportLaunchContracts === undefined
     ) throw new ConnectionStateError();
     if (
@@ -1748,7 +1846,7 @@ export class AwsRoleBroker {
   ): Promise<ValidatedRoleSession> {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if (
-      resolved.connection.permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION ||
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion) ||
       resolved.connection.finopsSourceContracts === undefined ||
       resolved.connection.computeOptimizerExportLaunchContracts === undefined ||
       typeof request !== "object" || request === null ||
@@ -2117,7 +2215,8 @@ export class AwsRoleBroker {
       | typeof ORGANIZATION_FINOPS_PACK_VERSION
       | typeof ADVANCED_FINOPS_PACK_VERSION
       | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
-      | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+      | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+      | typeof EXTENDED_SUPPORT_PACK_VERSION,
     signal?: AbortSignal,
   ): Promise<void> {
     try {
@@ -2130,6 +2229,7 @@ export class AwsRoleBroker {
         && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -2205,6 +2305,9 @@ export class AwsRoleBroker {
         ),
         ...objectContracts.map(({ policyName }) => policyName),
         ...launchContracts.map(({ policyName }) => policyName),
+        ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+          ? [EXTENDED_SUPPORT_POLICY_NAME]
+          : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
         throw new Error("unexpected inline policy set");
@@ -2223,6 +2326,16 @@ export class AwsRoleBroker {
         permissionPackVersion,
         actionsForFinopsSourceContracts(sourceContracts),
       );
+      if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            EXTENDED_SUPPORT_POLICY_NAME,
+          ),
+        );
+        assertExtendedSupportProjectionPolicy(policy.policyDocument);
+      }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,

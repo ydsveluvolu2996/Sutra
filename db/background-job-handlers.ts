@@ -163,6 +163,10 @@ import {
   createAwsBudgetsProductionComposition,
   scheduleAwsBudgetsProductionTick,
 } from "../lib/finops-aws-budgets-production-composition.ts";
+import { EXTENDED_SUPPORT_RUNTIME_JOB_KIND } from
+  "../lib/finops-extended-support-runtime-binding.ts";
+import { createExtendedSupportProductionComposition } from
+  "../lib/finops-extended-support-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -197,6 +201,25 @@ function awsBudgetsProductionComposition() {
 /** Six-hour deterministic ADV-08 scheduler hook for the internal job tick. */
 export function scheduleAwsBudgetsTick(scheduledAtMs = Date.now()) {
   return scheduleAwsBudgetsProductionTick(scheduledAtMs);
+}
+
+function extendedSupportProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("EXTENDED_SUPPORT_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createExtendedSupportProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-04 scheduler hook for the internal job tick. */
+export function scheduleExtendedSupportTick(scheduledAtMs = Date.now()) {
+  return extendedSupportProductionComposition().scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1313,6 +1336,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       awsNewsFeedsProductionComposition().handler(job),
     [AWS_BUDGETS_DURABLE_JOB_KIND]: (job) =>
       awsBudgetsProductionComposition().handler(job),
+    [EXTENDED_SUPPORT_RUNTIME_JOB_KIND]: (job) =>
+      extendedSupportProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

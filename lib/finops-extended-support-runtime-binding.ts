@@ -21,7 +21,7 @@ export const EXTENDED_SUPPORT_RUNTIME_JOB_KIND =
   "finops-extended-support-daily-collect" as const;
 export const EXTENDED_SUPPORT_RUNTIME_CADENCE = "rate(1 day)" as const;
 export const EXTENDED_SUPPORT_RUNTIME_ACTIVATION_REASON =
-  "EXTENDED_SUPPORT_DURABLE_RUNTIME_NOT_REGISTERED" as const;
+  "EXTENDED_SUPPORT_DURABLE_RUNTIME_REGISTERED" as const;
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,255}$/u;
 const CONNECTION = /^conn_[a-f0-9]{32}$/u;
@@ -284,6 +284,8 @@ export async function runExtendedSupportRuntimeHandler(
 
   try {
     const result = await runExtendedSupportCollectionJob({
+      jobId: job.id,
+      scheduledWindow: payload.scheduledWindow,
       boundary,
       broker: dependencies.broker,
       store: dependencies.store,
@@ -323,6 +325,6 @@ export const EXTENDED_SUPPORT_RUNTIME_BINDING = Object.freeze({
   jobKind: EXTENDED_SUPPORT_RUNTIME_JOB_KIND,
   cadence: EXTENDED_SUPPORT_RUNTIME_CADENCE,
   handlerFactory: createExtendedSupportRuntimeJobHandler,
-  registeredInSharedRuntime: false,
+  registeredInSharedRuntime: true,
   activationReason: EXTENDED_SUPPORT_RUNTIME_ACTIVATION_REASON,
 });
