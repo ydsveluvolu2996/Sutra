@@ -114,6 +114,7 @@ import postgresFinopsExtendedSupportRuntimeSql from "../postgres/migrations/0114
 import postgresFinopsAwsHealthRuntimeSql from "../postgres/migrations/0115_finops_aws_health_runtime.sql?raw";
 import postgresFinopsResilienceVueRuntimeSql from "../postgres/migrations/0116_finops_resilience_vue_runtime.sql?raw";
 import postgresFinopsDcfRuntimeSql from "../postgres/migrations/0117_finops_dcf_runtime.sql?raw";
+import postgresFinopsGravitonRuntimeSql from "../postgres/migrations/0118_finops_graviton_runtime.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -232,6 +233,7 @@ const migrations = [
   { id: "0115_finops_aws_health_runtime", source: postgresFinopsAwsHealthRuntimeSql },
   { id: "0116_finops_resilience_vue_runtime", source: postgresFinopsResilienceVueRuntimeSql },
   { id: "0117_finops_dcf_runtime", source: postgresFinopsDcfRuntimeSql },
+  { id: "0118_finops_graviton_runtime", source: postgresFinopsGravitonRuntimeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
