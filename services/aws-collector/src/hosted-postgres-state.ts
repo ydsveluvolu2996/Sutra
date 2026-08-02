@@ -19,12 +19,22 @@ import {
   type RegisteredAwsConnection,
 } from "./local-registry.js";
 import {
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+  type ComputeOptimizerExportLaunchProvisioningVerification,
   type ConnectionScope,
   type OnboardingTrustVerification,
   type StoredAwsConnection,
 } from "./types.js";
+import {
+  validateComputeOptimizerExportLaunchProvisioningContractSet,
+  validateComputeOptimizerExportLaunchProvisioningVerification,
+} from "./compute-optimizer-export-launch-provisioning.js";
 import type { HostedRequestReplayStore } from "./hosted-request-auth.js";
 import {
   AgentlessRunAlreadyRunningError,
@@ -345,6 +355,97 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
         ...connection,
         status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
         permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
+        updatedAt: new Date(this.now()).toISOString(),
+      };
+    });
+  }
+
+  public async markComputeOptimizerExportLaunchProvisioningVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    unsafeVerification: ComputeOptimizerExportLaunchProvisioningVerification,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate(scope.tenantId, connectionId, (connection, tombstoned) => {
+      if (tombstoned || connection === null) throw new RegistryConnectionNotFoundError();
+      if (connection.status !== "ACTIVE" || !new Set<StoredAwsConnection["permissionPackVersion"]>([
+        CURRENT_PERMISSION_PACK_VERSION,
+        FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+        ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+        ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+      ]).has(connection.permissionPackVersion)) throw new RegistryStateError();
+      let verification: ComputeOptimizerExportLaunchProvisioningVerification;
+      try {
+        verification = validateComputeOptimizerExportLaunchProvisioningVerification(
+          unsafeVerification,
+          connection,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      if (connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) {
+        if (JSON.stringify(connection.finopsSourceContracts) !==
+            JSON.stringify(verification.sourceContracts)
+          || JSON.stringify(connection.computeOptimizerExportObjectContracts) !==
+            JSON.stringify(verification.objectContracts)
+          || JSON.stringify(connection.computeOptimizerExportLaunchContracts) !==
+            JSON.stringify(verification.launchContracts)) {
+          throw new RegistryIntegrityError();
+        }
+        return connection;
+      }
+      return {
+        ...connection,
+        status: "VERIFIED",
+        permissionPackVersion:
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+        finopsSourceContracts: structuredClone(verification.sourceContracts),
+        computeOptimizerExportObjectContracts:
+          structuredClone(verification.objectContracts),
+        computeOptimizerExportLaunchContracts:
+          structuredClone(verification.launchContracts),
+        updatedAt: new Date(this.now()).toISOString(),
+      };
+    });
+  }
+
+  public async activateComputeOptimizerExportLaunchProvisioning(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate(scope.tenantId, connectionId, (connection, tombstoned) => {
+      if (tombstoned || connection === null || connection.roleArn !== expectedRoleArn) {
+        throw new RegistryStateError();
+      }
+      if (connection.status === "ACTIVE" && connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) return connection;
+      if (connection.status !== "VERIFIED"
+        || connection.permissionPackVersion !==
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+        || connection.finopsSourceContracts === undefined
+        || connection.computeOptimizerExportObjectContracts === undefined
+        || connection.computeOptimizerExportLaunchContracts === undefined) {
+        throw new RegistryStateError();
+      }
+      try {
+        validateComputeOptimizerExportLaunchProvisioningContractSet(
+          connection,
+          connection.enabledRegions,
+          connection.finopsSourceContracts,
+          connection.computeOptimizerExportObjectContracts,
+          connection.computeOptimizerExportLaunchContracts,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      return {
+        ...connection,
+        status: "ACTIVE",
         updatedAt: new Date(this.now()).toISOString(),
       };
     });

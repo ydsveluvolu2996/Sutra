@@ -40,6 +40,7 @@ import {
   type NegativeExternalIdProbe,
   type OnboardingTrustVerification,
   type ParsedIamRoleArn,
+  type PermissionPackVersion,
   type PermissionCapabilityAssessment,
   type RoleContractClient,
   type RoleContractClientFactory,
@@ -761,6 +762,20 @@ function sameStringSet(actual: readonly string[], expected: readonly string[]): 
     [...actual].sort().every((value, index) => value === [...expected].sort()[index]);
 }
 
+function assertActiveProvisioningSignal(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw new ConnectionStateError();
+}
+
+async function awaitWithActiveProvisioningSignal<T>(
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  assertActiveProvisioningSignal(signal);
+  const result = await operation();
+  assertActiveProvisioningSignal(signal);
+  return result;
+}
+
 function assertExpectedTrustPolicy(
   value: string | undefined,
   externalId: string,
@@ -1145,12 +1160,16 @@ function assertComputeOptimizerExportObjectPolicy(
 async function allInlinePolicyNames(
   client: RoleContractClient,
   roleName: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const names: string[] = [];
   let marker: string | undefined;
   const seen = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
-    const output = await client.listRolePolicies(roleName, marker);
+    const output = await awaitWithActiveProvisioningSignal(
+      signal,
+      () => client.listRolePolicies(roleName, marker),
+    );
     names.push(...output.policyNames);
     if (!output.isTruncated) return [...new Set(names)].sort();
     if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
@@ -1165,12 +1184,16 @@ async function allInlinePolicyNames(
 async function allAttachedManagedPolicies(
   client: RoleContractClient,
   roleName: string,
+  signal?: AbortSignal,
 ): Promise<readonly { readonly policyName?: string; readonly policyArn?: string }[]> {
   const policies: { policyName?: string; policyArn?: string }[] = [];
   let marker: string | undefined;
   const seen = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
-    const output = await client.listAttachedRolePolicies(roleName, marker);
+    const output = await awaitWithActiveProvisioningSignal(
+      signal,
+      () => client.listAttachedRolePolicies(roleName, marker),
+    );
     policies.push(...output.policies);
     if (!output.isTruncated) return policies;
     if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
@@ -1394,6 +1417,112 @@ export class AwsRoleBroker {
       launchContracts,
     );
     return validated;
+  }
+
+  /**
+   * Trusted control-plane attestation for an explicit .8.5 promotion. Unlike a
+   * collection session, this accepts only already-derived server contracts and
+   * does not mutate registry state. The caller must stage the returned proof
+   * through the encrypted registry and activate it in a separate step.
+   */
+  public async attestComputeOptimizerExportLaunchProvisioning(
+    scope: ConnectionScope,
+    connectionId: string,
+    operationId: string,
+    input: {
+      readonly sourceContracts: readonly FinopsSourceContract[];
+      readonly objectContracts: readonly ComputeOptimizerExportObjectContract[];
+      readonly launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<{
+    readonly identityAttested: true;
+    readonly permissionPolicyAttested: true;
+    readonly launchPoliciesAttested: true;
+  }> {
+    if (typeof input !== "object" || input === null || Array.isArray(input)
+      || !sameStringSet(Object.keys(input), [
+        "sourceContracts", "objectContracts", "launchContracts", "signal",
+      ])
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError(
+        "The Compute Optimizer provisioning attestation input is invalid",
+      );
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    assertActiveProvisioningSignal(input.signal);
+    if (!new Set<PermissionPackVersion>([
+      PERMISSION_PACK_VERSION,
+      FINOPS_PERMISSION_PACK_VERSION,
+      ORGANIZATION_FINOPS_PACK_VERSION,
+      ADVANCED_FINOPS_PACK_VERSION,
+      COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION,
+      COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+    ]).has(resolved.connection.permissionPackVersion)) throw new ConnectionStateError();
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let sources: readonly FinopsSourceContract[];
+    let objects: readonly ComputeOptimizerExportObjectContract[];
+    let launches: readonly ComputeOptimizerExportLaunchContract[];
+    try {
+      sources = parseFinopsSourceContracts(input.sourceContracts, owner);
+      objects = parseComputeOptimizerExportObjectContracts(input.objectContracts, owner);
+      launches = parseComputeOptimizerExportLaunchContracts(input.launchContracts, owner);
+      const sourceRegions = sources
+        .filter(({ sourceId }) => sourceId === "compute_optimizer_organization_export")
+        .map(({ region }) => region)
+        .sort();
+      const launchRegions = launches.map(({ region }) => region).sort();
+      const objectRegions = objects.map(({ region }) => region).sort();
+      if (sourceRegions.length === 0
+        || JSON.stringify(sourceRegions) !== JSON.stringify(objectRegions)
+        || JSON.stringify(sourceRegions) !== JSON.stringify(launchRegions)
+        || objects.some((objectContract) => {
+          const launchContract = launches.find(({ region }) => region === objectContract.region);
+          return launchContract === undefined
+            || objectContract.bucket !== launchContract.bucket
+            || objectContract.effectivePrefix !== launchContract.effectivePrefix
+            || objectContract.encryptionMode !== "SSE_S3"
+            || objectContract.kmsKeyArn !== null;
+        })) {
+        throw new Error("regional provisioning contract mismatch");
+      }
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The Compute Optimizer provisioning binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const attestation = await this.assumeAndValidateIdentity(
+      resolved,
+      `${operationId}-co85-attest`,
+      computeOptimizerExportAttestationSessionPolicy,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    await this.attestFinopsRoleContract(
+      resolved,
+      attestation.credentials,
+      undefined,
+      sources,
+      objects,
+      launches,
+      COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    return {
+      identityAttested: true,
+      permissionPolicyAttested: true,
+      launchPoliciesAttested: true,
+    };
   }
 
   /**
@@ -1842,9 +1971,18 @@ export class AwsRoleBroker {
     suppliedSourceContracts?: readonly FinopsSourceContract[],
     suppliedObjectContracts?: readonly ComputeOptimizerExportObjectContract[],
     suppliedLaunchContracts?: readonly ComputeOptimizerExportLaunchContract[],
+    suppliedPermissionPackVersion?:
+      | typeof FINOPS_PERMISSION_PACK_VERSION
+      | typeof ORGANIZATION_FINOPS_PACK_VERSION
+      | typeof ADVANCED_FINOPS_PACK_VERSION
+      | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+      | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+    signal?: AbortSignal,
   ): Promise<void> {
     try {
-      const permissionPackVersion = resolved.connection.permissionPackVersion;
+      assertActiveProvisioningSignal(signal);
+      const permissionPackVersion = suppliedPermissionPackVersion
+        ?? resolved.connection.permissionPackVersion;
       if (
         permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
         && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
@@ -1856,6 +1994,7 @@ export class AwsRoleBroker {
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
         throw new Error("principal partition mismatch");
       }
+      assertActiveProvisioningSignal(signal);
       const client = this.dependencies.roleContractClientFactory(credentials);
       const owner = {
         tenantId: resolved.connection.tenantId,
@@ -1891,7 +2030,10 @@ export class AwsRoleBroker {
               resolved.connection.computeOptimizerExportLaunchContracts,
               owner,
             ));
-      const role = await client.getRole(resolved.parsedRoleArn.roleName);
+      const role = await awaitWithActiveProvisioningSignal(
+        signal,
+        () => client.getRole(resolved.parsedRoleArn.roleName),
+      );
       assertExpectedRole(
         role,
         resolved,
@@ -1904,6 +2046,7 @@ export class AwsRoleBroker {
       const attachedPolicies = await allAttachedManagedPolicies(
         client,
         resolved.parsedRoleArn.roleName,
+        signal,
       );
       if (attachedPolicies.length !== 0) {
         throw new Error("attached managed policies are prohibited");
@@ -1911,8 +2054,9 @@ export class AwsRoleBroker {
       const policyNames = await allInlinePolicyNames(
         client,
         resolved.parsedRoleArn.roleName,
+        signal,
       );
-      const expectedPolicyNames = [
+      const expectedPolicyNames = [...new Set([
         EXPECTED_POLICY_NAME,
         ...contracts.map(({ policyName }) => policyName),
         ...sourceContracts.flatMap(({ policyName }) =>
@@ -1920,13 +2064,16 @@ export class AwsRoleBroker {
         ),
         ...objectContracts.map(({ policyName }) => policyName),
         ...launchContracts.map(({ policyName }) => policyName),
-      ];
+      ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
         throw new Error("unexpected inline policy set");
       }
-      const basePolicy = await client.getRolePolicy(
-        resolved.parsedRoleArn.roleName,
-        EXPECTED_POLICY_NAME,
+      const basePolicy = await awaitWithActiveProvisioningSignal(
+        signal,
+        () => client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,
+          EXPECTED_POLICY_NAME,
+        ),
       );
       assertExpectedPermissionPolicy(
         basePolicy.policyDocument,
@@ -1936,9 +2083,12 @@ export class AwsRoleBroker {
         actionsForFinopsSourceContracts(sourceContracts),
       );
       for (const contract of contracts) {
-        const policy = await client.getRolePolicy(
-          resolved.parsedRoleArn.roleName,
-          contract.policyName,
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
         );
         assertFoundationalFinopsPolicy(
           policy.policyDocument,
@@ -1948,23 +2098,32 @@ export class AwsRoleBroker {
       }
       for (const contract of sourceContracts) {
         if (contract.policyName === null) continue;
-        const policy = await client.getRolePolicy(
-          resolved.parsedRoleArn.roleName,
-          contract.policyName,
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName as string,
+          ),
         );
         assertFinopsSourcePolicy(policy.policyDocument, contract);
       }
       for (const contract of objectContracts) {
-        const policy = await client.getRolePolicy(
-          resolved.parsedRoleArn.roleName,
-          contract.policyName,
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
         );
         assertComputeOptimizerExportObjectPolicy(policy.policyDocument, contract);
       }
       for (const contract of launchContracts) {
-        const policy = await client.getRolePolicy(
-          resolved.parsedRoleArn.roleName,
-          contract.policyName,
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
         );
         assertComputeOptimizerExportLaunchPolicy(policy.policyDocument, contract);
       }
@@ -2109,11 +2268,14 @@ export class AwsRoleBroker {
      * default stays the narrow one.
      */
     sessionPolicy: (roleArn: string) => string = readonlyMetadataSessionPolicy,
+    provisioningSignal?: AbortSignal,
   ): Promise<ValidatedRoleSession> {
+    assertActiveProvisioningSignal(provisioningSignal);
     const roleSessionName = sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix);
     const policy = sessionPolicy(resolved.connection.roleArn);
     let output;
 
+    assertActiveProvisioningSignal(provisioningSignal);
     try {
       output = await this.dependencies.assumeRoleClient.send(
         new AssumeRoleCommand({
@@ -2131,16 +2293,19 @@ export class AwsRoleBroker {
       }
       throw new AssumeRoleFailedError(name);
     }
+    assertActiveProvisioningSignal(provisioningSignal);
 
     const credentials = parseTemporaryCredentials(output.Credentials, this.now());
     const identityClient = this.dependencies.callerIdentityClientFactory(credentials);
     let identity;
 
+    assertActiveProvisioningSignal(provisioningSignal);
     try {
       identity = await identityClient.send(new GetCallerIdentityCommand({}));
     } catch (error: unknown) {
       throw new CallerIdentityFailedError(errorName(error));
     }
+    assertActiveProvisioningSignal(provisioningSignal);
 
     const callerIdentityArn = identity.Arn;
     if (

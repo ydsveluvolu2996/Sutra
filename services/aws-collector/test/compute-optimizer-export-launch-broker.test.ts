@@ -16,10 +16,15 @@ import {
 } from "../src/role-broker.js";
 import type {
   AssumeRoleClient, CallerIdentityClient, ComputeOptimizerExportLaunchContract,
-  ConnectionScope, FinopsSourceContract, OnboardingTrustVerification,
+  ComputeOptimizerExportObjectContract, ConnectionScope, FinopsSourceContract,
+  OnboardingTrustVerification,
   RoleContractClient, ScopedConnectionRegistry, StoredAwsConnection,
 } from "../src/types.js";
-import { ConnectionIntegrityError, UnsafeTrustPolicyError } from "../src/types.js";
+import {
+  ConnectionIntegrityError,
+  ConnectionStateError,
+  UnsafeTrustPolicyError,
+} from "../src/types.js";
 import {
   parseComputeOptimizerExportLaunchContracts,
 } from "../src/compute-optimizer-export-launch-contract.js";
@@ -92,6 +97,21 @@ function launchContract(
   };
 }
 
+function objectContract(
+  overrides: Partial<ComputeOptimizerExportObjectContract> = {},
+): ComputeOptimizerExportObjectContract {
+  const launch = launchContract();
+  return {
+    tenantId: SCOPE.tenantId, connectionId: CONNECTION_ID, accountId: ACCOUNT,
+    partition: "aws", region: launch.region, contractId: "co-object-use1",
+    permissionPackVersion: "standard-2026-08.4",
+    permissionContractId: "compute-optimizer-export-read-v1",
+    policyName: `SutraComputeOptimizerExportReadV1-${launch.region}-${launch.bucket}`,
+    bucket: launch.bucket, effectivePrefix: launch.effectivePrefix,
+    encryptionMode: "SSE_S3", kmsKeyArn: null, ...overrides,
+  };
+}
+
 function connection(overrides: Partial<StoredAwsConnection> = {}): StoredAwsConnection {
   return {
     tenantId: SCOPE.tenantId, connectionId: CONNECTION_ID,
@@ -100,8 +120,22 @@ function connection(overrides: Partial<StoredAwsConnection> = {}): StoredAwsConn
     permissionPackVersion: "standard-2026-08.5", sessionNamePrefix: "sutra-",
     roleProvisioningMode: "sutra_template", expectedRolePath: "/sutra/",
     expectedRoleName: "SutraCollectorRole", finopsSourceContracts: sourceContracts(),
+    computeOptimizerExportObjectContracts: [objectContract()],
     computeOptimizerExportLaunchContracts: [launchContract()], ...overrides,
   };
+}
+
+function currentConnection(): StoredAwsConnection {
+  const {
+    finopsSourceContracts: _sources,
+    computeOptimizerExportObjectContracts: _objects,
+    computeOptimizerExportLaunchContracts: _launches,
+    ...base
+  } = connection();
+  void _sources;
+  void _objects;
+  void _launches;
+  return { ...base, permissionPackVersion: "standard-2026-07.4" };
 }
 
 class Registry implements ScopedConnectionRegistry {
@@ -148,11 +182,20 @@ function launchPolicy(item: ComputeOptimizerExportLaunchContract): Record<string
   ] };
 }
 
+function objectPolicy(item: ComputeOptimizerExportObjectContract): Record<string, unknown> {
+  return { Version: "2012-10-17", Statement: [{
+    Sid: "ReadSealedComputeOptimizerExportPrefix", Effect: "Allow",
+    Action: ["s3:GetObject", "s3:GetObjectVersion"],
+    Resource: `arn:${item.partition}:s3:::${item.bucket}/${item.effectivePrefix}*`,
+  }] };
+}
+
 function roleClient(
   stored: StoredAwsConnection,
   mutate?: (name: string, value: Record<string, unknown>) => Record<string, unknown>,
 ): RoleContractClient {
   const sources = stored.finopsSourceContracts ?? [];
+  const objects = stored.computeOptimizerExportObjectContracts ?? [];
   const launches = stored.computeOptimizerExportLaunchContracts ?? [];
   const sourceActions = sources.flatMap((source) =>
     SOURCE_DEFINITIONS[source.sourceId as keyof typeof SOURCE_DEFINITIONS]?.actions ?? []);
@@ -171,6 +214,7 @@ function roleClient(
       Action: SOURCE_DEFINITIONS[source.sourceId as keyof typeof SOURCE_DEFINITIONS].actions,
       Resource: "*",
     }] }] as const),
+    ...objects.map((item) => [item.policyName, objectPolicy(item)] as const),
     ...launches.map((item) => [item.policyName, launchPolicy(item)] as const),
   ]);
   return {
@@ -265,6 +309,148 @@ test("launch re-attests first and then mints only the exact 25-action session", 
   assert.equal(value.assume.calls[1]?.Policy, computeOptimizerExportLaunchSessionPolicy());
 });
 
+test("explicit .8.5 provisioning attests a .7.4 registry candidate without mutating it", async () => {
+  const active74 = currentConnection();
+  const exact85 = connection();
+  const assume = new Assume();
+  const broker = new AwsRoleBroker({
+    registry: new Registry(active74),
+    assumeRoleClient: assume,
+    callerIdentityClientFactory: () => new Identity(assume),
+    roleContractClientFactory: () => roleClient(exact85),
+    expectedPrincipalArn: PRINCIPAL,
+    now: () => new Date("2026-08-02T00:00:00.000Z"),
+  });
+  const proof = await broker.attestComputeOptimizerExportLaunchProvisioning(
+    SCOPE,
+    CONNECTION_ID,
+    "promote-co85",
+    {
+      sourceContracts: sourceContracts(),
+      objectContracts: [objectContract()],
+      launchContracts: [launchContract()],
+      signal: new AbortController().signal,
+    },
+  );
+  assert.deepEqual(proof, {
+    identityAttested: true,
+    permissionPolicyAttested: true,
+    launchPoliciesAttested: true,
+  });
+  assert.equal(assume.calls.length, 1);
+  assert.match(assume.calls[0]?.Policy ?? "", /iam:GetRole/u);
+  assert.equal(active74.permissionPackVersion, "standard-2026-07.4");
+});
+
+test("provisioning abort during identity prevents every later IAM policy read", async () => {
+  const active74 = currentConnection();
+  const exact85 = connection();
+  const assume = new Assume();
+  const controller = new AbortController();
+  let policyAttestationStarted = 0;
+  const broker = new AwsRoleBroker({
+    registry: new Registry(active74),
+    assumeRoleClient: assume,
+    callerIdentityClientFactory: () => ({
+      async send(): Promise<GetCallerIdentityCommandOutput> {
+        const session = assume.calls.at(-1)?.RoleSessionName;
+        assert.ok(session);
+        controller.abort();
+        return { $metadata: {}, Account: ACCOUNT,
+          Arn: `arn:aws:sts::${ACCOUNT}:assumed-role/SutraCollectorRole/${session}`,
+          UserId: `AROA:${session}` };
+      },
+    }),
+    roleContractClientFactory: () => {
+      policyAttestationStarted += 1;
+      return roleClient(exact85);
+    },
+    expectedPrincipalArn: PRINCIPAL,
+    now: () => new Date("2026-08-02T00:00:00.000Z"),
+  });
+  await assert.rejects(broker.attestComputeOptimizerExportLaunchProvisioning(
+    SCOPE,
+    CONNECTION_ID,
+    "abort-during-identity",
+    {
+      sourceContracts: sourceContracts(),
+      objectContracts: [objectContract()],
+      launchContracts: [launchContract()],
+      signal: controller.signal,
+    },
+  ), ConnectionStateError);
+  assert.equal(assume.calls.length, 1);
+  assert.equal(policyAttestationStarted, 0);
+});
+
+test("provisioning attestor rejects a missing, forged or expanded signal edge before STS", async () => {
+  for (const input of [
+    { sourceContracts: sourceContracts(), objectContracts: [objectContract()],
+      launchContracts: [launchContract()] },
+    { sourceContracts: sourceContracts(), objectContracts: [objectContract()],
+      launchContracts: [launchContract()], signal: {} },
+    { sourceContracts: sourceContracts(), objectContracts: [objectContract()],
+      launchContracts: [launchContract()], signal: new AbortController().signal,
+      wildcard: "*" },
+  ]) {
+    const value = fixture(currentConnection());
+    await assert.rejects(value.broker.attestComputeOptimizerExportLaunchProvisioning(
+      SCOPE,
+      CONNECTION_ID,
+      "invalid-signal-edge",
+      input as never,
+    ), ConnectionIntegrityError);
+    assert.equal(value.assume.calls.length, 0);
+  }
+});
+
+test(".8.5 provisioning rejects mismatched regional source evidence and widened live IAM", async () => {
+  const active74 = currentConnection();
+  const invalidRegions = sourceContracts().map((item) =>
+    item.sourceId === "compute_optimizer_organization_export"
+      ? { ...item, region: "us-west-2" }
+      : item);
+  await assert.rejects(
+    fixture(active74).broker.attestComputeOptimizerExportLaunchProvisioning(
+      SCOPE,
+      CONNECTION_ID,
+      "promote-region-tamper",
+      { sourceContracts: invalidRegions, objectContracts: [objectContract()],
+        launchContracts: [launchContract()], signal: new AbortController().signal },
+    ),
+    ConnectionIntegrityError,
+  );
+
+  const exact85 = connection();
+  const assume = new Assume();
+  const widened = new AwsRoleBroker({
+    registry: new Registry(active74),
+    assumeRoleClient: assume,
+    callerIdentityClientFactory: () => new Identity(assume),
+    roleContractClientFactory: () => roleClient(exact85, (name, value) => {
+      if (!name.startsWith("SutraComputeOptimizerExportLaunchV1")) return value;
+      const statements = value.Statement as Array<Record<string, unknown>>;
+      (statements[0]?.Action as string[]).push(
+        "compute-optimizer:UpdateEnrollmentStatus",
+      );
+      return value;
+    }),
+    expectedPrincipalArn: PRINCIPAL,
+    now: () => new Date("2026-08-02T00:00:00.000Z"),
+  });
+  await assert.rejects(
+    widened.attestComputeOptimizerExportLaunchProvisioning(
+      SCOPE,
+      CONNECTION_ID,
+      "promote-policy-tamper",
+      { sourceContracts: sourceContracts(), objectContracts: [objectContract()],
+        launchContracts: [launchContract()], signal: new AbortController().signal },
+    ),
+    UnsafeTrustPolicyError,
+  );
+  assert.equal(assume.calls.length, 1);
+});
+
 test("exact Describe binds source, regional launch contract and unique provider IDs", async () => {
   const value = fixture();
   await value.broker.assumeValidatedComputeOptimizerExportDescribeSession(
@@ -314,7 +500,7 @@ test(".8.5 object read mints one exact current/version ARN and rejects sibling t
   ), ConnectionIntegrityError);
 });
 
-test("missing or widened live launch add-on fails before operation credentials", async () => {
+test("missing or widened live read/launch add-ons fail before operation credentials", async () => {
   for (const mutate of [
     (_name: string, value: Record<string, unknown>) => {
       const statements = value.Statement as Array<Record<string, unknown>>;
@@ -327,6 +513,8 @@ test("missing or widened live launch add-on fails before operation credentials",
     },
     (name: string, value: Record<string, unknown>) => name.startsWith("SutraComputeOptimizerExportLaunchV1")
       ? { ...value, Statement: (value.Statement as unknown[]).slice(0, 2) } : value,
+    (name: string, value: Record<string, unknown>) => name.startsWith("SutraComputeOptimizerExportReadV1")
+      ? { ...value, Statement: [] } : value,
   ]) {
     const value = fixture(connection(), mutate);
     await assert.rejects(value.broker.assumeValidatedComputeOptimizerExportLaunchSession(

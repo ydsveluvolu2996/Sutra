@@ -16,6 +16,7 @@ import { dirname } from "node:path";
 
 import type {
   AwsRoleProvisioningMode,
+  ComputeOptimizerExportLaunchProvisioningVerification,
   ConnectionScope,
   OnboardingTrustVerification,
   ScopedConnectionRegistry,
@@ -41,6 +42,10 @@ import {
 import {
   parseComputeOptimizerExportLaunchContracts,
 } from "./compute-optimizer-export-launch-contract.js";
+import {
+  validateComputeOptimizerExportLaunchProvisioningContractSet,
+  validateComputeOptimizerExportLaunchProvisioningVerification,
+} from "./compute-optimizer-export-launch-provisioning.js";
 import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
@@ -377,6 +382,117 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
             // commits and calls activateOnboarding with the exact role ARN.
             status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
             permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /** Stage an explicitly attested .8.5 successor without auto-activation. */
+  public async markComputeOptimizerExportLaunchProvisioningVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    unsafeVerification: ComputeOptimizerExportLaunchProvisioningVerification,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined) throw new RegistryConnectionNotFoundError();
+      if (connection.status !== "ACTIVE" || !new Set<StoredAwsConnection["permissionPackVersion"]>([
+        CURRENT_PERMISSION_PACK_VERSION,
+        FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+        ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+        ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+      ]).has(connection.permissionPackVersion)) throw new RegistryStateError();
+      let verification: ComputeOptimizerExportLaunchProvisioningVerification;
+      try {
+        verification = validateComputeOptimizerExportLaunchProvisioningVerification(
+          unsafeVerification,
+          connection,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      if (connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) {
+        if (JSON.stringify(connection.finopsSourceContracts) !==
+            JSON.stringify(verification.sourceContracts)
+          || JSON.stringify(connection.computeOptimizerExportObjectContracts) !==
+            JSON.stringify(verification.objectContracts)
+          || JSON.stringify(connection.computeOptimizerExportLaunchContracts) !==
+            JSON.stringify(verification.launchContracts)) {
+          throw new RegistryIntegrityError();
+        }
+        return document;
+      }
+      return {
+        version: 3,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "VERIFIED",
+            permissionPackVersion:
+              COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+            finopsSourceContracts: structuredClone(verification.sourceContracts),
+            computeOptimizerExportObjectContracts:
+              structuredClone(verification.objectContracts),
+            computeOptimizerExportLaunchContracts:
+              structuredClone(verification.launchContracts),
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /** Explicit second phase for a staged, exact-role .8.5 promotion. */
+  public async activateComputeOptimizerExportLaunchProvisioning(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined || connection.roleArn !== expectedRoleArn) {
+        throw new RegistryStateError();
+      }
+      if (connection.status === "ACTIVE" && connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) return document;
+      if (connection.status !== "VERIFIED"
+        || connection.permissionPackVersion !==
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+        || connection.finopsSourceContracts === undefined
+        || connection.computeOptimizerExportObjectContracts === undefined
+        || connection.computeOptimizerExportLaunchContracts === undefined) {
+        throw new RegistryStateError();
+      }
+      try {
+        validateComputeOptimizerExportLaunchProvisioningContractSet(
+          connection,
+          connection.enabledRegions,
+          connection.finopsSourceContracts,
+          connection.computeOptimizerExportObjectContracts,
+          connection.computeOptimizerExportLaunchContracts,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      return {
+        version: 3,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "ACTIVE",
             updatedAt: this.now().toISOString(),
           },
         },
@@ -877,6 +993,8 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     if (
       permissionPackVersion !==
         COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+      && permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
     ) throw new RegistryIntegrityError();
     try {
       computeOptimizerExportObjectContracts = parseComputeOptimizerExportObjectContracts(

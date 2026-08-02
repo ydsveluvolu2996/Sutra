@@ -150,12 +150,29 @@ export function parseFinopsSourceContracts(
 ): readonly FinopsSourceContract[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > 64) failContract();
   const contracts = value.map((candidate) => parseContract(candidate, owner));
-  if (
-    new Set(contracts.map(({ contractId }) => contractId)).size !== contracts.length ||
-    new Set(contracts.map(({ sourceId }) => sourceId)).size !== contracts.length ||
-    new Set(contracts.flatMap(({ policyName }) => policyName === null ? [] : [policyName])).size !==
-      contracts.filter(({ policyName }) => policyName !== null).length
-  ) failContract();
+  if (new Set(contracts.map(({ contractId }) => contractId)).size !== contracts.length) {
+    failContract();
+  }
+  const logicalSources = new Set<string>();
+  const policyOwners = new Map<string, string>();
+  for (const contract of contracts) {
+    // Compute Optimizer is the only implemented source whose AWS endpoint and
+    // exact-Describe contract are regional. Every other source remains a
+    // singleton, preserving the original fail-closed source-id rule.
+    const logicalSource = contract.sourceId === "compute_optimizer_organization_export"
+      ? `${contract.sourceId}\u0000${contract.region}`
+      : contract.sourceId;
+    if (logicalSources.has(logicalSource)) failContract();
+    logicalSources.add(logicalSource);
+    if (contract.policyName === null) continue;
+    const priorSource = policyOwners.get(contract.policyName);
+    if (priorSource !== undefined
+      && (priorSource !== "compute_optimizer_organization_export"
+        || contract.sourceId !== "compute_optimizer_organization_export")) {
+      failContract();
+    }
+    policyOwners.set(contract.policyName, contract.sourceId);
+  }
   return contracts.sort((left, right) => left.contractId.localeCompare(right.contractId));
 }
 

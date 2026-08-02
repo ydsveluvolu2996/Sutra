@@ -183,6 +183,34 @@ export interface ComputeOptimizerExportLaunchContract {
   readonly servicePrincipal: "compute-optimizer.amazonaws.com";
 }
 
+/**
+ * Server-produced proof used by the encrypted registry's explicit .8.5
+ * promotion edge. Contract values are derived from collector-owned
+ * CloudFormation outputs and then re-attested against the live customer role;
+ * no HTTP/browser request is allowed to construct this value.
+ */
+export interface ComputeOptimizerExportLaunchProvisioningVerification {
+  readonly schemaVersion:
+    "sutra.compute-optimizer-export-launch-provisioning-verification.v1";
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly roleArn: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+  readonly enabledRegions: readonly string[];
+  readonly sourceContracts: readonly FinopsSourceContract[];
+  readonly objectContracts: readonly ComputeOptimizerExportObjectContract[];
+  readonly launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+  readonly baseRoleOutputsSha256: string;
+  readonly regionalObjectReadOutputsSha256: string;
+  readonly regionalLaunchOutputsSha256: string;
+  readonly identityAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly launchPoliciesAttested: true;
+  readonly stackOutputsAttested: true;
+}
+
 export type AwsConnectionStatus =
   | "PENDING"
   | "VERIFIED"
