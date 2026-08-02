@@ -68,6 +68,12 @@ export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID =
 export const EXTENDED_SUPPORT_PERMISSION_PACK_VERSION =
   "standard-2026-08.6" as const;
 /**
+ * Immutable successor for ADV-09. It preserves .8.6 and adds only the exact
+ * two account-local AWS Support case reads; no Support mutation is permitted.
+ */
+export const AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION =
+  "standard-2026-08.7" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -86,6 +92,7 @@ export type PermissionPackVersion =
   | typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
   | typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
   | typeof EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+  | typeof AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

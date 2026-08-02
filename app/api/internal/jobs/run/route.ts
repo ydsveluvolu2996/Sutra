@@ -13,6 +13,7 @@ import {
   scheduleAwsBudgetsTick,
   scheduleAwsNewsFeedsTick,
   scheduleExtendedSupportTick,
+  scheduleAwsSupportCasesTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -87,6 +88,9 @@ export async function POST(request: Request): Promise<Response> {
     // handler reloads the AWS boundary and signed-broker credentials only after
     // the durable job is claimed; the queue payload contains no provider data.
     const extendedSupport = await scheduleExtendedSupportTick();
+    // ADV-09 schedules one canonical organization anchor per daily UTC window;
+    // account fan-out is resolved only inside the claimed server-owned job.
+    const awsSupportCases = await scheduleAwsSupportCasesTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -110,6 +114,7 @@ export async function POST(request: Request): Promise<Response> {
       awsNewsFeeds,
       awsBudgets,
       extendedSupport,
+      awsSupportCases,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

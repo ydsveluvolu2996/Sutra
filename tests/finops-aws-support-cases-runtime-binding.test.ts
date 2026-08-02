@@ -147,11 +147,14 @@ test("Support broker signs the exact privacy-minimized request and rejects unsig
   assert.equal(sent.entitlementProbe, "DESCRIBE_CASES_AUTHORIZATION_OUTCOME");
 });
 
-test("Support runtime contract pins entitlement probing and remains honestly unregistered", async () => {
-  const [engine, runtime, broker] = await Promise.all([
+test("Support runtime contract pins entitlement probing and is registered end to end", async () => {
+  const [engine, runtime, broker, handlers, tick, collector] = await Promise.all([
     readFile(new URL("../lib/finops-aws-support-cases-radar.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/finops-aws-support-cases-runtime-binding.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/finops-aws-support-cases-signed-broker.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/background-job-handlers.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/internal/jobs/run/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../services/aws-collector/src/local-server.ts", import.meta.url), "utf8"),
   ]);
   assert.match(engine, /entitlementProbe: "DESCRIBE_CASES_AUTHORIZATION_OUTCOME"/u);
   assert.match(engine, /credentials: "SERVER_OWNED_TRUST_ROLE_SESSIONS"/u);
@@ -159,8 +162,13 @@ test("Support runtime contract pins entitlement probing and remains honestly unr
   assert.match(runtime, /job\.maxAttempts !== 5/u);
   assert.match(runtime, /maximumIncrementalWindowDays/u);
   assert.match(runtime, /targets: dependencies\.targets/u);
-  assert.match(runtime, /registeredInSharedRuntime: false/u);
+  assert.match(runtime, /registeredInSharedRuntime: true/u);
   assert.match(broker, /verifyHostedBrokerResponse/u);
   assert.match(broker, /maximumCaptureBytes/u);
+  assert.match(handlers, /\[AWS_SUPPORT_CASES_RUNTIME_JOB_KIND\]/u);
+  assert.match(handlers, /scheduleAwsSupportCasesTick/u);
+  assert.match(tick, /scheduleAwsSupportCasesTick/u);
+  assert.match(collector, /AWS_SUPPORT_CASES_PROVIDER_ROUTE/u);
+  assert.match(collector, /AWS_SUPPORT_CASES_RESPONSE_LIMIT/u);
   assert.doesNotMatch(broker, /provider secret|raw correspondence/iu);
 });

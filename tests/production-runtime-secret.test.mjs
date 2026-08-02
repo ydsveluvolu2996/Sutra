@@ -24,6 +24,8 @@ function fixture() {
   const outboundFeed = keyPair();
   return {
     SUTRA_APP_PUBLIC_KEYS: JSON.stringify({ "production-app-signing": app.publicKey }),
+    SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL:
+      Buffer.alloc(32, 6).toString("base64url"),
     SUTRA_AUTH_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString("base64url"),
     SUTRA_BROKER_CLIENT_KEY_ID: "production-app-signing",
     SUTRA_BROKER_CLIENT_PRIVATE_KEY: app.privateKey,

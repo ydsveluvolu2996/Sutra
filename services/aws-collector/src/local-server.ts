@@ -89,6 +89,7 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
+  AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -173,6 +174,19 @@ import {
   parseExtendedSupportProviderRouteRequest,
   runExtendedSupportProviderRoute,
 } from "./extended-support-provider-route.js";
+import {
+  AWS_SUPPORT_CASES_PROVIDER_BOUNDS,
+  AwsSupportCasesProviderAdapterError,
+  type AwsSupportCasesProviderClient,
+  type AwsSupportCasesProviderPartition,
+} from "./aws-support-cases-provider-adapter.js";
+import { createAwsSupportCasesProviderClient } from
+  "./aws-support-cases-provider-client.js";
+import {
+  AWS_SUPPORT_CASES_PROVIDER_ROUTE,
+  parseAwsSupportCasesProviderRouteRequest,
+  runAwsSupportCasesProviderRoute,
+} from "./aws-support-cases-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -180,6 +194,7 @@ const BODY_LIMIT = 64 * 1024;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
 const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
 const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
+const AWS_SUPPORT_CASES_RESPONSE_LIMIT = 65 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -217,7 +232,8 @@ const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 
 function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permissionPackVersion"]): boolean {
   return value === COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
-    || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
+    || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+    || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -370,6 +386,17 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedExtendedSupportSession">;
+  /** Dedicated server-owned HMAC key; never accepted from request data. */
+  readonly awsSupportCasesEvidenceKey?: Uint8Array;
+  readonly awsSupportCasesProviderClientFactory?: (input: {
+    readonly partition: AwsSupportCasesProviderPartition;
+    readonly credentials: AwsTemporaryCredentials;
+  }) => AwsSupportCasesProviderClient;
+  readonly awsSupportCasesRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsSupportCasesSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -480,6 +507,13 @@ interface ServerContext {
   readonly extendedSupportRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["extendedSupportRoleBrokerFactory"]
   >;
+  readonly awsSupportCasesEvidenceKey?: Uint8Array;
+  readonly awsSupportCasesProviderClientFactory: NonNullable<
+    LocalCollectorServerOptions["awsSupportCasesProviderClientFactory"]
+  >;
+  readonly awsSupportCasesRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsSupportCasesRoleBrokerFactory"]
+  >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
@@ -549,6 +583,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   const principalArn = options.principalArn ?? (mode === "fixture" ? FIXTURE_PRINCIPAL : "");
   if (principalArn.length === 0) {
     throw new Error("SUTRA_COLLECTOR_PRINCIPAL_ARN is required in live mode");
+  }
+  if (options.awsSupportCasesEvidenceKey !== undefined
+    && (!(options.awsSupportCasesEvidenceKey instanceof Uint8Array)
+      || options.awsSupportCasesEvidenceKey.byteLength < 32
+      || options.awsSupportCasesEvidenceKey.byteLength > 64)) {
+    throw new Error("AWS Support Cases evidence key must contain 32 to 64 bytes");
   }
   const parsedPrincipal = parseIamRoleArn(principalArn);
   const now = options.now ?? (() => new Date());
@@ -645,6 +685,13 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       })),
     extendedSupportRoleBrokerFactory:
       options.extendedSupportRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    ...(options.awsSupportCasesEvidenceKey === undefined
+      ? {}
+      : { awsSupportCasesEvidenceKey: options.awsSupportCasesEvidenceKey.slice() }),
+    awsSupportCasesProviderClientFactory:
+      options.awsSupportCasesProviderClientFactory ?? createAwsSupportCasesProviderClient,
+    awsSupportCasesRoleBrokerFactory:
+      options.awsSupportCasesRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -698,6 +745,9 @@ export async function startLocalCollectorServer(): Promise<Server> {
       resolvePath(process.cwd(), ".sutra", "local-jobs.json"),
     mode,
     allowLiveAws,
+    awsSupportCasesEvidenceKey: decodeAwsSupportCasesEvidenceKey(
+      requiredEnvironment("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL"),
+    ),
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
   });
   await new Promise<void>((resolve, reject) => {
@@ -1074,6 +1124,65 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === AWS_SUPPORT_CASES_PROVIDER_ROUTE) {
+    const providerRequest = parseAwsSupportCasesProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null
+      || context.awsSupportCasesEvidenceKey === undefined) {
+      throw invalidRequest();
+    }
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.tenantId, providerRequest.parentConnectionId),
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      AWS_SUPPORT_CASES_PROVIDER_BOUNDS.maximumDurationMs,
+    );
+    timer.unref?.();
+    try {
+      const broker = context.awsSupportCasesRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.endpointRegion,
+      });
+      const result = await runAwsSupportCasesProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        evidenceKey: context.awsSupportCasesEvidenceKey,
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsSupportCasesSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition as AwsSupportCasesProviderPartition,
+            credentials: session.credentials,
+          };
+        },
+        clientFactory: context.awsSupportCasesProviderClientFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === EXTENDED_SUPPORT_PROVIDER_ROUTE) {
     const request = parseExtendedSupportProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -3666,7 +3775,8 @@ async function requireFinopsSourceActiveConnection(
         COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !==
         COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
-      && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION)
+      && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
@@ -3687,6 +3797,8 @@ async function requireComputeOptimizerObjectActiveConnection(
         COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined) &&
     (connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined))
   ) throw new RegistryStateError();
   return connection;
@@ -4269,6 +4381,8 @@ async function sendSigned(
   let body = JSON.stringify(payload);
   const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
     ? AWS_BUDGETS_RESPONSE_LIMIT
+    : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
+      ? AWS_SUPPORT_CASES_RESPONSE_LIMIT
     : path === EXTENDED_SUPPORT_PROVIDER_ROUTE
       ? EXTENDED_SUPPORT_RESPONSE_LIMIT
       : RESPONSE_LIMIT;
@@ -4396,6 +4510,14 @@ function safeHttpError(error: unknown): LocalHttpError {
         : error.code === "BOUND_REACHED" ? 413 : 504,
       error.code,
       "The bounded Extended Support provider collection did not complete",
+    );
+  }
+  if (error instanceof AwsSupportCasesProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Support Cases provider collection did not complete",
     );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {
@@ -4619,6 +4741,18 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+export function decodeAwsSupportCasesEvidenceKey(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]{43,86}$/u.test(value)) {
+    throw new Error("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL is invalid");
+  }
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.byteLength < 32 || decoded.byteLength > 64
+    || decoded.toString("base64url") !== value) {
+    throw new Error("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL is invalid");
+  }
+  return decoded;
 }
 
 function exactBooleanEnvironment(name: string, fallback: boolean): boolean {

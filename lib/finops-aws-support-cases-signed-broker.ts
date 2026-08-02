@@ -15,7 +15,7 @@ import {
 
 export const AWS_SUPPORT_CASES_BROKER_PATH = "/v1/finops/aws-support-cases/collect";
 export const AWS_SUPPORT_CASES_SIGNED_BROKER_ACTIVATION_REASON =
-  "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED";
+  "AWS_SUPPORT_CASES_DURABLE_RUNTIME_REGISTERED";
 
 const JSON_CONTENT_TYPE = /^application\/json(?:\s*;\s*charset=utf-8)?$/iu;
 const SHA256 = /^[a-f0-9]{64}$/u;

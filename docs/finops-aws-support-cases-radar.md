@@ -143,8 +143,14 @@ fan-out from being misrepresented as a native AWS organization source.
 
 ## Production acceptance gates
 
-This source-only slice is locally testable but is not production-accepted until
-all of these gates pass:
+The local vertical now implements the pure engine, credential-owning AWS SDK
+adapter, strict signed route, deterministic one-anchor-per-cohort scheduler,
+trusted account fan-out, bounded complete-head watermarking, immutable
+snapshots, authenticated API, and native UI. Immutable permission pack
+`standard-2026-08.7` adds exactly the two Support reads after preserving the
+`.8.5` Compute Optimizer and `.8.6` Extended Support contracts. A mixed or
+older cohort fails closed with an upgrade-required state. Production acceptance
+still requires all of these gates:
 
 1. **Permission gate:** a versioned role/session ceiling grants exactly the two
    reads for `Resource: "*"` in each intended account, with no Support writes.
@@ -167,6 +173,7 @@ all of these gates pass:
    authorization denial, throttling, stale data, watermark replay, privacy
    redaction, and adversarial cross-tenant requests.
 
-No IAM template, broker, database schema, registry, application API, UI,
-customer account, or live environment is modified by this bounded engine
-slice.
+Local provider, runtime, persistence, API, UI, and permission-contract code is
+present. Shared worker/collector registry wiring and the published `.8.7`
+onboarding artifact remain local closure gates; controlled customer-account
+acceptance and deployment remain later external gates.

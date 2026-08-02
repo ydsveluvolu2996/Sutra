@@ -70,7 +70,9 @@ test("native report renders plan states, filters, trends, provenance and privacy
     const officialHtml = renderToStaticMarkup(createElement(dashboardModule.AwsSupportCasesOfficialDefinitionPanel, { definition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION }));
     for (const text of ["Official AWS Support Cases Radar coverage", "Managed QuickSight definition not publicly committed", "Cases Summary", "support_cases_status_view", "Frozen source evidence remains visible"]) assert.match(officialHtml, new RegExp(text, "iu"));
     const uiSource = await readFile(new URL("../app/costs/finops-aws-support-cases-radar-dashboard.tsx", import.meta.url), "utf8");
-    assert.match(uiSource, /dashboard === null\) return \{ report: null, officialDefinition:/u);
+    assert.match(uiSource, /dashboard === null\)[\s\S]*return \{ report: null, sourceState: body\.sourceState, collectionReason: body\.collection\.reason/u);
+    assert.match(uiSource, /state\.sourceState === "collecting"/u);
+    assert.match(uiSource, /AWS_SUPPORT_CASES_PERMISSION_PACK_UPGRADE_REQUIRED/u);
     assert.match(uiSource, /report === null \? <AwsSupportCasesOfficialDefinitionPanel/u);
   } finally { await vite.close(); }
 });
@@ -83,14 +85,20 @@ test("job resolves targets server-side and persists only the normalized engine s
   assert.match(source, /snapshots\.record\(scope, snapshot\)/u);
 });
 
-test("production binding is signed, entitlement-aware, and honestly inactive", async () => {
-  const [broker, runtime, route] = await Promise.all([
+test("production binding is signed, entitlement-aware, and registered", async () => {
+  const [broker, runtime, route, handlers, tick, collector] = await Promise.all([
     readFile(new URL("../lib/finops-aws-support-cases-signed-broker.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/finops-aws-support-cases-runtime-binding.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/v1/finops/aws-support-cases-radar/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/background-job-handlers.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/internal/jobs/run/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../services/aws-collector/src/local-server.ts", import.meta.url), "utf8"),
   ]);
   assert.match(broker, /signHostedBrokerRequest/u);
   assert.match(broker, /verifyHostedBrokerResponse/u);
-  assert.match(runtime, /registeredInSharedRuntime: false/u);
-  assert.match(route, /AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED/u);
+  assert.match(runtime, /registeredInSharedRuntime: true/u);
+  assert.match(route, /AWS_SUPPORT_CASES_PRODUCTION_COMPOSITION_STATUS/u);
+  assert.match(handlers, /\[AWS_SUPPORT_CASES_RUNTIME_JOB_KIND\]/u);
+  assert.match(tick, /scheduleAwsSupportCasesTick/u);
+  assert.match(collector, /AWS_SUPPORT_CASES_PROVIDER_ROUTE/u);
 });

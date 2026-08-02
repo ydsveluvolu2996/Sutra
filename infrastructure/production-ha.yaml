@@ -1900,6 +1900,7 @@ Resources:
             - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
             - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_APP_PUBLIC_KEYS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_APP_PUBLIC_KEYS::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
             - { Name: SUTRA_BROKER_RESPONSE_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
           HealthCheck:

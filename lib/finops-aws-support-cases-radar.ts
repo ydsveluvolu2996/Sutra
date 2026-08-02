@@ -60,6 +60,7 @@ export const AWS_SUPPORT_CASES_READ_OPERATIONS = Object.freeze([
 export type AwsSupportPartition = "aws" | "aws-us-gov";
 export type AwsSupportEndpointRegion = "us-east-1" | "us-gov-west-1";
 export type AwsSupportPlan =
+  | "qualifying_plan_unclassified"
   | "business_support_plus"
   | "enterprise"
   | "unified_operations"
@@ -372,6 +373,7 @@ const ACTOR_KINDS = new Set<AwsSupportActorKind>([
   "UNKNOWN",
 ]);
 const SUPPORT_PLANS = new Set<AwsSupportPlan>([
+  "qualifying_plan_unclassified",
   "business_support_plus",
   "enterprise",
   "unified_operations",

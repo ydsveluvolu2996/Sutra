@@ -1,7 +1,12 @@
 import { AwsSupportCasesRepository } from "../../../../../db/finops-aws-support-cases-repository";
+import {
+  AwsSupportCasesRuntimeRepository,
+  AwsSupportCasesRuntimeRepositoryError,
+} from "../../../../../db/finops-aws-support-cases-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { AWS_SUPPORT_CASES_OFFICIAL_DEFINITION } from "../../../../../lib/finops-aws-support-cases-official-definition";
+import { AWS_SUPPORT_CASES_PRODUCTION_COMPOSITION_STATUS } from "../../../../../lib/finops-aws-support-cases-production-composition";
 import {
   AWS_SUPPORT_CASES_COLLECTION_BOUNDS,
   buildAwsSupportCasesRadar,
@@ -76,7 +81,32 @@ export async function GET(request: Request): Promise<Response> {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     }
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
-    const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };
+    const permissionPackReady = connection.permissionPackVersion === "standard-2026-08.7";
+    const runtimeRepository = new AwsSupportCasesRuntimeRepository();
+    const anchor = permissionPackReady ? await runtimeRepository.loadCanonicalScope({
+      organizationId: authenticated.subject.orgId,
+      customerId: connection.customerId,
+      partition: connection.partition as "aws" | "aws-us-gov",
+    }) : null;
+    let cohortReady = permissionPackReady;
+    if (anchor !== null) {
+      try { await runtimeRepository.resolve(anchor); } catch (error) {
+        if (error instanceof AwsSupportCasesRuntimeRepositoryError
+          && error.code === "PERMISSION_PACK_UPGRADE_REQUIRED") cohortReady = false;
+        else throw error;
+      }
+    }
+    const collectionAvailable = cohortReady
+      && AWS_SUPPORT_CASES_PRODUCTION_COMPOSITION_STATUS.sharedWorkerRegistered;
+    const collectionReason = !cohortReady
+      ? "AWS_SUPPORT_CASES_PERMISSION_PACK_UPGRADE_REQUIRED"
+      : AWS_SUPPORT_CASES_PRODUCTION_COMPOSITION_STATUS.sharedWorkerRegistered
+        ? null : "AWS_SUPPORT_CASES_SHARED_RUNTIME_UNAVAILABLE";
+    const scope = {
+      organizationId: authenticated.subject.orgId,
+      customerId: connection.customerId,
+      connectionId: anchor?.parentConnectionId ?? connection.id,
+    };
     const repository = new AwsSupportCasesRepository();
     const [active, latest, persisted] = await Promise.all([
       repository.getActiveSnapshot(scope), repository.getLatestSnapshot(scope), repository.listHistory(scope, 36),
@@ -84,9 +114,14 @@ export async function GET(request: Request): Promise<Response> {
     const selected = active ?? latest;
     if (selected === null) return jsonResponse({
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: connection.id,
-      sourceState: "configuration_required", dashboard: null,
+      sourceState: collectionAvailable
+        ? "collecting" : "configuration_required", dashboard: null,
       officialDefinition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION,
-      collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
+      collection: {
+        available: collectionAvailable,
+        reason: collectionReason,
+        anchorConnectionId: anchor?.parentConnectionId ?? null,
+      },
       supportPlanState: "UNKNOWN",
     });
     const cohortKey = JSON.stringify((active?.snapshot ?? selected.snapshot).intendedAccounts);
@@ -108,7 +143,7 @@ export async function GET(request: Request): Promise<Response> {
           : dashboard.summary.caseCount === 0 ? "empty" : "complete";
     return jsonResponse({
       schema: "sutra.finops-aws-support-cases-radar.v1", connectionId: connection.id,
-      sourceState: mappedState, generatedAt: dashboard.generatedAt,
+      sourceState: cohortReady ? mappedState : "unverified", generatedAt: dashboard.generatedAt,
       officialDefinition: AWS_SUPPORT_CASES_OFFICIAL_DEFINITION,
       source: { ...dashboard.source, accountCoverage: dashboard.source.accountCoverage.map((entry) => ({
         accountId: entry.accountId, supportPlan: entry.supportPlan, entitlementState: entry.entitlementState,
@@ -126,7 +161,11 @@ export async function GET(request: Request): Promise<Response> {
         dataThroughAt: (active ?? selected).snapshot.window.nextWatermark,
         historyCoverage: dashboard.source.historyCoverage, watermarkCoverage: dashboard.source.watermarkCoverage,
         organizationCoverageClaimed: false },
-      collection: { available: false, reason: "AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED" },
+      collection: {
+        available: collectionAvailable,
+        reason: collectionReason,
+        anchorConnectionId: anchor?.parentConnectionId ?? null,
+      },
       summarization: { available: false, provider: null, reason: "OPTIONAL_BEDROCK_SUMMARIZATION_NOT_CONFIGURED" },
     });
   } catch (error) { return errorResponse(error); }

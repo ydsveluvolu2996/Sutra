@@ -167,6 +167,10 @@ import { EXTENDED_SUPPORT_RUNTIME_JOB_KIND } from
   "../lib/finops-extended-support-runtime-binding.ts";
 import { createExtendedSupportProductionComposition } from
   "../lib/finops-extended-support-production-composition.ts";
+import { AWS_SUPPORT_CASES_RUNTIME_JOB_KIND } from
+  "../lib/finops-aws-support-cases-runtime-binding.ts";
+import { createAwsSupportCasesProductionComposition } from
+  "../lib/finops-aws-support-cases-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -220,6 +224,25 @@ function extendedSupportProductionComposition() {
 /** Daily deterministic ADV-04 scheduler hook for the internal job tick. */
 export function scheduleExtendedSupportTick(scheduledAtMs = Date.now()) {
   return extendedSupportProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+function awsSupportCasesProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_SUPPORT_CASES_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsSupportCasesProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-09 organization scheduler hook. */
+export function scheduleAwsSupportCasesTick(scheduledAtMs = Date.now()) {
+  return awsSupportCasesProductionComposition().scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1338,6 +1361,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       awsBudgetsProductionComposition().handler(job),
     [EXTENDED_SUPPORT_RUNTIME_JOB_KIND]: (job) =>
       extendedSupportProductionComposition().handler(job),
+    [AWS_SUPPORT_CASES_RUNTIME_JOB_KIND]: (job) =>
+      awsSupportCasesProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

@@ -238,6 +238,6 @@ export const AWS_SUPPORT_CASES_RUNTIME_BINDING = Object.freeze({
   jobKind: AWS_SUPPORT_CASES_RUNTIME_JOB_KIND,
   cadence: AWS_SUPPORT_CASES_SCHEDULER_CADENCE,
   handlerFactory: createAwsSupportCasesRuntimeJobHandler,
-  registeredInSharedRuntime: false,
+  registeredInSharedRuntime: true,
   activationReason: AWS_SUPPORT_CASES_SIGNED_BROKER_ACTIVATION_REASON,
 });

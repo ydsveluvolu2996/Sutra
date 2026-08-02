@@ -41,6 +41,7 @@ const TEST_TURNSTILE_SECRET_KEYS = new Set([
 export const PRODUCTION_RUNTIME_SECRET_KEYS = Object.freeze([
   "SUTRA_APP_PUBLIC_KEYS",
   "SUTRA_AUTH_ENCRYPTION_KEY",
+  "SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL",
   "SUTRA_BROKER_CLIENT_KEY_ID",
   "SUTRA_BROKER_CLIENT_PRIVATE_KEY",
   "SUTRA_BROKER_RESPONSE_KEY_ID",
@@ -366,6 +367,10 @@ export function validateProductionRuntimeSecret(candidate, expectedIdentityMode)
   }
 
   const encryptionKeys = [
+    exactBase64Url256(
+      secret.SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL,
+      "SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL",
+    ),
     exactBase64Url256(secret.SUTRA_AUTH_ENCRYPTION_KEY, "SUTRA_AUTH_ENCRYPTION_KEY"),
     exactBase64Url256(secret.SUTRA_CONNECTION_ENCRYPTION_KEY, "SUTRA_CONNECTION_ENCRYPTION_KEY"),
     exactBase64Url256(
@@ -375,7 +380,7 @@ export function validateProductionRuntimeSecret(candidate, expectedIdentityMode)
     exactBase64Url256(secret.SUTRA_REGISTRY_ENCRYPTION_KEY, "SUTRA_REGISTRY_ENCRYPTION_KEY"),
   ];
   if (new Set(encryptionKeys).size !== encryptionKeys.length) {
-    invalid("Application encryption keys must be distinct");
+    invalid("Application encryption and evidence keys must be distinct");
   }
   if (
     typeof secret.SUTRA_JOB_RUNNER_TOKEN !== "string"

@@ -1,7 +1,10 @@
 import { pathToFileURL } from "node:url";
 
 import { runSandboxIdentityPreflight } from "./aws-sandbox-preflight.js";
-import { createLocalCollectorServer } from "./local-server.js";
+import {
+  createLocalCollectorServer,
+  decodeAwsSupportCasesEvidenceKey,
+} from "./local-server.js";
 import {
   HostedPostgresState,
   type HostedAgentlessRecoveryClaim,
@@ -287,6 +290,9 @@ export async function startHostedCollectorServer(): Promise<{
     operationCoordinator: state,
     computeOptimizerExportLaunchLedger: launchLedger,
     hostedRuntime: true,
+    awsSupportCasesEvidenceKey: decodeAwsSupportCasesEvidenceKey(
+      required("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL"),
+    ),
     trustedAdvisorTaxonomySigningKeyId: taxonomySigningKeyId,
     readiness: () => state.ready(),
     agentlessRunStore: state.agentlessRunStore(),

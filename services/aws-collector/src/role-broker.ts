@@ -54,6 +54,7 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
+  AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -89,6 +90,14 @@ import {
   EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS,
 } from
   "./extended-support-provider-adapter.js";
+import {
+  AWS_SUPPORT_CASES_PERMISSION_ACTIONS,
+  AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME,
+} from "./aws-support-cases-permission-contract.js";
+import { AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS } from
+  "./aws-support-cases-provider-adapter.js";
+import { awsSupportCasesProviderSessionPolicy } from
+  "./aws-support-cases-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -127,6 +136,7 @@ const COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION =
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
 const EXTENDED_SUPPORT_PACK_VERSION = EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
 const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1";
+const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -160,11 +170,18 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "aws_organizations_taxonomy",
     "compute_optimizer_organization_export",
   ]),
+  [AWS_SUPPORT_CASES_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
 });
 
 function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
   return value === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
-    || value === EXTENDED_SUPPORT_PACK_VERSION;
+    || value === EXTENDED_SUPPORT_PACK_VERSION
+    || value === AWS_SUPPORT_CASES_PACK_VERSION;
 }
 
 function permissionPackSupportsSource(
@@ -902,7 +919,8 @@ function assertExpectedPermissionPolicy(
     | typeof ADVANCED_FINOPS_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
-    | typeof EXTENDED_SUPPORT_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof EXTENDED_SUPPORT_PACK_VERSION
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -936,19 +954,26 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
             || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
           : []),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
           ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
+          : []),
+        ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+          ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -983,6 +1008,20 @@ function assertExtendedSupportProjectionPolicy(value: string | undefined): void 
     || statement.Effect !== "Allow" || statement.Resource !== "*"
     || !sameStringSet(stringList(statement.Action), EXTENDED_SUPPORT_PROVIDER_OPERATIONS)) {
     throw new Error("unexpected Extended Support policy");
+  }
+}
+
+function assertAwsSupportCasesPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected AWS Support Cases policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactSupportCasesRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), AWS_SUPPORT_CASES_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected AWS Support Cases policy");
   }
 }
 
@@ -1066,7 +1105,8 @@ function assertExpectedRole(
     | typeof ADVANCED_FINOPS_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
-    | typeof EXTENDED_SUPPORT_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof EXTENDED_SUPPORT_PACK_VERSION
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1452,6 +1492,58 @@ export class AwsRoleBroker {
   }
 
   /**
+   * ADV-09 session with an exact read-only intersection. The collector pins
+   * scope, account, partition, action set and immutable .8.7 pack before STS.
+   */
+  public async assumeValidatedAwsSupportCasesSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: "aws" | "aws-us-gov";
+      readonly sessionActions: typeof AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Support Cases session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-support`,
+      awsSupportCasesProviderSessionPolicy,
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      AWS_SUPPORT_CASES_PACK_VERSION,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
    * Prove the ACTIVE .8.5 connection identity without returning credentials or
    * granting any provider read/launch action to the manifest route.
    */
@@ -1587,7 +1679,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
-        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION) ||
+        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
+        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -2216,7 +2309,8 @@ export class AwsRoleBroker {
       | typeof ADVANCED_FINOPS_PACK_VERSION
       | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
       | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
-      | typeof EXTENDED_SUPPORT_PACK_VERSION,
+      | typeof EXTENDED_SUPPORT_PACK_VERSION
+      | typeof AWS_SUPPORT_CASES_PACK_VERSION,
     signal?: AbortSignal,
   ): Promise<void> {
     try {
@@ -2230,6 +2324,7 @@ export class AwsRoleBroker {
         && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
+        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -2306,7 +2401,11 @@ export class AwsRoleBroker {
         ...objectContracts.map(({ policyName }) => policyName),
         ...launchContracts.map(({ policyName }) => policyName),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
           ? [EXTENDED_SUPPORT_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+          ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
           : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
@@ -2326,7 +2425,8 @@ export class AwsRoleBroker {
         permissionPackVersion,
         actionsForFinopsSourceContracts(sourceContracts),
       );
-      if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION) {
+      if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+        || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2335,6 +2435,16 @@ export class AwsRoleBroker {
           ),
         );
         assertExtendedSupportProjectionPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertAwsSupportCasesPolicy(policy.policyDocument);
       }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(

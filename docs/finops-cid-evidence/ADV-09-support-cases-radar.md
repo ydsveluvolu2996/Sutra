@@ -125,16 +125,23 @@ Focused tests cover engine privacy/bounds, immutable migrations, tenant-scoped
 repository and route contracts, browser-safe projection, accessible native
 rendering, plan/configuration states, history/provenance, the server-owned job
 boundary, response/age/topic visuals, signed transport rejection, strict
-lease/window validation, and all-scope scheduler prevalidation. The
-implementation remains `PARTIAL_PIPELINE`, not live-verified: the shared
-runtime registration, credential-owning AWS SDK Support adapter, and provider
-accounts are not bound in this repository. Activation therefore remains false
+lease/window validation, all-scope scheduler prevalidation, real AWS SDK
+capture minimization, exact `.8.7` permission drift rejection, and isolated
+schedule-to-immutable-head composition. The scheduler proves that two account
+connections produce one cohort fan-out job rather than an O(N²) duplicate
+collection. Raw subjects, contacts, correspondence, attachment metadata,
+provider diagnostics and pagination tokens have explicit non-leakage tests.
+
+The implementation is not yet live-verified. Shared runtime/collector route
+registration and publication of the immutable `.8.7` onboarding role remain
+local closure gates. Until those hooks land, activation honestly remains false
 with `AWS_SUPPORT_CASES_SIGNED_BROKER_HANDLER_NOT_REGISTERED`.
 
-Focused local result: **21 passed, 0 failed, 0 skipped** across the exact public
-source audit, engine,
-runtime binding and vertical contract suites; scoped lint, TypeScript and the
-parent exact-tree gates are tracked separately.
+Focused local result before shared activation: **29 passed, 0 failed, 0
+skipped** across the exact public audit, engine, runtime binding, vertical,
+provider, permission-contract, and production-composition suites; root and
+collector typechecks, scoped lint, diff checks, and the repository secret scan
+passed on the same working tree before later parallel edits.
 
 Production activation requires controlled qualifying and non-qualifying linked
 accounts to validate IAM, endpoint partitioning, pagination, throttling,
