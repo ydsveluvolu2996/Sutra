@@ -66,21 +66,21 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 1 | 12 | 0 | 0 | 0 | 0 |
+| Advanced | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
-| **Total** | **29** | **6** | **23** | **0** | **0** | **0** | **0** |
+| **Total** | **29** | **7** | **22** | **0** | **0** | **0** | **0** |
 
 ### Current release-scope view
 
 | Release scope | Catalog rows | Candidate | Partial pipeline | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|
-| In scope — AWS-backed dashboards | 27 | 6 | 21 | 0 | 0 |
+| In scope — AWS-backed dashboards | 27 | 7 | 20 | 0 | 0 |
 | Excluded from this build — Azure CID and GCP CID | 2 | 0 | 2 | 0 | 0 |
-| **Official catalog retained** | **29** | **6** | **23** | **0** | **0** |
+| **Official catalog retained** | **29** | **7** | **22** | **0** | **0** |
 
-The six candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Trends, and Data Transfer. The twenty-three partial pipelines are Trusted
-Advisor Organizational, Compute Optimizer, Extended Support Cost Projection, Graviton Savings, Health Events, AWS News Feeds, AWS Budgets, Support Cases Radar,
+The seven candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
+Anomaly, AWS News Feeds, Trends, and Data Transfer. The twenty-two partial pipelines are Trusted
+Advisor Organizational, Compute Optimizer, Extended Support Cost Projection, Graviton Savings, Health Events, AWS Budgets, Support Cases Radar,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -100,7 +100,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADV-04 | Extended Support Cost Projection | `extended_support_projection` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-04-extended-support.md): the pinned 5-sheet/60-visual/17-control definition, five-service multi-account/Region contract, prevalidated scheduling, replay-safe durable boundary, immutable READY-only history, same-tenant API, exact signed-micro output and native 3/6/12-month UI exist; credential-owning provider adapter, shared runtime registration/IAM, decimal-string provider inputs, real calendar/rate/CUR2 reconciliation, exact layout and live acceptance remain. |
 | ADV-05 | Graviton Savings Dashboard | `graviton_savings` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-05-graviton-savings.md): the pinned v3.0.2 inventory maps 7 sheets, 122 visuals and 53 controls; EC2/ASG, RDS/Aurora, OpenSearch and ElastiCache contracts, prevalidated scheduling, signed replay, exact-micro CUR2 economics, immutable history, same-tenant API and native per-sheet evidence exist. Shared provider/runtime wiring, standalone instance mapping, richer service controls, reconciliation, exact layout and live acceptance remain. |
 | ADV-06 | Health Events Dashboard | `health_events` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-06-health-events.md): the pinned v3.1.0 inventory maps 3 sheets, 33 visuals and 28 controls; organization past/current/upcoming history, same-tenant API, prerequisite/provider states, native per-sheet planning UI and safe export retain explicit 48-hour-or-more/not-real-time semantics. Production broker/handler, eligible-plan/Organizations validation, real pagination/retention/initial-load, exact layout and live acceptance remain. |
-| ADV-07 | AWS News Feeds | `aws_news_feeds` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): the pinned 6-sheet/21-visual/12-control definition, hardened XML gateway, replay-safe durable contract, immutable history, same-tenant API and native four-family/per-sheet inventory exist; shared worker/tick, durable replay store, controlled-egress registration, exact layout, provider reconciliation and live acceptance remain. |
+| ADV-07 | AWS News Feeds | `aws_news_feeds` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): the pinned 6-sheet/21-visual/12-control definition, five exact server-owned sources, hardened controlled-egress XML gateway, durable tenant-bound replay/failure ledger, deterministic six-hour scheduler, shared worker handler, immutable READY-only head, same-tenant API and native four-family/per-sheet inventory are fully wired and locally tested. Provider/live reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree release gates and deployment remain; therefore no live claim is made. |
 | ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-08-aws-budgets.md): the pinned 2-sheet/11-visual/7-control definition, six-hour server-scoped scheduler, signed bounded broker transport, immutable hierarchy/actual/forecast history, same-tenant API and native per-visual coverage exist; arbitrary Group By/Sankey geometry, shared handler/adapter registration, secrets, provider reconciliation and live acceptance remain. |
 | ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): the pinned manifest/changelog/preview and 2 published dataset contracts are mapped; managed QuickSight counts remain explicitly unavailable. Privacy-minimized immutable history, entitlement probing, signed transport, daily runtime, same-tenant API, native case/account/age/cadence/topic views and optional-summary state exist; production registration, provider reconciliation, authorized template definition and live acceptance remain. |
 | ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-10-resiliencevue.md): the pinned v1.0.0 inventory maps 4 sheets, 47 visuals and 9 controls; replay-safe target/window runtime, immutable multi-account/Region history, last-assessment filtering, policy posture, score/RPO/RTO trends and recommendation evidence exist. Estimated cost/optimization/architecture/component dimensions require a versioned schema; credential-broker/runtime registration, provider reconciliation, exact layout and live acceptance remain. |

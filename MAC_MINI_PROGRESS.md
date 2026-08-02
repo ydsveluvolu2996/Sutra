@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 6 of 29 |
-| Partial pipelines | 23 of 29: 21 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 7 of 29 |
+| Partial pipelines | 22 of 29: 20 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -408,3 +408,15 @@ Next gate:
 | Focused verification | 16 collector broker/manifest/route tests and 3 app transport tests passed; root and collector typechecks, repository secret scan of 2,244 source files, and `git diff --check` passed |
 | Remaining gate | Complete the durable capability/outbox scheduler and crash-safe sealed-reference handoff before registering the full producer; controlled all-Region/two-tenant/provider/live acceptance remains open |
 | Release evidence | Source checkpoint only; no image was published or deployed and the production digest remains unchanged |
+
+### 2026-08-02 — AWS News Feeds local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-07 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 7 candidates and 22 partial pipelines, including 20 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `ddc448ba56af27d0ae92be8c950259f667cdbec1` pushed to `origin/agent/mac-mini-finops-continuation`; local, remote, and draft PR 26 heads matched exactly |
+| Delivery | Five pinned AWS sources; controlled-egress RSS/Atom gateway; deterministic six-hour scheduling; durable tenant-bound replay/failure receipts; immutable READY-only accepted head; real shared worker/drain wiring; same-tenant API and native 6-sheet/21-visual/12-control UI |
+| Security and integrity | Caller URLs, redirects, credentials, active content, DTD/entities/XInclude, MIME confusion, oversized bodies/items, tenant substitution, corrupt receipts, partial-head promotion and raw provider failures fail closed |
+| Focused verification | 39/39 engine/gateway/repository/runtime/API/UI tests, 5/5 shared handler tests, 2/2 transport-boundary tests, migration parity, root typecheck, scoped ESLint, PostgreSQL migration/runtime suite and repository secret scan passed |
+| Remaining gates | Controlled provider reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree full verification and live deployment proof |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
