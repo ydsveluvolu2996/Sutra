@@ -121,6 +121,19 @@ import {
   type ComputeOptimizerExactDescribeReader,
 } from "./compute-optimizer-export-exact-describe.js";
 import {
+  ComputeOptimizerExportLauncherError,
+  createAwsComputeOptimizerExportLaunchClient,
+  parseComputeOptimizerExportLaunchAttempt,
+  runComputeOptimizerExportLaunch,
+  type ComputeOptimizerExportLaunchClient,
+} from "./compute-optimizer-export-launcher.js";
+import {
+  ComputeOptimizerExportLaunchLedgerError,
+  type ComputeOptimizerExportLaunchExecutionLedger,
+} from "./compute-optimizer-export-launch-ledger.js";
+import { resolveComputeOptimizerExportLaunchContractForRegion } from
+  "./compute-optimizer-export-launch-contract.js";
+import {
   executeFinopsSourceDispatch,
   parseFinopsSourceDispatchRequest,
   resolveFinopsSourceContract,
@@ -142,7 +155,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|finops-source|organizations-taxonomy|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -255,6 +268,17 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportDescribeSession">;
+  readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
+  readonly computeOptimizerExportLaunchClientFactory?: (
+    partition: LocalAwsPartition,
+    region: string,
+    credentials: Parameters<typeof createAwsComputeOptimizerExportLaunchClient>[2],
+  ) => ComputeOptimizerExportLaunchClient;
+  readonly computeOptimizerExportLaunchRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportLaunchSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -340,6 +364,13 @@ interface ServerContext {
   >;
   readonly computeOptimizerExactDescribeRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["computeOptimizerExactDescribeRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
+  readonly computeOptimizerExportLaunchClientFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportLaunchClientFactory"]
+  >;
+  readonly computeOptimizerExportLaunchRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportLaunchRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -474,6 +505,15 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
         createAwsComputeOptimizerExactDescribeReader,
     computeOptimizerExactDescribeRoleBrokerFactory:
       options.computeOptimizerExactDescribeRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    ...(options.computeOptimizerExportLaunchLedger === undefined
+      ? {}
+      : { computeOptimizerExportLaunchLedger: options.computeOptimizerExportLaunchLedger }),
+    computeOptimizerExportLaunchClientFactory:
+      options.computeOptimizerExportLaunchClientFactory ??
+        createAwsComputeOptimizerExportLaunchClient,
+    computeOptimizerExportLaunchRoleBrokerFactory:
+      options.computeOptimizerExportLaunchRoleBrokerFactory ??
         createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
@@ -1392,6 +1432,10 @@ async function route(
         body: await collectComputeOptimizerExactDescribe(context, request),
       };
     }
+    if (action === "compute-optimizer-export-launch") {
+      const attempt = parseComputeOptimizerExportLaunchHttpRequest(body, pathConnectionId);
+      return { status: 200, body: await collectComputeOptimizerExportLaunch(context, attempt) };
+    }
     if (action === "finops-source") {
       const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
       return {
@@ -1740,6 +1784,100 @@ async function collectComputeOptimizerExactDescribe(
   } finally {
     await context.operationCoordinator.release(lease);
   }
+}
+
+function parseComputeOptimizerExportLaunchHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): ReturnType<typeof parseComputeOptimizerExportLaunchAttempt> {
+  let value: unknown;
+  try { value = JSON.parse(body) as unknown; } catch { throw invalidRequest(); }
+  try {
+    const attempt = parseComputeOptimizerExportLaunchAttempt(value);
+    if (attempt.scope.connectionId !== pathConnectionId) throw invalidRequest();
+    return attempt;
+  } catch (error) {
+    if (error instanceof LocalHttpError) throw error;
+    throw invalidRequest();
+  }
+}
+
+async function collectComputeOptimizerExportLaunch(
+  context: ServerContext,
+  attempt: ReturnType<typeof parseComputeOptimizerExportLaunchAttempt>,
+): Promise<unknown> {
+  const ledger = context.computeOptimizerExportLaunchLedger;
+  if (ledger === undefined) throw new RegistryStateError();
+  const operationKey = connectionOperationKey(attempt.scope.orgId, attempt.scope.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireConnection(context.registry, {
+      tenantId: attempt.scope.orgId,
+      connectionId: attempt.scope.connectionId,
+      jobId: attempt.launchAttemptId,
+    });
+    if (
+      context.mode !== "live" || connection.status !== "ACTIVE" ||
+      connection.permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined ||
+      connection.expectedAccountId !== attempt.requesterAccountId ||
+      connection.partition !== attempt.partition ||
+      !finopsRegionMatchesPartition(attempt.region, connection.partition)
+    ) throw new RegistryStateError();
+    let contract;
+    try {
+      contract = resolveComputeOptimizerExportLaunchContractForRegion(
+        connection.computeOptimizerExportLaunchContracts,
+        { tenantId: connection.tenantId, connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId, partition: connection.partition },
+        attempt.region,
+      );
+    } catch { throw invalidRequest(); }
+    const optionalPrefix = contract.basePrefix === "" ? null : contract.basePrefix.slice(0, -1);
+    if (attempt.targets.some((target) =>
+      target.region !== contract.region || target.bucket !== contract.bucket ||
+      target.optionalPrefix !== optionalPrefix || target.effectivePrefix !== contract.effectivePrefix ||
+      target.request.s3DestinationConfig.bucket !== contract.bucket ||
+      target.request.s3DestinationConfig.keyPrefix !== optionalPrefix
+    )) throw invalidRequest();
+    const ledgerBoundary = { tenantId: attempt.scope.orgId,
+      connectionId: attempt.scope.connectionId, attempt, nowMs: context.now().getTime() };
+    const prepared = await ledger.prepare(ledgerBoundary);
+    if (prepared.state === "TERMINAL") return prepared.execution;
+    if (prepared.state === "IN_PROGRESS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("ACTIVE");
+    }
+    if (prepared.state === "AMBIGUOUS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("AMBIGUOUS");
+    }
+    const claimed = await ledger.claim({ ...ledgerBoundary, nowMs: context.now().getTime() });
+    if (claimed.state === "TERMINAL") return claimed.execution;
+    if (claimed.state === "IN_PROGRESS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("ACTIVE");
+    }
+    if (claimed.state === "AMBIGUOUS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("AMBIGUOUS");
+    }
+    const broker = context.computeOptimizerExportLaunchRoleBrokerFactory({
+      registry: context.registry, principalArn: context.principalArn, region: attempt.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportLaunchSession(
+      { tenantId: attempt.scope.orgId }, attempt.scope.connectionId, attempt.launchAttemptId,
+      { contractId: contract.contractId, region: attempt.region },
+    );
+    if (session.accountId !== attempt.requesterAccountId || session.partition !== attempt.partition) {
+      throw invalidRequest();
+    }
+    const execution = await runComputeOptimizerExportLaunch({
+      attempt,
+      client: context.computeOptimizerExportLaunchClientFactory(
+        attempt.partition, attempt.region, session.credentials,
+      ),
+      now: context.now,
+    });
+    return ledger.complete({ ...ledgerBoundary, claimToken: claimed.claimToken,
+      execution, nowMs: context.now().getTime() });
+  } finally { await context.operationCoordinator.release(lease); }
 }
 
 function finopsRegionMatchesPartition(
@@ -3831,6 +3969,26 @@ function safeHttpError(error: unknown): LocalHttpError {
       status,
       error.code,
       "The exact Compute Optimizer export freshness check did not complete",
+    );
+  }
+  if (error instanceof ComputeOptimizerExportLaunchLedgerError) {
+    const status = error.code === "INVALID_INPUT" ? 400
+      : error.code === "STORAGE_FAILED" ? 503 : 409;
+    return new LocalHttpError(
+      status,
+      error.code === "ACTIVE" ? "LAUNCH_IN_PROGRESS"
+        : error.code === "AMBIGUOUS" ? "LAUNCH_AMBIGUOUS"
+          : "INVALID_REQUEST",
+      error.code === "AMBIGUOUS"
+        ? "The prior Compute Optimizer launch outcome is ambiguous and cannot be resumed"
+        : "The durable Compute Optimizer launch could not proceed",
+    );
+  }
+  if (error instanceof ComputeOptimizerExportLauncherError) {
+    return new LocalHttpError(
+      error.code === "LIMIT_EXCEEDED" ? 413 : 400,
+      error.code,
+      "The sealed Compute Optimizer export launch was rejected",
     );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {

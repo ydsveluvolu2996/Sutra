@@ -6,6 +6,8 @@ import {
   HostedPostgresState,
   type HostedAgentlessRecoveryClaim,
 } from "./hosted-postgres-state.js";
+import { HostedComputeOptimizerExportLaunchLedger } from
+  "./compute-optimizer-export-launch-ledger.js";
 import { HostedRequestAuthenticator } from "./hosted-request-auth.js";
 import {
   recoverAgentlessOwnedResources,
@@ -257,11 +259,16 @@ export async function startHostedCollectorServer(): Promise<{
   const agentless = hostedAgentlessConfiguration(identity.accountId, region);
   const taxonomySigningKeyId = hostedTaxonomySigningKey(identity.accountId, region);
 
+  const databaseUrl = required("DATABASE_URL");
   const state = new HostedPostgresState({
-    connectionString: required("DATABASE_URL"),
+    connectionString: databaseUrl,
     encryptionKey: required("SUTRA_REGISTRY_ENCRYPTION_KEY"),
   });
-  if (!await state.ready()) {
+  const launchLedger = new HostedComputeOptimizerExportLaunchLedger({
+    connectionString: databaseUrl,
+  });
+  if (!await state.ready() || !await launchLedger.ready()) {
+    await launchLedger.close();
     await state.close();
     throw new Error("The hosted broker database schema is unavailable");
   }
@@ -278,6 +285,7 @@ export async function startHostedCollectorServer(): Promise<{
     registry: state,
     authenticator,
     operationCoordinator: state,
+    computeOptimizerExportLaunchLedger: launchLedger,
     hostedRuntime: true,
     trustedAdvisorTaxonomySigningKeyId: taxonomySigningKeyId,
     readiness: () => state.ready(),
@@ -325,7 +333,7 @@ export async function startHostedCollectorServer(): Promise<{
       await new Promise<void>((resolve, reject) => {
         server.close((error) => error ? reject(error) : resolve());
       });
-      await state.close();
+      await Promise.all([state.close(), launchLedger.close()]);
     },
   };
 }

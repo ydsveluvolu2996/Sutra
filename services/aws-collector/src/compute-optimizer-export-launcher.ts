@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  ComputeOptimizerClient,
   ExportAutoScalingGroupRecommendationsCommand,
   ExportEBSVolumeRecommendationsCommand,
   ExportEC2InstanceRecommendationsCommand,
@@ -19,6 +20,8 @@ import {
 } from "@aws-sdk/client-compute-optimizer";
 
 import { canonicalJson } from "./canonical-json.js";
+import { workloadIdentityAwsClientConfig } from "./role-broker.js";
+import type { AwsPartition, AwsTemporaryCredentials } from "./types.js";
 
 const ACCOUNT_ID = /^\d{12}$/u;
 const BUCKET =
@@ -175,6 +178,7 @@ interface LaunchAttempt {
   readonly attemptNumber: number;
   readonly targets: readonly LaunchTarget[];
 }
+export type ComputeOptimizerExportLaunchAttempt = LaunchAttempt;
 
 export type ComputeOptimizerExportLaunchPublicErrorCode =
   | "ABORTED"
@@ -449,6 +453,70 @@ function validateAttempt(value: unknown): LaunchAttempt {
     reject("LIMIT_EXCEEDED");
   }
   return structuredClone(attempt);
+}
+
+/** Parse and clone a sealed attempt before any credential or provider work. */
+export function parseComputeOptimizerExportLaunchAttempt(
+  value: unknown,
+): ComputeOptimizerExportLaunchAttempt {
+  return deepFreeze(validateAttempt(value));
+}
+
+export function createAwsComputeOptimizerExportLaunchClient(
+  partition: AwsPartition,
+  region: string,
+  credentials: AwsTemporaryCredentials,
+): ComputeOptimizerExportLaunchClient {
+  if (!validRegionForPartition(region, partition)) reject("INVALID_ATTEMPT");
+  const client = new ComputeOptimizerClient({
+    ...workloadIdentityAwsClientConfig(region, 3),
+    endpoint: computeOptimizerExportEndpoint(partition, region),
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+      expiration: credentials.expiration,
+    },
+  });
+  return {
+    send: (command, options) => {
+      const handlerOptions = { abortSignal: options.abortSignal };
+      if (command instanceof ExportAutoScalingGroupRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportEBSVolumeRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportEC2InstanceRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportECSServiceRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportIdleRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportLambdaFunctionRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportLicenseRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      if (command instanceof ExportRDSDatabaseRecommendationsCommand) {
+        return client.send(command, handlerOptions);
+      }
+      return Promise.reject(new ComputeOptimizerExportLauncherError("INVALID_ATTEMPT"));
+    },
+  };
+}
+
+export function computeOptimizerExportEndpoint(
+  partition: AwsPartition,
+  region: string,
+): string {
+  if (!validRegionForPartition(region, partition)) reject("INVALID_ATTEMPT");
+  const suffix = partition === "aws-cn" ? "amazonaws.com.cn" : "amazonaws.com";
+  return `https://compute-optimizer.${region}.${suffix}`;
 }
 
 function bounded(value: number | undefined, maximum: number): number {

@@ -46,6 +46,8 @@ import type {
 import type {
   ComputeOptimizerExactDescribeRequest,
 } from "../services/aws-collector/src/compute-optimizer-export-exact-describe";
+import type { ComputeOptimizerExportLaunchAttempt } from
+  "../services/aws-collector/src/compute-optimizer-export-launcher";
 import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
@@ -1002,6 +1004,29 @@ export async function runComputeOptimizerExportExactDescribe(
     "POST",
     input,
     Math.min(40_000, remainingMs),
+    context.signal,
+  )).value;
+}
+
+/** Signed transport for a ledger-backed immutable launch attempt. */
+export async function runComputeOptimizerExportLaunch(
+  attempt: ComputeOptimizerExportLaunchAttempt,
+  context: { readonly signal: AbortSignal; readonly deadlineAtMs: number },
+): Promise<unknown> {
+  if (!(context.signal instanceof AbortSignal) || !Number.isSafeInteger(context.deadlineAtMs)) {
+    throw new PilotServerError(400, "INVALID_REQUEST",
+      "The Compute Optimizer export launch boundary was invalid");
+  }
+  const remainingMs = context.deadlineAtMs - Date.now();
+  if (context.signal.aborted || remainingMs <= 0) {
+    throw new PilotServerError(408, "REQUEST_TIMEOUT",
+      "The Compute Optimizer export launch deadline elapsed");
+  }
+  return (await brokerFetchEnvelope<unknown>(
+    `/v1/connections/${attempt.scope.connectionId}/compute-optimizer-export-launch`,
+    "POST",
+    attempt,
+    Math.min(130_000, remainingMs),
     context.signal,
   )).value;
 }

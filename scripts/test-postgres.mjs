@@ -7,6 +7,7 @@ import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const POSTGRES_TEST_PROJECT = "sutra-postgres-test";
+const NODE_TEST_ARGS = ["--experimental-strip-types", "--test"];
 const suppliedOwnerUrl = optionalEnvironmentValue("SUTRA_POSTGRES_TEST_URL");
 const suppliedRuntimeUrl = optionalEnvironmentValue("SUTRA_POSTGRES_RUNTIME_TEST_URL");
 if ((suppliedOwnerUrl === undefined) !== (suppliedRuntimeUrl === undefined)) {
@@ -114,35 +115,42 @@ try {
     SUTRA_MIGRATOR_DATABASE_URL: databaseUrl,
     SUTRA_POSTGRES_RUNTIME_ROLE: "sutra_app",
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-adapter.test.ts")], {
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-adapter.test.ts")], {
     ...process.env,
     SUTRA_POSTGRES_TEST_URL: databaseUrl,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-schema-parity.test.mjs")], {
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-schema-parity.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_TEST_URL: runtimeDatabaseUrl,
   });
   await run(process.execPath, [
-    "--test",
+    ...NODE_TEST_ARGS,
     resolve(root, "tests/postgres-compute-optimizer-exact-generation-schema.test.mjs"),
   ], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-repositories.test.mjs")], {
+  await run(process.execPath, [
+    ...NODE_TEST_ARGS,
+    resolve(root, "tests/postgres-compute-optimizer-export-launch-ledger-schema.test.mjs"),
+  ], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-ses-feedback.test.mjs")], {
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-repositories.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-resource-retirement.test.mjs")], {
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-ses-feedback.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });
-  await run(process.execPath, ["--test", resolve(root, "tests/postgres-trust-audit.test.mjs")], {
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-resource-retirement.test.mjs")], {
+    ...process.env,
+    SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
+  });
+  await run(process.execPath, [...NODE_TEST_ARGS, resolve(root, "tests/postgres-trust-audit.test.mjs")], {
     ...process.env,
     SUTRA_POSTGRES_RUNTIME_TEST_URL: runtimeDatabaseUrl,
   });

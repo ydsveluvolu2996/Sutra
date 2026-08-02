@@ -107,6 +107,7 @@ import postgresFinopsComputeOptimizerExportPlansSql from "../postgres/migrations
 import postgresFinopsComputeOptimizerExportPlanSetsSql from "../postgres/migrations/0108_finops_compute_optimizer_export_plan_sets.sql?raw";
 import postgresFinopsComputeOptimizerExportPlanTimestampGuardSql from "../postgres/migrations/0109_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
 import postgresFinopsComputeOptimizerExactGenerationsSql from "../postgres/migrations/0110_finops_compute_optimizer_exact_generations.sql?raw";
+import postgresComputeOptimizerExportLaunchLedgerSql from "../postgres/migrations/0111_compute_optimizer_export_launch_ledger.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -218,6 +219,7 @@ const migrations = [
   { id: "0108_finops_compute_optimizer_export_plan_sets", source: postgresFinopsComputeOptimizerExportPlanSetsSql },
   { id: "0109_finops_compute_optimizer_export_plan_timestamp_guard", source: postgresFinopsComputeOptimizerExportPlanTimestampGuardSql },
   { id: "0110_finops_compute_optimizer_exact_generations", source: postgresFinopsComputeOptimizerExactGenerationsSql },
+  { id: "0111_compute_optimizer_export_launch_ledger", source: postgresComputeOptimizerExportLaunchLedgerSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

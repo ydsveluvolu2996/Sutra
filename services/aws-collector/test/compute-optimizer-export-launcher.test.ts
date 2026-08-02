@@ -7,9 +7,29 @@ import {
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MINIMUM_PROJECTION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_OPERATION_BY_FAMILY,
   ComputeOptimizerExportLauncherError,
+  computeOptimizerExportEndpoint,
   runComputeOptimizerExportLaunch,
   type ComputeOptimizerExportLaunchClient,
 } from "../src/compute-optimizer-export-launcher.js";
+
+test("resolves explicit partition-correct Compute Optimizer endpoints", () => {
+  assert.equal(
+    computeOptimizerExportEndpoint("aws", "ap-south-1"),
+    "https://compute-optimizer.ap-south-1.amazonaws.com",
+  );
+  assert.equal(
+    computeOptimizerExportEndpoint("aws-us-gov", "us-gov-west-1"),
+    "https://compute-optimizer.us-gov-west-1.amazonaws.com",
+  );
+  assert.equal(
+    computeOptimizerExportEndpoint("aws-cn", "cn-north-1"),
+    "https://compute-optimizer.cn-north-1.amazonaws.com.cn",
+  );
+  assert.throws(
+    () => computeOptimizerExportEndpoint("aws-cn", "us-east-1"),
+    ComputeOptimizerExportLauncherError,
+  );
+});
 
 const NOW = new Date("2026-08-02T12:00:01.000Z");
 const REGION = "ap-south-1";
