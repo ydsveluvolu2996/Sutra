@@ -51,7 +51,7 @@ test("ADV-01, ADV-02, ADV-04 and ADV-06 render official evidence with no report"
           computeOptimizer.FinopsComputeOptimizerDashboard,
           { connectionId: null },
         )),
-        expected: ["Connect an active AWS trust-role account", "Official AWS Compute Optimizer Dashboard coverage", "Published Compute Optimizer modules", "Report evidence unavailable"],
+        expected: ["Connect an active AWS trust-role account", "Official AWS Compute Optimizer Dashboard coverage", "Published Compute Optimizer modules", "Accepted evidence unavailable"],
       },
       {
         html: renderToStaticMarkup(createElement(
@@ -84,6 +84,53 @@ test("ADV-01, ADV-02, ADV-04 and ADV-06 render official evidence with no report"
       else altered.source.commit = "0".repeat(40);
       assert.equal(validate(altered), false);
     }
+    const emptyPage = { rowKeys: [], total: 0, hasMore: false };
+    const report = {
+      schemaVersion: "sutra.finops-compute-optimizer-exact-dashboard.v1",
+      scope: { organizationId: "org_alpha", customerId: "customer_alpha", connectionId: `conn_${"a".repeat(32)}` },
+      requesterAccountId: "123456789012",
+      partition: "aws",
+      generation: {
+        generationId: `cog_${"b".repeat(64)}`, contentSha256: "c".repeat(64),
+        planSetId: `copes_${"d".repeat(64)}`, planSetContentSha256: "e".repeat(64),
+        scheduledWindow: "2026-08-02T00:00:00.000Z", materializedAtIso: "2026-08-02T01:00:00.000Z",
+        dataThroughAtIso: "2026-08-02T00:30:00.000Z", observedAtIso: "2026-08-02T00:45:00.000Z",
+        regions: ["us-east-1"], exportFamilies: ["EC2_INSTANCE"],
+        coverage: { expectedTargetCount: 1, mappedTargetCount: 1, rowCount: 0, recommendationCount: 0, rejectedRowCount: 0, sourceBytes: 0 },
+        schemaAssurances: ["OFFICIAL_USER_GUIDE_CSV_LABELS"],
+        unresolvedEvidence: { targetCount: 0, savingsChannelCount: 0, targetKeys: [] },
+      },
+      filters: { accountId: null, region: null, exportFamily: null, finding: null, tagKey: null, tagValue: null, groupByTagKey: null, search: null, offset: 0, limit: 100 },
+      filterOptions: { accounts: [], regions: [], exportFamilies: [], findings: [], tagKeys: [], tagValues: [] },
+      summary: { recommendationCount: 0, filteredRecommendationCount: 0, rejectedRowCount: 0, selectedExactSavings: [], selectedExactSavingsChannelCount: 0, unresolvedSavingsChannelCount: 0, resourcesWithCurrentRiskEvidence: 0 },
+      rows: [],
+      visuals: {
+        totalInstances: 0, findings: [], findingsByDate: [], findingsByBusinessUnit: [], operationalRiskFindingCount: 0,
+        maximumPotentialSavingsEc2: [], potentialSavingsByDate: [], potentialSavingsByBusinessUnit: [], operationalRisksByBusinessUnit: [],
+        selectedInstances: emptyPage, currentVersusRecommendedOptionProjection: emptyPage,
+        recommendedInstanceFamilyChanges: emptyPage, potentialSavingsHistogram: [], potentialSavingsByInstance: emptyPage,
+      },
+      page: emptyPage,
+      limitations: ["Exact evidence only."],
+    };
+    const exactHtml = renderToStaticMarkup(createElement(computeOptimizer.ComputeOptimizerReportView, {
+      payload: {
+        schema: "sutra.finops-compute-optimizer.v2", connectionId: report.scope.connectionId,
+        source: "AWS_COMPUTE_OPTIMIZER_EXACT_ORGANIZATION_S3_EXPORT", sourceState: "READY",
+        freshness: { dataThroughAt: report.generation.dataThroughAtIso, ageHours: 0.5, staleAfterHours: 48 },
+        dashboard: report, officialDefinition: definitions[1].FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+        evidence: {}, collection: { available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" },
+      },
+      filters: report.filters,
+      onFiltersChange: () => undefined,
+    }));
+    for (const text of [
+      "Exact organization export evidence", "Organization optimization overview", "Total EC2 instances",
+      "Findings by date", "Findings by business unit", "Potential savings by date",
+      "Potential savings by business unit", "Operational risks by business unit", "Maximum EC2 potential",
+      "Potential savings histogram", "Select instance", "Current versus recommended option projection",
+      "Recommended instance family changes", "Potential savings by instance", "Immutable lineage, scope and limitations",
+    ]) assert.match(exactHtml, new RegExp(text, "u"), text);
   } finally {
     await vite.close();
   }
@@ -101,7 +148,8 @@ test("configuration responses retain the validated audit for the non-report UI",
     assert.match(source, /OfficialDefinitionPanel/u);
   }
   assert.match(sources[0], /envelope\?\.officialDefinition/u);
-  assert.match(sources[1], /dashboard === null[\s\S]*officialDefinition: value\.officialDefinition/u);
+  assert.match(sources[1], /payload\?\.dashboard === null/u);
+  assert.match(sources[1], /payload\?\.officialDefinition \?\? FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION/u);
   assert.match(sources[2], /dashboard === null[\s\S]*officialDefinition: x\.officialDefinition/u);
   assert.match(sources[3], /dashboard === null[\s\S]*officialDefinition: value\.officialDefinition/u);
 });

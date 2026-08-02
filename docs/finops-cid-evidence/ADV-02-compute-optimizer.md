@@ -1,9 +1,9 @@
 # ADV-02 — Compute Optimizer Dashboard evidence record
 
-Reviewed: 2026-08-01
+Reviewed: 2026-08-02
 
-Status: `PARTIAL_PIPELINE` (native export-history vertical implemented locally;
-production provider activation not claimed)
+Status: `PARTIAL_PIPELINE` (exact local provider-to-visual vertical implemented;
+production scheduling, provider reconciliation, and live acceptance not claimed)
 
 Official guidance: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/compute-optimizer-dashboard.html>
 
@@ -62,92 +62,86 @@ controls. This inventory does not claim those are the only QuickSight controls.
 
 | Official lens | Sutra implementation | Evidence boundary |
 |---|---|---|
-| Organization/all-Region right-sizing | Server-pinned organization export materialization contract with account, Region, resource, utilization, ownership, tag, and search controls | Live object binding remains gated; discovery and direct Get APIs never substitute for history |
-| Nine published modules | Module coverage cards disclose observed versus absent accepted export rows; the engine also models newer provider resource types | Only resource types present in completed exports appear |
-| Findings | Over/under/idle/optimized/other distribution plus original provider finding and reason codes | No Sutra heuristic is represented as AWS evidence |
-| Savings | Rank-one AWS estimated savings by currency, resource type, date, account, team, and business unit | Currencies are never merged; missing provider estimates remain unavailable |
-| Operational risk | Provider performance-risk summary and distribution, current versus recommended risk in the detail table | Sutra does not invent risk severity |
-| Right-sizing | Current configuration, rank-one target, migration effort, savings, risk, and resource lineage | Missing rank-one options remain explicit |
-| Progress over time | Immutable accepted export generations grouped by provider observation date | Completed hash-addressed S3 exports only |
-| Ownership/eligibility | Primary/secondary owner, team, business unit, eligibility tag key/value | Requires explicit materialized export tag evidence |
-| Lineage | Export job, object SHA-256, metadata SHA-256, row count, materialization hash, accepted generation | Discovery readiness is not a dashboard data source |
+| Organization/all-Region right-sizing | Canonical eight-family regional launch projection, exact-ID terminal Describe proof, version-bound S3 reads, all-Region coordinator, and complete-only exact-generation heads | Partial, stale, substituted, expired, or ambiguous work is immutable evidence only and never heads |
+| Nine published modules | Eight AWS export APIs map to nine published lenses because RDS instance and storage retain independent typed evidence | Only module families in the accepted all-Region generation appear |
+| Findings | Original provider findings/reasons, exact filters, date and selected tag-key groupings | No finding regex is substituted for provider risk evidence |
+| Savings | Signed integer micros, scope/currency/discount dimensions, after-discount preference per scope/currency, per-currency EC2 maxima and magnitude histogram | Alternative pre/post-discount channels and different currencies are never added or compared |
+| Operational risk | Counts only resources carrying exported current-risk evidence, with exact business-unit tag grouping | Sutra does not infer severity or risk from finding prose |
+| Right-sizing | Current configuration, ranked options, true instance-family changes, exact savings and immutable object/job lineage | Same-family resizing is not mislabeled as a family change |
+| Progress over time | Full provider timestamp validation and UTC-normalized dates from one accepted exact generation | Malformed timestamps become structured missing evidence |
+| Ownership/eligibility | Exact exported tag key/value controls and explicitly selected grouping key | Missing/unselected tag states are structured and cannot collide with provider strings |
+| Lineage | Plan-set/generation IDs and hashes, request/job identity, exact object keys/versions and CSV/metadata hashes | Persisted plan/set/envelope binding hashes and AES-GCM context are reverified before API projection |
 | Official inventory | Pinned version/modules/preview visuals and non-public definition disclosure rendered natively | No invented sheet or control totals |
 | Export parser | Bounded fatal UTF-8 and AWS CSVW metadata/CSV parser with exact hashes, header/order/required/null validation, RFC4180 quoting, and exact integer/decimal lexemes | Returns a parsed intermediate only; it cannot create an accepted recommendation snapshot |
 
-The client validates the frozen commit, version, template and public artifact
-hashes before accepting either a configuration or report response. The same
-official inventory is rendered during loading, connection/configuration,
-failure and report states; without a report, module cards say report evidence
-is unavailable instead of claiming that accepted rows are absent.
+The client validates the frozen definition identity before accepting either a
+configuration or report response. The same inventory is rendered during
+loading, configuration, key-unavailable, failure and report states. The v2 API
+requires an authenticated same-tenant active connection, accepted-head
+reference, repository-verified plan-set bindings, authenticated regional plan
+envelopes, and a canonically reverified generation before returning evidence.
 
 ## Implementation files
 
-- Trust boundary: `lib/finops-compute-optimizer-organization.ts`
-- Export projection: `lib/finops-compute-optimizer-export-history.ts`
-- S3 materializer contract: `lib/finops-compute-optimizer-export-job.ts`
+- Export projection/launch: `lib/finops-compute-optimizer-export-field-catalog.ts`,
+  `lib/finops-compute-optimizer-export-launch.ts`
+- Replay-safe collector boundary:
+  `services/aws-collector/src/compute-optimizer-export-launch-ledger.ts`,
+  `services/aws-collector/src/compute-optimizer-export-launcher.ts`
+- Exact Describe/object path:
+  `services/aws-collector/src/compute-optimizer-export-exact-describe.ts`,
+  `lib/finops-compute-optimizer-export-object-reader.ts`
 - AWS CSVW parser: `lib/finops-compute-optimizer-export-parser.ts`
+- Exact mapper/coordinator/generation:
+  `lib/finops-compute-optimizer-export-mapper.ts`,
+  `lib/finops-compute-optimizer-export-coordinator.ts`,
+  `lib/finops-compute-optimizer-export-generation.ts`
+- Exact persistence: `db/finops-compute-optimizer-exact-generation-repository.ts`
+- Persisted plan rehydration:
+  `lib/finops-compute-optimizer-export-plan-set-reader.ts`
+- Exact API read model: `lib/finops-compute-optimizer-exact-dashboard.ts`
 - Official audit: `lib/finops-compute-optimizer-official-definition.ts`
-- Repository: `db/finops-compute-optimizer-export-repository.ts`
 - API/UI: `app/api/v1/finops/compute-optimizer/route.ts`,
   `app/costs/finops-compute-optimizer-dashboard.tsx`
 
 ## Remaining provider/live gates
 
-1. Publish and activate the immutable `standard-2026-08.3` role candidate,
-   which adds only the three Compute Optimizer enrollment/export-discovery
-   reads. It deliberately grants no `Export*` operation and no S3 object read.
-2. Persist the original organization export request/plan and exact
-   resource-type × Region targets. AWS requires separate files per resource
-   type and Region and separate S3 buckets for multiple Regions; a single
-   bucket/prefix cannot certify organization coverage.
-3. Register the production export-object S3 adapter and durable scheduled
-   handler; the API currently reports
-   `COMPUTE_OPTIMIZER_EXPORT_OBJECT_MATERIALIZER_NOT_REGISTERED`.
-4. Bind the existing discovery repository to completed-job target selection
-   without treating discovery as recommendation evidence.
-5. Add resource-specific row mappers that consume the exact CSVW parser
-   intermediate, beginning with EC2 and failing closed for unsupported export
-   resource types. Replace floating-point evidence fields with exact decimal or
-   integer units before live acceptance.
-6. Validate real organization exports across every configured Region and all
-   provider resource types, including multipart objects, corrected exports,
-   pagination, throttling, and partial S3 failures.
-7. Validate exact exported primary/secondary tag columns and the local
-   ownership mapping policy.
-8. Obtain an authorized QuickSight template definition/export if exact current
+1. Register the coordinator in the production scheduler/worker and bind its
+   exact repositories/readers without a browser-controlled target or scope.
+2. Activate the reviewed `.8.5` permission pack and launch add-on, rotate the
+   evidence-reference secret, and apply migrations through the release path.
+3. Reconcile controlled organization exports in every configured Region for
+   all eight AWS export families, including pagination, throttling, lease/crash
+   ambiguity, object versioning, corrected exports and partial S3 failures.
+4. Validate exported tag columns and governed business-unit keys with two
+   independent tenants; prove cross-tenant negative paths and stale behavior.
+5. Obtain an authorized QuickSight template definition/export if exact current
    sheet/visual/control counts are required; the public git source cannot prove
    them.
-9. Apply both database migrations through release and complete signed-in
-   visuals, cross-tenant negative tests, provider acceptance, stale-export
-   behavior, rollback, and live smoke evidence.
+6. Complete signed-in browser, provider, rollback and live smoke evidence, then
+   pass the repository-wide release gates before building/deploying an image.
 
 Until these gates pass, maturity remains `PARTIAL_PIPELINE` and production
 activation stays false.
 
 ## Focused verification
 
-`tests/finops-report-independent-official-ui.test.mjs` adds a server-rendered
-null/configuration contract for this report-independent audit surface.
+The exact focused suite covers launch replay/crash semantics, broker parity,
+all-Region coordination, exact persistence, encrypted plan rehydration, v2 API
+binding, 14-purpose projection, exact UI rendering and production build.
 
 ```sh
-node --experimental-strip-types --test \
-  tests/finops-compute-optimizer-organization.test.ts \
-  tests/finops-compute-optimizer-export-vertical.test.mjs \
-  tests/finops-compute-optimizer-official-definition.test.mjs
+NODE_OPTIONS=--experimental-transform-types node --test \
+  tests/finops-compute-optimizer-exact-dashboard.test.ts \
+  tests/finops-compute-optimizer-export-plan-set-reader.test.ts \
+  tests/finops-compute-optimizer-exact-generation-repository.test.mjs \
+  tests/finops-compute-optimizer-exact-route.test.mjs \
+  tests/finops-report-independent-official-ui.test.mjs
 ```
 
-Result: **21 passed, 0 failed, 0 skipped**.
-
-The bounded parser and immutable permission-pack delta add these focused gates:
-
-```sh
-pnpm exec tsx --test tests/finops-compute-optimizer-export-parser.test.ts
-node --test tests/customer-onboarding-role-standard-2026-08.3.test.mjs \
-  tests/collector-permission-coverage.test.mjs
-pnpm --dir services/aws-collector exec tsx --test \
-  test/finops-role-broker.test.ts
-```
-
-Result: **33 passed, 0 failed, 0 skipped**. Root and collector TypeScript
-checks pass. The pinned CloudFormation linter passes the `.8.3` template with
-the repository's documented Bedrock action-spec false-positive suppression.
+Latest evidence: coordinator **17/17**; cross-component projection/coordinator
+**136/136**; collector **295/295**; exact dashboard/reader/route/UI **17/17**;
+exact persistence **9/9**; PostgreSQL **110 migrations** and all adapter/schema
+tests; root/collector typechecks, touched ESLint, secret scans, diff checks and
+the production application build pass. These are local gates, not controlled
+provider or live acceptance.

@@ -369,3 +369,16 @@ Next gate:
 | Focused verification | 9/9 exact persistence/schema checks passed: 7 D1 repository behaviors and 2 isolated PostgreSQL schema/forgery checks. The isolated PostgreSQL harness applied all 109 migrations successfully; root typecheck, touched-file ESLint, repository secret scan (2,214 source files), and `git diff --check` passed |
 | Evidence boundaries | Durable collector launch execution ledger, launch orchestration, exact object materialization into accepted generations, repository-to-API/UI wiring, controlled provider run, two-tenant/live acceptance, image publication and deployment remain pending; production is unchanged |
 | Next gate | Implement the durable idempotent launch ledger and orchestration, then bind exact materialization and native API/UI evidence before provider/live release gates |
+
+### 2026-08-02 — Compute Optimizer exact API and native visual checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; no production/provider/live acceptance or release-image claim |
+| Delivery | Accepted-head reference rehydrates the immutable plan set, authenticates sealed regional plans, reads the exact referenced generation, canonically re-verifies it, and projects a same-tenant bounded v2 response. The native UI renders every one of the 14 publicly documented visual purposes from exact organization-export evidence |
+| Evidence integrity | Signed 64-bit source micros remain strings; aggregate BigInts use bounded canonical integers; currencies and alternative discount channels never merge; object/job/hash/version lineage is preserved; partial generations and discovery/direct recommendation results never substitute for an accepted export generation |
+| API/browser boundary | Query validation happens before authentication/evidence reads; authorization scope is derived from the session-owned active connection; missing keys and corrupt evidence fail closed with sanitized responses; the browser parser validates exact variants, definition identity, IDs/hashes, coverage, paging, freshness, evidence, rows, visual bounds and serialized size before rendering |
+| Focused verification | Exact dashboard/plan reader/executable route/SSR UI 17/17; persistence 9/9; whole-tree TypeScript, touched ESLint, production build and diff checks pass |
+| Retired path | The unconsumed float-based export history/repository/job slice and its legacy vertical test are removed; release migrations remain compatible |
+| Remaining gates | Register and prove the production materialization scheduler/worker, provision release evidence keys/IAM, reconcile controlled all-Region exports in two tenants, and complete signed-in/provider/rollback/live acceptance before any image deployment |
+| GitHub | Intended for the existing `agent/mac-mini-finops-continuation` branch and draft PR 26 as an independently reviewed checkpoint |

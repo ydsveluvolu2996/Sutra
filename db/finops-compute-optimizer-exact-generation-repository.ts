@@ -75,6 +75,12 @@ export interface RecordComputeOptimizerExactGenerationResult {
   readonly activeGenerationId: string | null;
 }
 
+export interface ComputeOptimizerAcceptedHeadReference {
+  readonly generationId: string;
+  readonly planSetId: string;
+  readonly planSetContentSha256: string;
+}
+
 export interface ComputeOptimizerExactPersistenceFaultEvent {
   readonly phase: "AFTER_ARTIFACT" | "AFTER_CHUNK_BATCH" | "BEFORE_COMMIT";
   readonly artifactId: string;
@@ -828,5 +834,51 @@ export class ComputeOptimizerExactGenerationRepository {
       || artifact.plan_set_content_sha256 !== planSet.contentSha256) return null;
     const value = await this.readCommitted(scope, planSet, head.generation_id, "GENERATION");
     return value as ComputeOptimizerExportGeneration | null;
+  }
+
+  /** Read one immutable accepted generation by a previously resolved head ID. */
+  public async getAcceptedGeneration(
+    scope: ComputeOptimizerExactGenerationScope,
+    planSet: ComputeOptimizerExportPlanSet,
+    generationId: string,
+  ): Promise<ComputeOptimizerExportGeneration | null> {
+    if (!GENERATION_ID.test(generationId)) reject("INVALID_INPUT");
+    const value = await this.readCommitted(scope, planSet, generationId, "GENERATION");
+    return value as ComputeOptimizerExportGeneration | null;
+  }
+
+  /** Resolve only the authenticated identity needed to rehydrate the plan set. */
+  public async getAcceptedHeadReference(
+    scope: ComputeOptimizerExactGenerationScope,
+  ): Promise<ComputeOptimizerAcceptedHeadReference | null> {
+    assertScope(scope);
+    await this.ready();
+    const row = await this.database.prepare(
+      `SELECT h.generation_id,a.plan_set_id,a.plan_set_content_sha256
+       FROM finops_co_exact_generation_heads h
+       JOIN finops_co_exact_artifacts a ON a.artifact_id=h.generation_id
+        AND a.org_id=h.org_id AND a.customer_id=h.customer_id
+        AND a.connection_id=h.connection_id
+       JOIN finops_co_exact_artifact_manifests m ON m.artifact_id=a.artifact_id
+       WHERE h.org_id=? AND h.customer_id=? AND h.connection_id=?
+        AND a.record_kind='GENERATION' AND a.state='ALL_REGION_ACCEPTED'
+        AND a.accepted_head_eligible=1 LIMIT 1`,
+    ).bind(scope.organizationId, scope.customerId, scope.connectionId).first<{
+      generation_id: string;
+      plan_set_id: string;
+      plan_set_content_sha256: string;
+    }>();
+    if (row === null) return null;
+    if (!GENERATION_ID.test(row.generation_id)
+      || !/^copes_[a-f0-9]{64}$/u.test(row.plan_set_id)
+      || !SHA256.test(row.plan_set_content_sha256)
+      || row.plan_set_id !== `copes_${row.plan_set_content_sha256}`) {
+      reject("STORED_EVIDENCE_INVALID");
+    }
+    return Object.freeze({
+      generationId: row.generation_id,
+      planSetId: row.plan_set_id,
+      planSetContentSha256: row.plan_set_content_sha256,
+    });
   }
 }

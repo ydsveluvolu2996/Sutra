@@ -359,6 +359,7 @@ test("partial and complete attempts are immutable evidence and structurally cann
       assert.equal(result.activeGenerationId, null);
       assert.deepEqual(await repository.getAttempt(SCOPE, fixture.planSet, attempt.attemptId), attempt);
     }
+    assert.equal(await repository.getAcceptedHeadReference(SCOPE), null);
     await assert.rejects(database.prepare(
       `INSERT INTO finops_co_exact_generation_heads (
         org_id,customer_id,connection_id,generation_id,data_through_at,observed_at,advanced_at
@@ -387,6 +388,11 @@ test("accepted evidence round-trips exact micros and replay is idempotent", asyn
     assert.equal(replay.artifact.createdAtIso, new Date(100).toISOString());
     const head = await repository.getAcceptedHeadForPlanSet(SCOPE, fixture.planSet);
     assert.deepEqual(head, fixture.generation);
+    assert.deepEqual(await repository.getAcceptedHeadReference(SCOPE), {
+      generationId: fixture.generation.generationId,
+      planSetId: fixture.planSet.planSetId,
+      planSetContentSha256: fixture.planSet.contentSha256,
+    });
     assert.equal(head.targets[0].recommendations[0].savings[0].amountMicros, "9223372036854775807");
     const chunks = await database.prepare(
       "SELECT byte_count,payload_base64url FROM finops_co_exact_artifact_chunks WHERE artifact_id=?",
@@ -498,6 +504,15 @@ test("plan-specific head reads return null when the scope head belongs to a newe
     await repository.recordAcceptedGeneration(SCOPE, prior.planSet, prior.generation, 100);
     await repository.recordAcceptedGeneration(SCOPE, current.planSet, current.generation, 200);
     assert.equal(await repository.getAcceptedHeadForPlanSet(SCOPE, prior.planSet), null);
+    assert.deepEqual(
+      await repository.getAcceptedGeneration(
+        SCOPE,
+        prior.planSet,
+        prior.generation.generationId,
+      ),
+      prior.generation,
+      "a request that resolved the prior head remains consistent after head advance",
+    );
     assert.deepEqual(
       await repository.getAcceptedHeadForPlanSet(SCOPE, current.planSet),
       current.generation,
