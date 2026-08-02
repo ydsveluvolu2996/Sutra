@@ -91,6 +91,7 @@ import {
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
+  RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type AwsTemporaryCredentials,
@@ -201,6 +202,16 @@ import {
   parseAwsHealthProviderRouteRequest,
   runAwsHealthProviderRoute,
 } from "./aws-health-provider-route.js";
+import {
+  ResilienceVueProviderAdapterError,
+  type ResilienceVueProviderClientFactory,
+} from "./resilience-vue-provider-adapter.js";
+import {
+  RESILIENCE_VUE_PROVIDER_BOUNDS,
+  RESILIENCE_VUE_PROVIDER_ROUTE,
+  parseResilienceVueProviderRouteRequest,
+  runResilienceVueProviderRoute,
+} from "./resilience-vue-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
@@ -210,6 +221,7 @@ const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
 const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const AWS_SUPPORT_CASES_RESPONSE_LIMIT = 65 * 1024 * 1024;
 const AWS_HEALTH_RESPONSE_LIMIT = 50 * 1024 * 1024;
+const RESILIENCE_VUE_RESPONSE_LIMIT = 13 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -249,7 +261,8 @@ function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permi
   return value === COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
     || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
     || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
-    || value === AWS_HEALTH_PERMISSION_PACK_VERSION;
+    || value === AWS_HEALTH_PERMISSION_PACK_VERSION
+    || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION;
 }
 
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
@@ -425,6 +438,12 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedAwsHealthSession">;
+  readonly resilienceVueProviderClientFactory?: ResilienceVueProviderClientFactory;
+  readonly resilienceVueRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedResilienceVueSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -547,6 +566,10 @@ interface ServerContext {
   >;
   readonly awsHealthRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["awsHealthRoleBrokerFactory"]
+  >;
+  readonly resilienceVueProviderClientFactory?: ResilienceVueProviderClientFactory;
+  readonly resilienceVueRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["resilienceVueRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -730,6 +753,11 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
       options.awsHealthReaderFactory ?? createAwsHealthSdkReader,
     awsHealthRoleBrokerFactory:
       options.awsHealthRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    ...(options.resilienceVueProviderClientFactory === undefined
+      ? {}
+      : { resilienceVueProviderClientFactory: options.resilienceVueProviderClientFactory }),
+    resilienceVueRoleBrokerFactory:
+      options.resilienceVueRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -745,7 +773,11 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   // beyond the longest credential-owning route so Node never kills a healthy
   // request before the route's own absolute deadline and abort controller.
   server.requestTimeout = options.hostedRuntime
-    ? Math.max(LIVE_AWS_BROKER_TIMEOUT_MS, AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs)
+    ? Math.max(
+        LIVE_AWS_BROKER_TIMEOUT_MS,
+        AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs,
+        RESILIENCE_VUE_PROVIDER_BOUNDS.maximumDurationMs,
+      )
       + 10_000
     : 190_000;
   server.headersTimeout = 10_000;
@@ -1163,6 +1195,65 @@ async function route(
   body: string,
   headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === RESILIENCE_VUE_PROVIDER_ROUTE) {
+    const providerRequest = parseResilienceVueProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const requestId = exactHeader(headers, "x-sutra-request-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || requestId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.scope.orgId, providerRequest.scope.connectionId),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.min(
+      RESILIENCE_VUE_PROVIDER_BOUNDS.maximumDurationMs,
+      providerRequest.maximumDurationMs,
+    );
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.resilienceVueRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.scope.region,
+      });
+      const result = await runResilienceVueProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, requestId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedResilienceVueSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.requestId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        ...(context.resilienceVueProviderClientFactory === undefined
+          ? {}
+          : { clientFactory: context.resilienceVueProviderClientFactory }),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "POST" && path === AWS_HEALTH_PROVIDER_ROUTE) {
     const providerRequest = parseAwsHealthProviderRouteRequest(body);
     const tenantId = exactHeader(headers, "x-sutra-tenant-id");
@@ -3873,7 +3964,8 @@ async function requireFinopsSourceActiveConnection(
         COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
-      && connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION)
+      && connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
@@ -3898,6 +3990,8 @@ async function requireComputeOptimizerObjectActiveConnection(
     (connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined) &&
     (connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION ||
       connection.computeOptimizerExportLaunchContracts === undefined))
   ) throw new RegistryStateError();
   return connection;
@@ -4484,6 +4578,8 @@ async function sendSigned(
       ? AWS_SUPPORT_CASES_RESPONSE_LIMIT
     : path === AWS_HEALTH_PROVIDER_ROUTE
       ? AWS_HEALTH_RESPONSE_LIMIT
+    : path === RESILIENCE_VUE_PROVIDER_ROUTE
+      ? RESILIENCE_VUE_RESPONSE_LIMIT
     : path === EXTENDED_SUPPORT_PROVIDER_ROUTE
       ? EXTENDED_SUPPORT_RESPONSE_LIMIT
       : RESPONSE_LIMIT;
@@ -4538,6 +4634,16 @@ function safeHttpError(error: unknown): LocalHttpError {
   }
   if (error instanceof RegistryError) {
     return new LocalHttpError(500, "COLLECTION_FAILED", "The encrypted connection registry could not complete the operation");
+  }
+  if (error instanceof ResilienceVueProviderAdapterError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "AWS Resilience Hub evidence collection did not complete",
+    );
   }
   if (error instanceof ComputeOptimizerExportObjectChunkError) {
     const status = error.code === "INVALID_REQUEST"

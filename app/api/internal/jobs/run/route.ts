@@ -15,6 +15,7 @@ import {
   scheduleExtendedSupportTick,
   scheduleAwsSupportCasesTick,
   scheduleAwsHealthTick,
+  scheduleResilienceVueTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -95,6 +96,9 @@ export async function POST(request: Request): Promise<Response> {
     // ADV-06 schedules one canonical organization-view capture per UTC day;
     // credentials and candidate-account fan-out remain server-owned.
     const awsHealth = await scheduleAwsHealthTick();
+    // ADV-10 schedules one connection-scoped Resilience Hub capture per UTC
+    // day; the signed provider session is created only by the claimed handler.
+    const resilienceVue = await scheduleResilienceVueTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -120,6 +124,7 @@ export async function POST(request: Request): Promise<Response> {
       extendedSupport,
       awsSupportCases,
       awsHealth,
+      resilienceVue,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

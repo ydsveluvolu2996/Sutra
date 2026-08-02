@@ -143,6 +143,12 @@ export interface ResilienceVueAcceptedRuntimeAttempt {
  * reference and the ResilienceVue snapshot in one accepted attempt boundary.
  */
 export interface ResilienceVueImmutableEvidenceHandoff {
+  prepareAttempt(
+    scope: ResilienceVuePersistenceScope,
+    target: ResilienceVueScope,
+    requestId: string,
+    scheduledWindow: string,
+  ): Promise<void>;
   getAccepted(
     scope: ResilienceVuePersistenceScope,
     target: ResilienceVueScope,
@@ -286,6 +292,18 @@ function currentTime(now: (() => number) | undefined): number {
   const value = now?.() ?? Date.now();
   if (!Number.isSafeInteger(value) || value < 0) reject("INVALID_JOB");
   return value;
+}
+
+function abortRace(signal: AbortSignal): Promise<never> {
+  return new Promise((_, rejectPromise) => {
+    if (signal.aborted) {
+      rejectPromise(new Error("resilience-vue-runtime-deadline"));
+      return;
+    }
+    signal.addEventListener("abort", () => rejectPromise(
+      new Error("resilience-vue-runtime-deadline"),
+    ), { once: true });
+  });
 }
 
 async function sha256(value: string | Uint8Array): Promise<string> {
@@ -540,6 +558,12 @@ export async function runResilienceVueRuntimeHandler(
         });
         let prior: ResilienceVueAcceptedRuntimeAttempt | null = null;
         try {
+          await dependencies.handoff.prepareAttempt(
+            trustedScope,
+            trustedTarget,
+            identity.requestId,
+            parsed.scheduledWindow,
+          );
           prior = await dependencies.handoff.getAccepted(
             trustedScope,
             trustedTarget,
@@ -588,7 +612,10 @@ export async function runResilienceVueRuntimeHandler(
         });
         let capture: ResilienceVueCapture | null = null;
         try {
-          capture = await dependencies.adapter!.collect(request, controller.signal);
+          capture = await Promise.race([
+            dependencies.adapter!.collect(request, controller.signal),
+            abortRace(controller.signal),
+          ]);
         } catch {
           const code: ResilienceVueRuntimeFailureCode = controller.signal.aborted
             ? "ADAPTER_TIMEOUT"

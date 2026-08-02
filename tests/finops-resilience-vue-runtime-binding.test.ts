@@ -167,6 +167,7 @@ function dependencies(input?: {
       }),
     },
     handoff: {
+      prepareAttempt: async () => undefined,
       getAccepted: async (_scope, _target, requestId) =>
         accepted.get(requestId) ?? null,
       commit: async (commit) => {

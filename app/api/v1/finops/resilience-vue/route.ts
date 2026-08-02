@@ -1,4 +1,5 @@
 import { ResilienceVueRepository } from "../../../../../db/finops-resilience-vue-repository";
+import { ResilienceVueRuntimeRepository } from "../../../../../db/finops-resilience-vue-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { buildResilienceVueDashboard } from "../../../../../lib/finops-resilience-vue";
@@ -51,7 +52,10 @@ export async function GET(request: Request): Promise<Response> {
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };
     const repository = new ResilienceVueRepository();
-    const [activeAll, historyAll] = await Promise.all([repository.listActiveSnapshots(scope), repository.listHistory(scope)]);
+    const runtime = new ResilienceVueRuntimeRepository();
+    const [activeAll, historyAll, runtimeStatus] = await Promise.all([
+      repository.listActiveSnapshots(scope), repository.listHistory(scope), runtime.getRuntimeStatus(scope),
+    ]);
     const active = activeAll.filter((item) => (query.accountId === null || item.snapshot.scope.accountId === query.accountId)
       && (query.region === null || item.snapshot.scope.region === query.region));
     const history = historyAll.filter((item) => (query.accountId === null || item.accountId === query.accountId)
@@ -59,10 +63,11 @@ export async function GET(request: Request): Promise<Response> {
     if (active.length === 0) {
       const latest = history[0] ?? null;
       return jsonResponse({ schema: "sutra.finops-resilience-vue.v1", connectionId: connection.id,
-        sourceState: latest === null || latest.state === "configuration_required" ? "configuration_required" : latest.state,
+        sourceState: runtimeStatus.state === "failed" ? "failed"
+          : latest === null || latest.state === "configuration_required" ? "configuration_required" : latest.state,
         officialDefinition: RESILIENCE_VUE_OFFICIAL_DEFINITION,
         dashboard: null, latestAttempt: latest,
-        collection: { available: false, reason: "RESILIENCE_VUE_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED" },
+        collection: runtimeStatus,
         limitations: [
           "No accepted complete AWS Resilience Hub assessment generation is available for this selection.",
           "Estimated cost and the official recommendation dimensions require a versioned provider-schema migration; no values are synthesized from v1 evidence.",
@@ -125,10 +130,10 @@ export async function GET(request: Request): Promise<Response> {
       },
       evidence: { acceptedHeads: active.map((item) => ({ generationId: item.generationId, contentSha256: item.contentSha256, captureId: item.snapshot.captureId })) },
       latestAttempt: history[0] ?? null,
-      collection: { available: false, reason: "RESILIENCE_VUE_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED" },
+      collection: runtimeStatus,
       limitations: [
         "RTO/RPO and recommendation fields are AWS Resilience Hub assessment evidence; Sutra priority scores are visibly labeled inference.",
-        "Daily collection activation remains unavailable until the permanent AWS credential broker adapter and job handler are registered and provider-validated.",
+        "Runtime state is derived from the durable ResilienceVue attempt ledger; live AWS provider acceptance remains a separate deployment gate.",
         "Estimated cost, availability architecture, optimization type, and App Component controls require a versioned capture-schema migration and are never inferred from v1 evidence.",
         ...(newerIncomplete ? ["A newer incomplete generation did not replace the last accepted complete target head."] : []),
       ],

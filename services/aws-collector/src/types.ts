@@ -80,6 +80,12 @@ export const AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION =
 export const AWS_HEALTH_PERMISSION_PACK_VERSION =
   "standard-2026-08.8" as const;
 /**
+ * Immutable successor for ADV-10. It preserves .8.8 and adds only the exact
+ * fourteen AWS Resilience Hub read operations used by ResilienceVue.
+ */
+export const RESILIENCE_VUE_PERMISSION_PACK_VERSION =
+  "standard-2026-08.9" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -100,6 +106,7 @@ export type PermissionPackVersion =
   | typeof EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
   | typeof AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
   | typeof AWS_HEALTH_PERMISSION_PACK_VERSION
+  | typeof RESILIENCE_VUE_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION

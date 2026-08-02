@@ -31,7 +31,8 @@ export interface ResilienceVueReport {
     readonly policyBreachedApplicationCount: number; readonly driftedApplicationCount: number; readonly openRecommendationCount: number };
   readonly targets: readonly Target[]; readonly history: readonly { generationId: string; accountId: string; region: string; completedAtIso: string; state: string; complete: boolean; applicationCount: number; assessmentCount: number; recommendationCount: number; contentSha256: string }[];
   readonly filterOptions: { readonly accounts: readonly string[]; readonly regions: readonly string[] };
-  readonly evidence: unknown; readonly collection: { readonly available: false; readonly reason: string }; readonly limitations: readonly string[];
+  readonly evidence: unknown; readonly collection: { readonly state: "unavailable" | "collecting" | "failed" | "ready";
+    readonly reason: string; readonly lastAttemptAt: string | null }; readonly limitations: readonly string[];
 }
 const EMPTY: Filters = { accountId: null, region: null, application: null, compliance: null, recommendationKind: null,
   assessmentFrom: null, assessmentTo: null };
@@ -135,6 +136,9 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
   return <section className={styles.root} aria-label="ResilienceVue AWS Resilience Hub dashboard">
     <OfficialDefinitionPanel definition={report.officialDefinition} />
     <div className={styles.notice}><strong>Observed AWS Resilience Hub evidence.</strong> RTO/RPO, posture, breaches, drift, and operational recommendations come from retained assessments. Any Sutra priority is labeled inference, not an AWS finding.</div>
+    {report.collection.state === "ready" ? null : <div role="status" className={`${styles.state} ${report.collection.state === "failed" ? styles.error : styles.warning}`}>
+      Collection {report.collection.state}: {report.collection.reason}{report.collection.lastAttemptAt === null ? "" : ` · ${report.collection.lastAttemptAt}`}
+    </div>}
     {message ? <div role="status" className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="ResilienceVue filters">
       <Select label="Account / payer scope" value={filters.accountId} options={report.filterOptions.accounts} onChange={(value) => set("accountId", value)} />
@@ -197,11 +201,15 @@ export function FinopsResilienceVueDashboard({ connectionId }: { readonly connec
     if (connectionId === null) return; const controller = new AbortController();
     fetch(`/api/v1/finops/resilience-vue?${query}`, { signal: controller.signal, headers: { Accept: "application/json" } })
       .then(async (response) => { if (!response.ok) throw new Error("ResilienceVue request failed"); return response.json(); })
-      .then((value: ResilienceVueReport | { dashboard: null; officialDefinition: ResilienceVueOfficialDefinition }) => {
+      .then((value: ResilienceVueReport | { dashboard: null; officialDefinition: ResilienceVueOfficialDefinition;
+        collection?: ResilienceVueReport["collection"] }) => {
         if (!hasPinnedOfficialDefinition(value.officialDefinition)) throw new Error("Sutra returned an unrecognized ResilienceVue definition");
         if ("dashboard" in value) {
           setReport(null); setConfigurationDefinition(value.officialDefinition);
-          setError("AWS Resilience Hub evidence is not configured for this selection. No posture, recommendation, or estimated-cost value is synthesized.");
+          const runtime = value.collection;
+          setError(runtime === undefined
+            ? "AWS Resilience Hub evidence is not configured for this selection. No posture, recommendation, or estimated-cost value is synthesized."
+            : `ResilienceVue collection ${runtime.state}: ${runtime.reason}. No posture, recommendation, or estimated-cost value is synthesized.`);
         } else {
           setReport(value); setConfigurationDefinition(null); setError(null);
         }

@@ -175,6 +175,10 @@ import { AWS_HEALTH_RUNTIME_JOB_KIND } from
   "../lib/finops-aws-health-runtime-binding.ts";
 import { createAwsHealthProductionComposition } from
   "../lib/finops-aws-health-production-composition.ts";
+import { RESILIENCE_VUE_RUNTIME_JOB_KIND } from
+  "../lib/finops-resilience-vue-runtime-binding.ts";
+import { createResilienceVueProductionComposition } from
+  "../lib/finops-resilience-vue-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -266,6 +270,35 @@ function awsHealthProductionComposition() {
 /** Daily deterministic ADV-06 organization-view scheduler hook. */
 export function scheduleAwsHealthTick(scheduledAtMs = Date.now()) {
   return awsHealthProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+let resilienceVueComposition: ReturnType<typeof createResilienceVueProductionComposition>
+  | undefined;
+
+function resilienceVueProductionComposition() {
+  if (resilienceVueComposition !== undefined) return resilienceVueComposition;
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("RESILIENCE_VUE_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  const pending = createResilienceVueProductionComposition({
+    env: env as unknown as Readonly<Record<string, string | undefined>>,
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+  resilienceVueComposition = pending;
+  void pending.catch(() => {
+    if (resilienceVueComposition === pending) resilienceVueComposition = undefined;
+  });
+  return pending;
+}
+
+/** Daily deterministic ADV-10 connection-scoped ResilienceVue scheduler hook. */
+export async function scheduleResilienceVueTick(scheduledAtMs = Date.now()) {
+  return (await resilienceVueProductionComposition()).scheduleTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1388,6 +1421,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       awsSupportCasesProductionComposition().handler(job),
     [AWS_HEALTH_RUNTIME_JOB_KIND]: (job) =>
       awsHealthProductionComposition().handler(job),
+    [RESILIENCE_VUE_RUNTIME_JOB_KIND]: async (job) =>
+      (await resilienceVueProductionComposition()).handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

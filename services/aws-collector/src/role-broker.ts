@@ -56,6 +56,7 @@ import {
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
+  RESILIENCE_VUE_PERMISSION_PACK_VERSION,
 } from "./types.js";
 import {
   foundationalFinopsObjectArn,
@@ -105,6 +106,12 @@ import {
   AWS_HEALTH_SESSION_ACTIONS,
 } from "./aws-health-permission-contract.js";
 import { awsHealthSessionPolicy } from "./aws-health-session-policy.js";
+import {
+  RESILIENCE_VUE_PERMISSION_ACTIONS,
+  RESILIENCE_VUE_PERMISSION_POLICY_NAME,
+  RESILIENCE_VUE_SESSION_ACTIONS,
+} from "./resilience-vue-permission-contract.js";
+import { resilienceVueProviderSessionPolicy } from "./resilience-vue-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -145,6 +152,7 @@ const EXTENDED_SUPPORT_PACK_VERSION = EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
 const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1";
 const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
 const AWS_HEALTH_PACK_VERSION = AWS_HEALTH_PERMISSION_PACK_VERSION;
+const RESILIENCE_VUE_PACK_VERSION = RESILIENCE_VUE_PERMISSION_PACK_VERSION;
 const FINOPS_SOURCES_BY_PACK = Object.freeze({
   [FINOPS_PERMISSION_PACK_VERSION]: new Set([
     "cost_anomaly_detection",
@@ -191,13 +199,22 @@ const FINOPS_SOURCES_BY_PACK = Object.freeze({
     "compute_optimizer_organization_export",
     "aws_health_organization",
   ]),
+  [RESILIENCE_VUE_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+  ]),
 });
 
 function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
   return value === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     || value === EXTENDED_SUPPORT_PACK_VERSION
     || value === AWS_SUPPORT_CASES_PACK_VERSION
-    || value === AWS_HEALTH_PACK_VERSION;
+    || value === AWS_HEALTH_PACK_VERSION
+    || value === RESILIENCE_VUE_PACK_VERSION;
 }
 
 function permissionPackSupportsSource(
@@ -937,7 +954,8 @@ function assertExpectedPermissionPolicy(
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     | typeof EXTENDED_SUPPORT_PACK_VERSION
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
-    | typeof AWS_HEALTH_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof AWS_HEALTH_PACK_VERSION
+    | typeof RESILIENCE_VUE_PACK_VERSION = PERMISSION_PACK_VERSION,
   additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
@@ -973,6 +991,7 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? FINOPS_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
@@ -980,25 +999,33 @@ function assertExpectedPermissionPolicy(
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
           : []),
         ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
             || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
           : []),
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? AWS_HEALTH_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+          ? RESILIENCE_VUE_PERMISSION_ACTIONS
           : []),
         ...additionalCeilingActions,
       ])],
@@ -1061,6 +1088,20 @@ function assertAwsHealthPolicy(value: string | undefined): void {
     || statement.Effect !== "Allow" || statement.Resource !== "*"
     || !sameStringSet(stringList(statement.Action), AWS_HEALTH_PERMISSION_ACTIONS)) {
     throw new Error("unexpected AWS Health policy");
+  }
+}
+
+function assertResilienceVuePolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected ResilienceVue policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactResilienceVueRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), RESILIENCE_VUE_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected ResilienceVue policy");
   }
 }
 
@@ -1146,7 +1187,8 @@ function assertExpectedRole(
     | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
     | typeof EXTENDED_SUPPORT_PACK_VERSION
     | typeof AWS_SUPPORT_CASES_PACK_VERSION
-    | typeof AWS_HEALTH_PACK_VERSION = PERMISSION_PACK_VERSION,
+    | typeof AWS_HEALTH_PACK_VERSION
+    | typeof RESILIENCE_VUE_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -1520,7 +1562,8 @@ export class AwsRoleBroker {
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
         && resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1562,7 +1605,8 @@ export class AwsRoleBroker {
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if ((resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
-        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION)
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1580,7 +1624,7 @@ export class AwsRoleBroker {
       undefined,
       undefined,
       undefined,
-      AWS_SUPPORT_CASES_PACK_VERSION,
+      resolved.connection.permissionPackVersion,
       input.signal,
     );
     return validated;
@@ -1614,7 +1658,8 @@ export class AwsRoleBroker {
     }
     assertActiveProvisioningSignal(input.signal);
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
-    if (resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+    if ((resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION)
       || resolved.connection.expectedAccountId !== input.expectedAccountId
       || resolved.parsedRoleArn.partition !== input.partition) {
       throw new ConnectionStateError();
@@ -1632,7 +1677,65 @@ export class AwsRoleBroker {
       undefined,
       undefined,
       undefined,
-      AWS_HEALTH_PACK_VERSION,
+      resolved.connection.permissionPackVersion,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-10 session with the exact .8.9 Resilience Hub read intersection.
+   * Account, partition, Region, action set and immutable pack are server-pinned.
+   */
+  public async assumeValidatedResilienceVueSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof RESILIENCE_VUE_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, RESILIENCE_VUE_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The ResilienceVue session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId}-resilience`,
+      () => resilienceVueProviderSessionPolicy({
+        accountId: input.expectedAccountId,
+        partition: input.partition,
+        region: input.region,
+      }),
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      RESILIENCE_VUE_PACK_VERSION,
       input.signal,
     );
     return validated;
@@ -1776,7 +1879,8 @@ export class AwsRoleBroker {
         && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
-        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION) ||
+        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION) ||
       resolved.connection.finopsSourceContracts === undefined
     ) throw new ConnectionStateError();
     const owner = {
@@ -2407,7 +2511,8 @@ export class AwsRoleBroker {
       | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
       | typeof EXTENDED_SUPPORT_PACK_VERSION
       | typeof AWS_SUPPORT_CASES_PACK_VERSION
-      | typeof AWS_HEALTH_PACK_VERSION,
+      | typeof AWS_HEALTH_PACK_VERSION
+      | typeof RESILIENCE_VUE_PACK_VERSION,
     signal?: AbortSignal,
   ): Promise<void> {
     try {
@@ -2423,6 +2528,7 @@ export class AwsRoleBroker {
         && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
         && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
         && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
       ) throw new Error("unexpected FinOps permission pack");
       const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
       if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
@@ -2501,14 +2607,20 @@ export class AwsRoleBroker {
         ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
             || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? [EXTENDED_SUPPORT_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
             || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
           : []),
         ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
           ? [AWS_HEALTH_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+          ? [RESILIENCE_VUE_PERMISSION_POLICY_NAME]
           : []),
       ])];
       if (!sameStringSet(policyNames, expectedPolicyNames)) {
@@ -2530,7 +2642,8 @@ export class AwsRoleBroker {
       );
       if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
         || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
-        || permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2541,7 +2654,8 @@ export class AwsRoleBroker {
         assertExtendedSupportProjectionPolicy(policy.policyDocument);
       }
       if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
-        || permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2551,7 +2665,8 @@ export class AwsRoleBroker {
         );
         assertAwsSupportCasesPolicy(policy.policyDocument);
       }
-      if (permissionPackVersion === AWS_HEALTH_PACK_VERSION) {
+      if (permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
         const policy = await awaitWithActiveProvisioningSignal(
           signal,
           () => client.getRolePolicy(
@@ -2560,6 +2675,16 @@ export class AwsRoleBroker {
           ),
         );
         assertAwsHealthPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === RESILIENCE_VUE_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            RESILIENCE_VUE_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertResilienceVuePolicy(policy.policyDocument);
       }
       for (const contract of contracts) {
         const policy = await awaitWithActiveProvisioningSignal(

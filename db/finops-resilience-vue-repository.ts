@@ -136,6 +136,18 @@ export class ResilienceVueRepository {
       .bind(scope.organizationId, scope.customerId, scope.connectionId, id).first<SnapshotRow>();
     return row === null ? null : materialize(row);
   }
+  public async getSnapshotByGeneration(scope: ResilienceVuePersistenceScope, generationId: string) {
+    if (!GENERATION_ID.test(generationId)) reject();
+    return this.byGeneration(await this.live(scope), scope, generationId);
+  }
+  public async getSnapshotByCaptureId(scope: ResilienceVuePersistenceScope, captureId: string) {
+    if (!/^resilience_[a-f0-9]{64}$/u.test(captureId)) reject();
+    const db = await this.live(scope);
+    const row = await db.prepare(`SELECT s.* FROM finops_resilience_vue_snapshots s
+      WHERE s.org_id=? AND s.customer_id=? AND s.connection_id=? AND s.capture_id=? LIMIT 1`)
+      .bind(scope.organizationId, scope.customerId, scope.connectionId, captureId).first<SnapshotRow>();
+    return row === null ? null : materialize(row);
+  }
   public async recordCapture(scope: ResilienceVuePersistenceScope, trustedScope: ResilienceVueScope,
     capture: ResilienceVueCapture, nowMs = Date.now()): Promise<{ readonly snapshot: StoredResilienceVueSnapshot; readonly becameActive: boolean }> {
     assertScope(scope);

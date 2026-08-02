@@ -112,6 +112,7 @@ import postgresFinopsComputeOptimizerActivationOutboxSql from "../postgres/migra
 import postgresFinopsAwsNewsFeedsReplaySql from "../postgres/migrations/0113_finops_aws_news_feeds_replay.sql?raw";
 import postgresFinopsExtendedSupportRuntimeSql from "../postgres/migrations/0114_finops_extended_support_runtime.sql?raw";
 import postgresFinopsAwsHealthRuntimeSql from "../postgres/migrations/0115_finops_aws_health_runtime.sql?raw";
+import postgresFinopsResilienceVueRuntimeSql from "../postgres/migrations/0116_finops_resilience_vue_runtime.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -228,6 +229,7 @@ const migrations = [
   { id: "0113_finops_aws_news_feeds_replay", source: postgresFinopsAwsNewsFeedsReplaySql },
   { id: "0114_finops_extended_support_runtime", source: postgresFinopsExtendedSupportRuntimeSql },
   { id: "0115_finops_aws_health_runtime", source: postgresFinopsAwsHealthRuntimeSql },
+  { id: "0116_finops_resilience_vue_runtime", source: postgresFinopsResilienceVueRuntimeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
