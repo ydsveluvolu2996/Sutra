@@ -38,6 +38,12 @@ enrollment, usage basis, calendar/pricing freshness, resource drilldown,
 projected incremental charge and remediation planning. RDS and Aurora remain
 separate evidence classes even though both use RDS APIs.
 
+The client validates the frozen commit, definition hash, exact totals and
+ordered sheet identities before accepting a configuration or report response.
+The five-sheet official inventory remains visible during loading,
+connection/configuration, failure and report states rather than depending on
+an accepted projection generation.
+
 ## Implemented chain
 
 - Engine: `lib/finops-extended-support-projection.ts`
@@ -105,3 +111,6 @@ Focused local result: **20 passed, 0 failed, 0 skipped** across the projection,
 runtime, repository, API and server-rendered UI suites; focused ESLint and diff
 checks passed. Full exact-tree type/build/security validation remains G7 after
 all concurrent dashboard work is integrated.
+
+The report-independent null/configuration rendering contract is additionally
+covered by `tests/finops-report-independent-official-ui.test.mjs`.

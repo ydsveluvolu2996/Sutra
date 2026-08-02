@@ -138,21 +138,27 @@ function validCounts(value: unknown, keys: readonly string[]): boolean {
   return isRecord(value) && keys.every((key) => safeCount(value[key]));
 }
 
+export function hasTrustedAdvisorOfficialDefinition(
+  value: unknown,
+): value is TrustedAdvisorOrganizationalOfficialDefinition {
+  return isRecord(value)
+    && value.sourceCommit === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.sourceCommit
+    && value.manifestSha256 === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.manifestSha256
+    && value.definitionSha256 === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.definitionSha256
+    && isRecord(value.totals)
+    && value.totals.sheets === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.totals.sheets
+    && value.totals.visuals === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.totals.visuals
+    && Array.isArray(value.sheets)
+    && value.sheets.length === TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.sheets.length;
+}
+
 function parseEnvelope(value: unknown, connectionId: string): TrustedAdvisorDashboardEnvelope {
   if (
     !isRecord(value)
     || value.schema !== "sutra.finops-trusted-advisor-organizational-dashboard.v1"
     || value.connectionId !== connectionId
     || value.source !== "AWS_SUPPORT_TRUSTED_ADVISOR_STANDARD_CHECKS"
-    || !isRecord(value.officialDefinition)
-    || value.officialDefinition.sourceCommit !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.sourceCommit
-    || value.officialDefinition.manifestSha256 !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.manifestSha256
-    || value.officialDefinition.definitionSha256 !== TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION.definitionSha256
-    || !isRecord(value.officialDefinition.totals)
-    || value.officialDefinition.totals.sheets !== 11
-    || value.officialDefinition.totals.visuals !== 147
-    || !Array.isArray(value.officialDefinition.sheets)
-    || value.officialDefinition.sheets.length !== 11
+    || !hasTrustedAdvisorOfficialDefinition(value.officialDefinition)
     || typeof value.sourceState !== "string"
     || !new Set(["configuration_required", "waiting", "empty", "partial", "stale", "failed", "complete"])
       .has(value.sourceState)
@@ -313,6 +319,69 @@ function officialCoverageLabel(value: string): string {
   return "Definition evidence";
 }
 
+export function TrustedAdvisorOfficialDefinitionPanel({
+  definition,
+  selectedSheetId,
+  onSelectSheet,
+}: {
+  readonly definition: TrustedAdvisorOrganizationalOfficialDefinition;
+  readonly selectedSheetId?: string;
+  readonly onSelectSheet?: (sheetId: string, category: string | null) => void;
+}) {
+  const [localSheetId, setLocalSheetId] = useState(definition.sheets[0]?.id ?? "");
+  const activeSheet = definition.sheets.find((sheet) =>
+    sheet.id === (selectedSheetId ?? localSheetId)) ?? definition.sheets[0];
+  const selectSheet = (sheetId: string, category: string | null): void => {
+    setLocalSheetId(sheetId);
+    onSelectSheet?.(sheetId, category);
+  };
+  return (
+    <>
+      <section className={styles.taoOfficialHeader} aria-label="Official AWS TAO definition coverage">
+        <div>
+          <p className="eyebrow">AWS CID TAO {definition.version} · immutable definition</p>
+          <h3>{definition.totals.sheets} sheets · {definition.totals.visuals} upstream visuals mapped</h3>
+          <p>Definition <code>{definition.definitionSha256.slice(0, 12)}…</code> at commit <code>{definition.sourceCommit.slice(0, 12)}…</code>. Counts below describe AWS’s source dashboard; native results remain bounded to accepted Sutra evidence.</p>
+        </div>
+        <dl><div><dt>Controls</dt><dd>{definition.totals.parameterControls + definition.totals.filterControls}</dd></div><div><dt>Calculated fields</dt><dd>{definition.totals.calculatedFields}</dd></div><div><dt>Filter groups</dt><dd>{definition.totals.filterGroups}</dd></div></dl>
+      </section>
+
+      <nav className={styles.taoSheetNav} aria-label="Official Trusted Advisor dashboard sheets">
+        {definition.sheets.map((sheet) => (
+          <button
+            key={sheet.id}
+            aria-current={activeSheet?.id === sheet.id ? "page" : undefined}
+            data-coverage={sheet.coverage}
+            onClick={() => selectSheet(sheet.id, sheet.category)}
+            type="button"
+          >
+            <strong>{sheet.name}</strong>
+            <small>{sheet.visualCount} visual{sheet.visualCount === 1 ? "" : "s"} · {officialCoverageLabel(sheet.coverage)}</small>
+          </button>
+        ))}
+      </nav>
+
+      {activeSheet === undefined ? null : (
+        <section className={styles.taoSheetEvidence} data-coverage={activeSheet.coverage} aria-live="polite">
+          <div><p className="eyebrow">Selected official sheet</p><h3>{activeSheet.name}</h3><p>{activeSheet.evidenceNote}</p></div>
+          <dl>
+            <div><dt>Upstream visuals</dt><dd>{activeSheet.visualCount}</dd></div>
+            <div><dt>Types</dt><dd>{Object.entries(activeSheet.visualTypes).map(([name, count]) => `${count} ${name}`).join(" · ")}</dd></div>
+            <div><dt>Controls</dt><dd>{[...activeSheet.parameterControls, ...activeSheet.filterControls].join(" · ") || "None"}</dd></div>
+          </dl>
+        </section>
+      )}
+
+      {activeSheet?.coverage === "PROVIDER_SOURCE_REQUIRED" ? (
+        <section className={styles.taoProviderGap} role="status">
+          <strong>{activeSheet.name} is not available from the active standard-check source</strong>
+          <p>{activeSheet.evidenceNote} No standard-check chart or resource is displayed as a substitute for this sheet.</p>
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 export function FinopsTrustedAdvisorOrganizationalReportView({
   report,
   filters,
@@ -377,47 +446,11 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
 
   return (
     <div className={styles.taoWorkspace}>
-      <section className={styles.taoOfficialHeader} aria-label="Official AWS TAO definition coverage">
-        <div>
-          <p className="eyebrow">AWS CID TAO {report.officialDefinition.version} · immutable definition</p>
-          <h3>{report.officialDefinition.totals.sheets} sheets · {report.officialDefinition.totals.visuals} upstream visuals mapped</h3>
-          <p>Definition <code>{report.officialDefinition.definitionSha256.slice(0, 12)}…</code> at commit <code>{report.officialDefinition.sourceCommit.slice(0, 12)}…</code>. Counts below describe AWS’s source dashboard; native results remain bounded to accepted Sutra evidence.</p>
-        </div>
-        <dl><div><dt>Controls</dt><dd>{report.officialDefinition.totals.parameterControls + report.officialDefinition.totals.filterControls}</dd></div><div><dt>Calculated fields</dt><dd>{report.officialDefinition.totals.calculatedFields}</dd></div><div><dt>Filter groups</dt><dd>{report.officialDefinition.totals.filterGroups}</dd></div></dl>
-      </section>
-
-      <nav className={styles.taoSheetNav} aria-label="Official Trusted Advisor dashboard sheets">
-        {report.officialDefinition.sheets.map((sheet) => (
-          <button
-            key={sheet.id}
-            aria-current={activeSheet?.id === sheet.id ? "page" : undefined}
-            data-coverage={sheet.coverage}
-            onClick={() => selectOfficialSheet(sheet.id, sheet.category)}
-            type="button"
-          >
-            <strong>{sheet.name}</strong>
-            <small>{sheet.visualCount} visual{sheet.visualCount === 1 ? "" : "s"} · {officialCoverageLabel(sheet.coverage)}</small>
-          </button>
-        ))}
-      </nav>
-
-      {activeSheet === undefined ? null : (
-        <section className={styles.taoSheetEvidence} data-coverage={activeSheet.coverage} aria-live="polite">
-          <div><p className="eyebrow">Selected official sheet</p><h3>{activeSheet.name}</h3><p>{activeSheet.evidenceNote}</p></div>
-          <dl>
-            <div><dt>Upstream visuals</dt><dd>{activeSheet.visualCount}</dd></div>
-            <div><dt>Types</dt><dd>{Object.entries(activeSheet.visualTypes).map(([name, count]) => `${count} ${name}`).join(" · ")}</dd></div>
-            <div><dt>Controls</dt><dd>{[...activeSheet.parameterControls, ...activeSheet.filterControls].join(" · ") || "None"}</dd></div>
-          </dl>
-        </section>
-      )}
-
-      {activeSheet?.coverage === "PROVIDER_SOURCE_REQUIRED" ? (
-        <section className={styles.taoProviderGap} role="status">
-          <strong>{activeSheet.name} is not available from the active standard-check source</strong>
-          <p>{activeSheet.evidenceNote} No standard-check chart or resource is displayed as a substitute for this sheet.</p>
-        </section>
-      ) : null}
+      <TrustedAdvisorOfficialDefinitionPanel
+        definition={report.officialDefinition}
+        selectedSheetId={activeSheetId}
+        onSelectSheet={selectOfficialSheet}
+      />
 
       <div className={styles.taoNativeEvidence} hidden={activeSheet?.coverage === "PROVIDER_SOURCE_REQUIRED"}>
       <section className={styles.taoFilters} aria-label="Trusted Advisor organization filters">
@@ -555,11 +588,20 @@ export function FinopsTrustedAdvisorOrganizationalDashboard({
   const presentation = statePresentation(connectionId, request);
   const envelope = request.status === "loaded" && request.envelope.connectionId === connectionId
     ? request.envelope : null;
+  const definition = envelope?.officialDefinition
+    ?? TRUSTED_ADVISOR_ORGANIZATIONAL_OFFICIAL_DEFINITION;
   return (
-    <FinopsCapabilityShell dashboard={dashboard} state={presentation.view} stateTitle={presentation.title} stateDetail={presentation.detail} evidence={evidenceFor(envelope)}>
-      {envelope === null || envelope.coverage === undefined ? null : (
-        <FinopsTrustedAdvisorOrganizationalReportView report={envelope} filters={filters} onFiltersChange={setFilters} />
-      )}
-    </FinopsCapabilityShell>
+    <>
+      <FinopsCapabilityShell dashboard={dashboard} state={presentation.view} stateTitle={presentation.title} stateDetail={presentation.detail} evidence={evidenceFor(envelope)}>
+        {envelope === null || envelope.coverage === undefined ? null : (
+          <FinopsTrustedAdvisorOrganizationalReportView report={envelope} filters={filters} onFiltersChange={setFilters} />
+        )}
+      </FinopsCapabilityShell>
+      {envelope === null || envelope.coverage === undefined ? (
+        <div className={styles.taoWorkspace}>
+          <TrustedAdvisorOfficialDefinitionPanel definition={definition} />
+        </div>
+      ) : null}
+    </>
   );
 }

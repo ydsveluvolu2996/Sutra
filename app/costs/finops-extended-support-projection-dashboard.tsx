@@ -2,6 +2,10 @@
 import { useEffect, useState } from "react";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
 import {
+  EXTENDED_SUPPORT_OFFICIAL_DEFINITION,
+  type ExtendedSupportOfficialDefinition,
+} from "../../lib/finops-extended-support-official-definition";
+import {
   FinopsCapabilityShell,
   type FinopsCapabilityViewState,
 } from "./finops-capability-shell";
@@ -91,22 +95,7 @@ interface Report {
   schema: string;
   connectionId: string;
   sourceState: string;
-  officialDefinition: {
-    source: { commit: string; sha256: string };
-    totals: {
-      sheets: number;
-      visuals: number;
-      parameterControls: number;
-      filterControls: number;
-    };
-    sheets: {
-      name: string;
-      visualCount: number;
-      parameterControlCount: number;
-      support: string;
-      note: string;
-    }[];
-  };
+  officialDefinition: ExtendedSupportOfficialDefinition;
   dashboard: {
     filters: Record<string, unknown>;
     filterOptions: {
@@ -208,6 +197,70 @@ function Select({
     </label>
   );
 }
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function hasExtendedSupportOfficialDefinition(value: unknown): value is ExtendedSupportOfficialDefinition {
+  if (!isRecord(value) || !isRecord(value.source) || !isRecord(value.totals)) return false;
+  return value.source.commit === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.source.commit
+    && value.source.sha256 === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.source.sha256
+    && value.totals.sheets === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.totals.sheets
+    && value.totals.visuals === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.totals.visuals
+    && value.totals.parameterControls === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.totals.parameterControls
+    && value.totals.filterControls === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.totals.filterControls
+    && Array.isArray(value.sheets)
+    && value.sheets.length === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.sheets.length
+    && value.sheets.every((sheet, index) => isRecord(sheet)
+      && sheet.name === EXTENDED_SUPPORT_OFFICIAL_DEFINITION.sheets[index]?.name);
+}
+
+export function ExtendedSupportOfficialDefinitionPanel({ definition }: {
+  readonly definition: ExtendedSupportOfficialDefinition;
+}) {
+  return (
+    <section
+      className={styles.panel}
+      aria-label="Official AWS Extended Support coverage"
+    >
+      <header>
+        <h3>Official AWS definition coverage</h3>
+        <span>
+          {definition.totals.sheets} sheets ·{" "}
+          {definition.totals.visuals} visuals ·{" "}
+          {definition.totals.parameterControls} controls
+        </span>
+      </header>
+      <div className={styles.serviceGrid}>
+        {definition.sheets.map((sheet) => (
+          <article key={sheet.name}>
+            <header>
+              <strong>{sheet.name}</strong>
+              <span>{sheet.support}</span>
+            </header>
+            <dl>
+              <div>
+                <dt>Visuals</dt>
+                <dd>{sheet.visualCount}</dd>
+              </div>
+              <div>
+                <dt>Controls</dt>
+                <dd>{sheet.parameterControlCount}</dd>
+              </div>
+            </dl>
+            <p>{sheet.note}</p>
+          </article>
+        ))}
+      </div>
+      <small>
+        Immutable definition{" "}
+        {definition.source.commit.slice(0, 12)} ·{" "}
+        {definition.source.sha256.slice(0, 16)}…
+      </small>
+    </section>
+  );
+}
 function shell(s: string): FinopsCapabilityViewState {
   return s === "complete"
     ? "complete"
@@ -256,45 +309,7 @@ export function ExtendedSupportProjectionReportView({
           READY accepted head is retained where available.
         </div>
       ) : null}
-      <section
-        className={styles.panel}
-        aria-label="Official AWS Extended Support coverage"
-      >
-        <header>
-          <h3>Official AWS definition coverage</h3>
-          <span>
-            {report.officialDefinition.totals.sheets} sheets ·{" "}
-            {report.officialDefinition.totals.visuals} visuals ·{" "}
-            {report.officialDefinition.totals.parameterControls} controls
-          </span>
-        </header>
-        <div className={styles.serviceGrid}>
-          {report.officialDefinition.sheets.map((sheet) => (
-            <article key={sheet.name}>
-              <header>
-                <strong>{sheet.name}</strong>
-                <span>{sheet.support}</span>
-              </header>
-              <dl>
-                <div>
-                  <dt>Visuals</dt>
-                  <dd>{sheet.visualCount}</dd>
-                </div>
-                <div>
-                  <dt>Controls</dt>
-                  <dd>{sheet.parameterControlCount}</dd>
-                </div>
-              </dl>
-              <p>{sheet.note}</p>
-            </article>
-          ))}
-        </div>
-        <small>
-          Immutable definition{" "}
-          {report.officialDefinition.source.commit.slice(0, 12)} ·{" "}
-          {report.officialDefinition.source.sha256.slice(0, 16)}…
-        </small>
-      </section>
+      <ExtendedSupportOfficialDefinitionPanel definition={report.officialDefinition} />
       <section className={styles.filters} aria-label="Extended Support filters">
         <Select
           label="Service"
@@ -622,10 +637,12 @@ export function FinopsExtendedSupportProjectionDashboard({
 }) {
   const [filters, setFilters] = useState<Filters>(EMPTY),
     [state, setState] = useState<{
+      connectionId: string | null;
       loading: boolean;
       report: Report | null;
       error: string | null;
-    }>({ loading: true, report: null, error: null });
+      officialDefinition: ExtendedSupportOfficialDefinition;
+    }>({ connectionId: null, loading: true, report: null, error: null, officialDefinition: EXTENDED_SUPPORT_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const c = new AbortController(),
@@ -633,40 +650,45 @@ export function FinopsExtendedSupportProjectionDashboard({
     for (const [k, v] of Object.entries(filters))
       if (v && k !== "horizon") p.set(k, v);
     const frame = window.requestAnimationFrame(() => {
-      setState({ loading: true, report: null, error: null });
       void fetch(`/api/v1/finops/extended-support-projection?${p}`, {
         signal: c.signal,
         credentials: "same-origin",
       })
         .then(async (r) => {
           if (!r.ok) throw new Error("Extended Support request failed");
-          return r.json() as Promise<Report | { dashboard: null }>;
+          return r.json() as Promise<unknown>;
         })
-        .then(
-          (x) =>
-            setState(
-              "dashboard" in x && x.dashboard === null
-                ? { loading: false, report: null, error: null }
-                : { loading: false, report: x as Report, error: null },
-            ),
-          (e) => {
-            if (!c.signal.aborted)
-              setState({
-                loading: false,
-                report: null,
-                error:
-                  e instanceof Error
-                    ? e.message
-                    : "Extended Support request failed",
-              });
-          },
-        );
+        .then((x) => {
+            if (!isRecord(x)
+              || x.schema !== "sutra.finops-extended-support-dashboard.v1"
+              || x.connectionId !== connectionId
+              || !hasExtendedSupportOfficialDefinition(x.officialDefinition)) {
+              throw new Error("Sutra returned an unrecognized official Extended Support definition");
+            }
+            setState(x.dashboard === null
+              ? { connectionId, loading: false, report: null, error: null, officialDefinition: x.officialDefinition }
+              : { connectionId, loading: false, report: x as unknown as Report, error: null, officialDefinition: x.officialDefinition });
+        })
+        .catch((e: unknown) => {
+          if (!c.signal.aborted)
+            setState((current) => ({
+              connectionId,
+              loading: false,
+              report: null,
+              error:
+                e instanceof Error
+                  ? e.message
+                  : "Extended Support request failed",
+              officialDefinition: current.officialDefinition,
+            }));
+        });
     });
     return () => {
       window.cancelAnimationFrame(frame);
       c.abort();
     };
   }, [connectionId, filters]);
+  const r = state.report?.connectionId === connectionId ? state.report : null;
   const shown =
     connectionId === null
       ? {
@@ -675,20 +697,20 @@ export function FinopsExtendedSupportProjectionDashboard({
           detail:
             "An active trust-role connection and server-pinned organization boundary are required.",
         }
-      : state.error
+      : state.connectionId === connectionId && state.error
         ? {
             state: "failed" as const,
             title: "Extended Support evidence could not be verified",
             detail: state.error,
           }
-        : state.loading
+        : state.connectionId !== connectionId || state.loading
           ? {
               state: "loading" as const,
               title: "Loading Extended Support projection",
               detail:
                 "Reading immutable inventory, lifecycle, pricing and CUR2 evidence.",
             }
-          : state.report === null
+          : r === null
             ? {
                 state: "configuration_required" as const,
                 title: "Extended Support collection is not configured",
@@ -696,13 +718,12 @@ export function FinopsExtendedSupportProjectionDashboard({
                   "Deploy and bind the multi-account inventory, lifecycle, pricing and CUR2 materializer.",
               }
             : {
-                state: shell(state.report.sourceState),
+                state: shell(r.sourceState),
                 title: "Extended Support Cost Projection",
                 detail:
                   "Engine/version eligibility, effective dates, incremental projection and remediation planning.",
               };
-  const r = state.report,
-    e =
+  const e =
       r === null
         ? null
         : {
@@ -719,20 +740,23 @@ export function FinopsExtendedSupportProjectionDashboard({
             limitations: r.dashboard.limitations,
           };
   return (
-    <FinopsCapabilityShell
-      dashboard={dashboard}
-      state={shown.state}
-      stateTitle={shown.title}
-      stateDetail={shown.detail}
-      evidence={e}
-    >
-      {r ? (
-        <ExtendedSupportProjectionReportView
-          report={r}
-          filters={filters}
-          onFiltersChange={setFilters}
-        />
-      ) : null}
-    </FinopsCapabilityShell>
+    <>
+      <FinopsCapabilityShell
+        dashboard={dashboard}
+        state={shown.state}
+        stateTitle={shown.title}
+        stateDetail={shown.detail}
+        evidence={e}
+      >
+        {r ? (
+          <ExtendedSupportProjectionReportView
+            report={r}
+            filters={filters}
+            onFiltersChange={setFilters}
+          />
+        ) : null}
+      </FinopsCapabilityShell>
+      {r === null ? <ExtendedSupportOfficialDefinitionPanel definition={state.officialDefinition} /> : null}
+    </>
   );
 }

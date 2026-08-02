@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ComputeOptimizerDashboardFilters } from
   "../../lib/finops-compute-optimizer-export-history";
-import type { FinopsComputeOptimizerOfficialDefinition } from
-  "../../lib/finops-compute-optimizer-official-definition";
+import {
+  FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
+  type FinopsComputeOptimizerOfficialDefinition,
+} from "../../lib/finops-compute-optimizer-official-definition";
 import styles from "./finops-compute-optimizer-dashboard.module.css";
 
 type Report = ReturnType<typeof import(
@@ -167,6 +169,77 @@ function resourceSavings(report: Report) {
   })).sort((left, right) => left.name.localeCompare(right.name));
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function hasComputeOptimizerOfficialDefinition(value: unknown): value is FinopsComputeOptimizerOfficialDefinition {
+  if (!isRecord(value) || !isRecord(value.source) || !isRecord(value.quickSightDefinition)) return false;
+  return value.source.commit === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.source.commit
+    && value.source.version === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.source.version
+    && value.source.templateId === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.source.templateId
+    && isRecord(value.source.manifest)
+    && value.source.manifest.sha256 === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.source.manifest.sha256
+    && isRecord(value.source.dataset)
+    && value.source.dataset.sha256 === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.source.dataset.sha256
+    && value.quickSightDefinition.state === "NOT_PUBLICLY_COMMITTED"
+    && Array.isArray(value.publishedModuleFamilies)
+    && value.publishedModuleFamilies.length === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.publishedModuleFamilies.length
+    && Array.isArray(value.documentedPreviewVisuals)
+    && value.documentedPreviewVisuals.length === FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION.documentedPreviewVisuals.length;
+}
+
+export function ComputeOptimizerOfficialDefinitionPanel({
+  definition,
+  observedResourceTypes = null,
+}: {
+  readonly definition: FinopsComputeOptimizerOfficialDefinition;
+  readonly observedResourceTypes?: readonly string[] | null;
+}) {
+  const observedTypes = observedResourceTypes === null
+    ? null : new Set(observedResourceTypes);
+  return (
+    <section className={styles.definition} aria-label="Official AWS Compute Optimizer Dashboard coverage">
+      <header>
+        <div>
+          <small>Immutable AWS audit · {definition.source.version}</small>
+          <h3>Published Compute Optimizer modules</h3>
+        </div>
+        <span>
+          Template {definition.source.templateId} ·{" "}
+          {definition.source.commit.slice(0, 12)}
+        </span>
+      </header>
+      <p>{definition.quickSightDefinition.disclosure}</p>
+      <div className={styles.moduleGrid}>
+        {definition.publishedModuleFamilies.map((module) => {
+          const observed = observedTypes === null ? null : (MODULE_TYPES[module] ?? []).some((type) =>
+            observedTypes.has(type));
+          return (
+            <article key={module}>
+              <strong>{module}</strong>
+              <span>{observed === null ? "Report evidence unavailable" : observed ? "Observed in accepted exports" : "No accepted rows"}</span>
+            </article>
+          );
+        })}
+      </div>
+      <details className={styles.previewInventory}>
+        <summary>Published preview visual inventory</summary>
+        <ul>
+          {definition.documentedPreviewVisuals.map((visual) => (
+            <li key={visual}>{visual}</li>
+          ))}
+        </ul>
+      </details>
+      <small>
+        Public definition state: not publicly committed · exact sheet,
+        visual, filter-control, and parameter-control counts are unavailable
+        and are not inferred from the preview image.
+      </small>
+    </section>
+  );
+}
+
 export function ComputeOptimizerReportView({
   report,
   filters,
@@ -184,7 +257,6 @@ export function ComputeOptimizerReportView({
   const risks = riskCounts(report);
   const savingsByResource = resourceSavings(report);
   const maxFinding = Math.max(1, ...findings.map(([, count]) => count));
-  const observedResourceTypes = new Set(report.filterOptions.resourceTypes);
 
   return (
     <section className={styles.root} aria-label="Compute Optimizer organization dashboard">
@@ -199,44 +271,10 @@ export function ComputeOptimizerReportView({
         </div>
       ) : null}
 
-      <section className={styles.definition} aria-label="Official AWS Compute Optimizer Dashboard coverage">
-        <header>
-          <div>
-            <small>Immutable AWS audit · {report.officialDefinition.source.version}</small>
-            <h3>Published Compute Optimizer modules</h3>
-          </div>
-          <span>
-            Template {report.officialDefinition.source.templateId} ·{" "}
-            {report.officialDefinition.source.commit.slice(0, 12)}
-          </span>
-        </header>
-        <p>{report.officialDefinition.quickSightDefinition.disclosure}</p>
-        <div className={styles.moduleGrid}>
-          {report.officialDefinition.publishedModuleFamilies.map((module) => {
-            const observed = (MODULE_TYPES[module] ?? []).some((type) =>
-              observedResourceTypes.has(type as never));
-            return (
-              <article key={module}>
-                <strong>{module}</strong>
-                <span>{observed ? "Observed in accepted exports" : "No accepted rows"}</span>
-              </article>
-            );
-          })}
-        </div>
-        <details className={styles.previewInventory}>
-          <summary>Published preview visual inventory</summary>
-          <ul>
-            {report.officialDefinition.documentedPreviewVisuals.map((visual) => (
-              <li key={visual}>{visual}</li>
-            ))}
-          </ul>
-        </details>
-        <small>
-          Public definition state: not publicly committed · exact sheet,
-          visual, filter-control, and parameter-control counts are unavailable
-          and are not inferred from the preview image.
-        </small>
-      </section>
+      <ComputeOptimizerOfficialDefinitionPanel
+        definition={report.officialDefinition}
+        observedResourceTypes={report.filterOptions.resourceTypes}
+      />
 
       <div className={styles.filters} aria-label="Compute Optimizer evidence filters">
         <Select label="Account" value={filters.accountId} options={report.filterOptions.accounts} onChange={(value) => set("accountId", value)} />
@@ -366,10 +404,12 @@ export function FinopsComputeOptimizerDashboard({
 }) {
   const [filters, setFilters] = useState(EMPTY);
   const [state, setState] = useState<{
+    readonly connectionId: string | null;
     readonly report: Report | null;
     readonly error: string | null;
     readonly configuration: boolean;
-  }>({ report: null, error: null, configuration: false });
+    readonly officialDefinition: FinopsComputeOptimizerOfficialDefinition;
+  }>({ connectionId: null, report: null, error: null, configuration: false, officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION });
   const query = useMemo(() => {
     if (connectionId === null) return null;
     const parameters = new URLSearchParams({ connectionId });
@@ -391,41 +431,47 @@ export function FinopsComputeOptimizerDashboard({
         throw new Error("Compute Optimizer export history request failed");
       }
       return response.json();
-    }).then((value) => {
+    }).then((value: unknown) => {
+      if (!isRecord(value)
+        || value.schema !== "sutra.finops-compute-optimizer.v1"
+        || value.connectionId !== connectionId
+        || !hasComputeOptimizerOfficialDefinition(value.officialDefinition)) {
+        throw new Error("Sutra returned an unrecognized official Compute Optimizer definition");
+      }
       if (value.dashboard === null) {
-        setState({ report: null, error: null, configuration: true });
+        setState({ connectionId, report: null, error: null, configuration: true, officialDefinition: value.officialDefinition });
       } else {
-        setState({ report: value as Report, error: null, configuration: false });
+        setState({ connectionId, report: value as unknown as Report, error: null, configuration: false, officialDefinition: value.officialDefinition });
       }
     }).catch((error: unknown) => {
       if (!controller.signal.aborted) {
-        setState({
+        setState((current) => ({
+          connectionId,
           report: null,
           error: error instanceof Error ? error.message : "Request failed",
           configuration: false,
-        });
+          officialDefinition: current.officialDefinition,
+        }));
       }
     });
     return () => controller.abort();
   }, [connectionId, query]);
 
-  if (connectionId === null) {
-    return <div role="status" className={styles.warning}>Connect an active AWS trust-role account.</div>;
+  if (state.report !== null && state.report.connectionId === connectionId) {
+    return (
+      <ComputeOptimizerReportView
+        report={state.report}
+        filters={filters}
+        onFiltersChange={setFilters}
+      />
+    );
   }
-  if (state.configuration) {
-    return <div role="status" className={styles.warning}>No accepted organization S3 export history exists. Discovery cannot substitute for export objects.</div>;
-  }
-  if (state.error !== null) {
-    return <div role="alert" className={styles.error}>{state.error}</div>;
-  }
-  if (state.report === null || state.report.connectionId !== connectionId) {
-    return <div role="status" className={styles.warning}>Loading immutable Compute Optimizer exports…</div>;
-  }
-  return (
-    <ComputeOptimizerReportView
-      report={state.report}
-      filters={filters}
-      onFiltersChange={setFilters}
-    />
-  );
+  const status = connectionId === null
+    ? <div role="status" className={styles.warning}>Connect an active AWS trust-role account.</div>
+    : state.connectionId === connectionId && state.configuration
+      ? <div role="status" className={styles.warning}>No accepted organization S3 export history exists. Discovery cannot substitute for export objects.</div>
+      : state.connectionId === connectionId && state.error !== null
+        ? <div role="alert" className={styles.error}>{state.error}</div>
+        : <div role="status" className={styles.warning}>Loading immutable Compute Optimizer exports…</div>;
+  return <section className={styles.root}>{status}<ComputeOptimizerOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import type { AwsHealthDashboardFilters } from
   "../../lib/finops-aws-health-dashboard";
-import type { FinopsAwsHealthOfficialDefinition } from
-  "../../lib/finops-aws-health-official-definition";
+import {
+  FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION,
+  type FinopsAwsHealthOfficialDefinition,
+} from "../../lib/finops-aws-health-official-definition";
 import styles from "./finops-health-events-dashboard.module.css";
 
 type Report = ReturnType<typeof import(
@@ -82,7 +84,27 @@ function exportCsv(report: Report): void {
   URL.revokeObjectURL(url);
 }
 
-function OfficialDefinition({ definition }: {
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function hasHealthEventsOfficialDefinition(value: unknown): value is FinopsAwsHealthOfficialDefinition {
+  if (!isRecord(value) || !isRecord(value.source) || !isRecord(value.totals)) return false;
+  return value.source.commit === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.source.commit
+    && value.source.version === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.source.version
+    && isRecord(value.source.manifest)
+    && value.source.manifest.sha256 === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.source.manifest.sha256
+    && isRecord(value.source.definition)
+    && value.source.definition.sha256 === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.source.definition.sha256
+    && value.totals.sheets === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.totals.sheets
+    && value.totals.visuals === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.totals.visuals
+    && value.totals.parameterControls === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.totals.parameterControls
+    && value.totals.filterControls === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.totals.filterControls
+    && Array.isArray(value.sheets)
+    && value.sheets.length === FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION.sheets.length;
+}
+
+export function HealthEventsOfficialDefinitionPanel({ definition }: {
   readonly definition: FinopsAwsHealthOfficialDefinition;
 }) {
   return (
@@ -116,7 +138,7 @@ export function HealthEventsReportView({ report, filters, onFiltersChange }: {
     <section className={styles.root} aria-label="AWS Health Events planning dashboard">
       <div role="status" className={styles.lag}><strong>Planning view — not real time.</strong> AWS Health organization data can lag by 48 hours or more. Use AWS Health and your incident tooling for current response.</div>
       <div className={styles.privacy}><strong>Tenant-private evidence.</strong> Event descriptions, account IDs, affected entities and metadata are visible only to authenticated users authorized for this connection.</div>
-      <OfficialDefinition definition={report.officialDefinition} />
+      <HealthEventsOfficialDefinitionPanel definition={report.officialDefinition} />
       <section className={styles.prereq}>
         <article><span>Eligible support / API entitlement</span><strong>{report.availability?.eligibleSupport ? "Validated" : "Not validated"}</strong><small>{report.availability?.supportPlan ?? "Unknown plan"}</small></article>
         <article><span>AWS Organizations access</span><strong>{report.availability?.organizationsAllFeaturesEnabled ? "All features enabled" : "Not proven"}</strong><small>{report.availability?.collectorAccountType ?? "Unknown collector"}</small></article>
@@ -157,7 +179,14 @@ export function HealthEventsReportView({ report, filters, onFiltersChange }: {
 
 export function FinopsHealthEventsDashboard({ connectionId }: { readonly connectionId: string | null }) {
   const [filters, setFilters] = useState(EMPTY);
-  const [state, setState] = useState<{ readonly report: Report | null; readonly error: string | null; readonly availability: Report["availability"] }>({ report: null, error: null, availability: null });
+  const [state, setState] = useState<{
+    readonly connectionId: string | null;
+    readonly loading: boolean;
+    readonly report: Report | null;
+    readonly error: string | null;
+    readonly availability: Report["availability"];
+    readonly officialDefinition: FinopsAwsHealthOfficialDefinition;
+  }>({ connectionId: null, loading: true, report: null, error: null, availability: null, officialDefinition: FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION });
   useEffect(() => {
     if (connectionId === null) return;
     const controller = new AbortController();
@@ -165,15 +194,32 @@ export function FinopsHealthEventsDashboard({ connectionId }: { readonly connect
     for (const [key, value] of Object.entries(filters)) if (value !== null) parameters.set(key, value);
     fetch(`/api/v1/finops/health-events?${parameters.toString()}`, { cache: "no-store", credentials: "same-origin", signal: controller.signal })
       .then(async (response) => { if (!response.ok) throw new Error("Health Events request failed"); return response.json(); })
-      .then((value) => value.dashboard === null ? setState({ report: null, error: null, availability: value.availability }) : setState({ report: value as Report, error: null, availability: value.availability }))
-      .catch((error: unknown) => { if (!controller.signal.aborted) setState({ report: null, error: error instanceof Error ? error.message : "Request failed", availability: null }); });
+      .then((value: unknown) => {
+        if (!isRecord(value)
+          || value.schema !== "sutra.finops-health-events.v1"
+          || value.connectionId !== connectionId
+          || !hasHealthEventsOfficialDefinition(value.officialDefinition)) {
+          throw new Error("Sutra returned an unrecognized official AWS Health definition");
+        }
+        if (value.dashboard === null) {
+          setState({ connectionId, loading: false, report: null, error: null, availability: value.availability as Report["availability"], officialDefinition: value.officialDefinition });
+        } else {
+          setState({ connectionId, loading: false, report: value as unknown as Report, error: null, availability: value.availability as Report["availability"], officialDefinition: value.officialDefinition });
+        }
+      })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setState((current) => ({ ...current, connectionId, loading: false, report: null, error: error instanceof Error ? error.message : "Request failed", availability: null })); });
     return () => controller.abort();
   }, [connectionId, filters]);
-  if (connectionId === null) return <div role="status" className={styles.warning}>Connect an active AWS trust-role account.</div>;
-  if (state.error !== null) return <div role="alert" className={styles.error}>{state.error}</div>;
-  if (state.report === null) {
-    const reason = state.availability?.eligibleSupport === false ? "Eligible AWS support/API entitlement is not validated." : state.availability?.organizationViewStatus === "DISABLED" ? "AWS Health Organizational View is disabled." : state.availability?.organizationsAllFeaturesEnabled === false ? "AWS Organizations all-features access is not enabled." : "No complete organization Health snapshot has been accepted.";
-    return <div role="status" className={styles.warning}><strong>Planning view unavailable.</strong> {reason} Data can lag by 48 hours or more and discovery is not real-time.</div>;
+  if (state.report !== null && state.report.connectionId === connectionId) {
+    return <HealthEventsReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
   }
-  return <HealthEventsReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
+  let status;
+  if (connectionId === null) status = <div role="status" className={styles.warning}>Connect an active AWS trust-role account.</div>;
+  else if (state.connectionId === connectionId && state.error !== null) status = <div role="alert" className={styles.error}>{state.error}</div>;
+  else if (state.connectionId !== connectionId || state.loading) status = <div role="status" className={styles.warning}>Loading immutable AWS Health planning evidence…</div>;
+  else {
+    const reason = state.availability?.eligibleSupport === false ? "Eligible AWS support/API entitlement is not validated." : state.availability?.organizationViewStatus === "DISABLED" ? "AWS Health Organizational View is disabled." : state.availability?.organizationsAllFeaturesEnabled === false ? "AWS Organizations all-features access is not enabled." : "No complete organization Health snapshot has been accepted.";
+    status = <div role="status" className={styles.warning}><strong>Planning view unavailable.</strong> {reason} Data can lag by 48 hours or more and discovery is not real-time.</div>;
+  }
+  return <section className={styles.root}>{status}<HealthEventsOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

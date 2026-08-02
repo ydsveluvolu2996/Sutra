@@ -66,7 +66,7 @@ charts, 18 insights, 8 KPIs, 5 pivot tables, and 43 tables.
 | G2 collector and orchestration | `IMPLEMENTED_UNVERIFIED` | The bounded standard-check runner owns check/resource/metadata/output/deadline/concurrency limits and sanitized failure states. App-side orchestration validates a fresh fully paged KMS-signed Organizations taxonomy, freezes the manifest, maps active same-tenant trust-role accounts, queues manifest-bound account/finalizer jobs, consumes exact immutable standard-check evidence bytes, and finalizes only terminal manifests. The external signed-taxonomy adapter and durable handler registrations remain unavailable. |
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Server-owned account manifests, account/check/resource snapshots, organization generations, and active heads are tenant/customer/connection scoped. Evidence is checksum-bound and append-only; database guards prevent incomplete or partial generations from advancing the complete active head. |
 | G4 API | `IMPLEMENTED_VERIFIED` | Authenticated same-tenant `GET /api/v1/finops/trusted-advisor-organizational` accepts one bounded connection/account/check/status/Region/category/suppression value, queries only the immutable active standard-check generation, exposes the pinned official definition, bounds output, minimizes metadata, and preserves explicit source states. |
-| G5 visual UI | `IMPLEMENTED_VERIFIED` | ADV-01 renders all 11 official sheet entries with exact upstream object/control counts and honest coverage badges, evidence-backed category/status/Region visuals, coverage KPIs, generation history, account/check/resource drilldowns, native Category and IsSuppressed controls, responsive layouts, and immutable source evidence. Provider-only sheets remain visible and unavailable rather than substituted. |
+| G5 visual UI | `IMPLEMENTED_VERIFIED` | ADV-01 renders all 11 official sheet entries with exact upstream object/control counts and honest coverage badges, evidence-backed category/status/Region visuals, coverage KPIs, generation history, account/check/resource drilldowns, native Category and IsSuppressed controls, responsive layouts, and immutable source evidence. The frozen definition remains visible during loading, configuration-required, failed and null-report states. Provider-only sheets remain visible and unavailable rather than substituted. |
 | G6 focused verification | `VERIFIED` | Exact-definition arithmetic, repository filters/isolation, catalog/navigation/render/accessibility, manifest-job/migration/signed-taxonomy/fan-out/evidence/finalization, TypeScript, targeted ESLint, and diff checks pass. Exact current command counts are recorded below. |
 | G7 exact-tree gate | `NOT_STARTED` | The complete eventual release SHA still requires the full application, collector, migration, PostgreSQL, build, rendered, security, and image scan gates after all capability work is integrated. |
 | G8 provider acceptance | `NOT_STARTED` | Controlled eligible-Support-plan AWS accounts, accepted server-owned Organizations taxonomy, standard-check reconciliation, failure/partial/freshness exercises, and two-tenant isolation evidence remain. |
@@ -97,6 +97,11 @@ checks. Security Hub coverage is conditional on the accepted TA standard-check
 evidence and is not inferred from Sutra's independent Security Hub source.
 
 ## Focused verification
+
+The report-independent UI contract is also exercised by
+`tests/finops-report-independent-official-ui.test.mjs`; it server-renders the
+null-connection state and proves the full 11-sheet/147-visual audit remains
+visible without accepted provider evidence.
 
 Definition, repository, API/UI contract, and rendered UI command:
 

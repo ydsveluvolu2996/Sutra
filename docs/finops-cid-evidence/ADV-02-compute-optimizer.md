@@ -73,6 +73,12 @@ controls. This inventory does not claim those are the only QuickSight controls.
 | Lineage | Export job, object SHA-256, metadata SHA-256, row count, materialization hash, accepted generation | Discovery readiness is not a dashboard data source |
 | Official inventory | Pinned version/modules/preview visuals and non-public definition disclosure rendered natively | No invented sheet or control totals |
 
+The client validates the frozen commit, version, template and public artifact
+hashes before accepting either a configuration or report response. The same
+official inventory is rendered during loading, connection/configuration,
+failure and report states; without a report, module cards say report evidence
+is unavailable instead of claiming that accepted rows are absent.
+
 ## Implementation files
 
 - Trust boundary: `lib/finops-compute-optimizer-organization.ts`
@@ -106,6 +112,9 @@ Until these gates pass, maturity remains `PARTIAL_PIPELINE` and production
 activation stays false.
 
 ## Focused verification
+
+`tests/finops-report-independent-official-ui.test.mjs` adds a server-rendered
+null/configuration contract for this report-independent audit surface.
 
 ```sh
 node --experimental-strip-types --test \

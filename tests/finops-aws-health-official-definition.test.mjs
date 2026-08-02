@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { register } from "node:module";
+import path from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
+import react from "@vitejs/plugin-react";
+import { createServer } from "vite";
 
 register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
@@ -112,7 +117,7 @@ test("ADV-06 inventory accounts for every official sheet, visual and control", (
   assert.equal(definition.sheets[2].visualCount, 1);
 });
 
-test("ADV-06 API and UI expose the frozen definition and honest planning semantics", async () => {
+test("ADV-06 API exposes the frozen definition and honest planning semantics", async () => {
   const [route, dashboard] = await Promise.all([
     readFile(
       new URL("../app/api/v1/finops/health-events/route.ts", import.meta.url),
@@ -127,13 +132,38 @@ test("ADV-06 API and UI expose the frozen definition and honest planning semanti
     ),
   ]);
   assert.match(route, /officialDefinition:\s*FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION/gu);
-  assert.match(dashboard, /definition\.sheets\.map/gu);
-  assert.match(dashboard, /sheet\.parameterControls/gu);
-  assert.match(dashboard, /sheet\.filterControls/gu);
+  assert.match(dashboard, /hasHealthEventsOfficialDefinition\(value\.officialDefinition\)/gu);
   assert.equal(definition.planningSemantics.collectionCadence, "daily");
   assert.equal(definition.planningSemantics.minimumDocumentedLagHours, 48);
   assert.equal(definition.planningSemantics.notRealTime, true);
   assert.equal(definition.sheets[0].nativeCoverage, "PARTIAL");
   assert.equal(definition.sheets[1].nativeCoverage, "PARTIAL");
   assert.equal(definition.sheets[2].nativeCoverage, "SUPPORTED");
+});
+
+test("ADV-06 renders the frozen official inventory without a provider report", async () => {
+  const vite = await createServer({
+    root: path.resolve(import.meta.dirname, ".."),
+    configFile: false,
+    logLevel: "silent",
+    plugins: [react()],
+    server: { middlewareMode: true },
+  });
+  try {
+    const dashboard = await vite.ssrLoadModule(
+      "/app/costs/finops-health-events-dashboard.tsx",
+    );
+    const html = renderToStaticMarkup(createElement(
+      dashboard.FinopsHealthEventsDashboard,
+      { connectionId: null },
+    ));
+    assert.match(html, /Connect an active AWS trust-role account/u);
+    assert.match(html, /Official sheet and control inventory/u);
+    assert.match(html, /3 sheets · 33 visuals · 28 controls/u);
+    assert.match(html, /Main/u);
+    assert.match(html, /Quick View/u);
+    assert.match(html, /Daily planning data can lag by 48 hours or more/u);
+  } finally {
+    await vite.close();
+  }
 });
