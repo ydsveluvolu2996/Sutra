@@ -37,10 +37,10 @@ export const AWS_NEWS_FEEDS_RUNTIME_CAPABILITY = Object.freeze({
   schedulerImplemented: true,
   replayContractImplemented: true,
   intervalMs: AWS_NEWS_FEEDS_SCHEDULE_INTERVAL_MS,
-  sharedWorkerRegistered: false,
-  durableReplayAdapterRegistered: false,
-  outboundGatewayRegistered: false,
-  reason: "AWS_NEWS_FEEDS_RUNTIME_ADAPTERS_NOT_REGISTERED" as const,
+  sharedWorkerRegistered: true,
+  durableReplayAdapterRegistered: true,
+  outboundGatewayRegistered: true,
+  reason: "AWS_NEWS_FEEDS_RUNTIME_REGISTERED" as const,
 });
 
 export interface AwsNewsFeedsActiveConnection {

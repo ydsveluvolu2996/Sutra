@@ -46,12 +46,14 @@ export interface AwsNewsFeedsCollectionJobDependencies {
   readonly gateway: AwsNewsFeedsSourceGateway;
   readonly loadTenantBoundary: (
     scope: AwsNewsFeedsPersistenceScope,
+    signal: AbortSignal,
   ) => Promise<AwsNewsTenantBoundary>;
   readonly recordCapture: (
     scope: AwsNewsFeedsPersistenceScope,
     capture: AwsNewsFeedsCapture,
     boundary: AwsNewsTenantBoundary,
     nowMs: number,
+    signal: AbortSignal,
   ) => Promise<{ readonly snapshot: StoredAwsNewsFeedsSnapshot; readonly becameActive: boolean }>;
   readonly now?: () => number;
 }
@@ -104,30 +106,35 @@ export async function runAwsNewsFeedsCollectionJob(
       if (captured.sourceId !== source.id || captured.requestUrl !== source.feedUrl) invalid();
       return captured;
     }));
+    if (controller.signal.aborted) invalid();
+    const completedAtMs = (dependencies.now ?? Date.now)();
+    if (!Number.isSafeInteger(completedAtMs) || completedAtMs < startedAtMs
+      || completedAtMs - startedAtMs > AWS_NEWS_FEED_COLLECTION_BOUNDS.maximumCollectionDurationMs) invalid();
+    const captureBase = {
+      schemaVersion: "sutra.aws-news-feeds.v1" as const,
+      scope: { orgId: scope.organizationId, customerId: scope.customerId, connectionId: scope.connectionId },
+      startedAt: new Date(startedAtMs).toISOString(),
+      completedAt: new Date(completedAtMs).toISOString(),
+      feeds,
+    };
+    const capture: AwsNewsFeedsCapture = {
+      ...captureBase,
+      captureId: `news_${await digest(captureBase)}`,
+    };
+    if (controller.signal.aborted) invalid();
+    const boundary = await dependencies.loadTenantBoundary(scope, controller.signal);
+    if (controller.signal.aborted || boundary.binding !== "SERVER_RESOLVED_CONNECTION") invalid();
+    const recorded = await dependencies.recordCapture(
+      scope, capture, boundary, completedAtMs, controller.signal,
+    );
+    if (controller.signal.aborted) invalid();
+    return {
+      generationId: recorded.snapshot.generationId,
+      captureId: capture.captureId,
+      state: recorded.snapshot.snapshot.state,
+      becameActive: recorded.becameActive,
+    };
   } finally {
     clearTimeout(timeout);
   }
-  const completedAtMs = (dependencies.now ?? Date.now)();
-  if (!Number.isSafeInteger(completedAtMs) || completedAtMs < startedAtMs
-    || completedAtMs - startedAtMs > AWS_NEWS_FEED_COLLECTION_BOUNDS.maximumCollectionDurationMs) invalid();
-  const captureBase = {
-    schemaVersion: "sutra.aws-news-feeds.v1" as const,
-    scope: { orgId: scope.organizationId, customerId: scope.customerId, connectionId: scope.connectionId },
-    startedAt: new Date(startedAtMs).toISOString(),
-    completedAt: new Date(completedAtMs).toISOString(),
-    feeds,
-  };
-  const capture: AwsNewsFeedsCapture = {
-    ...captureBase,
-    captureId: `news_${await digest(captureBase)}`,
-  };
-  const boundary = await dependencies.loadTenantBoundary(scope);
-  if (boundary.binding !== "SERVER_RESOLVED_CONNECTION") invalid();
-  const recorded = await dependencies.recordCapture(scope, capture, boundary, completedAtMs);
-  return {
-    generationId: recorded.snapshot.generationId,
-    captureId: capture.captureId,
-    state: recorded.snapshot.snapshot.state,
-    becameActive: recorded.becameActive,
-  };
 }

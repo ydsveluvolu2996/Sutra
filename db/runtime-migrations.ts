@@ -112,6 +112,7 @@ import finopsComputeOptimizerExportPlansSchemaSql from "../drizzle/0112_finops_c
 import finopsComputeOptimizerExportPlanSetsSchemaSql from "../drizzle/0113_finops_compute_optimizer_export_plan_sets.sql?raw";
 import finopsComputeOptimizerExportPlanTimestampGuardSchemaSql from "../drizzle/0114_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
 import finopsComputeOptimizerExactGenerationsSchemaSql from "../drizzle/0115_finops_compute_optimizer_exact_generations.sql?raw";
+import finopsAwsNewsFeedsReplaySchemaSql from "../drizzle/0117_finops_aws_news_feeds_replay.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -241,6 +242,7 @@ const migrations = [
   { id: "0113_finops_compute_optimizer_export_plan_sets", statements: statementsFrom(finopsComputeOptimizerExportPlanSetsSchemaSql) },
   { id: "0114_finops_compute_optimizer_export_plan_timestamp_guard", statements: statementsFrom(finopsComputeOptimizerExportPlanTimestampGuardSchemaSql) },
   { id: "0115_finops_compute_optimizer_exact_generations", statements: statementsFrom(finopsComputeOptimizerExactGenerationsSchemaSql) },
+  { id: "0117_finops_aws_news_feeds_replay", statements: statementsFrom(finopsAwsNewsFeedsReplaySchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

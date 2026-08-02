@@ -27,17 +27,17 @@ const connectionB = {
   status: "active",
 };
 
-test("runtime capability reports implemented contracts without claiming registered adapters", () => {
+test("runtime capability reports the registered production adapters", () => {
   assert.deepEqual(AWS_NEWS_FEEDS_RUNTIME_CAPABILITY, {
     schemaVersion: "sutra.aws-news-feeds-runtime-binding.v1",
     handlerImplemented: true,
     schedulerImplemented: true,
     replayContractImplemented: true,
     intervalMs: 21_600_000,
-    sharedWorkerRegistered: false,
-    durableReplayAdapterRegistered: false,
-    outboundGatewayRegistered: false,
-    reason: "AWS_NEWS_FEEDS_RUNTIME_ADAPTERS_NOT_REGISTERED",
+    sharedWorkerRegistered: true,
+    durableReplayAdapterRegistered: true,
+    outboundGatewayRegistered: true,
+    reason: "AWS_NEWS_FEEDS_RUNTIME_REGISTERED",
   });
 });
 

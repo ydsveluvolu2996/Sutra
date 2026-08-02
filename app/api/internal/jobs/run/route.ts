@@ -7,6 +7,7 @@ import {
   ensureDueScheduledReportsEnqueued,
   ensureDueVulnFeedRefreshEnqueued,
   ensureRetentionSweepsEnqueued,
+  scheduleAwsNewsFeedsTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
 import { FinopsScheduledReportRepository } from "../../../../../db/finops-scheduled-report-repository";
@@ -67,11 +68,15 @@ export async function POST(request: Request): Promise<Response> {
     // the ranking, and the queue keeps reporting stale risk as current. Enqueues
     // exactly ONE job across all orgs because the mirror is global.
     await ensureDueVulnFeedRefreshEnqueued(queue, activeOrgIds, customersForOrg);
+    // ADV-07 uses one deterministic connection-scoped job per six-hour UTC
+    // window. The production composition owns the pinned egress and replay
+    // ledger; this system tick supplies no tenant IDs or source URLs.
+    const awsNewsFeeds = await scheduleAwsNewsFeedsTick();
     // A hosted inventory job can legitimately use most of the broker's
     // five-minute bound. Process at most one job of each kind per 15-second
     // sidecar tick so the loopback request itself remains bounded.
     const result = await runDueBackgroundJobs({ queue, handlers: buildJobHandlers(), maxPerKind: 1 });
-    return jsonResponse({ ...result, platformUptime });
+    return jsonResponse({ ...result, platformUptime, awsNewsFeeds });
   } catch (error) {
     return errorResponse(error);
   }

@@ -12,6 +12,7 @@ const {
   buildJobHandlers,
   ensureRetentionSweepsEnqueued,
   runItsmSecretCleanupJob,
+  scheduleAwsNewsFeedsTick,
 } = await import("../db/background-job-handlers.ts");
 const { runDueBackgroundJobs } = await import("../lib/background-job-runner.ts");
 
@@ -29,6 +30,7 @@ test("every job kind emitted by the production ticks has a real handler", () => 
     "finops-alert-sweep",
     "finops.data-export.ingest",
     "finops-source-collect",
+    "finops-aws-news-feeds-collect",
     "finops-ta-organization-activate",
     "finops-ta-account-collect",
     "finops-ta-manifest-finalize",
@@ -39,6 +41,80 @@ test("every job kind emitted by the production ticks has a real handler", () => 
   ]) {
     assert.equal(typeof handlers[kind], "function", `${kind} must never enter the queue unhandled`);
   }
+});
+
+test("AWS News Feeds production tick is registered and drains through the shared worker", async () => {
+  await withDatabase(async (queue, database) => {
+    const connectionId = `conn_${"e".repeat(32)}`;
+    const scheduledAtMs = Date.parse("2026-07-31T12:10:00.000Z");
+    await database.batch([
+      database.prepare(`INSERT INTO aws_connections (
+        id,org_id,customer_id,source_kind,partition,aws_account_id,role_arn,
+        external_id_ciphertext,external_id_key_version,permission_pack_version,status,enabled_regions_json
+      ) VALUES (?,?,?,'aws_trust_role','aws','111122223333',?,'ct','v1','standard-2026-08.1','active','[]')`)
+        .bind(connectionId, ORG_A, CUSTOMER_A,
+          "arn:aws:iam::111122223333:role/sutra/SutraCollectorRole"),
+      database.prepare(`INSERT INTO resources (
+        id,org_id,customer_id,connection_id,provider_key,aws_account_id,region_key,
+        resource_type,native_id,lifecycle_state,configuration_json,content_sha256,
+        first_seen_at,last_seen_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,'active','{}',?,?,?)`)
+        .bind("resource-news-handler-ec2", ORG_A, CUSTOMER_A, connectionId, "aws",
+          "111122223333", "us-east-1", "aws_ec2_instance", "i-0123456789abcdef0",
+          "a".repeat(64), scheduledAtMs - 2_000, scheduledAtMs - 1_000),
+    ]);
+
+    const originalFetch = globalThis.fetch;
+    let fetchCount = 0;
+    globalThis.fetch = async (input, init) => {
+      fetchCount += 1;
+      assert.equal(init?.method, "GET");
+      assert.equal(init?.redirect, "manual");
+      assert.equal(init?.credentials, "omit");
+      const url = String(input);
+      const body = url.includes("youtube.com")
+        ? "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>"
+        : "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>AWS</title></channel></rss>";
+      return new Response(body, {
+        status: 200,
+        headers: { "content-type": url.includes("youtube.com")
+          ? "application/atom+xml"
+          : "application/rss+xml" },
+      });
+    };
+    try {
+      assert.deepEqual(await scheduleAwsNewsFeedsTick(scheduledAtMs), {
+        schemaVersion: "sutra.aws-news-feeds-runtime-binding.v1",
+        scheduledWindow: "2026-07-31T12:00:00.000Z",
+        connectionCount: 1,
+        submittedCount: 1,
+        rejectedCount: 0,
+      });
+      const result = await runDueBackgroundJobs({
+        queue,
+        handlers: buildJobHandlers(),
+        kinds: ["finops-aws-news-feeds-collect"],
+        maxPerKind: 1,
+        now: () => scheduledAtMs,
+      });
+      assert.deepEqual(result.outcomes[0], {
+        kind: "finops-aws-news-feeds-collect",
+        leased: 1,
+        succeeded: 1,
+        retried: 0,
+        deadLettered: 0,
+        unhandled: 0,
+        lostLease: 0,
+      });
+      assert.equal(fetchCount, 5, "the registered handler must collect all five pinned feeds");
+      const stored = await database.prepare(
+        "SELECT source_state FROM finops_aws_news_feed_snapshots WHERE org_id=? AND customer_id=? AND connection_id=?",
+      ).bind(ORG_A, CUSTOMER_A, connectionId).first();
+      assert.equal(stored?.source_state, "READY");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
 
 async function withDatabase(run) {

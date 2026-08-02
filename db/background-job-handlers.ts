@@ -137,6 +137,21 @@ import {
   runComputeOptimizerMaterializationJob,
   type ComputeOptimizerMaterializationOutcome,
 } from "../lib/finops-compute-optimizer-materialization-runtime.ts";
+import { AWS_NEWS_FEEDS_JOB_KIND } from
+  "../lib/finops-aws-news-feeds-job.ts";
+import { createAwsNewsFeedsProductionComposition } from
+  "../lib/finops-aws-news-feeds-production-composition.ts";
+
+function awsNewsFeedsProductionComposition() {
+  return createAwsNewsFeedsProductionComposition({
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Six-hour deterministic ADV-07 scheduler hook for the internal job tick. */
+export function scheduleAwsNewsFeedsTick(scheduledAtMs = Date.now()) {
+  return awsNewsFeedsProductionComposition().scheduleTick(scheduledAtMs);
+}
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -1210,6 +1225,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
           ),
         now: Date.now,
       }),
+    [AWS_NEWS_FEEDS_JOB_KIND]: (job) =>
+      awsNewsFeedsProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },
