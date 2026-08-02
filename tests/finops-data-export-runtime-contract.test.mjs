@@ -17,6 +17,10 @@ const appReader = await readFile(
   new URL("../lib/finops-broker-object-reader.ts", import.meta.url),
   "utf8",
 );
+const pilotServer = await readFile(
+  new URL("../lib/pilot-server.ts", import.meta.url),
+  "utf8",
+);
 const job = await readFile(
   new URL("../lib/finops-data-export-ingest-job.ts", import.meta.url),
   "utf8",
@@ -70,6 +74,10 @@ test("the broker endpoint owns S3 and both sides pin the same four-MiB range cap
   assert.match(
     collectorChunk,
     /createAwsFinopsExportChunkClient[\s\S]*new S3Client/u,
+  );
+  assert.match(
+    pilotServer,
+    /runFinopsExportChunkRead[\s\S]{0,1000}contractId: input\.contractId[\s\S]{0,200}exportName: input\.exportName/u,
   );
 });
 

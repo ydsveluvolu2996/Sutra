@@ -890,6 +890,8 @@ export async function runFinopsExportChunkRead(
       tenantId: input.tenantId,
       connectionId: input.connectionId,
       jobId: input.jobId,
+      contractId: input.contractId,
+      exportName: input.exportName,
       region: input.region,
       bucket: input.bucket,
       prefix: input.prefix,
