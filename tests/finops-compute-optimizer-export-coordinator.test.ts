@@ -8,6 +8,7 @@ import {
   coordinateComputeOptimizerMaterializationPlans,
   createComputeOptimizerMaterializationActivation,
   runComputeOptimizerMaterialization,
+  runComputeOptimizerPersistedPlanSetMaterialization,
   verifyComputeOptimizerMaterializationActivation,
   verifyComputeOptimizerMaterializationPlanCheckpoint,
   verifyComputeOptimizerMaterializationRuntimeCheckpoint,
@@ -687,6 +688,44 @@ test("all fresh exact objects deterministically persist an attempt then one acce
   assert.deepEqual(replay, first);
   assert.equal(replayStore.attempts[0]?.attemptId, firstStore.attempts[0]?.attemptId);
   assert.equal(replayStore.generations[0]?.generationId, firstStore.generations[0]?.generationId);
+});
+
+test("rehydrated sealed plan-set lineage executes the same exact accepted-generation path", async () => {
+  const { activation, ready, runtimes } = await runtimeFixture();
+  assert.notEqual(ready.planSet, null);
+  const accepted: ComputeOptimizerExportGeneration[] = [];
+  const result = await runComputeOptimizerPersistedPlanSetMaterialization({
+    schemaVersion: "sutra.compute-optimizer-persisted-plan-materialization.v1",
+    activationId: activation.activationId,
+    planCheckpointId: ready.checkpointId,
+    scheduledWindow: activation.scheduledWindow,
+    scope: activation.scope,
+    requesterAccountId: activation.requesterAccountId,
+    partition: activation.partition,
+    planSetId: ready.planSet!.planSetId,
+    planSetContentSha256: ready.planSet!.contentSha256,
+  }, ready.planSet!, runtimes, runtimeOptions({
+    recordAttempt: async () => undefined,
+    recordAcceptedGeneration: async (_scope, _planSet, generation) => {
+      accepted.push(generation);
+    },
+  }));
+  assert.equal(result.status, "GENERATION_ACCEPTED");
+  assert.equal(accepted.length, 1);
+  await assert.rejects(runComputeOptimizerPersistedPlanSetMaterialization({
+    schemaVersion: "sutra.compute-optimizer-persisted-plan-materialization.v1",
+    activationId: activation.activationId,
+    planCheckpointId: ready.checkpointId,
+    scheduledWindow: activation.scheduledWindow,
+    scope: activation.scope,
+    requesterAccountId: activation.requesterAccountId,
+    partition: activation.partition,
+    planSetId: `copes_${"f".repeat(64)}`,
+    planSetContentSha256: ready.planSet!.contentSha256,
+  }, ready.planSet!, runtimes, runtimeOptions({
+    recordAttempt: async () => undefined,
+    recordAcceptedGeneration: async () => undefined,
+  })), code("CHECKPOINT_INVALID"));
 });
 
 test("stale fresh evidence blocks every object read and creates no generation attempt", async () => {

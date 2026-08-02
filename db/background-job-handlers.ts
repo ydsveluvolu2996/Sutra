@@ -40,6 +40,14 @@ import { CloudVulnerabilityRepository } from "./cloud-vulnerability-repository";
 import { FinopsScheduledReportRepository, type ReportDeliveryKind } from "./finops-scheduled-report-repository";
 import { FinopsWorkspaceRepository } from "./finops-workspace-repository";
 import { FinopsBillingEngineRepository } from "./finops-billing-engine-repository";
+import { ComputeOptimizerDiscoveryRepository } from
+  "./finops-compute-optimizer-discovery-repository";
+import { ComputeOptimizerExactGenerationRepository } from
+  "./finops-compute-optimizer-exact-generation-repository";
+import { ComputeOptimizerExportPlanRepository } from
+  "./finops-compute-optimizer-export-plan-repository";
+import { ComputeOptimizerExportPlanSetRepository } from
+  "./finops-compute-optimizer-export-plan-set-repository";
 import {
   ITSM_SECRET_CLEANUP_JOB_KIND,
   ItsmConnectorRepository,
@@ -83,6 +91,8 @@ import {
   runCollectorSync,
   runFinopsExportChunkRead,
   runFinopsSourceCollection,
+  runComputeOptimizerExportExactDescribe,
+  runComputeOptimizerExportObjectChunkRead,
   runSignedOrganizationsTaxonomy,
   safeCollectionFailureCode,
 } from "../lib/pilot-server";
@@ -118,6 +128,15 @@ import { FinopsSourceJobLedgerRepository } from "./finops-source-job-ledger-repo
 import { FinopsSourceSnapshotRepository } from "./finops-source-snapshot-repository";
 import { TrustedAdvisorOrganizationRepository } from "./finops-trusted-advisor-organization-repository";
 import { EvidenceRepository } from "./evidence-repository";
+import { ComputeOptimizerExportPlanEnvelope } from
+  "../lib/finops-compute-optimizer-export-plan-envelope.ts";
+import { readComputeOptimizerExportPlanSet } from
+  "../lib/finops-compute-optimizer-export-plan-set-reader.ts";
+import {
+  FINOPS_COMPUTE_OPTIMIZER_MATERIALIZE_JOB_KIND,
+  runComputeOptimizerMaterializationJob,
+  type ComputeOptimizerMaterializationOutcome,
+} from "../lib/finops-compute-optimizer-materialization-runtime.ts";
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
@@ -1002,6 +1021,104 @@ async function recordFinopsAlertSweepAudit(outcome: FinopsAlertSweepOutcome): Pr
   });
 }
 
+const COMPUTE_OPTIMIZER_MATERIALIZATION_ACTOR_ID =
+  "system_finops_compute_optimizer_materializer";
+
+async function recordComputeOptimizerMaterializationOutcome(
+  value: ComputeOptimizerMaterializationOutcome,
+): Promise<void> {
+  await appendAuditEvent({
+    orgId: value.organizationId,
+    actorType: "system",
+    actorId: COMPUTE_OPTIMIZER_MATERIALIZATION_ACTOR_ID,
+    action: "finops.compute_optimizer.materialization.outcome",
+    targetType: "finops_compute_optimizer_plan_set",
+    targetId: value.planSetId,
+    customerId: value.customerId,
+    outcome: value.status === "GENERATION_ACCEPTED"
+      || value.status === "ALREADY_ACCEPTED" ? "allowed" : "failed",
+    requestId: `finops.co.materialize:${value.jobId}:${value.jobAttempt}`,
+    metadata: {
+      connectionId: value.connectionId,
+      activationId: value.activationId,
+      planCheckpointId: value.planCheckpointId,
+      status: value.status,
+      runtimeCheckpointId: value.runtimeCheckpointId,
+      generationId: value.generationId,
+      generationContentSha256: value.generationContentSha256,
+      mappedRegionCount: value.mappedRegionCount,
+      blockedRegionCount: value.blockedRegionCount,
+      jobAttempt: value.jobAttempt,
+    },
+  });
+}
+
+/** Production composition for the exact Compute Optimizer materialization job. */
+export async function runComputeOptimizerMaterializationHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const exactRepository = new ComputeOptimizerExactGenerationRepository();
+  await runComputeOptimizerMaterializationJob(job, {
+    getConnection: (organizationId, connectionId) =>
+      getConnectionForOrg(organizationId, connectionId),
+    loadPersistedPlanSet: async (scope) => {
+      const planSetRepository = new ComputeOptimizerExportPlanSetRepository();
+      const planRepository = new ComputeOptimizerExportPlanRepository();
+      const discoveryRepository = new ComputeOptimizerDiscoveryRepository();
+      const repositoryScope = {
+        organizationId: scope.organizationId,
+        customerId: scope.customerId,
+        connectionId: scope.connectionId,
+      };
+      const storedPlanSet = await planSetRepository.getPlanSet(
+        repositoryScope,
+        scope.planSetId,
+      );
+      if (storedPlanSet === null) throw new Error("compute-optimizer-plan-set-not-found");
+      const storedPlans = [];
+      for (const planId of storedPlanSet.planIds) {
+        const stored = await planRepository.getPlan(repositoryScope, planId);
+        if (stored === null) throw new Error("compute-optimizer-plan-not-found");
+        storedPlans.push(stored);
+      }
+      const envelope = await ComputeOptimizerExportPlanEnvelope.fromEnvironment(
+        env as unknown as Readonly<Record<string, string | undefined>>,
+      );
+      const planSet = await readComputeOptimizerExportPlanSet({
+        scope: repositoryScope,
+        storedPlanSet,
+        storedPlans,
+        envelope,
+      });
+      const discoveryEvidence = [];
+      for (const stored of storedPlans) {
+        const evidence = await discoveryRepository.getFinalizedExportEvidence(
+          repositoryScope,
+          stored.discoveryRunId,
+        );
+        if (evidence === null) {
+          throw new Error("compute-optimizer-discovery-evidence-not-found");
+        }
+        discoveryEvidence.push({ region: stored.region, evidence });
+      }
+      return { planSet, discoveryEvidence };
+    },
+    findAcceptedGeneration: (scope, planSet) =>
+      exactRepository.getAcceptedHeadForPlanSet(scope, planSet),
+    persistence: exactRepository,
+    describeTransport: {
+      describeExact: (request, context) =>
+        runComputeOptimizerExportExactDescribe(request, context),
+    },
+    objectTransport: {
+      readChunk: (request, context) =>
+        runComputeOptimizerExportObjectChunkRead(request, context),
+    },
+    recordOutcome: recordComputeOptimizerMaterializationOutcome,
+    now: Date.now,
+  });
+}
+
 /**
  * The app-side registry of durable job handlers. Each handler does real work and
  * throws on failure — nothing is fabricated, and the runner completes a job only
@@ -1101,6 +1218,9 @@ export function buildJobHandlers(): Record<string, JobHandler> {
     },
     [FINOPS_TA_MANIFEST_FINALIZE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorManifestFinalizeHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_MATERIALIZE_JOB_KIND]: async (job) => {
+      await runComputeOptimizerMaterializationHandler(job);
     },
     "agentless-teardown-sweep": (job) => {
       const repository = new AgentlessScanRepository();

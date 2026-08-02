@@ -106,8 +106,9 @@ envelopes, and a canonically reverified generation before returning evidence.
 
 ## Remaining provider/live gates
 
-1. Register the coordinator in the production scheduler/worker and bind its
-   exact repositories/readers without a browser-controlled target or scope.
+1. Build the server-owned launch/finalization producer that persists sealed
+   lineage and enqueues the registered materialization worker without a
+   browser-controlled target, scope, contract, bucket, prefix, or object key.
 2. Activate the reviewed `.8.5` permission pack and launch add-on, rotate the
    evidence-reference secret, and apply migrations through the release path.
 3. Reconcile controlled organization exports in every configured Region for

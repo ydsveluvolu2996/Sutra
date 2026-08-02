@@ -118,7 +118,7 @@ export function createComputeOptimizerExactGetHandler<TAuth extends ExactRouteAu
         schema: "sutra.finops-compute-optimizer.v2", connectionId: connection.id,
         sourceState: "EXPORT_CONFIGURATION_REQUIRED", dashboard: null,
         officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
-        collection: Object.freeze({ available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" }),
+        collection: Object.freeze({ available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" }),
         limitations: Object.freeze(["Discovery and direct recommendation APIs are not substituted for accepted organization S3 export evidence."]),
       });
       const storedPlanSet = await dependencies.getStoredPlanSet(scope, head.planSetId);
@@ -150,7 +150,7 @@ export function createComputeOptimizerExactGetHandler<TAuth extends ExactRouteAu
         dashboard, officialDefinition: FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
         evidence: Object.freeze({ acceptedHead: head, planIds: planSet.planIds,
           schemaAssurances: generation.schemaAssurances, unresolvedEvidence: generation.unresolvedEvidence }),
-        collection: Object.freeze({ available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" }),
+        collection: Object.freeze({ available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" }),
       });
     } catch (error) {
       return errorResponse(error);

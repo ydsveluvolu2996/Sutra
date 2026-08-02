@@ -119,7 +119,7 @@ test("ADV-01, ADV-02, ADV-04 and ADV-06 render official evidence with no report"
         source: "AWS_COMPUTE_OPTIMIZER_EXACT_ORGANIZATION_S3_EXPORT", sourceState: "READY",
         freshness: { dataThroughAt: report.generation.dataThroughAtIso, ageHours: 0.5, staleAfterHours: 48 },
         dashboard: report, officialDefinition: definitions[1].FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION,
-        evidence: {}, collection: { available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" },
+        evidence: {}, collection: { available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" },
       },
       filters: report.filters,
       onFiltersChange: () => undefined,

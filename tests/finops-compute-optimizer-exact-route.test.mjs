@@ -109,7 +109,7 @@ test("immutable head ID produces a consistent ready response and exact tenant sc
   assert.equal(response.status, 200);
   assert.equal(result.sourceState, "READY");
   assert.deepEqual(result.dashboard, { marker: "exact" });
-  assert.deepEqual(result.collection, { available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" });
+  assert.deepEqual(result.collection, { available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" });
   assert.ok(fixture.calls.scopes.every((scope) => scope.organizationId === "org_alpha"
     && scope.customerId === "customer_alpha" && scope.connectionId === CONNECTION));
 });

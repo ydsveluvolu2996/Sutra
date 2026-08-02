@@ -54,9 +54,11 @@ const ACTIVATION_ID = /^comra_[a-f0-9]{64}$/u;
 const CHECKPOINT_ID = /^comrp_[a-f0-9]{64}$/u;
 const EXECUTION_ID = /^coele_[a-f0-9]{64}$/u;
 const PLAN_ID = /^cope_[a-f0-9]{64}$/u;
+const PLAN_SET_ID = /^copes_[a-f0-9]{64}$/u;
 const ATTEMPT_ID = /^coa_[a-f0-9]{64}$/u;
 const GENERATION_ID = /^cog_[a-f0-9]{64}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const DAILY_WINDOW = /^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u;
 const MAX_REGIONS = 50;
 const EXPORT_FAMILY_COUNT = 8;
 const MAX_DATE_MS = 8_640_000_000_000_000;
@@ -156,6 +158,23 @@ export interface RunComputeOptimizerMaterializationOptions {
   readonly persistence: ComputeOptimizerExactGenerationPersistence;
   readonly signal?: AbortSignal;
   readonly now?: () => number;
+}
+
+/**
+ * Non-sensitive durable lineage used when the worker rehydrates an immutable
+ * sealed plan set. The enqueue boundary verifies the original activation and
+ * READY checkpoint before retaining only these identities.
+ */
+export interface ComputeOptimizerPersistedPlanSetMaterializationInput {
+  readonly schemaVersion: "sutra.compute-optimizer-persisted-plan-materialization.v1";
+  readonly activationId: string;
+  readonly planCheckpointId: string;
+  readonly scheduledWindow: string;
+  readonly scope: ComputeOptimizerExportPlanScope;
+  readonly requesterAccountId: string;
+  readonly partition: "aws" | "aws-us-gov" | "aws-cn";
+  readonly planSetId: string;
+  readonly planSetContentSha256: string;
 }
 
 export type ComputeOptimizerMaterializationRuntimeErrorCode =
@@ -749,13 +768,64 @@ export async function runComputeOptimizerMaterialization(
   unsafeRuntimes: readonly unknown[],
   options: RunComputeOptimizerMaterializationOptions,
 ): Promise<ComputeOptimizerMaterializationRuntimeCheckpoint> {
-  const activation = await verifyComputeOptimizerMaterializationActivation(unsafeActivation);
-  const planCheckpoint = await verifyComputeOptimizerMaterializationPlanCheckpoint(
-    activation,
-    unsafePlanCheckpoint,
-  );
-  if (planCheckpoint.status !== "PLAN_SET_READY" || planCheckpoint.planSet === null) {
-    reject("CHECKPOINT_INVALID");
+  let activationId: string;
+  let planCheckpointId: string;
+  let scheduledWindow: string;
+  let materializationScope: ComputeOptimizerExportPlanScope;
+  let planSet: ComputeOptimizerExportPlanSet;
+  if (isRecord(unsafeActivation)
+    && unsafeActivation.schemaVersion
+      === "sutra.compute-optimizer-persisted-plan-materialization.v1") {
+    if (!exactKeys(unsafeActivation, [
+      "schemaVersion", "activationId", "planCheckpointId", "scheduledWindow", "scope",
+      "requesterAccountId", "partition", "planSetId", "planSetContentSha256",
+    ]) || typeof unsafeActivation.activationId !== "string"
+      || !ACTIVATION_ID.test(unsafeActivation.activationId)
+      || typeof unsafeActivation.planCheckpointId !== "string"
+      || !CHECKPOINT_ID.test(unsafeActivation.planCheckpointId)
+      || typeof unsafeActivation.scheduledWindow !== "string"
+      || !DAILY_WINDOW.test(unsafeActivation.scheduledWindow)
+      || !Number.isSafeInteger(Date.parse(unsafeActivation.scheduledWindow))
+      || new Date(Date.parse(unsafeActivation.scheduledWindow)).toISOString()
+        !== unsafeActivation.scheduledWindow
+      || typeof unsafeActivation.planSetId !== "string"
+      || !PLAN_SET_ID.test(unsafeActivation.planSetId)
+      || typeof unsafeActivation.planSetContentSha256 !== "string"
+      || !SHA256.test(unsafeActivation.planSetContentSha256)) reject("INVALID_INPUT");
+    try {
+      planSet = await verifyComputeOptimizerExportPlanSet(
+        structuredClone(unsafePlanCheckpoint),
+      );
+    } catch {
+      return reject("CHECKPOINT_INVALID");
+    }
+    const lineage = unsafeActivation as unknown as
+      ComputeOptimizerPersistedPlanSetMaterializationInput;
+    if (!sameScope(lineage.scope, planSet.scope)
+      || lineage.requesterAccountId !== planSet.requesterAccountId
+      || lineage.partition !== planSet.partition
+      || lineage.planSetId !== planSet.planSetId
+      || lineage.planSetContentSha256 !== planSet.contentSha256) {
+      reject("CHECKPOINT_INVALID");
+    }
+    activationId = lineage.activationId;
+    planCheckpointId = lineage.planCheckpointId;
+    scheduledWindow = lineage.scheduledWindow;
+    materializationScope = lineage.scope;
+  } else {
+    const activation = await verifyComputeOptimizerMaterializationActivation(unsafeActivation);
+    const planCheckpoint = await verifyComputeOptimizerMaterializationPlanCheckpoint(
+      activation,
+      unsafePlanCheckpoint,
+    );
+    if (planCheckpoint.status !== "PLAN_SET_READY" || planCheckpoint.planSet === null) {
+      reject("CHECKPOINT_INVALID");
+    }
+    activationId = activation.activationId;
+    planCheckpointId = planCheckpoint.checkpointId;
+    scheduledWindow = activation.scheduledWindow;
+    materializationScope = activation.scope;
+    planSet = planCheckpoint.planSet;
   }
   if (!Array.isArray(unsafeRuntimes) || !isRecord(options)
     || !exactKeys(options as unknown as Record<string, unknown>, [
@@ -780,7 +850,6 @@ export async function runComputeOptimizerMaterialization(
   if (deadlineAtMs <= startedAtMs) reject("DEADLINE_EXCEEDED");
   assertRuntimeActive(options.signal, deadlineAtMs, options.now);
 
-  const planSet = planCheckpoint.planSet;
   const expectedRegions = new Set(planSet.regions);
   if (unsafeRuntimes.length > planSet.regions.length) reject("REGION_EXPANSION");
   const runtimeByRegion = new Map<string, ComputeOptimizerMaterializationRegionRuntime>();
@@ -843,11 +912,11 @@ export async function runComputeOptimizerMaterialization(
   if (freshBlocked) {
     return runtimeCheckpoint({
       schemaVersion: "sutra.compute-optimizer-materialization-runtime-checkpoint.v1",
-      activationId: activation.activationId,
-      planCheckpointId: planCheckpoint.checkpointId,
+      activationId,
+      planCheckpointId,
       planSetId: planSet.planSetId,
       status: "FRESH_BLOCKED",
-      scheduledWindow: activation.scheduledWindow,
+      scheduledWindow,
       materializedAtIso: new Date(options.materializedAtMs).toISOString(),
       regions: regionStates,
       attempt: null,
@@ -902,7 +971,7 @@ export async function runComputeOptimizerMaterialization(
   }
 
   const generationOptions = {
-    scheduledWindow: activation.scheduledWindow,
+    scheduledWindow,
     materializedAtMs: options.materializedAtMs,
   };
   let attempt: ComputeOptimizerExportGenerationAttempt;
@@ -926,7 +995,7 @@ export async function runComputeOptimizerMaterialization(
   try {
     await withRuntimeBoundary(
       () => options.persistence.recordAttempt(
-        persistenceScope(activation.scope),
+        persistenceScope(materializationScope),
         planSet,
         attempt,
       ),
@@ -950,11 +1019,11 @@ export async function runComputeOptimizerMaterialization(
   )) {
     return runtimeCheckpoint({
       schemaVersion: "sutra.compute-optimizer-materialization-runtime-checkpoint.v1",
-      activationId: activation.activationId,
-      planCheckpointId: planCheckpoint.checkpointId,
+      activationId,
+      planCheckpointId,
       planSetId: planSet.planSetId,
       status: "PARTIAL_ATTEMPT_RECORDED",
-      scheduledWindow: activation.scheduledWindow,
+      scheduledWindow,
       materializedAtIso: new Date(options.materializedAtMs).toISOString(),
       regions: regionStates,
       attempt: attemptReference,
@@ -983,7 +1052,7 @@ export async function runComputeOptimizerMaterialization(
   try {
     await withRuntimeBoundary(
       () => options.persistence.recordAcceptedGeneration(
-        persistenceScope(activation.scope),
+        persistenceScope(materializationScope),
         planSet,
         generation,
       ),
@@ -998,11 +1067,11 @@ export async function runComputeOptimizerMaterialization(
   }
   return runtimeCheckpoint({
     schemaVersion: "sutra.compute-optimizer-materialization-runtime-checkpoint.v1",
-    activationId: activation.activationId,
-    planCheckpointId: planCheckpoint.checkpointId,
+    activationId,
+    planCheckpointId,
     planSetId: planSet.planSetId,
     status: "GENERATION_ACCEPTED",
-    scheduledWindow: activation.scheduledWindow,
+    scheduledWindow,
     materializedAtIso: new Date(options.materializedAtMs).toISOString(),
     regions: regionStates,
     attempt: attemptReference,
@@ -1013,6 +1082,16 @@ export async function runComputeOptimizerMaterialization(
       observedAtIso: generation.observedAtIso,
     },
   });
+}
+
+/** Execute the same exact coordinator from a rehydrated sealed plan set. */
+export function runComputeOptimizerPersistedPlanSetMaterialization(
+  input: ComputeOptimizerPersistedPlanSetMaterializationInput,
+  planSet: ComputeOptimizerExportPlanSet,
+  runtimes: readonly unknown[],
+  options: RunComputeOptimizerMaterializationOptions,
+): Promise<ComputeOptimizerMaterializationRuntimeCheckpoint> {
+  return runComputeOptimizerMaterialization(input, planSet, runtimes, options);
 }
 
 export async function verifyComputeOptimizerMaterializationRuntimeCheckpoint(

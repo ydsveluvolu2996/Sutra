@@ -287,7 +287,7 @@ test("browser parser accepts the exact payload and rejects malformed evidence", 
       schemaAssurances: report.generation.schemaAssurances,
       unresolvedEvidence: report.generation.unresolvedEvidence,
     },
-    collection: { available: false, state: "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED" },
+    collection: { available: false, state: "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED" },
   };
   assert.equal(parseComputeOptimizerExactApiPayload(payload, SCOPE.connectionId).dashboard?.schemaVersion,
     "sutra.finops-compute-optimizer-exact-dashboard.v1");

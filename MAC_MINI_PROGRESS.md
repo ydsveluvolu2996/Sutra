@@ -380,5 +380,18 @@ Next gate:
 | API/browser boundary | Query validation happens before authentication/evidence reads; authorization scope is derived from the session-owned active connection; missing keys and corrupt evidence fail closed with sanitized responses; the browser parser validates exact variants, definition identity, IDs/hashes, coverage, paging, freshness, evidence, rows, visual bounds and serialized size before rendering |
 | Focused verification | Exact dashboard/plan reader/executable route/SSR UI 17/17; persistence 9/9; whole-tree TypeScript, touched ESLint, production build and diff checks pass |
 | Retired path | The unconsumed float-based export history/repository/job slice and its legacy vertical test are removed; release migrations remain compatible |
-| Remaining gates | Register and prove the production materialization scheduler/worker, provision release evidence keys/IAM, reconcile controlled all-Region exports in two tenants, and complete signed-in/provider/rollback/live acceptance before any image deployment |
+| Remaining gates | Build and prove the server-owned launch/finalization producer, activate release evidence keys/IAM, reconcile controlled all-Region exports in two tenants, and complete signed-in/provider/rollback/live acceptance before any image deployment |
 | GitHub | Intended for the existing `agent/mac-mini-finops-continuation` branch and draft PR 26 as an independently reviewed checkpoint |
+
+### 2026-08-02 — Compute Optimizer production materialization worker checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; the worker is registered but the upstream server-owned launch/finalization producer remains open |
+| Delivery | Strict durable job payload, active `.8.5` capability gate, authenticated sealed plan-set rehydration, exact discovery-evidence binding, signed Describe/object readers, exact coordinator execution, immutable persistence, durable outcome telemetry and shared background-handler registration |
+| Queue privacy | Background jobs and audit telemetry retain tenant-bound IDs, schedule, hashes and opaque contract IDs only; bucket, prefix, object keys, sealed envelopes, credentials and provider messages are excluded |
+| Completion semantics | Only a newly accepted generation or a repository-proven already-accepted replay completes the job; fresh-blocked and partial checkpoints are telemetered then thrown for durable retry/dead-letter handling |
+| Runtime bounds | One materialization job per drain, four concurrent object reads, 330-second worker ceiling, abort propagation, exact tenant/account/partition/Region/plan-set checks and deterministic idempotency |
+| Focused verification | Runtime/coordinator/readers/object/generation/plan-reader 103/103; handler registry 1/1; persistence 9/9; prior handler regression 4/4; whole-tree TypeScript, focused ESLint and diff checks pass |
+| Explicit open gate | No non-test producer yet creates/finalizes activation and plan-set lineage or enqueues this worker. The app registry does not own the collector-private regional launch/source contract IDs, so fabricating them or accepting browser-supplied contracts is forbidden |
+| Release evidence | Partial runtime checkpoint only; API collection remains unavailable and no image publication or deployment is authorized |

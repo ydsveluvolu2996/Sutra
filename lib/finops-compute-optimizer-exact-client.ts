@@ -243,7 +243,7 @@ function collection(value: unknown, sourceState: unknown): void {
   const result = record(value); exact(result, ["available", "state"]);
   if (result.available !== false) reject();
   const expected = sourceState === "EVIDENCE_KEY_UNAVAILABLE"
-    ? "EXACT_EVIDENCE_KEY_NOT_CONFIGURED" : "EXACT_SCHEDULED_HANDLER_NOT_REGISTERED";
+    ? "EXACT_EVIDENCE_KEY_NOT_CONFIGURED" : "EXACT_UPSTREAM_PRODUCER_NOT_REGISTERED";
   if (result.state !== expected) reject();
 }
 

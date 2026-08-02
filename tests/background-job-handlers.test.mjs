@@ -32,6 +32,7 @@ test("every job kind emitted by the production ticks has a real handler", () => 
     "finops-ta-organization-activate",
     "finops-ta-account-collect",
     "finops-ta-manifest-finalize",
+    "finops-compute-optimizer-materialize",
     "agentless-teardown-sweep",
     "vuln-feed-refresh",
     "itsm-secret-cleanup",
