@@ -147,11 +147,23 @@ import {
 import {
   collectSignedOrganizationsTaxonomy,
 } from "./aws-organizations-taxonomy-runner.js";
+import {
+  AwsBudgetsProviderAdapterError,
+  createAwsBudgetsProviderClients,
+  type AwsBudgetsProviderClients,
+  type AwsBudgetsProviderPartition,
+} from "./aws-budgets-provider-adapter.js";
+import {
+  AWS_BUDGETS_PROVIDER_ROUTE,
+  parseAwsBudgetsProviderRouteRequest,
+  runAwsBudgetsProviderRoute,
+} from "./aws-budgets-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
 const BODY_LIMIT = 64 * 1024;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
+const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -315,6 +327,15 @@ export interface LocalCollectorServerOptions {
    */
   readonly computeOptimizerActivationManifestIdentityAttestor?:
     ComputeOptimizerActivationManifestIdentityAttestor;
+  readonly awsBudgetsProviderClientFactory?: (input: {
+    readonly partition: AwsBudgetsProviderPartition;
+    readonly credentials: Parameters<typeof createAwsBudgetsProviderClients>[0]["credentials"];
+  }) => AwsBudgetsProviderClients;
+  readonly awsBudgetsProviderRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsBudgetsSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -413,6 +434,12 @@ interface ServerContext {
   >;
   readonly computeOptimizerActivationManifestIdentityAttestor?:
     ComputeOptimizerActivationManifestIdentityAttestor;
+  readonly awsBudgetsProviderClientFactory: NonNullable<
+    LocalCollectorServerOptions["awsBudgetsProviderClientFactory"]
+  >;
+  readonly awsBudgetsProviderRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsBudgetsProviderRoleBrokerFactory"]
+  >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
@@ -567,6 +594,10 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
           computeOptimizerActivationManifestIdentityAttestor:
             options.computeOptimizerActivationManifestIdentityAttestor,
         }),
+    awsBudgetsProviderClientFactory:
+      options.awsBudgetsProviderClientFactory ?? createAwsBudgetsProviderClients,
+    awsBudgetsProviderRoleBrokerFactory:
+      options.awsBudgetsProviderRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
       : {
@@ -822,7 +853,7 @@ async function dispatch(
       headers: request.headers,
       body,
     });
-    const result = await route(context, request.method ?? "", path, body);
+    const result = await route(context, request.method ?? "", path, body, request.headers);
     await sendSigned(context, response, result.status, path, nonce, result.body);
   } catch (error: unknown) {
     const safe = safeHttpError(error);
@@ -994,7 +1025,58 @@ async function route(
   method: string,
   path: string,
   body: string,
+  headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if (method === "POST" && path === AWS_BUDGETS_PROVIDER_ROUTE) {
+    const request = parseAwsBudgetsProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null) {
+      throw invalidRequest();
+    }
+    const operationKey = connectionOperationKey(request.scope.orgId, request.scope.connectionId);
+    const lease = await claimConnectionOperation(context, operationKey);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), request.maximumDurationMs);
+    timer.unref?.();
+    try {
+      const broker = context.awsBudgetsProviderRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(request.scope.partition),
+      });
+      const result = await runAwsBudgetsProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsBudgetsSession(
+            { tenantId: input.tenantId }, input.connectionId, input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        clientFactory: context.awsBudgetsProviderClientFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
   if (method === "GET" && path === "/v1/agentless/readiness") {
     requireEmptyBody(body);
     const canExecute = context.hostedAgentlessSettings !== undefined;
@@ -4082,7 +4164,9 @@ async function sendSigned(
   payload: unknown,
 ): Promise<void> {
   let body = JSON.stringify(payload);
-  if (Buffer.byteLength(body, "utf8") > RESPONSE_LIMIT) {
+  const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
+    ? AWS_BUDGETS_RESPONSE_LIMIT : RESPONSE_LIMIT;
+  if (Buffer.byteLength(body, "utf8") > responseLimit) {
     status = 502;
     body = JSON.stringify({ code: "COLLECTION_FAILED", message: "The normalized inventory exceeded the pilot response limit" });
   }
@@ -4192,6 +4276,14 @@ function safeHttpError(error: unknown): LocalHttpError {
       "The sealed Compute Optimizer export launch was rejected",
     );
   }
+  if (error instanceof AwsBudgetsProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Budgets provider collection did not complete",
+    );
+  }
   if (error instanceof LocalJobIdempotencyConflictError) {
     return new LocalHttpError(
       409,
@@ -4291,6 +4383,12 @@ function safeRequestTarget(rawUrl: string): string {
 function responseNonce(request: IncomingMessage): string {
   const nonce = request.headers["x-sutra-nonce"];
   return typeof nonce === "string" && nonce.length <= 128 ? nonce : "unauthenticated";
+}
+
+function exactHeader(headers: IncomingMessage["headers"], name: string): string | null {
+  const value = headers[name];
+  return typeof value === "string" && value.length > 0 && value.length <= 256
+    && !value.includes(",") && !/[\r\n]/u.test(value) ? value : null;
 }
 
 function boundaryResourceKey(resource: NormalizedAwsResource): string {

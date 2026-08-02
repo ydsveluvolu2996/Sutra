@@ -55,7 +55,11 @@ test("ADV-08 maps every official sheet, visual, and control honestly", () => {
     definition.sheets[0]?.visuals.some(
       (visual) =>
         visual.name === "Budget Distribution from Group By to Budget Level" &&
-        visual.coverage === "PARTIAL_EVIDENCE",
+        visual.coverage === "SUPPORTED",
     ),
+  );
+  assert.equal(
+    definition.sheets[0]?.visuals.every((visual) => visual.coverage === "SUPPORTED"),
+    true,
   );
 });

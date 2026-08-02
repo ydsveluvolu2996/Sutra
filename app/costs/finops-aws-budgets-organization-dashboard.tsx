@@ -30,7 +30,7 @@ export interface AwsBudgetsDashboardEnvelope {
   }[];
   readonly evidence: Readonly<Record<string, unknown>>;
   readonly separation: { readonly providerSource: string; readonly sutraInternalBudgetsIncluded: false; readonly reason: string };
-  readonly collection: { readonly jobContractAvailable: true; readonly providerAdapterAvailable: false; readonly reason: string };
+  readonly collection: { readonly jobContractAvailable: true; readonly providerAdapterAvailable: true; readonly sharedRuntimeRegistered: boolean; readonly reason: string };
   readonly prerequisites: readonly string[];
 }
 
@@ -96,9 +96,13 @@ function stateMessage(state: SourceState): string | null {
   return "The latest provider collection is unavailable. Previously accepted evidence, when present, remains immutable.";
 }
 
-function sums(report: AwsBudgetsDashboardEnvelope) {
+function sums(
+  report: AwsBudgetsDashboardEnvelope,
+  include: (row: AwsBudgetsDashboard["budgets"][number]) => boolean = () => true,
+) {
   const map = new Map<string, { budgeted: bigint; actual: bigint; forecast: bigint; budgetedCount: number; actualCount: number; forecastCount: number }>();
   for (const row of report.dashboard.budgets) {
+    if (!include(row)) continue;
     const budget = row.budget;
     const currency = budget.budgetLimit?.currency ?? budget.actual?.currency ?? budget.forecast?.currency;
     if (currency === null || currency === undefined) continue;
@@ -109,6 +113,81 @@ function sums(report: AwsBudgetsDashboardEnvelope) {
     map.set(currency, current);
   }
   return [...map.entries()].sort(([left], [right]) => left.localeCompare(right));
+}
+
+type AwsBudgetsGroupBy = "budgetLevel" | "account" | "budgetType" | "status";
+
+interface GroupedBudgetEvidence {
+  readonly label: string;
+  readonly budgetCount: number;
+  readonly currency: string;
+  readonly budgeted: bigint;
+  readonly actual: bigint;
+  readonly forecast: bigint;
+  readonly monetaryAllocation: "exact" | "relationship_only";
+}
+
+function groupedBudgetEvidence(
+  report: AwsBudgetsDashboardEnvelope,
+  groupBy: AwsBudgetsGroupBy,
+): readonly GroupedBudgetEvidence[] {
+  const grouped = new Map<string, { labels: Set<string>; budgeted: bigint; actual: bigint; forecast: bigint }>();
+  for (const row of report.dashboard.budgets) {
+    const currency = row.budget.budgetLimit?.currency ?? row.budget.actual?.currency ?? row.budget.forecast?.currency;
+    if (currency === null || currency === undefined) continue;
+    const labels = groupBy === "budgetLevel" ? [row.budget.hierarchyLevel ?? "Tag missing"]
+      : groupBy === "budgetType" ? [row.budget.budgetType]
+        : groupBy === "status" ? [row.health.statuses.join(" + ")]
+          : row.accountMappings.length > 0
+            ? row.accountMappings.map((account) => `${account.accountName ?? "Unknown account"} · ${account.accountId}`)
+            : ["Account relationship unavailable"];
+    for (const label of new Set(labels)) {
+      const key = `${label}\0${currency}`;
+      const current = grouped.get(key) ?? { labels: new Set<string>(), budgeted: BigInt(0), actual: BigInt(0), forecast: BigInt(0) };
+      current.labels.add(row.budget.budgetName);
+      if (groupBy !== "account") {
+        current.budgeted += BigInt(row.budget.budgetLimit?.amountMicros ?? "0");
+        current.actual += BigInt(row.budget.actual?.amountMicros ?? "0");
+        current.forecast += BigInt(row.budget.forecast?.amountMicros ?? "0");
+      }
+      grouped.set(key, current);
+    }
+  }
+  return [...grouped.entries()].map(([key, value]) => {
+    const [label = "Unknown", currency = ""] = key.split("\0");
+    return {
+      label, currency, budgetCount: value.labels.size,
+      budgeted: value.budgeted, actual: value.actual, forecast: value.forecast,
+      monetaryAllocation: groupBy === "account" ? "relationship_only" as const : "exact" as const,
+    };
+  }).sort((left, right) => left.label.localeCompare(right.label) || left.currency.localeCompare(right.currency));
+}
+
+function ratioWidth(value: bigint, maximum: bigint): string {
+  if (maximum <= BigInt(0)) return "0%";
+  const absolute = value < BigInt(0) ? -value : value;
+  return `${Number((absolute * BigInt(10_000)) / maximum) / 100}%`;
+}
+
+function gaugeRatio(value: bigint, limit: bigint): { readonly label: string; readonly width: string; readonly aria: number } | null {
+  if (limit <= BigInt(0)) return null;
+  const tenths = (value * BigInt(1_000)) / limit;
+  const capped = tenths < BigInt(0) ? BigInt(0) : tenths > BigInt(1_000) ? BigInt(1_000) : tenths;
+  const readable = tenths > BigInt(100_000) ? ">10,000%" : `${Number(tenths) / 10}%`;
+  return { label: readable, width: `${Number(capped) / 10}%`, aria: Number(capped) / 10 };
+}
+
+function BudgetGauge({ title, currency, value, limit }: {
+  readonly title: string; readonly currency: string; readonly value: bigint; readonly limit: bigint;
+}) {
+  const ratio = gaugeRatio(value, limit);
+  return <article className={styles.gauge}>
+    <header><small>{title} · {currency}</small><strong>{ratio?.label ?? "Unavailable"}</strong></header>
+    <div className={styles.gaugeTrack} role="meter" aria-label={`${title} ${currency}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={ratio?.aria ?? 0} aria-valuetext={ratio?.label ?? "Unavailable"}>
+      <span style={{ width: ratio?.width ?? "0%" }} />
+    </div>
+    <p>{money(value.toString(), currency)} of {money(limit.toString(), currency)}</p>
+  </article>;
 }
 
 export function AwsBudgetsOfficialDefinitionPanel({ definition }: { readonly definition: AwsBudgetsOfficialDefinition }) {
@@ -128,7 +207,33 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
   readonly onFiltersChange: (filters: AwsBudgetsDashboardFilters) => void;
 }) {
   const message = stateMessage(report.sourceState);
+  const [groupBy, setGroupBy] = useState<AwsBudgetsGroupBy>("budgetLevel");
   const currencySums = useMemo(() => sums(report), [report]);
+  const monthlyCurrencySums = useMemo(
+    () => sums(report, (row) => row.budget.timeUnit === "MONTHLY"),
+    [report],
+  );
+  const groups = useMemo(() => groupedBudgetEvidence(report, groupBy), [report, groupBy]);
+  const groupMaximums = groups.reduce((maximums, item) => {
+    const values = [item.budgeted, item.actual, item.forecast].map((value) => value < BigInt(0) ? -value : value);
+    const current = maximums.get(item.currency) ?? BigInt(0);
+    maximums.set(item.currency, values.reduce((largest, value) => value > largest ? value : largest, current));
+    return maximums;
+  }, new Map<string, bigint>());
+  const distribution = useMemo(() => {
+    const map = new Map<string, { account: string; level: string; budgets: Set<string> }>();
+    for (const row of report.dashboard.budgets) {
+      const level = row.budget.hierarchyLevel ?? "Tag missing";
+      const mappings = row.accountMappings.length > 0 ? row.accountMappings : [{ accountId: "unavailable", accountName: "Account relationship unavailable" }];
+      for (const account of mappings) {
+        const label = `${account.accountName ?? "Unknown account"} · ${account.accountId}`;
+        const key = `${label}\0${level}`;
+        const current = map.get(key) ?? { account: label, level, budgets: new Set<string>() };
+        current.budgets.add(row.budget.budgetName); map.set(key, current);
+      }
+    }
+    return [...map.values()].sort((left, right) => left.account.localeCompare(right.account) || left.level.localeCompare(right.level));
+  }, [report]);
   const accounts = [...new Map(report.dashboard.budgets.flatMap((row) => row.accountMappings)
     .map((account) => [account.accountId, account] as const)).values()];
   const budgetTypes = [...new Set(report.dashboard.budgets.map((row) => row.budget.budgetType))].sort();
@@ -141,6 +246,7 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
     <AwsBudgetsOfficialDefinitionPanel definition={report.officialDefinition} />
     {message ? <div role={report.sourceState === "failed" ? "alert" : "status"} className={`${styles.state} ${report.sourceState === "failed" ? styles.error : styles.warning}`}>{message}</div> : null}
     <div className={styles.filters} aria-label="AWS Budgets hierarchy and grouping filters">
+      <label>Group By<select value={groupBy} onChange={(event) => setGroupBy(event.target.value as AwsBudgetsGroupBy)}><option value="budgetLevel">cid:budget-level</option><option value="account">Account</option><option value="budgetType">Budget type</option><option value="status">Budget status</option></select></label>
       <label>Currency<select value={filters.currency} onChange={(event) => set("currency", event.target.value)}><option value="">All currencies</option>{report.dashboard.coverage.currencies.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label>Budget type<select value={filters.budgetType} onChange={(event) => set("budgetType", event.target.value)}><option value="">All types</option>{budgetTypes.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label>Account<select value={filters.accountId} onChange={(event) => set("accountId", event.target.value)}><option value="">All accounts</option>{accounts.map((account) => <option key={account.accountId} value={account.accountId}>{account.accountName ?? account.accountId} · {account.accountId}</option>)}</select></label>
@@ -161,6 +267,27 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
         <article className={styles.card} key={`${currency}:forecast`}><small>Forecasted spend · {currency}</small><strong>{item.forecastCount ? money(item.forecast.toString(), currency) : "Unavailable"}</strong><span>Missing forecast is not zero</span></article>,
       ])}
     </div>
+    <section className={styles.panel} aria-label="Official AWS Budget gauges">
+      <header className={styles.panelHead}><div><h3>Actual and forecast versus budget</h3><p>Four official gauge purposes: monthly and selected-portfolio actual/forecast, separated by currency.</p></div></header>
+      <div className={styles.gauges}>{monthlyCurrencySums.flatMap(([currency, item]) => [
+        <BudgetGauge key={`${currency}:monthly:actual`} title="Actual VS Budget This Month" currency={currency} value={item.actual} limit={item.budgeted} />,
+        <BudgetGauge key={`${currency}:monthly:forecast`} title="Forecast VS Budget This Month" currency={currency} value={item.forecast} limit={item.budgeted} />,
+      ])}{currencySums.flatMap(([currency, item]) => [
+        <BudgetGauge key={`${currency}:portfolio:actual`} title="Actual VS Budget" currency={currency} value={item.actual} limit={item.budgeted} />,
+        <BudgetGauge key={`${currency}:portfolio:forecast`} title="Forecast VS Budget" currency={currency} value={item.forecast} limit={item.budgeted} />,
+      ])}</div>
+    </section>
+    <section className={styles.panel} aria-label="AWS Budget Summary by Group By This Month">
+      <header className={styles.panelHead}><div><h3>Budget Summary by Group By This Month</h3><p>Native bar and pivot evidence grouped by {groupBy.replace(/([A-Z])/gu, " $1").toLowerCase()}; currencies are never combined.</p></div></header>
+      <div className={styles.groupChart}>{groups.map((item) => <article key={`${item.label}:${item.currency}`}>
+        <header><strong>{item.label}</strong><span>{item.budgetCount} budget{item.budgetCount === 1 ? "" : "s"} · {item.currency}</span></header>
+        {item.monetaryAllocation === "relationship_only" ? <p>Relationship count only. Organization-wide budget money is not duplicated across accounts.</p> : <div className={styles.bars} aria-label={`${item.label} exact grouped amounts`}>
+          <div><span>Budgeted</span><i style={{ width: ratioWidth(item.budgeted, groupMaximums.get(item.currency) ?? BigInt(0)) }} /><strong>{money(item.budgeted.toString(), item.currency)}</strong></div>
+          <div><span>Actual</span><i style={{ width: ratioWidth(item.actual, groupMaximums.get(item.currency) ?? BigInt(0)) }} /><strong>{money(item.actual.toString(), item.currency)}</strong></div>
+          <div><span>Forecast</span><i style={{ width: ratioWidth(item.forecast, groupMaximums.get(item.currency) ?? BigInt(0)) }} /><strong>{money(item.forecast.toString(), item.currency)}</strong></div>
+        </div>}
+      </article>)}</div>
+    </section>
     <section className={styles.panel} aria-label="AWS Budget hierarchy status and drilldown">
       <header className={styles.panelHead}><div><h3>Provider budget hierarchy</h3><p>Grouped only by the exact AWS tag <code>cid:budget-level</code>.</p></div><button type="button" onClick={() => exportVisible(report)}>Export visible rows</button></header>
       <div className={styles.scroll}><table><thead><tr><th>Hierarchy</th><th>Provider budget</th><th>Budgeted</th><th>Actual</th><th>Forecast</th><th>Provider status</th><th>Accounts / ownership</th></tr></thead><tbody>
@@ -170,6 +297,12 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
           return <tr key={budget.budgetName}><td><span className={styles.pill}>{budget.hierarchyLevel ?? "Tag missing"}</span></td><td><strong>{budget.budgetName}</strong><br />{budget.budgetType} · {budget.timeUnit}</td><td>{money(budget.budgetLimit?.amountMicros ?? null, unit)}</td><td>{money(budget.actual?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.actual}</small></td><td>{money(budget.forecast?.amountMicros ?? null, unit)}<br /><small>{budget.coverage.forecast}</small></td><td><span className={styles.pill}>{row.health.statuses.map((status) => status.replaceAll("_", " ")).join(" · ")}</span><br />Updated {budget.lastUpdatedAt ?? "not supplied"}<br />{budget.notifications.length} notifications · {budget.actions.length} read-only actions</td><td><details><summary>{targeting.replaceAll("_", " ")} · {mappingCoverage}</summary>{accountMappings.length ? <ul>{accountMappings.map((account) => <li key={account.accountId}>{account.accountName ?? "Unknown account"} · {account.accountId}<br />{account.ouPath.join(" / ") || "OU unavailable"} · {account.businessUnit ?? account.costCenter ?? "taxonomy unavailable"}</li>)}</ul> : <p>No evidenced account mapping.</p>}</details></td></tr>;
         })}
       </tbody></table></div>
+    </section>
+    <section className={styles.panel} aria-label="Budget Distribution from Group By to Budget Level">
+      <header className={styles.panelHead}><div><h3>Budget Distribution from Group By to Budget Level</h3><p>Accessible native flow of exact account relationships to the provider <code>cid:budget-level</code> tag.</p></div></header>
+      <div className={styles.flow}>{distribution.map((item) => <div key={`${item.account}:${item.level}`}>
+        <span className={styles.flowNode}>{item.account}</span><span className={styles.flowArrow} aria-hidden="true">→</span><span className={styles.flowNode}>{item.level}</span><strong>{item.budgets.size} budget{item.budgets.size === 1 ? "" : "s"}</strong>
+      </div>)}</div>
     </section>
     <section className={styles.panel} aria-label="AWS Budget performance history">
       <header className={styles.panelHead}><div><h3>Budget performance history</h3><p>Provider budgeted, actual and forecast values are shown separately.</p></div></header>
@@ -204,6 +337,6 @@ export function FinopsAwsBudgetsOrganizationDashboard({ connectionId }: { readon
     return () => controller.abort();
   }, [connectionId, filters]);
   if (state.report !== null && state.report.connectionId === connectionId) return <FinopsAwsBudgetsOrganizationReportView report={state.report} filters={filters} onFiltersChange={setFilters} />;
-  const status = connectionId === null ? <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting provider AWS Budgets.</div> : state.view === "configuration_required" ? <div role="status" className={`${styles.state} ${styles.warning}`}>AWS Budgets + Organizations evidence is not available. The permanent signed-broker adapter and cid:budget-level tags are required.</div> : state.view === "failed" ? <div role="alert" className={`${styles.state} ${styles.error}`}>The AWS Budgets provider dashboard could not be loaded.</div> : <div role="status" className={styles.state}>Loading provider AWS Budgets evidence…</div>;
+  const status = connectionId === null ? <div role="status" className={`${styles.state} ${styles.warning}`}>Connect an active AWS trust-role account before collecting provider AWS Budgets.</div> : state.view === "configuration_required" ? <div role="status" className={`${styles.state} ${styles.warning}`}>AWS Budgets + Organizations evidence is not available yet. Verify the role permissions, provider access, and cid:budget-level tags.</div> : state.view === "failed" ? <div role="alert" className={`${styles.state} ${styles.error}`}>The AWS Budgets provider dashboard could not be loaded.</div> : <div role="status" className={styles.state}>Loading provider AWS Budgets evidence…</div>;
   return <section className={styles.root}>{status}<AwsBudgetsOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
 }

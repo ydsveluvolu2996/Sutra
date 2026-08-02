@@ -10,6 +10,7 @@ import {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
   scheduleComputeOptimizerDailyTick,
+  scheduleAwsBudgetsTick,
   scheduleAwsNewsFeedsTick,
 } from "../../../../../db/background-job-handlers";
 import { AlertRuleRepository } from "../../../../../db/alert-rule-repository";
@@ -77,6 +78,10 @@ export async function POST(request: Request): Promise<Response> {
     // window. The production composition owns the pinned egress and replay
     // ledger; this system tick supplies no tenant IDs or source URLs.
     const awsNewsFeeds = await scheduleAwsNewsFeedsTick();
+    // ADV-08 uses the same deterministic six-hour cadence. Scheduling never
+    // loads broker credentials; the server-owned handler resolves them only
+    // after a scoped durable job has been claimed.
+    const awsBudgets = await scheduleAwsBudgetsTick();
     // Compute Optimizer is intentionally two-phase. Seal/replay the daily
     // activation, recover discovery-gated runs, then publish only durable
     // materializer outbox entries. One absolute deadline covers all three.
@@ -98,6 +103,7 @@ export async function POST(request: Request): Promise<Response> {
       ...result,
       platformUptime,
       awsNewsFeeds,
+      awsBudgets,
       computeOptimizer: {
         schedule: computeOptimizerSchedule,
         recovery: computeOptimizerRecovery,

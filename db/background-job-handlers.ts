@@ -99,6 +99,7 @@ import {
   runComputeOptimizerExportObjectChunkRead,
   runSignedOrganizationsTaxonomy,
   safeCollectionFailureCode,
+  getPilotSecrets,
 } from "../lib/pilot-server";
 import {
   createFinopsBrokerObjectReader,
@@ -156,6 +157,12 @@ import { AWS_NEWS_FEEDS_JOB_KIND } from
   "../lib/finops-aws-news-feeds-job.ts";
 import { createAwsNewsFeedsProductionComposition } from
   "../lib/finops-aws-news-feeds-production-composition.ts";
+import { AWS_BUDGETS_DURABLE_JOB_KIND } from
+  "../lib/finops-aws-budgets-durable-binding.ts";
+import {
+  createAwsBudgetsProductionComposition,
+  scheduleAwsBudgetsProductionTick,
+} from "../lib/finops-aws-budgets-production-composition.ts";
 export {
   dispatchComputeOptimizerOutboxTick,
   recoverComputeOptimizerActivationTick,
@@ -171,6 +178,25 @@ function awsNewsFeedsProductionComposition() {
 /** Six-hour deterministic ADV-07 scheduler hook for the internal job tick. */
 export function scheduleAwsNewsFeedsTick(scheduledAtMs = Date.now()) {
   return awsNewsFeedsProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+function awsBudgetsProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_BUDGETS_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsBudgetsProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Six-hour deterministic ADV-08 scheduler hook for the internal job tick. */
+export function scheduleAwsBudgetsTick(scheduledAtMs = Date.now()) {
+  return scheduleAwsBudgetsProductionTick(scheduledAtMs);
 }
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
@@ -1285,6 +1311,8 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       }),
     [AWS_NEWS_FEEDS_JOB_KIND]: (job) =>
       awsNewsFeedsProductionComposition().handler(job),
+    [AWS_BUDGETS_DURABLE_JOB_KIND]: (job) =>
+      awsBudgetsProductionComposition().handler(job),
     [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
       await runTrustedAdvisorOrganizationActivationHandler(job);
     },

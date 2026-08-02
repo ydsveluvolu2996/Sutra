@@ -348,6 +348,6 @@ export const AWS_BUDGETS_DURABLE_BINDING = Object.freeze({
   jobKind: AWS_BUDGETS_DURABLE_JOB_KIND,
   cadence: AWS_BUDGETS_SCHEDULER_CADENCE,
   handlerFactory: createAwsBudgetsDurableJobHandler,
-  registeredInSharedRuntime: false,
-  activationReason: AWS_BUDGETS_HANDLER_ACTIVATION_REASON,
+  registeredInSharedRuntime: true,
+  activationReason: null,
 });

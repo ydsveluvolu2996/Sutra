@@ -311,9 +311,8 @@ test("durable-attempt migrations are registered and enforce immutable, tenant-pi
   } finally { await mf.dispose(); }
 });
 
-test("activation remains honest until the isolated binding is registered and provider-accepted", () => {
-  assert.equal(binding.AWS_BUDGETS_DURABLE_BINDING.registeredInSharedRuntime, false);
-  assert.equal(binding.AWS_BUDGETS_DURABLE_BINDING.activationReason,
-    "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED");
+test("activation reports the exact shared runtime registration without claiming provider acceptance", () => {
+  assert.equal(binding.AWS_BUDGETS_DURABLE_BINDING.registeredInSharedRuntime, true);
+  assert.equal(binding.AWS_BUDGETS_DURABLE_BINDING.activationReason, null);
   assert.equal(binding.AWS_BUDGETS_DURABLE_BINDING.cadence, "rate(6 hours)");
 });

@@ -81,6 +81,8 @@ import {
   resolveComputeOptimizerExportLaunchContract,
   resolveComputeOptimizerExportLaunchContractForRegion,
 } from "./compute-optimizer-export-launch-contract.js";
+import { AWS_BUDGETS_PROVIDER_SESSION_ACTIONS } from
+  "./aws-budgets-provider-adapter.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -615,6 +617,21 @@ export function computeOptimizerActivationIdentitySessionPolicy(): string {
       Sid: "VerifyCallerIdentityOnly",
       Effect: "Allow",
       Action: "sts:GetCallerIdentity",
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Exact read-only STS intersection for the ADV-08 provider collector. */
+export function awsBudgetsProviderSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ReadAwsBudgetsAndOrganizationHierarchy",
+      Effect: "Allow",
+      Action: AWS_BUDGETS_PROVIDER_SESSION_ACTIONS,
       Resource: "*",
     }],
   });
@@ -1293,6 +1310,47 @@ export class AwsRoleBroker {
     // expand the compact read-family session cap.
     await this.attestRoleContract(resolved, validated.credentials);
     return validated;
+  }
+
+  /**
+   * ADV-08 session with an exact read-only intersection. Scope, account,
+   * partition and action set are server-pinned before STS; provider credentials
+   * never cross the collector process.
+   */
+  public async assumeValidatedAwsBudgetsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: typeof AWS_BUDGETS_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_BUDGETS_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Budgets session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-budgets`,
+      awsBudgetsProviderSessionPolicy,
+      input.signal,
+    );
   }
 
   /**

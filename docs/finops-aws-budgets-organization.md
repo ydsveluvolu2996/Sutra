@@ -123,13 +123,14 @@ gates are:
 
 1. add the exact missing read actions to the reviewed collector role and its
    session ceiling without adding mutation authority;
-2. deploy the implemented bounded signed-broker adapter behind the collection
-   job contract so it owns temporary AWS credentials and emits this schema;
+2. provision the deployed signed-broker keys/origin and execute the registered
+   durable scheduler/handler against the implemented credential-owning adapter;
 3. run live management-account and delegated-administrator tests for empty,
    populated, multi-currency, planned, history-ineligible, paginated,
    access-denied, stale, unknown-account, and cross-tenant cases.
 
-Immutable persistence, accepted-head promotion, authenticated API, native UI,
-and explicit AWS/Sutra source separation now exist locally. Until the remaining
-provider gates pass, this capability remains in progress and must not be
-reported as production accepted.
+Immutable persistence, accepted-head promotion, shared scheduling/handling,
+the bounded provider adapter and exact signed route, authenticated API, native
+UI, and explicit AWS/Sutra source separation now exist locally. Until the
+remaining provider gates pass, this capability must not be reported as
+production accepted.

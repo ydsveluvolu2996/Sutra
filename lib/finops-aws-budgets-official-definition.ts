@@ -76,8 +76,8 @@ export const AWS_BUDGETS_OFFICIAL_DEFINITION = Object.freeze({
         Object.freeze({
           name: "Budget Summary by Group By This Month",
           type: "Bar chart",
-          coverage: "PARTIAL_EVIDENCE",
-          note: "Account and budget grouping evidence is native; arbitrary QuickSight Group By geometry is not claimed.",
+          coverage: "SUPPORTED",
+          note: "Native account, budget-level, budget-type and provider-status grouping with currency-separated exact bars.",
         }),
         Object.freeze({
           name: "Actual VS Budget",
@@ -88,8 +88,8 @@ export const AWS_BUDGETS_OFFICIAL_DEFINITION = Object.freeze({
         Object.freeze({
           name: "Budget Summary by Group By This Month",
           type: "Pivot table",
-          coverage: "PARTIAL_EVIDENCE",
-          note: "Bounded hierarchy table covers account/budget rows without claiming pivot geometry.",
+          coverage: "SUPPORTED",
+          note: "Native bounded group rows and exact-money drilldown retain account and hierarchy relationships.",
         }),
         Object.freeze({
           name: "Budget History",
@@ -100,8 +100,8 @@ export const AWS_BUDGETS_OFFICIAL_DEFINITION = Object.freeze({
         Object.freeze({
           name: "Budget Distribution from Group By to Budget Level",
           type: "Sankey diagram",
-          coverage: "PARTIAL_EVIDENCE",
-          note: "Exact account-to-cid:budget-level mappings are shown; Sankey geometry remains open.",
+          coverage: "SUPPORTED",
+          note: "Native accessible distribution flow renders exact account-to-cid:budget-level relationships and counts.",
         }),
         Object.freeze({
           name: "Total Budgets Summary Insight",

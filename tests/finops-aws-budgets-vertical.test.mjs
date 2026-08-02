@@ -164,7 +164,7 @@ test("API and migrations enforce provider/internal separation, same-tenant reads
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /sutraInternalBudgetsIncluded: false/u);
   assert.match(route, /cid:budget-level/u);
-  assert.match(route, /AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED/u);
+  assert.match(route, /AWS_BUDGETS_SIGNED_BROKER_HANDLER_REGISTERED/u);
   assert.ok(route.match(/AWS_BUDGETS_OFFICIAL_DEFINITION/gu)?.length >= 3);
   assert.doesNotMatch(route, /createBudget|updateBudget|deleteBudget|FinopsWorkspaceRepository/u);
   assert.match(repository, /deliberately unrelated to finops_budgets/u);
@@ -202,10 +202,10 @@ test("native report renders hierarchy, budgeted/actual/forecast, honest status, 
       officialDefinition: AWS_BUDGETS_OFFICIAL_DEFINITION,
       freshness: { dataThroughAt: "2026-08-01T00:00:00.000Z", status: "fresh", ageHours: 1, staleAfterHours: 24 }, dashboard,
       history: [{ generationId: `abg_${"b".repeat(64)}`, sourceCaptureId: `awsbudgets_${"a".repeat(64)}`, state: "ready", hierarchyState: "complete", observedAtIso: "2026-08-01T01:00:00.000Z", dataThroughAtIso: "2026-08-01T00:00:00.000Z", budgetCount: 1, currencies: ["USD"], budgetLevels: ["BusinessUnit"] }],
-      evidence: { generationId: `abg_${"b".repeat(64)}` }, separation: { providerSource: "AWS_BUDGETS", sutraInternalBudgetsIncluded: false, reason: "Separate evidence." }, collection: { jobContractAvailable: true, providerAdapterAvailable: false, reason: "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED" }, prerequisites: ["AWS Budgets", "AWS Organizations", "cid:budget-level"],
+      evidence: { generationId: `abg_${"b".repeat(64)}` }, separation: { providerSource: "AWS_BUDGETS", sutraInternalBudgetsIncluded: false, reason: "Separate evidence." }, collection: { jobContractAvailable: true, providerAdapterAvailable: true, sharedRuntimeRegistered: true, reason: "AWS_BUDGETS_SIGNED_BROKER_HANDLER_REGISTERED" }, prerequisites: ["AWS Budgets", "AWS Organizations", "cid:budget-level"],
     };
     const html = renderToStaticMarkup(createElement(dashboardModule.FinopsAwsBudgetsOrganizationReportView, { report, filters: { currency: "", budgetType: "", accountId: "", budgetLevel: "", budgetStatus: "", namePrefix: "" }, onFiltersChange: () => undefined }));
-    for (const text of ["never includes or merges Sutra-authored", "Official AWS definition coverage", "2 sheets · 11 visuals · 7 controls", "Budget Summary", "Forecast VS Budget This Month", "Actual VS Budget This Month", "Budget Distribution from Group By to Budget Level", "PARTIAL EVIDENCE", "About", "cid:budget-level", "Budget status", "Healthy budgets", "Unhealthy budgets", "Forecasted unhealthy budgets", "Unclassified evidence", "Budgeted", "Actual spend", "Forecasted spend", "Platform budget", "Provider status", "Budget performance history", "Collection evidence history", "AWS_BUDGETS_SIGNED_BROKER_HANDLER_NOT_REGISTERED", "Coverage is partial"]) assert.ok(html.includes(text), `Expected rendered report to include: ${text}`);
+    for (const text of ["never includes or merges Sutra-authored", "Official AWS definition coverage", "2 sheets · 11 visuals · 7 controls", "Budget Summary", "Forecast VS Budget This Month", "Actual VS Budget This Month", "Budget Distribution from Group By to Budget Level", "SUPPORTED", "About", "Group By", "cid:budget-level", "Budget status", "Healthy budgets", "Unhealthy budgets", "Forecasted unhealthy budgets", "Unclassified evidence", "Budgeted", "Actual spend", "Forecasted spend", "Platform budget", "Provider status", "Budget performance history", "Collection evidence history", "AWS_BUDGETS_SIGNED_BROKER_HANDLER_REGISTERED", "Coverage is partial"]) assert.ok(html.includes(text), `Expected rendered report to include: ${text}`);
     assert.doesNotMatch(html, /fixture|sample|placeholder/iu);
     const officialHtml = renderToStaticMarkup(createElement(dashboardModule.AwsBudgetsOfficialDefinitionPanel, { definition: AWS_BUDGETS_OFFICIAL_DEFINITION }));
     for (const text of ["Official AWS Budgets definition coverage", "2 sheets · 11 visuals · 7 controls", "Frozen source identity remains visible", "Budget Summary", "About"]) assert.match(officialHtml, new RegExp(text, "iu"));
