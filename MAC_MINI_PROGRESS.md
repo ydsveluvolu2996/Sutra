@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 10 of 29 |
-| Partial pipelines | 19 of 29: 17 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 11 of 29 |
+| Partial pipelines | 18 of 29: 16 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -455,4 +455,16 @@ Next gate:
 | Permission integrity | Immutable `standard-2026-08.6` preserves `.8.5` and adds exactly ADV-04's 14 read actions; 25 predecessor compatibility tests prove Compute Optimizer remains authorized after upgrade |
 | Focused verification | 33/33 ADV-04 tests plus 25/25 predecessor tests passed; root and collector typechecks, targeted lint, collector and root production builds, diff check and repository secret scan of 2,309 files passed |
 | Remaining gates | Deploy and independently attest `.8.6`, configure authoritative CUR2/lifecycle/rate supplements, reconcile controlled bills and provider evidence, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — Support Cases Radar local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-09 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 11 candidates and 18 partial pipelines, including 16 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `6d5699b` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-09 vertical commit |
+| Delivery | Credential-owning AWS Support client, strict signed local/hosted route, HMAC-minimized evidence, immutable snapshots, entitlement state, deterministic one-job-per-cohort scheduler, durable handler, same-tenant API, native case/account/age/cadence/topic UI, and production evidence-key deployment wiring |
+| Permission and scale integrity | Immutable `standard-2026-08.7` preserves `.8.6` and adds exactly two read actions; one organization fan-out is scheduled per tenant/customer/partition cohort, preventing the prior O(N²) account multiplication |
+| Focused verification | 34/34 ADV-09 tests, root and collector typechecks, targeted lint, secret scan of 2,328 files, diff check, `.8.7` and production-HA CFN lint, 10/10 HA infrastructure tests and 3/3 runtime-secret tests passed |
+| Remaining gates | Deploy and attest `.8.7`, provision its unique evidence key, reconcile controlled provider evidence, complete authorized template/two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |

@@ -66,21 +66,21 @@ never replace it or masquerade as current success.
 | Level | Catalog rows | Candidate | Partial pipeline | Engine only | Absent | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Foundational | 3 | 3 | 0 | 0 | 0 | 0 | 0 |
-| Advanced | 13 | 5 | 8 | 0 | 0 | 0 | 0 |
+| Advanced | 13 | 6 | 7 | 0 | 0 | 0 | 0 |
 | Additional | 13 | 2 | 11 | 0 | 0 | 0 | 0 |
-| **Total** | **29** | **10** | **19** | **0** | **0** | **0** | **0** |
+| **Total** | **29** | **11** | **18** | **0** | **0** | **0** | **0** |
 
 ### Current release-scope view
 
 | Release scope | Catalog rows | Candidate | Partial pipeline | Local verified | Live accepted |
 |---|---:|---:|---:|---:|---:|
-| In scope — AWS-backed dashboards | 27 | 10 | 17 | 0 | 0 |
+| In scope — AWS-backed dashboards | 27 | 11 | 16 | 0 | 0 |
 | Excluded from this build — Azure CID and GCP CID | 2 | 0 | 2 | 0 | 0 |
-| **Official catalog retained** | **29** | **10** | **19** | **0** | **0** |
+| **Official catalog retained** | **29** | **11** | **18** | **0** | **0** |
 
-The ten candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
-Anomaly, Compute Optimizer, Extended Support Cost Projection, AWS News Feeds, AWS Budgets, Trends, and Data Transfer. The nineteen partial pipelines are Trusted
-Advisor Organizational, Graviton Savings, Health Events, Support Cases Radar,
+The eleven candidates are CUDOS, Cost Intelligence, KPI and Modernization, Cost
+Anomaly, Compute Optimizer, Extended Support Cost Projection, AWS News Feeds, AWS Budgets, Support Cases Radar, Trends, and Data Transfer. The eighteen partial pipelines are Trusted
+Advisor Organizational, Graviton Savings, Health Events,
 ResilienceVue, End User Computing, Data Collection Monitor, CORA, FOCUS, Config
 Resource Compliance, Pricing Change Analysis, Media Services Insights,
 Marketplace SPG, Kubecost Allocation, SCAD Allocation, Sustainability and
@@ -102,7 +102,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADV-06 | Health Events Dashboard | `health_events` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-06-health-events.md): the pinned v3.1.0 inventory maps 3 sheets, 33 visuals and 28 controls; organization past/current/upcoming history, same-tenant API, prerequisite/provider states, native per-sheet planning UI and safe export retain explicit 48-hour-or-more/not-real-time semantics. Production broker/handler, eligible-plan/Organizations validation, real pagination/retention/initial-load, exact layout and live acceptance remain. |
 | ADV-07 | AWS News Feeds | `aws_news_feeds` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-07-aws-news-feeds.md): the pinned 6-sheet/21-visual/12-control definition, five exact server-owned sources, hardened controlled-egress XML gateway, durable tenant-bound replay/failure ledger, deterministic six-hour scheduler, shared worker handler, immutable READY-only head, same-tenant API and native four-family/per-sheet inventory are fully wired and locally tested. Provider/live reconciliation, signed-in exact-layout/accessibility acceptance, fixed-tree release gates and deployment remain; therefore no live claim is made. |
 | ADV-08 | AWS Budgets Dashboard | `aws_budgets` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-08-aws-budgets.md): the pinned 2-sheet/11-visual/7-control definition, exact AWS Budgets/Organizations adapter, bounded pagination and response limits, read-only STS ceiling, signed tenant-bound collector route, immutable hierarchy/actual/forecast history, six-hour server scheduler, shared durable handler, same-tenant API and all 11 native visual purposes are fully wired and locally tested. Customer-role permission rollout, deployed asymmetric broker configuration, controlled provider reconciliation, exact Sankey geometry, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
-| ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): the pinned manifest/changelog/preview and 2 published dataset contracts are mapped; managed QuickSight counts remain explicitly unavailable. Privacy-minimized immutable history, entitlement probing, signed transport, daily runtime, same-tenant API, native case/account/age/cadence/topic views and optional-summary state exist; production registration, provider reconciliation, authorized template definition and live acceptance remain. |
+| ADV-09 | AWS Support Cases Radar Dashboard | `support_cases_radar` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADV-09-support-cases-radar.md): the pinned manifest/changelog/preview and 2 published dataset contracts are mapped; managed QuickSight counts remain explicitly unavailable. Privacy-minimized credential-owning collection, HMAC-redacted case evidence, entitlement probing, immutable history, signed local/hosted transport, deterministic cohort scheduler, durable shared handler, same-tenant API, native case/account/age/cadence/topic views and optional-summary state are fully wired and locally tested. Immutable `standard-2026-08.7` preserves `.8.6` and adds exactly `DescribeCases` and `DescribeCommunications`; dedicated production evidence-key wiring and route-specific bounded responses are included. Controlled provider reconciliation, authorized exact template definition, two-tenant/live acceptance, fixed-tree gates and deployment remain; no live claim is made. |
 | ADV-10 | ResilienceVue Dashboard | `resiliencevue` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-10-resiliencevue.md): the pinned v1.0.0 inventory maps 4 sheets, 47 visuals and 9 controls; replay-safe target/window runtime, immutable multi-account/Region history, last-assessment filtering, policy posture, score/RPO/RTO trends and recommendation evidence exist. Estimated cost/optimization/architecture/component dimensions require a versioned schema; credential-broker/runtime registration, provider reconciliation, exact layout and live acceptance remain. |
 | ADV-11 | AWS End User Computing Dashboard | `end_user_computing` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-11-end-user-computing.md): the pinned v1.2.0 definition audit covers 7 sheets/82 visuals/24 controls; prevalidated failure-isolated scheduling, exact-byte signed transport, privacy-safe WorkSpaces/Applications/metrics/CUR2 evidence, complete account/Region/mode/bundle/fleet aggregates and native visuals exist; shared runtime/broker registration, rolling three-month and privacy-approved usage dimensions, provider reconciliation and live acceptance remain. |
 | ADV-12 | Data Collection Monitor Dashboard | `data_collection_monitor` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADV-12-data-collection-monitor.md): the pinned v1.0.1 manifest and complete embedded definition map exactly 2 sheets, 10 visuals, 6 controls, 5 parameters, 21 calculated fields, 15 filter groups, and 1 dataset. A bounded metadata-only adapter, hourly runtime/replay contract, immutable DCF history, same-tenant API, and native execution/error/retry/latency/coverage UI exist; shared scheduler/handler/replay/provider registration, exact geometry, real DCF reconciliation, and live acceptance remain. |
@@ -182,7 +182,7 @@ not sufficient proof.
 3. Complete Trusted Advisor Organizational using standard-check organizational data plus a separately labelled Priority supplement.
 4. Complete each remaining engine-only row as a full vertical slice.
 5. Finish Data Collection Monitor and FOCUS rather than inheriting optimistic handover labels.
-6. Audit and close all gates for the ten local candidates.
+6. Audit and close all gates for the eleven local candidates.
 7. Build Azure CID and GCP CID with provider-specific connection/runtime contracts.
 8. Run exact-tree local, controlled-provider, GitHub, image, deployment, rollback, and live-site gates.
 
