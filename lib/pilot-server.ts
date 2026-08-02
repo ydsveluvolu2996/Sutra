@@ -43,6 +43,9 @@ import type { FinopsExportChunkRequest } from "../services/aws-collector/src/fin
 import type {
   ComputeOptimizerExportObjectChunkRequest,
 } from "../services/aws-collector/src/compute-optimizer-export-object-chunk";
+import type {
+  ComputeOptimizerExactDescribeRequest,
+} from "../services/aws-collector/src/compute-optimizer-export-exact-describe";
 import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
@@ -960,6 +963,45 @@ export async function runComputeOptimizerExportObjectChunkRead(
       ifMatch: input.ifMatch,
     },
     Math.min(90_000, remainingMs),
+    context.signal,
+  )).value;
+}
+
+/**
+ * Sends one sealed exact-ID Compute Optimizer Describe request through the
+ * authenticated collector channel. brokerFetchEnvelope verifies the response
+ * signature before this function releases any provider chronology or address.
+ */
+export async function runComputeOptimizerExportExactDescribe(
+  input: ComputeOptimizerExactDescribeRequest,
+  context: {
+    readonly signal: AbortSignal;
+    readonly deadlineAtMs: number;
+  },
+): Promise<unknown> {
+  if (
+    !(context.signal instanceof AbortSignal)
+    || !Number.isSafeInteger(context.deadlineAtMs)
+  ) {
+    throw new PilotServerError(
+      400,
+      "INVALID_REQUEST",
+      "The Compute Optimizer exact describe boundary was invalid",
+    );
+  }
+  const remainingMs = context.deadlineAtMs - Date.now();
+  if (context.signal.aborted || remainingMs <= 0) {
+    throw new PilotServerError(
+      408,
+      "REQUEST_TIMEOUT",
+      "The Compute Optimizer exact describe deadline elapsed",
+    );
+  }
+  return (await brokerFetchEnvelope<unknown>(
+    `/v1/connections/${input.connectionId}/compute-optimizer-export-exact-describe`,
+    "POST",
+    input,
+    Math.min(40_000, remainingMs),
     context.signal,
   )).value;
 }

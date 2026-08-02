@@ -15,6 +15,7 @@ import {
 } from "../src/compute-optimizer-export-object-contract.js";
 import type {
   AwsPartition,
+  ComputeOptimizerExportLaunchContract,
   ComputeOptimizerExportObjectContract,
 } from "../src/types.js";
 import {
@@ -50,6 +51,24 @@ function contract(
     encryptionMode: "SSE_S3",
     kmsKeyArn: null,
     ...overrides,
+  };
+}
+
+function launchContract(): ComputeOptimizerExportLaunchContract {
+  const bucket = "customer-compute-optimizer-use1";
+  const basePrefix = "ec2-instance-recommendations/";
+  const effectivePrefix = `${basePrefix}compute-optimizer/${OWNER.expectedAccountId}/`;
+  return {
+    tenantId: OWNER.tenantId, connectionId: OWNER.connectionId,
+    accountId: OWNER.expectedAccountId, partition: OWNER.partition,
+    region: "us-east-1", contractId: "co-launch-use1",
+    permissionPackVersion: "standard-2026-08.5",
+    permissionContractId: "compute-optimizer-export-launch-v1",
+    policyName: "SutraComputeOptimizerExportLaunchV1-us-east-1",
+    bucket, bucketArn: `arn:aws:s3:::${bucket}`, basePrefix, effectivePrefix,
+    objectArnPrefix: `arn:aws:s3:::${bucket}/${effectivePrefix}*`,
+    encryptionMode: "SSE_S3", bucketVersioningStatus: "Enabled",
+    servicePrincipal: "compute-optimizer.amazonaws.com",
   };
 }
 
@@ -351,6 +370,39 @@ test("hosted registry applies the same unchanged-trust preservation rule", async
   const changed = await hosted.resolve(SCOPE_FOR_REGISTRY, OWNER.connectionId);
   assert.equal(changed?.permissionPackVersion, "live-demo-2026-07.1");
   assert.equal(changed?.computeOptimizerExportObjectContracts, undefined);
+});
+
+test("hosted registry preserves .8.5 launch contracts only for unchanged trust identity", async () => {
+  const key = randomBytes(32);
+  const persisted = {
+    tenantId: OWNER.tenantId, connectionId: OWNER.connectionId,
+    expectedAccountId: OWNER.expectedAccountId, partition: OWNER.partition,
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraCollectorRole",
+    externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04", status: "ACTIVE",
+    sessionNamePrefix: "sutra-", enabledRegions: ["us-east-1"],
+    createdAt: "2026-08-02T00:00:00.000Z", updatedAt: "2026-08-02T00:00:00.000Z",
+    permissionPackVersion: "standard-2026-08.5",
+    roleProvisioningMode: "sutra_template" as const,
+    expectedRolePath: "/sutra/", expectedRoleName: "SutraCollectorRole",
+    computeOptimizerExportLaunchContracts: [launchContract()],
+  };
+  const fake = new HostedConnectionPool(key, persisted);
+  const hosted = new HostedPostgresState({
+    connectionString: "postgresql://unit.invalid/sutra",
+    encryptionKey: key.toString("base64url"), pool: fake as never,
+    now: () => Date.parse("2026-08-02T01:00:00.000Z"),
+  });
+  await hosted.upsert(persisted);
+  const unchanged = await hosted.resolve(SCOPE_FOR_REGISTRY, OWNER.connectionId);
+  assert.equal(unchanged?.permissionPackVersion, "standard-2026-08.5");
+  assert.deepEqual(unchanged?.computeOptimizerExportLaunchContracts, [launchContract()]);
+
+  await hosted.upsert({ ...persisted, expectedAccountId: "999999999999",
+    roleArn: "arn:aws:iam::999999999999:role/sutra/SutraCollectorRole" });
+  const changed = await hosted.resolve(SCOPE_FOR_REGISTRY, OWNER.connectionId);
+  assert.equal(changed?.status, "PENDING");
+  assert.equal(changed?.permissionPackVersion, "live-demo-2026-07.1");
+  assert.equal(changed?.computeOptimizerExportLaunchContracts, undefined);
 });
 
 interface HostedRow {

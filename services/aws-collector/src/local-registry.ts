@@ -27,6 +27,7 @@ import {
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
   OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
@@ -37,6 +38,9 @@ import { parseFinopsSourceContracts } from "./finops-source-contract.js";
 import {
   parseComputeOptimizerExportObjectContracts,
 } from "./compute-optimizer-export-object-contract.js";
+import {
+  parseComputeOptimizerExportLaunchContracts,
+} from "./compute-optimizer-export-launch-contract.js";
 import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
@@ -162,6 +166,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
               connection.computeOptimizerExportObjectContracts,
             ),
           }),
+      ...(connection.computeOptimizerExportLaunchContracts === undefined
+        ? {}
+        : {
+            computeOptimizerExportLaunchContracts: structuredClone(
+              connection.computeOptimizerExportLaunchContracts,
+            ),
+          }),
     };
   }
 
@@ -231,6 +242,13 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
               ? {
                   computeOptimizerExportObjectContracts: structuredClone(
                     previous.computeOptimizerExportObjectContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.computeOptimizerExportLaunchContracts !== undefined
+              ? {
+                  computeOptimizerExportLaunchContracts: structuredClone(
+                    previous.computeOptimizerExportLaunchContracts,
                   ),
                 }
               : {}),
@@ -757,6 +775,9 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     ...(Object.hasOwn(value, "computeOptimizerExportObjectContracts")
       ? ["computeOptimizerExportObjectContracts"]
       : []),
+    ...(Object.hasOwn(value, "computeOptimizerExportLaunchContracts")
+      ? ["computeOptimizerExportLaunchContracts"]
+      : []),
   ];
   const record = exactRecord(value, [...selectedKeys, ...optionalContractKeys]);
   if (
@@ -814,7 +835,8 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION &&
-    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
   }
@@ -870,6 +892,26 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
       throw new RegistryIntegrityError();
     }
   }
+  let computeOptimizerExportLaunchContracts;
+  if (Object.hasOwn(record, "computeOptimizerExportLaunchContracts")) {
+    if (
+      permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+    ) throw new RegistryIntegrityError();
+    try {
+      computeOptimizerExportLaunchContracts = parseComputeOptimizerExportLaunchContracts(
+        record.computeOptimizerExportLaunchContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
   return {
     ...parsed,
     status: record.status,
@@ -883,6 +925,9 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     ...(computeOptimizerExportObjectContracts === undefined
       ? {}
       : { computeOptimizerExportObjectContracts }),
+    ...(computeOptimizerExportLaunchContracts === undefined
+      ? {}
+      : { computeOptimizerExportLaunchContracts }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

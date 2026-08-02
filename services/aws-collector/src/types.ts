@@ -52,6 +52,16 @@ export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION =
 export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID =
   "compute-optimizer-export-read-v1" as const;
 /**
+ * Immutable successor required for launching the eight supported Compute
+ * Optimizer recommendation exports. The base role only opens its explicit
+ * deny ceiling; a separately attested, regional launch contract supplies the
+ * exact 25 launch/dependency grants and the sealed destination prefix.
+ */
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION =
+  "standard-2026-08.5" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID =
+  "compute-optimizer-export-launch-v1" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -68,6 +78,7 @@ export type PermissionPackVersion =
   | typeof ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
   | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
   | typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+  | typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION
@@ -149,6 +160,29 @@ export interface ComputeOptimizerExportObjectContract {
   readonly kmsKeyArn: string | null;
 }
 
+/** Server-owned copy of one regional launch add-on's immutable outputs. */
+export interface ComputeOptimizerExportLaunchContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly contractId: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+  readonly permissionContractId:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID;
+  readonly policyName: string;
+  readonly bucket: string;
+  readonly bucketArn: string;
+  readonly basePrefix: string;
+  readonly effectivePrefix: string;
+  readonly objectArnPrefix: string;
+  readonly encryptionMode: "SSE_S3";
+  readonly bucketVersioningStatus: "Enabled";
+  readonly servicePrincipal: "compute-optimizer.amazonaws.com";
+}
+
 export type AwsConnectionStatus =
   | "PENDING"
   | "VERIFIED"
@@ -203,6 +237,9 @@ export interface StoredAwsConnection {
   /** Exact regional S3/KMS bindings for the .8.4 object broker. */
   readonly computeOptimizerExportObjectContracts?:
     readonly ComputeOptimizerExportObjectContract[];
+  /** Exact regional launch/destination attestations for the .8.5 broker. */
+  readonly computeOptimizerExportLaunchContracts?:
+    readonly ComputeOptimizerExportLaunchContract[];
 }
 
 export interface ScopedConnectionRegistry {

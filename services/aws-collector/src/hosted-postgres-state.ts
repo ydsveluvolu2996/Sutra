@@ -264,6 +264,13 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
               ),
             }
           : {}),
+        ...(unchanged && previous.computeOptimizerExportLaunchContracts !== undefined
+          ? {
+              computeOptimizerExportLaunchContracts: structuredClone(
+                previous.computeOptimizerExportLaunchContracts,
+              ),
+            }
+          : {}),
         status: unchanged ? previous.status : "PENDING",
         permissionPackVersion: unchanged
           ? previous.permissionPackVersion

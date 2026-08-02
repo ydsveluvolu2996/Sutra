@@ -346,3 +346,14 @@ Next gate:
 | Focused verification | 29 passed: 10 attempt/execution/plan tests via Node 22.23.2 `--experimental-transform-types`; 12 immutable `.8.4`/`.8.5`/add-on infrastructure tests; 7 built collector launcher tests. `pnpm typecheck`, `pnpm typecheck:collector`, touched-file ESLint, cfn-lint 1.46.0 for both new templates, `pnpm security:secrets` (2,206 source files), and `git diff --check` passed |
 | Evidence boundaries | No signed launch route, durable attempt/execution persistence, accepted generation/head transition, exact object materialization, controlled provider run, live acceptance, image publication, or deployment is included; production remains unchanged |
 | Next gate | Complete exact-ID `DescribeRecommendationExportJobs`, then wire the authenticated signed collector route and narrowly attested `.8.5` broker/session contract before persistence and materialization |
+
+### 2026-08-02 — Compute Optimizer exact Describe and `.8.5` broker checkpoint
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-02 remains `PARTIAL_PIPELINE`; this checkpoint makes no tracker maturity transition and does not claim a verified or live dashboard |
+| Delivery | Authenticated signed exact-ID `DescribeRecommendationExportJobs` transport; immutable app-side fresh-evidence reader; `.8.5` encrypted registry and hosted-state launch-contract preservation; narrowly admitted `.8.5` exact current/version object reads |
+| Security | Exact tenant/connection/account/partition/Region/contract/job/destination binding; `.8.4` exact Describe denied; `.8.5` role re-attested before a distinct caller-identity-plus-Describe-only session; bounded pagination and deadlines; replayed tokens, missing/duplicate/extra jobs, sibling-object substitution, unsafe keys, stale chronology, provider-field substitution, credentials and raw provider messages fail closed |
+| Focused verification | Full collector corpus 285 passed with Node 22 `--experimental-transform-types`; 7 app reader/signed-transport tests passed; root and collector typechecks, touched-file ESLint, repository secret scan (2,214 source files), and `git diff --check` passed |
+| Evidence boundaries | No public launch mutation route is included. Durable idempotent launch attempt/execution persistence, accepted generation/head transition, exact object materialization, controlled provider run, two-tenant/live acceptance, image publication and deployment remain pending; production is unchanged |
+| P0 / next gate | Build and prove a durable collector-side launch execution ledger before exposing any launch mutation route; then bind exact persistence/materialization and complete provider/live release gates |

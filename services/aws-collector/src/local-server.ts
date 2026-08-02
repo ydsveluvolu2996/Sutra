@@ -87,6 +87,7 @@ import {
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
   type InventoryCollectorCoverage,
@@ -113,6 +114,13 @@ import {
   type ComputeOptimizerExportObjectChunkClientFactory,
 } from "./compute-optimizer-export-object-chunk.js";
 import {
+  ComputeOptimizerExactDescribeError,
+  createAwsComputeOptimizerExactDescribeReader,
+  describeComputeOptimizerExactExportJobs,
+  parseComputeOptimizerExactDescribeRequest,
+  type ComputeOptimizerExactDescribeReader,
+} from "./compute-optimizer-export-exact-describe.js";
+import {
   executeFinopsSourceDispatch,
   parseFinopsSourceDispatchRequest,
   resolveFinopsSourceContract,
@@ -134,7 +142,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|finops-source|organizations-taxonomy|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -236,6 +244,17 @@ export interface LocalCollectorServerOptions {
     readonly principalArn: string;
     readonly region: string;
   }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportObjectSession">;
+  /** Test seams for the exact-ID Describe action; credentials remain broker-private. */
+  readonly computeOptimizerExactDescribeReaderFactory?: (
+    partition: LocalAwsPartition,
+    region: string,
+    credentials: Parameters<typeof createAwsComputeOptimizerExactDescribeReader>[2],
+  ) => ComputeOptimizerExactDescribeReader;
+  readonly computeOptimizerExactDescribeRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportDescribeSession">;
   /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -315,6 +334,12 @@ interface ServerContext {
     ComputeOptimizerExportObjectChunkClientFactory;
   readonly computeOptimizerExportObjectRoleBrokerFactory: NonNullable<
     LocalCollectorServerOptions["computeOptimizerExportObjectRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerExactDescribeReaderFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExactDescribeReaderFactory"]
+  >;
+  readonly computeOptimizerExactDescribeRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExactDescribeRoleBrokerFactory"]
   >;
   readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
@@ -443,6 +468,12 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
         createAwsComputeOptimizerExportObjectChunkClient,
     computeOptimizerExportObjectRoleBrokerFactory:
       options.computeOptimizerExportObjectRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    computeOptimizerExactDescribeReaderFactory:
+      options.computeOptimizerExactDescribeReaderFactory ??
+        createAwsComputeOptimizerExactDescribeReader,
+    computeOptimizerExactDescribeRoleBrokerFactory:
+      options.computeOptimizerExactDescribeRoleBrokerFactory ??
         createWorkloadIdentityRoleBroker,
     ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
       ? {}
@@ -1354,6 +1385,13 @@ async function route(
         body: await collectComputeOptimizerExportObjectChunk(context, request),
       };
     }
+    if (action === "compute-optimizer-export-exact-describe") {
+      const request = parseComputeOptimizerExactDescribeRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectComputeOptimizerExactDescribe(context, request),
+      };
+    }
     if (action === "finops-source") {
       const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
       return {
@@ -1621,6 +1659,83 @@ async function collectComputeOptimizerExportObjectChunk(
       request,
       session.credentials,
       context.computeOptimizerExportObjectChunkClientFactory,
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectComputeOptimizerExactDescribe(
+  context: ServerContext,
+  request: ReturnType<typeof parseComputeOptimizerExactDescribeRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, {
+      tenantId: request.tenantId,
+      connectionId: request.connectionId,
+      jobId: request.collectionJobId,
+    });
+    if (
+      context.mode !== "live"
+      || connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      || connection.finopsSourceContracts === undefined
+      || connection.expectedAccountId !== request.accountId
+      || connection.partition !== request.partition
+      || !finopsRegionMatchesPartition(request.region, connection.partition)
+    ) throw new RegistryStateError();
+    let contract;
+    try {
+      contract = resolveFinopsSourceContract(
+        connection.finopsSourceContracts,
+        {
+          tenantId: connection.tenantId,
+          connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId,
+          partition: connection.partition,
+        },
+        request.contractId,
+      );
+    } catch {
+      throw invalidRequest();
+    }
+    if (
+      contract === null
+      || contract.sourceId !== "compute_optimizer_organization_export"
+      || contract.accountId !== request.accountId
+      || contract.partition !== request.partition
+      || contract.region !== request.region
+    ) throw invalidRequest();
+    const broker = context.computeOptimizerExactDescribeRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportDescribeSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.collectionJobId,
+      {
+        contractId: request.contractId,
+        region: request.region,
+        plannedJobIds: request.plannedJobs
+          .map(({ plannedJobId }) => plannedJobId)
+          .sort((left, right) => left.localeCompare(right)),
+      },
+    );
+    return describeComputeOptimizerExactExportJobs(
+      request,
+      session.credentials,
+      {
+        now: context.now,
+        reader: context.computeOptimizerExactDescribeReaderFactory(
+          request.partition,
+          request.region,
+          session.credentials,
+        ),
+      },
     );
   } finally {
     await context.operationCoordinator.release(lease);
@@ -3027,7 +3142,9 @@ async function requireFinopsSourceActiveConnection(
       && connection.permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION
       && connection.permissionPackVersion !==
-        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION)
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION)
   ) {
     throw new RegistryStateError();
   }
@@ -3041,9 +3158,12 @@ async function requireComputeOptimizerObjectActiveConnection(
   const connection = await requireConnection(registry, job);
   if (
     connection.status !== "ACTIVE" ||
-    connection.permissionPackVersion !==
-      COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION ||
-    connection.computeOptimizerExportObjectContracts === undefined
+    ((connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportObjectContracts === undefined) &&
+    (connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined))
   ) throw new RegistryStateError();
   return connection;
 }
@@ -3691,6 +3811,26 @@ function safeHttpError(error: unknown): LocalHttpError {
       error.code === "OBJECT_CHANGED"
         ? "The Compute Optimizer export object changed during the bounded read"
         : "The bounded Compute Optimizer export object read did not complete",
+    );
+  }
+  if (error instanceof ComputeOptimizerExactDescribeError) {
+    const status = error.code === "INVALID_REQUEST"
+      || error.code === "JOB_SUBSTITUTION"
+      || error.code === "MISSING_JOB"
+      || error.code === "DUPLICATE_JOB"
+      || error.code === "PAGINATION_INVALID"
+      || error.code === "PROVIDER_RESPONSE_INVALID"
+      || error.code === "EXPIRED"
+      ? 400
+      : error.code === "ABORTED" || error.code === "DESCRIBE_TIMEOUT"
+        ? 504
+        : error.code === "OUTPUT_LIMIT_EXCEEDED"
+          ? 413
+          : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "The exact Compute Optimizer export freshness check did not complete",
     );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {

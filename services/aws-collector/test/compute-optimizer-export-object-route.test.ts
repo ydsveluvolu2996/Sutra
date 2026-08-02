@@ -60,6 +60,38 @@ function stored(
   };
 }
 
+function storedLaunch(): RegisteredAwsConnection {
+  const bucket = "customer-compute-optimizer-use1";
+  const basePrefix = "ec2-instance-recommendations/";
+  const effectivePrefix = `${basePrefix}compute-optimizer/123456789012/`;
+  const { computeOptimizerExportObjectContracts: _objectContracts, ...base } = stored({
+    permissionPackVersion: "standard-2026-08.5",
+  });
+  void _objectContracts;
+  return {
+    ...base,
+    computeOptimizerExportLaunchContracts: [{
+      tenantId: TENANT,
+      connectionId: CONNECTION,
+      accountId: "123456789012",
+      partition: "aws",
+      region: "us-east-1",
+      contractId: "co-launch-use1",
+      permissionPackVersion: "standard-2026-08.5",
+      permissionContractId: "compute-optimizer-export-launch-v1",
+      policyName: "SutraComputeOptimizerExportLaunchV1-us-east-1",
+      bucket,
+      bucketArn: `arn:aws:s3:::${bucket}`,
+      basePrefix,
+      effectivePrefix,
+      objectArnPrefix: `arn:aws:s3:::${bucket}/${effectivePrefix}*`,
+      encryptionMode: "SSE_S3",
+      bucketVersioningStatus: "Enabled",
+      servicePrincipal: "compute-optimizer.amazonaws.com",
+    }],
+  };
+}
+
 class Registry {
   public constructor(public record: RegisteredAwsConnection) {}
   public async resolve(scope: ConnectionScope, connectionId: string):
@@ -226,6 +258,66 @@ test("route denies .8.3 and rejects contract/job/address/version substitution", 
         ...body(), ...replacement,
       });
       assert.equal(response.status, 400);
+    }
+    assert.equal(brokerCalls, 4);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("signed .8.5 launch contract reaches the same one-object route and denies siblings", async () => {
+  const sharedSecret = randomBytes(32).toString("base64url");
+  const registry = new Registry(storedLaunch());
+  const acceptedKey = KEY;
+  let brokerCalls = 0;
+  const server = createLocalCollectorServer({
+    sharedSecret,
+    registry,
+    mode: "live",
+    allowLiveAws: true,
+    principalArn: "arn:aws:iam::999988887777:role/SutraCollectorWorkload",
+    now: () => NOW,
+    computeOptimizerExportObjectRoleBrokerFactory: () => ({
+      assumeValidatedComputeOptimizerExportObjectSession:
+        async (_scope, _connectionId, _jobId, request) => {
+          void _scope; void _connectionId; void _jobId;
+          brokerCalls += 1;
+          if (
+            request.contractId !== "co-launch-use1" ||
+            request.region !== "us-east-1" ||
+            request.bucket !== "customer-compute-optimizer-use1" ||
+            request.objectKey !== acceptedKey ||
+            request.plannedJobId !== PLANNED_JOB
+          ) throw new ConnectionIntegrityError();
+          return SESSION;
+        },
+    }),
+    computeOptimizerExportObjectChunkClientFactory: () => ({
+      send: async () => ({
+        $metadata: {}, ContentRange: "bytes 0-3/8", ContentLength: 4,
+        ETag: '"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"', VersionId: "version-1",
+        Body: { async *[Symbol.asyncIterator]() { yield new Uint8Array([1, 2, 3, 4]); } },
+      } as GetObjectCommandOutput),
+    }),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const path = `/v1/connections/${CONNECTION}/compute-optimizer-export-object-chunk`;
+  try {
+    const accepted = await signedRequest(baseUrl, sharedSecret, path, {
+      ...body(), contractId: "co-launch-use1",
+    });
+    assert.equal(accepted.status, 200);
+    assert.doesNotMatch(JSON.stringify(accepted.value), /ASIAOBJECT|secret|token/u);
+    for (const tamper of [
+      { contractId: "neighbor-contract" },
+      { bucket: "neighbor-safe-bucket" },
+      { key: KEY.replace("ec2-instance-recommendations", "neighbor-prefix") },
+    ]) {
+      const rejected = await signedRequest(baseUrl, sharedSecret, path, {
+        ...body(), contractId: "co-launch-use1", ...tamper,
+      });
+      assert.equal(rejected.status, 400);
     }
     assert.equal(brokerCalls, 4);
   } finally {
