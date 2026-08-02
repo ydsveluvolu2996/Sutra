@@ -13,8 +13,8 @@ Starting fixed-tree SHA: `a9e3d96a8804aa217af42b0e53eb16087194ba96`
 |---|---|
 | Official catalog | 29: 3 Foundational, 13 Advanced, 13 Additional |
 | Current release scope | 27 AWS-backed dashboards; ADD-02 Azure CID and ADD-03 GCP CID remain catalogued but are excluded from this build by user direction |
-| Local vertical candidates | 8 of 29 |
-| Partial pipelines | 21 of 29: 19 in-scope AWS-backed plus 2 excluded provider rows |
+| Local vertical candidates | 9 of 29 |
+| Partial pipelines | 20 of 29: 18 in-scope AWS-backed plus 2 excluded provider rows |
 | Engine-only capabilities | 0 of 29 |
 | Absent capabilities | 0 of 29 |
 | Local verticals fully audited | 0 of 29 |
@@ -431,4 +431,16 @@ Next gate:
 | Security and integrity | Identity-only broker requests, exact tenant/account/partition binding, absolute deadlines and abort propagation, signed canonical bodies, replay/tamper rejection, deterministic UTC scheduling, immutable generations, exact currency/channel separation and failure-closed materialization |
 | Focused verification | 31 activation/capability/production/UI tests, 10 exact-route/transport tests and 5 repository tests passed independently; root and collector typechecks, scoped lint, migration parity, diff checks and repository secret scan passed |
 | Remaining gates | Activate the `.8.5` AWS stack and evidence keys, reconcile controlled all-Region exports in two tenants, complete authorized exact-layout/accessibility and fixed-tree release gates, then publish and deploy the reviewed image |
+| Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
+
+### 2026-08-02 — AWS Budgets local vertical closure
+
+| Field | Evidence |
+|---|---|
+| Tracker row / maturity | ADV-08 `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE`; aggregate is 9 candidates and 20 partial pipelines, including 18 in-scope AWS partials and 2 excluded provider partials |
+| Commit | `e2551db` pushed to `origin/agent/mac-mini-finops-continuation` as an isolated ADV-08 vertical commit |
+| Delivery | Exact AWS Budgets and Organizations SDK collection, bounded pagination/deadlines/records, read-only STS session ceiling, signed tenant-bound collector route, immutable production composition, six-hour scheduler, shared durable handler, registered API truth and all 11 native visual purposes |
+| Security and integrity | Server-owned scope, tenant/account/connection/header substitution protection, immutable complete generations, currency separation, sanitized provider failures and no browser-controlled credentials or provider targets |
+| Focused verification | 37/37 focused root and collector tests; root and collector typechecks, collector build, full production build, scoped lint, secret scan of 2,289 files and `git diff --check` passed |
+| Remaining gates | Roll out the exact customer permission contract and deployed asymmetric broker configuration, execute registered migrations, reconcile controlled provider evidence, complete two-tenant/live and fixed-tree gates, then publish and deploy the reviewed image |
 | Release evidence | Complete local vertical only; no image was published or deployed and production remains unchanged |
