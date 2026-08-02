@@ -294,3 +294,27 @@ test("uses fatal UTF-8 and re-verifies the exact decrypted plan shape and hash",
     scope,
   ));
 });
+
+test("round-trips maximum-length tenant identifiers and rejects 257 characters", async () => {
+  const source = input();
+  const value: ComputeOptimizerExportPlanInput = {
+    ...source,
+    scope: {
+      ...source.scope,
+      orgId: "o".repeat(256),
+      customerId: "c".repeat(256),
+    },
+  };
+  const plan = await createComputeOptimizerExportPlan(value);
+  const envelope = await ComputeOptimizerExportPlanEnvelope.fromRawRootKey({
+    rootKey: ROOT_KEY,
+    keyVersion: KEY_VERSION,
+  });
+  const maximum = context(plan);
+  const sealed = await envelope.seal(plan, maximum);
+  assert.deepEqual(await envelope.open(sealed, maximum), plan);
+  await rejectsOpaque(envelope.open(sealed, {
+    ...maximum,
+    orgId: "o".repeat(257),
+  }));
+});

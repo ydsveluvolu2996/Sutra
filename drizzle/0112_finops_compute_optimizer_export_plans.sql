@@ -61,7 +61,7 @@ CREATE TABLE `finops_co_export_plans` (
     AND `sealed_envelope_sha256` NOT GLOB '*[^a-f0-9]*'),
   CHECK (length(`binding_sha256`) = 64
     AND `binding_sha256` NOT GLOB '*[^a-f0-9]*'),
-  CHECK (`created_at` BETWEEN 0 AND 9007199254740991)
+  CHECK (`created_at` BETWEEN 0 AND 8640000000000000)
 );
 --> statement-breakpoint
 CREATE INDEX `finops_co_export_plans_history_idx`

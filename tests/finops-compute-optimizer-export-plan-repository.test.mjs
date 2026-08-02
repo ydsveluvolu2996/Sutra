@@ -23,6 +23,7 @@ const ACCOUNT_B = "999900001111";
 const DISCOVERY_A = `cor_${"d".repeat(64)}`;
 const DISCOVERY_B = `cor_${"e".repeat(64)}`;
 const DISCOVERY_PENDING = `cor_${"f".repeat(64)}`;
+const MAX_DATE_MS = 8_640_000_000_000_000;
 const SCOPE_A = {
   organizationId: ORG_A,
   customerId: CUSTOMER_A,
@@ -179,6 +180,10 @@ function expectCode(code) {
 test("sealed plans are deterministic, replay-safe, and ordered immutable history", async () => {
   await withRepository(async ({ repository }) => {
     const input = planInput();
+    await assert.rejects(
+      repository.recordPlan(SCOPE_A, input, MAX_DATE_MS + 1),
+      expectCode("INVALID_INPUT"),
+    );
     const first = await repository.recordPlan(SCOPE_A, input, 100);
     const replay = await repository.recordPlan(SCOPE_A, input, 200);
     assert.deepEqual(replay, first);
@@ -364,15 +369,28 @@ test("D1 and PostgreSQL schemas retain only sealed material and parity guards", 
       "created_at",
     ]);
     assert.equal(names.some((name) => /bucket|prefix|object_key|plan_json/u.test(name)), false);
+    const guard = await database.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",
+    ).bind("finops_co_export_plans_created_at_guard").first();
+    assert.match(guard?.sql ?? "", /8640000000000000/u);
+    const applied = await database.prepare(
+      "SELECT migration_id FROM sutra_runtime_migrations WHERE migration_id=?",
+    ).bind("0114_finops_compute_optimizer_export_plan_timestamp_guard").first();
+    assert.notEqual(applied, null);
   });
 
-  const postgres = await readFile(
-    new URL(
+  const [postgres, forward, registry, migrator] = await Promise.all([
+    readFile(new URL(
       "../postgres/migrations/0107_finops_compute_optimizer_export_plans.sql",
       import.meta.url,
-    ),
-    "utf8",
-  );
+    ), "utf8"),
+    readFile(new URL(
+      "../postgres/migrations/0109_finops_compute_optimizer_export_plan_timestamp_guard.sql",
+      import.meta.url,
+    ), "utf8"),
+    readFile(new URL("../db/postgres-runtime-migrations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../scripts/postgres-migrate.mjs", import.meta.url), "utf8"),
+  ]);
   assert.match(postgres, /CHECK \(plan_id = 'cope_' \|\| content_sha256\)/u);
   assert.match(postgres, /FINOPS_CO_EXPORT_PLAN_SCOPE_REJECTED/u);
   assert.match(postgres, /FINOPS_CO_EXPORT_PLAN_IMMUTABLE/u);
@@ -381,4 +399,7 @@ test("D1 and PostgreSQL schemas retain only sealed material and parity guards", 
     postgres.match(/CREATE TABLE finops_co_export_plans \([\s\S]*?\n\);/u)?.[0] ?? "",
     /\b(bucket|prefix|object_key|plan_json)\b/u,
   );
+  assert.match(forward, /created_at BETWEEN 0 AND 8640000000000000/u);
+  assert.equal(registry.match(/0109_finops_compute_optimizer_export_plan_timestamp_guard/gu)?.length, 2);
+  assert.equal(migrator.match(/0109_finops_compute_optimizer_export_plan_timestamp_guard\.sql/gu)?.length, 1);
 });

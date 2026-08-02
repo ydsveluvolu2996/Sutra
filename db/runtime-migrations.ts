@@ -109,6 +109,8 @@ import finopsAwsBudgetsDurableAttemptsSchemaSql from "../drizzle/0109_finops_aws
 import finopsEucRuntimeAttemptsSchemaSql from "../drizzle/0110_finops_euc_runtime_attempts.sql?raw";
 import finopsKubecostRuntimeAttemptsSchemaSql from "../drizzle/0111_finops_kubecost_runtime_attempts.sql?raw";
 import finopsComputeOptimizerExportPlansSchemaSql from "../drizzle/0112_finops_compute_optimizer_export_plans.sql?raw";
+import finopsComputeOptimizerExportPlanSetsSchemaSql from "../drizzle/0113_finops_compute_optimizer_export_plan_sets.sql?raw";
+import finopsComputeOptimizerExportPlanTimestampGuardSchemaSql from "../drizzle/0114_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -235,6 +237,8 @@ const migrations = [
   { id: "0110_finops_euc_runtime_attempts", statements: statementsFrom(finopsEucRuntimeAttemptsSchemaSql) },
   { id: "0111_finops_kubecost_runtime_attempts", statements: statementsFrom(finopsKubecostRuntimeAttemptsSchemaSql) },
   { id: "0112_finops_compute_optimizer_export_plans", statements: statementsFrom(finopsComputeOptimizerExportPlansSchemaSql) },
+  { id: "0113_finops_compute_optimizer_export_plan_sets", statements: statementsFrom(finopsComputeOptimizerExportPlanSetsSchemaSql) },
+  { id: "0114_finops_compute_optimizer_export_plan_timestamp_guard", statements: statementsFrom(finopsComputeOptimizerExportPlanTimestampGuardSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

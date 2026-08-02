@@ -23,6 +23,7 @@ const REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
 const KEY_VERSION = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
 const BASE64URL = /^[A-Za-z0-9_-]+$/u;
 const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
+const MAX_DATE_MS = 8_640_000_000_000_000;
 // One immutable plan is regional because AWS creates independent export jobs,
 // requires a Region-local bucket, and discovery evidence is itself regional.
 // A multi-Region activation is represented by a server-owned set of regional
@@ -288,7 +289,7 @@ async function storedPlan(row: PlanRow): Promise<StoredComputeOptimizerExportPla
     true,
   );
   const targetCount = integer(row.target_count, 1, MAX_TARGETS, true);
-  const createdAt = integer(row.created_at, 0, Number.MAX_SAFE_INTEGER, true);
+  const createdAt = integer(row.created_at, 0, MAX_DATE_MS, true);
   if (
     !DISCOVERY_RUN_ID.test(row.discovery_run_id)
     || !PLAN_ID.test(row.plan_id)
@@ -435,7 +436,7 @@ export class ComputeOptimizerExportPlanRepository {
   ): Promise<StoredComputeOptimizerExportPlan> {
     assertScope(scope);
     const input = normalizeInput(unsafeInput);
-    const createdAt = integer(nowMs, 0, Number.MAX_SAFE_INTEGER);
+    const createdAt = integer(nowMs, 0, MAX_DATE_MS);
     const database = await this.ready();
     const live = await this.liveScope(database, scope);
     if (

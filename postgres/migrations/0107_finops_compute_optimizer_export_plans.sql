@@ -29,7 +29,7 @@ CREATE TABLE finops_co_export_plans (
   ),
   sealed_envelope_sha256 text NOT NULL CHECK (sealed_envelope_sha256 ~ '^[a-f0-9]{64}$'),
   binding_sha256 text NOT NULL CHECK (binding_sha256 ~ '^[a-f0-9]{64}$'),
-  created_at bigint NOT NULL CHECK (created_at BETWEEN 0 AND 9007199254740991),
+  created_at bigint NOT NULL CHECK (created_at BETWEEN 0 AND 8640000000000000),
   UNIQUE (org_id,customer_id,connection_id,plan_id),
   UNIQUE (org_id,customer_id,connection_id,discovery_run_id,plan_id),
   FOREIGN KEY (org_id,customer_id,connection_id,discovery_run_id)

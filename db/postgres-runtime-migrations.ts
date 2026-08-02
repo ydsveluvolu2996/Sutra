@@ -104,6 +104,8 @@ import postgresFinopsAwsBudgetsDurableAttemptsSql from "../postgres/migrations/0
 import postgresFinopsEucRuntimeAttemptsSql from "../postgres/migrations/0105_finops_euc_runtime_attempts.sql?raw";
 import postgresFinopsKubecostRuntimeAttemptsSql from "../postgres/migrations/0106_finops_kubecost_runtime_attempts.sql?raw";
 import postgresFinopsComputeOptimizerExportPlansSql from "../postgres/migrations/0107_finops_compute_optimizer_export_plans.sql?raw";
+import postgresFinopsComputeOptimizerExportPlanSetsSql from "../postgres/migrations/0108_finops_compute_optimizer_export_plan_sets.sql?raw";
+import postgresFinopsComputeOptimizerExportPlanTimestampGuardSql from "../postgres/migrations/0109_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -212,6 +214,8 @@ const migrations = [
   { id: "0105_finops_euc_runtime_attempts", source: postgresFinopsEucRuntimeAttemptsSql },
   { id: "0106_finops_kubecost_runtime_attempts", source: postgresFinopsKubecostRuntimeAttemptsSql },
   { id: "0107_finops_compute_optimizer_export_plans", source: postgresFinopsComputeOptimizerExportPlansSql },
+  { id: "0108_finops_compute_optimizer_export_plan_sets", source: postgresFinopsComputeOptimizerExportPlanSetsSql },
+  { id: "0109_finops_compute_optimizer_export_plan_timestamp_guard", source: postgresFinopsComputeOptimizerExportPlanTimestampGuardSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
