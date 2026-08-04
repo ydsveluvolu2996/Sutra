@@ -113,7 +113,7 @@ jobs:
     needs: reuse-pr-gate
     if: ${{ needs.reuse-pr-gate.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       CI: "true"
 
