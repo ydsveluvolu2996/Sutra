@@ -3,9 +3,12 @@ import test from "node:test";
 import pg from "pg";
 
 const databaseUrl = process.env.SUTRA_POSTGRES_RUNTIME_TEST_URL;
-if (!databaseUrl) throw new Error("SUTRA_POSTGRES_RUNTIME_TEST_URL is required");
+// Skip rather than throw when no database is configured. scripts/test-postgres.mjs runs this file with
+// the URL set, but ci-test-shard.mjs also globs it into the offline shards, where a top-level throw
+// failed the whole file instead of standing aside. Matches the sibling launch-ledger schema test.
+const skip = databaseUrl === undefined;
 
-test("PostgreSQL installs the exact-generation constraints and immutable guards", async () => {
+test("PostgreSQL installs the exact-generation constraints and immutable guards", { skip }, async () => {
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   try {
     const tables = await pool.query(
@@ -53,7 +56,7 @@ test("PostgreSQL installs the exact-generation constraints and immutable guards"
   }
 });
 
-test("PostgreSQL rejects an exact artifact over a forged finalized plan-set shell", async () => {
+test("PostgreSQL rejects an exact artifact over a forged finalized plan-set shell", { skip }, async () => {
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
   const token = crypto.randomUUID().replaceAll("-", "");

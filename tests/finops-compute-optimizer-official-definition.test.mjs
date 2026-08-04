@@ -4,10 +4,11 @@ import test from "node:test";
 
 const { FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION: definition } =
   await import("../lib/finops-compute-optimizer-official-definition.ts");
-const [route, panel, evidence] = await Promise.all([
+const [route, panel, evidence, routeHandler] = await Promise.all([
   readFile(new URL("../app/api/v1/finops/compute-optimizer/route.ts", import.meta.url), "utf8"),
   readFile(new URL("../app/costs/finops-compute-optimizer-dashboard.tsx", import.meta.url), "utf8"),
   readFile(new URL("../docs/finops-cid-evidence/ADV-02-compute-optimizer.md", import.meta.url), "utf8"),
+  readFile(new URL("../lib/finops-compute-optimizer-exact-route-handler.ts", import.meta.url), "utf8"),
 ]);
 
 test("Compute Optimizer official public artifacts are immutable and exact", () => {
@@ -35,10 +36,24 @@ test("unpublished QuickSight definition counts remain explicitly unavailable", (
 });
 
 test("route and native UI expose the immutable inventory without claiming parity", () => {
-  assert.match(route, /FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION/gu);
-  assert.equal(route.match(/officialDefinition:FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION/gu)?.length, 2);
+  // The route now delegates to the shared exact route handler, so the official definition is
+  // referenced one level down. Assert the delegation and that the handler still exposes it.
+  assert.match(route, /finops-compute-optimizer-exact-route-handler/u);
+  assert.match(routeHandler, /FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION/u);
+  // Every response path must carry the immutable definition, so no state can answer while claiming
+  // parity. Assert that structurally -- one wiring per jsonResponse -- rather than pinning a count that
+  // moves whenever a lifecycle state is added.
+  const responses = routeHandler.match(/jsonResponse\(/gu) ?? [];
+  const wirings = routeHandler
+    .match(/officialDefinition: *FINOPS_COMPUTE_OPTIMIZER_OFFICIAL_DEFINITION/gu) ?? [];
+  assert.ok(responses.length > 0, "the exact route handler must build at least one response");
+  assert.equal(wirings.length, responses.length,
+    "every exact route handler response must carry the official definition");
   assert.match(panel, /Official AWS Compute Optimizer Dashboard coverage/u);
-  assert.match(panel, /exact sheet,[\s\S]*counts are unavailable/u);
+  // The disclosure was rephrased. Assert its substance: geometry is explicitly not inferred, and
+  // absent evidence reads as unavailable rather than as a zero count.
+  assert.match(panel, /Exact sheet\/control geometry is not inferred/u);
+  assert.match(panel, /Accepted evidence unavailable/u);
   assert.match(panel, /documentedPreviewVisuals\.map/u);
   assert.match(evidence, /NOT_PUBLICLY_COMMITTED/u);
 });

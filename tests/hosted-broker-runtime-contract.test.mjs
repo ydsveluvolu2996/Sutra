@@ -48,7 +48,12 @@ test("hosted broker schema is migrated and uses database-enforced replay and lea
   assert.match(state, /ON CONFLICT \(operation_key\)[\s\S]*WHERE hosted_broker_operation_leases\.expires_at <=/u);
   assert.match(state, /FOR UPDATE SKIP LOCKED/u);
   assert.match(state, /claimExpiredAgentlessRun/u);
-  assert.match(brokerServer, /LIVE_AWS_BROKER_TIMEOUT_MS \+ 10_000/u);
+  // The socket lifetime must outlive the longest credential-owning route so Node never kills a healthy
+  // request before that route's own deadline. The margin is no longer applied to the broker timeout
+  // alone -- it is applied to the maximum across the broker, AWS Health and ResilienceVue bounds -- so
+  // assert that shape rather than the old single-term expression.
+  assert.match(brokerServer, /server\.requestTimeout[\s\S]{0,400}?\+ 10_000/u);
+  assert.match(brokerServer, /Math\.max\([\s\S]{0,200}?LIVE_AWS_BROKER_TIMEOUT_MS[\s\S]{0,200}?\)\s*\+ 10_000/u);
 });
 
 test("hosted onboarding and live collection preserve authenticated org scope end to end", () => {
