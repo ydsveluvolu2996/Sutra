@@ -192,8 +192,13 @@ export class ScadCur2RuntimeAttemptRepository implements ScadCur2ReplayStore {
   public async latest(scope: Omit<ReplayScope, "scheduledWindow">): Promise<ScadCur2RuntimeAttemptStatus | null> {
     if (!IDENTIFIER.test(scope.organizationId) || !IDENTIFIER.test(scope.customerId)
       || !CONNECTION.test(scope.connectionId)) reject("INVALID_INPUT");
+    // Order by scheduled_window, not updated_at/replay_key. replay_key is a SHA-256 digest, so it tiebreaks by
+    // hash, and a late write to an older window bumps that row's updated_at ahead of a newer window. Either way a
+    // stale SUCCEEDED can mask a newer terminal FAILED and the caller reports READY. The
+    // UNIQUE(org_id,customer_id,connection_id,scheduled_window) constraint makes scheduled_window a total order
+    // within a scope, so no tiebreak column is needed.
     const row = await (await this.ready()).prepare(`SELECT * FROM finops_scad_runtime_attempts WHERE org_id=?
-      AND customer_id=? AND connection_id=? ORDER BY updated_at DESC,replay_key DESC LIMIT 1`)
+      AND customer_id=? AND connection_id=? ORDER BY scheduled_window DESC LIMIT 1`)
       .bind(scope.organizationId, scope.customerId, scope.connectionId).first<AttemptRow>();
     if (row === null) return null;
     return { state: row.state, scheduledWindow: row.scheduled_window, attemptCount: integer(row.attempt_count),
