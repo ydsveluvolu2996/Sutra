@@ -232,21 +232,24 @@ export interface MappedComputeOptimizerExportTarget {
 }
 
 export class ComputeOptimizerExportMapperError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "LIMIT_EXCEEDED"
-      | "SOURCE_LINEAGE_MISMATCH"
-      | "PROJECTION_MISMATCH"
-      | "SCHEMA_MISMATCH"
-      | "ROW_EVIDENCE_INVALID"
-      | "NUMERIC_EVIDENCE_INVALID"
-      | "TAG_EVIDENCE_INVALID"
-      | "RANK_MISMATCH"
-      | "DUPLICATE_RESOURCE",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "LIMIT_EXCEEDED"
+    | "SOURCE_LINEAGE_MISMATCH"
+    | "PROJECTION_MISMATCH"
+    | "SCHEMA_MISMATCH"
+    | "ROW_EVIDENCE_INVALID"
+    | "NUMERIC_EVIDENCE_INVALID"
+    | "TAG_EVIDENCE_INVALID"
+    | "RANK_MISMATCH"
+    | "DUPLICATE_RESOURCE";
+  public constructor(code: ComputeOptimizerExportMapperError["code"]) {
     super("Compute Optimizer export mapping rejected");
     this.name = "ComputeOptimizerExportMapperError";
+    this.code = code;
   }
 }
 

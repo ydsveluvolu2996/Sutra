@@ -87,15 +87,20 @@ export type ComputeOptimizerExportObjectChunkClientFactory = (
 ) => ComputeOptimizerExportObjectChunkClient;
 
 export class ComputeOptimizerExportObjectChunkError extends Error {
-  public constructor(public readonly code:
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
     | "INVALID_REQUEST"
     | "OBJECT_READ_FAILED"
     | "OBJECT_CHANGED"
     | "OBJECT_RESPONSE_INVALID"
     | "OBJECT_RANGE_LIMIT_EXCEEDED"
-    | "OBJECT_READ_TIMEOUT") {
+    | "OBJECT_READ_TIMEOUT";
+  public constructor(code: ComputeOptimizerExportObjectChunkError["code"]) {
     super("Compute Optimizer export object chunk request rejected");
     this.name = "ComputeOptimizerExportObjectChunkError";
+    this.code = code;
   }
 }
 

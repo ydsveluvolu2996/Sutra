@@ -99,20 +99,23 @@ export interface ParsedComputeOptimizerExport {
 }
 
 export class ComputeOptimizerExportParserError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "LIMIT_EXCEEDED"
-      | "INVALID_UTF8"
-      | "INVALID_METADATA"
-      | "UNSUPPORTED_DIALECT"
-      | "URL_MISMATCH"
-      | "INVALID_CSV"
-      | "SCHEMA_MISMATCH"
-      | "INVALID_CELL",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "LIMIT_EXCEEDED"
+    | "INVALID_UTF8"
+    | "INVALID_METADATA"
+    | "UNSUPPORTED_DIALECT"
+    | "URL_MISMATCH"
+    | "INVALID_CSV"
+    | "SCHEMA_MISMATCH"
+    | "INVALID_CELL";
+  public constructor(code: ComputeOptimizerExportParserError["code"]) {
     super("Compute Optimizer export parsing rejected");
     this.name = "ComputeOptimizerExportParserError";
+    this.code = code;
   }
 }
 

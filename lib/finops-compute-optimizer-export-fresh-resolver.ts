@@ -98,22 +98,25 @@ export interface FreshComputeOptimizerExportJobChronology {
 }
 
 export class ComputeOptimizerExportFreshResolverError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "ABORTED"
-      | "DEADLINE_EXCEEDED"
-      | "READ_FAILED"
-      | "PAGINATION_INVALID"
-      | "PROVIDER_RESPONSE_INVALID"
-      | "EVIDENCE_MISMATCH"
-      | "JOB_SUBSTITUTION"
-      | "MISSING_JOB"
-      | "DUPLICATE_JOB"
-      | "EXPIRED",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "ABORTED"
+    | "DEADLINE_EXCEEDED"
+    | "READ_FAILED"
+    | "PAGINATION_INVALID"
+    | "PROVIDER_RESPONSE_INVALID"
+    | "EVIDENCE_MISMATCH"
+    | "JOB_SUBSTITUTION"
+    | "MISSING_JOB"
+    | "DUPLICATE_JOB"
+    | "EXPIRED";
+  public constructor(code: ComputeOptimizerExportFreshResolverError["code"]) {
     super("Compute Optimizer export freshness resolution rejected");
     this.name = "ComputeOptimizerExportFreshResolverError";
+    this.code = code;
   }
 }
 

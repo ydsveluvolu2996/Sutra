@@ -149,28 +149,31 @@ export interface ComputeOptimizerExportGeneration
 }
 
 export class ComputeOptimizerExportGenerationError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "LIMIT_EXCEEDED"
-      | "PLAN_SET_INVALID"
-      | "FRESH_BINDING_INVALID"
-      | "DUPLICATE_FRESH_BINDING"
-      | "MISSING_FRESH_BINDING"
-      | "FRESH_BINDING_EXPIRED"
-      | "CHRONOLOGY_INVALID"
-      | "DUPLICATE_TARGET"
-      | "TARGET_SUBSTITUTION"
-      | "OBJECT_SUBSTITUTION"
-      | "DUPLICATE_OBJECT"
-      | "ROW_EVIDENCE_INVALID"
-      | "NUMERIC_EVIDENCE_INVALID"
-      | "DUPLICATE_RESOURCE"
-      | "INCOMPLETE_COVERAGE"
-      | "CONTENT_HASH_MISMATCH",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "LIMIT_EXCEEDED"
+    | "PLAN_SET_INVALID"
+    | "FRESH_BINDING_INVALID"
+    | "DUPLICATE_FRESH_BINDING"
+    | "MISSING_FRESH_BINDING"
+    | "FRESH_BINDING_EXPIRED"
+    | "CHRONOLOGY_INVALID"
+    | "DUPLICATE_TARGET"
+    | "TARGET_SUBSTITUTION"
+    | "OBJECT_SUBSTITUTION"
+    | "DUPLICATE_OBJECT"
+    | "ROW_EVIDENCE_INVALID"
+    | "NUMERIC_EVIDENCE_INVALID"
+    | "DUPLICATE_RESOURCE"
+    | "INCOMPLETE_COVERAGE"
+    | "CONTENT_HASH_MISMATCH";
+  public constructor(code: ComputeOptimizerExportGenerationError["code"]) {
     super("Compute Optimizer export generation rejected");
     this.name = "ComputeOptimizerExportGenerationError";
+    this.code = code;
   }
 }
 

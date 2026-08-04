@@ -227,11 +227,17 @@ async function deriveEnvelopeKey(
 }
 
 export class ComputeOptimizerExportPlanEnvelope {
-  private constructor(
-    private readonly key: CryptoKey,
-    public readonly keyVersion: string,
-    private readonly provider: Crypto,
-  ) {}
+  // Declared and assigned rather than constructor parameter properties: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  private readonly key: CryptoKey;
+  public readonly keyVersion: string;
+  private readonly provider: Crypto;
+  private constructor(key: CryptoKey, keyVersion: string, provider: Crypto) {
+    this.key = key;
+    this.keyVersion = keyVersion;
+    this.provider = provider;
+  }
 
   public static async fromRawRootKey(input: {
     readonly rootKey: Uint8Array;

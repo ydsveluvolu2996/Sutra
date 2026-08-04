@@ -99,20 +99,23 @@ export interface LoadComputeOptimizerExportObjectSetOptions {
 }
 
 export class ComputeOptimizerExportObjectSetError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "LIMIT_EXCEEDED"
-      | "ABORTED"
-      | "DEADLINE_EXCEEDED"
-      | "ADDRESS_SET_MISMATCH"
-      | "READ_FAILED"
-      | "OBJECT_IDENTITY_MISMATCH"
-      | "OBJECT_MUTATED"
-      | "PARSE_REJECTED",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "LIMIT_EXCEEDED"
+    | "ABORTED"
+    | "DEADLINE_EXCEEDED"
+    | "ADDRESS_SET_MISMATCH"
+    | "READ_FAILED"
+    | "OBJECT_IDENTITY_MISMATCH"
+    | "OBJECT_MUTATED"
+    | "PARSE_REJECTED";
+  public constructor(code: ComputeOptimizerExportObjectSetError["code"]) {
     super("Compute Optimizer export object set rejected");
     this.name = "ComputeOptimizerExportObjectSetError";
+    this.code = code;
   }
 }
 

@@ -205,20 +205,23 @@ export interface VerifiedComputeOptimizerExportJobBinding {
 }
 
 export class ComputeOptimizerExportPlanError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "LIMIT_EXCEEDED"
-      | "SCOPE_MISMATCH"
-      | "REGION_BUCKET_CONFLICT"
-      | "DUPLICATE_TARGET"
-      | "MISSING_TARGET"
-      | "REQUEST_PROOF_INVALID"
-      | "JOB_SUBSTITUTION"
-      | "CONTENT_HASH_MISMATCH",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "LIMIT_EXCEEDED"
+    | "SCOPE_MISMATCH"
+    | "REGION_BUCKET_CONFLICT"
+    | "DUPLICATE_TARGET"
+    | "MISSING_TARGET"
+    | "REQUEST_PROOF_INVALID"
+    | "JOB_SUBSTITUTION"
+    | "CONTENT_HASH_MISMATCH";
+  public constructor(code: ComputeOptimizerExportPlanError["code"]) {
     super("Compute Optimizer export plan rejected");
     this.name = "ComputeOptimizerExportPlanError";
+    this.code = code;
   }
 }
 

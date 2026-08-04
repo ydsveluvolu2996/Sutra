@@ -204,7 +204,10 @@ export interface ComputeOptimizerActivationReconcileDependencies {
 }
 
 export class ComputeOptimizerActivationJobError extends Error {
-  public constructor(public readonly code:
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
     | "INVALID_CONFIGURATION"
     | "INVALID_JOB"
     | "INVALID_SCOPE"
@@ -214,9 +217,11 @@ export class ComputeOptimizerActivationJobError extends Error {
     | "LAUNCH_REJECTED"
     | "PERSISTENCE_REJECTED"
     | "ABORTED"
-    | "DEADLINE_EXCEEDED") {
+    | "DEADLINE_EXCEEDED";
+  public constructor(code: ComputeOptimizerActivationJobError["code"]) {
     super("Compute Optimizer activation job rejected");
     this.name = "ComputeOptimizerActivationJobError";
+    this.code = code;
   }
 }
 

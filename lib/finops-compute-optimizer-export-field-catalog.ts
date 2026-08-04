@@ -473,19 +473,22 @@ export const COMPUTE_OPTIMIZER_EXPORT_FIELD_EVIDENCE = Object.freeze({
 } as const);
 
 export class ComputeOptimizerExportFieldCatalogError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_EXPORT_FAMILY"
-      | "OPERATION_MISMATCH"
-      | "INVALID_FIELDS"
-      | "DUPLICATE_FIELD"
-      | "NON_CANONICAL_ORDER"
-      | "UNKNOWN_FIELD"
-      | "CROSS_FAMILY_FIELD"
-      | "MINIMUM_FIELD_MISSING",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_EXPORT_FAMILY"
+    | "OPERATION_MISMATCH"
+    | "INVALID_FIELDS"
+    | "DUPLICATE_FIELD"
+    | "NON_CANONICAL_ORDER"
+    | "UNKNOWN_FIELD"
+    | "CROSS_FAMILY_FIELD"
+    | "MINIMUM_FIELD_MISSING";
+  public constructor(code: ComputeOptimizerExportFieldCatalogError["code"]) {
     super("Compute Optimizer fieldsToExport rejected");
     this.name = "ComputeOptimizerExportFieldCatalogError";
+    this.code = code;
   }
 }
 

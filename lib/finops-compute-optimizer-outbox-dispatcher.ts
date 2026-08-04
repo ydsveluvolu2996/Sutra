@@ -68,15 +68,20 @@ export interface ComputeOptimizerOutboxDispatcherDependencies {
 }
 
 export class ComputeOptimizerOutboxDispatcherError extends Error {
-  public constructor(public readonly code:
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
     | "INVALID_CONFIGURATION"
     | "INVALID_WORK"
     | "ABORTED"
     | "DEADLINE_EXCEEDED"
     | "CAS_REJECTED"
-    | "QUEUE_REJECTED") {
+    | "QUEUE_REJECTED";
+  public constructor(code: ComputeOptimizerOutboxDispatcherError["code"]) {
     super("Compute Optimizer materializer outbox dispatch rejected");
     this.name = "ComputeOptimizerOutboxDispatcherError";
+    this.code = code;
   }
 }
 
