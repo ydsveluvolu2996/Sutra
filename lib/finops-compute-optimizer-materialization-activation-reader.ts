@@ -41,16 +41,21 @@ export interface ComputeOptimizerMaterializationActivationReaderOptions {
 }
 
 export class ComputeOptimizerMaterializationActivationReaderError extends Error {
-  public constructor(public readonly code:
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
     | "INVALID_CONFIGURATION"
     | "ABORTED"
     | "DEADLINE_EXCEEDED"
     | "TRANSPORT_FAILED"
     | "BROKER_RESPONSE_INVALID"
     | "REGION_MATRIX_INVALID"
-    | "LIMIT_EXCEEDED") {
+    | "LIMIT_EXCEEDED";
+  public constructor(code: ComputeOptimizerMaterializationActivationReaderError["code"]) {
     super("Compute Optimizer materialization activation manifest read rejected");
     this.name = "ComputeOptimizerMaterializationActivationReaderError";
+    this.code = code;
   }
 }
 

@@ -83,15 +83,18 @@ export interface ComputeOptimizerExactObjectSessionPolicy {
 }
 
 export class ComputeOptimizerExportSessionPolicyError extends Error {
-  public constructor(
-    public readonly code:
-      | "INVALID_INPUT"
-      | "ADDRESS_NOT_PLANNED"
-      | "ENCRYPTION_BINDING_MISMATCH"
-      | "POLICY_SIZE_EXCEEDED",
-  ) {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
+    | "INVALID_INPUT"
+    | "ADDRESS_NOT_PLANNED"
+    | "ENCRYPTION_BINDING_MISMATCH"
+    | "POLICY_SIZE_EXCEEDED";
+  public constructor(code: ComputeOptimizerExportSessionPolicyError["code"]) {
     super("Compute Optimizer export session policy rejected");
     this.name = "ComputeOptimizerExportSessionPolicyError";
+    this.code = code;
   }
 }
 

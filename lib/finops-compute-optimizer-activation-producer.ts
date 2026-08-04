@@ -230,7 +230,10 @@ export interface ComputeOptimizerActivationProducerReadyOutcome {
 }
 
 export class ComputeOptimizerActivationProducerError extends Error {
-  public constructor(public readonly code:
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code:
     | "INVALID_CONFIGURATION"
     | "INVALID_INPUT"
     | "ABORTED"
@@ -240,9 +243,11 @@ export class ComputeOptimizerActivationProducerError extends Error {
     | "DISCOVERY_REFRESH_REQUIRED"
     | "LAUNCH_RESPONSE_INVALID"
     | "DESCRIBE_RESPONSE_INVALID"
-    | "PLAN_SET_BLOCKED") {
+    | "PLAN_SET_BLOCKED";
+  public constructor(code: ComputeOptimizerActivationProducerError["code"]) {
     super("Compute Optimizer activation production rejected");
     this.name = "ComputeOptimizerActivationProducerError";
+    this.code = code;
   }
 }
 

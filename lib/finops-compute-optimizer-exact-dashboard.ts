@@ -178,9 +178,14 @@ export interface ComputeOptimizerExactDashboard {
 }
 
 export class ComputeOptimizerExactDashboardError extends Error {
-  public constructor(public readonly code: "INVALID_INPUT" | "LIMIT_EXCEEDED") {
+  // Declared and assigned rather than a constructor parameter property: Node's default strip-only TypeScript mode
+  // cannot transform parameter properties, so any test importing this module without the transform loader fails to
+  // load it.
+  public readonly code: "INVALID_INPUT" | "LIMIT_EXCEEDED";
+  public constructor(code: ComputeOptimizerExactDashboardError["code"]) {
     super("Compute Optimizer exact dashboard projection rejected");
     this.name = "ComputeOptimizerExactDashboardError";
+    this.code = code;
   }
 }
 
