@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { register } from "node:module";
 import test from "node:test";
 
 import { canonicalJson } from "../lib/canonical-json.ts";
@@ -19,10 +20,14 @@ import {
 import { createComputeOptimizerExportPlan } from "../lib/finops-compute-optimizer-export-plan.ts";
 import { COMPUTE_OPTIMIZER_EXPORT_MATERIALIZATION_PROJECTION } from
   "../lib/finops-compute-optimizer-export-field-catalog.ts";
-import {
-  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION as BROKER_MATERIALIZATION_PROJECTION,
-  parseComputeOptimizerExportLaunchAttempt as parseBrokerLaunchAttempt,
-} from "../services/aws-collector/src/compute-optimizer-export-launcher.ts";
+// The collector launcher is NodeNext source that imports its siblings with post-compilation `./x.js`
+// specifiers, which do not resolve against the raw .ts tree. Register the loader that maps them, then
+// import it dynamically: the static imports above are hoisted and resolve before this runs.
+register(new URL("./cloudflare-loader.mjs", import.meta.url));
+const {
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_MATERIALIZATION_PROJECTION: BROKER_MATERIALIZATION_PROJECTION,
+  parseComputeOptimizerExportLaunchAttempt: parseBrokerLaunchAttempt,
+} = await import("../services/aws-collector/src/compute-optimizer-export-launcher.ts");
 
 const SEALED = "2026-08-02T12:00:00.000Z";
 const SCHEDULED = "2026-08-02T00:00:00.000Z";

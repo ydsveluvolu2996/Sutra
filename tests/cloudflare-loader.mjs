@@ -27,6 +27,24 @@ export function resolve(specifier, context, nextResolve) {
       return { url: indexCandidate.href, shortCircuit: true };
     }
   }
+  // services/aws-collector is a NodeNext package that compiles to dist/, so its sources import each
+  // other with the post-compilation `./x.js` specifier. A root test importing collector source
+  // directly reads the raw .ts, where that specifier does not exist. Map it to the sibling .ts only
+  // when the .js genuinely is not there, so a real emitted .js still wins.
+  if (
+    context.parentURL !== undefined &&
+    (specifier.startsWith("./") || specifier.startsWith("../")) &&
+    specifier.endsWith(".js")
+  ) {
+    const asJs = new URL(specifier, context.parentURL);
+    const asTs = new URL(`${specifier.slice(0, -3)}.ts`, context.parentURL);
+    if (
+      asJs.protocol === "file:" && !existsSync(fileURLToPath(asJs))
+      && existsSync(fileURLToPath(asTs))
+    ) {
+      return { url: asTs.href, shortCircuit: true };
+    }
+  }
   return nextResolve(specifier, context);
 }
 
