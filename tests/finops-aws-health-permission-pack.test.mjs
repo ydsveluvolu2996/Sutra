@@ -14,7 +14,7 @@ const successorPath = resolve(root,
   "infrastructure/customer-onboarding-role-standard-2026-08.8.yaml");
 const [priorSource, successorSource, brokerSource, registrySource, localServerSource,
   hostedServerSource, permissionRegistrySource, supportRepositorySource,
-  extendedRepositorySource] = await Promise.all([
+  extendedRepositorySource, successorCatalogSource] = await Promise.all([
   readFile(priorPath, "utf8"), readFile(successorPath, "utf8"),
   readFile(resolve(root, "services/aws-collector/src/role-broker.ts"), "utf8"),
   readFile(resolve(root, "services/aws-collector/src/local-registry.ts"), "utf8"),
@@ -23,6 +23,7 @@ const [priorSource, successorSource, brokerSource, registrySource, localServerSo
   readFile(resolve(root, "lib/finops-aws-permissions.ts"), "utf8"),
   readFile(resolve(root, "db/finops-aws-support-cases-runtime-repository.ts"), "utf8"),
   readFile(resolve(root, "db/finops-extended-support-runtime-repository.ts"), "utf8"),
+  readFile(resolve(root, "lib/finops-permission-pack-successors.ts"), "utf8"),
 ]);
 const prior = parseYaml(priorSource, { json: false });
 const successor = parseYaml(successorSource, { json: false });
@@ -104,8 +105,12 @@ test(".8.8 is accepted and attested at every credential-owning boundary", () => 
   assert.match(localServerSource, /AWS_HEALTH_RESPONSE_LIMIT/u);
   assert.match(hostedServerSource, /createLocalCollectorServer/u);
   assert.match(hostedServerSource, /hostedRuntime: true/u);
-  assert.match(supportRepositorySource, /standard-2026-08\.8/u);
-  assert.match(extendedRepositorySource, /standard-2026-08\.8/u);
+  // These allowlists moved out of each runtime and into the shared successor catalog, so .8.8 is no
+  // longer a literal here. Assert the same guarantee where it now lives: the catalog enumerates .8.8
+  // and both runtimes resolve eligibility through that enumeration, not a lexical comparison.
+  assert.match(successorCatalogSource, /"standard-2026-08\.8",/u);
+  assert.match(supportRepositorySource, /AWS_SUPPORT_CASES_RUNTIME_PERMISSION_PACK_SQL/u);
+  assert.match(extendedRepositorySource, /EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACK_SQL/u);
   for (const action of actions) assert.match(permissionRegistrySource,
     new RegExp(action.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
 });

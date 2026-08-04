@@ -749,6 +749,10 @@ test("a dependency resolving after terminal cannot start any later external side
 test("external abort cuts off an uncooperative launch and preserves the stable error", async () => {
   const controller = new AbortController();
   let launchSignal: AbortSignal | undefined;
+  // Signal arrival rather than spinning a fixed number of microtask turns. The producer awaits real
+  // work before it reaches launchExact, so a bounded spin raced it and failed under CPU contention.
+  let launchReached: () => void;
+  const launched = new Promise<void>((resolve) => { launchReached = resolve; });
   const run = harness({
     launchValue: async () => await new Promise(() => undefined),
   });
@@ -758,6 +762,7 @@ test("external abort cuts off an uncooperative launch and preserves the stable e
     launchTransport: {
       launchExact: async (attempt, context) => {
         launchSignal = context.signal;
+        launchReached();
         return await original(attempt, context);
       },
     },
@@ -765,9 +770,7 @@ test("external abort cuts off an uncooperative launch and preserves the stable e
   const pending = createComputeOptimizerActivationProducer(dependencies)(input({
     signal: controller.signal,
   }));
-  for (let spin = 0; spin < 50 && launchSignal === undefined; spin += 1) {
-    await new Promise((resolve) => setImmediate(resolve));
-  }
+  await launched;
   assert.ok(launchSignal !== undefined);
   controller.abort();
   await assert.rejects(pending, code("ABORTED"));
