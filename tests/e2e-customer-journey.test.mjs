@@ -966,7 +966,7 @@ test("onboarded customer can exercise every app section without a crash", async 
         status = response.status;
         bodyText = await response.text();
         if (status === 200 || status === 201) outcome = "PASS";
-        else if (status === 500) outcome = "FAIL_500";
+        else if (status === 500) { outcome = "FAIL_500"; note = safeErr(bodyText); }
         else if (status === 404) outcome = "FAIL_404";
         else if (status === 401 || status === 403) outcome = "FAIL_AUTH";
         else if (status === 503) { outcome = "SOFT_503"; note = `infra gate: ${safeErr(bodyText)}`; }

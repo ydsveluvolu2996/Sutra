@@ -228,6 +228,44 @@ export function scheduleAwsBudgetsTick(scheduledAtMs = Date.now()) {
   return scheduleAwsBudgetsProductionTick(scheduledAtMs);
 }
 
+/**
+ * Scheduling a provider vertical must never require broker credentials. Each tick only enqueues a
+ * scoped durable job; the signed broker is resolved later, by the claimed handler. Several
+ * compositions still build the broker eagerly, so on a deployment without asymmetric broker signing
+ * keys the first gated vertical threw and aborted the entire internal drain — every later tick and
+ * runDueBackgroundJobs() never ran at all.
+ *
+ * Absorb only these enumerated gate codes, report the vertical as unavailable carrying its exact
+ * code, and let the rest of the drain proceed. Every other error still propagates, so a real
+ * scheduling fault stays loud, and a gated tick is never reported as a successful zero-enqueue tick.
+ */
+const BROKER_GATED_SCHEDULE_CODES: ReadonlySet<string> = new Set([
+  "AWS_HEALTH_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "AWS_SUPPORT_CASES_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "DCF_STEP_FUNCTIONS_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "END_USER_COMPUTING_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "EXTENDED_SUPPORT_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "GRAVITON_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "RESILIENCE_VUE_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+]);
+
+export interface UnavailableScheduleTick {
+  readonly scheduled: false;
+  readonly unavailableCode: string;
+}
+
+async function gatedScheduleTick<T>(
+  tick: () => T | Promise<T>,
+): Promise<T | UnavailableScheduleTick> {
+  try {
+    return await tick();
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (!BROKER_GATED_SCHEDULE_CODES.has(code)) throw error;
+    return { scheduled: false, unavailableCode: code };
+  }
+}
+
 function extendedSupportProductionComposition() {
   const secrets = getPilotSecrets();
   if (secrets.brokerAuthentication.mode !== "asymmetric") {
@@ -244,7 +282,7 @@ function extendedSupportProductionComposition() {
 
 /** Daily deterministic ADV-04 scheduler hook for the internal job tick. */
 export function scheduleExtendedSupportTick(scheduledAtMs = Date.now()) {
-  return extendedSupportProductionComposition().scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(() => extendedSupportProductionComposition().scheduleTick(scheduledAtMs));
 }
 
 function awsSupportCasesProductionComposition() {
@@ -263,7 +301,7 @@ function awsSupportCasesProductionComposition() {
 
 /** Daily deterministic ADV-09 organization scheduler hook. */
 export function scheduleAwsSupportCasesTick(scheduledAtMs = Date.now()) {
-  return awsSupportCasesProductionComposition().scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(() => awsSupportCasesProductionComposition().scheduleTick(scheduledAtMs));
 }
 
 function awsHealthProductionComposition() {
@@ -282,7 +320,7 @@ function awsHealthProductionComposition() {
 
 /** Daily deterministic ADV-06 organization-view scheduler hook. */
 export function scheduleAwsHealthTick(scheduledAtMs = Date.now()) {
-  return awsHealthProductionComposition().scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(() => awsHealthProductionComposition().scheduleTick(scheduledAtMs));
 }
 
 let resilienceVueComposition: ReturnType<typeof createResilienceVueProductionComposition>
@@ -311,7 +349,7 @@ function resilienceVueProductionComposition() {
 
 /** Daily deterministic ADV-10 connection-scoped ResilienceVue scheduler hook. */
 export async function scheduleResilienceVueTick(scheduledAtMs = Date.now()) {
-  return (await resilienceVueProductionComposition()).scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(async () => (await resilienceVueProductionComposition()).scheduleTick(scheduledAtMs));
 }
 
 function dcfStepFunctionsProductionComposition() {
@@ -330,7 +368,7 @@ function dcfStepFunctionsProductionComposition() {
 
 /** Hourly deterministic ADV-12 connection-scoped Step Functions scheduler. */
 export function scheduleDcfStepFunctionsTick(scheduledAtMs = Date.now()) {
-  return dcfStepFunctionsProductionComposition().scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(() => dcfStepFunctionsProductionComposition().scheduleTick(scheduledAtMs));
 }
 
 function endUserComputingProductionComposition() {
@@ -352,7 +390,7 @@ function endUserComputingProductionComposition() {
 
 /** Six-hour deterministic ADV-11 End User Computing scheduler. */
 export function scheduleEndUserComputingTick(scheduledAtMs = Date.now()) {
-  return endUserComputingProductionComposition().scheduleTick(scheduledAtMs);
+  return gatedScheduleTick(() => endUserComputingProductionComposition().scheduleTick(scheduledAtMs));
 }
 
 function gravitonProductionComposition(){const secrets=getPilotSecrets();
@@ -374,7 +412,7 @@ function gravitonProductionComposition(){const secrets=getPilotSecrets();
     }});}
 /** Daily deterministic ADV-05 Graviton Savings scheduler. */
 export function scheduleGravitonSavingsTick(scheduledAtMs=Date.now()){
-  return gravitonProductionComposition().scheduleTick(scheduledAtMs);}
+  return gatedScheduleTick(() => gravitonProductionComposition().scheduleTick(scheduledAtMs));}
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
