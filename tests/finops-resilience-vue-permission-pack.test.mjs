@@ -14,7 +14,7 @@ const successorPath = resolve(root,
   "infrastructure/customer-onboarding-role-standard-2026-08.9.yaml");
 const [priorSource, successorSource, brokerSource, registrySource, serverSource,
   workerSource, runnerSource, healthRepositorySource, supportRepositorySource,
-  extendedRepositorySource, supportRouteSource] = await Promise.all([
+  extendedRepositorySource, supportRouteSource, successorCatalogSource] = await Promise.all([
   readFile(priorPath, "utf8"),
   readFile(successorPath, "utf8"),
   readFile(resolve(root, "services/aws-collector/src/role-broker.ts"), "utf8"),
@@ -26,6 +26,7 @@ const [priorSource, successorSource, brokerSource, registrySource, serverSource,
   readFile(resolve(root, "db/finops-aws-support-cases-runtime-repository.ts"), "utf8"),
   readFile(resolve(root, "db/finops-extended-support-runtime-repository.ts"), "utf8"),
   readFile(resolve(root, "app/api/v1/finops/aws-support-cases-radar/route.ts"), "utf8"),
+  readFile(resolve(root, "lib/finops-permission-pack-successors.ts"), "utf8"),
 ]);
 const prior = parseYaml(priorSource, { json: false });
 const successor = parseYaml(successorSource, { json: false });
@@ -95,9 +96,19 @@ test(".8.9 is enforced at every credential-owning and worker boundary", () => {
   assert.match(workerSource, /RESILIENCE_VUE_RUNTIME_JOB_KIND/u);
   assert.match(workerSource, /scheduleResilienceVueTick/u);
   assert.match(runnerSource, /scheduleResilienceVueTick/u);
-  for (const source of [healthRepositorySource, supportRepositorySource,
-    extendedRepositorySource, supportRouteSource]) {
-    assert.match(source, /standard-2026-08\.9/u,
-      "the .8.9 successor must preserve every predecessor runtime");
+  // ADV-12 moved these predecessor allowlists out of each runtime and into the shared successor catalog, so the
+  // pack version is no longer a literal in the files below. Assert the same guarantee where it now lives: the
+  // catalog still enumerates .8.9, and every predecessor runtime resolves eligibility through that enumeration
+  // rather than a lexical version comparison.
+  assert.match(successorCatalogSource, /"standard-2026-08\.9",/u,
+    "the shared successor catalog must still enumerate the .8.9 pack");
+  for (const [runtime, source, allowlist] of [
+    ["aws health", healthRepositorySource, /AWS_HEALTH_RUNTIME_PERMISSION_PACK_SQL/u],
+    ["aws support cases", supportRepositorySource, /AWS_SUPPORT_CASES_RUNTIME_PERMISSION_PACK_SQL/u],
+    ["extended support", extendedRepositorySource, /EXTENDED_SUPPORT_RUNTIME_PERMISSION_PACK_SQL/u],
+    ["aws support cases radar", supportRouteSource, /isAwsSupportCasesRuntimePermissionPack/u],
+  ]) {
+    assert.match(source, allowlist,
+      `the .8.9 successor must preserve the ${runtime} predecessor runtime`);
   }
 });
