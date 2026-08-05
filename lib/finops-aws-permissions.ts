@@ -232,6 +232,7 @@ const SOURCE_PERMISSIONS: Readonly<Record<FinopsSourceId, SourcePermissionDefini
       "aws-portal:ViewBilling",
       "billing:GetBillingViewData",
       "budgets:DescribeBudgetActionsForBudget",
+      "budgets:ListTagsForResource",
       "budgets:ViewBudget",
       "organizations:DescribeOrganization",
       "organizations:ListAccounts",
@@ -905,7 +906,11 @@ function collectorResourcesForAction(
       resources: [`arn:${partition}:states:${region}:${accountId}:stateMachine:sutra-finops-*`],
     };
   }
-  if (action === "budgets:ViewBudget" || action === "budgets:DescribeBudgetActionsForBudget") {
+  if (
+    action === "budgets:ViewBudget"
+    || action === "budgets:DescribeBudgetActionsForBudget"
+    || action === "budgets:ListTagsForResource"
+  ) {
     return { resources: [`arn:${partition}:budgets::${accountId}:budget/*`] };
   }
   if (action === "billing:GetBillingViewData") {

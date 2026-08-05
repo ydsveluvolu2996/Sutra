@@ -62,6 +62,7 @@ export const AWS_BUDGETS_READ_IAM_ACTIONS = Object.freeze([
   "aws-portal:ViewBilling",
   "budgets:ViewBudget",
   "budgets:DescribeBudgetActionsForBudget",
+  "budgets:ListTagsForResource",
 ] as const);
 
 /** Current service-authorization dependency for billing-view backed reads. */

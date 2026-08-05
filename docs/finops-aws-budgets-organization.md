@@ -47,6 +47,7 @@ The current AWS service-authorization mapping requires these read permissions:
 - `aws-portal:ViewBilling`
 - `budgets:ViewBudget`
 - `budgets:DescribeBudgetActionsForBudget`
+- `budgets:ListTagsForResource`
 
 AWS lists `billing:GetBillingViewData` as a dependent action for
 `budgets:ViewBudget`. Budget resources should be restricted to the connected
@@ -66,6 +67,7 @@ Authoritative references:
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_DescribeNotificationsForBudget.html>
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_DescribeSubscribersForNotification.html>
 - <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_DescribeBudgetActionsForBudget.html>
+- <https://docs.aws.amazon.com/aws-cost-management/latest/APIReference/API_budgets_ListTagsForResource.html>
 
 Every operation has explicit page, record, token, capture-size, and response
 bounds. Replayed pagination tokens, wrong-account page requests, conflicting

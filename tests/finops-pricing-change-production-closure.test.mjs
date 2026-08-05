@@ -69,8 +69,6 @@ test("full CUR2 reader exhausts more than the UI query ceiling and pins one acti
 test("runtime acceptance is immutable, same-tenant, and replay-addressable", async () => {
   const { miniflare, db } = await database();
   try {
-    const sql = await readFile(path.join(root, "drizzle/0128_finops_pricing_change_runtime.sql"), "utf8");
-    for (const statement of sql.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) await db.prepare(statement).run();
     const snapshotId = `pca_${"1".repeat(64)}`, evidence = `fss_${"2".repeat(64)}`, generation = `fbg_${"3".repeat(64)}`;
     await db.prepare(`INSERT INTO finops_pricing_change_materializations(snapshot_id,org_id,customer_id,connection_id,evidence_generation_id,state,
       content_sha256,evidence_reference_ciphertext,evidence_reference_key_version,captured_at,usage_period_start_at,usage_period_end_at,

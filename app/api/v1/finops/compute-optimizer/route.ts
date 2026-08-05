@@ -25,17 +25,14 @@ import { runComputeOptimizerMaterializationActivationManifest } from
 
 export const dynamic = "force-dynamic";
 
-const exactRepository = new ComputeOptimizerExactGenerationRepository();
-const planSetRepository = new ComputeOptimizerExportPlanSetRepository();
-const planRepository = new ComputeOptimizerExportPlanRepository();
-const activationRepository = new ComputeOptimizerActivationRepository();
-
 export const GET = createComputeOptimizerExactGetHandler({
   requireSession: requireApiSession,
   getConnection: getConnectionForOrg,
   assertRead: (auth, customerId) => assertSessionCapability(auth, "connection:read", customerId),
-  getHeadReference: (scope) => exactRepository.getAcceptedHeadReference(scope),
+  getHeadReference: (scope) =>
+    new ComputeOptimizerExactGenerationRepository().getAcceptedHeadReference(scope),
   getCollectionState: async (scope) => {
+    const activationRepository = new ComputeOptimizerActivationRepository();
     const capability = await activationRepository.getCurrentCapability(scope);
     if (capability === null || !capability.enabled) return {
       state: "UNAVAILABLE" as const,
@@ -63,12 +60,15 @@ export const GET = createComputeOptimizerExactGetHandler({
       updatedAtIso: latest.updatedAtIso,
     };
   },
-  getStoredPlanSet: (scope, planSetId) => planSetRepository.getPlanSet(scope, planSetId),
-  getStoredPlan: (scope, planId) => planRepository.getPlan(scope, planId),
+  getStoredPlanSet: (scope, planSetId) =>
+    new ComputeOptimizerExportPlanSetRepository().getPlanSet(scope, planSetId),
+  getStoredPlan: (scope, planId) =>
+    new ComputeOptimizerExportPlanRepository().getPlan(scope, planId),
   createEnvelope: () => ComputeOptimizerExportPlanEnvelope.fromEnvironment(),
   readPlanSet: readComputeOptimizerExportPlanSet,
   getGeneration: (scope, planSet, generationId) =>
-    exactRepository.getAcceptedGeneration(scope, planSet, generationId),
+    new ComputeOptimizerExactGenerationRepository()
+      .getAcceptedGeneration(scope, planSet, generationId),
   buildDashboard: buildComputeOptimizerExactDashboard,
   nowMs: Date.now,
 });
@@ -87,8 +87,9 @@ export const POST = createComputeOptimizerCapabilityPostHandler({
         deadlineAtMs: Date.now() + 15_000,
       }),
   },
-  getCurrentCapability: (scope) => activationRepository.getCurrentCapability(scope),
+  getCurrentCapability: (scope) =>
+    new ComputeOptimizerActivationRepository().getCurrentCapability(scope),
   recordCapability: (scope, input, nowMs) =>
-    activationRepository.recordCapability(scope, input, nowMs),
+    new ComputeOptimizerActivationRepository().recordCapability(scope, input, nowMs),
   nowMs: Date.now,
 });

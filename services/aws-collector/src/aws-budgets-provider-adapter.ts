@@ -55,6 +55,7 @@ export const AWS_BUDGETS_PROVIDER_SESSION_ACTIONS = Object.freeze([
   "billing:GetBillingViewData",
   "budgets:ViewBudget",
   "budgets:DescribeBudgetActionsForBudget",
+  "budgets:ListTagsForResource",
   "organizations:DescribeOrganization",
   "organizations:ListAccounts",
   "organizations:ListRoots",

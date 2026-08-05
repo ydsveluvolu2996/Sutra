@@ -471,6 +471,7 @@ test("documents exact read APIs, IAM actions, and organization dependencies with
     "aws-portal:ViewBilling",
     "budgets:ViewBudget",
     "budgets:DescribeBudgetActionsForBudget",
+    "budgets:ListTagsForResource",
   ]);
   assert.deepEqual(AWS_BUDGETS_DEPENDENT_IAM_ACTIONS, ["billing:GetBillingViewData"]);
   assert.deepEqual(AWS_BUDGETS_ORGANIZATION_READ_IAM_ACTIONS, [
@@ -485,5 +486,8 @@ test("documents exact read APIs, IAM actions, and organization dependencies with
     ...AWS_BUDGETS_DEPENDENT_IAM_ACTIONS,
     ...AWS_BUDGETS_ORGANIZATION_READ_IAM_ACTIONS,
   ];
-  assert.equal(all.some((action) => /(?:Create|Delete|Execute|Modify|Put|Tag|Untag|Update)/u.test(action)), false);
+  assert.equal(
+    all.some((action) => /^[^:]+:(?:Create|Delete|Execute|Modify|Put|Tag|Untag|Update)/u.test(action)),
+    false,
+  );
 });

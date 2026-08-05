@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import test from "node:test";
 import { Miniflare } from "miniflare";
@@ -15,17 +14,13 @@ function key(window) { return `scad-cur2:org_scad:customer_scad:${CONNECTION}:${
 async function digest(value) { const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(hash)].map((part) => part.toString(16).padStart(2, "0")).join(""); }
 
-// Miniflare D1 plus the runtime schema, the attempts migration, and the org/customer/connection the foreign keys
+// Miniflare D1 plus the runtime schema and the org/customer/connection the foreign keys
 // require. Each call gets its own database, so tests never share attempt rows.
 async function harness() {
   const mf = new Miniflare({ modules: true, script: "export default {fetch(){return new Response('ok')}}",
     compatibilityDate: "2026-05-22", d1Databases: { DB: `scad-replay-${crypto.randomUUID()}` }, d1Persist: false });
   const database = await mf.getD1Database("DB"); runtime.resetRuntimeSchemaCacheForTests();
   await runtime.ensureRuntimeSchema(database);
-  const migration = await readFile(new URL("../drizzle/0125_finops_scad_runtime_attempts.sql", import.meta.url), "utf8");
-  for (const statement of migration.split("--> statement-breakpoint").map((item) => item.trim()).filter(Boolean)) {
-    await database.prepare(statement).run();
-  }
   await database.batch([
     database.prepare("INSERT INTO organizations(id,slug,name,status) VALUES ('org_scad','org-scad','SCAD','active')"),
     database.prepare("INSERT INTO customers(id,org_id,slug,name,status) VALUES ('customer_scad','org_scad','customer-scad','SCAD','active')"),

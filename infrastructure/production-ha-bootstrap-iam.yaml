@@ -355,7 +355,13 @@ Resources:
                 aws:RequestTag/sutra:environment: production
           - Sid: ManageOnlyTaggedTaxonomySigningKey
             Effect: Allow
-            Action: [kms:DescribeKey, kms:GetKeyPolicy, kms:PutKeyPolicy, kms:ListResourceTags, kms:TagResource, kms:UntagResource]
+            Action:
+              - kms:DescribeKey
+              - kms:GetKeyPolicy
+              - kms:PutKeyPolicy
+              - kms:ListResourceTags
+              - kms:TagResource
+              - kms:UntagResource
             Resource: !Sub arn:${AWS::Partition}:kms:${AWS::Region}:${ExpectedAccountId}:key/*
             Condition:
               StringEquals:

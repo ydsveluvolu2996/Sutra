@@ -31,6 +31,6 @@ test("authorized POST is the production recordCapability caller and never update
   assert.match(route, /export const POST = createComputeOptimizerCapabilityPostHandler/u);
   assert.match(route, /assertSessionCapability\(auth, "connection:manage", customerId\)/u);
   assert.match(route, /runComputeOptimizerMaterializationActivationManifest/u);
-  assert.match(route, /activationRepository\.recordCapability/u);
+  assert.match(route, /new ComputeOptimizerActivationRepository\(\)\.recordCapability/u);
   assert.doesNotMatch(route, /markConnection|updateConnection|permissionPackVersion\s*=/u);
 });

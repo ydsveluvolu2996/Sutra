@@ -81,6 +81,7 @@ describe("enterprise FinOps AWS permission model", () => {
     assert.ok(actions.includes("rds:DescribeDBMajorEngineVersions"));
     assert.ok(!actions.includes("opensearch:DescribeDomain"));
     assert.ok(actions.includes("budgets:DescribeBudgetActionsForBudget"));
+    assert.ok(actions.includes("budgets:ListTagsForResource"));
     assert.ok(actions.includes("billing:GetBillingViewData"));
     assert.ok(actions.includes("aws-marketplace:GetAgreementEntitlements"));
     assert.ok(actions.includes("aws-marketplace:ListAgreementCharges"));
@@ -162,6 +163,7 @@ describe("enterprise FinOps AWS permission model", () => {
     const budget = plan.collector.statements.find((statement) => statement.actions.includes("budgets:ViewBudget"));
     assert.deepEqual(budget?.resources, ["arn:aws:budgets::123456789012:budget/*"]);
     assert.ok(budget?.actions.includes("budgets:DescribeBudgetActionsForBudget"));
+    assert.ok(budget?.actions.includes("budgets:ListTagsForResource"));
     const billingView = plan.collector.statements.find((statement) =>
       statement.actions.includes("billing:GetBillingViewData"));
     assert.deepEqual(billingView?.resources, [

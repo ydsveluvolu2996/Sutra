@@ -115,6 +115,13 @@ import postgresFinopsAwsHealthRuntimeSql from "../postgres/migrations/0115_finop
 import postgresFinopsResilienceVueRuntimeSql from "../postgres/migrations/0116_finops_resilience_vue_runtime.sql?raw";
 import postgresFinopsDcfRuntimeSql from "../postgres/migrations/0117_finops_dcf_runtime.sql?raw";
 import postgresFinopsGravitonRuntimeSql from "../postgres/migrations/0118_finops_graviton_runtime.sql?raw";
+import postgresFinopsMarketplaceSpgRuntimeSql from "../postgres/migrations/0119_finops_marketplace_spg_runtime.sql?raw";
+import postgresFinopsCoraRuntimeAttemptsSql from "../postgres/migrations/0120_finops_cora_runtime_attempts.sql?raw";
+import postgresFinopsScadRuntimeAttemptsSql from "../postgres/migrations/0121_finops_scad_runtime_attempts.sql?raw";
+import postgresFinopsSustainabilityTargetsSql from "../postgres/migrations/0122_finops_sustainability_targets.sql?raw";
+import postgresFinopsAmazonConnectRuntimeSql from "../postgres/migrations/0123_finops_amazon_connect_runtime.sql?raw";
+import postgresFinopsPricingChangeRuntimeSql from "../postgres/migrations/0124_finops_pricing_change_runtime.sql?raw";
+import postgresFinopsAwsConfigComplianceRuntimeSql from "../postgres/migrations/0125_finops_aws_config_compliance_runtime.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -234,6 +241,13 @@ const migrations = [
   { id: "0116_finops_resilience_vue_runtime", source: postgresFinopsResilienceVueRuntimeSql },
   { id: "0117_finops_dcf_runtime", source: postgresFinopsDcfRuntimeSql },
   { id: "0118_finops_graviton_runtime", source: postgresFinopsGravitonRuntimeSql },
+  { id: "0119_finops_marketplace_spg_runtime", source: postgresFinopsMarketplaceSpgRuntimeSql },
+  { id: "0120_finops_cora_runtime_attempts", source: postgresFinopsCoraRuntimeAttemptsSql },
+  { id: "0121_finops_scad_runtime_attempts", source: postgresFinopsScadRuntimeAttemptsSql },
+  { id: "0122_finops_sustainability_targets", source: postgresFinopsSustainabilityTargetsSql },
+  { id: "0123_finops_amazon_connect_runtime", source: postgresFinopsAmazonConnectRuntimeSql },
+  { id: "0124_finops_pricing_change_runtime", source: postgresFinopsPricingChangeRuntimeSql },
+  { id: "0125_finops_aws_config_compliance_runtime", source: postgresFinopsAwsConfigComplianceRuntimeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
