@@ -186,7 +186,8 @@ test("every declared source states its reads and its permission requirement", ()
 });
 
 test("declared source contracts match the immutable pack templates", async () => {
-  const files = (await readdir(`${root}infrastructure`))
+  const infrastructure = await readdir(`${root}infrastructure`);
+  const files = infrastructure
     .filter((name) => /^customer-onboarding-role-standard-2026-08\.\d+\.yaml$/u.test(name));
   const declaredBy = new Map();
   for (const name of files) {
@@ -204,10 +205,41 @@ test("declared source contracts match the immutable pack templates", async () =>
       }
     }
   }
+
+  // A contract may also be owned by a separately attested add-on stack rather
+  // than by a pack. ADD-04 FOCUS is the case in point: its resource-scoped
+  // grants live in finops-foundational-focus12-export-v1.yaml, which pins the
+  // exact bucket, prefix and export ARN to one tenant and connection. Inlining
+  // those statements into a successor pack would break that binding, so the
+  // add-on templates are a legitimate declaration site and must be scanned too.
+  // Without this, a source correctly citing an add-on contract looks undeclared.
+  const addOnContracts = new Map();
+  for (const name of infrastructure.filter((entry) => /^finops-.*\.yaml$/u.test(entry))) {
+    const text = await readFile(`${root}infrastructure/${name}`, "utf8");
+    const contract = /^\s+Contract: ([a-z0-9-]+)\s*$/mu.exec(text)?.[1];
+    if (contract !== undefined) addOnContracts.set(contract, name);
+  }
+  assert.ok(
+    addOnContracts.has("foundational-focus12-export-v1"),
+    "the FOCUS 1.2 export add-on template must declare its contract",
+  );
   for (const [sourceId, grant] of Object.entries(map.FINOPS_ONBOARDING_SOURCE_GRANTS)) {
     if (grant.kind !== "successor_pack" || grant.contractId === null) continue;
     const earliest = declaredBy.get(grant.contractId);
-    assert.ok(earliest !== undefined, `${sourceId}: no template declares ${grant.contractId}`);
+    if (earliest === undefined) {
+      // Add-on-owned contract. The pack it cites must still be the pack that
+      // opens the deny ceiling for those reads, which is the Foundational pack.
+      assert.ok(
+        addOnContracts.has(grant.contractId),
+        `${sourceId}: no pack or add-on template declares ${grant.contractId}`,
+      );
+      assert.equal(
+        grant.pack.version,
+        map.ACCEPTED_SUCCESSOR_PACK_VERSIONS[0],
+        `${sourceId} cites an add-on contract, so it must cite the Foundational pack that opens the ceiling`,
+      );
+      continue;
+    }
     assert.equal(
       grant.pack.version,
       earliest.version,
@@ -238,13 +270,26 @@ test("reserved packs are exactly the successors this build's collector does not 
     [...map.ACCEPTED_SUCCESSOR_PACK_VERSIONS].sort(),
     "the collector's pack constants changed: update app/onboard/finops-onboarding-source-map.ts so the onboarding UI stops calling a published pack reserved",
   );
+  // Packs .13 through .18 are now authored and accepted, so no source is
+  // reserved-blocked any more. The invariant that matters is not "some reserved
+  // pack exists" — it is that a reserved entry, if one is ever added again, is
+  // genuinely unaccepted and says so in the UI. Asserting a non-zero count would
+  // mean a pack could never be finished without failing this test.
   const reserved = Object.values(map.FINOPS_ONBOARDING_SOURCE_GRANTS)
     .filter((grant) => grant.kind === "reserved_pack");
-  assert.ok(reserved.length >= 6, "the reserved Additional packs must be reported");
   for (const grant of reserved) {
-    assert.equal(grant.pack.accepted, false);
+    assert.equal(grant.pack.accepted, false, `${grant.pack.version} is accepted, so it is not reserved`);
     assert.ok(html.includes(grant.pack.version), `${grant.pack.version} is missing from the UI`);
     assert.ok(html.includes(grant.reservedFor));
+  }
+  // Conversely, no source may cite a successor pack this build cannot accept.
+  for (const [sourceId, grant] of Object.entries(map.FINOPS_ONBOARDING_SOURCE_GRANTS)) {
+    if (grant.kind !== "successor_pack") continue;
+    assert.equal(
+      grant.pack.accepted,
+      true,
+      `${sourceId} cites ${grant.pack.version}, which this build's collector does not accept`,
+    );
   }
 });
 
@@ -253,12 +298,14 @@ test("dashboards blocked by a reserved pack say so plainly", () => {
     .flatMap((group) => group.dashboards)
     .filter((dashboard) => dashboard.state === "pack_unavailable");
   const ids = unavailable.map((dashboard) => dashboard.catalogId).sort();
-  // Every one of these Additional dashboards needs a successor pack that does
-  // not exist in this build, or a source no pack declares at all.
-  assert.deepEqual(ids, [
-    "ADD-01", "ADD-04", "ADD-05", "ADD-08", "ADD-11", "ADD-12", "ADD-13",
-    "ADV-08", "ADV-13",
-  ]);
+  // Only two dashboards remain pack-unavailable, and neither is waiting on a
+  // pack: ADV-08 AWS Budgets and ADV-13 Media Services read sources that no
+  // template declares a contract for at all. The seven Additional dashboards
+  // that used to sit here (ADD-01, ADD-04, ADD-05, ADD-08, ADD-11, ADD-12,
+  // ADD-13) are no longer blocked: packs .13-.18 are authored and accepted, and
+  // ADD-04 FOCUS is served by its own add-on stack. They are not "collecting" —
+  // they moved to awaiting_first_delivery, which is asserted separately.
+  assert.deepEqual(ids, ["ADV-08", "ADV-13"]);
   for (const dashboard of unavailable) {
     assert.equal(dashboard.stateLabel, "Not collecting — permission pack unavailable");
     assert.ok(dashboard.blockers.some((blocker) =>

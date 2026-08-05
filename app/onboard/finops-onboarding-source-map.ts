@@ -43,10 +43,15 @@ import {
 } from "../../lib/finops-source-runtime-registry";
 import {
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  AMAZON_CONNECT_PERMISSION_PACK_VERSION,
+  AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
+  AWS_MARKETPLACE_PERMISSION_PACK_VERSION,
+  AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
@@ -54,6 +59,7 @@ import {
   GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION,
 } from "../../services/aws-collector/src/types";
 
 /** Pack version the CloudFormation role this screen deploys actually pins. */
@@ -77,6 +83,12 @@ export const ACCEPTED_SUCCESSOR_PACK_VERSIONS: readonly string[] = Object.freeze
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
+  AWS_MARKETPLACE_PERMISSION_PACK_VERSION,
+  COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION,
+  SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION,
+  AMAZON_CONNECT_PERMISSION_PACK_VERSION,
+  AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION,
+  AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION,
 ]);
 
 const SUCCESSOR_PATTERN = /^standard-2026-08\.(\d+)$/u;
@@ -160,9 +172,10 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     note: "The base role only opens its deny ceiling. Exact bucket, prefix and export ARN come from a separately attested immutable add-on.",
   },
   aws_focus_1_2_data_export: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.19"),
-    reservedFor: "ADD-04 FOCUS",
+    kind: "successor_pack",
+    pack: pack(FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION),
+    contractId: "foundational-focus12-export-v1",
+    note: "ADD-04 FOCUS needs no permission pack of its own. Its grants come from the separately owned finops-foundational-focus12-export-v1 add-on stack, which pins the exact bucket, prefix and export ARN; the base pack only opens the deny ceiling for those reads, exactly as for CUR 2.0. Inlining the add-on's resource-scoped statements into a successor pack would break the add-on contract attestation that binds them to one tenant and connection.",
   },
   trusted_advisor_organization: {
     kind: "unassigned_pack",
@@ -229,14 +242,16 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     reason: "No permission pack declares a media-services source contract. The required IAM additions must be audited before any successor version is assigned.",
   },
   cost_optimization_hub_export: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.14"),
-    reservedFor: "ADD-01 CORA",
+    kind: "successor_pack",
+    pack: pack(COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION),
+    contractId: "cost-optimization-hub-v1",
+    note: "Enrollment and Data Export registration are one-time provisioner writes and are never placed on the read-only collector role.",
   },
   aws_marketplace_intelligence: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.13"),
-    reservedFor: "ADD-05 Marketplace SPG",
+    kind: "successor_pack",
+    pack: pack(AWS_MARKETPLACE_PERMISSION_PACK_VERSION),
+    contractId: "marketplace-spg-v1",
+    note: "Buyer-side reads only. Product catalog reads are withheld: aws-marketplace:GetProduct is a real Marketplace Discovery action but is absent from the cfn-lint IAM catalog, so it stays out of the template until its resource-type support is confirmed.",
   },
   kubecost_allocation: {
     kind: "successor_pack",
@@ -251,24 +266,28 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     note: "No dedicated pack is created for Split Cost Allocation Data: it reuses the exact CUR 2.0 export contract. AWS does not backfill data from before SCAD is enabled.",
   },
   aws_carbon_footprint: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.15"),
-    reservedFor: "ADD-08 Sustainability",
+    kind: "successor_pack",
+    pack: pack(SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION),
+    contractId: "sustainability-carbon-v1",
+    note: "Reads a CARBON_EMISSIONS Data Export from S3. The direct Sustainability emissions APIs are not granted.",
   },
   amazon_connect_telemetry: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.16"),
-    reservedFor: "ADD-11 Amazon Connect",
+    kind: "successor_pack",
+    pack: pack(AMAZON_CONNECT_PERMISSION_PACK_VERSION),
+    contractId: "amazon-connect-telemetry-v1",
+    note: "Instance discovery is excluded: the trusted connection supplies the authorized instance ARNs. Neither Connect nor Directory Service supports a resource ARN for these reads.",
   },
   aws_config_organization_aggregator: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.18"),
-    reservedFor: "ADD-12 Config Compliance",
+    kind: "successor_pack",
+    pack: pack(AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION),
+    contractId: "aws-config-aggregator-v1",
+    note: "config:SelectAggregateResourceConfig can return configuration item bodies containing customer-supplied strings; IAM cannot constrain the projection, so the runtime pins an exact column list instead.",
   },
   aws_pricing_catalog: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.17"),
-    reservedFor: "ADD-13 Pricing Change",
+    kind: "successor_pack",
+    pack: pack(AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION),
+    contractId: "aws-pricing-catalog-v1",
+    note: "Grants no action beyond the Price List reads ADV-05 already permits; the successor exists so a Pricing Change connection is attested against its own source contract.",
   },
   aws_organizations_taxonomy: {
     kind: "successor_pack",

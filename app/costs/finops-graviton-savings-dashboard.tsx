@@ -6,8 +6,10 @@ import {
 } from "../../lib/finops-graviton-savings-official-definition";
 import type {
   GravitonOpportunity,
+  GravitonPeriodTotal,
   GravitonUsagePeriod,
 } from "../../lib/finops-graviton-savings";
+import { TimeSeriesChart } from "../components/charts";
 import styles from "./finops-graviton-savings-dashboard.module.css";
 interface Filters {
   readonly accountId?: string;
@@ -117,6 +119,80 @@ function money(value: string | null, currency: string) {
     fraction = (n % BigInt(1_000_000)).toString().padStart(6, "0").slice(0, 2);
   return `${currency} ${whole}.${fraction}`;
 }
+/**
+ * Micro-units to a plain number, for chart geometry only.
+ *
+ * Every displayed amount still comes from `money`, which keeps exact micros. A
+ * chart coordinate is a pixel position, so the precision loss is invisible
+ * there — but it must never leak into a label or a total.
+ */
+export function microsToNumber(value: string): number | null {
+  // The explicit integer test is required, not belt-and-braces: BigInt("")
+  // returns 0n rather than throwing, so a blank amount would otherwise render as
+  // a measured zero — asserting a savings figure that was never collected.
+  if (!/^-?\d+$/u.test(value)) return null;
+  try {
+    return Number(BigInt(value)) / 1_000_000;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Monthly trend series, grouped by currency.
+ *
+ * Currencies are never summed or plotted on one axis: a EUR total and a USD
+ * total share no scale, so each currency gets its own chart. Modeled potential
+ * and measured realized stay distinct series for the same reason the cards kept
+ * them apart — one is a pricing model, the other is observed evidence, and
+ * averaging or stacking them would assert a saving that was never measured.
+ */
+export function trendsByCurrency(summary: {
+  readonly modeledPotentialByPeriod: readonly GravitonPeriodTotal[];
+  readonly measuredRealizedByPeriod: readonly GravitonPeriodTotal[];
+}) {
+  const currencies = [...new Set([
+    ...summary.modeledPotentialByPeriod.map((item) => item.currency),
+    ...summary.measuredRealizedByPeriod.map((item) => item.currency),
+  ])].sort();
+
+  return currencies.map((currency) => {
+    const periods = [...new Set([
+      ...summary.modeledPotentialByPeriod.filter((item) => item.currency === currency)
+        .map((item) => item.periodStartAt),
+      ...summary.measuredRealizedByPeriod.filter((item) => item.currency === currency)
+        .map((item) => item.periodStartAt),
+    ])].sort();
+
+    const pointsFor = (totals: readonly GravitonPeriodTotal[]) => periods.map((period) => {
+      const match = totals.find((item) =>
+        item.currency === currency && item.periodStartAt === period);
+      // No row for a period is a gap, not a zero: the chart must not claim a
+      // month of zero savings that was simply never collected.
+      return { label: period.slice(0, 7), value: match === undefined ? null : microsToNumber(match.amountMicros) };
+    });
+
+    return {
+      currency,
+      periods,
+      series: [
+        {
+          id: `modeled:${currency}`,
+          label: "Modeled potential",
+          tone: "amber" as const,
+          points: pointsFor(summary.modeledPotentialByPeriod),
+        },
+        {
+          id: `realized:${currency}`,
+          label: "Measured realized",
+          tone: "green" as const,
+          points: pointsFor(summary.measuredRealizedByPeriod),
+        },
+      ],
+    };
+  });
+}
+
 function stateMessage(state: GravitonDashboardEnvelope["sourceState"]) {
   if (state === "complete") return null;
   if (state === "partial")
@@ -436,6 +512,17 @@ export function FinopsGravitonSavingsReportView({
       </section>
       <section className={styles.panel} aria-label="Monthly Graviton trends">
         <h3>Monthly savings trends</h3>
+        {trendsByCurrency(report.summary).map((group) => (
+          <TimeSeriesChart
+            key={`trend:${group.currency}`}
+            ariaLabel={`Monthly modeled potential and measured realized Graviton savings in ${group.currency}`}
+            series={group.series}
+            formatValue={(value) => `${group.currency} ${value.toFixed(2)}`}
+            caption={`${group.currency}. Modeled potential is a pricing model, not a promise; measured realized is comparable observed evidence. The two are never combined. A month with no collected total is a gap in the line, not a zero.`}
+            emptyTitle="No monthly totals collected"
+            emptyDetail="Monthly trends need at least one accepted period total. Nothing is inferred from an absent month."
+          />
+        ))}
         <div className={styles.grid}>
           {report.summary.modeledPotentialByPeriod.map((item) => (
             <article

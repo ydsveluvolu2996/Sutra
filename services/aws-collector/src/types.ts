@@ -101,6 +101,49 @@ export const END_USER_COMPUTING_PERMISSION_PACK_VERSION =
 export const GRAVITON_SAVINGS_PERMISSION_PACK_VERSION =
   "standard-2026-08.12" as const;
 /**
+ * Immutable successor for ADD-05. It preserves .8.12 and adds only the ten
+ * buyer-side AWS Marketplace and License Manager reads. Product catalog reads are
+ * absent: aws-marketplace:GetProduct is a real AWS Marketplace Discovery action
+ * but is missing from the cfn-lint IAM catalog, so it is withheld from the
+ * template until its resource-type support is confirmed.
+ */
+export const AWS_MARKETPLACE_PERMISSION_PACK_VERSION =
+  "standard-2026-08.13" as const;
+/**
+ * Immutable successor for ADD-01 CORA. It preserves .8.13 and adds only the
+ * eleven read-only Cost Optimization Hub, Data Export and export-object reads.
+ * Enrollment and export registration stay provisioner-only writes.
+ */
+export const COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION =
+  "standard-2026-08.14" as const;
+/**
+ * Immutable successor for ADD-08 Sustainability. It preserves .8.14 and adds only
+ * the single carbon Data Export authorization read. The direct emissions APIs are
+ * not granted: this vertical reads a CARBON_EMISSIONS export from S3.
+ */
+export const SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION =
+  "standard-2026-08.15" as const;
+/**
+ * Immutable successor for ADD-11. It preserves .8.15 and adds only the three
+ * Amazon Connect and Directory Service reads. Neither service supports a
+ * resource ARN for them, so the deny ceiling is the only available bound.
+ */
+export const AMAZON_CONNECT_PERMISSION_PACK_VERSION =
+  "standard-2026-08.16" as const;
+/**
+ * Immutable successor for ADD-13. It preserves .8.16 and grants no new action:
+ * both Price List reads are already permitted for ADV-05. It exists so a Pricing
+ * Change connection is attested against its own named source contract.
+ */
+export const AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION =
+  "standard-2026-08.17" as const;
+/**
+ * Immutable successor for ADD-12. It preserves .8.17 and adds only the thirteen
+ * read-only AWS Config aggregator, rule-lifecycle and recorder reads.
+ */
+export const AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION =
+  "standard-2026-08.18" as const;
+/**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
  * rotated out of the union: dropping one would make an existing record fail
@@ -125,6 +168,12 @@ export type PermissionPackVersion =
   | typeof DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
   | typeof END_USER_COMPUTING_PERMISSION_PACK_VERSION
   | typeof GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
+  | typeof AWS_MARKETPLACE_PERMISSION_PACK_VERSION
+  | typeof COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION
+  | typeof SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION
+  | typeof AMAZON_CONNECT_PERMISSION_PACK_VERSION
+  | typeof AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION
+  | typeof AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
   | typeof OLDER_PERMISSION_PACK_VERSION
