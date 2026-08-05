@@ -23,6 +23,51 @@ const currentDefault = await readFile(
   ),
   "utf8",
 );
+const immutableBaseline = await readFile(
+  new URL(
+    "../infrastructure/customer-onboarding-role-standard-2026-07.4.yaml",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+// The seven reads this add-on needs. They must be permitted by the base role's
+// DenyUnimplementedActions ceiling — otherwise a scoped Allow here cannot take
+// effect — while never being granted by the base role itself. Splitting the
+// ceiling from the rest of the template is what lets one assertion distinguish
+// "permitted" from "granted"; a whole-file string match cannot.
+const ADD_ON_EXPORT_READS = [
+  "s3:ListBucket",
+  "s3:GetBucketLocation",
+  "s3:GetObject",
+  "s3:GetObjectAttributes",
+  "kms:Decrypt",
+  "bcm-data-exports:ListExports",
+  "bcm-data-exports:GetExport",
+];
+
+function splitDenyCeiling(templateText) {
+  const lines = templateText.split("\n");
+  const sid = lines.findIndex((line) =>
+    /^\s*-\s*Sid:\s*DenyUnimplementedActions\s*$/u.test(line),
+  );
+  assert.ok(sid >= 0, "the base role must carry a DenyUnimplementedActions ceiling");
+  const listStart = lines.findIndex(
+    (line, index) => index > sid && /^\s*NotAction:\s*$/u.test(line),
+  );
+  assert.ok(listStart > sid, "the ceiling must be expressed as a NotAction allowlist");
+  const indent = lines[listStart].search(/\S/u);
+  let end = listStart + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim() !== "" && line.search(/\S/u) <= indent) break;
+    end += 1;
+  }
+  return {
+    ceiling: lines.slice(listStart, end).join("\n"),
+    rest: [...lines.slice(0, listStart), ...lines.slice(end)].join("\n"),
+  };
+}
 
 function resourceBlock(logicalId, nextLogicalId) {
   const start = template.indexOf(`  ${logicalId}:`);
@@ -232,19 +277,24 @@ test("the permanent collector policy contains only the exact seven requested rea
   );
 });
 
-test("the current default remains incompatible and the runbook gates publication before app release", () => {
-  assert.match(currentDefault, /Value: standard-2026-07\.4/u);
-  for (const action of [
-    "s3:GetObject",
-    "s3:GetObjectAttributes",
-    "kms:Decrypt",
-    "bcm-data-exports:GetExport",
-    "bcm-data-exports:ListExports",
-  ]) {
-    assert.doesNotMatch(currentDefault, new RegExp(action, "u"));
+test("the deployable default permits the add-on's reads without granting them, and the runbook gates publication before app release", () => {
+  // The default advanced to standard-2026-08.12 so the FinOps verticals are not
+  // starved at the source. The superseded standard-2026-07.4 bytes are retained
+  // immutably alongside it and predate the add-on entirely.
+  assert.match(currentDefault, /Value: standard-2026-08\.12/u);
+  assert.match(immutableBaseline, /Value: standard-2026-07\.4/u);
+
+  const { ceiling, rest } = splitDenyCeiling(currentDefault);
+  for (const action of ADD_ON_EXPORT_READS) {
+    // Permitted by the ceiling, so this add-on's scoped Allow can take effect.
+    assert.match(ceiling, new RegExp(`^\\s*-\\s*${action}\\s*$`, "mu"));
+    // Never granted by the base role — the scoped Allows stay owned by the add-on.
+    assert.doesNotMatch(rest, new RegExp(action, "u"));
+    // Absent from the superseded baseline in either form.
+    assert.doesNotMatch(immutableBaseline, new RegExp(action, "u"));
     assert.ok(runbook.includes(`\`${action}\``));
   }
-  assert.match(runbook, /Do not launch the add-on against the current `standard-2026-07\.4`/u);
+  assert.match(runbook, /Do not launch the add-on against the superseded `standard-2026-07\.4`/u);
   assert.match(runbook, /Publish-before-application release order/u);
   const basePublish = runbook.indexOf(
     "Publish that base template at an immutable, digest-verified URL",

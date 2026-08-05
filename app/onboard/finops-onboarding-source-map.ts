@@ -43,10 +43,15 @@ import {
 } from "../../lib/finops-source-runtime-registry";
 import {
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  AMAZON_CONNECT_PERMISSION_PACK_VERSION,
+  AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION,
   AWS_HEALTH_PERMISSION_PACK_VERSION,
+  AWS_MARKETPLACE_PERMISSION_PACK_VERSION,
+  AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION,
   AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
   COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION,
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
@@ -54,6 +59,7 @@ import {
   GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION,
 } from "../../services/aws-collector/src/types";
 
 /** Pack version the CloudFormation role this screen deploys actually pins. */
@@ -77,6 +83,12 @@ export const ACCEPTED_SUCCESSOR_PACK_VERSIONS: readonly string[] = Object.freeze
   DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
   END_USER_COMPUTING_PERMISSION_PACK_VERSION,
   GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
+  AWS_MARKETPLACE_PERMISSION_PACK_VERSION,
+  COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION,
+  SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION,
+  AMAZON_CONNECT_PERMISSION_PACK_VERSION,
+  AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION,
+  AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION,
 ]);
 
 const SUCCESSOR_PATTERN = /^standard-2026-08\.(\d+)$/u;
@@ -92,22 +104,36 @@ export const ACCEPTED_SUCCESSOR_PACK_CEILING = ACCEPTED_SUCCESSOR_PACK_VERSIONS
   .reduce((highest, version) =>
     successorOrdinal(version) > successorOrdinal(highest) ? version : highest);
 
+/**
+ * Ordinal of the pack the onboarding template deploys, or null while onboarding
+ * still pins a pre-2026-08 template that grants no FinOps source at all.
+ */
+const ONBOARDING_TEMPLATE_ORDINAL: number | null =
+  SUCCESSOR_PATTERN.test(ONBOARDING_TEMPLATE_PACK_VERSION)
+    ? successorOrdinal(ONBOARDING_TEMPLATE_PACK_VERSION)
+    : null;
+
 export interface FinopsOnboardingPackRequirement {
   readonly version: string;
   readonly ordinal: number;
   /** True when this build's collector accepts a connection at this pack. */
   readonly accepted: boolean;
-  /** True when the template this screen deploys already grants it. Never true
-   * today: onboarding pins the base inventory pack, not a FinOps successor. */
+  /** True when the template this screen deploys already grants it. */
   readonly deployedByOnboardingTemplate: boolean;
 }
 
 function pack(version: string): FinopsOnboardingPackRequirement {
+  const ordinal = successorOrdinal(version);
   return {
     version,
-    ordinal: successorOrdinal(version),
+    ordinal,
     accepted: ACCEPTED_SUCCESSOR_PACK_VERSIONS.includes(version),
-    deployedByOnboardingTemplate: version === ONBOARDING_TEMPLATE_PACK_VERSION,
+    // Each successor preserves every earlier capability, so the template that
+    // deploys pack N grants every contract first declared at or below N. An
+    // equality test here would have reported ADV-05 Graviton as the only
+    // deployed vertical while the eleven contracts below it were equally granted.
+    deployedByOnboardingTemplate:
+      ONBOARDING_TEMPLATE_ORDINAL !== null && ordinal <= ONBOARDING_TEMPLATE_ORDINAL,
   };
 }
 
@@ -146,9 +172,10 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     note: "The base role only opens its deny ceiling. Exact bucket, prefix and export ARN come from a separately attested immutable add-on.",
   },
   aws_focus_1_2_data_export: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.19"),
-    reservedFor: "ADD-04 FOCUS",
+    kind: "successor_pack",
+    pack: pack(FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION),
+    contractId: "foundational-focus12-export-v1",
+    note: "ADD-04 FOCUS needs no permission pack of its own. Its grants come from the separately owned finops-foundational-focus12-export-v1 add-on stack, which pins the exact bucket, prefix and export ARN; the base pack only opens the deny ceiling for those reads, exactly as for CUR 2.0. Inlining the add-on's resource-scoped statements into a successor pack would break the add-on contract attestation that binds them to one tenant and connection.",
   },
   trusted_advisor_organization: {
     kind: "unassigned_pack",
@@ -215,14 +242,16 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     reason: "No permission pack declares a media-services source contract. The required IAM additions must be audited before any successor version is assigned.",
   },
   cost_optimization_hub_export: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.14"),
-    reservedFor: "ADD-01 CORA",
+    kind: "successor_pack",
+    pack: pack(COST_OPTIMIZATION_HUB_PERMISSION_PACK_VERSION),
+    contractId: "cost-optimization-hub-v1",
+    note: "Enrollment and Data Export registration are one-time provisioner writes and are never placed on the read-only collector role.",
   },
   aws_marketplace_intelligence: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.13"),
-    reservedFor: "ADD-05 Marketplace SPG",
+    kind: "successor_pack",
+    pack: pack(AWS_MARKETPLACE_PERMISSION_PACK_VERSION),
+    contractId: "marketplace-spg-v1",
+    note: "Buyer-side reads only. Product catalog reads are withheld: aws-marketplace:GetProduct is a real Marketplace Discovery action but is absent from the cfn-lint IAM catalog, so it stays out of the template until its resource-type support is confirmed.",
   },
   kubecost_allocation: {
     kind: "successor_pack",
@@ -237,24 +266,28 @@ const SOURCE_GRANTS: Readonly<Record<FinopsSourceId, FinopsOnboardingGrant>> = {
     note: "No dedicated pack is created for Split Cost Allocation Data: it reuses the exact CUR 2.0 export contract. AWS does not backfill data from before SCAD is enabled.",
   },
   aws_carbon_footprint: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.15"),
-    reservedFor: "ADD-08 Sustainability",
+    kind: "successor_pack",
+    pack: pack(SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION),
+    contractId: "sustainability-carbon-v1",
+    note: "Reads a CARBON_EMISSIONS Data Export from S3. The direct Sustainability emissions APIs are not granted.",
   },
   amazon_connect_telemetry: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.16"),
-    reservedFor: "ADD-11 Amazon Connect",
+    kind: "successor_pack",
+    pack: pack(AMAZON_CONNECT_PERMISSION_PACK_VERSION),
+    contractId: "amazon-connect-telemetry-v1",
+    note: "Instance discovery is excluded: the trusted connection supplies the authorized instance ARNs. Neither Connect nor Directory Service supports a resource ARN for these reads.",
   },
   aws_config_organization_aggregator: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.18"),
-    reservedFor: "ADD-12 Config Compliance",
+    kind: "successor_pack",
+    pack: pack(AWS_CONFIG_COMPLIANCE_PERMISSION_PACK_VERSION),
+    contractId: "aws-config-aggregator-v1",
+    note: "config:SelectAggregateResourceConfig can return configuration item bodies containing customer-supplied strings; IAM cannot constrain the projection, so the runtime pins an exact column list instead.",
   },
   aws_pricing_catalog: {
-    kind: "reserved_pack",
-    pack: pack("standard-2026-08.17"),
-    reservedFor: "ADD-13 Pricing Change",
+    kind: "successor_pack",
+    pack: pack(AWS_PRICING_CATALOG_PERMISSION_PACK_VERSION),
+    contractId: "aws-pricing-catalog-v1",
+    note: "Grants no action beyond the Price List reads ADV-05 already permits; the successor exists so a Pricing Change connection is attested against its own source contract.",
   },
   aws_organizations_taxonomy: {
     kind: "successor_pack",
@@ -299,6 +332,9 @@ export interface FinopsOnboardingSourceView {
 }
 
 export type FinopsOnboardingDashboardState =
+  /** Every pack this dashboard needs is granted by the template being deployed.
+   * Still not collecting: a granted permission is not an observed delivery. */
+  | "awaiting_first_delivery"
   | "awaiting_pack_deployment"
   | "pack_unavailable"
   | "not_aws_backed";
@@ -337,6 +373,7 @@ export interface FinopsOnboardingCoverage {
   readonly summary: {
     readonly awsBackedDashboards: number;
     readonly collectingNow: number;
+    readonly awaitingFirstDelivery: number;
     readonly awaitingPackDeployment: number;
     readonly packUnavailable: number;
     readonly notAwsBacked: number;
@@ -468,16 +505,35 @@ function dashboardView(entry: FinopsDashboardCatalogEntry): FinopsOnboardingDash
     );
   }
 
+  const undeployed = grants.filter((grant) =>
+    grant.kind === "successor_pack" && !grant.pack.deployedByOnboardingTemplate);
+
   const state: FinopsOnboardingDashboardState = unavailable.length > 0
     ? "pack_unavailable"
-    : "awaiting_pack_deployment";
+    : undeployed.length > 0
+      ? "awaiting_pack_deployment"
+      : "awaiting_first_delivery";
+
+  // Nothing here may read as healthy. Even with every required permission
+  // granted, no delivery has been observed at onboarding time, so the label
+  // stays "not collecting" and the blockers below stay populated.
+  if (state === "awaiting_first_delivery" && blockers.length === 0) {
+    blockers.push(
+      `The role template this screen deploys grants every permission this dashboard needs at pack ${ONBOARDING_TEMPLATE_PACK_VERSION}. Nothing is collecting yet: Sutra reports a source as delivering only after it observes a real export or API response for this tenant.`,
+    );
+  }
+
+  const STATE_LABEL: Readonly<Record<FinopsOnboardingDashboardState, string>> = {
+    awaiting_first_delivery: "Not collecting yet — awaiting first delivery",
+    awaiting_pack_deployment: "Not collecting — permission pack not deployed",
+    pack_unavailable: "Not collecting — permission pack unavailable",
+    not_aws_backed: "Not fed by an AWS account",
+  };
 
   return {
     ...base,
     state,
-    stateLabel: state === "pack_unavailable"
-      ? "Not collecting — permission pack unavailable"
-      : "Not collecting — permission pack not deployed",
+    stateLabel: STATE_LABEL[state],
     requiredPack,
     requiredSources,
     supplementalSources,
@@ -488,9 +544,11 @@ function dashboardView(entry: FinopsDashboardCatalogEntry): FinopsOnboardingDash
 /**
  * Build the complete onboarding coverage view for the official catalog.
  *
- * `collectingNow` is structurally zero: onboarding deploys the base inventory
- * pack and proves a trust boundary. No dashboard collects until its successor
- * pack is deployed and a delivery is actually observed.
+ * `collectingNow` is structurally zero. Onboarding proves a trust boundary; it
+ * does not deliver data. Since the template adopted the standard-2026-08.12
+ * action set most dashboards now have every permission they need, which changes
+ * their blocker from "deploy a successor pack" to "await the first observed
+ * delivery" — it does not make any of them collecting.
  */
 export function buildFinopsOnboardingCoverage(): FinopsOnboardingCoverage {
   const dashboards = FINOPS_DASHBOARD_CATALOG.map(dashboardView);
@@ -512,6 +570,8 @@ export function buildFinopsOnboardingCoverage(): FinopsOnboardingCoverage {
     summary: {
       awsBackedDashboards: awsBacked.length,
       collectingNow: 0,
+      awaitingFirstDelivery: dashboards
+        .filter((dashboard) => dashboard.state === "awaiting_first_delivery").length,
       awaitingPackDeployment: dashboards
         .filter((dashboard) => dashboard.state === "awaiting_pack_deployment").length,
       packUnavailable: dashboards.filter((dashboard) => dashboard.state === "pack_unavailable").length,

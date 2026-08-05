@@ -48,9 +48,28 @@ Start at `/onboard` and choose one of the two reviewed deployment modes:
 
 Do **not** deploy `infrastructure/customer-role.yaml`; it is a historical design
 artifact, not the accepted onboarding contract. The current permission pack is
-`standard-2026-07.4`: one exact inline metadata-read policy, no attached managed
-policies, and the required `sutra:permission-pack` tag. Sutra rejects reused
-administrator, shared-operations, wildcard-trust, or otherwise broader roles.
+`standard-2026-08.12`: the exact inline metadata-read policy, the eleven
+read-only FinOps source policies through ADV-05 Graviton Savings, no attached
+managed policies, and the required `sutra:permission-pack` tag. Sutra rejects
+reused administrator, shared-operations, wildcard-trust, or otherwise broader
+roles.
+
+The onboarding template previously pinned `standard-2026-07.4`, which granted no
+FinOps source at all, so no FinOps dashboard could collect from a freshly
+onboarded account regardless of which pack the tracker recorded. That baseline is
+kept verbatim as `infrastructure/customer-onboarding-role-standard-2026-07.4.yaml`
+because its published S3 object is never overwritten and customers holding an
+older quick-create link still deploy it.
+
+Two parameters differ from the immutable
+`customer-onboarding-role-standard-2026-08.12.yaml` pack file:
+`DcfStateMachineArns` and `DcfExecutionArnPatterns` carry empty defaults, and the
+`SutraFinopsDcfStepFunctionsReadV1` policy is attached only when
+`DcfStateMachineArns` is non-empty. The quick-create link Sutra generates passes
+five parameters, so a required parameter without a default would fail every stack
+creation. A customer who supplies real state-machine ARNs gets the identical
+resource-scoped policy the pack defines; a customer who leaves them empty gets no
+`states:` permission at all and no ADV-12 Data Collection Monitor coverage.
 In either supported mode, review before applying:
 
 - the trust policy names Sutra's exact collector principal and requires the

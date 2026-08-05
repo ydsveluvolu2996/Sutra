@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
-const [successor, previous, current, publicDefault, runbook] = await Promise.all([
+// `current` is the frozen standard-2026-07.4 baseline, not the deployed onboarding
+// template: onboarding now ships the standard-2026-08.12 action set, so the deployed
+// file is no longer the pre-successor baseline this immutability check needs.
+const [successor, previous, current, runbook] = await Promise.all([
   readFile(new URL(
     "../infrastructure/customer-onboarding-role-standard-2026-08.3.yaml",
     import.meta.url,
@@ -11,8 +14,10 @@ const [successor, previous, current, publicDefault, runbook] = await Promise.all
     "../infrastructure/customer-onboarding-role-standard-2026-08.2.yaml",
     import.meta.url,
   ), "utf8"),
-  readFile(new URL("../infrastructure/customer-onboarding-role.yaml", import.meta.url), "utf8"),
-  readFile(new URL("../public/sutra-customer-onboarding-role.yaml", import.meta.url), "utf8"),
+  readFile(new URL(
+    "../infrastructure/customer-onboarding-role-standard-2026-07.4.yaml",
+    import.meta.url,
+  ), "utf8"),
   readFile(new URL(
     "../docs/customer-onboarding-role-standard-2026-08.3.md",
     import.meta.url,
@@ -98,9 +103,7 @@ test("standard-2026-08.3 is immutable and leaves every mutable default untouched
   assert.match(previous, /Version: standard-2026-08\.2/u);
   assert.doesNotMatch(previous, /standard-2026-08\.3/u);
   assert.match(current, /Value: standard-2026-07\.4/u);
-  assert.match(publicDefault, /Value: standard-2026-07\.4/u);
   assert.doesNotMatch(current, /standard-2026-08\.3/u);
-  assert.doesNotMatch(publicDefault, /standard-2026-08\.3/u);
   assert.match(runbook, /has not been\s+published or\s+deployed/u);
   assert.match(runbook, /Do not overwrite/u);
 });

@@ -1,9 +1,29 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
-  Least-privilege, read-only customer role for the Sutra collector. It grants
-  exactly the metadata, network-exposure, IAM posture, and AWS-native finding
-  APIs the collector invokes, and never grants data-plane payload reads,
-  mutations, or security-service enablement.
+  Least-privilege, read-only customer role handed to customers by Sutra
+  onboarding. It grants the exact standard-2026-08.12 permission-pack action set
+  — the metadata, network-exposure, IAM posture and AWS-native finding APIs the
+  collector invokes, plus the read-only FinOps source contracts through ADV-05
+  Graviton Savings — and never grants data-plane payload reads, mutations, or
+  security-service enablement.
+
+  This is the deployable onboarding artifact, not the immutable pack file. It
+  differs from infrastructure/customer-onboarding-role-standard-2026-08.12.yaml
+  in exactly one reviewed way: the two DCF Step Functions parameters carry empty
+  defaults and their policy is conditional, so the five-parameter quick-create
+  link Sutra generates creates a stack without CloudFormation rejecting it for
+  missing parameter values. A customer who supplies DcfStateMachineArns gets the
+  identical resource-scoped DCF policy the pack defines; a customer who does not
+  gets no states: grant at all.
+
+Metadata:
+  SutraPermissionPack:
+    Name: standard
+    Version: standard-2026-08.12
+    FoundationalFinopsAddOn: foundational-cur2-export-v1
+    AdvancedFinopsObjectReadAddOn: compute-optimizer-export-read-v1
+    AdvancedFinopsLaunchAddOn: compute-optimizer-export-launch-v1
+    AdvancedFinopsSources: cost-anomaly-v1,trusted-advisor-standard-v1,organizations-taxonomy-v1,compute-optimizer-export-discovery-v1,extended-support-projection-v1,support-cases-radar-v1,health-events-v1,resilience-vue-v1,data-collection-monitor-v1,end-user-computing-v1,graviton-savings-v1
 
 Parameters:
   VendorCollectorRoleArn:
@@ -54,11 +74,41 @@ Parameters:
     Description: Optional customer-managed permissions boundary.
     AllowedPattern: '^$|^arn:(aws|aws-us-gov|aws-cn):iam::[0-9]{12}:policy/[A-Za-z0-9+=,.@_/-]+$'
 
+  DcfStateMachineArns:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      Optional. Exact unqualified Standard Step Functions state-machine ARNs for
+      the server-resolved DCF modules. Wildcards, aliases, versions, and other
+      accounts are rejected by Sutra role-contract attestation. Leave empty to
+      deploy without ADV-12 Data Collection Monitor: no states: permission is
+      granted at all when this is empty.
+
+  DcfExecutionArnPatterns:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: >-
+      Optional. Exact execution ARN patterns corresponding one-for-one to
+      DcfStateMachineArns, with only the final execution-name segment wildcarded
+      (for example arn:aws:states:us-east-1:123456789012:execution:CID-Module:*).
+      Required when DcfStateMachineArns is supplied; ignored when it is empty.
+
 Conditions:
   HasPermissionsBoundary:
     Fn::Not:
       - Fn::Equals:
           - Ref: PermissionsBoundaryArn
+          - ''
+
+  # An empty CommaDelimitedList resolves to a single empty string, which is not a
+  # usable IAM Resource. Joining and comparing to '' is therefore the only way to
+  # tell "no DCF state machines supplied" from a real ARN list.
+  HasDcfStateMachines:
+    Fn::Not:
+      - Fn::Equals:
+          - Fn::Join:
+              - ','
+              - Ref: DcfStateMachineArns
           - ''
 
 Resources:
@@ -156,6 +206,93 @@ Resources:
                   - iam:ListRolePolicies
                   - iam:ListAttachedRolePolicies
                   - iam:GetRolePolicy
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetObjectAttributes
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                  - bcm-data-exports:ListExports
+                  - bcm-data-exports:GetExport
+                  - ce:GetAnomalies
+                  - ce:GetAnomalyMonitors
+                  - ce:GetAnomalySubscriptions
+                  - support:DescribeTrustedAdvisorCheckResult
+                  - support:DescribeTrustedAdvisorChecks
+                  - support:DescribeCases
+                  - support:DescribeCommunications
+                  - health:DescribeAffectedAccountsForOrganization
+                  - health:DescribeAffectedEntitiesForOrganization
+                  - health:DescribeEventDetailsForOrganization
+                  - health:DescribeEventsForOrganization
+                  - health:DescribeHealthServiceStatusForOrganization
+                  - resiliencehub:DescribeApp
+                  - resiliencehub:DescribeAppAssessment
+                  - resiliencehub:DescribeResiliencyPolicy
+                  - resiliencehub:ListAlarmRecommendations
+                  - resiliencehub:ListAppAssessmentComplianceDrifts
+                  - resiliencehub:ListAppAssessmentResourceDrifts
+                  - resiliencehub:ListAppAssessments
+                  - resiliencehub:ListAppComponentCompliances
+                  - resiliencehub:ListAppComponentRecommendations
+                  - resiliencehub:ListAppVersionResources
+                  - resiliencehub:ListApps
+                  - resiliencehub:ListResiliencyPolicies
+                  - resiliencehub:ListSopRecommendations
+                  - resiliencehub:ListTestRecommendations
+                  - states:DescribeStateMachine
+                  - states:ListExecutions
+                  - states:DescribeExecution
+                  - appstream:DescribeFleets
+                  - appstream:DescribeSessions
+                  - appstream:DescribeStacks
+                  - appstream:ListAssociatedFleets
+                  - workspaces:DescribeWorkspaceBundles
+                  - workspaces:DescribeWorkspaces
+                  - workspaces:DescribeWorkspacesConnectionStatus
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstanceTypes
+                  - pricing:ListPriceLists
+                  - pricing:GetPriceListFileUrl
+                  - organizations:DescribeOrganization
+                  - organizations:ListAccounts
+                  - organizations:ListDelegatedAdministrators
+                  - compute-optimizer:DescribeRecommendationExportJobs
+                  - compute-optimizer:GetEnrollmentStatus
+                  - compute-optimizer:GetEnrollmentStatusesForOrganization
+                  - compute-optimizer:ExportAutoScalingGroupRecommendations
+                  - compute-optimizer:ExportEBSVolumeRecommendations
+                  - compute-optimizer:ExportEC2InstanceRecommendations
+                  - compute-optimizer:ExportECSServiceRecommendations
+                  - compute-optimizer:ExportIdleRecommendations
+                  - compute-optimizer:ExportLambdaFunctionRecommendations
+                  - compute-optimizer:ExportLicenseRecommendations
+                  - compute-optimizer:ExportRDSDatabaseRecommendations
+                  - compute-optimizer:GetAutoScalingGroupRecommendations
+                  - compute-optimizer:GetEBSVolumeRecommendations
+                  - compute-optimizer:GetEC2InstanceRecommendations
+                  - compute-optimizer:GetECSServiceRecommendations
+                  - compute-optimizer:GetIdleRecommendations
+                  - compute-optimizer:GetLambdaFunctionRecommendations
+                  - compute-optimizer:GetLicenseRecommendations
+                  - compute-optimizer:GetRDSDatabaseRecommendations
+                  - autoscaling:DescribeAutoScalingGroups
+                  - ecs:ListClusters
+                  - ecs:ListServices
+                  - lambda:ListFunctions
+                  - lambda:ListProvisionedConcurrencyConfigs
+                  - rds:DescribeDBClusters
+                  - eks:DescribeClusterVersions
+                  - rds:DescribeDBMajorEngineVersions
+                  - rds:DescribeOrderableDBInstanceOptions
+                  - es:ListDomainNames
+                  - es:DescribeDomain
+                  - es:DescribeDomains
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                  - elasticache:DescribeCacheEngineVersions
+                  - pricing:GetProducts
                 Resource: '*'
               - Sid: ImplementedMetadataApis
                 Effect: Allow
@@ -223,6 +360,176 @@ Resources:
                   - iam:GetRolePolicy
                 Resource:
                   Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/sutra/${RoleName}'
+        - PolicyName: SutraFinopsCostAnomalyReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactFinopsSourceRead
+                Effect: Allow
+                Action:
+                  - ce:GetAnomalies
+                  - ce:GetAnomalyMonitors
+                  - ce:GetAnomalySubscriptions
+                Resource: '*'
+        - PolicyName: SutraFinopsTrustedAdvisorStandardReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactFinopsSourceRead
+                Effect: Allow
+                Action:
+                  - support:DescribeTrustedAdvisorCheckResult
+                  - support:DescribeTrustedAdvisorChecks
+                Resource: '*'
+        - PolicyName: SutraFinopsOrganizationsTaxonomyReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactFinopsSourceRead
+                Effect: Allow
+                Action:
+                  - organizations:DescribeOrganization
+                  - organizations:ListAccounts
+                Resource: '*'
+        - PolicyName: SutraFinopsComputeOptimizerExportReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactFinopsSourceRead
+                Effect: Allow
+                Action:
+                  - compute-optimizer:DescribeRecommendationExportJobs
+                  - compute-optimizer:GetEnrollmentStatus
+                  - compute-optimizer:GetEnrollmentStatusesForOrganization
+                Resource: '*'
+        - PolicyName: SutraFinopsExtendedSupportProjectionReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactExtendedSupportProjectionRead
+                Effect: Allow
+                Action:
+                  - eks:ListClusters
+                  - eks:DescribeCluster
+                  - eks:DescribeClusterVersions
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBMajorEngineVersions
+                  - rds:DescribeOrderableDBInstanceOptions
+                  - es:ListDomainNames
+                  - es:DescribeDomain
+                  - es:DescribeDomains
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                  - elasticache:DescribeCacheEngineVersions
+                  - pricing:GetProducts
+                Resource: '*'
+        - PolicyName: SutraFinopsSupportCasesReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactSupportCasesRead
+                Effect: Allow
+                Action:
+                  - support:DescribeCases
+                  - support:DescribeCommunications
+                Resource: '*'
+        - PolicyName: SutraFinopsHealthOrganizationReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactHealthOrganizationRead
+                Effect: Allow
+                Action:
+                  - health:DescribeAffectedAccountsForOrganization
+                  - health:DescribeAffectedEntitiesForOrganization
+                  - health:DescribeEventDetailsForOrganization
+                  - health:DescribeEventsForOrganization
+                  - health:DescribeHealthServiceStatusForOrganization
+                  - organizations:DescribeOrganization
+                  - organizations:ListDelegatedAdministrators
+                Resource: '*'
+        - PolicyName: SutraFinopsResilienceVueReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactResilienceVueRead
+                Effect: Allow
+                Action:
+                  - resiliencehub:DescribeApp
+                  - resiliencehub:DescribeAppAssessment
+                  - resiliencehub:DescribeResiliencyPolicy
+                  - resiliencehub:ListAlarmRecommendations
+                  - resiliencehub:ListAppAssessmentComplianceDrifts
+                  - resiliencehub:ListAppAssessmentResourceDrifts
+                  - resiliencehub:ListAppAssessments
+                  - resiliencehub:ListAppComponentCompliances
+                  - resiliencehub:ListAppComponentRecommendations
+                  - resiliencehub:ListAppVersionResources
+                  - resiliencehub:ListApps
+                  - resiliencehub:ListResiliencyPolicies
+                  - resiliencehub:ListSopRecommendations
+                  - resiliencehub:ListTestRecommendations
+                Resource: '*'
+        - Fn::If:
+            - HasDcfStateMachines
+            - PolicyName: SutraFinopsDcfStepFunctionsReadV1
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Sid: ReadExactDcfStateMachines
+                    Effect: Allow
+                    Action:
+                      - states:DescribeStateMachine
+                      - states:ListExecutions
+                    Resource:
+                      Ref: DcfStateMachineArns
+                  - Sid: ReadExactDcfExecutions
+                    Effect: Allow
+                    Action:
+                      - states:DescribeExecution
+                    Resource:
+                      Ref: DcfExecutionArnPatterns
+            - Ref: AWS::NoValue
+        - PolicyName: SutraFinopsEndUserComputingReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactEndUserComputingRead
+                Effect: Allow
+                Action:
+                  - appstream:DescribeFleets
+                  - appstream:DescribeSessions
+                  - appstream:DescribeStacks
+                  - appstream:ListAssociatedFleets
+                  - cloudwatch:GetMetricData
+                  - workspaces:DescribeWorkspaceBundles
+                  - workspaces:DescribeWorkspaces
+                  - workspaces:DescribeWorkspacesConnectionStatus
+                Resource: '*'
+        - PolicyName: SutraFinopsGravitonSavingsReadV1
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ExactGravitonSavingsRead
+                Effect: Allow
+                Action:
+                  - compute-optimizer:GetEC2InstanceRecommendations
+                  - compute-optimizer:GetAutoScalingGroupRecommendations
+                  - compute-optimizer:GetRDSDatabaseRecommendations
+                  - ec2:DescribeInstances
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstanceTypes
+                  - autoscaling:DescribeAutoScalingGroups
+                  - rds:DescribeDBInstances
+                  - rds:DescribeDBClusters
+                  - es:ListDomainNames
+                  - es:DescribeDomain
+                  - elasticache:DescribeCacheClusters
+                  - elasticache:DescribeReplicationGroups
+                  - pricing:ListPriceLists
+                  - pricing:GetPriceListFileUrl
+                Resource: '*'
       Tags:
         - Key: sutra:tenant-id
           Value:
@@ -230,7 +537,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: standard-2026-07.4
+          Value: standard-2026-08.12
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -244,4 +551,29 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: standard-2026-07.4
+    Value: standard-2026-08.12
+
+  RequiredFoundationalFinopsAddOn:
+    Description: Separately owned resource-scoped policy required for Foundational billing reads.
+    Value: foundational-cur2-export-v1
+
+  RequiredComputeOptimizerExportReadAddOn:
+    Description: Separately owned regional prefix-scoped policy required for Compute Optimizer export-object reads.
+    Value: compute-optimizer-export-read-v1
+
+  RequiredComputeOptimizerExportLaunchAddOn:
+    Description: Dedicated regional bucket and exact launch policy required to create Compute Optimizer export jobs.
+    Value: compute-optimizer-export-launch-v1
+
+  RequiredDcfStepFunctionsResources:
+    Condition: HasDcfStateMachines
+    Description: Exact server-resolved DCF state-machine and execution ARN sets required by ADV-12.
+    Value: data-collection-monitor-v1
+
+  RequiredEndUserComputingRead:
+    Description: Exact privacy-minimized AppStream, WorkSpaces, and CloudWatch reads required by ADV-11.
+    Value: end-user-computing-v1
+
+  RequiredGravitonSavingsRead:
+    Description: Exact read-only cross-service operations required by ADV-05.
+    Value: graviton-savings-v1

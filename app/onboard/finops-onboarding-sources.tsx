@@ -19,14 +19,16 @@ import styles from "./finops-onboarding-sources.module.css";
 
 function packChip(dashboard: FinopsOnboardingDashboardView) {
   if (dashboard.requiredPack === null) return null;
-  const { version, accepted } = dashboard.requiredPack;
+  const { version, accepted, deployedByOnboardingTemplate } = dashboard.requiredPack;
   return (
     <span
       className={styles.packChip}
       data-available={accepted ? "true" : "false"}
-      title={accepted
-        ? "This permission pack exists in this build. The customer must still deploy it."
-        : "This permission pack is reserved and is not accepted by this build's collector."}
+      title={!accepted
+        ? "This permission pack is reserved and is not accepted by this build's collector."
+        : deployedByOnboardingTemplate
+          ? "The role template this screen deploys already grants this pack. Data still only appears once a delivery is observed."
+          : "This permission pack exists in this build. The customer must still deploy it."}
     >
       Needs <code>{version}</code>
       {accepted ? "" : " · reserved"}
@@ -130,8 +132,8 @@ export function FinopsOnboardingSources() {
           <p className={styles.lede}>
             The official Cloud Intelligence Dashboards catalog, grouped by level, with the exact AWS
             reads and permission pack each source needs. This is the declared onboarding contract, not
-            a health reading: nothing here is collecting until the customer deploys the successor
-            permission pack and Sutra observes a real delivery.
+            a health reading: nothing here is collecting until Sutra observes a real delivery, whether
+            or not the permissions are already granted.
           </p>
         </div>
       </header>
@@ -148,6 +150,11 @@ export function FinopsOnboardingSources() {
           <span>onboarding proves trust; it delivers no FinOps export</span>
         </div>
         <div>
+          <small>Granted, awaiting first delivery</small>
+          <strong>{coverage.summary.awaitingFirstDelivery}</strong>
+          <span>this role grants every read; no delivery observed yet</span>
+        </div>
+        <div>
           <small>Awaiting a pack upgrade</small>
           <strong>{coverage.summary.awaitingPackDeployment}</strong>
           <span>pack exists in this build and must be deployed</span>
@@ -162,9 +169,13 @@ export function FinopsOnboardingSources() {
       <div className={styles.contractNote} role="note">
         <strong>The role this screen deploys pins <code>{coverage.templatePackVersion}</code>.</strong>
         <span>
-          That template declares no FinOps source contract at all, so a freshly onboarded account
-          feeds none of the {coverage.summary.awsBackedDashboards} AWS-backed dashboards until a
-          successor pack is deployed. This build&apos;s collector accepts successor packs only through{" "}
+          That template grants the read-only source contracts declared up to and including that
+          pack, so {coverage.summary.awaitingFirstDelivery} of the{" "}
+          {coverage.summary.awsBackedDashboards} AWS-backed dashboards already have every permission
+          they need — and none of them is collecting, because a granted permission is not an observed
+          delivery. {coverage.summary.awaitingPackDeployment} still need a higher pack deployed and{" "}
+          {coverage.summary.packUnavailable} need a pack this build does not accept. This
+          build&apos;s collector accepts successor packs only through{" "}
           <code>{coverage.acceptedPackCeiling}</code>; anything above that is reserved and cannot be
           attested yet. {coverage.summary.customerAccountSources} of the declared sources read from the
           customer account; the rest are public feeds or Sutra&apos;s own persisted evidence.
