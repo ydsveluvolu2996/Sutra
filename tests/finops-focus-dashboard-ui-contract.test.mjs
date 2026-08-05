@@ -8,18 +8,22 @@ import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
-const [component, navigation, browser, css, catalog] = await Promise.all([
+const [component, navigation, views, browser, css, catalog] = await Promise.all([
   readFile(path.join(root, "app/costs/finops-focus-dashboard.tsx"), "utf8"),
   readFile(path.join(root, "app/costs/finops-dashboard-catalog-nav.tsx"), "utf8"),
+  readFile(path.join(root, "app/costs/finops-dashboard-views.tsx"), "utf8"),
   readFile(path.join(root, "app/costs/costs-browser.tsx"), "utf8"),
   readFile(path.join(root, "app/costs/costs.module.css"), "utf8"),
   readFile(path.join(root, "lib/finops-dashboard-catalog.ts"), "utf8"),
 ]);
 
 test("FOCUS catalog entry is wired to its tenant-resolved GET report", () => {
-  assert.match(navigation, /selected\.id === "focus"/u);
-  assert.match(navigation, /<FinopsFocusDashboard/u);
-  assert.match(navigation, /connectionId=\{connectionId\}/u);
+  // The catalog nav resolves dedicated views through the keyed registry, so the
+  // FOCUS wiring is asserted where it now lives.
+  assert.match(navigation, /getFinopsDashboardView\(selected\.id\)/u);
+  assert.match(views, /^ {2}focus: \(\{[^}]*\}\) => \(/mu);
+  assert.match(views, /<FinopsFocusDashboard/u);
+  assert.match(views, /connectionId=\{connectionId\}/u);
   assert.match(
     browser,
     /<FinopsDashboardCatalogNav[\s\S]*connectionId=\{connectionId\}[\s\S]*onOpenSharedAnalysis=\{navigateToSection\}/u,

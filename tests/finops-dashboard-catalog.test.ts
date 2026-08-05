@@ -39,8 +39,12 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     FINOPS_DASHBOARD_CATALOG,
     ({ currentMaturity }) => currentMaturity,
   );
-  assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 6);
-  assert.equal(counts.PARTIAL_PIPELINE?.length, 23);
+  // Mirrors the parent capability table in
+  // docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md: 15 local candidates and 14
+  // partial pipelines. The tracker is the authority; this catalog follows it and
+  // must never present a row as more complete than the tracker records.
+  assert.equal(counts.LOCAL_VERTICAL_CANDIDATE?.length, 15);
+  assert.equal(counts.PARTIAL_PIPELINE?.length, 14);
   assert.equal("ENGINE_ONLY" in counts, false);
   assert.equal("ABSENT" in counts, false);
   assert.deepEqual(
@@ -49,7 +53,16 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
       "cudos",
       "cost_intelligence_dashboard",
       "kpi_dashboard",
+      "compute_optimizer",
       "cost_anomaly",
+      "extended_support_projection",
+      "health_events",
+      "aws_news_feeds",
+      "aws_budgets",
+      "support_cases_radar",
+      "resiliencevue",
+      "end_user_computing",
+      "data_collection_monitor",
       "trends",
       "data_transfer",
     ],
@@ -58,16 +71,7 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
     counts.PARTIAL_PIPELINE?.map(({ id }) => id),
     [
       "trusted_advisor_organizational",
-      "compute_optimizer",
-      "extended_support_projection",
       "graviton_savings",
-      "health_events",
-      "aws_news_feeds",
-      "aws_budgets",
-      "support_cases_radar",
-      "resiliencevue",
-      "end_user_computing",
-      "data_collection_monitor",
       "media_services_insights",
       "cora",
       "azure_cid",
@@ -81,6 +85,15 @@ test("catalog preserves the tracker maturity vocabulary without claiming complet
       "config_resource_compliance",
       "pricing_change",
     ],
+  );
+  // Neither excluded cross-cloud row may be promoted by this change.
+  assert.equal(FINOPS_DASHBOARD_MATURITY_BY_ID.azure_cid, "PARTIAL_PIPELINE");
+  assert.equal(FINOPS_DASHBOARD_MATURITY_BY_ID.gcp_cid, "PARTIAL_PIPELINE");
+  assert.equal(
+    Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID)
+      .filter((maturity) => maturity === "LOCAL_VERTICAL_VERIFIED" || maturity === "LIVE_ACCEPTED")
+      .length,
+    0,
   );
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("COMPLETE" as never), false);
   assert.equal(Object.values(FINOPS_DASHBOARD_MATURITY_BY_ID).includes("READY" as never), false);
@@ -105,6 +118,45 @@ test("catalog and lookup helpers are deeply immutable and fail closed", () => {
   assert.equal(getFinopsDashboardCatalogEntry("trusted-advisor-organizational")?.id, "trusted_advisor_organizational");
   assert.equal(getFinopsDashboardCatalogEntry("unknown"), null);
   assert.equal(getFinopsDashboardCatalogEntry(""), null);
+});
+
+test("official catalog identifiers are unique and match the level they belong to", () => {
+  const PREFIX = { foundational: "FND", advanced: "ADV", additional: "ADD" } as const;
+  const seen = new Set<string>();
+  const perLevel: Record<string, number[]> = { FND: [], ADV: [], ADD: [] };
+
+  for (const entry of FINOPS_DASHBOARD_CATALOG) {
+    assert.match(entry.catalogId, /^(?:FND|ADV|ADD)-(?:0[1-9]|1[0-3])$/u, entry.id);
+    const [prefix, ordinal] = entry.catalogId.split("-");
+    assert.equal(prefix, PREFIX[entry.level], entry.id);
+    assert.equal(seen.has(entry.catalogId), false, entry.catalogId);
+    seen.add(entry.catalogId);
+    perLevel[prefix!]!.push(Number(ordinal));
+  }
+
+  assert.equal(seen.size, 29);
+  // Each level is numbered 1..n with no gap, renumbering or reuse, so an
+  // evidence record in docs/finops-cid-evidence/ always resolves.
+  assert.deepEqual(perLevel.FND, [1, 2, 3]);
+  assert.deepEqual(perLevel.ADV, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepEqual(perLevel.ADD, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+});
+
+test("every entry carries a drawable icon and a known tone", () => {
+  const TONES = new Set([
+    "blue", "indigo", "cyan", "teal", "green",
+    "amber", "orange", "red", "violet", "slate",
+  ]);
+  for (const entry of FINOPS_DASHBOARD_CATALOG) {
+    // Glyph names are validated against the drawn icon set at compile time by
+    // GlyphIcon's IconName prop; this guards shape and non-emptiness only.
+    assert.match(entry.icon, /^[a-z][A-Za-z]{2,23}$/u, entry.id);
+    assert.equal(TONES.has(entry.tone), true, `${entry.id}: ${entry.tone}`);
+  }
+  // Icons need not be unique, but the catalog should not collapse into one
+  // undifferentiated glyph; every level must be visually distinguishable.
+  assert.ok(new Set(FINOPS_DASHBOARD_CATALOG.map(({ icon }) => icon)).size >= 24);
+  assert.ok(new Set(FINOPS_DASHBOARD_CATALOG.map(({ tone }) => tone)).size >= 8);
 });
 
 test("every entry has bounded client-safe presentation metadata", () => {

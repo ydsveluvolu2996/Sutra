@@ -8,17 +8,21 @@ import react from "@vitejs/plugin-react";
 import { createServer } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
-const [route, component, navigation, repository, css] = await Promise.all([
+const [route, component, navigation, views, repository, css] = await Promise.all([
   readFile(path.join(root, "app/api/v1/finops/trusted-advisor-organizational/route.ts"), "utf8"),
   readFile(path.join(root, "app/costs/finops-trusted-advisor-organizational-dashboard.tsx"), "utf8"),
   readFile(path.join(root, "app/costs/finops-dashboard-catalog-nav.tsx"), "utf8"),
+  readFile(path.join(root, "app/costs/finops-dashboard-views.tsx"), "utf8"),
   readFile(path.join(root, "db/finops-trusted-advisor-organization-repository.ts"), "utf8"),
   readFile(path.join(root, "app/costs/costs.module.css"), "utf8"),
 ]);
 
 test("TAO catalog entry is wired to its authenticated same-tenant standard-check GET report", () => {
-  assert.match(navigation, /selected\.id === "trusted_advisor_organizational"/u);
-  assert.match(navigation, /<FinopsTrustedAdvisorOrganizationalDashboard/u);
+  // The catalog nav resolves dedicated views through the keyed registry, so the
+  // TAO wiring is asserted where it now lives.
+  assert.match(navigation, /getFinopsDashboardView\(selected\.id\)/u);
+  assert.match(views, /^ {2}trusted_advisor_organizational: \(\{[^}]*\}\) => \(/mu);
+  assert.match(views, /<FinopsTrustedAdvisorOrganizationalDashboard/u);
   assert.match(component, /\/api\/v1\/finops\/trusted-advisor-organizational\?\$\{parameters\.toString\(\)\}/u);
   assert.match(component, /credentials: "same-origin"/u);
   assert.match(route, /requireApiSession\(request\)/u);
