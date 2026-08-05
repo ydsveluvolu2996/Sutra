@@ -9,12 +9,17 @@ const successor = await readFile(
   ),
   "utf8",
 );
+// The baseline this successor must leave untouched is the frozen standard-2026-07.4
+// artifact, NOT the deployed onboarding template. Onboarding has since adopted the
+// standard-2026-08.12 action set, so comparing against the deployed file would make
+// this immutability check drift every time onboarding moves forward. The frozen copy
+// is byte-identical to the 2026-07.4 object already published to S3, which is never
+// overwritten and which customers on older quick-create links still deploy.
 const current = await readFile(
-  new URL("../infrastructure/customer-onboarding-role.yaml", import.meta.url),
-  "utf8",
-);
-const publicDefault = await readFile(
-  new URL("../public/sutra-customer-onboarding-role.yaml", import.meta.url),
+  new URL(
+    "../infrastructure/customer-onboarding-role-standard-2026-07.4.yaml",
+    import.meta.url,
+  ),
   "utf8",
 );
 const addOn = await readFile(
@@ -136,9 +141,7 @@ test("the successor is an explicit immutable source contract and leaves both def
     /PermissionPackVersion:[\s\S]*Value: standard-2026-08\.1/u,
   );
   assert.match(current, /Value: standard-2026-07\.4/u);
-  assert.match(publicDefault, /Value: standard-2026-07\.4/u);
   assert.doesNotMatch(current, /standard-2026-08\.1/u);
-  assert.doesNotMatch(publicDefault, /standard-2026-08\.1/u);
   assert.match(runbook, /has not been\s+published or deployed/u);
   assert.match(runbook, /Do not overwrite a previously published/u);
 });

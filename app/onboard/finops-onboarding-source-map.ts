@@ -92,22 +92,36 @@ export const ACCEPTED_SUCCESSOR_PACK_CEILING = ACCEPTED_SUCCESSOR_PACK_VERSIONS
   .reduce((highest, version) =>
     successorOrdinal(version) > successorOrdinal(highest) ? version : highest);
 
+/**
+ * Ordinal of the pack the onboarding template deploys, or null while onboarding
+ * still pins a pre-2026-08 template that grants no FinOps source at all.
+ */
+const ONBOARDING_TEMPLATE_ORDINAL: number | null =
+  SUCCESSOR_PATTERN.test(ONBOARDING_TEMPLATE_PACK_VERSION)
+    ? successorOrdinal(ONBOARDING_TEMPLATE_PACK_VERSION)
+    : null;
+
 export interface FinopsOnboardingPackRequirement {
   readonly version: string;
   readonly ordinal: number;
   /** True when this build's collector accepts a connection at this pack. */
   readonly accepted: boolean;
-  /** True when the template this screen deploys already grants it. Never true
-   * today: onboarding pins the base inventory pack, not a FinOps successor. */
+  /** True when the template this screen deploys already grants it. */
   readonly deployedByOnboardingTemplate: boolean;
 }
 
 function pack(version: string): FinopsOnboardingPackRequirement {
+  const ordinal = successorOrdinal(version);
   return {
     version,
-    ordinal: successorOrdinal(version),
+    ordinal,
     accepted: ACCEPTED_SUCCESSOR_PACK_VERSIONS.includes(version),
-    deployedByOnboardingTemplate: version === ONBOARDING_TEMPLATE_PACK_VERSION,
+    // Each successor preserves every earlier capability, so the template that
+    // deploys pack N grants every contract first declared at or below N. An
+    // equality test here would have reported ADV-05 Graviton as the only
+    // deployed vertical while the eleven contracts below it were equally granted.
+    deployedByOnboardingTemplate:
+      ONBOARDING_TEMPLATE_ORDINAL !== null && ordinal <= ONBOARDING_TEMPLATE_ORDINAL,
   };
 }
 
@@ -299,6 +313,9 @@ export interface FinopsOnboardingSourceView {
 }
 
 export type FinopsOnboardingDashboardState =
+  /** Every pack this dashboard needs is granted by the template being deployed.
+   * Still not collecting: a granted permission is not an observed delivery. */
+  | "awaiting_first_delivery"
   | "awaiting_pack_deployment"
   | "pack_unavailable"
   | "not_aws_backed";
@@ -337,6 +354,7 @@ export interface FinopsOnboardingCoverage {
   readonly summary: {
     readonly awsBackedDashboards: number;
     readonly collectingNow: number;
+    readonly awaitingFirstDelivery: number;
     readonly awaitingPackDeployment: number;
     readonly packUnavailable: number;
     readonly notAwsBacked: number;
@@ -468,16 +486,35 @@ function dashboardView(entry: FinopsDashboardCatalogEntry): FinopsOnboardingDash
     );
   }
 
+  const undeployed = grants.filter((grant) =>
+    grant.kind === "successor_pack" && !grant.pack.deployedByOnboardingTemplate);
+
   const state: FinopsOnboardingDashboardState = unavailable.length > 0
     ? "pack_unavailable"
-    : "awaiting_pack_deployment";
+    : undeployed.length > 0
+      ? "awaiting_pack_deployment"
+      : "awaiting_first_delivery";
+
+  // Nothing here may read as healthy. Even with every required permission
+  // granted, no delivery has been observed at onboarding time, so the label
+  // stays "not collecting" and the blockers below stay populated.
+  if (state === "awaiting_first_delivery" && blockers.length === 0) {
+    blockers.push(
+      `The role template this screen deploys grants every permission this dashboard needs at pack ${ONBOARDING_TEMPLATE_PACK_VERSION}. Nothing is collecting yet: Sutra reports a source as delivering only after it observes a real export or API response for this tenant.`,
+    );
+  }
+
+  const STATE_LABEL: Readonly<Record<FinopsOnboardingDashboardState, string>> = {
+    awaiting_first_delivery: "Not collecting yet — awaiting first delivery",
+    awaiting_pack_deployment: "Not collecting — permission pack not deployed",
+    pack_unavailable: "Not collecting — permission pack unavailable",
+    not_aws_backed: "Not fed by an AWS account",
+  };
 
   return {
     ...base,
     state,
-    stateLabel: state === "pack_unavailable"
-      ? "Not collecting — permission pack unavailable"
-      : "Not collecting — permission pack not deployed",
+    stateLabel: STATE_LABEL[state],
     requiredPack,
     requiredSources,
     supplementalSources,
@@ -488,9 +525,11 @@ function dashboardView(entry: FinopsDashboardCatalogEntry): FinopsOnboardingDash
 /**
  * Build the complete onboarding coverage view for the official catalog.
  *
- * `collectingNow` is structurally zero: onboarding deploys the base inventory
- * pack and proves a trust boundary. No dashboard collects until its successor
- * pack is deployed and a delivery is actually observed.
+ * `collectingNow` is structurally zero. Onboarding proves a trust boundary; it
+ * does not deliver data. Since the template adopted the standard-2026-08.12
+ * action set most dashboards now have every permission they need, which changes
+ * their blocker from "deploy a successor pack" to "await the first observed
+ * delivery" — it does not make any of them collecting.
  */
 export function buildFinopsOnboardingCoverage(): FinopsOnboardingCoverage {
   const dashboards = FINOPS_DASHBOARD_CATALOG.map(dashboardView);
@@ -512,6 +551,8 @@ export function buildFinopsOnboardingCoverage(): FinopsOnboardingCoverage {
     summary: {
       awsBackedDashboards: awsBacked.length,
       collectingNow: 0,
+      awaitingFirstDelivery: dashboards
+        .filter((dashboard) => dashboard.state === "awaiting_first_delivery").length,
       awaitingPackDeployment: dashboards
         .filter((dashboard) => dashboard.state === "awaiting_pack_deployment").length,
       packUnavailable: dashboards.filter((dashboard) => dashboard.state === "pack_unavailable").length,

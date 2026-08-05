@@ -99,34 +99,64 @@ test("no dashboard is presented as available or collecting", () => {
         dashboard.blockers.length > 0,
         `${dashboard.catalogId} must state why it is not collecting`,
       );
-      assert.match(dashboard.stateLabel, /Not collecting|Not fed by an AWS account/u);
+      assert.match(
+        dashboard.stateLabel,
+        /Not collecting|Not collecting yet|Not fed by an AWS account/u,
+      );
       assert.ok(html.includes(dashboard.stateLabel));
     }
   }
-  // No dashboard may be badged as available, enabled or ready to collect.
+  // No dashboard may be badged as available, enabled or ready to collect. Having
+  // every permission granted is still not collecting, so "awaiting first
+  // delivery" must never soften into a positive claim.
   assert.doesNotMatch(html, /\bAvailable\b|\bEnabled\b|\bReady to collect\b/u);
+  // Every AWS-backed dashboard states one of the three not-collecting reasons.
   assert.equal(
-    (html.match(/Not collecting — permission pack/gu) ?? []).length,
+    (html.match(/Not collecting(?: yet)? — (?:permission pack|awaiting first delivery)/gu) ?? [])
+      .length,
+    coverage.summary.awsBackedDashboards,
+  );
+  assert.equal(
+    coverage.summary.awaitingFirstDelivery
+      + coverage.summary.awaitingPackDeployment
+      + coverage.summary.packUnavailable,
     coverage.summary.awsBackedDashboards,
   );
 });
 
-test("the deployed onboarding template pack is stated, not assumed to grant FinOps", async () => {
+test("the deployed onboarding template pack is read from the template, not assumed", async () => {
   assert.equal(coverage.templatePackVersion, templateContract.AWS_CUSTOMER_ROLE_TEMPLATE_VERSION);
   assert.ok(html.includes(coverage.templatePackVersion));
   const deployedTemplate = await readFile(
     `${root}infrastructure/customer-onboarding-role.yaml`,
     "utf8",
   );
-  // The template the screen hands the customer declares no FinOps source
-  // contract, which is exactly why nothing collects at onboarding time.
-  assert.doesNotMatch(deployedTemplate, /AdvancedFinopsSources|FoundationalFinopsAddOn/u);
+
+  // The template the screen hands the customer now declares its FinOps source
+  // contracts, and the version it tags must be the version this screen states.
+  assert.match(deployedTemplate, /AdvancedFinopsSources: /u);
+  assert.match(deployedTemplate, /FoundationalFinopsAddOn: /u);
+  assert.match(
+    deployedTemplate,
+    new RegExp(`Key: sutra:permission-pack\\s*\\n\\s*Value: ${coverage.templatePackVersion.replaceAll(".", "\\.")}`, "u"),
+  );
+
+  // A pack is reported as deployed exactly when it is at or below the pack the
+  // template tags. Nothing may claim deployment of a higher pack.
+  const templateOrdinal = Number(/^standard-2026-08\.(\d+)$/u.exec(coverage.templatePackVersion)[1]);
   for (const group of coverage.levels) {
     for (const dashboard of group.dashboards) {
       if (dashboard.requiredPack === null) continue;
-      assert.equal(dashboard.requiredPack.deployedByOnboardingTemplate, false);
+      assert.equal(
+        dashboard.requiredPack.deployedByOnboardingTemplate,
+        dashboard.requiredPack.ordinal <= templateOrdinal,
+        `${dashboard.catalogId} requires ${dashboard.requiredPack.version}`,
+      );
     }
   }
+
+  // Deployment is never delivery: no dashboard is collecting regardless.
+  assert.equal(coverage.summary.collectingNow, 0);
 });
 
 test("every declared source states its reads and its permission requirement", () => {
