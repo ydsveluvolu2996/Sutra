@@ -34,6 +34,16 @@ export const PUBLIC_ASSET_PATHS = new Set([
   "/window.svg",
 ]);
 
+/**
+ * Public crawler-control route handlers are not pages or static assets, but
+ * they must bypass the private workspace session gate. Keeping them explicit
+ * prevents a filename extension from becoming a general authentication bypass.
+ */
+export const PUBLIC_SEARCH_CONTROL_PATHS = new Set([
+  "/robots.txt",
+  "/sitemap.xml",
+]);
+
 function cookieValue(request: Request, name: string): string | null {
   const cookie = request.headers.get("cookie");
   if (cookie === null) return null;
@@ -53,6 +63,7 @@ export function isPublicBrowserPath(pathname: string): boolean {
   if (pathname.startsWith("/api/") || pathname === "/api") return true;
   if (pathname.startsWith("/_next/")) return true;
   if (PUBLIC_PAGE_PATHS.has(pathname)) return true;
+  if (PUBLIC_SEARCH_CONTROL_PATHS.has(pathname)) return true;
   return PUBLIC_ASSET_PATHS.has(pathname);
 }
 

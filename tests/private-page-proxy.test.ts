@@ -11,6 +11,7 @@ const {
   isPublicBrowserPath,
   PUBLIC_ASSET_PATHS,
   PUBLIC_PAGE_PATHS,
+  PUBLIC_SEARCH_CONTROL_PATHS,
 } = await import("../proxy.ts");
 
 const root = resolve(import.meta.dirname, "..");
@@ -66,6 +67,23 @@ test("the public asset allowlist exactly matches root public files and never use
   assert.equal(isPublicBrowserPath("/cmdb/resource/tenant.json"), false);
 });
 
+test("only the exact public crawler-control routes bypass the session gate", async () => {
+  assert.deepEqual(
+    [...PUBLIC_SEARCH_CONTROL_PATHS].sort(),
+    ["/robots.txt", "/sitemap.xml"],
+  );
+  for (const pathname of PUBLIC_SEARCH_CONTROL_PATHS) {
+    assert.equal(isPublicBrowserPath(pathname), true, pathname);
+    assert.equal(
+      (await proxy(new Request(`https://www.sutracmdb.com${pathname}`))).status,
+      200,
+      pathname,
+    );
+  }
+  assert.equal(isPublicBrowserPath("/customers/robots.txt"), false);
+  assert.equal(isPublicBrowserPath("/sitemap.xml/tenant-secret"), false);
+});
+
 test("an anonymous private page is redirected before rendering and cannot be cached", async () => {
   const response = await proxy(new Request(
     "https://app.sutracmdb.com/cmdb/resource?key=tenant-secret-resource",
@@ -99,6 +117,8 @@ test("public/auth pages and API callbacks pass through while forged session cook
     "/api/auth/saml/callback",
     "/api/v1/itsm/inbound/itc_callback",
     "/favicon.svg",
+    "/robots.txt",
+    "/sitemap.xml",
   ]) {
     assert.equal((await proxy(new Request(`https://app.sutracmdb.com${pathname}`))).status, 200, pathname);
   }
