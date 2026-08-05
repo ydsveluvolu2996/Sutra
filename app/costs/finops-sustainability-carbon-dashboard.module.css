@@ -1,1 +1,211 @@
-.root{display:grid;gap:1rem;color:var(--text-primary,#e8eef9)}.panel,.state,.notice{border:1px solid rgba(148,163,184,.24);border-radius:14px;background:rgba(15,23,42,.72);padding:1rem}.notice{border-color:rgba(45,212,191,.5);background:rgba(13,148,136,.13)}.warning{border-color:rgba(245,158,11,.55);background:rgba(120,53,15,.18)}.error{border-color:rgba(248,113,113,.55);background:rgba(127,29,29,.18)}.split{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:1rem}.filters{display:flex;flex-wrap:wrap;gap:.7rem;align-items:end}.filters label{display:grid;gap:.3rem;font-size:.75rem;color:#b7c4d8}.filters select{min-width:160px;background:#0b1220;color:inherit;border:1px solid rgba(148,163,184,.35);border-radius:8px;padding:.52rem}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.7rem}.card{border:1px solid rgba(148,163,184,.2);border-radius:12px;background:rgba(30,41,59,.56);padding:.85rem;display:grid;gap:.32rem}.card strong{font-size:1.25rem;color:#f8fafc}.card small,.muted{color:#94a3b8}.panel h3{margin:0 0 .75rem;font-size:1rem}.scroll{overflow-x:auto}.table{width:100%;border-collapse:collapse;font-size:.8rem}.table th,.table td{text-align:left;padding:.62rem;border-bottom:1px solid rgba(148,163,184,.18);vertical-align:top}.table th{color:#b8c5d9}.pill{display:inline-flex;padding:.14rem .46rem;border-radius:999px;color:#5eead4;background:rgba(20,184,166,.14);font-size:.7rem}.unknown{color:#fbbf24}.evidence{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.73rem;color:#9fb0c8}@media(max-width:720px){.table{min-width:760px}}
+/*
+ * ADD-08 Sustainability. Layout and shell chrome come from
+ * finops-foundational.module.css; this file only styles what is specific to a
+ * dashboard carrying two irreconcilable evidence channels: the channel
+ * provenance tag that sits beside every figure, the separation notice, the
+ * side-by-side comparison panels, the explicitly unavailable dimension panels
+ * and the governed-target form.
+ *
+ * The two channels never share a colour. Proxy evidence is teal, provider carbon
+ * is violet, so a figure is not misread as belonging to the other channel by
+ * glance alone — colour is a second cue behind the always-present text label.
+ */
+
+.state {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 0.9rem 1rem;
+  font-size: 0.85rem;
+  color: var(--text-primary, #e8eef9);
+}
+
+.warning {
+  border-color: rgba(245, 158, 11, 0.55);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.error {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(127, 29, 29, 0.18);
+}
+
+/* The provenance label. Never decorative: it names the evidence channel. */
+.channelTag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.channelProxy {
+  color: #5eead4;
+  border-color: rgba(45, 212, 191, 0.5);
+  background: rgba(13, 148, 136, 0.14);
+}
+
+.channelCarbon {
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(109, 40, 217, 0.16);
+}
+
+.separation {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.72);
+  padding: 1rem;
+}
+
+.separationChannels {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.separationChannel {
+  display: grid;
+  gap: 0.45rem;
+  align-content: start;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.85rem;
+  font-size: 0.82rem;
+}
+
+/* A channel panel keeps its own tint; the tag classes double as panel accents. */
+.separationChannel.channelProxy,
+.compareChannel.channelProxy {
+  text-transform: none;
+  letter-spacing: normal;
+  color: #cbd5e1;
+  background: rgba(13, 148, 136, 0.07);
+}
+
+.separationChannel.channelCarbon,
+.compareChannel.channelCarbon {
+  text-transform: none;
+  letter-spacing: normal;
+  color: #cbd5e1;
+  background: rgba(109, 40, 217, 0.08);
+}
+
+.separationChannel p {
+  margin: 0;
+}
+
+.summaryNotice {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #e2e8f2;
+}
+
+.separationChannel h4 {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.provenance {
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.provenance summary {
+  cursor: pointer;
+}
+
+.separationRule {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #94a3b8;
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0.85rem;
+}
+
+.compareChannel {
+  display: grid;
+  gap: 0.55rem;
+  align-content: start;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.85rem;
+}
+
+.unavailable {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px dashed rgba(245, 158, 11, 0.5);
+  border-radius: 12px;
+  background: rgba(120, 53, 15, 0.12);
+  padding: 0.9rem;
+  font-size: 0.82rem;
+  color: #e2e8f2;
+}
+
+.unavailable[data-state="PARTIAL"] {
+  border-style: solid;
+  border-color: rgba(148, 163, 184, 0.4);
+  background: rgba(30, 41, 59, 0.5);
+}
+
+.unavailableHead {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.unavailable p {
+  margin: 0;
+  color: #cbd5e1;
+}
+
+.form {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: rgba(30, 41, 59, 0.42);
+}
+
+.formFields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+  align-items: end;
+}
+
+.formFields select,
+.formFields input {
+  background: #0b1220;
+  color: inherit;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  padding: 0.5rem;
+  min-width: 170px;
+}
+
+.formFields button {
+  border: 1px solid rgba(45, 212, 191, 0.5);
+  border-radius: 8px;
+  background: rgba(13, 148, 136, 0.18);
+  color: #5eead4;
+  padding: 0.55rem 0.9rem;
+  cursor: pointer;
+}

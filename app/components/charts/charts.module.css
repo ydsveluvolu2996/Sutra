@@ -1,0 +1,156 @@
+/*
+ * Sutra chart kit styling.
+ *
+ * Tone hues match the sidebar/icon tones in globals.css but are shifted deeper
+ * so a 2px stroke and a small filled rectangle both stay legible on the light
+ * canvas. Every colour is also paired with a distinct dash pattern or marker in
+ * the components, so a series is never identified by hue alone.
+ */
+
+.chartTone {
+  --chart-blue: #2563eb;
+  --chart-indigo: #4f46e5;
+  --chart-cyan: #0891b2;
+  --chart-teal: #0d9488;
+  --chart-green: #059669;
+  --chart-amber: #d97706;
+  --chart-orange: #ea580c;
+  --chart-red: #e11d48;
+  --chart-violet: #7c3aed;
+  --chart-slate: #64748b;
+}
+
+.figure {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.caption {
+  margin: 0;
+  color: var(--muted, #64748b);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+/* Axes and gridlines sit behind the data and must never compete with it. */
+.gridLine { stroke: var(--line, #e3e8f4); stroke-width: 1; }
+.zeroLine { stroke: var(--line-dark, #c9d3ec); stroke-width: 1.25; }
+.axisLine { stroke: var(--line-dark, #c9d3ec); stroke-width: 1; }
+.axisLabel {
+  fill: var(--ink-faint, #7d87a6);
+  font-size: 9.5px;
+  font-weight: 750;
+  letter-spacing: .02em;
+}
+.axisLabelValue { text-anchor: end; dominant-baseline: middle; }
+.axisLabelCategory { text-anchor: middle; dominant-baseline: hanging; }
+
+/* Data marks. */
+.line { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.area { stroke: none; opacity: .13; }
+.marker { stroke: white; stroke-width: 1.25; }
+.bar { stroke: none; }
+.bar:hover { opacity: .82; }
+.segment { stroke: white; stroke-width: 1.5; }
+
+.rankTrack { fill: var(--line, #e3e8f4); }
+.rankBar { stroke: none; }
+.rankLabel { fill: var(--ink, #1c2333); font-size: 10.5px; font-weight: 700; }
+.rankValue { fill: var(--ink-soft, #565f7d); font-size: 10.5px; font-weight: 800; text-anchor: end; }
+
+.sparkline { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+.sparkArea { stroke: none; opacity: .15; }
+
+.shareBar { border-radius: 999px; overflow: hidden; }
+.shareSegment { stroke: none; }
+
+.donutCenterValue {
+  fill: var(--ink, #1c2333);
+  font-size: 17px;
+  font-weight: 850;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+.donutCenterLabel {
+  fill: var(--ink-faint, #7d87a6);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  text-transform: uppercase;
+}
+
+/* Legend. */
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft, #565f7d);
+  font-size: 10.5px;
+  font-weight: 750;
+}
+.legendSwatch { width: 10px; height: 10px; flex: 0 0 auto; border-radius: 3px; }
+.legendValue { color: var(--ink-faint, #7d87a6); font-weight: 800; font-variant-numeric: tabular-nums; }
+
+/*
+ * Explicit non-data state. This is deliberately a visible, labelled block rather
+ * than a blank frame: an empty chart area must read as "no evidence", never as
+ * "zero spend".
+ */
+.chartState {
+  display: grid;
+  place-items: center;
+  gap: 3px;
+  min-height: 84px;
+  padding: 14px 16px;
+  border: 1px dashed var(--line-dark, #c9d3ec);
+  border-radius: 11px;
+  background: #fbfcfe;
+  text-align: center;
+}
+.chartStateTitle { color: var(--ink-soft, #565f7d); font-size: 11px; font-weight: 850; }
+.chartStateDetail { color: var(--ink-faint, #7d87a6); font-size: 10px; font-weight: 700; line-height: 1.45; }
+
+/* A table equivalent of the chart, available to assistive technology and to
+ * anyone who needs the exact numbers rather than the shape. */
+.dataTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10.5px;
+}
+.dataTable caption { color: var(--ink-faint, #7d87a6); font-size: 10px; font-weight: 800; text-align: left; padding-bottom: 4px; }
+.dataTable th, .dataTable td { padding: 3px 8px 3px 0; text-align: left; border-bottom: 1px solid var(--line, #e3e8f4); }
+.dataTable td:last-child { text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+
+.details { margin: 0; }
+.details > summary {
+  color: var(--ink-faint, #7d87a6);
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+.details > summary::-webkit-details-marker { display: none; }
+.details > summary::before { content: "▸ "; }
+.details[open] > summary::before { content: "▾ "; }
+.details > summary:focus-visible { outline: 3px solid rgba(15, 118, 110, .22); outline-offset: 2px; border-radius: 4px; }
+.details > div { padding-top: 6px; }
+
+@media (max-width: 700px) {
+  .caption { font-size: 10px; }
+  .axisLabel { font-size: 9px; }
+}

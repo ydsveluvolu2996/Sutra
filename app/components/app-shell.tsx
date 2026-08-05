@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
-import { groupContainsActiveItem, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
+import { groupContainsActiveItem, resolveActiveNavKey, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
 import { GlyphIcon, NavIcon, navTone } from "./nav-icon";
 import { AccountMenu } from "./account-menu";
 
@@ -86,6 +87,10 @@ function AuthenticatedAppShell({
   readonly session: PublicLocalSession;
 }) {
   const { state, health, loading } = usePilotState();
+  // FinOps dashboard routes all declare `active="costs"`; the exact rail
+  // destination is resolved from the path so the open dashboard is the one
+  // marked `aria-current="page"`.
+  const activeKey = resolveActiveNavKey(active, usePathname());
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [navQuery, setNavQuery] = useState("");
@@ -178,7 +183,7 @@ function AuthenticatedAppShell({
         <nav className="main-nav grouped-nav" aria-label="Primary navigation">
           {visibleNav.map((group) => (
             <NavigationGroup
-              active={active}
+              active={activeKey}
               connectionId={selectedConnectionId}
               group={group}
               forceOpen={query !== ""}
@@ -222,7 +227,7 @@ function AuthenticatedAppShell({
                     <strong id={`mobile-nav-${group.key}`}>{group.label}</strong>
                     {group.items.map((item) => (
                       <Link
-                        aria-current={active === item.key ? "page" : undefined}
+                        aria-current={activeKey === item.key ? "page" : undefined}
                         href={scopedWorkspaceHref(item.href, selectedConnectionId)}
                         key={`${group.key}-${item.href}`}
                         onClick={() => closeMobileNav(false)}
@@ -266,6 +271,42 @@ function AuthenticatedAppShell({
   );
 }
 
+/**
+ * A collapsed sub-list inside a nav group. Native `<details>`/`<summary>` keeps
+ * it keyboard operable with no custom key handling, and the count is the only
+ * metadata shown — delivery maturity is never implied here.
+ */
+function NavigationSubsection({
+  children,
+  containsActive,
+  count,
+  forceOpen,
+  label,
+}: {
+  readonly children: ReactNode;
+  readonly containsActive: boolean;
+  readonly count: number;
+  readonly forceOpen: boolean;
+  readonly label: string;
+}) {
+  const [open, setOpen] = useState(containsActive);
+
+  return (
+    <details
+      className="nav-subsection nav-subsection-collapsible"
+      open={forceOpen || open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="nav-subsection-label">
+        <span>{label}</span>
+        <em>{count}</em>
+        <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
+      </summary>
+      <div>{children}</div>
+    </details>
+  );
+}
+
 function NavigationGroup({
   active,
   connectionId,
@@ -304,6 +345,7 @@ function NavigationGroup({
   const sections = group.sections
     ?.map((section) => ({
       label: section.label,
+      collapsible: section.collapsible === true,
       items: section.keys
         .map((key) => group.items.find((item) => item.key === key))
         .filter((item): item is NavGroup["items"][number] => item !== undefined),
@@ -319,7 +361,19 @@ function NavigationGroup({
       </summary>
       <div>
         {sections && sections.length > 0
-          ? sections.map((section) => (
+          ? sections.map((section) => section.collapsible
+            ? (
+              <NavigationSubsection
+                containsActive={section.items.some((item) => item.key === active)}
+                count={section.items.length}
+                forceOpen={forceOpen}
+                key={`${group.key}-${section.label}`}
+                label={section.label}
+              >
+                {section.items.map(renderItem)}
+              </NavigationSubsection>
+            )
+            : (
               <div className="nav-subsection" key={`${group.key}-${section.label}`}>
                 <p className="nav-subsection-label">{section.label}</p>
                 {section.items.map(renderItem)}

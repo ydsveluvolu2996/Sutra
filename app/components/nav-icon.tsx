@@ -1,17 +1,21 @@
 import type { ReactNode } from "react";
-import type { NavKey } from "./navigation-config";
+import { FINOPS_DASHBOARD_CATALOG } from "../../lib/finops-dashboard-catalog";
+import { finopsDashboardNavKey, type FinopsDashboardNavKey, type NavKey } from "./navigation-config";
 
 // Hand-drawn line icons (24px grid, 1.75 stroke, currentColor) so the product
 // ships no icon-font or CDN dependency. Each nav destination maps to a glyph by
 // meaning, not by its legacy two-letter code.
-type IconName =
+export type IconName =
   | "dashboard" | "users" | "userPlus" | "plus" | "activity" | "pulse"
   | "server" | "history" | "hexagon" | "cube" | "folders" | "grid"
   | "layers" | "supplyChain" | "globe" | "target" | "key" | "network"
   | "shieldCheck" | "policy" | "scan" | "alert" | "bug" | "siren"
   | "wrench" | "clipboardCheck" | "listChecks" | "fileText" | "dollar"
   | "refresh" | "map" | "bell" | "alertOctagon" | "gear" | "trendUp" | "diff" | "dot"
-  | "logout" | "chevron" | "search";
+  | "logout" | "chevron" | "search"
+  // FinOps / Cloud Intelligence dashboard glyphs
+  | "receipt" | "gauge" | "chip" | "megaphone" | "wallet" | "lifebuoy"
+  | "monitor" | "film" | "cloud" | "cart" | "leaf" | "headset" | "tag";
 
 const PATHS: Readonly<Record<IconName, ReactNode>> = {
   dashboard: <><rect x="3" y="3" width="7" height="9" rx="1.3" /><rect x="14" y="3" width="7" height="5" rx="1.3" /><rect x="14" y="12" width="7" height="9" rx="1.3" /><rect x="3" y="16" width="7" height="5" rx="1.3" /></>,
@@ -54,9 +58,31 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5" /><path d="M21 12H9" /></>,
   chevron: <path d="m6 9 6 6 6-6" />,
   search: <><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>,
+  receipt: <><path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17l-2.3-1.6-2.4 1.6-2.3-1.6L9.7 21l-2.4-1.6z" /><path d="M9 8h6M9 12h4" /></>,
+  gauge: <><path d="M3.5 16.5a8.5 8.5 0 1 1 17 0" /><path d="m12 16.5 4.3-4.7" /><circle cx="12" cy="16.5" r="1.4" /></>,
+  chip: <><rect x="7" y="7" width="10" height="10" rx="1.8" /><path d="M10 4v3M14 4v3M10 17v3M14 17v3M4 10h3M4 14h3M17 10h3M17 14h3" /></>,
+  megaphone: <><path d="M3 11v2a1 1 0 0 0 1 1h2l9 5V5L6 10H4a1 1 0 0 0-1 1Z" /><path d="M18.5 9.2a4 4 0 0 1 0 5.6" /></>,
+  wallet: <><rect x="3" y="6" width="18" height="14" rx="2.3" /><path d="M3 10.5h18" /><path d="M16.3 15.2h2.2" /></>,
+  lifebuoy: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="3.6" /><path d="m5.6 5.6 3.9 3.9M14.5 14.5l3.9 3.9M18.4 5.6l-3.9 3.9M9.5 14.5l-3.9 3.9" /></>,
+  monitor: <><rect x="2.5" y="4" width="19" height="12.5" rx="2" /><path d="M9 20.5h6M12 16.5v4" /></>,
+  film: <><rect x="2.5" y="4" width="19" height="16" rx="2.2" /><path d="M7.5 4v16M16.5 4v16M2.5 12h19" /></>,
+  cloud: <path d="M17.5 19H7a4.5 4.5 0 0 1-.6-8.96A6 6 0 0 1 18 9.3a4.85 4.85 0 0 1-.5 9.7Z" />,
+  cart: <><circle cx="9.5" cy="20" r="1.4" /><circle cx="18" cy="20" r="1.4" /><path d="M2.5 3h2.2l2.4 11.2a1.8 1.8 0 0 0 1.8 1.4h9.4a1.8 1.8 0 0 0 1.75-1.35L21.5 7H6" /></>,
+  leaf: <><path d="M11 20.5A7.5 7.5 0 0 1 3.5 13c0-6.4 6.2-11 16.5-11 0 10.4-4.7 15.6-9 16.5Z" /><path d="M4 20.5C5.6 15 9.2 11 14.5 8.5" /></>,
+  headset: <><path d="M4 14.5v-2.2a8 8 0 0 1 16 0v2.2" /><rect x="2" y="13.6" width="4.4" height="6.4" rx="1.8" /><rect x="17.6" y="13.6" width="4.4" height="6.4" rx="1.8" /><path d="M19.8 20v.4a2 2 0 0 1-2 2h-3.6" /></>,
+  tag: <><path d="M20.6 12.4 12.4 20.6a2 2 0 0 1-2.8 0l-6.2-6.2a2 2 0 0 1-.6-1.5l.3-6.4a2 2 0 0 1 1.9-1.9l6.4-.3a2 2 0 0 1 1.5.6l6.2 6.2a2 2 0 0 1 0 2.8Z" /><circle cx="8.6" cy="8.6" r="1.5" /></>,
 };
 
+// Cloud Intelligence dashboard glyphs and tones come from the catalog entry
+// itself, so the rail never carries a second hard-coded map that could drift
+// from the dashboard page it links to.
+const DASHBOARD_ICONS = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) =>
+  [finopsDashboardNavKey(entry.catalogId), entry.icon] as const,
+)) as Record<FinopsDashboardNavKey, IconName>;
+
 const KEY_ICON: Record<NavKey, IconName> = {
+  ...DASHBOARD_ICONS,
+  finops_dashboards: "grid",
   overview: "dashboard",
   customers: "users",
   onboard: "plus",
@@ -131,7 +157,13 @@ export type NavTone =
   | "blue" | "indigo" | "cyan" | "teal" | "green"
   | "amber" | "orange" | "red" | "violet" | "slate";
 
+const DASHBOARD_TONES = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) =>
+  [finopsDashboardNavKey(entry.catalogId), entry.tone] as const,
+)) as Record<FinopsDashboardNavKey, NavTone>;
+
 const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
+  ...DASHBOARD_TONES,
+  finops_dashboards: "amber",
   overview: "cyan",
   customers: "blue",
   onboard: "green",

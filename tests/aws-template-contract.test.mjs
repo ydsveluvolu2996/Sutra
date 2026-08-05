@@ -16,8 +16,72 @@ function statementActions(source, sid) {
   assert.notEqual(start, -1, sid);
   const following = source.indexOf("\n              - Sid:", start + marker.length);
   const block = source.slice(start, following === -1 ? source.length : following);
-  return [...block.matchAll(/^\s+- ([a-z0-9*]+:[A-Za-z0-9*]+)\s*$/gmu)]
+  // Service prefixes may contain hyphens (bcm-data-exports, compute-optimizer),
+  // so a hyphen-free prefix class would silently drop those actions and make the
+  // deny-ceiling comparison below pass while ignoring real grants.
+  return [...block.matchAll(/^\s+- ([a-z0-9*-]+:[A-Za-z0-9*]+)\s*$/gmu)]
     .map((match) => match[1]);
+}
+
+const ACTION_ITEM = /^\s+- ([a-z0-9-]+:[A-Za-z0-9*]+)\s*$/u;
+
+/**
+ * Every IAM statement in the template as `{ sid, effect, actions }`, scanned
+ * line by line so no YAML dependency is needed and so conditional policies
+ * (`Fn::If`) are read exactly like unconditional ones.
+ *
+ * Statement boundaries are `Sid:` lines at any indent, which is sound because
+ * every statement in these templates declares a Sid.
+ */
+function statements(source) {
+  const parsed = [];
+  let current = null;
+  let collecting = false;
+  for (const line of source.split("\n")) {
+    const sid = /^\s+- Sid: (\S+)\s*$/u.exec(line);
+    if (sid !== null) {
+      current = { sid: sid[1], effect: null, actions: [] };
+      parsed.push(current);
+      collecting = false;
+      continue;
+    }
+    if (current === null) continue;
+    const effect = /^\s+Effect: (Allow|Deny)\s*$/u.exec(line);
+    if (effect !== null) {
+      current.effect = effect[1];
+      continue;
+    }
+    if (/^\s+(?:Not)?Action:\s*$/u.test(line)) {
+      collecting = true;
+      continue;
+    }
+    const action = ACTION_ITEM.exec(line);
+    if (collecting && action !== null) current.actions.push(action[1]);
+    else if (action === null && line.trim() !== "") collecting = false;
+  }
+  return parsed;
+}
+
+/** Actions the template actually grants, mapped to the granting statement. */
+function allowedActions(source) {
+  const grants = new Map();
+  for (const statement of statements(source)) {
+    if (statement.effect !== "Allow") continue;
+    for (const action of statement.actions) grants.set(action, statement.sid);
+  }
+  return grants;
+}
+
+/**
+ * The `NotAction` set of the explicit deny ceiling. An explicit Deny overrides
+ * every Allow, so an action absent from this set is dead however it is granted.
+ */
+function denyCeiling(source) {
+  const ceiling = statements(source)
+    .find((statement) => statement.sid === "DenyUnimplementedActions");
+  assert.notEqual(ceiling, undefined, "template has no DenyUnimplementedActions ceiling");
+  assert.equal(ceiling.effect, "Deny");
+  return new Set(ceiling.actions);
 }
 
 test("standard customer onboarding role is the reviewed public artifact", async () => {
@@ -35,7 +99,7 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.4");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-08.12");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -93,16 +157,34 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     assert.match(infrastructure, new RegExp(`- ${action.replaceAll("*", "\\*")}`));
   }
 
+  // Appearing in the deny ceiling's NotAction is NOT a grant — it is the only
+  // way a separately-owned add-on policy (the CUR 2.0 export reader, the Compute
+  // Optimizer export-object reader) can function at all under an explicit deny
+  // that overrides every allow. So these actions are checked against what the
+  // template GRANTS, not against its source text; a textual check would either
+  // fail on the ceiling or, worse, be silently satisfied by a grant the ceiling
+  // happens to list.
+  const granted = allowedActions(infrastructure);
   for (const forbidden of [
     "s3:GetObject",
+    "s3:GetObjectVersion",
     "secretsmanager:GetSecretValue",
     "ssm:GetParameter",
     "kms:Decrypt",
+    "kms:GenerateDataKey",
     "iam:PassRole",
     "ec2:RunInstances",
-    "Principal: '*'",
   ]) {
-    assert.doesNotMatch(infrastructure, new RegExp(forbidden.replaceAll("*", "\\*")));
+    assert.equal(
+      granted.has(forbidden),
+      false,
+      `${forbidden} is granted by ${granted.get(forbidden)}`,
+    );
+  }
+  assert.doesNotMatch(infrastructure, /Principal:\s*['"]?\*['"]?/u);
+  // No statement may grant a wildcard action or a whole-service wildcard.
+  for (const [action, sid] of granted) {
+    assert.doesNotMatch(action, /\*/u, `${sid} grants the wildcard action ${action}`);
   }
   assert.match(infrastructure, /sts:ExternalId:/);
   assert.doesNotMatch(infrastructure, /NoEcho:\s*true/u);
@@ -114,14 +196,157 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.4/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.4/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-08\.12/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-08\.12/u);
+
+  // The ceiling is an explicit Deny with NotAction, so every granted action must
+  // appear in it or the grant is dead on arrival. This is the invariant that
+  // makes adding a FinOps policy safe: forget the ceiling entry and the test
+  // fails rather than the customer's collection silently returning nothing.
+  const ceiling = denyCeiling(infrastructure);
+  const dead = [...granted].filter(([action]) => !ceiling.has(action));
+  assert.deepEqual(
+    dead,
+    [],
+    `granted but denied by the ceiling: ${dead.map(([a, sid]) => `${a} (${sid})`).join(", ")}`,
+  );
+
+  // The reverse containment does not hold, and must not be asserted: the ceiling
+  // is deliberately wider than the inline grants so separately-owned add-on
+  // policies can function. Those extra entries are enumerated exactly, so a new
+  // one cannot be slipped in without review.
+  const ceilingOnly = [...ceiling].filter((action) => !granted.has(action)).sort();
+  assert.deepEqual(ceilingOnly, [
+    "bcm-data-exports:GetExport",
+    "bcm-data-exports:ListExports",
+    "compute-optimizer:ExportAutoScalingGroupRecommendations",
+    "compute-optimizer:ExportEBSVolumeRecommendations",
+    "compute-optimizer:ExportEC2InstanceRecommendations",
+    "compute-optimizer:ExportECSServiceRecommendations",
+    "compute-optimizer:ExportIdleRecommendations",
+    "compute-optimizer:ExportLambdaFunctionRecommendations",
+    "compute-optimizer:ExportLicenseRecommendations",
+    "compute-optimizer:ExportRDSDatabaseRecommendations",
+    "compute-optimizer:GetEBSVolumeRecommendations",
+    "compute-optimizer:GetECSServiceRecommendations",
+    "compute-optimizer:GetIdleRecommendations",
+    "compute-optimizer:GetLambdaFunctionRecommendations",
+    "compute-optimizer:GetLicenseRecommendations",
+    "ecs:ListClusters",
+    "ecs:ListServices",
+    "kms:Decrypt",
+    "kms:GenerateDataKey",
+    "lambda:ListFunctions",
+    "lambda:ListProvisionedConcurrencyConfigs",
+    "s3:GetBucketLocation",
+    "s3:GetObject",
+    "s3:GetObjectAttributes",
+    "s3:GetObjectVersion",
+    "s3:ListBucket",
+  ]);
 
   const implemented = statementActions(infrastructure, "ImplementedMetadataApis");
-  const trust = statementActions(infrastructure, "TrustContractAttestation");
-  const ceiling = statementActions(infrastructure, "DenyUnimplementedActions");
-  assert.deepEqual(new Set(ceiling), new Set([...implemented, ...trust]));
   assert.equal(implemented.includes("lambda:ListFunctions"), false);
+});
+
+test("the onboarding template creates from the five-parameter quick-create link", async () => {
+  // lib/aws-cloudformation-quick-launch.ts passes exactly five parameters. A
+  // parameter without a default that is not in that set makes every quick-create
+  // stack fail with "Parameters must have values", so onboarding would break for
+  // every new customer while every local test still passed.
+  const infrastructure = await readFile(
+    resolve(root, "infrastructure/customer-onboarding-role.yaml"),
+    "utf8",
+  );
+  const supplied = new Set([
+    "VendorCollectorRoleArn",
+    "ExternalId",
+    "SessionNamePrefix",
+    "CustomerTenantId",
+    "RoleName",
+  ]);
+
+  const block = infrastructure.slice(
+    infrastructure.indexOf("\nParameters:"),
+    infrastructure.indexOf("\nConditions:"),
+  );
+  const declared = [...block.matchAll(/^ {2}([A-Za-z0-9]+):$/gmu)].map((match) => match[1]);
+  assert.ok(declared.length >= supplied.size);
+
+  for (const name of declared) {
+    if (supplied.has(name)) continue;
+    const start = block.indexOf(`\n  ${name}:`);
+    const next = declared
+      .map((other) => block.indexOf(`\n  ${other}:`))
+      .filter((index) => index > start);
+    const body = block.slice(start, next.length === 0 ? block.length : Math.min(...next));
+    assert.match(
+      body,
+      /^\s+Default:/mu,
+      `${name} has no default, so the five-parameter quick-create link cannot create this stack`,
+    );
+  }
+
+  // The DCF Step Functions policy is the one grant that cannot be unconditional:
+  // an empty CommaDelimitedList resolves to [''], which is not a usable IAM
+  // Resource, so the policy is attached only when real ARNs are supplied.
+  assert.match(infrastructure, /HasDcfStateMachines:\s*\n\s+Fn::Not:/u);
+  assert.match(
+    infrastructure,
+    /- Fn::If:\s*\n\s+- HasDcfStateMachines\s*\n\s+- PolicyName: SutraFinopsDcfStepFunctionsReadV1/u,
+  );
+  assert.match(infrastructure, /- Ref: AWS::NoValue/u);
+});
+
+test("the onboarding template grants the FinOps source contracts it advertises", async () => {
+  // The previous onboarding template pinned standard-2026-07.4 and contained the
+  // string "finops" zero times, so every FinOps dashboard was starved at the
+  // source no matter which permission pack the tracker claimed.
+  const infrastructure = await readFile(
+    resolve(root, "infrastructure/customer-onboarding-role.yaml"),
+    "utf8",
+  );
+  const granted = allowedActions(infrastructure);
+
+  assert.match(
+    infrastructure,
+    /AdvancedFinopsSources: cost-anomaly-v1,trusted-advisor-standard-v1,organizations-taxonomy-v1,compute-optimizer-export-discovery-v1,extended-support-projection-v1,support-cases-radar-v1,health-events-v1,resilience-vue-v1,data-collection-monitor-v1,end-user-computing-v1,graviton-savings-v1/u,
+  );
+  assert.match(infrastructure, /FoundationalFinopsAddOn: foundational-cur2-export-v1/u);
+
+  for (const policy of [
+    "SutraFinopsCostAnomalyReadV1",
+    "SutraFinopsTrustedAdvisorStandardReadV1",
+    "SutraFinopsOrganizationsTaxonomyReadV1",
+    "SutraFinopsComputeOptimizerExportReadV1",
+    "SutraFinopsExtendedSupportProjectionReadV1",
+    "SutraFinopsSupportCasesReadV1",
+    "SutraFinopsHealthOrganizationReadV1",
+    "SutraFinopsResilienceVueReadV1",
+    "SutraFinopsDcfStepFunctionsReadV1",
+    "SutraFinopsEndUserComputingReadV1",
+    "SutraFinopsGravitonSavingsReadV1",
+  ]) {
+    assert.match(infrastructure, new RegExp(`PolicyName: ${policy}`, "u"));
+  }
+
+  // One representative action per source contract, so a policy renamed without
+  // its grants surviving still fails.
+  for (const action of [
+    "ce:GetAnomalies",
+    "support:DescribeTrustedAdvisorChecks",
+    "organizations:ListAccounts",
+    "compute-optimizer:GetEnrollmentStatus",
+    "rds:DescribeDBMajorEngineVersions",
+    "support:DescribeCases",
+    "health:DescribeEventsForOrganization",
+    "resiliencehub:ListAppAssessments",
+    "states:DescribeStateMachine",
+    "workspaces:DescribeWorkspaces",
+    "pricing:GetPriceListFileUrl",
+  ]) {
+    assert.equal(granted.has(action), true, `${action} is not granted`);
+  }
 });
 
 test("public customer role advertises the enterprise permission-pack version", async () => {
@@ -231,7 +456,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "2393c14eca626b985ec247d806034fcdc52d1c8068ac384f7173ffd24fbee4ca",
+    "7fe1024f4ec6caffe6e4de75e082d78e032c25ac6c9e7925741a3927aa9c8f7c",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));

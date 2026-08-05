@@ -494,13 +494,27 @@ test("FinOps source commands require the exact successor source policy and deny 
   assert.match(finopsTemplate, /PolicyName: SutraFinopsComputeOptimizerExportReadV1/u);
   assert.equal(finopsTemplate.includes("- kms:Sign"), false);
   assert.deepEqual([...sourceAllowed].sort(), [...sourceActions].sort());
+
+  // The "default metadata role" is the ImplementedMetadataApis statement — the
+  // broad inventory grant every connection gets. A FinOps source action must
+  // reach the role only through its own named source policy, never by being
+  // folded into that statement, where it would be granted to every collection
+  // path rather than to the one source that declares it.
+  //
+  // Checked against that statement rather than the whole file: onboarding now
+  // deploys the standard-2026-08.12 action set, so these actions are legitimately
+  // present in the template's dedicated FinOps policies and in its deny ceiling.
+  // A whole-file check would forbid exactly the grant the design requires.
+  const defaultMetadataActions = new Set(
+    actionsInStatement(currentTemplate, "ImplementedMetadataApis"),
+  );
   for (const action of sourceActions) {
     assert.ok(
       denyCeiling.has(action),
       `FinOps source calls ${action} but the successor deny ceiling would deny it`,
     );
     assert.equal(
-      currentTemplate.includes(`- ${action}`),
+      defaultMetadataActions.has(action),
       false,
       `${action} must not widen the current default metadata role`,
     );
@@ -517,10 +531,17 @@ test("source-specific collector sessions do not widen the default metadata role"
   )];
 
   assert.ok(sourceActions.length > 0, "source-specific command scope must not be empty");
+  // Same boundary as above: the broad ImplementedMetadataApis grant, not the
+  // whole template. A source-session action belongs to the named source policy
+  // that declares it, so folding it into the default metadata statement would
+  // hand it to every collection path.
+  const defaultMetadataActions = new Set(
+    actionsInStatement(currentTemplate, "ImplementedMetadataApis"),
+  );
   for (const action of sourceActions) {
     assert.match(action, READ_ONLY_VERBS, `${action} is not a read-only source-session action`);
     assert.equal(
-      currentTemplate.includes(`- ${action}`),
+      defaultMetadataActions.has(action),
       false,
       `${action} must not widen the current default metadata role`,
     );

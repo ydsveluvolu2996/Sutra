@@ -7,6 +7,39 @@
 
 export type FinopsDashboardLevel = "foundational" | "advanced" | "additional";
 export type FinopsDashboardProvider = "aws" | "azure" | "gcp" | "multi-cloud";
+
+/**
+ * Official level-scoped catalog identifier. These are the same IDs used by the
+ * implementation tracker and by every `docs/finops-cid-evidence/<ID>-*.md`
+ * record, so a rendered dashboard can be traced to its evidence without a
+ * second lookup table.
+ */
+export type FinopsDashboardCatalogId =
+  | `FND-0${1 | 2 | 3}`
+  | `ADV-0${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
+  | `ADV-1${0 | 1 | 2 | 3}`
+  | `ADD-0${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9}`
+  | `ADD-1${0 | 1 | 2 | 3}`;
+
+/**
+ * Name of a glyph in the shared inline-SVG icon system
+ * (`app/components/nav-icon.tsx`). Deliberately a plain string union so this
+ * catalog stays client-safe and free of React imports; `GlyphIcon`'s own
+ * `IconName` prop type rejects any name that has no drawn glyph at compile
+ * time, so an unusable icon cannot reach the UI.
+ */
+export type FinopsDashboardIconName =
+  | "dashboard" | "receipt" | "gauge" | "clipboardCheck" | "server"
+  | "alertOctagon" | "history" | "chip" | "pulse" | "megaphone" | "wallet"
+  | "lifebuoy" | "shieldCheck" | "monitor" | "activity" | "film"
+  | "listChecks" | "cloud" | "layers" | "cart" | "hexagon" | "cube"
+  | "leaf" | "trendUp" | "network" | "headset" | "policy" | "tag";
+
+/** Semantic hue for the dashboard's icon chip, matching the sidebar tones. */
+export type FinopsDashboardTone =
+  | "blue" | "indigo" | "cyan" | "teal" | "green"
+  | "amber" | "orange" | "red" | "violet" | "slate";
+
 export type FinopsDashboardMaturity =
   | "LOCAL_VERTICAL_CANDIDATE"
   | "PARTIAL_PIPELINE"
@@ -32,8 +65,12 @@ export type FinopsSharedAnalysisSection =
 export interface FinopsDashboardCatalogEntry {
   readonly id: string;
   readonly slug: string;
+  /** Official tracker/evidence identifier, e.g. `FND-01` or `ADV-05`. */
+  readonly catalogId: FinopsDashboardCatalogId;
   readonly name: string;
   readonly shortName: string;
+  readonly icon: FinopsDashboardIconName;
+  readonly tone: FinopsDashboardTone;
   readonly level: FinopsDashboardLevel;
   readonly provider: FinopsDashboardProvider;
   /** Delivery maturity only; no value means production-ready or accepted. */
@@ -52,8 +89,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "cudos",
     slug: "cudos",
+    catalogId: "FND-01",
     name: "CUDOS Dashboard",
     shortName: "CUDOS",
+    icon: "dashboard",
+    tone: "cyan",
     level: "foundational",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -65,8 +105,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "cost_intelligence_dashboard",
     slug: "cost-intelligence",
+    catalogId: "FND-02",
     name: "Cost Intelligence Dashboard",
     shortName: "Cost Intelligence",
+    icon: "receipt",
+    tone: "blue",
     level: "foundational",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -78,8 +121,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "kpi_dashboard",
     slug: "kpi-modernization",
+    catalogId: "FND-03",
     name: "KPI and Modernization Dashboard",
     shortName: "KPI & Modernization",
+    icon: "gauge",
+    tone: "green",
     level: "foundational",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -91,8 +137,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "trusted_advisor_organizational",
     slug: "trusted-advisor-organizational",
+    catalogId: "ADV-01",
     name: "Trusted Advisor Organizational (TAO) Dashboard",
     shortName: "Trusted Advisor",
+    icon: "clipboardCheck",
+    tone: "green",
     level: "advanced",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -104,11 +153,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "compute_optimizer",
     slug: "compute-optimizer",
+    catalogId: "ADV-02",
     name: "Compute Optimizer Dashboard",
     shortName: "Compute Optimizer",
+    icon: "server",
+    tone: "indigo",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Organization-wide rightsizing recommendations, savings opportunities, and under-provisioning risk.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/compute-optimizer-dashboard.html`,
@@ -117,8 +169,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "cost_anomaly",
     slug: "cost-anomaly",
+    catalogId: "ADV-03",
     name: "Cost Anomaly Dashboard",
     shortName: "Cost Anomaly",
+    icon: "alertOctagon",
+    tone: "red",
     level: "advanced",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -130,11 +185,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "extended_support_projection",
     slug: "extended-support-projection",
+    catalogId: "ADV-04",
     name: "Extended Support Cost Projection",
     shortName: "Extended Support",
+    icon: "history",
+    tone: "orange",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Projected ElastiCache, EKS, RDS/Aurora, and OpenSearch Extended Support charges from authoritative resource and usage evidence.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/extended-support.html`,
@@ -143,8 +201,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "graviton_savings",
     slug: "graviton-savings",
+    catalogId: "ADV-05",
     name: "Graviton Savings Dashboard",
     shortName: "Graviton Savings",
+    icon: "chip",
+    tone: "violet",
     level: "advanced",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -156,11 +217,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "health_events",
     slug: "health-events",
+    catalogId: "ADV-06",
     name: "Health Events Dashboard",
     shortName: "Health Events",
+    icon: "pulse",
+    tone: "red",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Past, active, and upcoming AWS Health events across organization accounts and affected entities.",
     targetAudience: ["Product owners", "DevOps", "Engineering", "SRE", "Security"],
     documentationUrl: `${AWS_CID_ROOT}/health-events-dashboard.html`,
@@ -169,11 +233,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "aws_news_feeds",
     slug: "aws-news-feeds",
+    catalogId: "ADV-07",
     name: "AWS News Feeds",
     shortName: "AWS News",
+    icon: "megaphone",
+    tone: "amber",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Governed AWS What’s New, blog, video, and security bulletin feeds for operational review.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/news-feeds.html`,
@@ -182,11 +249,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "aws_budgets",
     slug: "aws-budgets",
+    catalogId: "ADV-08",
     name: "AWS Budgets Dashboard",
     shortName: "AWS Budgets",
+    icon: "wallet",
+    tone: "green",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Organization-wide AWS budget configuration, actual spend, forecasts, thresholds, and status.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering"],
     documentationUrl: `${AWS_CID_ROOT}/budgets-dashboard.html`,
@@ -195,11 +265,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "support_cases_radar",
     slug: "support-cases-radar",
+    catalogId: "ADV-09",
     name: "AWS Support Cases Radar Dashboard",
     shortName: "Support Cases",
+    icon: "lifebuoy",
+    tone: "blue",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Consolidated support-case volume, status, severity, age, ownership, and account trends.",
     targetAudience: ["Product owners", "FinOps", "DevOps", "Engineering", "CCOE", "Security"],
     documentationUrl: `${AWS_CID_ROOT}/support-cases-radar.html`,
@@ -208,11 +281,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "resiliencevue",
     slug: "resiliencevue",
+    catalogId: "ADV-10",
     name: "ResilienceVue Dashboard",
     shortName: "ResilienceVue",
+    icon: "shieldCheck",
+    tone: "teal",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "AWS Resilience Hub application posture, assessments, drift, policies, and recommendations.",
     targetAudience: ["Product owners", "DevOps", "Engineering", "SRE", "Security"],
     documentationUrl: `${AWS_CID_ROOT}/resiliencevue-dashboard.html`,
@@ -221,11 +297,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "end_user_computing",
     slug: "end-user-computing",
+    catalogId: "ADV-11",
     name: "AWS End User Computing (EUC) Dashboard",
     shortName: "End User Computing",
+    icon: "monitor",
+    tone: "cyan",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "WorkSpaces usage, cost, performance, and user-behavior evidence for fleet optimization.",
     targetAudience: ["IT administrators", "FinOps", "Product owners"],
     documentationUrl: `${AWS_CID_ROOT}/euc-dashboard.html`,
@@ -234,11 +313,14 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "data_collection_monitor",
     slug: "data-collection-monitor",
+    catalogId: "ADV-12",
     name: "Data Collection Monitor Dashboard",
     shortName: "Collection Monitor",
+    icon: "activity",
+    tone: "slate",
     level: "advanced",
     provider: "aws",
-    currentMaturity: "PARTIAL_PIPELINE",
+    currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
     summary: "Data Collection Framework execution history, module instrumentation, failures, and troubleshooting evidence.",
     targetAudience: ["IT administrators", "FinOps"],
     documentationUrl: `${AWS_CID_ROOT}/data-collection-monitor.html`,
@@ -247,8 +329,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "media_services_insights",
     slug: "media-services-insights",
+    catalogId: "ADV-13",
     name: "Media Services Insights Hub",
     shortName: "Media Services",
+    icon: "film",
+    tone: "violet",
     level: "advanced",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -260,8 +345,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "cora",
     slug: "cora",
+    catalogId: "ADD-01",
     name: "CORA Dashboard",
     shortName: "CORA",
+    icon: "listChecks",
+    tone: "green",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -273,8 +361,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "azure_cid",
     slug: "azure-cloud-intelligence",
+    catalogId: "ADD-02",
     name: "Cloud Intelligence Dashboard for Azure",
     shortName: "Azure CID",
+    icon: "cloud",
+    tone: "blue",
     level: "additional",
     provider: "azure",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -286,8 +377,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "gcp_cid",
     slug: "gcp-cloud-intelligence",
+    catalogId: "ADD-03",
     name: "Cloud Intelligence Dashboard for GCP",
     shortName: "GCP CID",
+    icon: "cloud",
+    tone: "orange",
     level: "additional",
     provider: "gcp",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -299,8 +393,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "focus",
     slug: "focus",
+    catalogId: "ADD-04",
     name: "FOCUS Dashboard",
     shortName: "FOCUS",
+    icon: "layers",
+    tone: "indigo",
     level: "additional",
     provider: "multi-cloud",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -312,8 +409,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "marketplace_spg",
     slug: "marketplace-spg",
+    catalogId: "ADD-05",
     name: "AWS Marketplace Single Pane of Glass (SPG) Dashboard",
     shortName: "Marketplace SPG",
+    icon: "cart",
+    tone: "amber",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -325,8 +425,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "kubecost_container_allocation",
     slug: "kubecost-container-allocation",
+    catalogId: "ADD-06",
     name: "Kubecost Containers Cost Allocation Dashboard",
     shortName: "Kubecost",
+    icon: "hexagon",
+    tone: "blue",
     level: "additional",
     provider: "multi-cloud",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -338,8 +441,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "scad_container_allocation",
     slug: "scad-container-allocation",
+    catalogId: "ADD-07",
     name: "SCAD Containers Cost Allocation Dashboard",
     shortName: "SCAD",
+    icon: "cube",
+    tone: "teal",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -351,8 +457,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "sustainability_proxy",
     slug: "sustainability-carbon",
+    catalogId: "ADD-08",
     name: "Sustainability Proxy Metrics and Carbon Emissions Dashboard",
     shortName: "Sustainability",
+    icon: "leaf",
+    tone: "green",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -364,8 +473,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "trends",
     slug: "trends",
+    catalogId: "ADD-09",
     name: "Trends Dashboard",
     shortName: "Trends",
+    icon: "trendUp",
+    tone: "cyan",
     level: "additional",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -377,8 +489,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "data_transfer",
     slug: "data-transfer",
+    catalogId: "ADD-10",
     name: "Data Transfer Dashboard",
     shortName: "Data Transfer",
+    icon: "network",
+    tone: "orange",
     level: "additional",
     provider: "aws",
     currentMaturity: "LOCAL_VERTICAL_CANDIDATE",
@@ -390,8 +505,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "amazon_connect_cost_insights",
     slug: "amazon-connect-cost-insights",
+    catalogId: "ADD-11",
     name: "Amazon Connect Cost Insights Dashboard",
     shortName: "Amazon Connect",
+    icon: "headset",
+    tone: "violet",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -403,8 +521,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "config_resource_compliance",
     slug: "config-resource-compliance",
+    catalogId: "ADD-12",
     name: "AWS Config Resource Compliance Dashboard",
     shortName: "Config Compliance",
+    icon: "policy",
+    tone: "green",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",
@@ -416,8 +537,11 @@ const FINOPS_DASHBOARD_CATALOG_DATA = [
   {
     id: "pricing_change",
     slug: "pricing-change-analysis",
+    catalogId: "ADD-13",
     name: "Pricing Change Analysis Dashboard",
     shortName: "Pricing Changes",
+    icon: "tag",
+    tone: "amber",
     level: "additional",
     provider: "aws",
     currentMaturity: "PARTIAL_PIPELINE",

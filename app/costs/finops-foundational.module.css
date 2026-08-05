@@ -1,0 +1,117 @@
+/* Sheet-based presentation for the three Foundational dashboards. */
+
+.shell { display: grid; gap: 15px; min-width: 0; }
+
+.shellHead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.inventory { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin: 0; color: var(--ink-faint); font-size: 10.5px; font-weight: 750; }
+.inventory b { color: var(--ink-soft); font-weight: 850; font-variant-numeric: tabular-nums; }
+.inventoryPin { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+
+/* Sheet tabs. Horizontally scrollable: 19 official CUDOS sheets never fit. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 3px 2px 7px;
+  border-bottom: 1px solid var(--line);
+  scrollbar-width: thin;
+  overscroll-behavior-x: contain;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.tab:hover { border-color: var(--line); background: #f8fafc; color: var(--ink); }
+.tab:focus-visible { outline: 3px solid rgba(15, 118, 110, .24); outline-offset: 1px; }
+.tabActive { border-color: rgba(15, 118, 110, .3) !important; background: #f0fdfa !important; color: #0f766e !important; font-weight: 900; }
+.tabCount { padding: 1px 6px; border-radius: 999px; background: #eef2f9; color: #64748b; font-size: 8.5px; font-weight: 850; font-variant-numeric: tabular-nums; }
+.tabActive .tabCount { background: white; color: #0f766e; }
+/* Non-colour cue that a sheet is only partially covered. */
+.tabPartial::after { content: "◐"; color: #b45309; font-size: 10px; }
+
+.panel { display: grid; gap: 14px; min-width: 0; }
+
+/* Per-sheet coverage disclosure. */
+.coverage {
+  display: grid;
+  gap: 7px;
+  padding: 11px 13px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fbfcfe;
+}
+.coverage[data-support="PARTIAL"] { border-left-color: #d97706; background: #fffdf7; }
+.coverage[data-support="SUPPORTED"] { border-left-color: #059669; background: #f7fdfa; }
+.coverageHead { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.coverageHead strong { font-size: 11.5px; font-weight: 850; }
+.coverageBadge { padding: 2px 8px; border-radius: 999px; font-size: 8.5px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.coverageBadge[data-support="SUPPORTED"] { background: #ecfdf5; color: #065f46; }
+.coverageBadge[data-support="PARTIAL"] { background: #fffbeb; color: #92400e; }
+.coverageMeta { color: var(--ink-faint); font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.coverageGaps { margin: 0; padding-left: 17px; display: grid; gap: 3px; }
+.coverageGaps li { color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
+
+.formulaList { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.formulaList li { padding: 2px 7px; border: 1px solid var(--line); border-radius: 6px; background: white; color: var(--ink-soft); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; font-weight: 700; }
+
+/* Content blocks inside a sheet. */
+.blocks { display: grid; gap: 14px; min-width: 0; }
+.block { display: grid; gap: 9px; padding: 15px 16px; border: 1px solid var(--line); border-radius: 13px; background: white; min-width: 0; }
+.blockHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.blockHead h4 { margin: 0; font-size: 12.5px; font-weight: 850; }
+.blockHead p { margin: 0; max-width: 74ch; color: var(--ink-faint); font-size: 10.5px; line-height: 1.5; }
+.blockGrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(268px, 1fr)); gap: 14px; align-items: start; }
+
+/* Exact-value KPI tiles. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 3px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px; background: #fbfcfe; }
+.tileLabel { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.tileValue { font-size: 16px; font-weight: 850; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.tileDetail { color: var(--ink-faint); font-size: 10px; font-weight: 700; }
+.tileSpark { padding-top: 3px; }
+
+/* Goal rows for the KPI dashboard. */
+.goals { display: grid; gap: 9px; }
+.goalRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #fbfcfe; }
+.goalName { font-size: 11.5px; font-weight: 800; }
+.goalFigures { display: flex; align-items: baseline; gap: 9px; font-variant-numeric: tabular-nums; }
+.goalCurrent { font-size: 14px; font-weight: 850; }
+.goalTarget { color: var(--ink-faint); font-size: 10px; font-weight: 800; }
+.goalTrack { grid-column: 1 / -1; }
+.goalMeta { grid-column: 1 / -1; color: var(--ink-faint); font-size: 10px; font-weight: 700; }
+.goalFormula { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9.5px; }
+
+/* Tables for pivot-style sheets. */
+.tableWrap { overflow-x: auto; overscroll-behavior-x: contain; }
+.table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.table caption { padding-bottom: 6px; color: var(--ink-faint); font-size: 10px; font-weight: 800; text-align: left; }
+.table th, .table td { padding: 6px 10px 6px 0; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table thead th { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.table td.numeric, .table th.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
+.table tbody tr:hover { background: #f8fafc; }
+
+.toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
+.field { display: grid; gap: 3px; }
+.field label { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.field select, .field input {
+  min-height: 32px; padding: 5px 9px; border: 1px solid var(--line-dark); border-radius: 8px;
+  background: white; color: var(--ink); font-size: 11.5px; font-weight: 700;
+}
+.field select:focus-visible, .field input:focus-visible { outline: 3px solid rgba(15, 118, 110, .22); outline-offset: 1px; }
+
+@media (max-width: 760px) {
+  .blockGrid { grid-template-columns: 1fr; }
+  .goalRow { grid-template-columns: 1fr; }
+}

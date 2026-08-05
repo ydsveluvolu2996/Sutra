@@ -1,7 +1,26 @@
 import type { Capability } from "../../lib/auth-policy";
+import {
+  listFinopsDashboardsByLevel,
+  type FinopsDashboardCatalogId,
+  type FinopsDashboardLevel,
+} from "../../lib/finops-dashboard-catalog.ts";
 import type { KubernetesSection } from "../kubernetes/kubernetes-sections";
 
+/**
+ * One nav destination per AWS Cloud Intelligence dashboard. The key is derived
+ * from the catalog's own tracker identifier (`FND-01`, `ADV-05`, …) so the
+ * union stays finite and exhaustive maps over `NavKey` still compile, and so a
+ * rail entry can be traced back to its evidence record without a lookup table.
+ */
+export type FinopsDashboardNavKey = `finops_dashboard_${FinopsDashboardCatalogId}`;
+
+export function finopsDashboardNavKey(catalogId: FinopsDashboardCatalogId): FinopsDashboardNavKey {
+  return `finops_dashboard_${catalogId}`;
+}
+
 export type NavKey =
+  | "finops_dashboards"
+  | FinopsDashboardNavKey
   | "overview"
   | "customers"
   | "cmdb"
@@ -66,6 +85,12 @@ export interface NavItem {
 export interface NavSection {
   readonly label: string;
   readonly keys: readonly NavKey[];
+  /**
+   * Render the section as its own collapsed disclosure inside the group. Used
+   * for long catalog sub-lists so a group that owns dozens of destinations
+   * still opens to a short, scannable rail.
+   */
+  readonly collapsible?: boolean;
 }
 
 export interface NavGroup {
@@ -83,6 +108,43 @@ export interface NavGroup {
 
 const readWorkspace = ["workspace:read"] as const;
 const readConnection = ["connection:read"] as const;
+
+// The dashboard rail is generated from the shared catalog, so labels, glyphs,
+// tones, levels and ordering have exactly one source of truth. Dashboard
+// destinations are gated identically to `/costs` (`connection:read`); they
+// never widen access.
+//
+// Level order, level labels and the dashboard href are re-stated here instead
+// of imported from `app/costs/dashboards/dashboard-catalog-presentation.ts`
+// only because this module must stay loadable by the plain-Node navigation
+// tests, which cannot resolve that module's extensionless imports.
+// `tests/finops-navigation-subsections.test.mjs` asserts these values stay
+// identical to the presentation helpers, so drift fails the build rather than
+// shipping.
+const FINOPS_NAV_LEVELS: readonly { readonly level: FinopsDashboardLevel; readonly label: string }[] = [
+  { level: "foundational", label: "Foundational" },
+  { level: "advanced", label: "Advanced" },
+  { level: "additional", label: "Additional" },
+];
+
+const finopsLevelRails = FINOPS_NAV_LEVELS.map((entry) => ({
+  label: entry.label,
+  dashboards: listFinopsDashboardsByLevel(entry.level),
+}));
+
+const finopsDashboardItems: readonly NavItem[] = finopsLevelRails.flatMap((rail) =>
+  rail.dashboards.map((dashboard) => ({
+    key: finopsDashboardNavKey(dashboard.catalogId),
+    label: dashboard.shortName,
+    href: `/costs/dashboards/${dashboard.slug}`,
+    capabilities: readConnection,
+  })));
+
+const finopsLevelSections: readonly NavSection[] = finopsLevelRails.map((rail) => ({
+  label: rail.label,
+  collapsible: true,
+  keys: rail.dashboards.map((dashboard) => finopsDashboardNavKey(dashboard.catalogId)),
+}));
 
 export const navGroups: readonly NavGroup[] = [
   {
@@ -189,6 +251,12 @@ export const navGroups: readonly NavGroup[] = [
     items: [
       { key: "costs", label: "AWS costs", href: "/costs", capabilities: readConnection },
       { key: "showback", label: "Customer showback", href: "/costs/showback", capabilities: readConnection },
+      { key: "finops_dashboards", label: "All dashboards", href: "/costs/dashboards", capabilities: readConnection },
+      ...finopsDashboardItems,
+    ],
+    sections: [
+      { label: "Cost workspace", keys: ["costs", "showback", "finops_dashboards"] },
+      ...finopsLevelSections,
     ],
   },
   {
@@ -210,6 +278,23 @@ export function visibleNavigation(capabilities: ReadonlySet<Capability>): readon
       items: group.items.filter((item) => item.capabilities.every((capability) => capabilities.has(capability))),
     }))
     .filter((group) => group.items.length > 0);
+}
+
+/**
+ * The dashboard index and per-dashboard routes both render the shell with
+ * `active="costs"`, so the rail resolves the precise destination from the
+ * current path instead. Scope is deliberately narrow: only `/costs/dashboards`
+ * paths are resolved, and only when the page already declared the FinOps costs
+ * destination, so no other group's active state can change.
+ */
+const FINOPS_DASHBOARD_KEY_BY_PATH: ReadonlyMap<string, NavKey> = new Map(
+  [{ key: "finops_dashboards" as NavKey, href: "/costs/dashboards" }, ...finopsDashboardItems]
+    .map((item) => [item.href, item.key] as const),
+);
+
+export function resolveActiveNavKey(active: NavKey, pathname: string | null | undefined): NavKey {
+  if (active !== "costs" || typeof pathname !== "string") return active;
+  return FINOPS_DASHBOARD_KEY_BY_PATH.get(pathname) ?? active;
 }
 
 export function groupContainsActiveItem(group: NavGroup, active: NavKey): boolean {

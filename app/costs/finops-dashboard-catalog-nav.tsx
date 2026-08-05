@@ -10,29 +10,8 @@ import {
   type FinopsSharedAnalysisSection,
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
-import { FinopsAwsConfigResourceComplianceDashboard } from "./finops-aws-config-resource-compliance-dashboard";
-import { FinopsAwsBudgetsOrganizationDashboard } from "./finops-aws-budgets-organization-dashboard";
-import { FinopsAwsNewsFeedsDashboard } from "./finops-aws-news-feeds-dashboard";
-import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-radar-dashboard";
-import { FinopsAmazonConnectCostInsightsDashboard } from "./finops-amazon-connect-cost-insights-dashboard";
-import { FinopsAzureCloudIntelligenceDashboard } from "./finops-azure-cloud-intelligence-dashboard";
-import { FinopsComputeOptimizerDashboard } from "./finops-compute-optimizer-dashboard";
-import { FinopsDataCollectionMonitorDashboard } from "./finops-data-collection-monitor-dashboard";
-import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
-import { FinopsExtendedSupportProjectionDashboard } from "./finops-extended-support-projection-dashboard";
-import { FinopsCoraDashboard } from "./finops-cora-dashboard";
-import { FinopsFocusDashboard } from "./finops-focus-dashboard";
-import { FinopsGravitonSavingsDashboard } from "./finops-graviton-savings-dashboard";
-import { FinopsGcpCloudIntelligenceDashboard } from "./finops-gcp-cloud-intelligence-dashboard";
-import { FinopsHealthEventsDashboard } from "./finops-health-events-dashboard";
-import { FinopsKubecostAllocationDashboard } from "./finops-kubecost-allocation-dashboard";
-import { FinopsMarketplaceSpgDashboard } from "./finops-marketplace-spg-dashboard";
-import { FinopsMediaServicesInsightsDashboard } from "./finops-media-services-insights-dashboard";
-import { FinopsPricingChangeDashboard } from "./finops-pricing-change-dashboard";
-import { FinopsResilienceVueDashboard } from "./finops-resilience-vue-dashboard";
-import { FinopsScadAllocationDashboard } from "./finops-scad-allocation-dashboard";
-import { FinopsSustainabilityCarbonDashboard } from "./finops-sustainability-carbon-dashboard";
-import { FinopsTrustedAdvisorOrganizationalDashboard } from "./finops-trusted-advisor-organizational-dashboard";
+import { getFinopsDashboardView } from "./finops-dashboard-views";
+import { GlyphIcon } from "../components/nav-icon";
 import styles from "./costs.module.css";
 
 interface FinopsDashboardCatalogNavProps {
@@ -110,6 +89,7 @@ export function FinopsDashboardCatalogNav({
     [selectedId],
   );
   const selectedState = shellState(selected);
+  const selectedView = useMemo(() => getFinopsDashboardView(selected.id), [selected.id]);
 
   const select = useCallback((dashboard: FinopsDashboardCatalogEntry) => {
     setSelectedId(dashboard.id);
@@ -144,7 +124,12 @@ export function FinopsDashboardCatalogNav({
           <h2 id="finops-dashboard-catalog-heading">29 evidence-tracked dashboards</h2>
           <p>Browse every Foundational, Advanced, and Additional dashboard. Maturity describes local delivery only; no entry is presented as production accepted.</p>
         </div>
-        <span>{FINOPS_DASHBOARD_CATALOG.length} catalog entries</span>
+        <div className={styles.dashboardCatalogHeadingActions}>
+          <a className="button button-secondary" href={`/costs/dashboards/${selected.slug}`}>
+            Open {selected.shortName} full page
+          </a>
+          <span>{FINOPS_DASHBOARD_CATALOG.length} catalog entries</span>
+        </div>
       </header>
 
       <div className={styles.dashboardCatalogLayout}>
@@ -167,7 +152,17 @@ export function FinopsDashboardCatalogNav({
                       onClick={() => select(dashboard)}
                       type="button"
                     >
-                      <span><strong>{dashboard.shortName}</strong><small>{dashboard.provider}</small></span>
+                      <span
+                        aria-hidden="true"
+                        className={`nav-glyph-chip ${styles.dashboardCatalogNavIcon}`}
+                        data-tone={dashboard.tone}
+                      >
+                        <GlyphIcon name={dashboard.icon} />
+                      </span>
+                      <span className={styles.dashboardCatalogNavLabel}>
+                        <strong>{dashboard.shortName}</strong>
+                        <small>{dashboard.catalogId} · {dashboard.provider}</small>
+                      </span>
                       <i>{MATURITY_LABELS[dashboard.currentMaturity]}</i>
                     </button>
                   ))}
@@ -178,82 +173,7 @@ export function FinopsDashboardCatalogNav({
         </nav>
 
         <div className={styles.dashboardCatalogDetail}>
-          {selected.id === "focus" ? (
-            <FinopsFocusDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-              onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
-            />
-          ) : selected.id === "trusted_advisor_organizational" ? (
-            <FinopsTrustedAdvisorOrganizationalDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : selected.id === "compute_optimizer" ? (
-            <FinopsComputeOptimizerDashboard connectionId={connectionId} />
-          ) : selected.id === "extended_support_projection" ? (
-            <FinopsExtendedSupportProjectionDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : selected.id === "graviton_savings" ? (
-            <FinopsGravitonSavingsDashboard connectionId={connectionId} />
-          ) : selected.id === "health_events" ? (
-            <FinopsHealthEventsDashboard connectionId={connectionId} />
-          ) : selected.id === "data_collection_monitor" ? (
-            <FinopsDataCollectionMonitorDashboard connectionId={connectionId} />
-          ) : selected.id === "azure_cid" ? (
-            <FinopsAzureCloudIntelligenceDashboard
-              sourceId={null}
-              dashboard={selected}
-            />
-          ) : selected.id === "gcp_cid" ? (
-            <FinopsGcpCloudIntelligenceDashboard />
-          ) : selected.id === "cora" ? (
-            <FinopsCoraDashboard connectionId={connectionId} />
-          ) : selected.id === "config_resource_compliance" ? (
-            <FinopsAwsConfigResourceComplianceDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : selected.id === "pricing_change" ? (
-            <FinopsPricingChangeDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-              onOpenSharedAnalysis={() => onOpenSharedAnalysis("explorer")}
-            />
-          ) : selected.id === "aws_news_feeds" ? (
-            <FinopsAwsNewsFeedsDashboard connectionId={connectionId} />
-          ) : selected.id === "aws_budgets" ? (
-            <FinopsAwsBudgetsOrganizationDashboard connectionId={connectionId} />
-          ) : selected.id === "support_cases_radar" ? (
-            <FinopsAwsSupportCasesRadarDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : selected.id === "resiliencevue" ? (
-            <FinopsResilienceVueDashboard connectionId={connectionId} />
-          ) : selected.id === "end_user_computing" ? (
-            <FinopsEndUserComputingDashboard connectionId={connectionId} />
-          ) : selected.id === "media_services_insights" ? (
-            <FinopsMediaServicesInsightsDashboard connectionId={connectionId} />
-          ) : selected.id === "marketplace_spg" ? (
-            <FinopsMarketplaceSpgDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : selected.id === "kubecost_container_allocation" ? (
-            <FinopsKubecostAllocationDashboard connectionId={connectionId} />
-          ) : selected.id === "scad_container_allocation" ? (
-            <FinopsScadAllocationDashboard connectionId={connectionId} />
-          ) : selected.id === "sustainability_proxy" ? (
-            <FinopsSustainabilityCarbonDashboard connectionId={connectionId} />
-          ) : selected.id === "amazon_connect_cost_insights" ? (
-            <FinopsAmazonConnectCostInsightsDashboard
-              connectionId={connectionId}
-              dashboard={selected}
-            />
-          ) : (
+          {selectedView === null ? (
             <FinopsCapabilityShell
               dashboard={selected}
               state={selectedState.state}
@@ -275,7 +195,11 @@ export function FinopsDashboardCatalogNav({
                 </>
               )}
             />
-          )}
+          ) : selectedView({
+            connectionId,
+            dashboard: selected,
+            openSharedAnalysis: onOpenSharedAnalysis,
+          })}
           <section className={styles.dashboardAudience} aria-label={`${selected.name} target audience`}>
             <strong>Target audience</strong>
             <div>{selected.targetAudience.map((audience) => <span key={audience}>{audience}</span>)}</div>

@@ -171,7 +171,10 @@ test("healthy collection telemetry does not promote an incomplete monitor to rea
   const monitor = report.capabilities.find((entry) => entry.id === "data_collection_monitor");
   assert.equal(monitor?.state, "healthy");
   assert.equal(monitor?.sourceReady, true);
-  assert.equal(monitor?.implementationMaturity, "PARTIAL_PIPELINE");
+  // A local candidate is the tracker's recorded maturity, and it is still not
+  // implementation-ready: only LOCAL_VERTICAL_VERIFIED or LIVE_ACCEPTED may
+  // ever set implementationReady, so healthy telemetry cannot promote the row.
+  assert.equal(monitor?.implementationMaturity, "LOCAL_VERTICAL_CANDIDATE");
   assert.equal(monitor?.implementationReady, false);
   assert.equal(monitor?.ready, false);
   assert.deepEqual(monitor?.blockingSourceIds, []);
