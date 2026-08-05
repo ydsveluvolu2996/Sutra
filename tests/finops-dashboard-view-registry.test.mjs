@@ -23,9 +23,6 @@ const CATALOG_IDS = new Set(catalog.FINOPS_DASHBOARD_CATALOG.map(({ id }) => id)
  * its own evidence; growing it is a regression.
  */
 const SHELL_ONLY = [
-  "cudos",
-  "cost_intelligence_dashboard",
-  "kpi_dashboard",
   "cost_anomaly",
   "trends",
   "data_transfer",
@@ -48,11 +45,28 @@ test("the registry and the shared shell together cover all 29 catalog rows", () 
   const uncovered = [...CATALOG_IDS].filter((id) => !registered.has(id));
   assert.deepEqual(uncovered.sort(), [...SHELL_ONLY].sort());
   assert.equal(registered.size + uncovered.length, 29);
-  assert.equal(registered.size, 23);
+  assert.equal(registered.size, 26);
+});
+
+test("all three Foundational dashboards have a dedicated view", () => {
+  // AWS recommends starting with the Foundational level, so these three must
+  // never fall back to the generic capability shell.
+  for (const id of ["cudos", "cost_intelligence_dashboard", "kpi_dashboard"]) {
+    assert.equal(typeof registry.getFinopsDashboardView(id), "function", id);
+  }
+  const foundational = catalog.FINOPS_DASHBOARD_CATALOG
+    .filter(({ level }) => level === "foundational")
+    .map(({ id }) => id);
+  assert.equal(foundational.length, 3);
+  for (const id of foundational) {
+    assert.notEqual(registry.getFinopsDashboardView(id), null, id);
+  }
 });
 
 test("view lookup fails closed for unknown and inherited names", () => {
-  assert.equal(registry.getFinopsDashboardView("cudos"), null);
+  // A catalogued dashboard that has no dedicated view resolves to null so the
+  // caller renders the shared shell.
+  assert.equal(registry.getFinopsDashboardView("cost_anomaly"), null);
   assert.equal(registry.getFinopsDashboardView("unknown_dashboard"), null);
   assert.equal(registry.getFinopsDashboardView(""), null);
   // An inherited member name must never resolve to a view.

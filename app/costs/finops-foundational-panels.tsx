@@ -61,7 +61,7 @@ interface FinopsFoundationalPanelsProps {
   ) => void;
 }
 
-interface ActiveGenerationEvidence {
+export interface ActiveGenerationEvidence {
   readonly manifestSha256: string;
   readonly generationId: string;
   readonly sourceUpdatedAtIso: string | null;
@@ -85,17 +85,17 @@ interface PeriodHistorySourceEvidence {
   readonly periods: readonly PeriodGenerationEvidence[];
 }
 
-type FoundationalSourceEvidence =
+export type FoundationalSourceEvidence =
   | SingleGenerationSourceEvidence
   | PeriodHistorySourceEvidence;
 
-interface AvailablePeriod {
+export interface AvailablePeriod {
   readonly period: string;
   readonly generationId: string;
   readonly committedAtIso: string;
 }
 
-interface CudosEnvelope {
+export interface CudosEnvelope {
   readonly connectionId: string;
   readonly selectedPeriod: string | null;
   readonly availablePeriods: readonly AvailablePeriod[];
@@ -105,7 +105,7 @@ interface CudosEnvelope {
   readonly officialDefinition: FinopsCudosOfficialDefinition;
 }
 
-interface CostIntelligenceEnvelope {
+export interface CostIntelligenceEnvelope {
   readonly connectionId: string;
   readonly selectedPeriods: readonly string[];
   readonly availablePeriods: readonly AvailablePeriod[];
@@ -116,7 +116,7 @@ interface CostIntelligenceEnvelope {
   readonly officialDefinition: FinopsCostIntelligenceOfficialDefinition;
 }
 
-interface KpiEnvelope {
+export interface KpiEnvelope {
   readonly connectionId: string;
   readonly selectedPeriod: string | null;
   readonly availablePeriods: readonly AvailablePeriod[];
@@ -141,7 +141,7 @@ interface KpiFilters {
   readonly payerAccountId: string;
 }
 
-type EndpointState<T> =
+export type EndpointState<T> =
   | { readonly status: "idle" | "loading" }
   | {
       readonly status: "waiting" | "configuration_required";
@@ -191,7 +191,7 @@ export function formatMicrosExact(
   return `${negative ? "−" : ""}${currency} ${whole}.${fraction}`;
 }
 
-function formatBasisPoints(value: string | number | null): string {
+export function formatBasisPoints(value: string | number | null): string {
   if (value === null) return "Not available";
   const basisPoints = typeof value === "number"
     ? BigInt(value)
@@ -228,7 +228,7 @@ function relativeBasisPoints(value: string | null, maximum: bigint): bigint {
   return (parsed * BigInt(10_000)) / maximum;
 }
 
-function costFor(
+export function costFor(
   costs: readonly FinopsCudosCostSummary[],
   basis: FinopsCudosCostBasis,
 ): FinopsCudosCostSummary | null {
@@ -259,7 +259,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-class FoundationalEndpointError extends Error {
+export class FoundationalEndpointError extends Error {
   public readonly kind: "no_active_generation" | "source_incomplete" | "request";
 
   public constructor(
@@ -363,7 +363,7 @@ function validAvailablePeriods(value: unknown): boolean {
       && Number.isFinite(Date.parse(period.committedAtIso)));
 }
 
-function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
+export function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
   const sourceState = value.sourceState;
   const sourceEvidence = value.sourceEvidence;
   const stateMatchesEvidence = sourceState === "waiting"
@@ -405,7 +405,7 @@ function validCudosEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     && value.officialDefinition.sheets.length === 19;
 }
 
-function validCostIntelligenceEnvelope(
+export function validCostIntelligenceEnvelope(
   value: Readonly<Record<string, unknown>>,
 ): boolean {
   const definition = value.officialDefinition;
@@ -434,7 +434,7 @@ function validCostIntelligenceEnvelope(
     && definition.sheets.length === 10;
 }
 
-function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
+export function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
   const filters = value.filters;
   const filterOptions = value.filterOptions;
   const definition = value.officialDefinition;
@@ -481,7 +481,7 @@ function validKpiEnvelope(value: Readonly<Record<string, unknown>>): boolean {
     && definition.sheets.length === 10;
 }
 
-async function readEnvelope<T>(
+export async function readEnvelope<T>(
   response: Response,
   connectionId: string,
   schema: string,
@@ -516,7 +516,7 @@ async function readEnvelope<T>(
   return body as unknown as T;
 }
 
-function failureCodes(report: unknown): readonly string[] {
+export function failureCodes(report: unknown): readonly string[] {
   if (
     !isRecord(report)
     || report.ok !== false
@@ -528,7 +528,7 @@ function failureCodes(report: unknown): readonly string[] {
       : []);
 }
 
-function stateForEnvelope<
+export function stateForEnvelope<
   T extends {
     readonly report: { readonly ok: boolean } | null;
     readonly sourceState: string;
@@ -550,7 +550,7 @@ function stateForEnvelope<
   return { status: "ready", envelope };
 }
 
-function cudosUrl(connectionId: string): string {
+export function cudosUrl(connectionId: string): string {
   const query = new URLSearchParams({
     connectionId,
     costBasis: "amortized",
@@ -559,7 +559,7 @@ function cudosUrl(connectionId: string): string {
   return `/api/v1/finops/cudos?${query.toString()}`;
 }
 
-function costIntelligenceUrl(connectionId: string): string {
+export function costIntelligenceUrl(connectionId: string): string {
   const query = new URLSearchParams({
     connectionId,
     costBasis: "amortized",
@@ -571,7 +571,7 @@ function costIntelligenceUrl(connectionId: string): string {
   return `/api/v1/finops/cost-intelligence?${query.toString()}`;
 }
 
-function kpiUrl(connectionId: string, filters: KpiFilters): string {
+export function kpiUrl(connectionId: string, filters: KpiFilters): string {
   const query = new URLSearchParams({ connectionId });
   if (filters.period !== "") query.set("period", filters.period);
   if (filters.accountId !== "") query.set("accountId", filters.accountId);
@@ -581,7 +581,7 @@ function kpiUrl(connectionId: string, filters: KpiFilters): string {
   return `/api/v1/finops/kpi?${query.toString()}`;
 }
 
-function sourceEvidenceFor(
+export function sourceEvidenceFor(
   envelope: {
     readonly sourceEvidence: FoundationalSourceEvidence | null;
     readonly availablePeriods: readonly AvailablePeriod[];
@@ -607,7 +607,7 @@ function sourceEvidenceFor(
   return matches ? evidence : null;
 }
 
-function EvidenceStrip({
+export function EvidenceStrip({
   title,
   basis,
   currencies,
@@ -698,7 +698,7 @@ function EvidenceStrip({
   );
 }
 
-function EndpointBoundary({
+export function EndpointBoundary({
   title,
   state,
   onRetry,
@@ -1261,7 +1261,7 @@ function CudosServices({
   );
 }
 
-function StateBadge({ state }: { readonly state: string }) {
+export function StateBadge({ state }: { readonly state: string }) {
   const className = state === "complete" || state === "met" || state === "measured"
     ? styles.foundationalBadgePositive
     : state === "partial" || state === "not_met" || state === "insufficient_evidence"

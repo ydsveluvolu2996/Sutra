@@ -13,6 +13,9 @@ import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-
 import { FinopsAzureCloudIntelligenceDashboard } from "./finops-azure-cloud-intelligence-dashboard";
 import { FinopsComputeOptimizerDashboard } from "./finops-compute-optimizer-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
+import { FinopsCostIntelligenceSheetsDashboard } from "./finops-cost-intelligence-sheets-dashboard";
+import { FinopsCudosDashboard } from "./finops-cudos-dashboard";
+import { FinopsKpiSheetsDashboard } from "./finops-kpi-sheets-dashboard";
 import { FinopsDataCollectionMonitorDashboard } from "./finops-data-collection-monitor-dashboard";
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsExtendedSupportProjectionDashboard } from "./finops-extended-support-projection-dashboard";
@@ -48,6 +51,17 @@ export type FinopsDashboardView = (context: FinopsDashboardViewContext) => React
  * which states its real evidence position instead of implying a finished view.
  */
 const FINOPS_DASHBOARD_VIEWS: Readonly<Record<string, FinopsDashboardView>> = {
+  // Foundational: presented as the sheets AWS publishes, driven by each
+  // dashboard's hash-pinned official definition.
+  cudos: ({ connectionId }) => (
+    <FinopsCudosDashboard connectionId={connectionId} />
+  ),
+  cost_intelligence_dashboard: ({ connectionId }) => (
+    <FinopsCostIntelligenceSheetsDashboard connectionId={connectionId} />
+  ),
+  kpi_dashboard: ({ connectionId }) => (
+    <FinopsKpiSheetsDashboard connectionId={connectionId} />
+  ),
   trusted_advisor_organizational: ({ connectionId, dashboard }) => (
     <FinopsTrustedAdvisorOrganizationalDashboard connectionId={connectionId} dashboard={dashboard} />
   ),
