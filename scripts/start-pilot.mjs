@@ -24,14 +24,22 @@ const variables = parseVariables(await readFile(variablesPath, "utf8"));
 const environment = { ...process.env, ...variables };
 const webHost = environment.SUTRA_WEB_HOST ?? "127.0.0.1";
 const webPort = "3000";
-const localCollectorEnabled = environment.SUTRA_LOCAL_MODE === "true";
-if (!localCollectorEnabled && environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") {
+// The retained single-node private beta is a staging-only deployment whose AWS
+// collector deliberately shares the app container and listens only on loopback.
+// Managed production replicas never take this branch: they must use the
+// separately scaled, asymmetrically authenticated broker service.
+const embeddedCollectorEnabled = environment.SUTRA_LOCAL_MODE === "true"
+  || (
+    environment.SUTRA_DEPLOYMENT_ENV === "staging"
+    && environment.SUTRA_BROKER_URL === "http://127.0.0.1:8788"
+  );
+if (!embeddedCollectorEnabled && environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") {
   throw new Error("Hosted runtime requires SUTRA_BROKER_AUTH_MODE=asymmetric");
 }
-// The loopback HMAC collector is developer fixture infrastructure only. Hosted
-// replicas use the separately scaled broker service and must never create a
-// task-local connection registry or replay cache.
-const collector = localCollectorEnabled
+// The loopback HMAC collector is limited to developer fixtures and the retained
+// single-node staging beta. Managed production replicas use the separately
+// scaled broker and must never create a task-local registry or replay cache.
+const collector = embeddedCollectorEnabled
   ? spawn(process.execPath, [resolve(root, "services/aws-collector/dist/src/local-server.js")], {
       cwd: root,
       env: environment,
