@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { navGroups } from "../app/components/navigation-config.ts";
 import { KUBERNETES_SECTION_KEYS } from "../app/kubernetes/kubernetes-sections.ts";
+import { FINOPS_DASHBOARD_CATALOG } from "../lib/finops-dashboard-catalog.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -49,12 +50,18 @@ describe("hosted live UI contract", () => {
 
   it("backs every visible navigation destination with a real page", async () => {
     const dynamicKubernetesSections = new Set(KUBERNETES_SECTION_KEYS);
+    // Catalogued FinOps dashboards are served by one dynamic segment whose
+    // params come from the catalog itself, so a real page backs every slug.
+    const dashboardSlugs = new Set<string>(FINOPS_DASHBOARD_CATALOG.map(({ slug }) => slug));
     for (const item of navGroups.flatMap((group) => group.items)) {
       const pathname = item.href.split(/[?#]/u, 1)[0] ?? "";
       const section = /^\/kubernetes\/([^/]+)$/u.exec(pathname)?.[1];
+      const dashboardSlug = /^\/costs\/dashboards\/([^/]+)$/u.exec(pathname)?.[1];
       const route = section !== undefined && dynamicKubernetesSections.has(section as never)
         ? path.join(root, "app/kubernetes/[section]/page.tsx")
-        : path.join(root, "app", pathname.replace(/^\//u, ""), "page.tsx");
+        : dashboardSlug !== undefined && dashboardSlugs.has(dashboardSlug)
+          ? path.join(root, "app/costs/dashboards/[slug]/page.tsx")
+          : path.join(root, "app", pathname.replace(/^\//u, ""), "page.tsx");
       assert.equal(await exists(route), true, `${item.label} points to missing route ${pathname}`);
     }
   });

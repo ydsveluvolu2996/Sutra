@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { NavKey } from "./navigation-config";
+import { FINOPS_DASHBOARD_CATALOG } from "../../lib/finops-dashboard-catalog";
+import { finopsDashboardNavKey, type FinopsDashboardNavKey, type NavKey } from "./navigation-config";
 
 // Hand-drawn line icons (24px grid, 1.75 stroke, currentColor) so the product
 // ships no icon-font or CDN dependency. Each nav destination maps to a glyph by
@@ -72,7 +73,16 @@ const PATHS: Readonly<Record<IconName, ReactNode>> = {
   tag: <><path d="M20.6 12.4 12.4 20.6a2 2 0 0 1-2.8 0l-6.2-6.2a2 2 0 0 1-.6-1.5l.3-6.4a2 2 0 0 1 1.9-1.9l6.4-.3a2 2 0 0 1 1.5.6l6.2 6.2a2 2 0 0 1 0 2.8Z" /><circle cx="8.6" cy="8.6" r="1.5" /></>,
 };
 
+// Cloud Intelligence dashboard glyphs and tones come from the catalog entry
+// itself, so the rail never carries a second hard-coded map that could drift
+// from the dashboard page it links to.
+const DASHBOARD_ICONS = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) =>
+  [finopsDashboardNavKey(entry.catalogId), entry.icon] as const,
+)) as Record<FinopsDashboardNavKey, IconName>;
+
 const KEY_ICON: Record<NavKey, IconName> = {
+  ...DASHBOARD_ICONS,
+  finops_dashboards: "grid",
   overview: "dashboard",
   customers: "users",
   onboard: "plus",
@@ -147,7 +157,13 @@ export type NavTone =
   | "blue" | "indigo" | "cyan" | "teal" | "green"
   | "amber" | "orange" | "red" | "violet" | "slate";
 
+const DASHBOARD_TONES = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) =>
+  [finopsDashboardNavKey(entry.catalogId), entry.tone] as const,
+)) as Record<FinopsDashboardNavKey, NavTone>;
+
 const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
+  ...DASHBOARD_TONES,
+  finops_dashboards: "amber",
   overview: "cyan",
   customers: "blue",
   onboard: "green",

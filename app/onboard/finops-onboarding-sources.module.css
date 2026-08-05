@@ -1,0 +1,137 @@
+/*
+ * Onboarding FinOps coverage surface. Styling only; it reuses the shared
+ * `.summary-band`, `.eyebrow` and `.nav-glyph-chip` primitives so the section
+ * matches the rest of the onboarding page.
+ */
+
+.wrap { display: grid; gap: 16px; margin-top: 22px; min-width: 0; }
+
+.head { display: grid; gap: 8px; }
+.head h2 { margin: 0; font-size: 17px; font-weight: 850; letter-spacing: -.01em; }
+.lede { margin: 6px 0 0; max-width: 92ch; color: var(--ink-soft); font-size: 11.5px; line-height: 1.65; }
+
+.contractNote {
+  display: grid;
+  gap: 5px;
+  padding: 13px 15px;
+  border: 1px solid var(--line-dark);
+  border-left: 3px solid #d97706;
+  border-radius: 10px;
+  background: #fffbf3;
+}
+.contractNote strong { font-size: 11.5px; font-weight: 850; }
+.contractNote span { color: var(--ink-soft); font-size: 11px; line-height: 1.6; }
+.contractNote code { font: 10px var(--font-geist-mono), monospace; }
+
+.level { display: grid; gap: 10px; min-width: 0; }
+.levelHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.levelHead h3 { margin: 0; font-size: 13.5px; font-weight: 850; }
+.levelCount {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: #eef2f9;
+  color: #475569;
+  font-size: 9.5px;
+  font-weight: 850;
+}
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 11px; }
+
+.card {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  padding: 14px 15px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+.card[data-state="pack_unavailable"] { border-color: rgba(217, 119, 6, .38); }
+.card[data-state="not_aws_backed"] { background: var(--surface-soft); }
+
+.cardHead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.cardIcon { flex: 0 0 auto; }
+.cardTitle { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.cardTitle strong { overflow: hidden; font-size: 12.5px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.cardId { flex: 0 0 auto; color: var(--ink-faint); font-size: 9.5px; font-weight: 850; letter-spacing: .04em; }
+
+.packChip {
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid var(--line-dark);
+  border-radius: 999px;
+  background: #f4f7fd;
+  color: #475569;
+  font-size: 9.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.packChip code { font: 9.5px var(--font-geist-mono), monospace; }
+.packChip[data-available="false"] { border-color: rgba(180, 83, 9, .4); background: #fff5e8; color: #92400e; }
+
+.stateLabel {
+  justify-self: start;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 9.5px;
+  font-weight: 850;
+}
+.stateLabel[data-state="pack_unavailable"] { background: #fee2e2; color: #991b1b; }
+.stateLabel[data-state="not_aws_backed"] { background: #eef2f9; color: #475569; }
+
+.sectionLabel {
+  margin: 3px 0 0;
+  color: var(--ink-faint);
+  font-size: 9px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.sourceList, .blockerList { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.sourceRow {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+  min-width: 0;
+}
+.sourceHead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sourceHead strong { font-size: 11px; font-weight: 850; }
+.sourceKind { color: var(--ink-faint); font: 9px var(--font-geist-mono), monospace; }
+.sourceFlag { padding: 1px 7px; border-radius: 999px; font-size: 9px; font-weight: 850; }
+.sourceFlag[data-tone="warn"] { background: #fee2e2; color: #991b1b; }
+
+.sourceReads { margin: 0; overflow-wrap: anywhere; color: var(--ink-soft); font-size: 10.5px; line-height: 1.55; }
+.sourceReads code { font: 9.5px var(--font-geist-mono), monospace; }
+.sourceLabel {
+  margin-right: 6px;
+  color: var(--ink-faint);
+  font-size: 8.5px;
+  font-weight: 850;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.supplemental { margin: 0; color: var(--ink-faint); font-size: 10.5px; line-height: 1.55; }
+
+.blockerList li {
+  padding-left: 13px;
+  position: relative;
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+.blockerList li::before { content: "•"; position: absolute; left: 2px; color: #d97706; font-weight: 850; }
+
+@media (max-width: 760px) {
+  .cards { grid-template-columns: minmax(0, 1fr); }
+}
