@@ -56,3 +56,11 @@ test("pilot uses the node:http runner and reads its configuration from the merge
   assert.match(source, /SUTRA_JOB_RUNNER_SELF_TICK !== "false"/u);
   assert.doesNotMatch(source, /fetch\(runUrl/u);
 });
+
+test("pilot keeps the single-node staging collector without weakening production broker auth", async () => {
+  const source = await readFile(new URL("../scripts/start-pilot.mjs", import.meta.url), "utf8");
+  assert.match(source, /environment\.SUTRA_DEPLOYMENT_ENV === "staging"/u);
+  assert.match(source, /environment\.SUTRA_BROKER_URL === "http:\/\/127\.0\.0\.1:8788"/u);
+  assert.match(source, /if \(!embeddedCollectorEnabled && environment\.SUTRA_BROKER_AUTH_MODE !== "asymmetric"\)/u);
+  assert.match(source, /const collector = embeddedCollectorEnabled/u);
+});
