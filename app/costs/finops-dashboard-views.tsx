@@ -13,9 +13,12 @@ import { FinopsAwsSupportCasesRadarDashboard } from "./finops-aws-support-cases-
 import { FinopsAzureCloudIntelligenceDashboard } from "./finops-azure-cloud-intelligence-dashboard";
 import { FinopsComputeOptimizerDashboard } from "./finops-compute-optimizer-dashboard";
 import { FinopsCoraDashboard } from "./finops-cora-dashboard";
+import { FinopsCostAnomalyDashboard } from "./finops-cost-anomaly-dashboard";
 import { FinopsCostIntelligenceSheetsDashboard } from "./finops-cost-intelligence-sheets-dashboard";
 import { FinopsCudosDashboard } from "./finops-cudos-dashboard";
+import { FinopsDataTransferDashboard } from "./finops-data-transfer-dashboard";
 import { FinopsKpiSheetsDashboard } from "./finops-kpi-sheets-dashboard";
+import { FinopsTrendsDashboard } from "./finops-trends-dashboard";
 import { FinopsDataCollectionMonitorDashboard } from "./finops-data-collection-monitor-dashboard";
 import { FinopsEndUserComputingDashboard } from "./finops-end-user-computing-dashboard";
 import { FinopsExtendedSupportProjectionDashboard } from "./finops-extended-support-projection-dashboard";
@@ -64,6 +67,15 @@ const FINOPS_DASHBOARD_VIEWS: Readonly<Record<string, FinopsDashboardView>> = {
   ),
   trusted_advisor_organizational: ({ connectionId, dashboard }) => (
     <FinopsTrustedAdvisorOrganizationalDashboard connectionId={connectionId} dashboard={dashboard} />
+  ),
+  cost_anomaly: ({ connectionId }) => (
+    <FinopsCostAnomalyDashboard connectionId={connectionId} />
+  ),
+  trends: ({ connectionId }) => (
+    <FinopsTrendsDashboard connectionId={connectionId} />
+  ),
+  data_transfer: ({ connectionId }) => (
+    <FinopsDataTransferDashboard connectionId={connectionId} />
   ),
   compute_optimizer: ({ connectionId }) => (
     <FinopsComputeOptimizerDashboard connectionId={connectionId} />

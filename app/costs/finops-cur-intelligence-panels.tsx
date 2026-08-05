@@ -128,7 +128,13 @@ export function formatCurRationalPercentExact(
   }
   const negative = numerator < BigInt(0);
   const absolute = negative ? -numerator : numerator;
-  const scaled = (absolute * BigInt(10_000)) / denominator;
+  /*
+   * The rational already expresses a percent, as the exactly-divisible branch
+   * above and the trailing "%" on the exact form both show. Scaling by 100 keeps
+   * two decimal places; scaling by 10,000 overstated every non-terminating
+   * percentage by 100x, so 100/3 rendered as 3333.33% instead of 33.33%.
+   */
+  const scaled = (absolute * BigInt(100)) / denominator;
   const whole = scaled / BigInt(100);
   const fraction = (scaled % BigInt(100)).toString().padStart(2, "0");
   return `${negative ? "−" : ""}${whole.toString()}.${fraction}% · exact ${value.numerator}/${value.denominator}%`;

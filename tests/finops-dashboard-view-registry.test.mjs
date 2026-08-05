@@ -17,16 +17,12 @@ after(async () => vite.close());
 const CATALOG_IDS = new Set(catalog.FINOPS_DASHBOARD_CATALOG.map(({ id }) => id));
 
 /**
- * Dashboards deliberately without a dedicated view. Each is presented through
- * the shared capability shell, which states its real evidence position instead
- * of implying a finished dashboard. Shrinking this list is a promotion and needs
- * its own evidence; growing it is a regression.
+ * Dashboards deliberately without a dedicated view, presented through the shared
+ * capability shell instead. Now empty: every catalogued dashboard has its own
+ * view. Growing this list is a regression, so the shell is a fallback for a
+ * future catalog addition rather than a standing gap.
  */
-const SHELL_ONLY = [
-  "cost_anomaly",
-  "trends",
-  "data_transfer",
-];
+const SHELL_ONLY = [];
 
 test("every registered view maps to a real catalog dashboard", () => {
   assert.ok(registry.FINOPS_DASHBOARD_VIEW_IDS.length > 0);
@@ -45,7 +41,7 @@ test("the registry and the shared shell together cover all 29 catalog rows", () 
   const uncovered = [...CATALOG_IDS].filter((id) => !registered.has(id));
   assert.deepEqual(uncovered.sort(), [...SHELL_ONLY].sort());
   assert.equal(registered.size + uncovered.length, 29);
-  assert.equal(registered.size, 26);
+  assert.equal(registered.size, 29);
 });
 
 test("all three Foundational dashboards have a dedicated view", () => {
@@ -64,9 +60,6 @@ test("all three Foundational dashboards have a dedicated view", () => {
 });
 
 test("view lookup fails closed for unknown and inherited names", () => {
-  // A catalogued dashboard that has no dedicated view resolves to null so the
-  // caller renders the shared shell.
-  assert.equal(registry.getFinopsDashboardView("cost_anomaly"), null);
   assert.equal(registry.getFinopsDashboardView("unknown_dashboard"), null);
   assert.equal(registry.getFinopsDashboardView(""), null);
   // An inherited member name must never resolve to a view.
