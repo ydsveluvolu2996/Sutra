@@ -22,10 +22,12 @@ Authoritative AWS contracts:
 
 ## Deliberate activation block
 
-Do not launch the add-on against the current `standard-2026-07.4` onboarding
-role. That role has an explicit `DenyUnimplementedActions` `NotAction` ceiling.
-The following actions are absent from that ceiling, so an Allow in a separate
-add-on policy cannot make them effective:
+Do not launch the add-on against the superseded `standard-2026-07.4` onboarding
+role, retained immutably as
+`infrastructure/customer-onboarding-role-standard-2026-07.4.yaml`. That role has
+an explicit `DenyUnimplementedActions` `NotAction` ceiling. The following actions
+are absent from that ceiling, so an Allow in a separate add-on policy cannot make
+them effective:
 
 - `s3:ListBucket`
 - `s3:GetBucketLocation`
@@ -36,10 +38,26 @@ add-on policy cannot make them effective:
 - `bcm-data-exports:GetExport`
 
 The add-on's CloudFormation rule rejects `standard-2026-07.4`. It accepts only
-the future, separately reviewed `standard-2026-08.1` base-role contract. That
-future base template must add exactly the seven actions above to its explicit
-deny ceiling without granting broad S3 access, export mutation access, or any
-other data-plane read. The scoped Allows remain owned by this add-on.
+the separately reviewed `standard-2026-08.1` base-role contract. That base
+template must add exactly the seven actions above to its explicit deny ceiling
+without granting broad S3 access, export mutation access, or any other
+data-plane read. The scoped Allows remain owned by this add-on.
+
+The deployable default (`infrastructure/customer-onboarding-role.yaml` and
+`public/sutra-customer-onboarding-role.yaml`) now pins `standard-2026-08.12`,
+which satisfies that ceiling requirement exactly: all seven actions appear in its
+`DenyUnimplementedActions` `NotAction` allowlist and none of them is granted by
+any Allow in the base role.
+
+Open conflict, not yet resolved: this add-on's
+`BaseCollectorPermissionPackVersion` still enumerates only `standard-2026-07.4`
+and `standard-2026-08.1`, so a customer role tagged `standard-2026-08.12` cannot
+launch it — CloudFormation refuses the parameter value. The add-on template is an
+immutable, separately reviewed source contract and is deliberately not edited
+here. Accepting `standard-2026-08.12` requires a successor add-on revision with
+its own review, published under the publish-before-application order below.
+Until that successor exists, the CUR 2.0 and FOCUS 1.2 foundational exports
+cannot be launched against the current default role.
 
 The parameter is an acknowledgement, not AWS-side discovery. Before launching
 the add-on, the operator must attest that the existing `/sutra/` role has the
