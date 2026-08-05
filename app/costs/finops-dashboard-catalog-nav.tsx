@@ -124,7 +124,12 @@ export function FinopsDashboardCatalogNav({
           <h2 id="finops-dashboard-catalog-heading">29 evidence-tracked dashboards</h2>
           <p>Browse every Foundational, Advanced, and Additional dashboard. Maturity describes local delivery only; no entry is presented as production accepted.</p>
         </div>
-        <span>{FINOPS_DASHBOARD_CATALOG.length} catalog entries</span>
+        <div className={styles.dashboardCatalogHeadingActions}>
+          <a className="button button-secondary" href={`/costs/dashboards/${selected.slug}`}>
+            Open {selected.shortName} full page
+          </a>
+          <span>{FINOPS_DASHBOARD_CATALOG.length} catalog entries</span>
+        </div>
       </header>
 
       <div className={styles.dashboardCatalogLayout}>

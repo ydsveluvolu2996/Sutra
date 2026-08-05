@@ -1,0 +1,125 @@
+/* Per-dashboard route surface for the AWS Cloud Intelligence catalog. */
+
+.page { display: grid; gap: 20px; min-width: 0; }
+
+.pageHead { display: grid; gap: 9px; }
+.pageHead h1 { margin: 0; font-size: 21px; font-weight: 850; letter-spacing: -.01em; }
+.pageHead p { margin: 0; max-width: 76ch; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+
+.breadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 10.5px; font-weight: 800; }
+.breadcrumb a { color: var(--ink-faint); text-decoration: none; }
+.breadcrumb a:hover { color: var(--ink); text-decoration: underline; }
+.breadcrumb a:focus-visible { outline: 3px solid rgba(15, 118, 110, .22); outline-offset: 2px; border-radius: 4px; }
+.breadcrumb span { color: var(--ink-faint); }
+.breadcrumb strong { color: var(--ink); font-weight: 850; }
+
+/* Maturity overview built from the catalog itself. */
+.overview {
+  display: grid;
+  grid-template-columns: minmax(0, 210px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: center;
+  padding: 17px 19px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: white;
+}
+.overviewLevels { display: grid; gap: 12px; min-width: 0; }
+.overviewLevel { display: grid; gap: 5px; }
+.overviewLevelHead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.overviewLevelHead strong { font-size: 11.5px; font-weight: 850; }
+.overviewLevelHead span { color: var(--ink-faint); font-size: 10px; font-weight: 800; }
+.overviewNote { margin: 0; color: var(--ink-faint); font-size: 10.5px; font-weight: 700; line-height: 1.5; }
+
+/* Level sections and dashboard cards. */
+.level { display: grid; gap: 11px; }
+.levelHead { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.levelHead h2 { margin: 0; font-size: 14px; font-weight: 850; }
+.levelHead p { margin: 0; max-width: 70ch; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
+.levelCount { flex: 0 0 auto; padding: 2px 9px; border-radius: 999px; background: #eef2f9; color: #475569; font-size: 9.5px; font-weight: 850; }
+
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(258px, 1fr)); gap: 11px; }
+
+.card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 11px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: white;
+  color: inherit;
+  text-decoration: none;
+  transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+.card:hover { border-color: rgba(15, 118, 110, .3); box-shadow: 0 5px 16px rgba(15, 23, 42, .07); transform: translateY(-1px); }
+.card:focus-visible { outline: 3px solid rgba(15, 118, 110, .24); outline-offset: 2px; }
+.cardIcon { grid-row: span 2; align-self: start; }
+.cardTitle { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.cardTitle strong { overflow: hidden; font-size: 12.5px; font-weight: 850; text-overflow: ellipsis; white-space: nowrap; }
+.cardId { flex: 0 0 auto; color: var(--ink-faint); font-size: 9.5px; font-weight: 850; letter-spacing: .04em; }
+.cardSummary { margin: 0; grid-column: 2; color: var(--ink-soft); font-size: 11px; line-height: 1.5; }
+.cardMeta { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding-top: 3px; }
+
+.maturity { padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 8.5px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+.maturity[data-maturity="local_vertical_candidate"],
+.maturity[data-maturity="local_vertical_verified"],
+.maturity[data-maturity="live_accepted"] { background: #ecfdf5; color: #065f46; }
+.maturity[data-maturity="partial_pipeline"] { background: #fffbeb; color: #92400e; }
+.maturity[data-maturity="engine_only"], .maturity[data-maturity="absent"] { background: #fff1f2; color: #9f1239; }
+.provider { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+
+/* Single-dashboard layout: sibling rail plus the dashboard itself. */
+.detailLayout { display: grid; grid-template-columns: minmax(0, 244px) minmax(0, 1fr); gap: 18px; align-items: start; }
+
+.rail {
+  position: sticky;
+  top: 14px;
+  max-height: calc(100vh - 34px);
+  overflow-y: auto;
+  padding: 11px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: white;
+  scrollbar-width: thin;
+}
+.rail > section + section { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); }
+.rail section > h2 { margin: 0 0 6px; padding: 0 6px; color: #334155; font-size: 9.5px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
+.rail ul { display: grid; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.railLink {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: inherit;
+  text-decoration: none;
+}
+.railLink:hover { border-color: var(--line); background: #f8fafc; }
+.railLink:focus-visible { outline: 3px solid rgba(15, 118, 110, .22); outline-offset: 1px; }
+.railLinkActive { border-color: rgba(15, 118, 110, .26) !important; background: #f0fdfa !important; font-weight: 850; }
+.railText { display: grid; min-width: 0; gap: 1px; }
+.railText strong { overflow: hidden; font-size: 11px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.railLinkActive .railText strong { font-weight: 900; }
+.railText small { color: var(--ink-faint); font-size: 8.5px; font-weight: 850; letter-spacing: .04em; }
+
+.detailHead { display: grid; gap: 11px; padding-bottom: 3px; }
+.detailTitle { display: flex; align-items: center; gap: 12px; }
+.detailTitle h1 { margin: 0; font-size: 19px; font-weight: 850; letter-spacing: -.01em; }
+.detailBadges { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.detailSummary { margin: 0; max-width: 78ch; color: var(--ink-soft); font-size: 12px; line-height: 1.6; }
+.detailActions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.audience { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding-top: 4px; }
+.audience strong { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; }
+.audience span { padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 9.5px; font-weight: 800; }
+
+@media (max-width: 980px) {
+  .detailLayout { grid-template-columns: 1fr; }
+  .rail { position: static; max-height: none; }
+  .rail ul { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .overview { grid-template-columns: 1fr; justify-items: center; }
+  .overviewLevels { width: 100%; }
+}
