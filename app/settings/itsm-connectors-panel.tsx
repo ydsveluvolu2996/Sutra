@@ -9,6 +9,7 @@ interface ConnectorSummary {
   readonly baseUrl: string;
   readonly projectKey: string | null;
   readonly secretPreview: string;
+  readonly secretStorage: "local" | "managed";
   readonly enabled: boolean;
 }
 
@@ -98,14 +99,14 @@ export function ItsmConnectorsPanel({ connectionId }: { readonly connectionId: s
 
   return (
     <section className="panel" aria-label="ITSM connectors">
-      <div className="panel-heading"><div><h2>Jira and ServiceNow connectors</h2><p>Signed, bidirectional case synchronization. Unknown remote states remain unmapped and visible.</p></div></div>
+      <div className="panel-heading"><div><h2>Jira and ServiceNow connectors</h2><p>Signed delivery through provider-bounded Jira Cloud Automation and ServiceNow API webhook endpoints. Unknown remote states remain unmapped and visible.</p></div></div>
       <div className="cmdbq-row">
         <input aria-label="Connector name" placeholder="connector name" value={name} onChange={(event) => setName(event.target.value)} />
         <select aria-label="Connector type" value={connectorType} onChange={(event) => setConnectorType(event.target.value as "jira" | "servicenow")}>
           <option value="jira">Jira</option>
           <option value="servicenow">ServiceNow</option>
         </select>
-        <input aria-label="ITSM endpoint URL" placeholder="https://itsm.example/api/tickets" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
+        <input aria-label="ITSM endpoint URL" placeholder={connectorType === "jira" ? "https://automation.atlassian.com/pro/hooks/…" : "https://instance.service-now.com/api/…"} value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
       </div>
       <div className="cmdbq-row">
         <input aria-label="Project key" placeholder="project key (Jira only)" value={projectKey} onChange={(event) => setProjectKey(event.target.value)} />
@@ -114,17 +115,17 @@ export function ItsmConnectorsPanel({ connectionId }: { readonly connectionId: s
           {busy ? "Saving…" : "Save connector"}
         </button>
       </div>
-      <p className="panel-footnote">Private-beta secrets are stored locally. Hosted production requires migration to the managed secret service.</p>
+      <p className="panel-footnote">Hosted credentials are tenant-bound in the managed secret service. Local storage is identified below and is never reported as production-ready.</p>
       {error ? <p className="cmdbq-error" role="alert">{error}</p> : null}
       {connectors.length === 0 ? <p className="panel-footnote">No ITSM connectors configured.</p> : (
         <table>
-          <thead><tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Secret</th><th>Inbound webhook</th><th>Status</th><th /></tr></thead>
+          <thead><tr><th>Name</th><th>Type</th><th>Endpoint</th><th>Credential storage</th><th>Inbound webhook</th><th>Status</th><th /></tr></thead>
           <tbody>{connectors.map((connector) => (
             <tr key={connector.id}>
               <td>{connector.name}{connector.projectKey ? ` · ${connector.projectKey}` : ""}</td>
               <td>{connector.connectorType === "jira" ? "Jira" : "ServiceNow"}</td>
               <td><code>{connector.baseUrl}</code></td>
-              <td><code>{connector.secretPreview}</code></td>
+              <td>{connector.secretStorage === "managed" ? "Managed" : "Local development"}</td>
               <td><code>/api/v1/itsm/inbound/{connector.id}</code></td>
               <td>{connector.enabled ? "Enabled" : "Disabled"}</td>
               <td><button type="button" className="button button-secondary" onClick={() => void remove(connector.id)}>Delete</button></td>

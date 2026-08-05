@@ -9,6 +9,7 @@ register(new URL("./cloudflare-loader.mjs", import.meta.url));
 
 const pilotRepository = await import("../db/pilot-repository.ts");
 const { CUSTOMER_ROLE_METADATA_ACTIONS } = await import("../lib/aws-customer-role-artifacts.ts");
+const { deriveScopedAwsConnectionIdentity } = await import("../lib/aws-pilot-security.ts");
 const { getRawDb } = await import("../db/index.ts");
 const { closePostgresDatabase } = await import("../db/postgres-d1-adapter.ts");
 
@@ -44,7 +45,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
            permission_pack_version, status, enabled_regions_json,
            last_validated_at, created_at, updated_at)
          VALUES (?, ?, ?, 'aws_trust_role', 'aws', ?, ?, ?, 'test-key-v1',
-                 'standard-2026-07.3', 'active', '["us-east-1"]', ?, ?, ?)`,
+                 'standard-2026-07.4', 'active', '["us-east-1"]', ?, ?, ?)`,
       ).bind(
         connectionId,
         pilotRepository.LOCAL_ORG_ID,
@@ -74,7 +75,7 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07.3",
+        permissionPackVersion: "standard-2026-07.4",
         capabilityAssessment: {
           grantedActions: [...CUSTOMER_ROLE_METADATA_ACTIONS],
           missingActions: [],
@@ -118,6 +119,147 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
     assert.notEqual(stored?.external_id_ciphertext, "postgres-encrypted-external-id-material");
     assert.equal(stored?.external_id_key_version, "offboarded");
     assert.equal(stored?.status, "disabled");
+  } finally {
+    await closePostgresDatabase();
+  }
+});
+
+test("PostgreSQL globally serializes live AWS ownership races and emits a scoped collision signal", async () => {
+  const database = getRawDb();
+  const suffix = crypto.randomUUID().replaceAll("-", "");
+  const orgA = `org_pg_owner_a_${suffix}`;
+  const orgB = `org_pg_owner_b_${suffix}`;
+  const customerA = `cust_${crypto.randomUUID().replaceAll("-", "")}`;
+  const customerB = `cust_${crypto.randomUUID().replaceAll("-", "")}`;
+  const raceAccount = "700000000001";
+  const claimedAccount = "700000000002";
+  const fixtureAccount = "700000000003";
+  const insertConnection = (input) => database.prepare(
+    `INSERT INTO aws_connections
+      (id, org_id, customer_id, source_kind, partition, aws_account_id, role_arn,
+       external_id_ciphertext, external_id_key_version, permission_pack_version,
+       status, enabled_regions_json)
+     VALUES (?, ?, ?, ?, 'aws', ?, ?, 'postgres-encrypted-material', 'test-key-v1',
+             'standard-2026-07.4', 'active', '["us-east-1"]')`,
+  ).bind(
+    input.connectionId,
+    input.orgId,
+    input.customerId,
+    input.sourceKind,
+    input.accountId,
+    input.roleArn,
+  );
+
+  try {
+    await database.batch([
+      database.prepare(
+        "INSERT INTO organizations (id, slug, name, status) VALUES (?, ?, 'PG owner A', 'active')",
+      ).bind(orgA, `pg-owner-a-${suffix}`),
+      database.prepare(
+        "INSERT INTO organizations (id, slug, name, status) VALUES (?, ?, 'PG owner B', 'active')",
+      ).bind(orgB, `pg-owner-b-${suffix}`),
+      database.prepare(
+        "INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, ?, 'PG customer A', 'active')",
+      ).bind(customerA, orgA, `pg-customer-a-${suffix}`),
+      database.prepare(
+        "INSERT INTO customers (id, org_id, slug, name, status) VALUES (?, ?, ?, 'PG customer B', 'active')",
+      ).bind(customerB, orgB, `pg-customer-b-${suffix}`),
+    ]);
+
+    const race = await Promise.allSettled([
+      insertConnection({
+        connectionId: `conn_${crypto.randomUUID().replaceAll("-", "")}`,
+        orgId: orgA,
+        customerId: customerA,
+        sourceKind: "aws_trust_role",
+        accountId: raceAccount,
+        roleArn: `arn:aws:iam::${raceAccount}:role/sutra/SutraRaceA`,
+      }).run(),
+      insertConnection({
+        connectionId: `conn_${crypto.randomUUID().replaceAll("-", "")}`,
+        orgId: orgB,
+        customerId: customerB,
+        sourceKind: "aws_trust_role",
+        accountId: raceAccount,
+        roleArn: `arn:aws:iam::${raceAccount}:role/sutra/SutraRaceB`,
+      }).run(),
+    ]);
+    assert.equal(race.filter((result) => result.status === "fulfilled").length, 1);
+    assert.equal(race.filter((result) => result.status === "rejected").length, 1);
+    assert.equal(
+      Number((await database.prepare(
+        `SELECT COUNT(*) AS count FROM aws_connections
+          WHERE source_kind = 'aws_trust_role' AND partition = 'aws' AND aws_account_id = ?`,
+      ).bind(raceAccount).first())?.count),
+      1,
+    );
+
+    await insertConnection({
+      connectionId: `conn_${crypto.randomUUID().replaceAll("-", "")}`,
+      orgId: orgA,
+      customerId: customerA,
+      sourceKind: "aws_trust_role",
+      accountId: claimedAccount,
+      roleArn: `arn:aws:iam::${claimedAccount}:role/sutra/SutraClaimOwner`,
+    }).run();
+    const attempted = await deriveScopedAwsConnectionIdentity(orgB, claimedAccount, "aws");
+    await assert.rejects(
+      pilotRepository.createConnectionDraft({
+        orgId: orgB,
+        actorId: `usr_pg_collision_${suffix}`,
+        operationId: `onb_${"a".repeat(32)}`,
+        ...attempted,
+        customerName: "PG collision",
+        customerSlug: `pg-collision-${suffix.slice(0, 16)}`,
+        accountId: claimedAccount,
+        partition: "aws",
+        enabledRegions: ["us-east-1"],
+        externalIdCiphertext: "postgres-encrypted-collision-material",
+        externalIdKeyVersion: "test-key-v1",
+        roleProvisioningMode: "sutra_template",
+        expectedRolePath: "/sutra/",
+        expectedRoleName: "SutraReadOnlyRole",
+      }),
+      (error) =>
+        error?.code === "CONFLICT" &&
+        error.message === "The AWS ownership claim could not be accepted",
+    );
+    const signal = await database.prepare(
+      `SELECT customer_id, outcome, metadata_json, event_hash
+         FROM audit_events
+        WHERE org_id = ? AND action = 'security.aws_connection_ownership_collision'
+        LIMIT 1`,
+    ).bind(orgB).first();
+    assert.equal(signal?.customer_id, null);
+    assert.equal(signal?.outcome, "denied");
+    assert.match(signal?.event_hash ?? "", /^[a-f0-9]{64}$/u);
+    assert.equal((signal?.metadata_json ?? "").includes(claimedAccount), false);
+    assert.equal((signal?.metadata_json ?? "").includes(orgA), false);
+
+    await database.batch([
+      insertConnection({
+        connectionId: `conn_${crypto.randomUUID().replaceAll("-", "")}`,
+        orgId: orgA,
+        customerId: customerA,
+        sourceKind: "simulated_fixture",
+        accountId: fixtureAccount,
+        roleArn: "",
+      }),
+      insertConnection({
+        connectionId: `conn_${crypto.randomUUID().replaceAll("-", "")}`,
+        orgId: orgB,
+        customerId: customerB,
+        sourceKind: "simulated_fixture",
+        accountId: fixtureAccount,
+        roleArn: "",
+      }),
+    ]);
+    assert.equal(
+      Number((await database.prepare(
+        "SELECT COUNT(*) AS count FROM aws_connections WHERE source_kind = 'simulated_fixture' AND aws_account_id = ?",
+      ).bind(fixtureAccount).first())?.count),
+      2,
+    );
   } finally {
     await closePostgresDatabase();
   }

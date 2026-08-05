@@ -10,7 +10,16 @@ async function run(command) {
   const { stdout, stderr } = await execute(process.execPath, [
     "scripts/kubernetes-enterprise-demo.mjs", command,
   ], { cwd });
-  assert.equal(stderr, "");
+  // The script imports .ts modules, so Node prints its own type-stripping ExperimentalWarning on
+  // stderr. That is the runtime talking, not the demo, so drop those lines before requiring silence --
+  // anything the script itself writes to stderr still fails the run.
+  const scriptStderr = stderr
+    .split("\n")
+    .filter((line) => line !== ""
+      && !/^\(node:\d+\) ExperimentalWarning:/u.test(line)
+      && !/^\(Use `node --trace-warnings/u.test(line))
+    .join("\n");
+  assert.equal(scriptStderr, "");
   return { stdout, parsed: JSON.parse(stdout) };
 }
 

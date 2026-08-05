@@ -5,8 +5,10 @@ import { useState } from "react";
 import { formatTimestamp, usePilotState } from "../components/use-pilot-state";
 import { postAuth, useSession } from "../components/use-session";
 import { ApiTokensPanel } from "./api-tokens-panel";
+import { EnterpriseReadinessPanel } from "./enterprise-readiness-panel";
 import { ItsmConnectorsPanel } from "./itsm-connectors-panel";
 import GovernancePoliciesPanel from "./governance-policies-panel";
+import { ScimConnectorsPanel } from "./scim-connectors-panel";
 
 function roleLabel(role: string): string {
   return role.split("_").map((part) => `${part[0]?.toLocaleUpperCase("en-US") ?? ""}${part.slice(1)}`).join(" ");
@@ -75,7 +77,7 @@ export function SettingsBrowser() {
           <dl className="settings-list">
             <div><dt>Name</dt><dd>{session.organization.name}</dd></div>
             <div><dt>Identifier</dt><dd>{session.organization.slug}</dd></div>
-            <div><dt>Release</dt><dd><span className="settings-pill">General availability</span></dd></div>
+            <div><dt>Release</dt><dd><span className="settings-pill">Controlled enterprise release</span></dd></div>
           </dl>
         </section>
 
@@ -97,6 +99,8 @@ export function SettingsBrowser() {
       </div>
       {workspaceError ? <p className="page-alert page-alert-error" role="alert">{workspaceError}</p> : null}
       {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
+      <EnterpriseReadinessPanel connectionId={connectionId} />
+      {canManageMembers ? <ScimConnectorsPanel /> : null}
       <ApiTokensPanel connectionId={connectionId} />
       <ItsmConnectorsPanel connectionId={connectionId} />
       <GovernancePoliciesPanel connectionId={connectionId} />

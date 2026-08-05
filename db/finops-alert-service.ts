@@ -28,9 +28,6 @@ import {
   normalizeSecurityNotificationEvent,
 } from "../lib/security-notifications.ts";
 
-const PUBLIC_ORIGIN = "https://app.sutracmdb.com";
-const REPORT_URL = "https://app.sutracmdb.com/costs";
-
 export async function evidenceHash(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -156,6 +153,7 @@ export async function enqueueFinopsAlert(
     readonly destinationId: string;
     readonly recipients: readonly string[];
     readonly alert: FinopsAlert;
+    readonly publicOrigin: string;
   },
 ): Promise<void> {
   const eventId = `notify_${(await evidenceHash(`finops-alert\0${args.alert.id}`)).slice(0, 48)}`;
@@ -169,9 +167,9 @@ export async function enqueueFinopsAlert(
     summary: args.alert.summary,
     occurredAt: new Date().toISOString(),
     findingCount: 1,
-    reportUrl: REPORT_URL,
+    reportUrl: `${args.publicOrigin}/costs`,
     evidenceSha256: await evidenceHash(`finops-alert-evidence\0${args.alert.id}\0${args.alert.summary}`),
-  }, PUBLIC_ORIGIN);
+  }, args.publicOrigin);
   const payloads = await buildSecurityNotificationPayloads({ event, emailRecipients: [...args.recipients] });
   await notifications.enqueue({
     orgId: args.orgId,

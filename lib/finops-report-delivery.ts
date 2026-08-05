@@ -6,8 +6,9 @@
 //
 // Two per-schedule destinations (never a stored secret — only a URL or a
 // recipient address lives in the row):
-//   * webhook — the schedule's own HTTPS endpoint. The report envelope is
-//     POSTed there unchanged. The endpoint URL is SSRF-screened at store time.
+//   * webhook — a Jira Cloud Automation or ServiceNow API webhook. The report
+//     envelope is posted through the signed managed outbound gateway. Other
+//     customer-controlled hosts fail closed before egress.
 //   * email   — the schedule's recipient address, sent through the configured
 //     transactional email API (SUTRA_CONTACT_EMAIL_API_URL / _KEY). When that
 //     API is not configured we do NOT pretend an email went out.
@@ -26,6 +27,8 @@ import {
 } from "./contact-delivery.ts";
 import { assertSafeOutboundUrl } from "./ssrf-guard.ts";
 import { sendZohoMail } from "./zoho-mail.ts";
+import { isManagedTicketWebhookUrl } from "./managed-provider-webhooks.ts";
+import { requiredManagedOutboundFetch } from "./managed-outbound-fetch.ts";
 
 export type ReportDeliveryKind = "webhook" | "email";
 export type ReportDeliveryTransport = "webhook" | "email-api" | "none";
@@ -125,8 +128,6 @@ export async function deliverScheduledReport(input: {
   readonly env: ReportDeliveryEnv;
   readonly fetchImpl?: typeof fetch;
 }): Promise<ReportDeliveryResult> {
-  const fetchImpl = input.fetchImpl ?? fetch;
-
   if (input.kind === "webhook") {
     const url = httpsUrl(input.target);
     // A stored target that is not a usable HTTPS URL cannot be delivered to; be
@@ -138,10 +139,37 @@ export async function deliverScheduledReport(input: {
       // follow redirects so a 3xx cannot bypass the SSRF guard after the first
       // hop. A blocked target throws here and resolves to an honest non-delivery.
       const target = assertSafeOutboundUrl(url);
-      const response = await fetchImpl(target, {
+      if (
+        input.fetchImpl === undefined &&
+        !isManagedTicketWebhookUrl(target)
+      ) {
+        return { delivered: false, transport: "none" };
+      }
+      const outboundBody = JSON.stringify({ report: input.envelope });
+      const digest = new Uint8Array(
+        await crypto.subtle.digest(
+          "SHA-256",
+          new TextEncoder().encode([
+            "sutra.finops-report-delivery.v1",
+            target.toString(),
+            outboundBody,
+          ].join("\u0000")),
+        ),
+      );
+      const idempotencyKey = `finops-${[...digest]
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("")}`;
+      const outboundFetch = requiredManagedOutboundFetch(
+        input.env,
+        input.fetchImpl,
+      );
+      const response = await outboundFetch(target, {
         method: "POST",
-        headers: { "content-type": "application/json; charset=utf-8" },
-        body: JSON.stringify({ report: input.envelope }),
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "idempotency-key": idempotencyKey,
+        },
+        body: outboundBody,
         redirect: "error",
         signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
       });
@@ -166,7 +194,7 @@ export async function deliverScheduledReport(input: {
       toAddress: recipient,
       subject,
       content: text,
-    }, fetchImpl);
+    }, input.fetchImpl);
     return {
       delivered: outcome.status === "accepted",
       transport:
@@ -202,7 +230,7 @@ export async function deliverScheduledReport(input: {
   }
 
   try {
-    const response = await fetchImpl(emailApiUrl, {
+    const response = await (input.fetchImpl ?? fetch)(emailApiUrl, {
       method: "POST",
       headers: { "content-type": "application/json; charset=utf-8", authorization: `Bearer ${emailApiKey}` },
       body: JSON.stringify(body),

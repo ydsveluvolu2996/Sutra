@@ -1,4 +1,5 @@
-import { hostedOidcProviderIssues } from "./hosted-oidc-providers.ts";
+import { hostedOidcProviderIssues, parseHostedOidcProviders } from "./hosted-oidc-providers.ts";
+import { parseHostedSamlProviders } from "./hosted-saml-providers.ts";
 import { effectiveRequestOrigin } from "./request-origin.ts";
 import {
   isCanonicalPublicSiteUrl,
@@ -15,6 +16,8 @@ export interface DeploymentSecurityEnvironment {
   readonly SUTRA_IDENTITY_MODE?: string;
   readonly SUTRA_OIDC_PROVIDERS?: string;
   readonly SUTRA_OIDC_TRANSACTION_KEY?: string;
+  readonly SUTRA_SAML_PROVIDERS?: string;
+  readonly SUTRA_SAML_TRANSACTION_KEY?: string;
   readonly SUTRA_BROKER_URL?: string;
   readonly SUTRA_BROKER_AUTH_MODE?: string;
   readonly SUTRA_DATABASE_MODE?: string;
@@ -118,13 +121,33 @@ export function hostedConfigurationIssues(environment: DeploymentSecurityEnviron
   const issues: string[] = [];
   if (environment.SUTRA_LOCAL_MODE === "true") issues.push("local authentication must be disabled");
   if (exactHttpsOrigin(environment.SUTRA_PUBLIC_ORIGIN) === null) issues.push("a canonical non-loopback HTTPS public origin is required");
-  if (environment.SUTRA_IDENTITY_MODE !== "oidc") issues.push("the hosted OIDC identity adapter is required");
-  // Federated login is MULTI-PROVIDER (Google, Microsoft Entra, ...). At least
-  // one fully-configured provider is required and every configured provider must
-  // pass its own HTTPS issuer/endpoint validation, so a single malformed entry
-  // still fails closed.
-  issues.push(...hostedOidcProviderIssues(environment.SUTRA_OIDC_PROVIDERS));
-  if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) issues.push("a managed 256-bit OIDC transaction key is required");
+  const identityMode = environment.SUTRA_IDENTITY_MODE;
+  if (identityMode !== "oidc" && identityMode !== "federated") {
+    issues.push("the hosted OIDC or federated identity adapter is required");
+  }
+  if (identityMode === "oidc") {
+    issues.push(...hostedOidcProviderIssues(environment.SUTRA_OIDC_PROVIDERS));
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) {
+      issues.push("a managed 256-bit OIDC transaction key is required");
+    }
+    if (environment.SUTRA_SAML_PROVIDERS?.trim()) {
+      issues.push("SAML providers require SUTRA_IDENTITY_MODE=federated");
+    }
+  }
+  if (identityMode === "federated") {
+    const oidc = environment.SUTRA_OIDC_PROVIDERS?.trim()
+      ? parseHostedOidcProviders(environment.SUTRA_OIDC_PROVIDERS)
+      : { providers: [], issues: [] };
+    const saml = parseHostedSamlProviders(environment.SUTRA_SAML_PROVIDERS);
+    issues.push(...oidc.issues, ...saml.issues);
+    if (saml.providers.length === 0) issues.push("at least one fully-configured enterprise SAML provider is required");
+    if (oidc.providers.length > 0 && !/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_OIDC_TRANSACTION_KEY ?? "")) {
+      issues.push("a managed 256-bit OIDC transaction key is required when OIDC providers are configured");
+    }
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(environment.SUTRA_SAML_TRANSACTION_KEY ?? "")) {
+      issues.push("a managed 256-bit SAML transaction key is required");
+    }
+  }
   if (!isExactHttpsUrl(environment.SUTRA_BROKER_URL)) issues.push("a non-loopback HTTPS broker URL is required");
   if (environment.SUTRA_BROKER_AUTH_MODE !== "asymmetric") issues.push("asymmetric broker authentication is required");
   if (!new Set(["d1", "postgres-tls"]).has(environment.SUTRA_DATABASE_MODE ?? "")) issues.push("a supported hosted database mode is required");
@@ -221,9 +244,9 @@ export function privateBetaOidcConfigurationIssues(environment: DeploymentSecuri
 }
 
 /**
- * Selects the identity contract for a network deployment. `password` and `oidc`
- * are the only supported hosted identity modes; anything else falls through to
- * the OIDC contract, whose first check reports the missing adapter.
+ * Selects the identity contract for a network deployment. Production supports
+ * password, OIDC, and explicit OIDC+SAML federated mode. SAML never inherits the
+ * narrower staging switch.
  */
 export function networkConfigurationIssues(environment: DeploymentSecurityEnvironment): readonly string[] {
   if (environment.SUTRA_DEPLOYMENT_ENV === "staging") {

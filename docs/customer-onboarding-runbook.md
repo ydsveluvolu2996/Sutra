@@ -48,7 +48,7 @@ Start at `/onboard` and choose one of the two reviewed deployment modes:
 
 Do **not** deploy `infrastructure/customer-role.yaml`; it is a historical design
 artifact, not the accepted onboarding contract. The current permission pack is
-`standard-2026-07.3`: one exact inline metadata-read policy, no attached managed
+`standard-2026-07.4`: one exact inline metadata-read policy, no attached managed
 policies, and the required `sutra:permission-pack` tag. Sutra rejects reused
 administrator, shared-operations, wildcard-trust, or otherwise broader roles.
 In either supported mode, review before applying:

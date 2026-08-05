@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { resolve as resolvePath } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -21,6 +21,7 @@ import {
   RegistryStateError,
   type LocalAwsPartition,
   type RegisteredAwsConnection,
+  type RegisterAwsConnectionInput,
 } from "./local-registry.js";
 import {
   DurableLocalScheduler,
@@ -50,45 +51,213 @@ import {
 } from "./local-job-state.js";
 import {
   executeAgentlessScan,
+  type AgentlessScanExecution,
   type AgentlessScanPlan as AgentlessExecutePlan,
 } from "./scan-runner.js";
 
 import {
   createAgentlessExecutor,
+  sweepHostedAgentlessTeardownDebt,
   type AgentlessExecutionSettings,
+  type HostedAgentlessTeardownResource,
+  type AgentlessResourceTracker,
 } from "./agentless-execution.js";
 import {
   AgentlessRunAlreadyRunningError,
   AgentlessRunRegistry,
+  type AgentlessRunStore,
 } from "./agentless-run-registry.js";
 import {
   createWorkloadIdentityRoleBroker,
   IMPLEMENTED_READ_ACTIONS,
   parseIamRoleArn,
+  type AwsRoleBroker,
 } from "./role-broker.js";
 import { runSandboxIdentityPreflight } from "./aws-sandbox-preflight.js";
 import {
   RequestAuthenticationError,
   RequestAuthenticator,
 } from "./request-auth.js";
+import { HostedRequestAuthenticationError } from "./hosted-request-auth.js";
+import { LIVE_AWS_BROKER_TIMEOUT_MS } from "./live-collection-limits.js";
 import {
   CollectorError,
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
+  AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
+  AWS_HEALTH_PERMISSION_PACK_VERSION,
+  RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
+  GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
   type AwsInventoryBatch,
   type AwsInventorySink,
+  type AwsTemporaryCredentials,
   type InventoryCollectorCoverage,
   type NormalizedAwsEvidence,
   type NormalizedAwsResource,
   type OnboardingTrustVerification,
+  type ConnectionScope,
+  type ScopedConnectionRegistry,
   type SafeJsonObject,
   type SafeJsonValue,
 } from "./types.js";
 import { isValidAwsRegionSelection } from "./aws-region-selection.js";
+import {
+  createAwsFinopsExportChunkClient,
+  parseFinopsExportChunkRequest,
+  readFinopsExportChunk,
+  type FinopsExportChunkClientFactory,
+} from "./finops-export-chunk.js";
+import {
+  ComputeOptimizerExportObjectChunkError,
+  createAwsComputeOptimizerExportObjectChunkClient,
+  parseComputeOptimizerExportObjectChunkRequest,
+  readComputeOptimizerExportObjectChunk,
+  type ComputeOptimizerExportObjectChunkClientFactory,
+} from "./compute-optimizer-export-object-chunk.js";
+import {
+  ComputeOptimizerExactDescribeError,
+  createAwsComputeOptimizerExactDescribeReader,
+  describeComputeOptimizerExactExportJobs,
+  parseComputeOptimizerExactDescribeRequest,
+  type ComputeOptimizerExactDescribeReader,
+} from "./compute-optimizer-export-exact-describe.js";
+import {
+  ComputeOptimizerExportLauncherError,
+  createAwsComputeOptimizerExportLaunchClient,
+  parseComputeOptimizerExportLaunchAttempt,
+  runComputeOptimizerExportLaunch,
+  type ComputeOptimizerExportLaunchClient,
+} from "./compute-optimizer-export-launcher.js";
+import {
+  ComputeOptimizerExportLaunchLedgerError,
+  type ComputeOptimizerExportLaunchExecutionLedger,
+} from "./compute-optimizer-export-launch-ledger.js";
+import {
+  ComputeOptimizerMaterializationActivationManifestError,
+  projectComputeOptimizerMaterializationActivationManifest,
+  type ComputeOptimizerMaterializationActivationManifestRequest,
+} from "./compute-optimizer-materialization-activation-manifest.js";
+import { resolveComputeOptimizerExportLaunchContractForRegion } from
+  "./compute-optimizer-export-launch-contract.js";
+import {
+  executeFinopsSourceDispatch,
+  parseFinopsSourceDispatchRequest,
+  resolveFinopsSourceContract,
+  type FinopsSourceDispatchRequest,
+} from "./finops-source-runner.js";
+import {
+  collectSignedOrganizationsTaxonomy,
+} from "./aws-organizations-taxonomy-runner.js";
+import {
+  AwsBudgetsProviderAdapterError,
+  createAwsBudgetsProviderClients,
+  type AwsBudgetsProviderClients,
+  type AwsBudgetsProviderPartition,
+} from "./aws-budgets-provider-adapter.js";
+import {
+  AWS_BUDGETS_PROVIDER_ROUTE,
+  parseAwsBudgetsProviderRouteRequest,
+  runAwsBudgetsProviderRoute,
+} from "./aws-budgets-provider-route.js";
+import {
+  ExtendedSupportProviderAdapterError,
+  EXTENDED_SUPPORT_PROVIDER_BOUNDS,
+  type ExtendedSupportAwsReader,
+  type ExtendedSupportProviderBoundary,
+} from "./extended-support-provider-adapter.js";
+import { createExtendedSupportAwsSdkReader } from
+  "./extended-support-aws-sdk-reader.js";
+import {
+  EXTENDED_SUPPORT_PROVIDER_ROUTE,
+  parseExtendedSupportProviderRouteRequest,
+  runExtendedSupportProviderRoute,
+} from "./extended-support-provider-route.js";
+import {
+  AWS_SUPPORT_CASES_PROVIDER_BOUNDS,
+  AwsSupportCasesProviderAdapterError,
+  type AwsSupportCasesProviderClient,
+  type AwsSupportCasesProviderPartition,
+} from "./aws-support-cases-provider-adapter.js";
+import { createAwsSupportCasesProviderClient } from
+  "./aws-support-cases-provider-client.js";
+import {
+  AWS_SUPPORT_CASES_PROVIDER_ROUTE,
+  parseAwsSupportCasesProviderRouteRequest,
+  runAwsSupportCasesProviderRoute,
+} from "./aws-support-cases-provider-route.js";
+import {
+  AWS_HEALTH_PROVIDER_BOUNDS,
+  AwsHealthProviderAdapterError,
+  type AwsHealthProviderReader,
+  type AwsHealthProviderRequest,
+  type AwsHealthProviderTarget,
+} from "./aws-health-provider-adapter.js";
+import { createAwsHealthSdkReader } from "./aws-health-sdk-reader.js";
+import {
+  AWS_HEALTH_PROVIDER_ROUTE,
+  parseAwsHealthProviderRouteRequest,
+  runAwsHealthProviderRoute,
+} from "./aws-health-provider-route.js";
+import {
+  ResilienceVueProviderAdapterError,
+  type ResilienceVueProviderClientFactory,
+} from "./resilience-vue-provider-adapter.js";
+import {
+  RESILIENCE_VUE_PROVIDER_BOUNDS,
+  RESILIENCE_VUE_PROVIDER_ROUTE,
+  parseResilienceVueProviderRouteRequest,
+  runResilienceVueProviderRoute,
+} from "./resilience-vue-provider-route.js";
+import {
+  DCF_PROVIDER_BOUNDS,
+  DcfProviderAdapterError,
+  type DcfProviderReader,
+} from "./dcf-step-functions-provider-adapter.js";
+import { createDcfStepFunctionsSdkReader } from "./dcf-step-functions-sdk-reader.js";
+import {
+  DCF_STEP_FUNCTIONS_PROVIDER_ROUTE,
+  parseDcfProviderRouteRequest,
+  runDcfProviderRoute,
+} from "./dcf-step-functions-provider-route.js";
+import {
+  EndUserComputingProviderError,
+  type EndUserComputingCanonicalCostProjection,
+  type EndUserComputingProviderReader,
+} from "./end-user-computing-provider-adapter.js";
+import { createEndUserComputingSdkReader } from "./end-user-computing-sdk-reader.js";
+import {
+  END_USER_COMPUTING_PROVIDER_ROUTE,
+  parseEndUserComputingProviderRouteRequest,
+  runEndUserComputingProviderRoute,
+} from "./end-user-computing-provider-route.js";
+import { GravitonProviderAdapterError, type GravitonProviderReader,
+  GRAVITON_PROVIDER_BOUNDS } from "./graviton-savings-provider-adapter.js";
+import { createGravitonSavingsSdkReader } from "./graviton-savings-sdk-reader.js";
+import { GRAVITON_PROVIDER_ROUTE, parseGravitonProviderRouteRequest,
+  runGravitonProviderRoute } from "./graviton-savings-provider-route.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8788;
 const BODY_LIMIT = 64 * 1024;
 const RESPONSE_LIMIT = 12 * 1024 * 1024;
+const AWS_BUDGETS_RESPONSE_LIMIT = 14 * 1024 * 1024;
+const EXTENDED_SUPPORT_RESPONSE_LIMIT = 34 * 1024 * 1024;
+const AWS_SUPPORT_CASES_RESPONSE_LIMIT = 65 * 1024 * 1024;
+const AWS_HEALTH_RESPONSE_LIMIT = 50 * 1024 * 1024;
+const RESILIENCE_VUE_RESPONSE_LIMIT = 13 * 1024 * 1024;
+const DCF_STEP_FUNCTIONS_BODY_LIMIT = 1_048_576;
+const DCF_STEP_FUNCTIONS_RESPONSE_LIMIT = 65 * 1024 * 1024;
+const END_USER_COMPUTING_BODY_LIMIT = 256 * 1024;
+const END_USER_COMPUTING_RESPONSE_LIMIT = 66 * 1024 * 1024;
+const GRAVITON_BODY_LIMIT = 64 * 1024;
+const GRAVITON_RESPONSE_LIMIT = 34 * 1024 * 1024;
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 const ACCOUNT_ID = /^\d{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
@@ -97,7 +266,7 @@ const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
-  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|disable|offboard)$/;
+  /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|compute-optimizer-materialization-activation-manifest|finops-source|organizations-taxonomy|disable|offboard)$/;
 const LOCAL_JOB_RESULT_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/result$/;
 const LOCAL_JOB_PUBLISHED_PATH = /^\/v1\/local\/jobs\/(job_[a-f0-9]{48})\/published$/;
 const LOCAL_SCHEDULE_PATH = /^\/v1\/local\/schedules\/(sched_[a-f0-9]{48})$/;
@@ -119,16 +288,46 @@ const LIVE_SNAPSHOT_RELATIONSHIP_BUDGET_BYTES = 1024 * 1024;
 const LIVE_SNAPSHOT_FINDING_BUDGET_BYTES = 2 * 1024 * 1024;
 export const LIVE_SNAPSHOT_RESPONSE_BUDGET_BYTES = 10 * 1024 * 1024;
 const SECURITY_EVENT_OPERATION_DEADLINE_MS = 105_000;
+const COMPUTE_OPTIMIZER_ACTIVATION_MANIFEST_DEADLINE_MS = 15_000;
 const MIN_LOCAL_SCHEDULE_INTERVAL_MS = 1_000;
 const MAX_LOCAL_SCHEDULE_INTERVAL_MS = 31_536_000_000;
 const LOCAL_JOB_AVAILABLE_AT = new Date(0);
 
+function computeOptimizerLaunchCapablePack(value: RegisteredAwsConnection["permissionPackVersion"]): boolean {
+  return value === COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+    || value === EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+    || value === AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+    || value === AWS_HEALTH_PERMISSION_PACK_VERSION
+    || value === RESILIENCE_VUE_PERMISSION_PACK_VERSION
+    || value === DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+    || value === END_USER_COMPUTING_PERMISSION_PACK_VERSION
+    || value === GRAVITON_SAVINGS_PERMISSION_PACK_VERSION;
+}
+
 export type LocalFixtureJobExecutor = typeof executeLocalFixtureCollectionJob;
 
+export interface ComputeOptimizerActivationManifestIdentityAttestor {
+  attest(input: {
+    readonly scope: ConnectionScope;
+    readonly connectionId: string;
+    readonly jobId: string;
+    readonly expectedAccountId: string;
+    readonly partition: LocalAwsPartition;
+    /** The implementation must create a session capped to this exact action set. */
+    readonly sessionActions: readonly ["sts:GetCallerIdentity"];
+    readonly signal: AbortSignal;
+  }): Promise<{
+    readonly verified: true;
+    readonly connectionId: string;
+    readonly accountId: string;
+    readonly partition: LocalAwsPartition;
+  }>;
+}
+
 export interface LocalCollectorServerOptions {
-  readonly sharedSecret: string;
-  readonly registryEncryptionKey: string;
-  readonly registryPath: string;
+  readonly sharedSecret?: string;
+  readonly registryEncryptionKey?: string;
+  readonly registryPath?: string;
   readonly mode?: "fixture" | "live";
   readonly allowLiveAws?: boolean;
   readonly principalArn?: string;
@@ -143,6 +342,234 @@ export interface LocalCollectorServerOptions {
   readonly localJobMaxBackoffMs?: number;
   readonly localScheduleMaxCatchUpPerTick?: number;
   readonly localFixtureJobExecutor?: LocalFixtureJobExecutor;
+  /** Hosted-only dependency injection. Local callers leave these unset. */
+  readonly registry?: CollectorConnectionRegistry;
+  readonly authenticator?: CollectorRequestAuthenticator;
+  readonly operationCoordinator?: CollectorOperationCoordinator;
+  readonly hostedRuntime?: boolean;
+  readonly readiness?: () => Promise<boolean>;
+  readonly agentlessRunStore?: AgentlessRunStore;
+  readonly agentlessResourceTracker?: (input: {
+    readonly tenantId: string;
+    readonly runId: string;
+    readonly connectionId: string;
+  }) => AgentlessResourceTracker;
+  readonly agentlessExecutionFinalizer?: (
+    tenantId: string,
+    runId: string,
+    execution: AgentlessScanExecution,
+  ) => Promise<AgentlessScanExecution>;
+  /** Hosted broker independently pins every spend-capable setting. */
+  readonly hostedAgentlessSettings?: AgentlessExecutionSettings;
+  /**
+   * Non-secret subset used while execution approval is still fail-closed.
+   * Planning must bind the eventual scan account/KMS behavior without granting
+   * the public control plane any AWS credential or execution capability.
+   */
+  readonly hostedAgentlessPlanProfile?: {
+    readonly scanAccountId: string;
+    readonly kmsReencrypt: boolean;
+  };
+  /** Full broker-private settings used only to reconcile already-owned debt. */
+  readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
+  readonly agentlessCleanupLedger?: {
+    authorize(
+      tenantId: string,
+      resources: readonly HostedAgentlessTeardownResource[],
+    ): Promise<void>;
+    record(input: {
+      readonly tenantId: string;
+      readonly resource: HostedAgentlessTeardownResource;
+      readonly settled: boolean;
+      readonly detail: string;
+    }): Promise<void>;
+  };
+  /**
+   * Broker-only S3 range client. Hosted production uses the AWS SDK; tests may
+   * inject a deterministic client. The web/control-plane never receives this.
+   */
+  readonly finopsExportChunkClientFactory?: FinopsExportChunkClientFactory;
+  /** Broker-only exact Compute Optimizer range client; never exposed upstream. */
+  readonly computeOptimizerExportObjectChunkClientFactory?:
+    ComputeOptimizerExportObjectChunkClientFactory;
+  /** Focused test seam. Production always constructs the workload-identity broker. */
+  readonly computeOptimizerExportObjectRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportObjectSession">;
+  /** Test seams for the exact-ID Describe action; credentials remain broker-private. */
+  readonly computeOptimizerExactDescribeReaderFactory?: (
+    partition: LocalAwsPartition,
+    region: string,
+    credentials: Parameters<typeof createAwsComputeOptimizerExactDescribeReader>[2],
+  ) => ComputeOptimizerExactDescribeReader;
+  readonly computeOptimizerExactDescribeRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportDescribeSession">;
+  readonly computeOptimizerActivationManifestRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "attestComputeOptimizerActivationManifestIdentity">;
+  readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
+  readonly computeOptimizerExportLaunchClientFactory?: (
+    partition: LocalAwsPartition,
+    region: string,
+    credentials: Parameters<typeof createAwsComputeOptimizerExportLaunchClient>[2],
+  ) => ComputeOptimizerExportLaunchClient;
+  readonly computeOptimizerExportLaunchRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedComputeOptimizerExportLaunchSession">;
+  /**
+   * Fail-closed seam for the dedicated identity-only .8.5 attestation. The
+   * production role broker must implement a session policy containing only
+   * sts:GetCallerIdentity before this route is enabled.
+   */
+  readonly computeOptimizerActivationManifestIdentityAttestor?:
+    ComputeOptimizerActivationManifestIdentityAttestor;
+  readonly awsBudgetsProviderClientFactory?: (input: {
+    readonly partition: AwsBudgetsProviderPartition;
+    readonly credentials: Parameters<typeof createAwsBudgetsProviderClients>[0]["credentials"];
+  }) => AwsBudgetsProviderClients;
+  readonly awsBudgetsProviderRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsBudgetsSession">;
+  readonly extendedSupportReaderFactory?: (input: {
+    readonly boundary: ExtendedSupportProviderBoundary;
+    readonly jobId: string;
+    readonly sessionForAccount: (
+      accountId: string,
+      signal: AbortSignal,
+    ) => Promise<AwsTemporaryCredentials>;
+  }) => ExtendedSupportAwsReader;
+  readonly extendedSupportRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedExtendedSupportSession">;
+  /** Dedicated server-owned HMAC key; never accepted from request data. */
+  readonly awsSupportCasesEvidenceKey?: Uint8Array;
+  readonly awsSupportCasesProviderClientFactory?: (input: {
+    readonly partition: AwsSupportCasesProviderPartition;
+    readonly credentials: AwsTemporaryCredentials;
+  }) => AwsSupportCasesProviderClient;
+  readonly awsSupportCasesRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsSupportCasesSession">;
+  readonly awsHealthReaderFactory?: (input: {
+    readonly request: AwsHealthProviderRequest;
+    readonly sessionForTarget: (
+      target: AwsHealthProviderTarget,
+      signal: AbortSignal,
+    ) => Promise<AwsTemporaryCredentials>;
+  }) => AwsHealthProviderReader;
+  readonly awsHealthRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedAwsHealthSession">;
+  readonly resilienceVueProviderClientFactory?: ResilienceVueProviderClientFactory;
+  readonly resilienceVueRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedResilienceVueSession">;
+  readonly dcfStepFunctionsReaderFactory?: (input: {
+    readonly credentials: AwsTemporaryCredentials;
+    readonly partition: LocalAwsPartition;
+    readonly region: string;
+  }) => DcfProviderReader;
+  readonly dcfStepFunctionsRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedDcfStepFunctionsSession">;
+  readonly endUserComputingReaderFactory?: (input: {
+    readonly credentials: AwsTemporaryCredentials;
+    readonly accountId: string;
+    readonly partition: LocalAwsPartition;
+    readonly region: string;
+  }) => EndUserComputingProviderReader;
+  readonly endUserComputingRoleBrokerFactory?: (input: {
+    readonly registry: ScopedConnectionRegistry;
+    readonly principalArn: string;
+    readonly region: string;
+  }) => Pick<AwsRoleBroker, "assumeValidatedEndUserComputingSession">;
+  readonly endUserComputingCostProjectionLoader?: (input: {
+    readonly tenantId: string;
+    readonly customerId: string;
+    readonly connectionId: string;
+    readonly requestId: string;
+    readonly cur2: Readonly<Record<string, unknown>>;
+    readonly accountIds: readonly string[];
+    readonly regions: readonly string[];
+  }) => Promise<EndUserComputingCanonicalCostProjection>;
+  readonly gravitonSavingsReaderFactory?: (input:{readonly request:ReturnType<typeof parseGravitonProviderRouteRequest>})=>GravitonProviderReader;
+  readonly gravitonSavingsRoleBrokerFactory?: (input:{readonly registry:ScopedConnectionRegistry;
+    readonly principalArn:string;readonly region:string})=>Pick<AwsRoleBroker,"assumeValidatedGravitonSavingsSession">;
+  /** Hosted-only immutable asymmetric KMS key used for ADV-01 taxonomy signing. */
+  readonly trustedAdvisorTaxonomySigningKeyId?: string;
+}
+
+export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
+  getRegistered(scope: ConnectionScope, connectionId: string): Promise<RegisteredAwsConnection | null>;
+  upsert(input: RegisterAwsConnectionInput): Promise<void>;
+  disable(scope: ConnectionScope, connectionId: string): Promise<void>;
+  offboard(scope: ConnectionScope, connectionId: string): Promise<void>;
+  activateOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
+  discardStagedOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
+}
+
+export interface CollectorRequestAuthenticator {
+  verify(input: {
+    readonly method: string;
+    readonly path: string;
+    readonly headers: IncomingMessage["headers"];
+    readonly body: string;
+  }): { readonly nonce: string; readonly timestamp: number } | Promise<{ readonly nonce: string; readonly timestamp: number }>;
+  responseSignature(
+    status: number,
+    path: string,
+    nonce: string,
+    body: string,
+  ): string | { readonly keyId: string; readonly signature: string } |
+    Promise<string | { readonly keyId: string; readonly signature: string }>;
+}
+
+export interface CollectorOperationLease {
+  readonly operationKey: string;
+  readonly leaseToken: string;
+}
+
+export interface CollectorOperationCoordinator {
+  claim(operationKey: string): Promise<CollectorOperationLease | null>;
+  release(lease: CollectorOperationLease): Promise<void>;
+}
+
+export class InMemoryCollectorOperationCoordinator implements CollectorOperationCoordinator {
+  private readonly leases = new Map<string, string>();
+
+  public async claim(operationKey: string): Promise<CollectorOperationLease | null> {
+    if (this.leases.has(operationKey)) return null;
+    const leaseToken = randomUUID();
+    this.leases.set(operationKey, leaseToken);
+    return { operationKey, leaseToken };
+  }
+
+  public async release(lease: CollectorOperationLease): Promise<void> {
+    if (this.leases.get(lease.operationKey) === lease.leaseToken) {
+      this.leases.delete(lease.operationKey);
+    }
+  }
 }
 
 interface ServerContext {
@@ -150,13 +577,90 @@ interface ServerContext {
   readonly principalArn: string;
   readonly sourceAccountId: string;
   readonly now: () => Date;
-  readonly registry: EncryptedFileConnectionRegistry;
-  readonly authenticator: RequestAuthenticator;
-  readonly activeConnectionOperations: Set<string>;
-  readonly lifecycleMutations: Set<string>;
+  readonly registry: CollectorConnectionRegistry;
+  readonly authenticator: CollectorRequestAuthenticator;
+  readonly operationCoordinator: CollectorOperationCoordinator;
+  readonly hostedRuntime: boolean;
+  readonly readiness: () => Promise<boolean>;
   readonly localJobs: LocalJobsContext | null;
-  /** In-flight agentless scans. Memory-only; see agentless-run-registry.ts. */
-  readonly agentlessRuns: AgentlessRunRegistry;
+  readonly agentlessRuns: AgentlessRunStore;
+  readonly agentlessResourceTracker?: LocalCollectorServerOptions["agentlessResourceTracker"];
+  readonly agentlessExecutionFinalizer?: LocalCollectorServerOptions["agentlessExecutionFinalizer"];
+  readonly hostedAgentlessSettings?: AgentlessExecutionSettings;
+  readonly hostedAgentlessPlanProfile?: LocalCollectorServerOptions["hostedAgentlessPlanProfile"];
+  readonly hostedAgentlessCleanupSettings?: AgentlessExecutionSettings;
+  readonly agentlessCleanupLedger?: LocalCollectorServerOptions["agentlessCleanupLedger"];
+  readonly finopsExportChunkClientFactory: FinopsExportChunkClientFactory;
+  readonly computeOptimizerExportObjectChunkClientFactory:
+    ComputeOptimizerExportObjectChunkClientFactory;
+  readonly computeOptimizerExportObjectRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportObjectRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerExactDescribeReaderFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExactDescribeReaderFactory"]
+  >;
+  readonly computeOptimizerExactDescribeRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExactDescribeRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerActivationManifestRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerActivationManifestRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerExportLaunchLedger?: ComputeOptimizerExportLaunchExecutionLedger;
+  readonly computeOptimizerExportLaunchClientFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportLaunchClientFactory"]
+  >;
+  readonly computeOptimizerExportLaunchRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["computeOptimizerExportLaunchRoleBrokerFactory"]
+  >;
+  readonly computeOptimizerActivationManifestIdentityAttestor?:
+    ComputeOptimizerActivationManifestIdentityAttestor;
+  readonly awsBudgetsProviderClientFactory: NonNullable<
+    LocalCollectorServerOptions["awsBudgetsProviderClientFactory"]
+  >;
+  readonly awsBudgetsProviderRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsBudgetsProviderRoleBrokerFactory"]
+  >;
+  readonly extendedSupportReaderFactory: NonNullable<
+    LocalCollectorServerOptions["extendedSupportReaderFactory"]
+  >;
+  readonly extendedSupportRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["extendedSupportRoleBrokerFactory"]
+  >;
+  readonly awsSupportCasesEvidenceKey?: Uint8Array;
+  readonly awsSupportCasesProviderClientFactory: NonNullable<
+    LocalCollectorServerOptions["awsSupportCasesProviderClientFactory"]
+  >;
+  readonly awsSupportCasesRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsSupportCasesRoleBrokerFactory"]
+  >;
+  readonly awsHealthReaderFactory: NonNullable<
+    LocalCollectorServerOptions["awsHealthReaderFactory"]
+  >;
+  readonly awsHealthRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["awsHealthRoleBrokerFactory"]
+  >;
+  readonly resilienceVueProviderClientFactory?: ResilienceVueProviderClientFactory;
+  readonly resilienceVueRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["resilienceVueRoleBrokerFactory"]
+  >;
+  readonly dcfStepFunctionsReaderFactory: NonNullable<
+    LocalCollectorServerOptions["dcfStepFunctionsReaderFactory"]
+  >;
+  readonly dcfStepFunctionsRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["dcfStepFunctionsRoleBrokerFactory"]
+  >;
+  readonly endUserComputingReaderFactory: NonNullable<
+    LocalCollectorServerOptions["endUserComputingReaderFactory"]
+  >;
+  readonly endUserComputingRoleBrokerFactory: NonNullable<
+    LocalCollectorServerOptions["endUserComputingRoleBrokerFactory"]
+  >;
+  readonly endUserComputingCostProjectionLoader: NonNullable<
+    LocalCollectorServerOptions["endUserComputingCostProjectionLoader"]
+  >;
+  readonly gravitonSavingsReaderFactory:NonNullable<LocalCollectorServerOptions["gravitonSavingsReaderFactory"]>;
+  readonly gravitonSavingsRoleBrokerFactory:NonNullable<LocalCollectorServerOptions["gravitonSavingsRoleBrokerFactory"]>;
+  readonly trustedAdvisorTaxonomySigningKeyId?: string;
 }
 
 interface LocalJobsContext {
@@ -170,6 +674,11 @@ interface ScopedJob {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly jobId: string;
+}
+
+interface OrganizationsTaxonomyHttpRequest extends ScopedJob {
+  readonly customerId: string;
+  readonly contractId: string;
 }
 
 interface LocalFixtureJobInput {
@@ -221,36 +730,160 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
   if (principalArn.length === 0) {
     throw new Error("SUTRA_COLLECTOR_PRINCIPAL_ARN is required in live mode");
   }
+  if (options.awsSupportCasesEvidenceKey !== undefined
+    && (!(options.awsSupportCasesEvidenceKey instanceof Uint8Array)
+      || options.awsSupportCasesEvidenceKey.byteLength < 32
+      || options.awsSupportCasesEvidenceKey.byteLength > 64)) {
+    throw new Error("AWS Support Cases evidence key must contain 32 to 64 bytes");
+  }
   const parsedPrincipal = parseIamRoleArn(principalArn);
   const now = options.now ?? (() => new Date());
   const localJobs =
     mode === "fixture"
       ? createLocalJobsContext(options, now)
       : null;
+  const registry = options.registry ?? new EncryptedFileConnectionRegistry({
+    filePath: options.registryPath ?? (() => { throw new Error("registryPath is required"); })(),
+    encryptionKey: options.registryEncryptionKey ??
+      (() => { throw new Error("registryEncryptionKey is required"); })(),
+    ...(options.now === undefined ? {} : { now: options.now }),
+  });
   const context: ServerContext = {
     mode,
     principalArn,
     sourceAccountId: parsedPrincipal.accountId,
     now,
-    registry: new EncryptedFileConnectionRegistry({
-      filePath: options.registryPath,
-      encryptionKey: options.registryEncryptionKey,
-      ...(options.now === undefined ? {} : { now: options.now }),
-    }),
-    authenticator: new RequestAuthenticator({
-      sharedSecret: options.sharedSecret,
+    registry,
+    authenticator: options.authenticator ?? new RequestAuthenticator({
+      sharedSecret: options.sharedSecret ?? (() => { throw new Error("sharedSecret is required"); })(),
       ...(options.now === undefined ? {} : { now: () => options.now!().getTime() }),
     }),
-    activeConnectionOperations: new Set(),
-    lifecycleMutations: new Set(),
+    operationCoordinator: options.operationCoordinator ?? new InMemoryCollectorOperationCoordinator(),
+    hostedRuntime: options.hostedRuntime ?? false,
+    readiness: options.readiness ?? (async () => true),
     localJobs,
-    agentlessRuns: new AgentlessRunRegistry(options.now ?? (() => new Date())),
+    agentlessRuns: options.agentlessRunStore ??
+      new AgentlessRunRegistry(options.now ?? (() => new Date())),
+    ...(options.agentlessResourceTracker === undefined
+      ? {}
+      : { agentlessResourceTracker: options.agentlessResourceTracker }),
+    ...(options.agentlessExecutionFinalizer === undefined
+      ? {}
+      : { agentlessExecutionFinalizer: options.agentlessExecutionFinalizer }),
+    ...(options.hostedAgentlessSettings === undefined
+      ? {}
+      : { hostedAgentlessSettings: options.hostedAgentlessSettings }),
+    ...(options.hostedAgentlessPlanProfile === undefined &&
+        options.hostedAgentlessSettings === undefined
+      ? {}
+      : {
+        hostedAgentlessPlanProfile: options.hostedAgentlessPlanProfile ?? {
+          scanAccountId: options.hostedAgentlessSettings!.scanAccountId,
+          kmsReencrypt: options.hostedAgentlessSettings!.kmsKeyArn !== null,
+        },
+      }),
+    ...(options.hostedAgentlessCleanupSettings === undefined
+      ? {}
+      : { hostedAgentlessCleanupSettings: options.hostedAgentlessCleanupSettings }),
+    ...(options.agentlessCleanupLedger === undefined
+      ? {}
+      : { agentlessCleanupLedger: options.agentlessCleanupLedger }),
+    finopsExportChunkClientFactory:
+      options.finopsExportChunkClientFactory ?? createAwsFinopsExportChunkClient,
+    computeOptimizerExportObjectChunkClientFactory:
+      options.computeOptimizerExportObjectChunkClientFactory ??
+        createAwsComputeOptimizerExportObjectChunkClient,
+    computeOptimizerExportObjectRoleBrokerFactory:
+      options.computeOptimizerExportObjectRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    computeOptimizerExactDescribeReaderFactory:
+      options.computeOptimizerExactDescribeReaderFactory ??
+        createAwsComputeOptimizerExactDescribeReader,
+    computeOptimizerExactDescribeRoleBrokerFactory:
+      options.computeOptimizerExactDescribeRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    computeOptimizerActivationManifestRoleBrokerFactory:
+      options.computeOptimizerActivationManifestRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    ...(options.computeOptimizerExportLaunchLedger === undefined
+      ? {}
+      : { computeOptimizerExportLaunchLedger: options.computeOptimizerExportLaunchLedger }),
+    computeOptimizerExportLaunchClientFactory:
+      options.computeOptimizerExportLaunchClientFactory ??
+        createAwsComputeOptimizerExportLaunchClient,
+    computeOptimizerExportLaunchRoleBrokerFactory:
+      options.computeOptimizerExportLaunchRoleBrokerFactory ??
+        createWorkloadIdentityRoleBroker,
+    ...(options.computeOptimizerActivationManifestIdentityAttestor === undefined
+      ? {}
+      : {
+          computeOptimizerActivationManifestIdentityAttestor:
+            options.computeOptimizerActivationManifestIdentityAttestor,
+        }),
+    awsBudgetsProviderClientFactory:
+      options.awsBudgetsProviderClientFactory ?? createAwsBudgetsProviderClients,
+    awsBudgetsProviderRoleBrokerFactory:
+      options.awsBudgetsProviderRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    extendedSupportReaderFactory:
+      options.extendedSupportReaderFactory ?? ((input) => createExtendedSupportAwsSdkReader({
+        boundary: input.boundary,
+        sessionForAccount: input.sessionForAccount,
+      })),
+    extendedSupportRoleBrokerFactory:
+      options.extendedSupportRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    ...(options.awsSupportCasesEvidenceKey === undefined
+      ? {}
+      : { awsSupportCasesEvidenceKey: options.awsSupportCasesEvidenceKey.slice() }),
+    awsSupportCasesProviderClientFactory:
+      options.awsSupportCasesProviderClientFactory ?? createAwsSupportCasesProviderClient,
+    awsSupportCasesRoleBrokerFactory:
+      options.awsSupportCasesRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    awsHealthReaderFactory:
+      options.awsHealthReaderFactory ?? createAwsHealthSdkReader,
+    awsHealthRoleBrokerFactory:
+      options.awsHealthRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    ...(options.resilienceVueProviderClientFactory === undefined
+      ? {}
+      : { resilienceVueProviderClientFactory: options.resilienceVueProviderClientFactory }),
+    resilienceVueRoleBrokerFactory:
+      options.resilienceVueRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    dcfStepFunctionsReaderFactory:
+      options.dcfStepFunctionsReaderFactory ?? createDcfStepFunctionsSdkReader,
+    dcfStepFunctionsRoleBrokerFactory:
+      options.dcfStepFunctionsRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    endUserComputingReaderFactory:
+      options.endUserComputingReaderFactory ?? createEndUserComputingSdkReader,
+    endUserComputingRoleBrokerFactory:
+      options.endUserComputingRoleBrokerFactory ?? createWorkloadIdentityRoleBroker,
+    endUserComputingCostProjectionLoader:
+      options.endUserComputingCostProjectionLoader ?? (async (input) => {
+        if (input.cur2.availability === "UNAVAILABLE") return { billingEvidence: null, costs: [] };
+        throw new EndUserComputingProviderError("PROVIDER_RESPONSE_INVALID");
+      }),
+    gravitonSavingsReaderFactory:options.gravitonSavingsReaderFactory??(()=>createGravitonSavingsSdkReader()),
+    gravitonSavingsRoleBrokerFactory:options.gravitonSavingsRoleBrokerFactory??createWorkloadIdentityRoleBroker,
+    ...(options.trustedAdvisorTaxonomySigningKeyId === undefined
+      ? {}
+      : {
+          trustedAdvisorTaxonomySigningKeyId:
+            options.trustedAdvisorTaxonomySigningKeyId,
+        }),
   };
 
   const server = createServer((request, response) => {
     void dispatch(context, request, response);
   });
-  server.requestTimeout = 190_000;
+  // Hosted AWS Health is bounded at fifteen minutes. Keep the socket lifetime
+  // beyond the longest credential-owning route so Node never kills a healthy
+  // request before the route's own absolute deadline and abort controller.
+  server.requestTimeout = options.hostedRuntime
+    ? Math.max(
+        LIVE_AWS_BROKER_TIMEOUT_MS,
+        AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs,
+        RESILIENCE_VUE_PROVIDER_BOUNDS.maximumDurationMs,
+      )
+      + 10_000
+    : 190_000;
   server.headersTimeout = 10_000;
   server.keepAliveTimeout = 5_000;
   server.maxRequestsPerSocket = 100;
@@ -287,6 +920,9 @@ export async function startLocalCollectorServer(): Promise<Server> {
       resolvePath(process.cwd(), ".sutra", "local-jobs.json"),
     mode,
     allowLiveAws,
+    awsSupportCasesEvidenceKey: decodeAwsSupportCasesEvidenceKey(
+      requiredEnvironment("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL"),
+    ),
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
   });
   await new Promise<void>((resolve, reject) => {
@@ -470,18 +1106,35 @@ async function dispatch(
   const path = safeRequestTarget(rawUrl);
   const nonce = responseNonce(request);
   try {
-    const body = await readBody(request);
-    context.authenticator.verify({
+    const body = await readBody(
+      request,
+      path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE ? DCF_STEP_FUNCTIONS_BODY_LIMIT
+        : path === END_USER_COMPUTING_PROVIDER_ROUTE ? END_USER_COMPUTING_BODY_LIMIT
+          : path === GRAVITON_PROVIDER_ROUTE ? GRAVITON_BODY_LIMIT : BODY_LIMIT,
+    );
+    if (context.hostedRuntime && request.method === "GET" && path === "/readyz") {
+      if (body.length !== 0) throw invalidRequest();
+      const ready = await context.readiness();
+      const payload = JSON.stringify({ ok: ready });
+      response.statusCode = ready ? 200 : 503;
+      response.setHeader("content-type", "application/json; charset=utf-8");
+      response.setHeader("cache-control", "no-store");
+      response.setHeader("x-content-type-options", "nosniff");
+      response.setHeader("content-length", Buffer.byteLength(payload, "utf8"));
+      response.end(payload);
+      return;
+    }
+    await context.authenticator.verify({
       method: request.method ?? "",
       path,
       headers: request.headers,
       body,
     });
-    const result = await route(context, request.method ?? "", path, body);
-    sendSigned(context, response, result.status, path, nonce, result.body);
+    const result = await route(context, request.method ?? "", path, body, request.headers);
+    await sendSigned(context, response, result.status, path, nonce, result.body);
   } catch (error: unknown) {
     const safe = safeHttpError(error);
-    sendSigned(context, response, safe.status, path, nonce, {
+    await sendSigned(context, response, safe.status, path, nonce, {
       code: safe.code,
       message: safe.message,
     });
@@ -491,23 +1144,21 @@ async function dispatch(
 /** POST to start, GET to poll. A run id is opaque and never a capability. */
 const AGENTLESS_RUN_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})$/u;
 const AGENTLESS_EXECUTE_PATH = /^\/v1\/agentless\/scans\/([A-Za-z0-9_-]{8,64})\/execute$/u;
+const AGENTLESS_TEARDOWN_SWEEP_PATH = "/v1/agentless/teardown-sweep";
 
 /**
  * Parses an agentless execute request. Every field is required and validated: this is
  * the request that spends money, so a malformed one is refused before a claim is made
  * rather than discovered after a snapshot exists.
  *
- * The SETTINGS come from the Worker, which resolves them through
- * resolveAgentlessExecutorConfig — the single place that owns the no-defaults contract
- * and the operator-facing list of unset names. They are re-validated for SHAPE here
- * because this process is the one that would act on them.
+ * The web app sends only tenant scope and the approved plan. Scan-account,
+ * network, KMS, image, role, and instance settings never leave the broker's
+ * pinned process configuration.
  */
 function parseAgentlessExecuteRequest(body: string): {
   readonly tenantId: string;
   readonly connectionId: string;
-  readonly region: string;
-  readonly plan: AgentlessExecutePlan;
-  readonly settings: AgentlessExecutionSettings;
+  readonly plan: AgentlessExecutePlan & { readonly scanAccountId: string };
 } {
   let parsed: unknown;
   try {
@@ -517,68 +1168,118 @@ function parseAgentlessExecuteRequest(body: string): {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw invalidRequest();
   const record = parsed as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    !Object.hasOwn(record, "tenantId") ||
+    !Object.hasOwn(record, "connectionId") ||
+    !Object.hasOwn(record, "plan")
+  ) throw invalidRequest();
 
   const tenantId = record.tenantId;
   const connectionId = record.connectionId;
-  const region = record.region;
   if (
     typeof tenantId !== "string" || tenantId.length === 0 || tenantId.length > 128 ||
-    typeof connectionId !== "string" || connectionId.length === 0 || connectionId.length > 128 ||
-    typeof region !== "string" || !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(region)
+    typeof connectionId !== "string" || connectionId.length === 0 || connectionId.length > 128
   ) throw invalidRequest();
 
   const plan = record.plan;
   if (typeof plan !== "object" || plan === null || Array.isArray(plan)) throw invalidRequest();
   const planRecord = plan as Record<string, unknown>;
   if (
+    planRecord.schema !== "sutra.aws-agentless-scan-plan.v1" ||
+    planRecord.mode !== "plan" ||
     !Array.isArray(planRecord.volumes) ||
+    planRecord.volumes.length === 0 ||
+    planRecord.volumes.length > 1_000 ||
     !Array.isArray(planRecord.scanners) ||
+    planRecord.scanners.length === 0 ||
+    planRecord.scanners.length > 4 ||
+    planRecord.scanners.some((scanner) =>
+      scanner !== "vuln" && scanner !== "secret" && scanner !== "sbom" && scanner !== "malware") ||
+    new Set(planRecord.scanners).size !== planRecord.scanners.length ||
+    typeof planRecord.scanAccountId !== "string" ||
+    !/^\d{12}$/u.test(planRecord.scanAccountId) ||
     typeof planRecord.kmsReencrypt !== "boolean" ||
     typeof planRecord.summary !== "object" || planRecord.summary === null
   ) throw invalidRequest();
-  // An empty scanner list would run a scan that cannot find anything and then report
-  // an empty result, which is indistinguishable from a clean disk.
-  if (planRecord.scanners.length === 0) throw invalidRequest();
-
-  const settings = record.settings;
-  if (typeof settings !== "object" || settings === null || Array.isArray(settings)) throw invalidRequest();
-  const settingsRecord = settings as Record<string, unknown>;
-  const instance = settingsRecord.instance;
-  if (typeof instance !== "object" || instance === null || Array.isArray(instance)) throw invalidRequest();
-  const instanceRecord = instance as Record<string, unknown>;
-  const requiredStrings: readonly [unknown, RegExp][] = [
-    [settingsRecord.scanAccountId, /^\d{12}$/u],
-    [settingsRecord.scanAvailabilityZone, /^[a-z]{2}(-gov)?-[a-z]+-\d[a-z]$/u],
-    [settingsRecord.scannerImage, /^[a-z0-9.\-_/:]+@sha256:[0-9a-f]{64}$/u],
-    [settingsRecord.orchestratorRoleArn, /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/u],
-    [instanceRecord.amiId, /^ami-[0-9a-f]{8,17}$/u],
-    [instanceRecord.instanceType, /^[a-z0-9]+\.[a-z0-9]+$/u],
-    [instanceRecord.subnetId, /^subnet-[0-9a-f]{8,17}$/u],
-    [instanceRecord.securityGroupId, /^sg-[0-9a-f]{8,17}$/u],
-    [instanceRecord.instanceProfileArn, /^arn:aws:iam::\d{12}:instance-profile\/[A-Za-z0-9+=,.@_/-]+$/u],
-    [instanceRecord.findingsBucket, /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u],
-  ];
-  for (const [value, pattern] of requiredStrings) {
-    if (typeof value !== "string" || !pattern.test(value)) throw invalidRequest();
+  const volumeKeys = new Set<string>();
+  for (const volume of planRecord.volumes) {
+    if (typeof volume !== "object" || volume === null || Array.isArray(volume)) throw invalidRequest();
+    const item = volume as Record<string, unknown>;
+    if (
+      typeof item.volumeId !== "string" || !/^vol-[0-9a-f]{8,32}$/u.test(item.volumeId) ||
+      volumeKeys.has(item.volumeId) ||
+      typeof item.region !== "string" || !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(item.region)
+    ) throw invalidRequest();
+    volumeKeys.add(item.volumeId);
   }
-  // Absent is legal and means the source volume is unencrypted; malformed is not.
-  const kmsKeyArn = settingsRecord.kmsKeyArn;
+  const summary = planRecord.summary as Record<string, unknown>;
   if (
-    kmsKeyArn !== null && kmsKeyArn !== undefined &&
-    (typeof kmsKeyArn !== "string" ||
-      !/^arn:aws(-us-gov|-cn)?:kms:[a-z0-9-]+:\d{12}:key\/[0-9a-f-]{36}$/u.test(kmsKeyArn))
+    !Number.isSafeInteger(summary.snapshotTtlHours) ||
+    (summary.snapshotTtlHours as number) < 1 ||
+    (summary.snapshotTtlHours as number) > 168
   ) throw invalidRequest();
-  // Only the exact boolean true. This records an operator attestation, so a near-miss
-  // must never be read as the claim.
-  if (settingsRecord.liveValidated !== true) throw invalidRequest();
 
   return {
     tenantId,
     connectionId,
-    region,
-    plan: plan as AgentlessExecutePlan,
-    settings: settings as unknown as AgentlessExecutionSettings,
+    plan: plan as AgentlessExecutePlan & { readonly scanAccountId: string },
   };
+}
+
+function parseAgentlessTeardownSweepRequest(body: string): {
+  readonly tenantId: string;
+  readonly operationId: string;
+  readonly resources: readonly HostedAgentlessTeardownResource[];
+} {
+  const record = exactJson(body, ["tenantId", "operationId", "resources"]);
+  if (
+    typeof record.tenantId !== "string" ||
+    record.tenantId.length === 0 ||
+    record.tenantId.length > 128 ||
+    typeof record.operationId !== "string" ||
+    !/^[A-Za-z0-9_-]{8,64}$/u.test(record.operationId) ||
+    !Array.isArray(record.resources) ||
+    record.resources.length === 0 ||
+    record.resources.length > 200
+  ) throw invalidRequest();
+  const seen = new Set<string>();
+  const resources = record.resources.map((value): HostedAgentlessTeardownResource => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw invalidRequest();
+    const item = value as Record<string, unknown>;
+    if (
+      Object.keys(item).sort().join(",") !==
+        "accountScope,connectionId,region,resourceId,resourceKind" ||
+      typeof item.connectionId !== "string" ||
+      item.connectionId.length === 0 ||
+      item.connectionId.length > 128 ||
+      (item.accountScope !== "customer" && item.accountScope !== "sutra-scan-account") ||
+      (item.resourceKind !== "snapshot" &&
+        item.resourceKind !== "volume" &&
+        item.resourceKind !== "instance") ||
+      typeof item.resourceId !== "string" ||
+      !/^(?:snap-|vol-|i-)[0-9a-f]{8,32}$/u.test(item.resourceId) ||
+      typeof item.region !== "string" ||
+      !/^[a-z]{2}(-gov)?-[a-z]+-\d$/u.test(item.region) ||
+      (item.accountScope === "customer" && item.resourceKind !== "snapshot") ||
+      seen.has(item.resourceId)
+    ) throw invalidRequest();
+    const prefix = item.resourceKind === "snapshot"
+      ? "snap-"
+      : item.resourceKind === "volume"
+        ? "vol-"
+        : "i-";
+    if (!item.resourceId.startsWith(prefix)) throw invalidRequest();
+    seen.add(item.resourceId);
+    return {
+      connectionId: item.connectionId,
+      resourceId: item.resourceId,
+      resourceKind: item.resourceKind,
+      accountScope: item.accountScope,
+      region: item.region,
+    };
+  });
+  return { tenantId: record.tenantId, operationId: record.operationId, resources };
 }
 
 /** Scope for a poll. Checked by the registry, so a foreign run reads as absent. */
@@ -601,28 +1302,556 @@ async function route(
   method: string,
   path: string,
   body: string,
+  headers: IncomingMessage["headers"],
 ): Promise<{ readonly status: number; readonly body: unknown }> {
+  if(method==="POST"&&path===GRAVITON_PROVIDER_ROUTE){
+    const providerRequest=parseGravitonProviderRouteRequest(body),tenantId=exactHeader(headers,"x-sutra-tenant-id"),
+      customerId=exactHeader(headers,"x-sutra-customer-id"),connectionId=exactHeader(headers,"x-sutra-connection-id"),
+      requestId=exactHeader(headers,"x-sutra-request-id");
+    if(tenantId===null||customerId===null||connectionId===null||requestId===null)throw invalidRequest();
+    const lease=await claimConnectionOperation(context,connectionOperationKey(providerRequest.boundary.scope.orgId,
+      providerRequest.boundary.scope.connectionId));const controller=new AbortController();
+    const remaining=Math.max(1,Math.min(GRAVITON_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso)-context.now().getTime()));
+    const timer=setTimeout(()=>controller.abort(),remaining);timer.unref?.();
+    try{const broker=context.gravitonSavingsRoleBrokerFactory({registry:context.registry,
+      principalArn:context.principalArn,region:providerRequest.boundary.regions[0]!});
+      const result=await runGravitonProviderRoute({body,headers:{tenantId,customerId,connectionId,requestId},
+        signal:controller.signal},{now:()=>context.now().getTime(),readerFactory:context.gravitonSavingsReaderFactory,
+        assumeReadOnlySession:async input=>{const session=await broker.assumeValidatedGravitonSavingsSession(
+          {tenantId:input.tenantId},input.connectionId,input.requestId,{expectedAccountId:input.expectedAccountId,
+            partition:input.partition,region:input.region,sessionActions:input.sessionActions,signal:input.signal});
+          return{accountId:session.accountId,partition:session.partition,credentials:session.credentials};}});
+      return{status:200,body:result};
+    }finally{clearTimeout(timer);await context.operationCoordinator.release(lease);}
+  }
+  if (method === "POST" && path === END_USER_COMPUTING_PROVIDER_ROUTE) {
+    const providerRequest = parseEndUserComputingProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || jobId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(
+        providerRequest.boundary.scope.orgId,
+        providerRequest.boundary.scope.connectionId,
+      ),
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), providerRequest.maximumDurationMs);
+    timer.unref?.();
+    try {
+      const broker = context.endUserComputingRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.boundary.regions[0]!,
+      });
+      const result = await runEndUserComputingProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedEndUserComputingSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return { accountId: session.accountId, partition: session.partition,
+            credentials: session.credentials };
+        },
+        readerFactory: context.endUserComputingReaderFactory,
+        loadCanonicalCostProjection: context.endUserComputingCostProjectionLoader,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE) {
+    const providerRequest = parseDcfProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const boundaryId = exactHeader(headers, "x-sutra-boundary-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || boundaryId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(
+        providerRequest.boundary.scope.orgId,
+        providerRequest.boundary.scope.connectionId,
+      ),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      DCF_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.dcfStepFunctionsRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.boundary.scope.region,
+      });
+      const result = await runDcfProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, boundaryId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedDcfStepFunctionsSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.boundaryId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              stateMachineArns: input.stateMachineArns,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.dcfStepFunctionsReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === RESILIENCE_VUE_PROVIDER_ROUTE) {
+    const providerRequest = parseResilienceVueProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const requestId = exactHeader(headers, "x-sutra-request-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || requestId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.scope.orgId, providerRequest.scope.connectionId),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.min(
+      RESILIENCE_VUE_PROVIDER_BOUNDS.maximumDurationMs,
+      providerRequest.maximumDurationMs,
+    );
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.resilienceVueRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.scope.region,
+      });
+      const result = await runResilienceVueProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, requestId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedResilienceVueSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.requestId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              region: input.region,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        ...(context.resilienceVueProviderClientFactory === undefined
+          ? {}
+          : { clientFactory: context.resilienceVueProviderClientFactory }),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === AWS_HEALTH_PROVIDER_ROUTE) {
+    const providerRequest = parseAwsHealthProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const requestId = exactHeader(headers, "x-sutra-request-id");
+    if (tenantId === null || customerId === null || connectionId === null
+      || requestId === null) throw invalidRequest();
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.scope.orgId, providerRequest.scope.connectionId),
+    );
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      AWS_HEALTH_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(providerRequest.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.awsHealthRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.scope.endpointRegion,
+      });
+      const result = await runAwsHealthProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, requestId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsHealthSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.requestId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition as "aws" | "aws-us-gov",
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.awsHealthReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === AWS_SUPPORT_CASES_PROVIDER_ROUTE) {
+    const providerRequest = parseAwsSupportCasesProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null
+      || context.awsSupportCasesEvidenceKey === undefined) {
+      throw invalidRequest();
+    }
+    const lease = await claimConnectionOperation(
+      context,
+      connectionOperationKey(providerRequest.tenantId, providerRequest.parentConnectionId),
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      AWS_SUPPORT_CASES_PROVIDER_BOUNDS.maximumDurationMs,
+    );
+    timer.unref?.();
+    try {
+      const broker = context.awsSupportCasesRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: providerRequest.endpointRegion,
+      });
+      const result = await runAwsSupportCasesProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        evidenceKey: context.awsSupportCasesEvidenceKey,
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsSupportCasesSession(
+            { tenantId: input.tenantId },
+            input.connectionId,
+            input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition as AwsSupportCasesProviderPartition,
+            credentials: session.credentials,
+          };
+        },
+        clientFactory: context.awsSupportCasesProviderClientFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === EXTENDED_SUPPORT_PROVIDER_ROUTE) {
+    const request = parseExtendedSupportProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null) {
+      throw invalidRequest();
+    }
+    const operationKey = connectionOperationKey(request.boundary.scope.orgId,
+      request.boundary.scope.connectionId);
+    const lease = await claimConnectionOperation(context, operationKey);
+    const controller = new AbortController();
+    const remainingMs = Math.max(1, Math.min(
+      EXTENDED_SUPPORT_PROVIDER_BOUNDS.maximumDurationMs,
+      Date.parse(request.deadlineAtIso) - context.now().getTime(),
+    ));
+    const timer = setTimeout(() => controller.abort(), remainingMs);
+    timer.unref?.();
+    try {
+      const broker = context.extendedSupportRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(request.boundary.partition),
+      });
+      const result = await runExtendedSupportProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedExtendedSupportSession(
+            { tenantId: input.tenantId }, input.connectionId, input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        readerFactory: context.extendedSupportReaderFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "POST" && path === AWS_BUDGETS_PROVIDER_ROUTE) {
+    const request = parseAwsBudgetsProviderRouteRequest(body);
+    const tenantId = exactHeader(headers, "x-sutra-tenant-id");
+    const customerId = exactHeader(headers, "x-sutra-customer-id");
+    const connectionId = exactHeader(headers, "x-sutra-connection-id");
+    const jobId = exactHeader(headers, "x-sutra-job-id");
+    if (tenantId === null || customerId === null || connectionId === null || jobId === null) {
+      throw invalidRequest();
+    }
+    const operationKey = connectionOperationKey(request.scope.orgId, request.scope.connectionId);
+    const lease = await claimConnectionOperation(context, operationKey);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), request.maximumDurationMs);
+    timer.unref?.();
+    try {
+      const broker = context.awsBudgetsProviderRoleBrokerFactory({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(request.scope.partition),
+      });
+      const result = await runAwsBudgetsProviderRoute({
+        body,
+        headers: { tenantId, customerId, connectionId, jobId },
+        signal: controller.signal,
+      }, {
+        assumeReadOnlySession: async (input) => {
+          const session = await broker.assumeValidatedAwsBudgetsSession(
+            { tenantId: input.tenantId }, input.connectionId, input.jobId,
+            {
+              expectedAccountId: input.expectedAccountId,
+              partition: input.partition,
+              sessionActions: input.sessionActions,
+              signal: input.signal,
+            },
+          );
+          return {
+            accountId: session.accountId,
+            partition: session.partition,
+            credentials: session.credentials,
+          };
+        },
+        clientFactory: context.awsBudgetsProviderClientFactory,
+        now: () => context.now().getTime(),
+      });
+      return { status: 200, body: result };
+    } finally {
+      clearTimeout(timer);
+      await context.operationCoordinator.release(lease);
+    }
+  }
+  if (method === "GET" && path === "/v1/agentless/readiness") {
+    requireEmptyBody(body);
+    const canExecute = context.hostedAgentlessSettings !== undefined;
+    const canPlan = context.hostedAgentlessPlanProfile !== undefined;
+    return {
+      status: 200,
+      body: {
+        schema: "sutra.aws-agentless-readiness.v1",
+        canExecute,
+        canPlan,
+        gaps: canExecute
+          ? []
+          : [{
+            id: "production-configuration",
+            summary:
+              "The hosted broker has not accepted a complete pinned scan configuration "
+              + "and exact live-validation operator attestation.",
+            owner: "operator",
+          }],
+        summary: canExecute
+          ? "The authenticated broker reports an executable, pinned agentless runtime."
+          : "Plans remain reviewable, but the broker refuses execution until its production configuration is complete.",
+      },
+    };
+  }
+
+  if (method === "GET" && path === "/v1/agentless/plan-profile") {
+    requireEmptyBody(body);
+    const profile = context.hostedAgentlessPlanProfile;
+    if (profile === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Agentless planning infrastructure is not pinned in this broker configuration",
+      );
+    }
+    return {
+      status: 200,
+      body: {
+        schema: "sutra.aws-agentless-plan-profile.v1",
+        scanAccountId: profile.scanAccountId,
+        kmsReencrypt: profile.kmsReencrypt,
+      },
+    };
+  }
+
+  if (method === "POST" && path === AGENTLESS_TEARDOWN_SWEEP_PATH) {
+    const settings = context.hostedAgentlessCleanupSettings;
+    const ledger = context.agentlessCleanupLedger;
+    if (settings === undefined || ledger === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Hosted agentless cleanup infrastructure is not pinned in this broker configuration",
+      );
+    }
+    const input = parseAgentlessTeardownSweepRequest(body);
+    // Authentication proves which app called; the durable resource ledger
+    // proves whether that app-supplied identifier is actually ours to delete.
+    await ledger.authorize(input.tenantId, input.resources);
+    const result = await sweepHostedAgentlessTeardownDebt({ ...input, settings }, {
+      registry: context.registry,
+      principalArn: context.principalArn,
+    });
+    for (const outcome of result.outcomes) {
+      const resource = input.resources.find(
+        (candidate) => candidate.resourceId === outcome.resourceId,
+      );
+      if (resource === undefined) throw new RegistryStateError();
+      await ledger.record({
+        tenantId: input.tenantId,
+        resource,
+        settled: outcome.disposition === "settled" || outcome.disposition === "deleted",
+        detail: outcome.detail,
+      });
+    }
+    return {
+      status: 200,
+      body: result,
+    };
+  }
+
   const agentlessExecuteMatch = AGENTLESS_EXECUTE_PATH.exec(requestPathname(path));
   if (method === "POST" && agentlessExecuteMatch !== null) {
+    if (context.hostedAgentlessSettings === undefined) {
+      throw new LocalHttpError(
+        503,
+        "COLLECTION_FAILED",
+        "Hosted agentless execution is not approved in this broker configuration",
+      );
+    }
     const runId = agentlessExecuteMatch[1];
     if (runId === undefined) throw invalidRequest();
     const input = parseAgentlessExecuteRequest(body);
+    const settings = context.hostedAgentlessSettings;
+    const region = settings.scanAvailabilityZone.slice(0, -1);
+    if (
+      input.plan.scanAccountId !== settings.scanAccountId ||
+      input.plan.kmsReencrypt !== (settings.kmsKeyArn !== null)
+    ) {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "The approved plan no longer matches the broker's pinned scan profile",
+      );
+    }
+    const executionRequest = { ...input, region, settings };
 
     // Claimed BEFORE anything starts, so a retried POST cannot begin a second scan of
     // the same run — which would double the snapshots, the instances and the bill, and
     // let one teardown delete resources the other is still using.
     let claimed;
     try {
-      claimed = context.agentlessRuns.claim({
+      claimed = await context.agentlessRuns.claim({
         runId,
         tenantId: input.tenantId,
         connectionId: input.connectionId,
+        executionRequest,
       });
     } catch (error) {
       if (error instanceof AgentlessRunAlreadyRunningError) {
         return { status: 409, body: { code: "ALREADY_RUNNING", message: error.message } };
       }
       throw error;
+    }
+    if (claimed.phase !== "running") {
+      return {
+        status: 200,
+        body: { runId: claimed.runId, phase: claimed.phase, startedAt: claimed.startedAt },
+      };
     }
 
     // Built here so a misconfiguration — a denied assume, a malformed ARN — surfaces
@@ -635,16 +1864,26 @@ async function route(
           tenantId: input.tenantId,
           connectionId: input.connectionId,
           runId,
-          region: input.region,
-          settings: input.settings,
+          region,
+          settings,
         },
-        { registry: context.registry, principalArn: context.principalArn },
+        {
+          registry: context.registry,
+          principalArn: context.principalArn,
+          ...(context.agentlessResourceTracker === undefined ? {} : {
+            resourceTracker: context.agentlessResourceTracker({
+              tenantId: input.tenantId,
+              runId,
+              connectionId: input.connectionId,
+            }),
+          }),
+        },
       );
     } catch (error) {
       const rawCode = (error as { code?: unknown }).code;
       const code = typeof rawCode === "string" ? rawCode : "EXECUTOR_UNAVAILABLE";
       const message = error instanceof Error ? error.message : "the executor could not be built";
-      context.agentlessRuns.fail(runId, { code, message });
+      await context.agentlessRuns.fail(runId, { code, message });
       return {
         status: 503,
         body: {
@@ -660,15 +1899,21 @@ async function route(
     // Deliberately NOT awaited. A scan outlives the 190s requestTimeout, and timing out
     // mid-scan would leave a snapshot AND an instance billing with no caller left to
     // reap them. Every terminal state is recorded, so the poll route is the truth.
-    void executeAgentlessScan(input.plan, executor)
-      .then((execution) => context.agentlessRuns.complete(runId, execution))
-      .catch((error: unknown) => {
+    void (async () => {
+      try {
+        const rawExecution = await executeAgentlessScan(input.plan, executor);
+        const execution = context.agentlessExecutionFinalizer === undefined
+          ? rawExecution
+          : await context.agentlessExecutionFinalizer(input.tenantId, runId, rawExecution);
+        await context.agentlessRuns.complete(runId, execution);
+      } catch (error: unknown) {
         const rawCode = (error as { code?: unknown }).code;
-        context.agentlessRuns.fail(runId, {
+        await Promise.resolve(context.agentlessRuns.fail(runId, {
           code: typeof rawCode === "string" ? rawCode : "SCAN_FAILED",
           message: error instanceof Error ? error.message : "the scan failed",
-        });
-      });
+        })).catch(() => undefined);
+      }
+    })();
 
     return { status: 202, body: { runId, phase: claimed.phase, startedAt: claimed.startedAt } };
   }
@@ -679,7 +1924,7 @@ async function route(
     if (runId === undefined) throw invalidRequest();
     requireEmptyBody(body);
     const query = parseAgentlessRunQuery(path);
-    const state = context.agentlessRuns.read(runId, query);
+    const state = await context.agentlessRuns.read(runId, query);
     if (state === null) {
       // Unknown to THIS process. Not "failed", and certainly not "clean": the collector
       // may have restarted mid-scan while the AWS resources still exist.
@@ -700,12 +1945,25 @@ async function route(
 
   if (method === "GET" && path === "/v1/health") {
     if (body.length !== 0) throw invalidRequest();
+    if (!await context.readiness()) {
+      return {
+        status: 503,
+        body: {
+          ok: false,
+          mode: context.mode,
+          version: "0.3.0-hosted",
+          principalArn: context.principalArn,
+          sourceAccountId: context.sourceAccountId,
+          message: "Collector durable dependencies are unavailable.",
+        },
+      };
+    }
     return {
       status: 200,
       body: {
         ok: true,
         mode: context.mode,
-        version: "0.2.0-pilot",
+        version: context.hostedRuntime ? "0.3.0-hosted" : "0.2.0-pilot",
         principalArn: context.principalArn,
         sourceAccountId: context.sourceAccountId,
         message:
@@ -897,13 +2155,13 @@ async function route(
     if (pathConnectionId === undefined) throw invalidRequest();
     const input = parseRegistration(body, pathConnectionId);
     const operationKey = connectionOperationKey(input.tenantId, input.connectionId);
-    if (
-      context.activeConnectionOperations.has(operationKey) ||
-      context.lifecycleMutations.has(operationKey)
-    ) {
-      throw new RegistryStateError();
+    const lease = await context.operationCoordinator.claim(operationKey);
+    if (lease === null) throw new RegistryStateError();
+    try {
+      await context.registry.upsert(input);
+    } finally {
+      await context.operationCoordinator.release(lease);
     }
-    await context.registry.upsert(input);
     return { status: 200, body: { registered: true } };
   }
 
@@ -932,9 +2190,58 @@ async function route(
       const eventJob = parseSecurityEventJob(body, pathConnectionId, context.now());
       return { status: 200, body: await collectConnectionSecurityEvents(context, eventJob) };
     }
+    if (action === "finops-export-chunk") {
+      const request = parseFinopsExportChunkRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectFinopsExportChunk(context, request),
+      };
+    }
+    if (action === "compute-optimizer-export-object-chunk") {
+      const request = parseComputeOptimizerExportObjectChunkRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectComputeOptimizerExportObjectChunk(context, request),
+      };
+    }
+    if (action === "compute-optimizer-export-exact-describe") {
+      const request = parseComputeOptimizerExactDescribeRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectComputeOptimizerExactDescribe(context, request),
+      };
+    }
+    if (action === "compute-optimizer-export-launch") {
+      const attempt = parseComputeOptimizerExportLaunchHttpRequest(body, pathConnectionId);
+      return { status: 200, body: await collectComputeOptimizerExportLaunch(context, attempt) };
+    }
+    if (action === "compute-optimizer-materialization-activation-manifest") {
+      const request = parseComputeOptimizerActivationManifestHttpRequest(
+        body,
+        pathConnectionId,
+      );
+      return {
+        status: 200,
+        body: await collectComputeOptimizerActivationManifest(context, request),
+      };
+    }
+    if (action === "finops-source") {
+      const request = parseFinopsSourceHttpRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectFinopsSource(context, request),
+      };
+    }
+    if (action === "organizations-taxonomy") {
+      const request = parseOrganizationsTaxonomyHttpRequest(body, pathConnectionId);
+      return {
+        status: 200,
+        body: await collectOrganizationsTaxonomy(context, request),
+      };
+    }
     const job = parseScopedJob(body, pathConnectionId);
     if (action === "verify") {
-      return { status: 200, body: await verifyConnection(context, job) };
+      return { status: 200, body: await attestOnboardingTrust(context, job) };
     }
     if (action === "costs") {
       return { status: 200, body: await collectConnectionCosts(context, job) };
@@ -948,15 +2255,569 @@ async function route(
   throw new LocalHttpError(404, "INVALID_REQUEST", "The collector endpoint does not exist");
 }
 
+function parseComputeOptimizerActivationManifestHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): ComputeOptimizerMaterializationActivationManifestRequest {
+  const record = exactJson(body, [
+    "schema", "requestId", "tenantId", "connectionId", "accountId", "partition",
+    "requiredPermissionPackVersion",
+  ]);
+  if (
+    record.schema
+      !== "sutra.compute-optimizer-materialization-activation-manifest-request.v1"
+    || typeof record.requestId !== "string" || !IDENTIFIER.test(record.requestId)
+    || typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId)
+    || record.connectionId !== pathConnectionId
+    || typeof record.accountId !== "string" || !ACCOUNT_ID.test(record.accountId)
+    || (record.partition !== "aws" && record.partition !== "aws-us-gov"
+      && record.partition !== "aws-cn")
+    || record.requiredPermissionPackVersion
+      !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+  ) throw invalidRequest();
+  return record as unknown as ComputeOptimizerMaterializationActivationManifestRequest;
+}
+
+async function collectComputeOptimizerActivationManifest(
+  context: ServerContext,
+  request: ComputeOptimizerMaterializationActivationManifestRequest,
+): Promise<unknown> {
+  const connection = await requireConnection(context.registry, {
+    tenantId: request.tenantId,
+    connectionId: request.connectionId,
+    jobId: request.requestId,
+  });
+  if (
+    connection.status !== "ACTIVE"
+    || !computeOptimizerLaunchCapablePack(connection.permissionPackVersion)
+    || connection.expectedAccountId !== request.accountId
+    || connection.partition !== request.partition
+    || connection.enabledRegions.length < 1
+    || connection.enabledRegions.length > 50
+    || connection.enabledRegions.includes("all-enabled")
+    || connection.finopsSourceContracts === undefined
+    || connection.computeOptimizerExportObjectContracts === undefined
+    || connection.computeOptimizerExportLaunchContracts === undefined
+  ) throw new RegistryStateError();
+
+  let manifest;
+  try {
+    manifest = projectComputeOptimizerMaterializationActivationManifest({
+      owner: {
+        tenantId: connection.tenantId,
+        connectionId: connection.connectionId,
+        expectedAccountId: connection.expectedAccountId,
+        partition: connection.partition,
+        permissionPackVersion: connection.permissionPackVersion,
+        enabledRegions: connection.enabledRegions,
+      },
+      request,
+      sourceContracts: connection.finopsSourceContracts,
+      launchContracts: connection.computeOptimizerExportLaunchContracts,
+      objectReadContracts: connection.computeOptimizerExportObjectContracts,
+    });
+  } catch (error) {
+    if (error instanceof ComputeOptimizerMaterializationActivationManifestError
+      && error.code === "INVALID_REQUEST") throw invalidRequest();
+    throw new RegistryStateError();
+  }
+
+  const attestor = context.computeOptimizerActivationManifestIdentityAttestor;
+  const identityInput = {
+    scope: { tenantId: connection.tenantId },
+    connectionId: connection.connectionId,
+    jobId: request.requestId,
+    expectedAccountId: connection.expectedAccountId,
+    partition: connection.partition,
+    sessionActions: ["sts:GetCallerIdentity"],
+  } as const;
+  const identity = await withComputeOptimizerManifestDeadline((signal) => {
+    if (attestor !== undefined) return attestor.attest({ ...identityInput, signal });
+    const broker = context.computeOptimizerActivationManifestRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    return broker.attestComputeOptimizerActivationManifestIdentity(
+      identityInput.scope,
+      identityInput.connectionId,
+      identityInput.jobId,
+      {
+        expectedAccountId: identityInput.expectedAccountId,
+        partition: identityInput.partition,
+        sessionActions: identityInput.sessionActions,
+        signal,
+      },
+    );
+  });
+  if (
+    !isPlainRecord(identity)
+    || Object.keys(identity).sort().join(",")
+      !== "accountId,connectionId,partition,verified"
+    || identity.verified !== true
+    || identity.connectionId !== connection.connectionId
+    || identity.accountId !== connection.expectedAccountId
+    || identity.partition !== connection.partition
+  ) throw new RegistryStateError();
+  return manifest;
+}
+
+function withComputeOptimizerManifestDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (callback: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      callback();
+    };
+    const timer = setTimeout(() => {
+      controller.abort();
+      finish(() => reject(new LocalHttpError(
+        504,
+        "COLLECTION_FAILED",
+        "The Compute Optimizer activation identity check did not complete",
+      )));
+    }, COMPUTE_OPTIMIZER_ACTIVATION_MANIFEST_DEADLINE_MS);
+    Promise.resolve().then(() => operation(controller.signal)).then(
+      (value) => finish(() => resolve(value)),
+      () => finish(() => reject(new LocalHttpError(
+        502,
+        "COLLECTION_FAILED",
+        "The Compute Optimizer activation identity check did not complete",
+      ))),
+    );
+  });
+}
+
+function parseFinopsSourceHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): FinopsSourceDispatchRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(body) as unknown;
+    const request = parseFinopsSourceDispatchRequest(value);
+    if (request.connectionId !== pathConnectionId) throw invalidRequest();
+    return request;
+  } catch (error) {
+    if (error instanceof LocalHttpError) throw error;
+    throw invalidRequest();
+  }
+}
+
+async function collectFinopsSource(
+  context: ServerContext,
+  request: FinopsSourceDispatchRequest,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, request);
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "FinOps source collection requires explicit live AWS mode",
+      );
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: partitionControlRegion(connection.partition),
+    });
+    return executeFinopsSourceDispatch(request, {
+      registry: context.registry,
+      broker,
+      now: context.now,
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+function parseOrganizationsTaxonomyHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): OrganizationsTaxonomyHttpRequest {
+  const record = exactJson(body, [
+    "tenantId", "customerId", "connectionId", "jobId", "contractId",
+  ]);
+  if (
+    typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId)
+    || typeof record.customerId !== "string" || !IDENTIFIER.test(record.customerId)
+    || typeof record.connectionId !== "string"
+    || record.connectionId !== pathConnectionId
+    || !IDENTIFIER.test(record.connectionId)
+    || typeof record.jobId !== "string" || !IDENTIFIER.test(record.jobId)
+    || typeof record.contractId !== "string" || !IDENTIFIER.test(record.contractId)
+  ) throw invalidRequest();
+  return {
+    tenantId: record.tenantId,
+    customerId: record.customerId,
+    connectionId: record.connectionId,
+    jobId: record.jobId,
+    contractId: record.contractId,
+  };
+}
+
+async function collectOrganizationsTaxonomy(
+  context: ServerContext,
+  request: OrganizationsTaxonomyHttpRequest,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, request);
+    if (
+      context.mode !== "live"
+      || context.trustedAdvisorTaxonomySigningKeyId === undefined
+      || connection.finopsSourceContracts === undefined
+    ) {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "Signed AWS Organizations taxonomy collection is not activated",
+      );
+    }
+    let contract;
+    try {
+      contract = resolveFinopsSourceContract(
+        connection.finopsSourceContracts,
+        {
+          tenantId: connection.tenantId,
+          connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId,
+          partition: connection.partition,
+        },
+        request.contractId,
+      );
+    } catch {
+      throw invalidRequest();
+    }
+    if (
+      contract === null
+      || contract.sourceId !== "aws_organizations_taxonomy"
+      || contract.accountId !== connection.expectedAccountId
+      || contract.partition !== "aws"
+      || contract.region !== "us-east-1"
+    ) throw invalidRequest();
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: "us-east-1",
+    });
+    const session = await broker.assumeValidatedFinopsSourceSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.jobId,
+      request.contractId,
+    );
+    return await collectSignedOrganizationsTaxonomy({
+      scope: {
+        organizationId: request.tenantId,
+        customerId: request.customerId,
+        connectionId: request.connectionId,
+      },
+      managementAccountId: connection.expectedAccountId,
+      partition: connection.partition,
+      credentials: session.credentials,
+      signerKeyId: context.trustedAdvisorTaxonomySigningKeyId,
+      now: context.now,
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectFinopsExportChunk(
+  context: ServerContext,
+  request: ReturnType<typeof parseFinopsExportChunkRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(
+    request.tenantId,
+    request.connectionId,
+  );
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsActiveConnection(context.registry, {
+      tenantId: request.tenantId,
+      connectionId: request.connectionId,
+      jobId: request.jobId,
+    });
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "FinOps export reads require explicit live AWS mode",
+      );
+    }
+    if (!finopsRegionMatchesPartition(request.region, connection.partition)) {
+      throw invalidRequest();
+    }
+    const broker = createWorkloadIdentityRoleBroker({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedFinopsSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.jobId,
+      {
+        contractId: request.contractId,
+        exportName: request.exportName,
+        region: request.region,
+        bucket: request.bucket,
+        prefix: request.prefix,
+      },
+    );
+    return readFinopsExportChunk(
+      request,
+      session.credentials,
+      context.finopsExportChunkClientFactory,
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectComputeOptimizerExportObjectChunk(
+  context: ServerContext,
+  request: ReturnType<typeof parseComputeOptimizerExportObjectChunkRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireComputeOptimizerObjectActiveConnection(
+      context.registry,
+      request,
+    );
+    if (context.mode !== "live") {
+      throw new LocalHttpError(
+        409,
+        "INVALID_REQUEST",
+        "Compute Optimizer export reads require explicit live AWS mode",
+      );
+    }
+    if (!finopsRegionMatchesPartition(request.region, connection.partition)) {
+      throw invalidRequest();
+    }
+    const broker = context.computeOptimizerExportObjectRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportObjectSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      `${request.jobId}-chunk-${request.offset}`,
+      {
+        contractId: request.contractId,
+        plannedJobId: request.plannedJobId,
+        region: request.region,
+        bucket: request.bucket,
+        objectKey: request.key,
+        versionIdentity: request.versionId === null
+          ? { kind: "CURRENT", versionId: null }
+          : { kind: "VERSION", versionId: request.versionId },
+      },
+    );
+    return readComputeOptimizerExportObjectChunk(
+      request,
+      session.credentials,
+      context.computeOptimizerExportObjectChunkClientFactory,
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+async function collectComputeOptimizerExactDescribe(
+  context: ServerContext,
+  request: ReturnType<typeof parseComputeOptimizerExactDescribeRequest>,
+): Promise<unknown> {
+  const operationKey = connectionOperationKey(request.tenantId, request.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireFinopsSourceActiveConnection(context.registry, {
+      tenantId: request.tenantId,
+      connectionId: request.connectionId,
+      jobId: request.collectionJobId,
+    });
+    if (
+      context.mode !== "live"
+      || !computeOptimizerLaunchCapablePack(connection.permissionPackVersion)
+      || connection.finopsSourceContracts === undefined
+      || connection.expectedAccountId !== request.accountId
+      || connection.partition !== request.partition
+      || !finopsRegionMatchesPartition(request.region, connection.partition)
+    ) throw new RegistryStateError();
+    let contract;
+    try {
+      contract = resolveFinopsSourceContract(
+        connection.finopsSourceContracts,
+        {
+          tenantId: connection.tenantId,
+          connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId,
+          partition: connection.partition,
+        },
+        request.contractId,
+      );
+    } catch {
+      throw invalidRequest();
+    }
+    if (
+      contract === null
+      || contract.sourceId !== "compute_optimizer_organization_export"
+      || contract.accountId !== request.accountId
+      || contract.partition !== request.partition
+      || contract.region !== request.region
+    ) throw invalidRequest();
+    const broker = context.computeOptimizerExactDescribeRoleBrokerFactory({
+      registry: context.registry,
+      principalArn: context.principalArn,
+      region: request.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportDescribeSession(
+      { tenantId: request.tenantId },
+      request.connectionId,
+      request.collectionJobId,
+      {
+        contractId: request.contractId,
+        region: request.region,
+        plannedJobIds: request.plannedJobs
+          .map(({ plannedJobId }) => plannedJobId)
+          .sort((left, right) => left.localeCompare(right)),
+      },
+    );
+    return describeComputeOptimizerExactExportJobs(
+      request,
+      session.credentials,
+      {
+        now: context.now,
+        reader: context.computeOptimizerExactDescribeReaderFactory(
+          request.partition,
+          request.region,
+          session.credentials,
+        ),
+      },
+    );
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
+}
+
+function parseComputeOptimizerExportLaunchHttpRequest(
+  body: string,
+  pathConnectionId: string,
+): ReturnType<typeof parseComputeOptimizerExportLaunchAttempt> {
+  let value: unknown;
+  try { value = JSON.parse(body) as unknown; } catch { throw invalidRequest(); }
+  try {
+    const attempt = parseComputeOptimizerExportLaunchAttempt(value);
+    if (attempt.scope.connectionId !== pathConnectionId) throw invalidRequest();
+    return attempt;
+  } catch (error) {
+    if (error instanceof LocalHttpError) throw error;
+    throw invalidRequest();
+  }
+}
+
+async function collectComputeOptimizerExportLaunch(
+  context: ServerContext,
+  attempt: ReturnType<typeof parseComputeOptimizerExportLaunchAttempt>,
+): Promise<unknown> {
+  const ledger = context.computeOptimizerExportLaunchLedger;
+  if (ledger === undefined) throw new RegistryStateError();
+  const operationKey = connectionOperationKey(attempt.scope.orgId, attempt.scope.connectionId);
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    const connection = await requireConnection(context.registry, {
+      tenantId: attempt.scope.orgId,
+      connectionId: attempt.scope.connectionId,
+      jobId: attempt.launchAttemptId,
+    });
+    if (
+      context.mode !== "live" || connection.status !== "ACTIVE" ||
+      !computeOptimizerLaunchCapablePack(connection.permissionPackVersion) ||
+      connection.computeOptimizerExportLaunchContracts === undefined ||
+      connection.expectedAccountId !== attempt.requesterAccountId ||
+      connection.partition !== attempt.partition ||
+      !finopsRegionMatchesPartition(attempt.region, connection.partition)
+    ) throw new RegistryStateError();
+    let contract;
+    try {
+      contract = resolveComputeOptimizerExportLaunchContractForRegion(
+        connection.computeOptimizerExportLaunchContracts,
+        { tenantId: connection.tenantId, connectionId: connection.connectionId,
+          expectedAccountId: connection.expectedAccountId, partition: connection.partition },
+        attempt.region,
+      );
+    } catch { throw invalidRequest(); }
+    const optionalPrefix = contract.basePrefix === "" ? null : contract.basePrefix.slice(0, -1);
+    if (attempt.targets.some((target) =>
+      target.region !== contract.region || target.bucket !== contract.bucket ||
+      target.optionalPrefix !== optionalPrefix || target.effectivePrefix !== contract.effectivePrefix ||
+      target.request.s3DestinationConfig.bucket !== contract.bucket ||
+      target.request.s3DestinationConfig.keyPrefix !== optionalPrefix
+    )) throw invalidRequest();
+    const ledgerBoundary = { tenantId: attempt.scope.orgId,
+      connectionId: attempt.scope.connectionId, attempt, nowMs: context.now().getTime() };
+    const prepared = await ledger.prepare(ledgerBoundary);
+    if (prepared.state === "TERMINAL") return prepared.execution;
+    if (prepared.state === "IN_PROGRESS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("ACTIVE");
+    }
+    if (prepared.state === "AMBIGUOUS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("AMBIGUOUS");
+    }
+    const claimed = await ledger.claim({ ...ledgerBoundary, nowMs: context.now().getTime() });
+    if (claimed.state === "TERMINAL") return claimed.execution;
+    if (claimed.state === "IN_PROGRESS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("ACTIVE");
+    }
+    if (claimed.state === "AMBIGUOUS") {
+      throw new ComputeOptimizerExportLaunchLedgerError("AMBIGUOUS");
+    }
+    const broker = context.computeOptimizerExportLaunchRoleBrokerFactory({
+      registry: context.registry, principalArn: context.principalArn, region: attempt.region,
+    });
+    const session = await broker.assumeValidatedComputeOptimizerExportLaunchSession(
+      { tenantId: attempt.scope.orgId }, attempt.scope.connectionId, attempt.launchAttemptId,
+      { contractId: contract.contractId, region: attempt.region },
+    );
+    if (session.accountId !== attempt.requesterAccountId || session.partition !== attempt.partition) {
+      throw invalidRequest();
+    }
+    const execution = await runComputeOptimizerExportLaunch({
+      attempt,
+      client: context.computeOptimizerExportLaunchClientFactory(
+        attempt.partition, attempt.region, session.credentials,
+      ),
+      now: context.now,
+    });
+    return ledger.complete({ ...ledgerBoundary, claimToken: claimed.claimToken,
+      execution, nowMs: context.now().getTime() });
+  } finally { await context.operationCoordinator.release(lease); }
+}
+
+function finopsRegionMatchesPartition(
+  region: string,
+  partition: RegisteredAwsConnection["partition"],
+): boolean {
+  if (partition === "aws-cn") return region.startsWith("cn-");
+  if (partition === "aws-us-gov") return region.startsWith("us-gov-");
+  return !region.startsWith("cn-") && !region.startsWith("us-gov-");
+}
+
 async function collectConnectionCosts(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode !== "live") {
@@ -997,7 +2858,7 @@ async function collectConnectionCosts(context: ServerContext, job: ScopedJob): P
       now: context.now,
     });
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1029,13 +2890,7 @@ function ec2InstancesFromResources(
  */
 async function collectConnectionUtilization(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     const { fixtureEc2Utilization, collectEc2Utilization } = await import("./cloudwatch-runner.js");
@@ -1101,7 +2956,7 @@ async function collectConnectionUtilization(context: ServerContext, job: ScopedJ
       now: context.now,
     });
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1115,14 +2970,13 @@ async function collectConnectionSecurityEvents(
   job: ScopedSecurityEventJob,
 ): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (context.lifecycleMutations.has(operationKey)) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "Another collection is already running for this connection");
-  }
-  return runTimedSecurityEventOperation({
-    activeOperations: context.activeConnectionOperations,
-    operationKey,
-    deadlineMs: SECURITY_EVENT_OPERATION_DEADLINE_MS,
-    operation: async (operationSignal) => {
+  const lease = await claimConnectionOperation(context, operationKey);
+  try {
+    return await runTimedSecurityEventOperation({
+      activeOperations: new Set(),
+      operationKey,
+      deadlineMs: SECURITY_EVENT_OPERATION_DEADLINE_MS,
+      operation: async (operationSignal) => {
       const connection = await requireCurrentActiveConnection(context.registry, job);
       if (context.mode !== "live") {
         throw new LocalHttpError(
@@ -1171,8 +3025,11 @@ async function collectConnectionSecurityEvents(
         now: context.now,
         abortSignal: operationSignal,
       });
-    },
-  });
+      },
+    });
+  } finally {
+    await context.operationCoordinator.release(lease);
+  }
 }
 
 export async function runTimedSecurityEventOperation<T>(input: {
@@ -1232,15 +3089,16 @@ function raceLocalAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-async function verifyConnection(context: ServerContext, job: ScopedJob): Promise<unknown> {
+/**
+ * Execute the explicitly requested onboarding-attestation endpoint.
+ *
+ * This is an endpoint action, not an authorization guard for the other
+ * allowlisted connection actions. Those actions enforce their own persisted
+ * state preconditions in the scoped registry.
+ */
+async function attestOnboardingTrust(context: ServerContext, job: ScopedJob): Promise<unknown> {
   const operationKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.activeConnectionOperations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     const scope = { tenantId: job.tenantId };
     if (context.mode === "fixture") {
@@ -1258,7 +3116,7 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
         trustPolicyAttested: true,
         permissionPolicyAttested: true,
         sessionPolicyApplied: true,
-        permissionPackVersion: "standard-2026-07.3",
+        permissionPackVersion: "standard-2026-07.4",
         capabilityAssessment: {
           grantedActions: [...IMPLEMENTED_READ_ACTIONS],
           missingActions: [],
@@ -1278,19 +3136,13 @@ async function verifyConnection(context: ServerContext, job: ScopedJob): Promise
     await context.registry.markOnboardingVerified(scope, job.connectionId, verification);
     return verificationResponse(verification);
   } finally {
-    context.activeConnectionOperations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
 async function syncConnection(context: ServerContext, job: ScopedJob): Promise<PilotSnapshot> {
   const syncKey = connectionOperationKey(job.tenantId, job.connectionId);
-  if (
-    context.activeConnectionOperations.has(syncKey) ||
-    context.lifecycleMutations.has(syncKey)
-  ) {
-    throw new LocalHttpError(409, "INVALID_REQUEST", "A sync is already running for this connection");
-  }
-  context.activeConnectionOperations.add(syncKey);
+  const lease = await claimConnectionOperation(context, syncKey);
   try {
     const connection = await requireCurrentActiveConnection(context.registry, job);
     if (context.mode === "fixture") {
@@ -1298,7 +3150,7 @@ async function syncConnection(context: ServerContext, job: ScopedJob): Promise<P
     }
     return await collectLiveSnapshot(context, connection, job);
   } finally {
-    context.activeConnectionOperations.delete(syncKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1308,13 +3160,7 @@ async function mutateConnectionLifecycle(
   action: "disable" | "offboard",
 ): Promise<void> {
   const operationKey = connectionOperationKey(scope.tenantId, scope.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.lifecycleMutations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     if (action === "disable") {
       await context.registry.disable({ tenantId: scope.tenantId }, scope.connectionId);
@@ -1322,7 +3168,7 @@ async function mutateConnectionLifecycle(
       await context.registry.offboard({ tenantId: scope.tenantId }, scope.connectionId);
     }
   } finally {
-    context.lifecycleMutations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
@@ -1336,13 +3182,7 @@ async function mutateStagedRegistration(
   action: "activate" | "discard",
 ): Promise<void> {
   const operationKey = connectionOperationKey(candidate.tenantId, candidate.connectionId);
-  if (
-    context.activeConnectionOperations.has(operationKey) ||
-    context.lifecycleMutations.has(operationKey)
-  ) {
-    throw new RegistryStateError();
-  }
-  context.lifecycleMutations.add(operationKey);
+  const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     const scope = { tenantId: candidate.tenantId };
     if (action === "activate") {
@@ -1359,12 +3199,27 @@ async function mutateStagedRegistration(
       );
     }
   } finally {
-    context.lifecycleMutations.delete(operationKey);
+    await context.operationCoordinator.release(lease);
   }
 }
 
 function connectionOperationKey(tenantId: string, connectionId: string): string {
   return `${tenantId}\u001f${connectionId}`;
+}
+
+async function claimConnectionOperation(
+  context: ServerContext,
+  operationKey: string,
+  registryError = false,
+): Promise<CollectorOperationLease> {
+  const lease = await context.operationCoordinator.claim(operationKey);
+  if (lease !== null) return lease;
+  if (registryError) throw new RegistryStateError();
+  throw new LocalHttpError(
+    409,
+    "INVALID_REQUEST",
+    "Another collection or lifecycle operation is already running for this connection",
+  );
 }
 
 async function collectLiveSnapshot(
@@ -1941,6 +3796,64 @@ function liveFindings(
           { publiclyAccessible: true, internetReachabilityProven: false });
       }
     }
+    if (source.resourceType === "aws.bedrock.guardrail") {
+      const status = scalarString(config.status);
+      if (status !== "READY") {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.GUARDRAIL_READY",
+          "medium",
+          "Bedrock guardrail version is not ready",
+          "The observed guardrail version is not in the READY state, so applications cannot rely on it as an active protection boundary.",
+          "Review the guardrail validation or deployment error in Amazon Bedrock, publish an approved version, and verify application enforcement.",
+          { status: status ?? "unknown", version: scalarString(config.version) ?? "unknown" },
+        );
+      }
+      const contentPolicy = jsonObject(config.contentPolicy);
+      if (contentPolicy === null || contentPolicy.filterCount === 0) {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.CONTENT_FILTERS",
+          "high",
+          "Bedrock guardrail has no harmful-content filters",
+          "The guardrail contains no observed harmful-content filter configuration.",
+          "Configure input and output content filters at strengths appropriate to the application risk, test them, and publish the reviewed guardrail version.",
+          { filterCount: 0 },
+        );
+      } else {
+        const disabled = jsonObjectArray(contentPolicy.filters).filter((filter) =>
+          filter.inputEnabled === false ||
+          filter.outputEnabled === false ||
+          filter.inputAction === "NONE" ||
+          filter.outputAction === "NONE"
+        ).length;
+        if (disabled > 0) {
+          add(
+            resourceKey,
+            "SUTRA.AWS.BEDROCK.CONTENT_FILTER_ENFORCEMENT",
+            "high",
+            "Bedrock content filters do not enforce both directions",
+            "One or more observed content filters disables evaluation or records detections without blocking for input or output.",
+            "Review each content category and enable an approved enforcement action for both prompts and model responses.",
+            { filtersWithoutBidirectionalEnforcement: disabled },
+          );
+        }
+      }
+      const sensitive = jsonObject(config.sensitiveInformationPolicy);
+      const piiEntityCount = finiteSafeNumber(sensitive?.piiEntityCount) ?? 0;
+      const regexCount = finiteSafeNumber(sensitive?.regexCount) ?? 0;
+      if (piiEntityCount === 0 && regexCount === 0) {
+        add(
+          resourceKey,
+          "SUTRA.AWS.BEDROCK.SENSITIVE_INFORMATION",
+          "medium",
+          "Bedrock guardrail has no sensitive-information filters",
+          "No PII entity or custom sensitive-pattern filter was observed for this guardrail version.",
+          "Configure the PII classes and custom patterns relevant to the application, use blocking or anonymization as approved, then test both input and output handling.",
+          { piiEntityCount, regexCount },
+        );
+      }
+    }
     if (source.resourceType === "aws.ec2.security-group" && isPublicSshIngressCandidate(config.ingress)) {
       add(resourceKey, "SUTRA.AWS.EC2.SSH_PUBLIC", "high", "Security group allows public SSH ingress",
         "The security-group rule permits SSH from a public IPv4 or IPv6 CIDR. Route, NACL, attachment, and public-address evidence is still required to prove internet reachability.",
@@ -2009,6 +3922,36 @@ function liveFindings(
         "No account password policy was returned.",
         "Prefer federation and configure a strong policy for any remaining IAM users.", findingEvidence,
         accountSignalScope);
+    }
+    if (
+      item.evidenceType === "BEDROCK_MODEL_INVOCATION_LOGGING" &&
+      item.status === "NOT_CONFIGURED"
+    ) {
+      add(
+        null,
+        "SUTRA.AWS.BEDROCK.INVOCATION_LOGGING",
+        "medium",
+        "Bedrock model invocation logging is not configured",
+        `No model invocation logging destination was observed for Amazon Bedrock in ${item.region}.`,
+        "Configure an approved CloudWatch Logs or S3 destination with retention, encryption, and least-privilege access. Review whether prompt and response content may be logged before enabling content delivery.",
+        findingEvidence,
+        accountSignalScope,
+      );
+    }
+    if (
+      item.evidenceType === "BEDROCK_ACCOUNT_DATA_RETENTION" &&
+      item.data.mode === "provider_data_share"
+    ) {
+      add(
+        null,
+        "SUTRA.AWS.BEDROCK.PROVIDER_DATA_SHARE",
+        "high",
+        "Bedrock provider data sharing is enabled",
+        `The observed Amazon Bedrock account data-retention mode in ${item.region} permits provider data sharing.`,
+        "Confirm legal and data-owner approval. If sharing is not explicitly required, change the account retention mode to the approved non-sharing policy.",
+        findingEvidence,
+        accountSignalScope,
+      );
     }
   }
   return result;
@@ -2199,7 +4142,7 @@ function parseStagedRegistrationMutation(
 }
 
 async function activeCandidate(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await requireConnection(registry, job);
@@ -2215,7 +4158,7 @@ async function activeCandidate(
 }
 
 async function requireConnection(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await registry.getRegistered({ tenantId: job.tenantId }, job.connectionId);
@@ -2224,7 +4167,7 @@ async function requireConnection(
 }
 
 async function requireCurrentActiveConnection(
-  registry: EncryptedFileConnectionRegistry,
+  registry: CollectorConnectionRegistry,
   job: ScopedJob,
 ): Promise<RegisteredAwsConnection> {
   const connection = await requireConnection(registry, job);
@@ -2234,6 +4177,70 @@ async function requireCurrentActiveConnection(
   ) {
     throw new RegistryStateError();
   }
+  return connection;
+}
+
+async function requireFinopsActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION ||
+    connection.foundationalFinopsContracts === undefined
+  ) {
+    throw new RegistryStateError();
+  }
+  return connection;
+}
+
+async function requireFinopsSourceActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    (connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
+      && connection.permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION)
+  ) {
+    throw new RegistryStateError();
+  }
+  return connection;
+}
+
+async function requireComputeOptimizerObjectActiveConnection(
+  registry: CollectorConnectionRegistry,
+  job: ScopedJob,
+): Promise<RegisteredAwsConnection> {
+  const connection = await requireConnection(registry, job);
+  if (
+    connection.status !== "ACTIVE" ||
+    ((connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportObjectContracts === undefined) &&
+    (connection.permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined) &&
+    (connection.permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION ||
+      connection.computeOptimizerExportLaunchContracts === undefined))
+  ) throw new RegistryStateError();
   return connection;
 }
 
@@ -2778,11 +4785,14 @@ function canonicalIsoDate(value: string): Date | null {
   return Number.isNaN(date.getTime()) || date.toISOString() !== value ? null : date;
 }
 
-async function readBody(request: IncomingMessage): Promise<string> {
+async function readBody(
+  request: IncomingMessage,
+  maximumBytes: number = BODY_LIMIT,
+): Promise<string> {
   const declared = request.headers["content-length"];
   if (typeof declared === "string") {
     const bytes = Number(declared);
-    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > BODY_LIMIT) {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > maximumBytes) {
       throw new LocalHttpError(413, "INVALID_REQUEST", "The collector request body is too large");
     }
   }
@@ -2791,7 +4801,7 @@ async function readBody(request: IncomingMessage): Promise<string> {
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
     total += bytes.length;
-    if (total > BODY_LIMIT) {
+    if (total > maximumBytes) {
       throw new LocalHttpError(413, "INVALID_REQUEST", "The collector request body is too large");
     }
     chunks.push(bytes);
@@ -2803,16 +4813,33 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return body;
 }
 
-function sendSigned(
+async function sendSigned(
   context: ServerContext,
   response: ServerResponse,
   status: number,
   path: string,
   nonce: string,
   payload: unknown,
-): void {
+): Promise<void> {
   let body = JSON.stringify(payload);
-  if (Buffer.byteLength(body, "utf8") > RESPONSE_LIMIT) {
+  const responseLimit = path === AWS_BUDGETS_PROVIDER_ROUTE
+    ? AWS_BUDGETS_RESPONSE_LIMIT
+    : path === END_USER_COMPUTING_PROVIDER_ROUTE
+      ? END_USER_COMPUTING_RESPONSE_LIMIT
+    : path === GRAVITON_PROVIDER_ROUTE
+      ? GRAVITON_RESPONSE_LIMIT
+    : path === DCF_STEP_FUNCTIONS_PROVIDER_ROUTE
+      ? DCF_STEP_FUNCTIONS_RESPONSE_LIMIT
+    : path === AWS_SUPPORT_CASES_PROVIDER_ROUTE
+      ? AWS_SUPPORT_CASES_RESPONSE_LIMIT
+    : path === AWS_HEALTH_PROVIDER_ROUTE
+      ? AWS_HEALTH_RESPONSE_LIMIT
+    : path === RESILIENCE_VUE_PROVIDER_ROUTE
+      ? RESILIENCE_VUE_RESPONSE_LIMIT
+    : path === EXTENDED_SUPPORT_PROVIDER_ROUTE
+      ? EXTENDED_SUPPORT_RESPONSE_LIMIT
+      : RESPONSE_LIMIT;
+  if (Buffer.byteLength(body, "utf8") > responseLimit) {
     status = 502;
     body = JSON.stringify({ code: "COLLECTION_FAILED", message: "The normalized inventory exceeded the pilot response limit" });
   }
@@ -2821,10 +4848,13 @@ function sendSigned(
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-content-type-options", "nosniff");
   response.setHeader("content-length", Buffer.byteLength(body, "utf8"));
-  response.setHeader(
-    "x-sutra-response-signature",
-    context.authenticator.responseSignature(status, path, nonce, body),
-  );
+  const signed = await context.authenticator.responseSignature(status, path, nonce, body);
+  if (typeof signed === "string") {
+    response.setHeader("x-sutra-response-signature", signed);
+  } else {
+    response.setHeader("x-sutra-key-id", signed.keyId);
+    response.setHeader("x-sutra-signature", signed.signature);
+  }
   response.end(body);
 }
 
@@ -2845,6 +4875,13 @@ function safeHttpError(error: unknown): LocalHttpError {
   if (error instanceof RequestAuthenticationError) {
     return new LocalHttpError(401, "INVALID_REQUEST", "Collector request authentication failed");
   }
+  if (error instanceof HostedRequestAuthenticationError) {
+    return new LocalHttpError(
+      error.code === "REQUEST_REPLAYED" ? 409 : 401,
+      error.code === "REQUEST_REPLAYED" ? "REQUEST_REPLAYED" : "INVALID_REQUEST",
+      "Collector request authentication failed",
+    );
+  }
   if (error instanceof RegistryConnectionNotFoundError) {
     return new LocalHttpError(404, "CONNECTION_NOT_FOUND", "The scoped connection was not found");
   }
@@ -2853,6 +4890,130 @@ function safeHttpError(error: unknown): LocalHttpError {
   }
   if (error instanceof RegistryError) {
     return new LocalHttpError(500, "COLLECTION_FAILED", "The encrypted connection registry could not complete the operation");
+  }
+  if (error instanceof ResilienceVueProviderAdapterError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "AWS Resilience Hub evidence collection did not complete",
+    );
+  }
+  if (error instanceof DcfProviderAdapterError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "Data Collection Monitor evidence collection did not complete",
+    );
+  }
+  if (error instanceof EndUserComputingProviderError) {
+    const status = error.code === "INVALID_REQUEST" ? 400
+      : error.code === "BOUND_REACHED" ? 413
+        : error.code === "ABORTED" ? 504 : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "End User Computing evidence collection did not complete",
+    );
+  }
+  if(error instanceof GravitonProviderAdapterError){
+    const status=error.code==="INVALID_REQUEST"?400:error.code==="BOUND_REACHED"?413:error.code==="ABORTED"?504:502;
+    return new LocalHttpError(status,error.code,"Graviton Savings evidence collection did not complete");
+  }
+  if (error instanceof ComputeOptimizerExportObjectChunkError) {
+    const status = error.code === "INVALID_REQUEST"
+      ? 400
+      : error.code === "OBJECT_CHANGED"
+        ? 409
+        : error.code === "OBJECT_RANGE_LIMIT_EXCEEDED"
+          ? 413
+          : error.code === "OBJECT_READ_TIMEOUT"
+            ? 504
+            : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      error.code === "OBJECT_CHANGED"
+        ? "The Compute Optimizer export object changed during the bounded read"
+        : "The bounded Compute Optimizer export object read did not complete",
+    );
+  }
+  if (error instanceof ComputeOptimizerExactDescribeError) {
+    const status = error.code === "INVALID_REQUEST"
+      || error.code === "JOB_SUBSTITUTION"
+      || error.code === "MISSING_JOB"
+      || error.code === "DUPLICATE_JOB"
+      || error.code === "PAGINATION_INVALID"
+      || error.code === "PROVIDER_RESPONSE_INVALID"
+      || error.code === "EXPIRED"
+      ? 400
+      : error.code === "ABORTED" || error.code === "DESCRIBE_TIMEOUT"
+        ? 504
+        : error.code === "OUTPUT_LIMIT_EXCEEDED"
+          ? 413
+          : 502;
+    return new LocalHttpError(
+      status,
+      error.code,
+      "The exact Compute Optimizer export freshness check did not complete",
+    );
+  }
+  if (error instanceof ComputeOptimizerExportLaunchLedgerError) {
+    const status = error.code === "INVALID_INPUT" ? 400
+      : error.code === "STORAGE_FAILED" ? 503 : 409;
+    return new LocalHttpError(
+      status,
+      error.code === "ACTIVE" ? "LAUNCH_IN_PROGRESS"
+        : error.code === "AMBIGUOUS" ? "LAUNCH_AMBIGUOUS"
+          : "INVALID_REQUEST",
+      error.code === "AMBIGUOUS"
+        ? "The prior Compute Optimizer launch outcome is ambiguous and cannot be resumed"
+        : "The durable Compute Optimizer launch could not proceed",
+    );
+  }
+  if (error instanceof ComputeOptimizerExportLauncherError) {
+    return new LocalHttpError(
+      error.code === "LIMIT_EXCEEDED" ? 413 : 400,
+      error.code,
+      "The sealed Compute Optimizer export launch was rejected",
+    );
+  }
+  if (error instanceof AwsBudgetsProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Budgets provider collection did not complete",
+    );
+  }
+  if (error instanceof ExtendedSupportProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded Extended Support provider collection did not complete",
+    );
+  }
+  if (error instanceof AwsSupportCasesProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Support Cases provider collection did not complete",
+    );
+  }
+  if (error instanceof AwsHealthProviderAdapterError) {
+    return new LocalHttpError(
+      error.code === "INVALID_REQUEST" || error.code === "PROVIDER_RESPONSE_INVALID" ? 400
+        : error.code === "BOUND_REACHED" ? 413 : 504,
+      error.code,
+      "The bounded AWS Health provider collection did not complete",
+    );
   }
   if (error instanceof LocalJobIdempotencyConflictError) {
     return new LocalHttpError(
@@ -2955,6 +5116,12 @@ function responseNonce(request: IncomingMessage): string {
   return typeof nonce === "string" && nonce.length <= 128 ? nonce : "unauthenticated";
 }
 
+function exactHeader(headers: IncomingMessage["headers"], name: string): string | null {
+  const value = headers[name];
+  return typeof value === "string" && value.length > 0 && value.length <= 256
+    && !value.includes(",") && !/[\r\n]/u.test(value) ? value : null;
+}
+
 function boundaryResourceKey(resource: NormalizedAwsResource): string {
   if (resource.resourceKey.length <= 180 && /^[A-Za-z0-9][A-Za-z0-9._:@/#+=-]*$/u.test(resource.resourceKey)) {
     return resource.resourceKey;
@@ -3032,6 +5199,18 @@ function stringArray(value: SafeJsonValue | undefined): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function jsonObject(value: SafeJsonValue | undefined): SafeJsonObject | null {
+  return value !== undefined && isJsonObject(value) ? value : null;
+}
+
+function jsonObjectArray(value: SafeJsonValue | undefined): SafeJsonObject[] {
+  return Array.isArray(value) ? value.filter(isJsonObject) : [];
+}
+
+function finiteSafeNumber(value: SafeJsonValue | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function isJsonObject(value: SafeJsonValue): value is SafeJsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -3057,6 +5236,18 @@ function requiredEnvironment(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+export function decodeAwsSupportCasesEvidenceKey(value: string): Uint8Array {
+  if (!/^[A-Za-z0-9_-]{43,86}$/u.test(value)) {
+    throw new Error("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL is invalid");
+  }
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.byteLength < 32 || decoded.byteLength > 64
+    || decoded.toString("base64url") !== value) {
+    throw new Error("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL is invalid");
+  }
+  return decoded;
 }
 
 function exactBooleanEnvironment(name: string, fallback: boolean): boolean {

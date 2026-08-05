@@ -35,10 +35,12 @@ function connectionIdFrom(value: unknown): string {
 export async function POST(request: Request): Promise<Response> {
   let connectionId: string | null = null;
   let actorId: string | null = null;
+  let orgId: string | null = null;
   let validationClaimed = false;
   try {
     const actor = await requirePilotActor(request, "workspace:read");
     actorId = actor.id;
+    orgId = actor.orgId;
     assertSameOrigin(request);
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
@@ -47,7 +49,7 @@ export async function POST(request: Request): Promise<Response> {
     if (health.mode !== "live") {
       throw Object.assign(new Error("AWS trust validation requires an explicitly enabled live collector"), { code: "INVALID_STATE" });
     }
-    await markConnectionValidating(connectionId);
+    await markConnectionValidating(connectionId, actor.orgId);
     validationClaimed = true;
     if (!stored.roleArn) {
       throw Object.assign(new Error("Register the customer IAM role before validation"), { code: "INVALID_STATE" });
@@ -79,7 +81,7 @@ export async function POST(request: Request): Promise<Response> {
       roleArn: stored.roleArn,
       sessionNamePrefix: "sutra-",
     });
-    await markConnectionValidated(connectionId, actor.id, verification);
+    await markConnectionValidated(connectionId, actor.id, verification, actor.orgId);
     await activateCollectorConnection({
       tenantId: actor.orgId,
       connectionId,
@@ -87,9 +89,14 @@ export async function POST(request: Request): Promise<Response> {
     });
     return jsonResponse({ verification, connectionId });
   } catch (error) {
-    if (validationClaimed && connectionId !== null && actorId !== null) {
+    if (validationClaimed && connectionId !== null && actorId !== null && orgId !== null) {
       try {
-        await markConnectionNeedsAttention(connectionId, actorId, safeValidationFailureCode(error));
+        await markConnectionNeedsAttention(
+          connectionId,
+          actorId,
+          safeValidationFailureCode(error),
+          orgId,
+        );
       } catch {
         // Preserve the original validation error; state transition errors are
         // intentionally not allowed to replace it.

@@ -4,6 +4,7 @@ import { RuntimeEventCaseRepository } from "../../../../../db/runtime-event-case
 import { SecurityNotificationRepository } from "../../../../../db/security-notification-repository";
 import {
   assertSessionCapability,
+  requiredConfiguredPublicOrigin,
   requireApiSession,
 } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
@@ -121,6 +122,7 @@ export async function POST(request: Request): Promise<Response> {
       connection.customerId,
     )).filter((destination) => destination.enabled);
     const notificationEventId = `notify_${(await evidenceHash(`case\0${created.id}`)).slice(0, 48)}`;
+    const publicOrigin = requiredConfiguredPublicOrigin();
     const notificationEvent = normalizeSecurityNotificationEvent({
       eventId: notificationEventId,
       orgId: authenticated.subject.orgId,
@@ -131,9 +133,11 @@ export async function POST(request: Request): Promise<Response> {
       summary: `A human-approved case ${created.caseNumber} was created from immutable Falco runtime evidence. Automatic containment remains disabled.`,
       occurredAt: created.createdAt,
       findingCount: 1,
-      reportUrl: "https://app.sutracmdb.com/cases",
+      reportUrl:
+        `${publicOrigin}/kubernetes/runtime?connectionId=${encodeURIComponent(input.connectionId)}`
+        + `#runtime-event-${encodeURIComponent(created.sourceId)}`,
       evidenceSha256: created.evidenceSha256,
-    }, "https://app.sutracmdb.com");
+    }, publicOrigin);
     const queued = await Promise.allSettled(destinations.map(async (destination) => {
       const recipients = destination.configuration.channel === "email"
         ? destination.configuration.recipients

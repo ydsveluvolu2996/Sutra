@@ -58,6 +58,70 @@ import postgresGovernancePoliciesSql from "../postgres/migrations/0058_governanc
 import postgresAgentlessScansSql from "../postgres/migrations/0059_agentless_scans.sql?raw";
 import postgresInvitationZohoProviderSql from "../postgres/migrations/0060_invitation_zoho_provider.sql?raw";
 import postgresAwsLiveSnapshotOriginSql from "../postgres/migrations/0061_aws_live_snapshot_origin.sql?raw";
+import postgresSamlAssertionReplaysSql from "../postgres/migrations/0062_saml_assertion_replays.sql?raw";
+import postgresDspmWorkspaceSql from "../postgres/migrations/0063_dspm_workspace.sql?raw";
+import postgresScimIdentityLifecycleSql from "../postgres/migrations/0064_scim_identity_lifecycle.sql?raw";
+import postgresHostedBrokerRuntimeSql from "../postgres/migrations/0065_hosted_broker_runtime.sql?raw";
+import postgresItsmManagedSecretsSql from "../postgres/migrations/0066_itsm_managed_secrets.sql?raw";
+import postgresAuditHashVersionSql from "../postgres/migrations/0067_audit_hash_version.sql?raw";
+import postgresAwsGlobalOwnershipSql from "../postgres/migrations/0068_aws_global_ownership.sql?raw";
+import postgresCmdbResourceRetirementSql from "../postgres/migrations/0069_cmdb_resource_retirement.sql?raw";
+import postgresManagedEvidenceObjectsSql from "../postgres/migrations/0070_managed_evidence_objects.sql?raw";
+import postgresItsmDeliveryEvidenceSql from "../postgres/migrations/0071_itsm_delivery_evidence.sql?raw";
+import postgresSesDeliveryFeedbackSql from "../postgres/migrations/0072_ses_delivery_feedback.sql?raw";
+import postgresFinopsBillingEngineV2Sql from "../postgres/migrations/0073_finops_billing_engine_v2.sql?raw";
+import postgresFinopsFoundationalConfigSql from "../postgres/migrations/0074_finops_foundational_config.sql?raw";
+import postgresFinopsSourceJobLedgerSql from "../postgres/migrations/0075_finops_source_job_ledger.sql?raw";
+import postgresFinopsSourceSnapshotsSql from "../postgres/migrations/0076_finops_source_snapshots.sql?raw";
+import postgresFinopsSourceEvidenceArtifactSql from "../postgres/migrations/0077_finops_source_evidence_artifact.sql?raw";
+import postgresFinopsDataExportObservationsSql from "../postgres/migrations/0078_finops_data_export_observations.sql?raw";
+import postgresFinopsTrustedAdvisorOrganizationSql from "../postgres/migrations/0079_finops_trusted_advisor_organization.sql?raw";
+import postgresFinopsComputeOptimizerDiscoverySql from "../postgres/migrations/0080_finops_compute_optimizer_discovery.sql?raw";
+import postgresFinopsActiveFileCountSql from "../postgres/migrations/0081_finops_active_file_count.sql?raw";
+import postgresFinopsAwsConfigComplianceSql from "../postgres/migrations/0082_finops_aws_config_compliance.sql?raw";
+import postgresFinopsPricingChangeMaterializationsSql from "../postgres/migrations/0083_finops_pricing_change_materializations.sql?raw";
+import postgresFinopsCoraSnapshotsSql from "../postgres/migrations/0084_finops_cora_snapshots.sql?raw";
+import postgresFinopsAwsNewsFeedSnapshotsSql from "../postgres/migrations/0085_finops_aws_news_feed_snapshots.sql?raw";
+import postgresFinopsAwsBudgetsOrganizationSql from "../postgres/migrations/0086_finops_aws_budgets_organization.sql?raw";
+import postgresFinopsAwsSupportCasesSql from "../postgres/migrations/0087_finops_aws_support_cases.sql?raw";
+import postgresFinopsResilienceVueSql from "../postgres/migrations/0088_finops_resilience_vue.sql?raw";
+import postgresFinopsEndUserComputingSql from "../postgres/migrations/0089_finops_end_user_computing.sql?raw";
+import postgresFinopsMediaServicesInsightsSql from "../postgres/migrations/0090_finops_media_services_insights.sql?raw";
+import postgresFinopsMarketplaceSpgSql from "../postgres/migrations/0091_finops_marketplace_spg.sql?raw";
+import postgresFinopsKubecostAllocationSql from "../postgres/migrations/0092_finops_kubecost_allocation.sql?raw";
+import postgresFinopsScadAllocationSql from "../postgres/migrations/0093_finops_scad_allocation.sql?raw";
+import postgresFinopsSustainabilityCarbonSql from "../postgres/migrations/0094_finops_sustainability_carbon.sql?raw";
+import postgresFinopsAmazonConnectCostInsightsSql from "../postgres/migrations/0095_finops_amazon_connect_cost_insights.sql?raw";
+import postgresFinopsComputeOptimizerExportHistorySql from "../postgres/migrations/0096_finops_compute_optimizer_export_history.sql?raw";
+import postgresFinopsExtendedSupportProjectionSql from "../postgres/migrations/0097_finops_extended_support_projection.sql?raw";
+import postgresFinopsGravitonSavingsSql from "../postgres/migrations/0098_finops_graviton_savings.sql?raw";
+import postgresFinopsAwsHealthEventsSql from "../postgres/migrations/0099_finops_aws_health_events.sql?raw";
+import postgresFinopsAzureCidSql from "../postgres/migrations/0100_finops_azure_cid.sql?raw";
+import postgresFinopsGcpCloudIntelligenceSql from "../postgres/migrations/0101_finops_gcp_cloud_intelligence.sql?raw";
+import postgresFinopsDcfExecutionHistorySql from "../postgres/migrations/0102_finops_dcf_execution_history.sql?raw";
+import postgresFinopsCoraExportObjectsSql from "../postgres/migrations/0103_finops_cora_export_objects.sql?raw";
+import postgresFinopsAwsBudgetsDurableAttemptsSql from "../postgres/migrations/0104_finops_aws_budgets_durable_attempts.sql?raw";
+import postgresFinopsEucRuntimeAttemptsSql from "../postgres/migrations/0105_finops_euc_runtime_attempts.sql?raw";
+import postgresFinopsKubecostRuntimeAttemptsSql from "../postgres/migrations/0106_finops_kubecost_runtime_attempts.sql?raw";
+import postgresFinopsComputeOptimizerExportPlansSql from "../postgres/migrations/0107_finops_compute_optimizer_export_plans.sql?raw";
+import postgresFinopsComputeOptimizerExportPlanSetsSql from "../postgres/migrations/0108_finops_compute_optimizer_export_plan_sets.sql?raw";
+import postgresFinopsComputeOptimizerExportPlanTimestampGuardSql from "../postgres/migrations/0109_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
+import postgresFinopsComputeOptimizerExactGenerationsSql from "../postgres/migrations/0110_finops_compute_optimizer_exact_generations.sql?raw";
+import postgresComputeOptimizerExportLaunchLedgerSql from "../postgres/migrations/0111_compute_optimizer_export_launch_ledger.sql?raw";
+import postgresFinopsComputeOptimizerActivationOutboxSql from "../postgres/migrations/0112_finops_compute_optimizer_activation_outbox.sql?raw";
+import postgresFinopsAwsNewsFeedsReplaySql from "../postgres/migrations/0113_finops_aws_news_feeds_replay.sql?raw";
+import postgresFinopsExtendedSupportRuntimeSql from "../postgres/migrations/0114_finops_extended_support_runtime.sql?raw";
+import postgresFinopsAwsHealthRuntimeSql from "../postgres/migrations/0115_finops_aws_health_runtime.sql?raw";
+import postgresFinopsResilienceVueRuntimeSql from "../postgres/migrations/0116_finops_resilience_vue_runtime.sql?raw";
+import postgresFinopsDcfRuntimeSql from "../postgres/migrations/0117_finops_dcf_runtime.sql?raw";
+import postgresFinopsGravitonRuntimeSql from "../postgres/migrations/0118_finops_graviton_runtime.sql?raw";
+import postgresFinopsMarketplaceSpgRuntimeSql from "../postgres/migrations/0119_finops_marketplace_spg_runtime.sql?raw";
+import postgresFinopsCoraRuntimeAttemptsSql from "../postgres/migrations/0120_finops_cora_runtime_attempts.sql?raw";
+import postgresFinopsScadRuntimeAttemptsSql from "../postgres/migrations/0121_finops_scad_runtime_attempts.sql?raw";
+import postgresFinopsSustainabilityTargetsSql from "../postgres/migrations/0122_finops_sustainability_targets.sql?raw";
+import postgresFinopsAmazonConnectRuntimeSql from "../postgres/migrations/0123_finops_amazon_connect_runtime.sql?raw";
+import postgresFinopsPricingChangeRuntimeSql from "../postgres/migrations/0124_finops_pricing_change_runtime.sql?raw";
+import postgresFinopsAwsConfigComplianceRuntimeSql from "../postgres/migrations/0125_finops_aws_config_compliance_runtime.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -120,6 +184,70 @@ const migrations = [
   { id: "0059_agentless_scans", source: postgresAgentlessScansSql },
   { id: "0060_invitation_zoho_provider", source: postgresInvitationZohoProviderSql },
   { id: "0061_aws_live_snapshot_origin", source: postgresAwsLiveSnapshotOriginSql },
+  { id: "0062_saml_assertion_replays", source: postgresSamlAssertionReplaysSql },
+  { id: "0063_dspm_workspace", source: postgresDspmWorkspaceSql },
+  { id: "0064_scim_identity_lifecycle", source: postgresScimIdentityLifecycleSql },
+  { id: "0065_hosted_broker_runtime", source: postgresHostedBrokerRuntimeSql },
+  { id: "0066_itsm_managed_secrets", source: postgresItsmManagedSecretsSql },
+  { id: "0067_audit_hash_version", source: postgresAuditHashVersionSql },
+  { id: "0068_aws_global_ownership", source: postgresAwsGlobalOwnershipSql },
+  { id: "0069_cmdb_resource_retirement", source: postgresCmdbResourceRetirementSql },
+  { id: "0070_managed_evidence_objects", source: postgresManagedEvidenceObjectsSql },
+  { id: "0071_itsm_delivery_evidence", source: postgresItsmDeliveryEvidenceSql },
+  { id: "0072_ses_delivery_feedback", source: postgresSesDeliveryFeedbackSql },
+  { id: "0073_finops_billing_engine_v2", source: postgresFinopsBillingEngineV2Sql },
+  { id: "0074_finops_foundational_config", source: postgresFinopsFoundationalConfigSql },
+  { id: "0075_finops_source_job_ledger", source: postgresFinopsSourceJobLedgerSql },
+  { id: "0076_finops_source_snapshots", source: postgresFinopsSourceSnapshotsSql },
+  { id: "0077_finops_source_evidence_artifact", source: postgresFinopsSourceEvidenceArtifactSql },
+  { id: "0078_finops_data_export_observations", source: postgresFinopsDataExportObservationsSql },
+  { id: "0079_finops_trusted_advisor_organization", source: postgresFinopsTrustedAdvisorOrganizationSql },
+  { id: "0080_finops_compute_optimizer_discovery", source: postgresFinopsComputeOptimizerDiscoverySql },
+  { id: "0081_finops_active_file_count", source: postgresFinopsActiveFileCountSql },
+  { id: "0082_finops_aws_config_compliance", source: postgresFinopsAwsConfigComplianceSql },
+  { id: "0083_finops_pricing_change_materializations", source: postgresFinopsPricingChangeMaterializationsSql },
+  { id: "0084_finops_cora_snapshots", source: postgresFinopsCoraSnapshotsSql },
+  { id: "0085_finops_aws_news_feed_snapshots", source: postgresFinopsAwsNewsFeedSnapshotsSql },
+  { id: "0086_finops_aws_budgets_organization", source: postgresFinopsAwsBudgetsOrganizationSql },
+  { id: "0087_finops_aws_support_cases", source: postgresFinopsAwsSupportCasesSql },
+  { id: "0088_finops_resilience_vue", source: postgresFinopsResilienceVueSql },
+  { id: "0089_finops_end_user_computing", source: postgresFinopsEndUserComputingSql },
+  { id: "0090_finops_media_services_insights", source: postgresFinopsMediaServicesInsightsSql },
+  { id: "0091_finops_marketplace_spg", source: postgresFinopsMarketplaceSpgSql },
+  { id: "0092_finops_kubecost_allocation", source: postgresFinopsKubecostAllocationSql },
+  { id: "0093_finops_scad_allocation", source: postgresFinopsScadAllocationSql },
+  { id: "0094_finops_sustainability_carbon", source: postgresFinopsSustainabilityCarbonSql },
+  { id: "0095_finops_amazon_connect_cost_insights", source: postgresFinopsAmazonConnectCostInsightsSql },
+  { id: "0096_finops_compute_optimizer_export_history", source: postgresFinopsComputeOptimizerExportHistorySql },
+  { id: "0097_finops_extended_support_projection", source: postgresFinopsExtendedSupportProjectionSql },
+  { id: "0098_finops_graviton_savings", source: postgresFinopsGravitonSavingsSql },
+  { id: "0099_finops_aws_health_events", source: postgresFinopsAwsHealthEventsSql },
+  { id: "0100_finops_azure_cid", source: postgresFinopsAzureCidSql },
+  { id: "0101_finops_gcp_cloud_intelligence", source: postgresFinopsGcpCloudIntelligenceSql },
+  { id: "0102_finops_dcf_execution_history", source: postgresFinopsDcfExecutionHistorySql },
+  { id: "0103_finops_cora_export_objects", source: postgresFinopsCoraExportObjectsSql },
+  { id: "0104_finops_aws_budgets_durable_attempts", source: postgresFinopsAwsBudgetsDurableAttemptsSql },
+  { id: "0105_finops_euc_runtime_attempts", source: postgresFinopsEucRuntimeAttemptsSql },
+  { id: "0106_finops_kubecost_runtime_attempts", source: postgresFinopsKubecostRuntimeAttemptsSql },
+  { id: "0107_finops_compute_optimizer_export_plans", source: postgresFinopsComputeOptimizerExportPlansSql },
+  { id: "0108_finops_compute_optimizer_export_plan_sets", source: postgresFinopsComputeOptimizerExportPlanSetsSql },
+  { id: "0109_finops_compute_optimizer_export_plan_timestamp_guard", source: postgresFinopsComputeOptimizerExportPlanTimestampGuardSql },
+  { id: "0110_finops_compute_optimizer_exact_generations", source: postgresFinopsComputeOptimizerExactGenerationsSql },
+  { id: "0111_compute_optimizer_export_launch_ledger", source: postgresComputeOptimizerExportLaunchLedgerSql },
+  { id: "0112_finops_compute_optimizer_activation_outbox", source: postgresFinopsComputeOptimizerActivationOutboxSql },
+  { id: "0113_finops_aws_news_feeds_replay", source: postgresFinopsAwsNewsFeedsReplaySql },
+  { id: "0114_finops_extended_support_runtime", source: postgresFinopsExtendedSupportRuntimeSql },
+  { id: "0115_finops_aws_health_runtime", source: postgresFinopsAwsHealthRuntimeSql },
+  { id: "0116_finops_resilience_vue_runtime", source: postgresFinopsResilienceVueRuntimeSql },
+  { id: "0117_finops_dcf_runtime", source: postgresFinopsDcfRuntimeSql },
+  { id: "0118_finops_graviton_runtime", source: postgresFinopsGravitonRuntimeSql },
+  { id: "0119_finops_marketplace_spg_runtime", source: postgresFinopsMarketplaceSpgRuntimeSql },
+  { id: "0120_finops_cora_runtime_attempts", source: postgresFinopsCoraRuntimeAttemptsSql },
+  { id: "0121_finops_scad_runtime_attempts", source: postgresFinopsScadRuntimeAttemptsSql },
+  { id: "0122_finops_sustainability_targets", source: postgresFinopsSustainabilityTargetsSql },
+  { id: "0123_finops_amazon_connect_runtime", source: postgresFinopsAmazonConnectRuntimeSql },
+  { id: "0124_finops_pricing_change_runtime", source: postgresFinopsPricingChangeRuntimeSql },
+  { id: "0125_finops_aws_config_compliance_runtime", source: postgresFinopsAwsConfigComplianceRuntimeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

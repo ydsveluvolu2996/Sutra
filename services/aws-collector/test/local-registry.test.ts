@@ -9,6 +9,7 @@ import {
   EncryptedFileConnectionRegistry,
   RegistryIntegrityError,
   RegistryStateError,
+  parsePersistedConnection,
 } from "../src/local-registry.js";
 
 const NOW = new Date("2026-07-15T10:00:00.000Z");
@@ -62,7 +63,7 @@ test("registry stages verified trust until the control plane explicitly activate
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07.3" as const,
+      permissionPackVersion: "standard-2026-07.4" as const,
       capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(
@@ -82,7 +83,7 @@ test("registry stages verified trust until the control plane explicitly activate
         { tenantId: "org_local_sutra" },
         "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       ))?.permissionPackVersion,
-      "standard-2026-07.3",
+      "standard-2026-07.4",
     );
     await registry.activateOnboarding(
       { tenantId: "org_local_sutra" },
@@ -257,13 +258,13 @@ test("v1 and v2 registry documents preserve the previous pack and migrate in pla
           trustPolicyAttested: true,
           permissionPolicyAttested: true,
           sessionPolicyApplied: true,
-          permissionPackVersion: "standard-2026-07.3",
+          permissionPackVersion: "standard-2026-07.4",
           capabilityAssessment: { grantedActions: [], missingActions: [] },
         },
       );
       const after = await registry.resolve({ tenantId: candidate.tenantId }, connectionId);
       assert.equal(after?.status, "ACTIVE");
-      assert.equal(after?.permissionPackVersion, "standard-2026-07.3");
+      assert.equal(after?.permissionPackVersion, "standard-2026-07.4");
 
       const migrated = await readEncryptedDocument(path, keyBytes) as {
         version: number;
@@ -272,7 +273,7 @@ test("v1 and v2 registry documents preserve the previous pack and migrate in pla
       assert.equal(migrated.version, 3);
       assert.equal(
         migrated.connections[`org_local_sutra\u001f${connectionId}`]?.permissionPackVersion,
-        "standard-2026-07.3",
+        "standard-2026-07.4",
       );
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -352,7 +353,7 @@ test("staged activation is role-bound and cannot remove an active connection", a
       trustPolicyAttested: true as const,
       permissionPolicyAttested: true as const,
       sessionPolicyApplied: true as const,
-      permissionPackVersion: "standard-2026-07.3" as const,
+      permissionPackVersion: "standard-2026-07.4" as const,
       capabilityAssessment: { grantedActions: [], missingActions: [] },
     };
     await registry.markOnboardingVerified(
@@ -536,6 +537,103 @@ test("registry authentication rejects a wrong encryption key", async () => {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("persisted successor records accept only exact tenant-bound FinOps contracts", () => {
+  const persisted = {
+    tenantId: "org_local_sutra",
+    connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    expectedAccountId: "123456789012",
+    partition: "aws",
+    roleArn: "arn:aws:iam::123456789012:role/sutra/SutraCollectorRole",
+    externalId: EXTERNAL_ID,
+    status: "ACTIVE",
+    sessionNamePrefix: "sutra-",
+    enabledRegions: ["us-east-1"],
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString(),
+    permissionPackVersion: "standard-2026-08.1",
+    roleProvisioningMode: "sutra_template",
+    expectedRolePath: "/sutra/",
+    expectedRoleName: "SutraCollectorRole",
+    foundationalFinopsContracts: [{
+      tenantId: "org_local_sutra",
+      connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      contractId: "foundational-cur2-export-v1",
+      exportTable: "COST_AND_USAGE_REPORT",
+      policyName: "SutraFoundationalCur2ReadV1",
+      region: "us-east-1",
+      bucket: "customer-cur2-export",
+      prefix: "sutra/cur2/sutra_foundational_cur2_v1/",
+      exportName: "sutra_foundational_cur2_v1",
+      exportArn:
+        "arn:aws:bcm-data-exports:us-east-1:123456789012:" +
+        "export/sutra_foundational_cur2_v1-1234",
+    }],
+  };
+  const parsed = parsePersistedConnection(persisted);
+  assert.equal(parsed.permissionPackVersion, "standard-2026-08.1");
+  assert.equal(
+    parsed.foundationalFinopsContracts?.[0]?.policyName,
+    "SutraFoundationalCur2ReadV1",
+  );
+
+  const { foundationalFinopsContracts: _foundational, ...advancedBase } = persisted;
+  void _foundational;
+  const advanced = parsePersistedConnection({
+    ...advancedBase,
+    permissionPackVersion: "standard-2026-08.3",
+    finopsSourceContracts: [{
+      tenantId: "org_local_sutra",
+      connectionId: "conn_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      contractId: "compute-optimizer-export-primary-v1",
+      sourceId: "compute_optimizer_organization_export",
+      accountId: "123456789012",
+      partition: "aws",
+      region: "us-east-1",
+      permissionContractId: "aws-compute-optimizer-organization-export-read-v1",
+      policyName: "SutraFinopsComputeOptimizerExportReadV1",
+    }],
+  });
+  assert.equal(advanced.permissionPackVersion, "standard-2026-08.3");
+  assert.equal(
+    advanced.finopsSourceContracts?.[0]?.sourceId,
+    "compute_optimizer_organization_export",
+  );
+
+  const crossTenant = structuredClone(persisted);
+  crossTenant.foundationalFinopsContracts[0]!.tenantId = "other_tenant";
+  assert.throws(
+    () => parsePersistedConnection(crossTenant),
+    RegistryIntegrityError,
+  );
+
+  const widenedPrefix = structuredClone(persisted);
+  widenedPrefix.foundationalFinopsContracts[0]!.prefix = "sutra/cur2/";
+  assert.throws(
+    () => parsePersistedConnection(widenedPrefix),
+    RegistryIntegrityError,
+  );
+
+  const differentExportArn = structuredClone(persisted);
+  differentExportArn.foundationalFinopsContracts[0]!.exportArn =
+    "arn:aws:bcm-data-exports:us-east-1:123456789012:" +
+    "export/different_export-1234";
+  assert.throws(
+    () => parsePersistedConnection(differentExportArn),
+    RegistryIntegrityError,
+  );
+
+  const additionalField = structuredClone(persisted) as typeof persisted & {
+    foundationalFinopsContracts: Array<
+      typeof persisted.foundationalFinopsContracts[number] & { wildcard: string }
+    >;
+  };
+  additionalField.foundationalFinopsContracts[0]!.wildcard = "*";
+  assert.throws(
+    () => parsePersistedConnection(additionalField),
+    RegistryIntegrityError,
+  );
 });
 
 function connection(connectionId: string) {

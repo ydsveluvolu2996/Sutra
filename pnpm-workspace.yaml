@@ -7,7 +7,10 @@ packages:
 injectWorkspacePackages: true
 
 overrides:
-  postcss: 8.5.19
+  postcss: 8.5.23
+  # CVE-2026-13697 plus five related advisories: undici cache, cookie and CRLF
+  # issues. Transitive via miniflare and wrangler. Patched in 7.29.0.
+  undici: 7.29.0
   sharp: 0.35.0
   # GHSA-v2hh-gcrm-f6hx: fast-uri host confusion via literal backslash
   # authority delimiter. Transitive via ajv (build toolchain). Patched in 3.1.4.

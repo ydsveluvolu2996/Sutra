@@ -71,6 +71,10 @@ const EXPECTED_IMPLEMENTED_READ_ACTIONS = [
   "securityhub:GetFindings",
   "inspector2:BatchGetAccountStatus",
   "inspector2:ListFindings",
+  "bedrock:ListGuardrails",
+  "bedrock:GetGuardrail",
+  "bedrock:GetModelInvocationLoggingConfiguration",
+  "bedrock:GetAccountDataRetention",
   "ce:GetCostAndUsage",
   "ce:GetCostForecast",
 ] as const;
@@ -91,7 +95,7 @@ function connection(
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "4a3e789b-5a2e-47db-9cab-226cbe52fc04",
     status: "ACTIVE",
-    permissionPackVersion: "standard-2026-07.3",
+    permissionPackVersion: "standard-2026-07.4",
     sessionNamePrefix: "mspcmdb-",
     ...overrides,
   };
@@ -182,7 +186,7 @@ function expectedRoleContractClient(
       })),
       tags: [
         { key: "sutra:access-mode", value: "read-only" },
-        { key: "sutra:permission-pack", value: "standard-2026-07.3" },
+        { key: "sutra:permission-pack", value: "standard-2026-07.4" },
         {
           key: "sutra:managed-by",
           value: stored.roleProvisioningMode === "customer_managed" ? "customer" : "cloudformation",
@@ -960,7 +964,9 @@ function agentlessAllowed(): string[] {
 }
 
 test("the agentless session cap allows exactly three writes and nothing more", () => {
-  const writes = agentlessAllowed().filter((action) => !/^sts:|:Describe\*$/u.test(action));
+  const writes = agentlessAllowed().filter(
+    (action) => !action.startsWith("sts:") && !action.endsWith(":Describe*"),
+  );
   // Any fourth write action here is a privilege expansion and must be a
   // deliberate, reviewed change — not something a refactor can add quietly.
   assert.deepEqual(writes.sort(), [

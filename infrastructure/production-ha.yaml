@@ -1,0 +1,2651 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Sutra managed production foundation: internet-facing ALB, multi-AZ ECS
+  Fargate app and worker services, encrypted Multi-AZ PostgreSQL, managed
+  secrets, retained KMS-encrypted evidence storage, AWS Backup, CloudWatch
+  alarms/logs, and optional regional WAF.
+  The legacy single-node private-beta stack is intentionally separate.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: Network prerequisites }
+        Parameters: [VpcId, VpcCidr, PublicSubnetIds, PrivateAppSubnetIds, PrivateDatabaseSubnetIds, AlbIngressPrefixListId, ApprovedHttpsEgressPrefixListId, S3GatewayPrefixListId, EndpointSecurityGroupId, NetworkFirewallArn]
+      - Label: { default: Immutable release }
+        Parameters: [SutraAppImage, SutraMigrationImage, NotificationWorkerImage, HostedBrokerImage, AgentlessScannerImage, ReleaseActivation, PublicOrigin, BrokerHostName, HostedReleaseApproval, HostedRuntimeArchitectureApproval]
+      - Label: { default: Runtime secret and encryption }
+        Parameters: [IdentityMode, ApplicationRuntimeSecretArn, ApplicationRuntimeSecretVersionId, CustomerRoleTemplateUrl, KmsKeyArn]
+      - Label: { default: Agentless scanner approval and pinned infrastructure }
+        Parameters: [AgentlessLiveValidationApproval, AgentlessScanAvailabilityZone, AgentlessKmsKeyArn, AgentlessOrchestratorRoleArn, AgentlessAmiId, AgentlessInstanceType, AgentlessSubnetId, AgentlessSecurityGroupId, AgentlessInstanceProfileArn, AgentlessFindingsBucket]
+      - Label: { default: Application capacity }
+        Parameters: [TaskCpu, TaskMemory, MinimumTaskCount, MaximumTaskCount, MinimumWorkerTaskCount, MaximumWorkerTaskCount, MinimumBrokerTaskCount, MaximumBrokerTaskCount, ResourceRetirementCompleteMisses, EvidenceRetentionDays]
+      - Label: { default: Database capacity and recovery }
+        Parameters: [DatabaseEngineVersion, DatabaseParameterGroupFamily, DatabaseInstanceClass, DatabaseAllocatedStorage, DatabaseMaxAllocatedStorage, DatabaseBackupRetentionDays, EnableBackupVaultLock, BackupVaultMinimumRetentionDays, BackupVaultMaximumRetentionDays]
+      - Label: { default: "Edge, logging, and alerting" }
+        Parameters: [CertificateArn, EnableWaf, WafClientIpHeader, EnableContainerInsights, LogRetentionDays, AccessLogRetentionDays, AlarmSnsTopicArn]
+      - Label: { default: Protected GitHub release identity }
+        Parameters: [GitHubOidcProviderArn, GitHubRepository, GitHubReleaseEnvironment, AppRepositoryName, WorkerRepositoryName, BrokerRepositoryName, ScannerRepositoryName]
+      - Label: { default: SES security-notification feedback }
+        Parameters: [NotificationSesActivation, NotificationSesIdentityArn]
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  VpcCidr:
+    Type: String
+    AllowedPattern: ^(?:\d{1,3}\.){3}\d{1,3}/(?:[0-9]|[12][0-9]|3[0-2])$
+    Description: Exact VPC CIDR, used only for DNS egress to the VPC resolver.
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two public subnets in distinct Availability Zones for the ALB.
+  PrivateAppSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two private subnets in distinct AZs with reviewed HTTPS egress.
+  PrivateDatabaseSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two isolated database subnets in distinct AZs.
+  AlbIngressPrefixListId:
+    Type: String
+    AllowedPattern: ^pl-[0-9a-f]{8,17}$
+    Description: Existing managed prefix list containing only approved edge/probe source CIDRs.
+  ApprovedHttpsEgressPrefixListId:
+    Type: String
+    AllowedPattern: ^pl-[0-9a-f]{8,17}$
+    Description: >-
+      Existing managed prefix list containing only reviewed external-service
+      IPv4 ranges. Private interface endpoints use EndpointSecurityGroupId.
+  S3GatewayPrefixListId:
+    Type: String
+    AllowedPattern: ^pl-[0-9a-f]{8,17}$
+    Description: >-
+      AWS-managed regional S3 prefix list verified as
+      com.amazonaws.<region>.s3. Regional IDs must not be hardcoded.
+  EndpointSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: >-
+      Existing security group attached only to the managed-production AWS
+      PrivateLink endpoints. Workload HTTPS egress targets this group directly.
+  NetworkFirewallArn:
+    Type: String
+    AllowedPattern: ^arn:aws:network-firewall:[a-z0-9-]+:[0-9]{12}:firewall/sutra-production-egress-inspection$
+    Description: >-
+      Exact production egress firewall. Bootstrap and every release verify its
+      deletion/policy/subnet protections and two-AZ READY state before changing
+      workloads.
+  CertificateArn:
+    Type: String
+    AllowedPattern: ^arn:aws(?:-[a-z]+)*:acm:[a-z0-9-]+:[0-9]{12}:certificate/[0-9a-f-]{36}$
+  PublicOrigin:
+    Type: String
+    AllowedPattern: ^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$
+    Description: Canonical browser origin, without a trailing slash.
+  BrokerHostName:
+    Type: String
+    AllowedPattern: ^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$
+    Description: Dedicated broker DNS name whose certificate is covered by CertificateArn and whose alias targets this ALB.
+  AgentlessLiveValidationApproval:
+    Type: String
+    Default: not-approved
+    AllowedValues: ["not-approved", "approved-after-live-end-to-end-agentless-validation"]
+    Description: Explicit operator attestation. The default keeps planning available and execution fail-closed.
+  AgentlessScanAvailabilityZone:
+    Type: AWS::EC2::AvailabilityZone::Name
+    Description: Availability Zone containing the pinned scan subnet.
+  AgentlessKmsKeyArn:
+    Type: String
+    AllowedPattern: ^arn:aws:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$
+  AgentlessScannerImage:
+    Type: String
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/agentless-scanner@sha256:[a-f0-9]{64}$
+    Description: Release-controlled, separately scanned immutable scanner image; mutable tags and other repositories are rejected.
+  AgentlessOrchestratorRoleArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:role/sutra/[A-Za-z0-9+=,.@_/-]+$
+  AgentlessAmiId:
+    Type: AWS::EC2::Image::Id
+    Description: Pinned scanner-host AMI validated by the operator.
+  AgentlessInstanceType:
+    Type: String
+    AllowedPattern: ^[a-z0-9]+\.[a-z0-9]+$
+  AgentlessSubnetId:
+    Type: AWS::EC2::Subnet::Id
+  AgentlessSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  AgentlessInstanceProfileArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:instance-profile/sutra/[A-Za-z0-9+=,.@_/-]+$
+  AgentlessFindingsBucket:
+    Type: String
+    AllowedPattern: ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$
+  HostedReleaseApproval:
+    Type: String
+    AllowedValues: ["approved-after-adversarial-auth-review"]
+    Description: Required explicit production identity/security approval; there is no default.
+  HostedRuntimeArchitectureApproval:
+    Type: String
+    AllowedValues: ["approved-after-stateless-hosted-broker-cutover"]
+    Description: >-
+      Required architecture sign-off after the application no longer starts or
+      health-checks the loopback HMAC collector and all broker state is durable
+      outside individual Fargate tasks. There is no default.
+  SutraAppImage:
+    Type: String
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$
+    Description: Immutable application digest. Mutable tags are rejected.
+  SutraMigrationImage:
+    Type: String
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$
+    Description: Immutable digest used by the one-off migration task.
+  NotificationWorkerImage:
+    Type: String
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/notification-worker@sha256:[a-f0-9]{64}$
+    Description: Immutable notification worker digest. Mutable tags are rejected.
+  HostedBrokerImage:
+    Type: String
+    AllowedPattern: ^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/sutra/broker@sha256:[a-f0-9]{64}$
+    Description: Immutable hosted AWS broker digest. Mutable tags are rejected.
+  ReleaseActivation:
+    Type: String
+    Default: inactive-before-first-migration
+    AllowedValues:
+      - inactive-before-first-migration
+      - active-after-successful-migration
+    Description: >-
+      Fail-closed first-deployment latch. The bootstrap workflow creates the
+      stack inactive, runs the exact digest's migration, and changes this value
+      only from its separately protected activation job.
+  ApplicationRuntimeSecretArn:
+    Type: String
+    AllowedPattern: ^arn:aws(?:-[a-z]+)*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:sutra/production/runtime-[A-Za-z0-9/_+=.@-]+$
+    Description: >-
+      Existing KMS-encrypted JSON secret. Required keys are documented in
+      deploy/production/README.md and are injected individually.
+  ApplicationRuntimeSecretVersionId:
+    Type: String
+    AllowedPattern: ^[A-Za-z0-9-]{32,64}$
+    Description: >-
+      Exact Secrets Manager version that passed semantic release preflight.
+      Every application-runtime ECS secret reference is pinned to this immutable
+      version instead of resolving a mutable staging label at task launch.
+  CustomerRoleTemplateUrl:
+    Type: String
+    MaxLength: 1024
+    AllowedPattern: '^https://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\.s3\.ap-south-1\.amazonaws\.com/templates/standard-2026-07\.4/1f08f008ab024bc9c440340340e7a7cfbad7ed394e6704c3df7173766f727fc8\.yaml\?versionId=(?!null$)[A-Za-z0-9._~%+=/-]{1,256}$'
+    Description: >-
+      Immutable ap-south-1 S3 URL for the exact reviewed customer onboarding
+      role template. A non-null S3 VersionId is mandatory.
+  IdentityMode:
+    Type: String
+    AllowedValues: [oidc, federated]
+    Description: Explicit managed identity mode. Federated keeps OIDC and additionally enables SAML.
+  KmsKeyArn:
+    Type: String
+    AllowedPattern: ^arn:aws(?:-[a-z]+)*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-f-]{36}$
+    Description: Existing customer-managed symmetric KMS key for RDS, secrets, logs, and backup vault.
+  EvidenceRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 30
+    MaxValue: 3650
+    Description: Days managed evidence remains downloadable before fail-closed expiry.
+  TaskCpu:
+    Type: String
+    Default: "1024"
+    AllowedValues: ["1024", "2048", "4096"]
+  TaskMemory:
+    Type: String
+    Default: "4096"
+    AllowedValues: ["4096", "8192", "16384"]
+  MinimumTaskCount:
+    Type: Number
+    MinValue: 2
+    MaxValue: 10
+    Description: Explicit steady-state minimum; production may not use one task.
+  MaximumTaskCount:
+    Type: Number
+    MinValue: 11
+    MaxValue: 100
+  MinimumWorkerTaskCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    MaxValue: 10
+    Description: At least two workers so delivery processing survives one task or AZ failure.
+  MaximumWorkerTaskCount:
+    Type: Number
+    Default: 20
+    MinValue: 11
+    MaxValue: 100
+  MinimumBrokerTaskCount:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    MaxValue: 10
+  MaximumBrokerTaskCount:
+    Type: Number
+    Default: 20
+    MinValue: 3
+    MaxValue: 100
+  ResourceRetirementCompleteMisses:
+    Type: Number
+    Default: 2
+    MinValue: 2
+    MaxValue: 30
+    Description: Consecutive authoritative complete-run misses required before a resource leaves the live CMDB projection.
+  DatabaseEngineVersion:
+    Type: String
+    AllowedPattern: ^[0-9]{2}\.[0-9]+$
+    Description: Region-supported RDS PostgreSQL version approved by the database owner.
+  DatabaseParameterGroupFamily:
+    Type: String
+    AllowedPattern: ^postgres[0-9]{2}$
+    Description: Must match DatabaseEngineVersion (for example postgres17).
+  DatabaseInstanceClass:
+    Type: String
+    AllowedPattern: ^db\.(?:m|r|t)[0-9a-z.]+$
+    Description: Explicit cost-bearing RDS class selected after load testing.
+  DatabaseAllocatedStorage:
+    Type: Number
+    Default: 100
+    MinValue: 100
+    MaxValue: 1000
+  DatabaseMaxAllocatedStorage:
+    Type: Number
+    Default: 2000
+    MinValue: 1001
+    MaxValue: 65536
+  DatabaseBackupRetentionDays:
+    Type: Number
+    Default: 35
+    MinValue: 7
+    MaxValue: 35
+  EnableBackupVaultLock:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Description: Explicit irreversible-after-grace-period AWS Backup Vault Lock decision.
+  BackupVaultMinimumRetentionDays:
+    Type: Number
+    Default: 7
+    MinValue: 7
+    MaxValue: 35
+  BackupVaultMaximumRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 36
+    MaxValue: 3650
+  EnableWaf:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Description: Explicit paid regional WAF decision; there is no default.
+  WafClientIpHeader:
+    Type: String
+    AllowedValues: [CF-Connecting-IP, True-Client-IP, X-Forwarded-For]
+    Description: Header normalized by the only edge networks allowed in AlbIngressPrefixListId.
+  EnableContainerInsights:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Description: Explicit CloudWatch Container Insights cost decision; there is no default.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [7, 14, 30, 60, 90, 120, 180, 365]
+  AccessLogRetentionDays:
+    Type: Number
+    Default: 90
+    AllowedValues: [30, 90, 180, 365, 730]
+  AlarmSnsTopicArn:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^arn:aws(?:-[a-z]+)*:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]{1,256}$
+    Description: Existing paging topic. Empty creates visible alarms without notification actions.
+  GitHubOidcProviderArn:
+    Type: String
+    AllowedPattern: ^arn:aws:iam::[0-9]{12}:oidc-provider/token.actions.githubusercontent.com$
+  GitHubRepository:
+    Type: String
+    AllowedPattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+  GitHubReleaseEnvironment:
+    Type: String
+    Default: production-ha-release
+    AllowedPattern: ^[A-Za-z0-9_.-]{3,64}$
+  AppRepositoryName:
+    Type: String
+    Default: sutra/app
+    AllowedValues: [sutra/app]
+  WorkerRepositoryName:
+    Type: String
+    Default: sutra/notification-worker
+    AllowedValues: [sutra/notification-worker]
+  BrokerRepositoryName:
+    Type: String
+    Default: sutra/broker
+    AllowedValues: [sutra/broker]
+  ScannerRepositoryName:
+    Type: String
+    Default: sutra/agentless-scanner
+    AllowedValues: [sutra/agentless-scanner]
+  NotificationSesIdentityArn:
+    Type: String
+    AllowedPattern: ^arn:aws(?:-[a-z]+)*:ses:[a-z0-9-]+:[0-9]{12}:identity/[A-Za-z0-9_.@-]+$
+    Description: Existing verified SES domain or address identity used by the notification worker.
+  NotificationSesActivation:
+    Type: String
+    Default: disabled-ses-production-access-denied
+    AllowedValues:
+      - disabled-ses-production-access-denied
+      - active-after-production-access-and-feedback-validation
+    Description: >-
+      Independent fail-closed SES latch. Activate only after GetAccount reports
+      ProductionAccessEnabled=true and the configuration-set feedback path,
+      suppression, reputation alarms, and live bounce/complaint tests pass.
+
+Conditions:
+  WafEnabled: !Equals [!Ref EnableWaf, "true"]
+  ContainerInsightsEnabled: !Equals [!Ref EnableContainerInsights, "true"]
+  HasAlarmTopic: !Not [!Equals [!Ref AlarmSnsTopicArn, ""]]
+  FederatedIdentityEnabled: !Equals [!Ref IdentityMode, federated]
+  BackupVaultLockEnabled: !Equals [!Ref EnableBackupVaultLock, "true"]
+  ProductionActivated: !Equals [!Ref ReleaseActivation, active-after-successful-migration]
+  SesNotificationsActivated: !Equals [!Ref NotificationSesActivation, active-after-production-access-and-feedback-validation]
+  AgentlessExecutionApproved: !Equals [!Ref AgentlessLiveValidationApproval, approved-after-live-end-to-end-agentless-validation]
+
+Resources:
+  TrustedAdvisorTaxonomySigningKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Retained asymmetric key for signed AWS Organizations taxonomy captures.
+      Enabled: true
+      KeySpec: RSA_3072
+      KeyUsage: SIGN_VERIFY
+      MultiRegion: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - { Key: "sutra:component", Value: trusted-advisor-taxonomy-signing }
+        - { Key: "sutra:environment", Value: production }
+
+  ApplicationLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /sutra/production/application
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: "sutra:component", Value: application }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:architecture-approval", Value: !Ref HostedRuntimeArchitectureApproval }
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /sutra/production/notification-worker
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+
+  BrokerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: /sutra/production/hosted-broker
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: "sutra:component", Value: hosted-broker }
+        - { Key: "sutra:environment", Value: production }
+
+  WafLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: WafEnabled
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: aws-waf-logs-sutra-production
+      KmsKeyId: !Ref KmsKeyArn
+      RetentionInDays: !Ref LogRetentionDays
+      Tags:
+        - { Key: "sutra:component", Value: edge }
+        - { Key: "sutra:environment", Value: production }
+
+  SesNotificationConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: sutra-production-security-notifications
+      DeliveryOptions:
+        TlsPolicy: REQUIRE
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SendingOptions:
+        SendingEnabled: !If [SesNotificationsActivated, true, false]
+      SuppressionOptions:
+        SuppressedReasons: [BOUNCE, COMPLAINT]
+
+  SesFeedbackDeadLetterQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: sutra-production-ses-feedback-dlq
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:data-classification", Value: security-delivery-evidence }
+
+  SesFeedbackQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: sutra-production-ses-feedback
+      KmsMasterKeyId: !Ref KmsKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      MaximumMessageSize: 262144
+      MessageRetentionPeriod: 1209600
+      ReceiveMessageWaitTimeSeconds: 10
+      VisibilityTimeout: 60
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt SesFeedbackDeadLetterQueue.Arn
+        maxReceiveCount: 5
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+        - { Key: "sutra:data-classification", Value: security-delivery-evidence }
+
+  SesFeedbackEventRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: sutra-production-ses-feedback
+      Description: Routes only this SES configuration set's delivery evidence to the encrypted queue.
+      EventBusName: default
+      State: !If [SesNotificationsActivated, ENABLED, DISABLED]
+      EventPattern:
+        source: [aws.ses]
+        detail:
+          eventType:
+            - Send
+            - Delivery
+            - DeliveryDelay
+            - Bounce
+            - Complaint
+            - Reject
+            - Rendering Failure
+          mail:
+            tags:
+              "ses:configuration-set": [!Ref SesNotificationConfigurationSet]
+      Targets:
+        - Id: encrypted-feedback-queue
+          Arn: !GetAtt SesFeedbackQueue.Arn
+          DeadLetterConfig:
+            Arn: !GetAtt SesFeedbackDeadLetterQueue.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 10
+
+  SesFeedbackQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref SesFeedbackQueue
+        - !Ref SesFeedbackDeadLetterQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: sqs:*
+            Resource:
+              - !GetAtt SesFeedbackQueue.Arn
+              - !GetAtt SesFeedbackDeadLetterQueue.Arn
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: AllowOnlyExactEventRule
+            Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource:
+              - !GetAtt SesFeedbackQueue.Arn
+              - !GetAtt SesFeedbackDeadLetterQueue.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+              ArnEquals:
+                aws:SourceArn: !GetAtt SesFeedbackEventRule.Arn
+
+  SesNotificationEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    Properties:
+      ConfigurationSetName: !Ref SesNotificationConfigurationSet
+      EventDestination:
+        Name: sutra-production-eventbridge
+        Enabled: !If [SesNotificationsActivated, true, false]
+        MatchingEventTypes:
+          - SEND
+          - DELIVERY
+          - DELIVERY_DELAY
+          - BOUNCE
+          - COMPLAINT
+          - REJECT
+          - RENDERING_FAILURE
+        EventBridgeDestination:
+          EventBusArn: !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/default
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: sutra-production
+      ClusterSettings:
+        - Name: containerInsights
+          Value: !If [ContainerInsightsEnabled, enabled, disabled]
+      Tags:
+        - { Key: "sutra:component", Value: application }
+        - { Key: "sutra:environment", Value: production }
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: TLS from the approved edge prefix list only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress: []
+      Tags:
+        - { Key: Name, Value: sutra-production-alb }
+
+  BrokerAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Internal TLS broker load balancer; ingress from Sutra application tasks only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress: []
+      Tags:
+        - { Key: Name, Value: sutra-production-broker-alb }
+
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Sutra tasks; ingress only from the ALB
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
+          Description: HTTPS to reviewed production destinations only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - { Key: Name, Value: sutra-production-app }
+
+  WorkerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Notification workers with database and reviewed HTTPS egress only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
+          Description: SES and approved external notification HTTPS destinations
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - { Key: Name, Value: sutra-production-notification-worker }
+
+  BrokerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Hosted broker tasks with ALB ingress and reviewed AWS HTTPS egress
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: >-
+            Broker-only L3 reachability; private subnet defaults force this
+            through strict L7 Network Firewall for .amazonaws.com
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - { Key: Name, Value: sutra-production-hosted-broker }
+
+  VulnerabilityFeedSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Scheduled vulnerability feed task with database and reviewed HTTPS egress only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref ApprovedHttpsEgressPrefixListId
+          Description: CISA, FIRST EPSS, NVD, and approved external feed destinations
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationSecurityGroupId: !Ref EndpointSecurityGroupId
+          Description: HTTPS to managed AWS PrivateLink endpoints only
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          DestinationPrefixListId: !Ref S3GatewayPrefixListId
+          Description: HTTPS to regional S3 through the gateway endpoint only
+        - IpProtocol: udp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+        - IpProtocol: tcp
+          FromPort: 53
+          ToPort: 53
+          CidrIp: !Ref VpcCidr
+      Tags:
+        - { Key: Name, Value: sutra-production-vulnerability-feed }
+
+  AlbIngressFromApprovedEdge:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourcePrefixListId: !Ref AlbIngressPrefixListId
+      Description: TLS from approved edge and synthetic-probe networks
+
+  AlbToApplicationEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref AlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      DestinationSecurityGroupId: !Ref ApplicationSecurityGroup
+      Description: ALB health and application traffic only
+
+  ApplicationToBrokerAlbEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      DestinationSecurityGroupId: !Ref BrokerAlbSecurityGroup
+      Description: Asymmetric authenticated broker HTTPS only
+
+  BrokerAlbIngressFromApplication:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BrokerAlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+      Description: Broker HTTPS from application tasks only
+
+  BrokerAlbToBrokerEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BrokerAlbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8788
+      ToPort: 8788
+      DestinationSecurityGroupId: !Ref BrokerSecurityGroup
+      Description: Broker health and authenticated application traffic only
+
+  ApplicationIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: tcp
+      FromPort: 3000
+      ToPort: 3000
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: Application traffic from the production ALB only
+
+  BrokerIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BrokerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 8788
+      ToPort: 8788
+      SourceSecurityGroupId: !Ref BrokerAlbSecurityGroup
+      Description: Broker traffic from the internal broker ALB only
+
+  ApplicationToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref ApplicationSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
+      Description: PostgreSQL TLS to the managed database only
+
+  WorkerToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref WorkerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
+      Description: PostgreSQL TLS to the managed database only
+
+  BrokerToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref BrokerSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
+      Description: PostgreSQL TLS to shared durable broker state only
+
+  VulnerabilityFeedToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !Ref VulnerabilityFeedSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      DestinationSecurityGroupId: !Ref DatabaseSecurityGroup
+      Description: PostgreSQL TLS from the scheduled feed task only
+
+  DatabaseSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PostgreSQL from Sutra tasks only
+      VpcId: !Ref VpcId
+      SecurityGroupIngress: []
+      SecurityGroupEgress: []
+      Tags:
+        - { Key: Name, Value: sutra-production-database }
+
+  DatabaseIngressFromApplication:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+      Description: PostgreSQL TLS from application and migration tasks only
+
+  DatabaseIngressFromWorker:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref WorkerSecurityGroup
+      Description: PostgreSQL TLS from notification workers only
+
+  DatabaseIngressFromBroker:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref BrokerSecurityGroup
+      Description: PostgreSQL TLS from hosted broker tasks only
+
+  DatabaseIngressFromVulnerabilityFeed:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DatabaseSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref VulnerabilityFeedSecurityGroup
+      Description: PostgreSQL TLS from the scheduled feed task only
+
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: RetainAlbAccessLogs
+            Status: Enabled
+            ExpirationInDays: !Ref AccessLogRetentionDays
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 }
+      Tags:
+        - { Key: "sutra:component", Value: edge-access-logs }
+        - { Key: "sutra:environment", Value: production }
+
+  AccessLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAlbLogDeliveryAclCheck
+            Effect: Allow
+            Principal: { Service: logdelivery.elasticloadbalancing.amazonaws.com }
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt AccessLogBucket.Arn
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/*
+          - Sid: AllowAlbLogDelivery
+            Effect: Allow
+            Principal: { Service: logdelivery.elasticloadbalancing.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub "${AccessLogBucket.Arn}/alb/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              ArnLike:
+                aws:SourceArn: !Sub arn:${AWS::Partition}:elasticloadbalancing:${AWS::Region}:${AWS::AccountId}:loadbalancer/*
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt AccessLogBucket.Arn
+              - !Sub "${AccessLogBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: AccessLogBucketPolicy
+    Properties:
+      Name: sutra-production
+      Scheme: internet-facing
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups: [!Ref AlbSecurityGroup]
+      Subnets: !Ref PublicSubnetIds
+      LoadBalancerAttributes:
+        - { Key: deletion_protection.enabled, Value: "true" }
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: "true" }
+        - { Key: routing.http.desync_mitigation_mode, Value: strictest }
+        - { Key: idle_timeout.timeout_seconds, Value: "360" }
+        - { Key: access_logs.s3.enabled, Value: "true" }
+        - { Key: access_logs.s3.bucket, Value: !Ref AccessLogBucket }
+        - { Key: access_logs.s3.prefix, Value: alb }
+      Tags:
+        - { Key: "sutra:component", Value: edge }
+        - { Key: "sutra:environment", Value: production }
+
+  ApplicationTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: sutra-production-app
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 3000
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /api/healthz
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+        - { Key: load_balancing.algorithm.type, Value: least_outstanding_requests }
+
+  BrokerTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: sutra-production-broker
+      VpcId: !Ref VpcId
+      Protocol: HTTP
+      Port: 8788
+      TargetType: ip
+      HealthCheckEnabled: true
+      HealthCheckPath: /readyz
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+        - { Key: load_balancing.algorithm.type, Value: least_outstanding_requests }
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: [{ TargetGroupArn: !Ref ApplicationTargetGroup, Weight: 1 }]
+            TargetGroupStickinessConfig: { Enabled: false }
+
+  DenyPublicInternalApiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 1
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig: { Values: ["/api/internal/*"] }
+      Actions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            StatusCode: "404"
+            ContentType: application/json
+            MessageBody: '{"error":{"code":"NOT_FOUND"}}'
+
+  BrokerLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: AccessLogBucketPolicy
+    Properties:
+      Name: sutra-production-broker
+      Scheme: internal
+      Type: application
+      IpAddressType: ipv4
+      SecurityGroups: [!Ref BrokerAlbSecurityGroup]
+      Subnets: !Ref PrivateAppSubnetIds
+      LoadBalancerAttributes:
+        - { Key: deletion_protection.enabled, Value: "true" }
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: "true" }
+        - { Key: routing.http.desync_mitigation_mode, Value: strictest }
+        - { Key: idle_timeout.timeout_seconds, Value: "360" }
+        - { Key: access_logs.s3.enabled, Value: "true" }
+        - { Key: access_logs.s3.bucket, Value: !Ref AccessLogBucket }
+        - { Key: access_logs.s3.prefix, Value: broker-alb }
+      Tags:
+        - { Key: "sutra:component", Value: hosted-broker-edge }
+        - { Key: "sutra:environment", Value: production }
+
+  BrokerHttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref BrokerLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: [{ TargetGroupArn: !Ref BrokerTargetGroup, Weight: 1 }]
+            TargetGroupStickinessConfig: { Enabled: false }
+
+  RegionalWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Condition: WafEnabled
+    Properties:
+      Name: sutra-production
+      Scope: REGIONAL
+      DefaultAction: { Allow: {} }
+      VisibilityConfig:
+        CloudWatchMetricsEnabled: true
+        MetricName: sutra-production-waf
+        SampledRequestsEnabled: true
+      Rules:
+        - Name: AwsCommon
+          Priority: 10
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: sutra-common, SampledRequestsEnabled: true }
+        - Name: AwsKnownBadInputs
+          Priority: 20
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: sutra-bad-inputs, SampledRequestsEnabled: true }
+        - Name: AwsIpReputation
+          Priority: 30
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesAmazonIpReputationList
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: sutra-ip-reputation, SampledRequestsEnabled: true }
+        - Name: PerIpRateLimit
+          Priority: 40
+          Action: { Block: {} }
+          Statement:
+            RateBasedStatement:
+              AggregateKeyType: FORWARDED_IP
+              Limit: 2000
+              EvaluationWindowSec: 300
+              ForwardedIPConfig:
+                FallbackBehavior: NO_MATCH
+                HeaderName: !Ref WafClientIpHeader
+          VisibilityConfig: { CloudWatchMetricsEnabled: true, MetricName: sutra-rate-limit, SampledRequestsEnabled: true }
+
+  RegionalWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: WafEnabled
+    Properties:
+      ResourceArn: !Ref PublicLoadBalancer
+      WebACLArn: !GetAtt RegionalWebAcl.Arn
+
+  RegionalWebAclLogging:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Condition: WafEnabled
+    Properties:
+      ResourceArn: !GetAtt RegionalWebAcl.Arn
+      LogDestinationConfigs:
+        - !GetAtt WafLogGroup.Arn
+      RedactedFields:
+        - SingleHeader: { Name: authorization }
+        - SingleHeader: { Name: cookie }
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Sutra production isolated database subnets
+      SubnetIds: !Ref PrivateDatabaseSubnetIds
+
+  DatabaseParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Sutra production PostgreSQL TLS and connection audit settings
+      Family: !Ref DatabaseParameterGroupFamily
+      Parameters:
+        rds.force_ssl: "1"
+        log_connections: "1"
+        log_disconnections: "1"
+        log_lock_waits: "1"
+
+  DatabaseAdminSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: sutra/production/database/admin
+      KmsKeyId: !Ref KmsKeyArn
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"sutra_admin"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+      Tags:
+        - { Key: "sutra:component", Value: database }
+
+  DatabaseRuntimeSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: sutra/production/database/runtime
+      KmsKeyId: !Ref KmsKeyArn
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"sutra_app"}'
+        GenerateStringKey: password
+        PasswordLength: 40
+        ExcludePunctuation: true
+      Tags:
+        - { Key: "sutra:component", Value: database }
+
+  DatabaseMonitoringRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: monitoring.rds.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      DBInstanceIdentifier: sutra-production
+      Engine: postgres
+      EngineVersion: !Ref DatabaseEngineVersion
+      DBInstanceClass: !Ref DatabaseInstanceClass
+      DBName: sutra
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:password}}"
+      Port: 5432
+      MultiAZ: true
+      PubliclyAccessible: false
+      StorageType: gp3
+      AllocatedStorage: !Ref DatabaseAllocatedStorage
+      MaxAllocatedStorage: !Ref DatabaseMaxAllocatedStorage
+      StorageEncrypted: true
+      KmsKeyId: !Ref KmsKeyArn
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      VPCSecurityGroups: [!Ref DatabaseSecurityGroup]
+      DBParameterGroupName: !Ref DatabaseParameterGroup
+      BackupRetentionPeriod: !Ref DatabaseBackupRetentionDays
+      PreferredBackupWindow: 20:00-21:00
+      PreferredMaintenanceWindow: sun:21:30-sun:22:30
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DeletionProtection: true
+      EnablePerformanceInsights: true
+      PerformanceInsightsKMSKeyId: !Ref KmsKeyArn
+      PerformanceInsightsRetentionPeriod: 7
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt DatabaseMonitoringRole.Arn
+      EnableCloudwatchLogsExports: [postgresql, upgrade]
+      Tags:
+        - { Key: "sutra:component", Value: database }
+        - { Key: "sutra:environment", Value: production }
+
+  ApplicationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullAppWriteAppLogsAndReadRuntimeSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource: !GetAtt ApplicationLogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  VulnerabilityFeedExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullAppWriteFeedLogsAndReadDatabaseAppSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource: !GetAtt ApplicationLogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  MigrationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: sutra-production-ha-migration-execution
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullAppWriteMigrationLogsAndReadDatabaseSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource: !GetAtt ApplicationLogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DatabaseAdminSecret
+                  - !Ref DatabaseRuntimeSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  WorkerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullWorkerWriteWorkerLogsAndReadRuntimeSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${WorkerRepositoryName}
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource: !GetAtt WorkerLogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  BrokerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: PullBrokerWriteLogsAndReadRuntimeSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action: ["ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
+                Resource: !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${BrokerRepositoryName}
+              - Effect: Allow
+                Action: ["logs:CreateLogStream", "logs:PutLogEvents"]
+                Resource: !GetAtt BrokerLogGroup.Arn
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref ApplicationRuntimeSecretArn
+                  - !Ref DatabaseRuntimeSecret
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  ApplicationTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: VerifyOnlyTrustedAdvisorTaxonomyDigests
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: VerifyOnlyPinnedTaxonomyDigest
+                Effect: Allow
+                Action: kms:Verify
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+                    kms:MessageType: DIGEST
+                    kms:SigningAlgorithm: RSASSA_PSS_SHA_256
+        - PolicyName: ReadWriteOnlyOpaqueManagedEvidence
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadAndCreateImmutableEvidenceObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub "${EvidenceBucket.Arn}/evidence/v1/*"
+              - Sid: UseProductionKeyOnlyThroughEvidenceS3
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+        - PolicyName: ManageOnlyTenantScopedItsmCredentials
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CreateTaggedItsmCredentials
+                Effect: Allow
+                Action: secretsmanager:CreateSecret
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/production/itsm/*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/sutra:purpose: itsm-hmac
+              - Sid: ReadRotateAndScheduleDeleteItsmCredentials
+                Effect: Allow
+                Action:
+                  - secretsmanager:DeleteSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/production/itsm/*
+                Condition:
+                  StringEquals:
+                    secretsmanager:ResourceTag/sutra:purpose: itsm-hmac
+              - Sid: EncryptItsmCredentialsWithProductionKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+  BrokerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SignOnlyTrustedAdvisorTaxonomyDigests
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SignOnlyPinnedTaxonomyDigest
+                Effect: Allow
+                Action: kms:Sign
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+                    kms:MessageType: DIGEST
+                    kms:SigningAlgorithm: RSASSA_PSS_SHA_256
+        - PolicyName: AssumeOnlyDedicatedCustomerRoles
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DenyOutsideSutraNamespace
+                Effect: Deny
+                Action: sts:AssumeRole
+                NotResource: !Sub arn:${AWS::Partition}:iam::*:role/sutra/*
+              - Sid: AssumeDedicatedCustomerRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !Sub arn:${AWS::Partition}:iam::*:role/sutra/*
+
+  WorkerTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ReadOnlyNotificationDestinationSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Sub arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/notifications/*
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+        - !If
+          - SesNotificationsActivated
+          - PolicyName: SendFromOneVerifiedSesIdentity
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: SendOnlyAfterSesFeedbackActivation
+                  Effect: Allow
+                  Action: ses:SendEmail
+                  Resource: !Ref NotificationSesIdentityArn
+          - !Ref "AWS::NoValue"
+        - !If
+          - SesNotificationsActivated
+          - PolicyName: ConsumeOnlySesFeedbackQueue
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Sid: ReceiveAndDeleteExactFeedbackQueue
+                  Effect: Allow
+                  Action:
+                    - sqs:ReceiveMessage
+                    - sqs:DeleteMessage
+                  Resource: !GetAtt SesFeedbackQueue.Arn
+                - Sid: DecryptOnlySesFeedbackThroughSqs
+                  Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref KmsKeyArn
+                  Condition:
+                    StringEquals:
+                      kms:ViaService: !Sub sqs.${AWS::Region}.amazonaws.com
+          - !Ref "AWS::NoValue"
+
+  AppTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sutra-production-app
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: !Ref TaskCpu
+      Memory: !Ref TaskMemory
+      ExecutionRoleArn: !GetAtt ApplicationExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApplicationTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      EphemeralStorage: { SizeInGiB: 30 }
+      Volumes:
+        - { Name: runtime-config }
+        - { Name: app-scratch }
+        - { Name: wrangler-scratch }
+      ContainerDefinitions:
+        - Name: app
+          Image: !Ref SutraAppImage
+          Essential: true
+          EntryPoint: [/app/deploy/production/entrypoint.sh]
+          ReadonlyRootFilesystem: true
+          StopTimeout: 120
+          PortMappings:
+            - { ContainerPort: 3000, HostPort: 3000, Protocol: tcp, Name: http }
+          MountPoints:
+            - { SourceVolume: runtime-config, ContainerPath: /app/runtime, ReadOnly: false }
+            - { SourceVolume: app-scratch, ContainerPath: /app/.sutra, ReadOnly: false }
+            - { SourceVolume: wrangler-scratch, ContainerPath: /app/.wrangler, ReadOnly: false }
+          Environment:
+            - { Name: SUTRA_DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: SUTRA_DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: SUTRA_DB_NAME, Value: sutra }
+            - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
+            - { Name: SUTRA_PUBLIC_ORIGIN, Value: !Ref PublicOrigin }
+            - { Name: SUTRA_CUSTOMER_ROLE_TEMPLATE_URL, Value: !Ref CustomerRoleTemplateUrl }
+            - { Name: SUTRA_RELEASE_IMAGE, Value: !Ref SutraAppImage }
+            - { Name: SUTRA_HOSTED_RELEASE_APPROVAL, Value: !Ref HostedReleaseApproval }
+            - { Name: SUTRA_IDENTITY_MODE, Value: !Ref IdentityMode }
+            - { Name: SUTRA_JOB_RUNNER_SELF_TICK, Value: "false" }
+            - { Name: SUTRA_BROKER_URL, Value: !Sub "https://${BrokerHostName}" }
+            - { Name: SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES, Value: !Ref ResourceRetirementCompleteMisses }
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+            - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
+            - { Name: SUTRA_ITSM_SECRET_BACKEND, Value: aws-secrets-manager }
+            - { Name: SUTRA_ITSM_SECRET_PREFIX, Value: sutra/production/itsm/ }
+            - { Name: SUTRA_ITSM_SECRET_KMS_KEY_ARN, Value: !Ref KmsKeyArn }
+            - { Name: SUTRA_EVIDENCE_BACKEND, Value: s3 }
+            - { Name: SUTRA_EVIDENCE_BUCKET, Value: !Ref EvidenceBucket }
+            - { Name: SUTRA_EVIDENCE_KMS_KEY_ARN, Value: !Ref KmsKeyArn }
+            - { Name: SUTRA_EVIDENCE_RETENTION_DAYS, Value: !Ref EvidenceRetentionDays }
+            - { Name: SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION, Value: production-finops-evidence-v1 }
+            - { Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN, Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn }
+          Secrets:
+            - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_AUTH_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AUTH_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONNECTION_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONNECTION_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_TURNSTILE_SITE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SITE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_TURNSTILE_SECRET_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_TURNSTILE_SECRET_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONTACT_RECIPIENT, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_RECIPIENT::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_CONTACT_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_CONTACT_FROM::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_INVITATION_FROM, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_INVITATION_FROM::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_DATACENTER, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_DATACENTER::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_MAIL_ACCOUNT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_MAIL_ACCOUNT_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_CLIENT_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_CLIENT_SECRET, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_CLIENT_SECRET::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_ZOHO_REFRESH_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_ZOHO_REFRESH_TOKEN::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_APP_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_OIDC_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_PROVIDERS::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_OIDC_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_OIDC_TRANSACTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - !If
+              - FederatedIdentityEnabled
+              - { Name: SUTRA_SAML_PROVIDERS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_PROVIDERS::${ApplicationRuntimeSecretVersionId}" }
+              - !Ref "AWS::NoValue"
+            - !If
+              - FederatedIdentityEnabled
+              - { Name: SUTRA_SAML_TRANSACTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_SAML_TRANSACTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+              - !Ref "AWS::NoValue"
+            - { Name: SUTRA_BROKER_CLIENT_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_CLIENT_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_CLIENT_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_PUBLIC_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PUBLIC_KEY::${ApplicationRuntimeSecretVersionId}" }
+          HealthCheck:
+            Command:
+              - CMD
+              - node
+              - -e
+              - fetch('http://127.0.0.1:3000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 45
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApplicationLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: app
+              mode: non-blocking
+              max-buffer-size: 25m
+        - Name: background-job-runner
+          Image: !Ref SutraAppImage
+          Essential: true
+          EntryPoint: [node, /app/scripts/production-job-runner.mjs]
+          ReadonlyRootFilesystem: true
+          StopTimeout: 120
+          DependsOn:
+            - { ContainerName: app, Condition: HEALTHY }
+          Environment:
+            - { Name: SUTRA_PUBLIC_ORIGIN, Value: !Ref PublicOrigin }
+            - { Name: SUTRA_JOB_RUNNER_INTERVAL_MS, Value: "15000" }
+          Secrets:
+            - { Name: SUTRA_JOB_RUNNER_TOKEN, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_JOB_RUNNER_TOKEN::${ApplicationRuntimeSecretVersionId}" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApplicationLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: background-job-runner
+              mode: non-blocking
+              max-buffer-size: 10m
+      Tags:
+        - { Key: "sutra:release-boundary", Value: production }
+
+  VulnerabilityFeedTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sutra-production-vulnerability-feed
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt VulnerabilityFeedExecutionRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: vulnerability-feed-refresh
+          Image: !Ref SutraAppImage
+          Essential: true
+          EntryPoint:
+            - /usr/bin/timeout
+            - --signal=TERM
+            - --kill-after=120s
+            - 1800s
+            - node
+            - /app/scripts/vuln-feed-refresh.mjs
+          ReadonlyRootFilesystem: true
+          StopTimeout: 120
+          Environment:
+            - { Name: SUTRA_VULN_FEED_STRICT, Value: "true" }
+            - { Name: SUTRA_DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: SUTRA_DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: SUTRA_DB_NAME, Value: sutra }
+            - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
+          Secrets:
+            - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_FEED_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApplicationLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: vulnerability-feed
+              mode: non-blocking
+              max-buffer-size: 10m
+      Tags:
+        - { Key: "sutra:release-boundary", Value: production }
+
+  MigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sutra-production-migration
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt MigrationExecutionRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: migrate
+          Image: !Ref SutraMigrationImage
+          Essential: true
+          EntryPoint: [node, /app/deploy/production/migrate.mjs]
+          ReadonlyRootFilesystem: true
+          Environment:
+            - { Name: SUTRA_DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: SUTRA_DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: SUTRA_DB_NAME, Value: sutra }
+          Secrets:
+            - { Name: SUTRA_DB_ADMIN_USER, ValueFrom: !Sub "${DatabaseAdminSecret}:username::" }
+            - { Name: SUTRA_DB_ADMIN_PASSWORD, ValueFrom: !Sub "${DatabaseAdminSecret}:password::" }
+            - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApplicationLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: migration
+      Tags:
+        - { Key: "sutra:release-boundary", Value: production }
+
+  WorkerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    DependsOn:
+      - SesNotificationEventDestination
+      - SesFeedbackEventRule
+      - SesFeedbackQueuePolicy
+    Properties:
+      Family: sutra-production-worker
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt WorkerExecutionRole.Arn
+      TaskRoleArn: !GetAtt WorkerTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: notification-worker
+          Image: !Ref NotificationWorkerImage
+          Essential: true
+          ReadonlyRootFilesystem: true
+          Environment:
+            - { Name: SUTRA_DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: SUTRA_DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: SUTRA_DB_NAME, Value: sutra }
+            - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
+            - { Name: SUTRA_NOTIFICATION_HEALTH_PORT, Value: "8081" }
+            - { Name: SUTRA_NOTIFICATION_POLL_INTERVAL_MS, Value: "1000" }
+            - { Name: SUTRA_NOTIFICATION_CONFIG_PREFIX, Value: "sutra/notifications/" }
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_CONFIGURATION_SET, Value: !Ref SesNotificationConfigurationSet }
+              - !Ref "AWS::NoValue"
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_FEEDBACK_QUEUE_URL, Value: !Ref SesFeedbackQueue }
+              - !Ref "AWS::NoValue"
+            - !If
+              - SesNotificationsActivated
+              - { Name: SUTRA_SES_FEEDBACK_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }
+              - !Ref "AWS::NoValue"
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+            - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
+          Secrets:
+            - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_MANAGED_OUTBOUND_WORKER_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+          HealthCheck:
+            Command:
+              - CMD
+              - node
+              - -e
+              - fetch('http://127.0.0.1:8081/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 30
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WorkerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: worker
+              mode: non-blocking
+              max-buffer-size: 10m
+      Tags:
+        - { Key: "sutra:release-boundary", Value: production }
+
+  BrokerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: sutra-production-broker
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "1024"
+      Memory: "2048"
+      ExecutionRoleArn: !GetAtt BrokerExecutionRole.Arn
+      TaskRoleArn: !GetAtt BrokerTaskRole.Arn
+      RuntimePlatform: { CpuArchitecture: X86_64, OperatingSystemFamily: LINUX }
+      ContainerDefinitions:
+        - Name: hosted-broker
+          Image: !Ref HostedBrokerImage
+          Essential: true
+          EntryPoint: [/app/deploy/production/broker-entrypoint.sh]
+          ReadonlyRootFilesystem: true
+          StopTimeout: 120
+          PortMappings:
+            - { ContainerPort: 8788, HostPort: 8788, Protocol: tcp, Name: broker-http }
+          Environment:
+            - { Name: SUTRA_DEPLOYMENT_ENV, Value: production }
+            - { Name: SUTRA_BROKER_AUTH_MODE, Value: asymmetric }
+            - { Name: SUTRA_BROKER_PORT, Value: "8788" }
+            - { Name: SUTRA_DB_HOST, Value: !GetAtt Database.Endpoint.Address }
+            - { Name: SUTRA_DB_PORT, Value: !GetAtt Database.Endpoint.Port }
+            - { Name: SUTRA_DB_NAME, Value: sutra }
+            - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
+            - { Name: SUTRA_COLLECTOR_PRINCIPAL_ARN, Value: !GetAtt BrokerTaskRole.Arn }
+            - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
+            - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
+            - { Name: SUTRA_AGENTLESS_SCAN_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }
+            - { Name: SUTRA_AGENTLESS_SCAN_AZ, Value: !Ref AgentlessScanAvailabilityZone }
+            - { Name: SUTRA_AGENTLESS_KMS_KEY_ARN, Value: !Ref AgentlessKmsKeyArn }
+            - { Name: SUTRA_AGENTLESS_SCANNER_IMAGE, Value: !Ref AgentlessScannerImage }
+            - Name: SUTRA_AGENTLESS_LIVE_VALIDATED
+              Value: !If [AgentlessExecutionApproved, "true", "false"]
+            - { Name: SUTRA_AGENTLESS_LIVE_VALIDATION_APPROVAL, Value: !Ref AgentlessLiveValidationApproval }
+            - { Name: SUTRA_AGENTLESS_ORCHESTRATOR_ROLE_ARN, Value: !Ref AgentlessOrchestratorRoleArn }
+            - { Name: SUTRA_AGENTLESS_AMI_ID, Value: !Ref AgentlessAmiId }
+            - { Name: SUTRA_AGENTLESS_INSTANCE_TYPE, Value: !Ref AgentlessInstanceType }
+            - { Name: SUTRA_AGENTLESS_SUBNET_ID, Value: !Ref AgentlessSubnetId }
+            - { Name: SUTRA_AGENTLESS_SECURITY_GROUP_ID, Value: !Ref AgentlessSecurityGroupId }
+            - { Name: SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN, Value: !Ref AgentlessInstanceProfileArn }
+            - { Name: SUTRA_AGENTLESS_FINDINGS_BUCKET, Value: !Ref AgentlessFindingsBucket }
+            - { Name: SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN, Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn }
+          Secrets:
+            - { Name: SUTRA_DB_APP_PASSWORD, ValueFrom: !Sub "${DatabaseRuntimeSecret}:password::" }
+            - { Name: SUTRA_REGISTRY_ENCRYPTION_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_REGISTRY_ENCRYPTION_KEY::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_APP_PUBLIC_KEYS, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_APP_PUBLIC_KEYS::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_KEY_ID, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_KEY_ID::${ApplicationRuntimeSecretVersionId}" }
+            - { Name: SUTRA_BROKER_RESPONSE_PRIVATE_KEY, ValueFrom: !Sub "${ApplicationRuntimeSecretArn}:SUTRA_BROKER_RESPONSE_PRIVATE_KEY::${ApplicationRuntimeSecretVersionId}" }
+          HealthCheck:
+            Command:
+              - CMD
+              - node
+              - -e
+              - fetch('http://127.0.0.1:8788/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))
+            Interval: 15
+            Timeout: 5
+            Retries: 3
+            StartPeriod: 45
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BrokerLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: broker
+              mode: non-blocking
+              max-buffer-size: 25m
+      Tags:
+        - { Key: "sutra:release-boundary", Value: production }
+
+  VulnerabilityFeedScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RunOnlyTheVulnerabilityFeedTask
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-vulnerability-feed:*
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !GetAtt Cluster.Arn
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt VulnerabilityFeedExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+
+  VulnerabilityFeedSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: sutra-production-vulnerability-feed
+      Description: Daily strict EPSS bulk refresh in a private bounded Fargate task
+      ScheduleExpression: cron(30 3 * * ? *)
+      State: !If [ProductionActivated, ENABLED, DISABLED]
+      Targets:
+        - Id: vulnerability-feed-refresh
+          Arn: !GetAtt Cluster.Arn
+          RoleArn: !GetAtt VulnerabilityFeedScheduleRole.Arn
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 2
+          EcsParameters:
+            TaskDefinitionArn: !Ref VulnerabilityFeedTaskDefinition
+            LaunchType: FARGATE
+            PlatformVersion: LATEST
+            TaskCount: 1
+            NetworkConfiguration:
+              AwsVpcConfiguration:
+                AssignPublicIp: DISABLED
+                Subnets: !Ref PrivateAppSubnetIds
+                SecurityGroups: [!Ref VulnerabilityFeedSecurityGroup]
+
+  AppService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpsListener
+    Properties:
+      ServiceName: sutra-production-app
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref AppTaskDefinition
+      DesiredCount: !If [ProductionActivated, !Ref MinimumTaskCount, 0]
+      EnableECSManagedTags: true
+      PropagateTags: TASK_DEFINITION
+      AvailabilityZoneRebalancing: ENABLED
+      HealthCheckGracePeriodSeconds: 90
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      LoadBalancers:
+        - TargetGroupArn: !Ref ApplicationTargetGroup
+          ContainerName: app
+          ContainerPort: 3000
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref ApplicationSecurityGroup]
+          Subnets: !Ref PrivateAppSubnetIds
+      Tags:
+        - { Key: "sutra:component", Value: application }
+        - { Key: "sutra:environment", Value: production }
+
+  WorkerService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: sutra-production-worker
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref WorkerTaskDefinition
+      DesiredCount: !If [ProductionActivated, !Ref MinimumWorkerTaskCount, 0]
+      EnableECSManagedTags: true
+      PropagateTags: TASK_DEFINITION
+      AvailabilityZoneRebalancing: ENABLED
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref WorkerSecurityGroup]
+          Subnets: !Ref PrivateAppSubnetIds
+      Tags:
+        - { Key: "sutra:component", Value: notification-worker }
+        - { Key: "sutra:environment", Value: production }
+
+  BrokerService:
+    Type: AWS::ECS::Service
+    DependsOn: BrokerHttpsListener
+    Properties:
+      ServiceName: sutra-production-broker
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      PlatformVersion: LATEST
+      TaskDefinition: !Ref BrokerTaskDefinition
+      DesiredCount: !If [ProductionActivated, !Ref MinimumBrokerTaskCount, 0]
+      EnableECSManagedTags: true
+      PropagateTags: TASK_DEFINITION
+      AvailabilityZoneRebalancing: ENABLED
+      HealthCheckGracePeriodSeconds: 90
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker: { Enable: true, Rollback: true }
+      LoadBalancers:
+        - TargetGroupArn: !Ref BrokerTargetGroup
+          ContainerName: hosted-broker
+          ContainerPort: 8788
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups: [!Ref BrokerSecurityGroup]
+          Subnets: !Ref PrivateAppSubnetIds
+      Tags:
+        - { Key: "sutra:component", Value: hosted-broker }
+        - { Key: "sutra:environment", Value: production }
+
+  ServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
+    DependsOn: AppService
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub service/${Cluster}/sutra-production-app
+      MinCapacity: !Ref MinimumTaskCount
+      MaxCapacity: !Ref MaximumTaskCount
+
+  CpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
+    Properties:
+      PolicyName: sutra-production-app-cpu
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+
+  MemoryScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
+    Properties:
+      PolicyName: sutra-production-app-memory
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref ServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 70
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageMemoryUtilization }
+
+  WorkerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
+    DependsOn: WorkerService
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub service/${Cluster}/sutra-production-worker
+      MinCapacity: !Ref MinimumWorkerTaskCount
+      MaxCapacity: !Ref MaximumWorkerTaskCount
+
+  WorkerCpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
+    Properties:
+      PolicyName: sutra-production-worker-cpu
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref WorkerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+
+  BrokerScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ProductionActivated
+    DependsOn: BrokerService
+    Properties:
+      ServiceNamespace: ecs
+      ScalableDimension: ecs:service:DesiredCount
+      ResourceId: !Sub service/${Cluster}/sutra-production-broker
+      MinCapacity: !Ref MinimumBrokerTaskCount
+      MaxCapacity: !Ref MaximumBrokerTaskCount
+
+  BrokerCpuScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ProductionActivated
+    Properties:
+      PolicyName: sutra-production-broker-cpu
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref BrokerScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        TargetValue: 60
+        ScaleInCooldown: 300
+        ScaleOutCooldown: 60
+        PredefinedMetricSpecification: { PredefinedMetricType: ECSServiceAverageCPUUtilization }
+
+  ActivationVerificationHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+    Condition: ProductionActivated
+
+  ActivationVerification:
+    Type: AWS::CloudFormation::WaitCondition
+    Condition: ProductionActivated
+    DependsOn:
+      - AppService
+      - WorkerService
+      - BrokerService
+      - VulnerabilityFeedSchedule
+    Properties:
+      Handle: !Ref ActivationVerificationHandle
+      Timeout: "1800"
+      Count: 1
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref KmsKeyArn
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 }
+          - Id: DeleteExpiredEvidenceVersions
+            Status: Enabled
+            Prefix: evidence/v1/
+            # Versioning turns current expiry into a delete marker. Remove the
+            # now-noncurrent encrypted bytes on the next lifecycle pass.
+            NoncurrentVersionExpiration: { NoncurrentDays: 1 }
+          - Id: ExpireEvidenceAfterRetention
+            Status: Enabled
+            Prefix: evidence/v1/
+            ExpirationInDays: !Ref EvidenceRetentionDays
+      Tags:
+        - { Key: "sutra:component", Value: evidence }
+        - { Key: "sutra:environment", Value: production }
+
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EvidenceBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt EvidenceBucket.Arn
+              - !Sub "${EvidenceBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: DenyUploadsWithoutKms
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${EvidenceBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyEvidenceEncryptedWithUnexpectedKey
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${EvidenceBucket.Arn}/evidence/v1/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id: !Ref KmsKeyArn
+
+  BackupVault:
+    Type: AWS::Backup::BackupVault
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BackupVaultName: sutra-production
+      EncryptionKeyArn: !Ref KmsKeyArn
+      LockConfiguration: !If
+        - BackupVaultLockEnabled
+        - ChangeableForDays: 3
+          MinRetentionDays: !Ref BackupVaultMinimumRetentionDays
+          MaxRetentionDays: !Ref BackupVaultMaximumRetentionDays
+        - !Ref "AWS::NoValue"
+      BackupVaultTags:
+        "sutra:environment": production
+
+  BackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: backup.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup
+        - arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForRestores
+
+  BackupPlan:
+    Type: AWS::Backup::BackupPlan
+    Properties:
+      BackupPlan:
+        BackupPlanName: sutra-production
+        BackupPlanRule:
+          - RuleName: nightly-rds
+            TargetBackupVault: !Ref BackupVault
+            ScheduleExpression: cron(0 19 * * ? *)
+            StartWindowMinutes: 60
+            CompletionWindowMinutes: 360
+            EnableContinuousBackup: true
+            Lifecycle:
+              DeleteAfterDays: !Ref DatabaseBackupRetentionDays
+
+  BackupSelection:
+    Type: AWS::Backup::BackupSelection
+    Properties:
+      BackupPlanId: !Ref BackupPlan
+      BackupSelection:
+        SelectionName: sutra-production-rds
+        IamRoleArn: !GetAtt BackupRole.Arn
+        Resources:
+          - !Sub arn:${AWS::Partition}:rds:${AWS::Region}:${AWS::AccountId}:db:${Database}
+
+  UnhealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: One or more Sutra application targets are unhealthy.
+      Namespace: AWS/ApplicationELB
+      MetricName: UnHealthyHostCount
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      Dimensions:
+        - { Name: LoadBalancer, Value: !GetAtt PublicLoadBalancer.LoadBalancerFullName }
+        - { Name: TargetGroup, Value: !GetAtt ApplicationTargetGroup.TargetGroupFullName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  AlbServerErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Sustained ALB 5xx responses.
+      Namespace: AWS/ApplicationELB
+      MetricName: HTTPCode_ELB_5XX_Count
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - { Name: LoadBalancer, Value: !GetAtt PublicLoadBalancer.LoadBalancerFullName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  DatabaseCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Sustained production database CPU pressure.
+      Namespace: AWS/RDS
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      Dimensions:
+        - { Name: DBInstanceIdentifier, Value: !Ref Database }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  DatabaseStorageAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Production database free storage is below 20 GiB.
+      Namespace: AWS/RDS
+      MetricName: FreeStorageSpace
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 21474836480
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      Dimensions:
+        - { Name: DBInstanceIdentifier, Value: !Ref Database }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  WorkerCpuAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Sustained notification worker CPU pressure.
+      Namespace: AWS/ECS
+      MetricName: CPUUtilization
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 3
+      Threshold: 85
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: breaching
+      Dimensions:
+        - { Name: ClusterName, Value: !Ref Cluster }
+        - { Name: ServiceName, Value: sutra-production-worker }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesFeedbackQueueAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES feedback has not been durably reconciled within five minutes.
+      Namespace: AWS/SQS
+      MetricName: ApproximateAgeOfOldestMessage
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 5
+      DatapointsToAlarm: 3
+      Threshold: 300
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt SesFeedbackQueue.QueueName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesFeedbackDeadLetterAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES feedback was invalid, unmatched, or could not be reconciled after redrive attempts.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      Dimensions:
+        - { Name: QueueName, Value: !GetAtt SesFeedbackDeadLetterQueue.QueueName }
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesBounceReputationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES account bounce reputation rate is at or above three percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.BounceRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0.03
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  SesComplaintReputationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: SesNotificationsActivated
+    Properties:
+      AlarmDescription: SES account complaint reputation rate is at or above 0.05 percent.
+      Namespace: AWS/SES
+      MetricName: Reputation.ComplaintRate
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold: 0.0005
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmTopic, [!Ref AlarmSnsTopicArn], !Ref "AWS::NoValue"]
+
+  GitHubProductionReleaseRole:
+    Type: AWS::IAM::Role
+    Properties:
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepository}:environment:${GitHubReleaseEnvironment}
+      Policies:
+        - PolicyName: PublishOnlyImmutableReleaseImages
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:DescribeRepositories
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:GetLifecyclePolicy
+                  - ecr:InitiateLayerUpload
+                  - ecr:PutImage
+                  - ecr:UploadLayerPart
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${AppRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${WorkerRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${BrokerRepositoryName}
+                  - !Sub arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/${ScannerRepositoryName}
+        - PolicyName: RegisterAndDeployProductionTaskRevision
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: RegisterTaggedTaskRevision
+                Effect: Allow
+                Action: ecs:RegisterTaskDefinition
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/sutra:release-boundary: production
+              - Sid: TagOnlyProductionTaskRevision
+                Effect: Allow
+                Action: ecs:TagResource
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-app:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-migration:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-worker:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-broker:*
+                  - !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-vulnerability-feed:*
+                Condition:
+                  StringEquals:
+                    aws:RequestTag/sutra:release-boundary: production
+              - Sid: UpdateExactService
+                Effect: Allow
+                Action: ecs:UpdateService
+                Resource:
+                  - !Ref AppService
+                  - !Ref WorkerService
+                  - !Ref BrokerService
+              - Sid: RunOnlyMigrationFamily
+                Effect: Allow
+                Action: ecs:RunTask
+                Resource: !Sub arn:${AWS::Partition}:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/sutra-production-migration:*
+                Condition:
+                  ArnEquals:
+                    ecs:cluster: !GetAtt Cluster.Arn
+              - Sid: ReadDeploymentState
+                Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                  - ecs:DescribeServices
+                  - ecs:DescribeTaskDefinition
+                  - ecs:DescribeTasks
+                  - ecs:ListTasks
+                Resource: "*"
+              - Sid: PassOnlyProductionTaskRoles
+                Effect: Allow
+                Action: iam:PassRole
+                Resource:
+                  - !GetAtt ApplicationExecutionRole.Arn
+                  - !GetAtt MigrationExecutionRole.Arn
+                  - !GetAtt WorkerExecutionRole.Arn
+                  - !GetAtt BrokerExecutionRole.Arn
+                  - !GetAtt VulnerabilityFeedExecutionRole.Arn
+                  - !GetAtt ApplicationTaskRole.Arn
+                  - !GetAtt WorkerTaskRole.Arn
+                  - !GetAtt BrokerTaskRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ecs-tasks.amazonaws.com
+              - Sid: UpdateOnlyVulnerabilityFeedScheduleTarget
+                Effect: Allow
+                Action:
+                  - events:ListTargetsByRule
+                  - events:PutTargets
+                Resource: !GetAtt VulnerabilityFeedSchedule.Arn
+              - Sid: PassOnlyVulnerabilityFeedScheduleRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt VulnerabilityFeedScheduleRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: events.amazonaws.com
+              - Sid: ReadOnlyThisStackOutputs
+                Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Ref "AWS::StackId"
+              - Sid: VerifyRegionalAwsManagedPrefixLists
+                Effect: Allow
+                Action: ec2:DescribeManagedPrefixLists
+                Resource: "*"
+              - Sid: VerifyExactProductionNetworkFirewall
+                Effect: Allow
+                Action: network-firewall:DescribeFirewall
+                Resource: !Ref NetworkFirewallArn
+              - Sid: VerifyTrustedAdvisorTaxonomySigningKey
+                Effect: Allow
+                Action: kms:DescribeKey
+                Resource: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+              - Sid: ReadExactRuntimeSecretForReleasePreflight
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ApplicationRuntimeSecretArn
+              - Sid: DecryptExactRuntimeSecretForReleasePreflight
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+              - Sid: WriteImmutableReleaseEvidence
+                Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${EvidenceBucket.Arn}/releases/*"
+              - Sid: EncryptReleaseEvidence
+                Effect: Allow
+                Action:
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource: !Ref KmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+
+Outputs:
+  ReleaseActivation: { Value: !Ref ReleaseActivation }
+  NotificationSesActivation: { Value: !Ref NotificationSesActivation }
+  SesNotificationConfigurationSetName: { Value: !Ref SesNotificationConfigurationSet }
+  SesFeedbackQueueUrl: { Value: !Ref SesFeedbackQueue }
+  SesFeedbackDeadLetterQueueUrl: { Value: !Ref SesFeedbackDeadLetterQueue }
+  PublicOrigin: { Value: !Ref PublicOrigin }
+  CustomerRoleTemplateUrl: { Value: !Ref CustomerRoleTemplateUrl }
+  LoadBalancerDnsName: { Value: !GetAtt PublicLoadBalancer.DNSName }
+  BrokerLoadBalancerDnsName: { Value: !GetAtt BrokerLoadBalancer.DNSName }
+  AccessLogBucketName: { Value: !Ref AccessLogBucket }
+  LoadBalancerArn: { Value: !Ref PublicLoadBalancer }
+  ClusterName: { Value: !Ref Cluster }
+  ServiceName: { Value: sutra-production-app }
+  WorkerServiceName: { Value: sutra-production-worker }
+  BrokerServiceName: { Value: sutra-production-broker }
+  AppTaskDefinitionArn: { Value: !Ref AppTaskDefinition }
+  MigrationTaskDefinitionArn: { Value: !Ref MigrationTaskDefinition }
+  WorkerTaskDefinitionArn: { Value: !Ref WorkerTaskDefinition }
+  BrokerTaskDefinitionArn: { Value: !Ref BrokerTaskDefinition }
+  VulnerabilityFeedTaskDefinitionArn: { Value: !Ref VulnerabilityFeedTaskDefinition }
+  VulnerabilityFeedScheduleRuleName: { Value: !Ref VulnerabilityFeedSchedule }
+  ApplicationSecurityGroupId: { Value: !Ref ApplicationSecurityGroup }
+  BrokerSecurityGroupId: { Value: !Ref BrokerSecurityGroup }
+  EndpointSecurityGroupId: { Value: !Ref EndpointSecurityGroupId }
+  S3GatewayPrefixListId: { Value: !Ref S3GatewayPrefixListId }
+  NetworkFirewallArn: { Value: !Ref NetworkFirewallArn }
+  PrivateAppSubnetIds:
+    Value: !Join [",", !Ref PrivateAppSubnetIds]
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DatabaseAdminSecretArn:
+    Value: !Ref DatabaseAdminSecret
+  DatabaseRuntimeSecretArn:
+    Value: !Ref DatabaseRuntimeSecret
+  BackupVaultName:
+    Value: !Ref BackupVault
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  KmsKeyArn:
+    Value: !Ref KmsKeyArn
+  TrustedAdvisorTaxonomySigningKeyArn:
+    Value: !GetAtt TrustedAdvisorTaxonomySigningKey.Arn
+  GitHubProductionReleaseRoleArn:
+    Value: !GetAtt GitHubProductionReleaseRole.Arn

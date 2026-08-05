@@ -8,18 +8,8 @@
  * and billing, and no caller left to reap them. That is the worst failure available
  * here, so execution is started and polled instead.
  *
- * ── WHY NOT A DURABLE QUEUE ─────────────────────────────────────────────────
- * The collector's DurableLocalJobQueue exists only in fixture mode (`localJobs` is
- * null when live), and the collector cannot reach Postgres — the Worker owns the run
- * rows. So this process tracks execution and the Worker polls, then persists.
- *
- * ── THE HONEST LIMITATION ───────────────────────────────────────────────────
- * This state is memory-only. If the collector restarts mid-scan the entry is gone,
- * and a poll reports UNKNOWN rather than inventing an outcome — because the AWS
- * resources may well still exist. UNKNOWN means "check AWS", not "it failed" and
- * certainly not "it finished clean". The instance's own shutdown trap and the
- * snapshot TTL are what stop an orphan billing forever; this registry is not a
- * substitute for either.
+ * This implementation remains the local-only fixture/live-pilot adapter. Hosted
+ * production injects a PostgreSQL implementation of the same interface.
  */
 
 export type AgentlessRunPhase = "running" | "completed" | "failed";
@@ -37,7 +27,28 @@ export interface AgentlessRunState {
   readonly error: { readonly code: string; readonly message: string } | null;
 }
 
-export class AgentlessRunRegistry {
+export interface AgentlessRunClaimInput {
+  readonly runId: string;
+  readonly tenantId: string;
+  readonly connectionId: string;
+  /** Hosted recovery stores the exact signed execution request. */
+  readonly executionRequest?: unknown;
+}
+
+export interface AgentlessRunStore {
+  claim(input: AgentlessRunClaimInput): AgentlessRunState | Promise<AgentlessRunState>;
+  complete(runId: string, execution: unknown): void | Promise<void>;
+  fail(
+    runId: string,
+    error: { readonly code: string; readonly message: string },
+  ): void | Promise<void>;
+  read(
+    runId: string,
+    scope: { readonly tenantId: string; readonly connectionId: string },
+  ): AgentlessRunState | null | Promise<AgentlessRunState | null>;
+}
+
+export class AgentlessRunRegistry implements AgentlessRunStore {
   private readonly runs = new Map<string, AgentlessRunState>();
 
   private readonly now: () => Date;
@@ -51,14 +62,19 @@ export class AgentlessRunRegistry {
    * retried POST cannot start a second scan of the same run — which would double the
    * snapshots, the instances and the bill.
    */
-  public claim(input: {
-    readonly runId: string;
-    readonly tenantId: string;
-    readonly connectionId: string;
-  }): AgentlessRunState {
+  public claim(input: AgentlessRunClaimInput): AgentlessRunState {
     const existing = this.runs.get(input.runId);
-    if (existing !== undefined && existing.phase === "running") {
-      throw new AgentlessRunAlreadyRunningError(input.runId);
+    if (existing !== undefined) {
+      if (
+        existing.tenantId !== input.tenantId ||
+        existing.connectionId !== input.connectionId
+      ) {
+        throw new AgentlessRunScopeConflictError(input.runId);
+      }
+      if (existing.phase === "running") {
+        throw new AgentlessRunAlreadyRunningError(input.runId);
+      }
+      return existing;
     }
     const state: AgentlessRunState = {
       runId: input.runId,
@@ -129,5 +145,12 @@ export class AgentlessRunAlreadyRunningError extends Error {
     );
     this.name = "AgentlessRunAlreadyRunningError";
     this.runId = runId;
+  }
+}
+
+export class AgentlessRunScopeConflictError extends Error {
+  public constructor(runId: string) {
+    super(`agentless run ${runId} is already bound to another scope`);
+    this.name = "AgentlessRunScopeConflictError";
   }
 }

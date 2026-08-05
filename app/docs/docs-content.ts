@@ -304,7 +304,7 @@ export const docsSections: readonly DocSection[] = [
       {
         label: "Case routing",
         href: "/cases/routing",
-        description: "Route cases to the right owner and destination automatically.",
+        description: "Preview tenant-scoped owner, team, and destination routing without changing a case.",
       },
       {
         label: "Finding exceptions",

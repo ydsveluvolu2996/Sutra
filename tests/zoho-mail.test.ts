@@ -46,6 +46,8 @@ describe("Zoho Mail REST delivery", () => {
     assert.equal(calls.length, 2);
     assert.equal(calls[0]?.url, "https://accounts.zoho.in/oauth/v2/token");
     assert.equal(calls[0]?.init.redirect, "manual");
+    const oauthHeaders = new Headers(calls[0]?.init.headers);
+    assert.equal(oauthHeaders.get("idempotency-key"), null);
     const tokenBody = new URLSearchParams(String(calls[0]?.init.body));
     assert.equal(tokenBody.get("grant_type"), "refresh_token");
     assert.equal(tokenBody.get("client_id"), ENV.SUTRA_ZOHO_CLIENT_ID);
@@ -54,8 +56,12 @@ describe("Zoho Mail REST delivery", () => {
 
     assert.equal(calls[1]?.url, "https://mail.zoho.in/api/accounts/60080685470/messages");
     assert.equal(calls[1]?.init.redirect, "manual");
-    const headers = calls[1]?.init.headers as Record<string, string>;
-    assert.match(headers.authorization, /^Zoho-oauthtoken 1000\./u);
+    const headers = new Headers(calls[1]?.init.headers);
+    assert.match(headers.get("authorization") ?? "", /^Zoho-oauthtoken 1000\./u);
+    assert.match(
+      headers.get("idempotency-key") ?? "",
+      /^sutra-zoho-mail-[a-f0-9]{64}$/u,
+    );
     const body = JSON.parse(String(calls[1]?.init.body));
     assert.deepEqual(body, {
       fromAddress: MESSAGE.fromAddress,
@@ -84,6 +90,21 @@ describe("Zoho Mail REST delivery", () => {
       httpStatus: null,
     });
     assert.equal(calls, 0);
+  });
+
+  it("classifies a partial managed outbound tuple as configuration failure", async () => {
+    const result = await sendZohoMail(
+      {
+        ...ENV,
+        SUTRA_MANAGED_OUTBOUND_URL: "https://outbound.sutracmdb.com",
+      },
+      MESSAGE,
+    );
+    assert.deepEqual(result, {
+      status: "failed",
+      errorCode: "EMAIL_CONFIGURATION_INVALID",
+      httpStatus: null,
+    });
   });
 
   it("classifies token rejection without attempting a mail send", async () => {

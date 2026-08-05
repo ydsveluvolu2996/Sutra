@@ -12,6 +12,8 @@ export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
  * IMPLEMENTED_READ_ACTIONS as an EXACT set for sutra_template roles.
  *
  * .3 adds ec2:DescribeFlowLogs (VPC flow-log coverage).
+ * .4 adds Amazon Bedrock guardrail, invocation-logging, and account
+ * data-retention posture.
  *
  * A connection still recorded against an older pack is rejected by
  * assumeValidatedSession BEFORE attestation runs, so the customer sees a clear
@@ -19,7 +21,85 @@ export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
  * ordering is the whole point of this constant: without the bump, an old role
  * would fail the action-set comparison with no actionable explanation.
  */
-export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.3" as const;
+export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.4" as const;
+/**
+ * Separately published successor ceiling used only by the Foundational FinOps
+ * object broker. It is intentionally not CURRENT_PERMISSION_PACK_VERSION:
+ * regular inventory/onboarding remains pinned to .4 until the whole product
+ * permission pack is promoted. The successor grants no S3/Data Exports reads
+ * by itself; an independently attested immutable add-on is mandatory.
+ */
+export const FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.1" as const;
+/**
+ * Successor ceiling for signed organization taxonomy and account-local
+ * Trusted Advisor standard checks. It remains separate from the regular .4
+ * inventory pack and the .8.1 Foundational-only successor.
+ */
+export const ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.2" as const;
+/**
+ * Immutable successor that adds only Compute Optimizer enrollment and completed
+ * export-job discovery. Export creation and S3 object access remain outside the
+ * base role and require separate server-owned contracts.
+ */
+export const ADVANCED_FINOPS_PERMISSION_PACK_VERSION = "standard-2026-08.3" as const;
+/**
+ * Immutable successor for exact Compute Optimizer export-object reads. The
+ * base role adds only GetObjectVersion and GenerateDataKey to the .8.3 deny
+ * ceiling; every S3 prefix and optional CMK remains in a server-owned add-on.
+ */
+export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION =
+  "standard-2026-08.4" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID =
+  "compute-optimizer-export-read-v1" as const;
+/**
+ * Immutable successor required for launching the eight supported Compute
+ * Optimizer recommendation exports. The base role only opens its explicit
+ * deny ceiling; a separately attested, regional launch contract supplies the
+ * exact 25 launch/dependency grants and the sealed SSE-KMS destination prefix.
+ */
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION =
+  "standard-2026-08.5" as const;
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID =
+  "compute-optimizer-export-launch-v1" as const;
+/**
+ * Immutable successor for ADV-04. It preserves .8.5 and adds only the exact
+ * fourteen Extended Support inventory, lifecycle and public-pricing reads.
+ */
+export const EXTENDED_SUPPORT_PERMISSION_PACK_VERSION =
+  "standard-2026-08.6" as const;
+/**
+ * Immutable successor for ADV-09. It preserves .8.6 and adds only the exact
+ * two account-local AWS Support case reads; no Support mutation is permitted.
+ */
+export const AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION =
+  "standard-2026-08.7" as const;
+/**
+ * Immutable successor for ADV-06. It preserves .8.7 and adds only the exact
+ * AWS Health organization-view reads and Organizations prerequisite proofs.
+ */
+export const AWS_HEALTH_PERMISSION_PACK_VERSION =
+  "standard-2026-08.8" as const;
+/**
+ * Immutable successor for ADV-10. It preserves .8.8 and adds only the exact
+ * fourteen AWS Resilience Hub read operations used by ResilienceVue.
+ */
+export const RESILIENCE_VUE_PERMISSION_PACK_VERSION =
+  "standard-2026-08.9" as const;
+/**
+ * Immutable successor for ADV-12. It preserves .8.9 and adds only the three
+ * Step Functions metadata operations scoped to server-declared DCF machines.
+ */
+export const DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION =
+  "standard-2026-08.10" as const;
+/**
+ * Immutable successor for ADV-11. It preserves .8.10 and adds only the exact
+ * eight AppStream, WorkSpaces, and CloudWatch reads used by End User Computing.
+ */
+export const END_USER_COMPUTING_PERMISSION_PACK_VERSION =
+  "standard-2026-08.11" as const;
+/** Immutable successor for ADV-05 Graviton Savings exact read-only APIs. */
+export const GRAVITON_SAVINGS_PERMISSION_PACK_VERSION =
+  "standard-2026-08.12" as const;
 /**
  * Superseded packs are still ACCEPTED AS STORED VALUES so that existing registry
  * records stay readable and can report "needs upgrade". They are deliberately not
@@ -27,14 +107,156 @@ export const CURRENT_PERMISSION_PACK_VERSION = "standard-2026-07.3" as const;
  * integrity parsing outright, which is strictly worse than a clear upgrade
  * prompt.
  */
-export const PRIOR_PERMISSION_PACK_VERSION = "standard-2026-07.2" as const;
-export const PREVIOUS_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
+export const PRIOR_PERMISSION_PACK_VERSION = "standard-2026-07.3" as const;
+export const PREVIOUS_PERMISSION_PACK_VERSION = "standard-2026-07.2" as const;
+export const OLDER_PERMISSION_PACK_VERSION = "standard-2026-07" as const;
 export const LEGACY_PERMISSION_PACK_VERSION = "live-demo-2026-07.1" as const;
 export type PermissionPackVersion =
   | typeof CURRENT_PERMISSION_PACK_VERSION
+  | typeof FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION
+  | typeof ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION
+  | typeof ADVANCED_FINOPS_PERMISSION_PACK_VERSION
+  | typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+  | typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+  | typeof EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+  | typeof AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+  | typeof AWS_HEALTH_PERMISSION_PACK_VERSION
+  | typeof RESILIENCE_VUE_PERMISSION_PACK_VERSION
+  | typeof DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+  | typeof END_USER_COMPUTING_PERMISSION_PACK_VERSION
+  | typeof GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
   | typeof PRIOR_PERMISSION_PACK_VERSION
   | typeof PREVIOUS_PERMISSION_PACK_VERSION
+  | typeof OLDER_PERMISSION_PACK_VERSION
   | typeof LEGACY_PERMISSION_PACK_VERSION;
+
+export type FoundationalFinopsContractId =
+  | "foundational-cur2-export-v1"
+  | "foundational-focus12-export-v1";
+
+/**
+ * Server-owned copy of immutable CloudFormation outputs. This value is never
+ * accepted from a collector request. It binds an add-on policy to one tenant,
+ * connection, account, export, bucket and prefix.
+ */
+export interface FoundationalFinopsAddOnContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly contractId: FoundationalFinopsContractId;
+  readonly exportTable: "COST_AND_USAGE_REPORT" | "FOCUS_1_2_AWS";
+  readonly policyName:
+    | "SutraFoundationalCur2ReadV1"
+    | "SutraFoundationalFocus12ReadV1";
+  readonly region: string;
+  readonly bucket: string;
+  readonly prefix: string;
+  readonly exportName: string;
+  readonly exportArn: string;
+}
+
+export interface FoundationalFinopsBindingRequest {
+  readonly contractId: FoundationalFinopsContractId;
+  readonly exportName: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly prefix: string;
+}
+
+/**
+ * Immutable, server-owned identity for one AWS FinOps source integration.
+ *
+ * Requests carry only `contractId`. AWS operations, endpoints, account scope,
+ * partition and region are all derived from this persisted contract and the
+ * collector's compiled source catalog.
+ */
+export interface FinopsSourceContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly contractId: string;
+  readonly sourceId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly permissionContractId: string | null;
+  readonly policyName: string | null;
+}
+
+export type ComputeOptimizerExportObjectEncryptionMode = "SSE_S3" | "SSE_KMS";
+
+/**
+ * Server-owned immutable binding for one regional Compute Optimizer provider
+ * prefix. Public jobs carry only its opaque contractId plus an exact object
+ * address already sealed by the export plan.
+ */
+export interface ComputeOptimizerExportObjectContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly contractId: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION;
+  readonly permissionContractId:
+    typeof COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_CONTRACT_ID;
+  readonly policyName: string;
+  readonly bucket: string;
+  readonly effectivePrefix: string;
+  readonly encryptionMode: ComputeOptimizerExportObjectEncryptionMode;
+  readonly kmsKeyArn: string | null;
+}
+
+/** Server-owned copy of one regional launch add-on's immutable outputs. */
+export interface ComputeOptimizerExportLaunchContract {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly region: string;
+  readonly contractId: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+  readonly permissionContractId:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_CONTRACT_ID;
+  readonly policyName: string;
+  readonly bucket: string;
+  readonly bucketArn: string;
+  readonly basePrefix: string;
+  readonly effectivePrefix: string;
+  readonly objectArnPrefix: string;
+  readonly encryptionMode: "SSE_KMS";
+  readonly kmsKeyArn: string;
+  readonly bucketVersioningStatus: "Enabled";
+  readonly servicePrincipal: "compute-optimizer.amazonaws.com";
+}
+
+/**
+ * Server-produced proof used by the encrypted registry's explicit .8.5
+ * promotion edge. Contract values are derived from collector-owned
+ * CloudFormation outputs and then re-attested against the live customer role;
+ * no HTTP/browser request is allowed to construct this value.
+ */
+export interface ComputeOptimizerExportLaunchProvisioningVerification {
+  readonly schemaVersion:
+    "sutra.compute-optimizer-export-launch-provisioning-verification.v1";
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly roleArn: string;
+  readonly permissionPackVersion:
+    typeof COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+  readonly enabledRegions: readonly string[];
+  readonly sourceContracts: readonly FinopsSourceContract[];
+  readonly objectContracts: readonly ComputeOptimizerExportObjectContract[];
+  readonly launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+  readonly baseRoleOutputsSha256: string;
+  readonly regionalObjectReadOutputsSha256: string;
+  readonly regionalLaunchOutputsSha256: string;
+  readonly identityAttested: true;
+  readonly permissionPolicyAttested: true;
+  readonly launchPoliciesAttested: true;
+  readonly stackOutputsAttested: true;
+}
 
 export type AwsConnectionStatus =
   | "PENDING"
@@ -77,6 +299,22 @@ export interface StoredAwsConnection {
   readonly roleProvisioningMode?: AwsRoleProvisioningMode;
   readonly expectedRolePath?: string;
   readonly expectedRoleName?: string;
+  /**
+   * Optional for old records and for successor records awaiting operator
+   * attestation. Missing is fail-closed on every FinOps object request.
+   */
+  readonly foundationalFinopsContracts?: readonly FoundationalFinopsAddOnContract[];
+  /**
+   * Persisted by the trusted control plane. Public collector requests cannot
+   * create or modify these source bindings.
+   */
+  readonly finopsSourceContracts?: readonly FinopsSourceContract[];
+  /** Exact regional S3/KMS bindings for the .8.4 object broker. */
+  readonly computeOptimizerExportObjectContracts?:
+    readonly ComputeOptimizerExportObjectContract[];
+  /** Exact regional launch/destination attestations for the .8.5 broker. */
+  readonly computeOptimizerExportLaunchContracts?:
+    readonly ComputeOptimizerExportLaunchContract[];
 }
 
 export interface ScopedConnectionRegistry {

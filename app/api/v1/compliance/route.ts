@@ -1,17 +1,10 @@
 import { getConnectionForOrg, getPilotStateForOrg } from "../../../../db/pilot-repository";
 import { listComplianceExceptions } from "../../../../db/compliance-exception-repository";
 import { assertSessionCapability } from "../../../../lib/api-auth";
-import {
-  COMPLIANCE_FRAMEWORKS,
-} from "../../../../lib/compliance-catalog";
-import {
-  assessCompliance,
-} from "../../../../lib/compliance-engine";
+import { buildComplianceReport } from "../../../../lib/compliance-report";
 import { canonicalJson } from "../../../../lib/canonical-json";
-import {
-  applyComplianceExceptions,
-  type ComplianceAssessmentWithExceptions,
-} from "../../../../lib/compliance-exception-types";
+import { safeCsvCell } from "../../../../lib/safe-csv";
+import type { ComplianceAssessmentWithExceptions } from "../../../../lib/compliance-exception-types";
 import {
   errorResponse,
   jsonResponse,
@@ -21,27 +14,6 @@ import {
 export const dynamic = "force-dynamic";
 
 type ComplianceResponseFormat = "view" | "json" | "csv";
-
-function toHex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)]
-    .map((value) => value.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  return toHex(
-    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)),
-  );
-}
-
-function safeSpreadsheetText(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  return /^[=+\-@\t\r]/u.test(text) ? `'${text}` : text;
-}
-
-function csvCell(value: unknown): string {
-  return `"${safeSpreadsheetText(value).replaceAll('"', '""')}"`;
-}
 
 function complianceCsv(
   assessment: ComplianceAssessmentWithExceptions,
@@ -111,8 +83,8 @@ function complianceCsv(
     result.remediation,
     result.limitation,
   ]);
-  return `${header.map(csvCell).join(",")}\r\n${rows
-    .map((row) => row.map(csvCell).join(","))
+  return `${header.map(safeCsvCell).join(",")}\r\n${rows
+    .map((row) => row.map(safeCsvCell).join(","))
     .join("\r\n")}\r\n`;
 }
 
@@ -167,14 +139,8 @@ export async function GET(request: Request): Promise<Response> {
       customerId: state.connection.customerId,
       connectionId: state.connection.id,
     });
-    const assessment = applyComplianceExceptions(assessCompliance(state), exceptionRecords);
-    const reportCore = {
-      schemaVersion: "sutra.compliance-report.v2" as const,
-      assessment,
-      frameworks: COMPLIANCE_FRAMEWORKS,
-      exceptions: exceptionRecords,
-    };
-    const reportSha256 = await sha256Hex(canonicalJson(reportCore));
+    const { reportSha256, ...reportCore } = await buildComplianceReport(state, exceptionRecords);
+    const { assessment } = reportCore;
     if (format === "view") {
       return jsonResponse({ ...reportCore, reportSha256 });
     }

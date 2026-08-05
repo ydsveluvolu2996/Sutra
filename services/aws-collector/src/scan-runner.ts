@@ -71,6 +71,14 @@ export interface AgentlessVolumeResult {
    * Handed to the customer's lifecycle policy; surfaced as cost until reaped.
    */
   readonly cleanupHandoff: readonly string[];
+  /** Durable, typed ownership evidence used by hosted restart recovery. */
+  readonly teardownDebt?: readonly {
+    readonly resourceId: string;
+    readonly resourceKind: "snapshot" | "volume" | "instance";
+    readonly accountScope: "customer" | "sutra-scan-account";
+    readonly region: string;
+    readonly error: string;
+  }[];
 }
 
 export interface AgentlessScanExecution {

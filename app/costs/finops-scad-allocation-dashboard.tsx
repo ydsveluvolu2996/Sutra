@@ -1,0 +1,638 @@
+"use client";
+import { useEffect, useState } from "react";
+import type {
+  ScadAmount,
+  ScadDashboardFilters,
+  ScadDashboardProjection,
+} from "../../lib/finops-scad-dashboard";
+import { SCAD_OFFICIAL_DEFINITION, type ScadOfficialDefinition } from "../../lib/finops-scad-official-definition";
+import styles from "./finops-scad-allocation-dashboard.module.css";
+interface Envelope extends ScadDashboardProjection {
+  readonly connectionId: string;
+  readonly sourceState: string;
+  readonly officialDefinition: ScadOfficialDefinition;
+  readonly freshness: {
+    readonly dataThroughAt: string | null;
+    readonly ageHours: number | null;
+    readonly staleAfterHours: number;
+  };
+  readonly history: readonly {
+    readonly generationId: string;
+    readonly generatedAt: string;
+    readonly billingPeriodStartAt: string;
+    readonly state: string;
+    readonly complete: boolean;
+    readonly rowCount: number;
+    readonly groupCount: number;
+    readonly activeBillingGenerationId: string;
+  }[];
+  readonly evidence: Readonly<Record<string, unknown>>;
+  readonly collection: CollectionState;
+}
+interface CollectionState { readonly available: boolean;
+  readonly lifecycleState: "UNAVAILABLE" | "COLLECTING" | "FAILED" | "READY";
+  readonly reason: string | null; readonly latestAttempt: unknown }
+interface ScadConfigurationEnvelope { readonly dashboard: null; readonly sourceState: string;
+  readonly officialDefinition: ScadOfficialDefinition; readonly collection: CollectionState }
+function hasPinnedOfficialDefinition(value: unknown): value is ScadOfficialDefinition { if (typeof value !== "object" || value === null) return false; const definition = value as Readonly<Record<string, unknown>>; const source = definition.source; return typeof source === "object" && source !== null && (source as Readonly<Record<string, unknown>>).commit === SCAD_OFFICIAL_DEFINITION.source.commit && (source as Readonly<Record<string, unknown>>).sha256 === SCAD_OFFICIAL_DEFINITION.source.sha256 && definition.documentedTabCountClaim === 3 && definition.documentedSectionCount === 5 && Array.isArray(definition.sections) && definition.sections.length === 5; }
+const EMPTY: ScadDashboardFilters = {
+  accountId: null,
+  region: null,
+  platform: null,
+  cluster: null,
+  namespace: null,
+  workload: null,
+  metric: null,
+  tagKey: null,
+  tagValue: null,
+  search: null,
+  showbackBy: "WORKLOAD",
+};
+function decimal(value: {
+  readonly numerator: string;
+  readonly denominator: string;
+}): string {
+  const n = BigInt(value.numerator);
+  const d = BigInt(value.denominator);
+  const negative = n < BigInt(0);
+  const absolute = negative ? -n : n;
+  const whole = absolute / d;
+  const fraction = (((absolute % d) * BigInt(1_000_000)) / d)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/u, "");
+  return `${negative ? "−" : ""}${whole.toLocaleString("en-US")}${fraction ? `.${fraction}` : ""}`;
+}
+function amounts(values: readonly ScadAmount[]): string {
+  return values.length
+    ? values
+        .map((item) => `${item.currency} ${decimal(item.exact)}`)
+        .join(" · ")
+    : "No cost";
+}
+function csvCell(value: string): string {
+  const safe = /^[=+\-@\t\r]/u.test(value) ? `'${value}` : value;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+function exportCsv(report: Envelope): void {
+  const rows = report.workloads.map((row) =>
+    [
+      row.accountId,
+      row.region,
+      row.platform,
+      row.cluster ?? "",
+      row.namespace ?? "",
+      row.workloadType ?? "",
+      row.workload ?? "",
+      row.podOrTaskId,
+      row.metric,
+      amounts(row.costs),
+      row.businessTags.map((tag) => `${tag.key}=${tag.value}`).join("|"),
+    ]
+      .map((value) => csvCell(String(value)))
+      .join(","),
+  );
+  const header =
+    "account,region,platform,cluster,namespace,workload_type,workload,pod_or_task,metric,attributed_cost,tags";
+  const url = URL.createObjectURL(
+    new Blob([[header, ...rows].join("\n")], {
+      type: "text/csv;charset=utf-8",
+    }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "sutra-scad-allocation.csv";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+function Select({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: string | null;
+  readonly options: readonly string[];
+  readonly onChange: (value: string | null) => void;
+}) {
+  return (
+    <label>
+      {label}
+      <select
+        value={value ?? ""}
+        onChange={(event) => onChange(event.target.value || null)}
+      >
+        <option value="">All</option>
+        {options.map((option) => (
+          <option value={option} key={option}>
+            {option.replaceAll("_", " ")}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+export function ScadOfficialDefinitionPanel({ definition }: { readonly definition: ScadOfficialDefinition }) {
+  return <section className={styles.official} aria-label="Official AWS SCAD coverage"><header><div><small>Immutable AWS catalog · {definition.source.commit.slice(0, 12)} · SHA-256 {definition.source.sha256.slice(0, 16)}…</small><h3>{definition.documentedSectionCount} named sections</h3><p>AWS states {definition.documentedTabCountClaim} tabs; exact QuickSight controls are {definition.source.quickSightControlInventory.toLocaleLowerCase().replaceAll("_", " ")}.</p></div></header><p>{definition.catalogNote}</p><nav>{definition.sections.map((section) => <a key={section.id} href={`#scad-${section.id}`}><span className={section.support === "SUPPORTED" ? styles.supported : styles.partial}>{section.support}</span><strong>{section.label}</strong><small>{section.documentedAreas.length} documented areas</small></a>)}</nav><p>Frozen source coverage remains visible without an accepted SCAD report; unpublished QuickSight object counts, geometry, and controls are not inferred.</p></section>;
+}
+export function ScadAllocationReportView({
+  report,
+  filters,
+  onFiltersChange,
+}: {
+  readonly report: Envelope;
+  readonly filters: ScadDashboardFilters;
+  readonly onFiltersChange: (filters: ScadDashboardFilters) => void;
+}) {
+  const set = <K extends keyof ScadDashboardFilters>(
+    key: K,
+    value: ScadDashboardFilters[K],
+  ) => onFiltersChange({ ...filters, [key]: value });
+  const warning =
+    report.sourceState === "PARTIAL"
+      ? "A newer incomplete or corrected delivery did not replace the accepted complete billing-period head."
+      : report.sourceState === "STALE"
+        ? "The accepted SCAD evidence is older than the 48-hour freshness objective."
+        : null;
+  return (
+    <section
+      className={styles.root}
+      aria-label="SCAD Containers Cost Allocation dashboard"
+    >
+      <div className={styles.disclosure}>
+        <strong>Allocation boundary.</strong> AWS SCAD publishes EKS pods and
+        ECS tasks, not container IDs. Shared/idle means AWS-attributed unused
+        cost, not complete platform overhead.
+      </div>
+      {report.collection.lifecycleState !== "READY" ? (
+        <div role={report.collection.lifecycleState === "FAILED" ? "alert" : "status"}
+          className={report.collection.lifecycleState === "FAILED" ? styles.error : styles.warning}>
+          Collection {report.collection.lifecycleState.toLocaleLowerCase().replaceAll("_", " ")}.
+          {report.collection.lifecycleState === "UNAVAILABLE"
+            ? " Accepted immutable evidence remains visible while shared runtime registration is pending."
+            : report.collection.lifecycleState === "COLLECTING"
+              ? " The accepted head remains stable until the new generation is complete."
+              : " The sanitized failure is retained in collection evidence; the accepted head was not displaced."}
+        </div>
+      ) : null}
+      {warning ? (
+        <div role="status" className={styles.warning}>
+          {warning}
+        </div>
+      ) : null}
+      {Object.values(report.projectionTruncation).some(Boolean) ? (
+        <div role="status" className={styles.warning}>
+          High-cardinality dashboard output was deterministically bounded.
+          Refine filters to inspect omitted detail and aggregate values.
+        </div>
+      ) : null}
+      <ScadOfficialDefinitionPanel definition={report.officialDefinition} />
+      <div className={styles.filters}>
+        <Select
+          label="Account"
+          value={filters.accountId}
+          options={report.filterOptions.accounts}
+          onChange={(value) => set("accountId", value)}
+        />
+        <Select
+          label="Region"
+          value={filters.region}
+          options={report.filterOptions.regions}
+          onChange={(value) => set("region", value)}
+        />
+        <Select
+          label="Platform"
+          value={filters.platform}
+          options={report.filterOptions.platforms}
+          onChange={(value) =>
+            set("platform", value as ScadDashboardFilters["platform"])
+          }
+        />
+        <Select
+          label="Cluster"
+          value={filters.cluster}
+          options={report.filterOptions.clusters}
+          onChange={(value) => set("cluster", value)}
+        />
+        <Select
+          label="Namespace"
+          value={filters.namespace}
+          options={report.filterOptions.namespaces}
+          onChange={(value) => set("namespace", value)}
+        />
+        <Select
+          label="Workload"
+          value={filters.workload}
+          options={report.filterOptions.workloads}
+          onChange={(value) => set("workload", value)}
+        />
+        <Select
+          label="Metric"
+          value={filters.metric}
+          options={report.filterOptions.metrics}
+          onChange={(value) =>
+            set("metric", value as ScadDashboardFilters["metric"])
+          }
+        />
+        <Select
+          label="Tag / label key"
+          value={filters.tagKey}
+          options={report.filterOptions.tagKeys}
+          onChange={(value) => {
+            set("tagKey", value);
+          }}
+        />
+        <Select
+          label="Tag / label value"
+          value={filters.tagValue}
+          options={report.filterOptions.tagValues}
+          onChange={(value) => set("tagValue", value)}
+        />
+        <Select
+          label="Showback / chargeback by"
+          value={filters.showbackBy}
+          options={[
+            "ACCOUNT",
+            "CLUSTER",
+            "NAMESPACE",
+            "WORKLOAD",
+            ...(filters.tagKey ? ["TAG"] : []),
+          ]}
+          onChange={(value) =>
+            set(
+              "showbackBy",
+              (value ?? "WORKLOAD") as ScadDashboardFilters["showbackBy"],
+            )
+          }
+        />
+        <label>
+          Search
+          <input
+            value={filters.search ?? ""}
+            maxLength={128}
+            placeholder="Pod, task, workload or tag"
+            onChange={(event) => set("search", event.target.value || null)}
+          />
+        </label>
+      </div>
+      <section className={styles.section} id="scad-executive-summary">
+        <header>
+          <div>
+            <small>CUR2 Split Cost Allocation Data</small>
+            <h3>Executive KPIs</h3>
+          </div>
+          <button type="button" onClick={() => exportCsv(report)}>
+            Export visible rows
+          </button>
+        </header>
+        <div className={styles.cards}>
+          <article>
+            <span>Total attributed</span>
+            <strong>{amounts(report.executive.total)}</strong>
+            <small>{report.executive.groupCount} allocation groups</small>
+          </article>
+          <article>
+            <span>Allocated workload</span>
+            <strong>{amounts(report.executive.allocated)}</strong>
+            <small>direct split cost</small>
+          </article>
+          <article>
+            <span>Shared / idle</span>
+            <strong>{amounts(report.executive.attributedUnused)}</strong>
+            <small>AWS-attributed unused cost</small>
+          </article>
+          <article>
+            <span>Missing business lineage</span>
+            <strong>{amounts(report.executive.missingBusinessLineage)}</strong>
+            <small>kept separate, not redistributed</small>
+          </article>
+          {report.metricKpis.map((kpi) => (
+            <article key={kpi.category}>
+              <span>{kpi.category.replaceAll("_", " ")}</span>
+              <strong>{amounts(kpi.total)}</strong>
+              <small>
+                {kpi.groupCount} groups · allocated {amounts(kpi.allocated)} ·
+                idle {amounts(kpi.attributedUnused)}
+              </small>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className={styles.two}>
+        <article className={styles.section}>
+          <header>
+            <h3>Account allocation</h3>
+          </header>
+          {report.accountSummary.map((item) => (
+            <div className={styles.rank} key={item.key}>
+              <strong>{item.key}</strong>
+              <span>{amounts(item.costs)}</span>
+              <small>{item.podOrTaskCount} pods/tasks</small>
+            </div>
+          ))}
+        </article>
+        <article className={styles.section}>
+          <header>
+            <h3>Top clusters</h3>
+            <small>
+              Ranked within one currency; mixed currencies remain separate
+            </small>
+          </header>
+          {report.clusterSummary.map((item) => (
+            <div className={styles.rank} key={item.key}>
+              <strong>{item.key}</strong>
+              <span>{amounts(item.costs)}</span>
+              <small>{item.groupCount} metric groups</small>
+            </div>
+          ))}
+        </article>
+      </section>
+      <section className={styles.section} id="scad-workloads-explorer">
+        <header>
+          <div>
+            <small>EKS · ECS · AWS Batch</small>
+            <h3>Workloads Explorer</h3>
+          </div>
+        </header>
+        <div className={styles.scroll}>
+          <table>
+            <thead>
+              <tr>
+                <th>Account / Region</th>
+                <th>Platform</th>
+                <th>Cluster / namespace</th>
+                <th>Workload</th>
+                <th>Pod or task</th>
+                <th>Metric usage</th>
+                <th>Total cost</th>
+                <th>Tags</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.workloads.map((row, index) => (
+                <tr key={`${row.podOrTaskId}:${row.metric}:${index}`}>
+                  <td>
+                    {row.accountId}
+                    <small>{row.region}</small>
+                  </td>
+                  <td>{row.platform}</td>
+                  <td>
+                    {row.cluster ?? "Unallocated"}
+                    <small>{row.namespace ?? "No namespace"}</small>
+                  </td>
+                  <td>
+                    {row.workload ?? "Unallocated"}
+                    <small>{row.workloadType ?? "Unknown type"}</small>
+                  </td>
+                  <td>
+                    {row.podOrTaskId}
+                    <small>Container ID not published by SCAD</small>
+                  </td>
+                  <td>
+                    {row.metric}
+                    <small>
+                      allocated {decimal(row.allocatedUsage)} · requested{" "}
+                      {row.requestedUsage.exact
+                        ? decimal(row.requestedUsage.exact)
+                        : "unavailable"}{" "}
+                      · actual{" "}
+                      {row.actualUsage.exact
+                        ? decimal(row.actualUsage.exact)
+                        : "unavailable"}
+                    </small>
+                  </td>
+                  <td>{amounts(row.costs)}</td>
+                  <td>
+                    {row.businessTags
+                      .map((tag) => `${tag.key}=${tag.value}`)
+                      .join(" · ") || "None"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section className={styles.section} id="scad-cluster-breakdown">
+        <header>
+          <h3>Cluster coverage &amp; drilldowns</h3>
+        </header>
+        <div className={styles.grid}>
+          {report.clusterCoverage.map((cluster) => (
+            <article
+              key={`${cluster.accountId}:${cluster.region}:${cluster.cluster}`}
+            >
+              <strong>{cluster.cluster}</strong>
+              <span>
+                {cluster.platform} · {cluster.accountId} · {cluster.region}
+              </span>
+              <span>
+                {cluster.namespaceCount} namespaces · {cluster.workloadCount}{" "}
+                workloads · {cluster.podOrTaskCount} pods/tasks
+              </span>
+              <span>{amounts(cluster.costs)}</span>
+              {cluster.missingLineageGroups ? (
+                <small>
+                  {cluster.missingLineageGroups} groups missing business lineage
+                </small>
+              ) : (
+                <small>Lineage complete through pod/task</small>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className={styles.two}>
+        <article className={styles.section} id="scad-labels-tags-explorer">
+          <header>
+            <h3>Labels / tags explorer &amp; TCO</h3>
+          </header>
+          {report.tags.map((tag) => (
+            <div className={styles.rank} key={`${tag.key}:${tag.value}`}>
+              <strong>
+                {tag.key} = {tag.value}
+              </strong>
+              <span>{amounts(tag.costs)}</span>
+              <small>{tag.groupCount} groups</small>
+            </div>
+          ))}
+          <p>
+            <strong>{report.tco.basis.replaceAll("_", " ")}.</strong>{" "}
+            {report.tco.limitation}
+          </p>
+        </article>
+        <article className={styles.section} id="scad-data-on-eks">
+          <header>
+            <h3>Spark · Flink · EMR on EKS</h3>
+          </header>
+          {report.dataFrameworks.map((item) => (
+            <div className={styles.rank} key={item.framework}>
+              <strong>{item.framework.replaceAll("_", " ")}</strong>
+              <span>{amounts(item.costs)}</span>
+              <small>
+                {item.groupCount} groups · SUTRA name or tag inference
+              </small>
+            </div>
+          ))}
+        </article>
+      </section>
+      <section className={styles.section}>
+        <header>
+          <h3>Showback / chargeback</h3>
+          <span>{report.showback.chargebackPolicy.replaceAll("_", " ")}</span>
+        </header>
+        <div className={styles.grid}>
+          {report.showback.rows.map((item) => (
+            <article key={item.key}>
+              <strong>{item.key}</strong>
+              <span>{amounts(item.costs)}</span>
+              <small>
+                {item.podOrTaskCount} pods/tasks · {item.groupCount} groups
+              </small>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className={styles.section}>
+        <header>
+          <h3>Reconciliation &amp; immutable lineage</h3>
+        </header>
+        <div className={styles.scroll}>
+          <table>
+            <thead>
+              <tr>
+                <th>Period</th>
+                <th>Accepted generation</th>
+                <th>Currency</th>
+                <th>Source total</th>
+                <th>Projected total</th>
+                <th>Difference</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.reconciliation.map((item) => (
+                <tr key={`${item.generationId}:${item.currency}`}>
+                  <td>{item.billingPeriodStartAt.slice(0, 7)}</td>
+                  <td>{item.generationId}</td>
+                  <td>{item.currency}</td>
+                  <td>{decimal(item.sourceTotal)}</td>
+                  <td>{decimal(item.projectedGroupTotal)}</td>
+                  <td>{decimal(item.difference)}</td>
+                  <td>{item.reconciled ? "Reconciled" : "Mismatch"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {report.periods.map((period) => (
+          <details key={period.generationId}>
+            <summary>
+              {period.billingPeriodStartAt.slice(0, 7)} · {period.state} ·{" "}
+              {period.deliveryState.replaceAll("_", " ")} ·{" "}
+              {period.objectCoverage.processed}/{period.objectCoverage.expected}{" "}
+              objects
+            </summary>
+            <pre>{JSON.stringify(period, null, 2)}</pre>
+          </details>
+        ))}
+      </section>
+      <details className={`${styles.section} ${styles.evidence}`}>
+        <summary>Evidence, collection status &amp; limitations</summary>
+        <pre>
+          {JSON.stringify(
+            {
+              freshness: report.freshness,
+              evidence: report.evidence,
+              collection: report.collection,
+              limitations: report.limitations,
+            },
+            null,
+            2,
+          )}
+        </pre>
+      </details>
+    </section>
+  );
+}
+export function FinopsScadAllocationDashboard({
+  connectionId,
+}: {
+  readonly connectionId: string | null;
+}) {
+  const [filters, setFilters] = useState<ScadDashboardFilters>(EMPTY);
+  const [state, setState] = useState<{
+    report: Envelope | null;
+    error: string | null;
+    configuration: boolean;
+    collection: CollectionState | null;
+    officialDefinition: ScadOfficialDefinition;
+  }>({ report: null, error: null, configuration: false, collection: null,
+    officialDefinition: SCAD_OFFICIAL_DEFINITION });
+  useEffect(() => {
+    if (connectionId === null) return;
+    const controller = new AbortController();
+    const parameters = new URLSearchParams({ connectionId });
+    for (const [key, value] of Object.entries(filters))
+      if (value !== null) parameters.set(key, value);
+    fetch(`/api/v1/finops/scad-allocation?${parameters.toString()}`, {
+      signal: controller.signal,
+      headers: { Accept: "application/json" },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("SCAD allocation request failed");
+        return response.json() as Promise<
+          Envelope | ScadConfigurationEnvelope
+        >;
+      })
+      .then((report) => {
+        if (!hasPinnedOfficialDefinition(report.officialDefinition)) throw new Error("Sutra returned an unrecognized SCAD official definition");
+        if ("dashboard" in report && report.dashboard === null)
+          setState({ report: null, error: null, configuration: true, collection: report.collection,
+            officialDefinition: report.officialDefinition });
+        else
+          setState({
+            report: report as Envelope,
+            error: null,
+            configuration: false,
+            collection: (report as Envelope).collection,
+            officialDefinition: report.officialDefinition,
+          });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted)
+          setState((current) => ({
+            report: null,
+            error:
+              error instanceof Error
+                ? error.message
+                : "SCAD allocation request failed",
+            configuration: false,
+            collection: null,
+            officialDefinition: current.officialDefinition,
+          }));
+      });
+    return () => controller.abort();
+  }, [connectionId, filters]);
+  if (state.report !== null && state.report.connectionId === connectionId) return (
+    <ScadAllocationReportView
+      report={state.report}
+      filters={filters}
+      onFiltersChange={setFilters}
+    />
+  );
+  const status = connectionId === null
+    ? <div role="status" className={styles.warning}>Connect an active AWS trust-role account before collecting SCAD.</div>
+    : state.error ? <div role="alert" className={styles.error}>{state.error}</div>
+      : state.collection?.lifecycleState === "UNAVAILABLE"
+        ? <div role="status" className={styles.warning}>SCAD collection is unavailable until the provider and daily handler are registered. Existing immutable evidence remains readable.</div>
+        : state.collection?.lifecycleState === "FAILED"
+          ? <div role="alert" className={styles.error}>The latest SCAD collection failed. Its sanitized failure code is available in collection evidence.</div>
+          : state.collection?.lifecycleState === "COLLECTING"
+            ? <div role="status" className={styles.warning}>SCAD collection is running or waiting for its first immutable CUR2 delivery.</div>
+            : state.configuration
+              ? <div role="status" className={styles.warning}>Collection is ready, but no complete SCAD billing-period generation has been accepted yet.</div>
+              : <div role="status" className={styles.warning}>Loading SCAD allocation evidence…</div>;
+  return <section className={styles.root}>{status}<ScadOfficialDefinitionPanel definition={state.officialDefinition} /></section>;
+}

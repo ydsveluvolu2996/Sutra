@@ -168,6 +168,44 @@ async function rollbackQuietly(client: Client): Promise<void> {
   }
 }
 
+export type PostgresTransactionQuery = (
+  query: string,
+  values?: readonly unknown[],
+) => Promise<QueryResult>;
+
+/**
+ * Run repository operations on one connected PostgreSQL client. This is for
+ * workflows that need row locks or conditional decisions between statements;
+ * callers receive a bounded query function rather than the connection URL.
+ */
+export async function withPostgresTransaction<T>(
+  databaseUrl: string,
+  operation: (query: PostgresTransactionQuery) => Promise<T>,
+): Promise<T> {
+  const normalized = normalizedDatabaseUrl(databaseUrl);
+  if (configuredUrl !== undefined && configuredUrl !== normalized) {
+    throw new Error("DATABASE_URL cannot change while the Sutra process is running");
+  }
+  const client = new pg.Client({
+    connectionString: normalized,
+    application_name: "sutra-local-control-plane",
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 30_000,
+  });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await operation((query, values = []) => client.query(query, [...values]));
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await rollbackQuietly(client);
+    throw error;
+  } finally {
+    await client.end();
+  }
+}
+
 export function postgresDatabase(databaseUrl: string): D1Database {
   const normalized = normalizedDatabaseUrl(databaseUrl);
   if (configuredUrl !== undefined && configuredUrl !== normalized) {

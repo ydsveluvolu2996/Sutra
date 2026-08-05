@@ -1004,11 +1004,6 @@ export default function LandingZone() {
             <div className="ftcol ftbrand">
               <Link className="lx-brand" href="/"><span className="mark" aria-hidden="true"><i /><i /><i /></span><span><b>Sutra</b><small>Cloud security, woven together</small></span></Link>
               <p>The evidence-backed cloud operations platform for AWS MSPs — inventory, security, cost and compliance, every finding traced to what was actually observed.</p>
-              <div className="soc">
-                <a href="#top" aria-label="X"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.7 3H21l-7.3 8.3L22.2 21h-6.8l-5.3-6.4L4 21H.8l7.8-8.9L.5 3h7l4.8 5.8L17.7 3Zm-1.2 16h1.9L6.6 4.9H4.6L16.5 19Z" /></svg></a>
-                <a href="#top" aria-label="LinkedIn"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1s2.48 1.12 2.48 2.5ZM.24 8.25h4.52V23H.24V8.25ZM8.34 8.25h4.33v2h.06c.6-1.14 2.08-2.34 4.28-2.34 4.58 0 5.43 3.01 5.43 6.93V23h-4.52v-7.1c0-1.7-.03-3.88-2.37-3.88-2.37 0-2.73 1.85-2.73 3.76V23H8.34V8.25Z" /></svg></a>
-                <a href="#top" aria-label="RSS"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73H19.5C19.5 11.4 12.6 4.44 4 4.44Zm0 5.66v2.83a7.9 7.9 0 0 1 7.9 7.9h2.83c0-5.93-4.8-10.73-10.73-10.73ZM6.18 15.64a2.18 2.18 0 1 0 0 4.36 2.18 2.18 0 0 0 0-4.36Z" /></svg></a>
-              </div>
             </div>
             <div className="ftcol"><strong>Platform</strong>
               <a href="#platform">Platform overview</a>

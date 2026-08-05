@@ -4,7 +4,6 @@ import {
   LocalAuthError,
   LOCAL_IDENTITY_ISSUER,
   createSession,
-  loginHostedUser,
   type AuthenticatedLocalSession,
   type HostedIdentity,
 } from "./auth-repository";
@@ -1071,9 +1070,18 @@ export async function acceptIdentityInvitation(
   identity: HostedIdentity,
   token: string,
   now = Date.now(),
-): Promise<Awaited<ReturnType<typeof loginHostedUser>>> {
+): Promise<Awaited<ReturnType<typeof createSession>>> {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(token)) {
     throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The invitation is invalid");
+  }
+  if (
+    !identity.issuer.startsWith("https://")
+    || identity.issuer.length > 2048
+    || !/^[^\u0000-\u001f\u007f]{1,255}$/u.test(identity.subject)
+    || identity.authenticatedAt > now + 60_000
+    || identity.expiresAt <= now
+  ) {
+    throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The hosted identity is invalid");
   }
   const db = await database();
   const tokenDigest = await digestSessionToken(token);
@@ -1084,6 +1092,7 @@ export async function acceptIdentityInvitation(
               WHERE created.invitation_id = i.id AND created.action = 'created'
               ORDER BY created.occurred_at ASC, created.id ASC LIMIT 1) AS metadata_json
        FROM identity_invitations i
+       JOIN organizations o ON o.id = i.org_id AND o.status = 'active'
        JOIN identity_invitation_events e ON e.invitation_id = i.id
       WHERE i.token_digest = ? AND i.email = ? AND i.accepted_at IS NULL
         AND i.revoked_at IS NULL AND i.expires_at > ?
@@ -1119,7 +1128,50 @@ export async function acceptIdentityInvitation(
   if (pinnedIssuer !== null && identity.issuer !== pinnedIssuer) {
     throw new LocalAuthError(401, "IDENTITY_ISSUER_MISMATCH", "This invitation is bound to a different sign-in provider");
   }
-  const userId = opaqueId("user");
+
+  // A verified federated identity is global while memberships are tenant
+  // scoped. Reuse only the exact (issuer, subject, email) identity when it joins
+  // a second organization. Any subject/email drift is refused instead of being
+  // linked by email, and an existing target-org membership cannot be changed or
+  // escalated through an invitation.
+  const matchingUsers = await db.prepare(
+    `SELECT id, subject, email, status
+       FROM users
+      WHERE issuer = ? AND (subject = ? OR email = ?)
+      ORDER BY id`,
+  ).bind(identity.issuer, identity.subject, email).all<{
+    id: string;
+    subject: string;
+    email: string;
+    status: string;
+  }>();
+  const matches = matchingUsers.results ?? [];
+  const exact = matches.filter((candidate) => candidate.subject === identity.subject && candidate.email === email);
+  if (matches.length !== exact.length || exact.length > 1) {
+    throw new LocalAuthError(
+      409,
+      "IDENTITY_NOT_PROVISIONED",
+      "The verified identity attributes conflict with an existing account",
+    );
+  }
+  const existingUser = exact[0] ?? null;
+  if (existingUser !== null && existingUser.status !== "active") {
+    throw new LocalAuthError(403, "IDENTITY_NOT_PROVISIONED", "The invited identity is inactive");
+  }
+  if (existingUser !== null) {
+    const existingMembership = await db.prepare(
+      `SELECT id FROM memberships WHERE org_id = ? AND user_id = ? LIMIT 1`,
+    ).bind(invitation.org_id, existingUser.id).first<{ id: string }>();
+    if (existingMembership !== null) {
+      throw new LocalAuthError(
+        409,
+        "IDENTITY_NOT_PROVISIONED",
+        "This identity already has a membership in the invited organization",
+      );
+    }
+  }
+
+  const userId = existingUser?.id ?? opaqueId("user");
   const membershipId = opaqueId("member");
   const eventId = opaqueId("invite_event");
   // A customer-scoped invitation materializes exactly one `customer_access`
@@ -1142,19 +1194,29 @@ export async function acceptIdentityInvitation(
       `UPDATE identity_invitations
           SET accepted_at = ?, accepted_user_id = ?
         WHERE id = ? AND token_digest = ? AND email = ? AND accepted_at IS NULL
-          AND accepted_user_id IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+          AND accepted_user_id IS NULL AND revoked_at IS NULL AND expires_at > ?
+          AND EXISTS (
+            SELECT 1 FROM organizations o
+             WHERE o.id = identity_invitations.org_id AND o.status = 'active'
+          )`,
     ).bind(now, userId, invitation.id, tokenDigest, email, now),
-    db.prepare(
+  ];
+  if (existingUser === null) {
+    statements.push(db.prepare(
       `INSERT INTO users (id, issuer, subject, email, display_name, status, created_at)
        SELECT ?, ?, ?, email, ?, 'active', ?
          FROM identity_invitations
         WHERE id = ? AND accepted_at = ? AND accepted_user_id = ?`,
     ).bind(userId, identity.issuer, identity.subject, identity.displayName, now, invitation.id, now, userId),
+    );
+  }
+  statements.push(
     db.prepare(
       `INSERT INTO memberships (id, org_id, user_id, role, scope_mode, status, created_at)
-       SELECT ?, org_id, ?, role, scope_mode, 'active', ?
-         FROM identity_invitations
-        WHERE id = ? AND accepted_at = ? AND accepted_user_id = ?`,
+       SELECT ?, i.org_id, ?, i.role, i.scope_mode, 'active', ?
+         FROM identity_invitations i
+         JOIN organizations o ON o.id = i.org_id AND o.status = 'active'
+        WHERE i.id = ? AND i.accepted_at = ? AND i.accepted_user_id = ?`,
     ).bind(membershipId, userId, now, invitation.id, now, userId),
     db.prepare(
       `INSERT INTO identity_invitation_events
@@ -1174,7 +1236,7 @@ export async function acceptIdentityInvitation(
       now,
       userId,
     ),
-  ];
+  );
   if (grantsCustomerAccess) {
     statements.push(
       db.prepare(
@@ -1194,7 +1256,18 @@ export async function acceptIdentityInvitation(
   if (results.some((result) => Number(result.meta?.changes ?? 0) !== 1)) {
     throw new LocalAuthError(401, "AUTHENTICATION_REQUIRED", "The invitation was already used or revoked");
   }
-  return loginHostedUser(identity, now);
+  // Land directly in the organization named by the invitation. Calling the
+  // general hosted-login selector here would choose the user's earliest
+  // membership and could make a successful second-org invitation appear to
+  // open the wrong tenant.
+  return createSession(
+    db,
+    userId,
+    invitation.org_id,
+    identity.authenticatedAt,
+    now,
+    Math.min(identity.expiresAt, now + 60 * 60 * 1000),
+  );
 }
 
 export interface PasswordInvitationPreview {
@@ -1270,6 +1343,7 @@ export async function acceptPasswordInvitation(
               WHERE created.invitation_id = i.id AND created.action = 'created'
               ORDER BY created.occurred_at ASC, created.id ASC LIMIT 1) AS metadata_json
        FROM identity_invitations i
+       JOIN organizations o ON o.id = i.org_id AND o.status = 'active'
        JOIN identity_invitation_events e ON e.invitation_id = i.id
       WHERE i.token_digest = ? AND i.accepted_at IS NULL
         AND i.revoked_at IS NULL AND i.expires_at > ?
@@ -1340,7 +1414,11 @@ export async function acceptPasswordInvitation(
       `UPDATE identity_invitations
           SET accepted_at = ?, accepted_user_id = ?
         WHERE id = ? AND token_digest = ? AND accepted_at IS NULL
-          AND accepted_user_id IS NULL AND revoked_at IS NULL AND expires_at > ?`,
+          AND accepted_user_id IS NULL AND revoked_at IS NULL AND expires_at > ?
+          AND EXISTS (
+            SELECT 1 FROM organizations o
+             WHERE o.id = identity_invitations.org_id AND o.status = 'active'
+          )`,
     ).bind(now, userId, invitation.id, tokenDigest, now),
     db.prepare(
       `INSERT INTO users (id, issuer, subject, email, display_name, status, created_at)

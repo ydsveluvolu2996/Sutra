@@ -35,6 +35,14 @@ export function postInternalJobRun({ port, token, publicOrigin, timeoutMs = 30_0
   if (!Number.isInteger(numericPort) || numericPort < 1 || numericPort > 65_535) {
     return Promise.reject(new Error("Internal job runner port is invalid"));
   }
+  if (
+    typeof token !== "string" ||
+    token.length === 0 ||
+    token.length > 512 ||
+    /[^\x21-\x7e]/u.test(token)
+  ) {
+    return Promise.reject(new Error("Internal job runner token is invalid"));
+  }
 
   const headers = {
     ...canonicalProxyHeaders(publicOrigin, numericPort),
@@ -43,6 +51,11 @@ export function postInternalJobRun({ port, token, publicOrigin, timeoutMs = 30_0
   };
 
   return new Promise((resolvePromise, rejectPromise) => {
+    // TCP destination and request path are fixed loopback constants. The
+    // file/environment-derived values below are bounded authentication and
+    // canonical-proxy headers for that same local application, never a remote
+    // destination or an exfiltration request.
+    // codeql[js/file-access-to-http]
     const outgoing = request({
       hostname: LOOPBACK_HOST,
       port: numericPort,

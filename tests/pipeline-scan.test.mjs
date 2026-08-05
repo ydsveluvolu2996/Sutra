@@ -9,18 +9,18 @@ import { combinePipelineGate } from "../scripts/pipeline-scan.mjs";
 
 const RUNNER = fileURLToPath(new URL("../scripts/pipeline-scan.mjs", import.meta.url));
 
-test("combinePipelineGate passes only when no stage failed", () => {
+test("combinePipelineGate passes only when every requested stage passed", () => {
   const gate = combinePipelineGate([
     { name: "secret-scan", status: "pass" },
-    { name: "iac-scan", status: "skipped" },
-    { name: "image-scan", status: "skipped" },
+    { name: "dependency-scan", status: "pass" },
+    { name: "configuration-scan", status: "pass" },
   ]);
   assert.equal(gate.passed, true);
   assert.equal(gate.exitCode, 0);
-  assert.deepEqual(gate.counts, { passed: 1, failed: 0, skipped: 2 });
+  assert.deepEqual(gate.counts, { passed: 3, failed: 0, skipped: 0 });
 });
 
-test("combinePipelineGate breaches (exit 2) when any stage failed; skips never fail it", () => {
+test("combinePipelineGate breaches when a stage fails or is unexpectedly skipped", () => {
   const gate = combinePipelineGate([
     { name: "secret-scan", status: "pass" },
     { name: "iac-scan", status: "fail" },
@@ -32,13 +32,13 @@ test("combinePipelineGate breaches (exit 2) when any stage failed; skips never f
   assert.equal(gate.counts.failed, 1);
 });
 
-test("end-to-end: runs the secret scan and honestly skips IaC and image when no inputs given", () => {
+test("end-to-end: always runs repository secret, dependency, and configuration gates", () => {
   const result = spawnSync(process.execPath, [RUNNER], { encoding: "utf8" });
-  // The repo is clean of committed secrets, so the secret stage passes → gate 0.
   assert.equal(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stdout, /secret-scan/u);
-  assert.match(result.stdout, /SKIPPED\s+iac-scan\s+no --terraform or --manifests provided/u);
-  assert.match(result.stdout, /SKIPPED\s+image-scan\s+no --image provided/u);
+  assert.match(result.stdout, /PASS\s+secret-scan/u);
+  assert.match(result.stdout, /PASS\s+dependency-scan/u);
+  assert.match(result.stdout, /PASS\s+configuration-scan/u);
+  assert.doesNotMatch(result.stdout, /SKIPPED/u);
   assert.match(result.stdout, /Pipeline gate: PASSED/u);
 });
 
@@ -50,6 +50,17 @@ test("end-to-end: a misconfigured IaC input fails the pipeline gate with exit 2"
   writeFileSync(planPath, plan);
   const result = spawnSync(process.execPath, [RUNNER, "--terraform", planPath], { encoding: "utf8" });
   assert.equal(result.status, 2, result.stdout + result.stderr);
-  assert.match(result.stdout, /FAIL\s+iac-scan/u);
+  assert.match(result.stdout, /FAIL\s+structured-iac-scan/u);
   assert.match(result.stdout, /Pipeline gate: FAILED/u);
+});
+
+test("end-to-end: missing required Trivy fails closed instead of skipping", () => {
+  const result = spawnSync(process.execPath, [RUNNER], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "" },
+  });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  assert.match(result.stdout, /FAIL\s+dependency-scan\s+required scanner unavailable/u);
+  assert.match(result.stdout, /FAIL\s+configuration-scan\s+required scanner unavailable/u);
+  assert.doesNotMatch(result.stdout, /SKIPPED/u);
 });

@@ -19,6 +19,61 @@ try {
 }
 
 const secret = () => randomBytes(32).toString("base64url");
+const FINOPS_EVIDENCE_KEY = "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY";
+const FINOPS_EVIDENCE_KEY_VERSION = "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION";
+const FINOPS_EVIDENCE_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/u;
+
+function exactStoredValue(contents, name) {
+  if (contents === null) return undefined;
+  const prefix = `${name}=`;
+  const matches = contents.split("\n").filter((line) => line.startsWith(prefix));
+  if (matches.length > 1) throw new Error(`${name} must occur exactly once`);
+  const line = matches[0];
+  if (line === undefined) return undefined;
+  if (/[\r\n]/u.test(line)) throw new Error(`${name} must be a single LF-terminated line`);
+  return line.slice(prefix.length);
+}
+
+function validFinopsEvidenceKey(value) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
+  try {
+    const decoded = Buffer.from(value, "base64url");
+    return decoded.byteLength === 32 && decoded.toString("base64url") === value;
+  } catch {
+    return false;
+  }
+}
+
+function validateFinopsEvidencePair(key, version) {
+  if (!validFinopsEvidenceKey(key)) {
+    throw new Error(`${FINOPS_EVIDENCE_KEY} must be canonical 256-bit base64url key material`);
+  }
+  if (typeof version !== "string" || !FINOPS_EVIDENCE_VERSION_PATTERN.test(version)) {
+    throw new Error(`${FINOPS_EVIDENCE_KEY_VERSION} must be a valid nonempty key version`);
+  }
+}
+
+const environmentFinopsEvidenceKey = process.env[FINOPS_EVIDENCE_KEY];
+const environmentFinopsEvidenceVersion = process.env[FINOPS_EVIDENCE_KEY_VERSION];
+if ((environmentFinopsEvidenceKey === undefined)
+  !== (environmentFinopsEvidenceVersion === undefined)) {
+  throw new Error(`Both ${FINOPS_EVIDENCE_KEY} and ${FINOPS_EVIDENCE_KEY_VERSION} are required`);
+}
+const storedFinopsEvidenceKey = exactStoredValue(existingContents, FINOPS_EVIDENCE_KEY);
+const storedFinopsEvidenceVersion = exactStoredValue(
+  existingContents,
+  FINOPS_EVIDENCE_KEY_VERSION,
+);
+if ((storedFinopsEvidenceKey === undefined) !== (storedFinopsEvidenceVersion === undefined)) {
+  throw new Error(`Stored ${FINOPS_EVIDENCE_KEY} and ${FINOPS_EVIDENCE_KEY_VERSION} must form a pair`);
+}
+if (storedFinopsEvidenceKey !== undefined && storedFinopsEvidenceVersion !== undefined) {
+  validateFinopsEvidencePair(storedFinopsEvidenceKey, storedFinopsEvidenceVersion);
+}
+if (environmentFinopsEvidenceKey !== undefined
+  && environmentFinopsEvidenceVersion !== undefined) {
+  validateFinopsEvidencePair(environmentFinopsEvidenceKey, environmentFinopsEvidenceVersion);
+}
 const databaseUrl = process.env.DATABASE_URL?.trim();
 if (databaseUrl !== undefined && /[\r\n]/u.test(databaseUrl)) {
   throw new Error("DATABASE_URL must be a single line");
@@ -157,6 +212,13 @@ if (
 }
 const privateBetaRequested = privateBetaPasswordSwitch === "true" || privateBetaOidcSwitch === "true";
 const releaseImage = validatedReleaseImage(process.env.SUTRA_RELEASE_IMAGE);
+const finopsEvidenceKey = environmentFinopsEvidenceKey
+  ?? storedFinopsEvidenceKey
+  ?? secret();
+const finopsEvidenceKeyVersion = environmentFinopsEvidenceVersion
+  ?? storedFinopsEvidenceVersion
+  ?? "local-finops-evidence-v1";
+validateFinopsEvidencePair(finopsEvidenceKey, finopsEvidenceKeyVersion);
 
 // Cloudflare Turnstile protects public unauthenticated mutations. Network
 // deployments MUST provide a real widget key pair and can never use the
@@ -311,6 +373,8 @@ if (existingContents === null) {
     "SUTRA_CONNECTION_KEY_VERSION=local-v1",
     `SUTRA_BROKER_SHARED_SECRET=${secret()}`,
     `SUTRA_REGISTRY_ENCRYPTION_KEY=${secret()}`,
+    `${FINOPS_EVIDENCE_KEY}=${finopsEvidenceKey}`,
+    `${FINOPS_EVIDENCE_KEY_VERSION}=${finopsEvidenceKeyVersion}`,
     ...collectorVars.map(({ name, value }) => `${name}=${value}`),
     "SUTRA_FIXTURE_ACCOUNT_ID=123456789012",
     "SUTRA_REGISTRY_PATH=.sutra/collector-registry.enc",
@@ -348,6 +412,18 @@ if (existingContents === null) {
   for (const { name, value } of collectorVars) {
     updatedContents = upsertVariable(updatedContents, additions, name, value);
   }
+  updatedContents = upsertVariable(
+    updatedContents,
+    additions,
+    FINOPS_EVIDENCE_KEY,
+    finopsEvidenceKey,
+  );
+  updatedContents = upsertVariable(
+    updatedContents,
+    additions,
+    FINOPS_EVIDENCE_KEY_VERSION,
+    finopsEvidenceKeyVersion,
+  );
   // Removing the opt-in from the container configuration must fail closed even
   // when a persistent runtime volume still contains a prior enabled value.
   if (!privateBetaRequested && /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=true$/mu.test(updatedContents)) {

@@ -15,6 +15,7 @@ import {
   type FrameworkReadiness,
 } from "../../../../../lib/compliance-frameworks";
 import { canonicalJson } from "../../../../../lib/canonical-json";
+import { safeCsvCell } from "../../../../../lib/safe-csv";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -27,15 +28,6 @@ type ExportFormat = "view" | "json" | "csv" | "pack";
 
 function invalid(): never {
   throw Object.assign(new Error("The compliance framework request is invalid"), { code: "INVALID_INPUT" });
-}
-
-// Spreadsheet-injection guard + CSV quoting, identical to the AWS compliance export.
-function safeSpreadsheetText(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  return /^[=+\-@\t\r]/u.test(text) ? `'${text}` : text;
-}
-function csvCell(value: unknown): string {
-  return `"${safeSpreadsheetText(value).replaceAll('"', '""')}"`;
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -54,7 +46,7 @@ function auditCsv(auditExport: AuditExport, reportSha256: string): string {
     row.mappedEvidence.map((entry) => `${entry.sutraControlId}:${entry.state}`).join(";"),
     auditExport.framework.claimBoundary,
   ]);
-  return `${header.map(csvCell).join(",")}\r\n${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+  return `${header.map(safeCsvCell).join(",")}\r\n${rows.map((row) => row.map(safeCsvCell).join(",")).join("\r\n")}\r\n`;
 }
 
 export async function GET(request: Request): Promise<Response> {

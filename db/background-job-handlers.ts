@@ -35,20 +35,45 @@ import {
 import { buildMspScorecard } from "../lib/kubernetes-posture-trend.ts";
 import { addCaseNote } from "./case-repository";
 import { AlertRuleRepository, type RecordAlertEventInput } from "./alert-rule-repository";
+import { AgentlessScanRepository } from "./agentless-scan-repository";
 import { CloudVulnerabilityRepository } from "./cloud-vulnerability-repository";
 import { FinopsScheduledReportRepository, type ReportDeliveryKind } from "./finops-scheduled-report-repository";
 import { FinopsWorkspaceRepository } from "./finops-workspace-repository";
-import { ItsmConnectorRepository } from "./itsm-connector-repository";
+import { FinopsBillingEngineRepository } from "./finops-billing-engine-repository";
+import { ComputeOptimizerDiscoveryRepository } from
+  "./finops-compute-optimizer-discovery-repository";
+import { ComputeOptimizerExactGenerationRepository } from
+  "./finops-compute-optimizer-exact-generation-repository";
+import { ComputeOptimizerExportPlanRepository } from
+  "./finops-compute-optimizer-export-plan-repository";
+import { ComputeOptimizerExportPlanSetRepository } from
+  "./finops-compute-optimizer-export-plan-set-repository";
+import { ComputeOptimizerActivationRepository } from
+  "./finops-compute-optimizer-activation-repository";
+import { resolveComputeOptimizerMaterializationConnection } from
+  "../lib/finops-compute-optimizer-runtime-capability";
+import {
+  ITSM_SECRET_CLEANUP_JOB_KIND,
+  ItsmConnectorRepository,
+} from "./itsm-connector-repository";
 import { JobQueueRepository } from "./job-queue-repository";
 import { KubernetesRepository } from "./kubernetes-repository";
 import {
   appendAuditEvent,
   createSyncRun,
+  failSyncRun,
   getConnectionForOrg,
   getLatestConnectionForOrg,
+  listHostedCollectorOperationRuns,
+  listActiveAwsConnectionsForCustomer,
   listConnectionsForOrg,
+  markConnectionNeedsAttention,
   persistSnapshot,
 } from "./pilot-repository";
+import {
+  HOSTED_COLLECTOR_COLLECT_JOB_KIND,
+  runHostedCollectorJob,
+} from "../lib/hosted-collector-job";
 import { HOSTED_BROKER_INGEST_JOB_KIND } from "../lib/hosted-broker-ingest";
 import { runHostedBrokerIngestJob } from "../lib/hosted-broker-ingest-job";
 import { RetentionSweepRepository } from "./retention-sweep-repository";
@@ -60,10 +85,527 @@ import {
 } from "./finops-alert-service";
 import type { FinopsAlert } from "../lib/finops-alerts.ts";
 import { runUptimeProbeJob, buildUptimeProbeDeps } from "../lib/uptime-probe-handler";
+import { requiredConfiguredPublicOrigin } from "../lib/api-auth";
+import { planVulnFeedRefresh } from "../lib/vuln-feed-refresh-schedule";
+import { refreshBoundedVulnerabilityFeed } from "../lib/vuln-feed-runtime";
+import type { ManagedOutboundEnvironment } from "../lib/managed-outbound-fetch";
+import { VulnerabilityMirrorRepository } from "./vulnerability-mirror-repository";
+import {
+  requestAgentlessTeardownSweep,
+  runCollectorSync,
+  runFinopsExportChunkRead,
+  runFinopsSourceCollection,
+  runComputeOptimizerExportExactDescribe,
+  runComputeOptimizerExportObjectChunkRead,
+  runSignedOrganizationsTaxonomy,
+  safeCollectionFailureCode,
+  getPilotSecrets,
+} from "../lib/pilot-server";
+import {
+  createFinopsBrokerObjectReader,
+} from "../lib/finops-broker-object-reader";
+import {
+  FINOPS_DATA_EXPORT_INGEST_JOB_KIND,
+  runFinopsDataExportIngestJob,
+} from "../lib/finops-data-export-ingest-job";
+import {
+  FINOPS_SOURCE_COLLECT_JOB_KIND,
+  runFinopsSourceCollectJob,
+} from "../lib/finops-source-collect-job";
+import { FinopsEvidenceReferenceSealer } from "../lib/finops-source-evidence-reference";
+import {
+  FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND,
+  TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS,
+  TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+  runTrustedAdvisorAccountCollectionJob,
+  runTrustedAdvisorManifestFinalizeJob,
+  runTrustedAdvisorOrganizationActivationJob,
+  type TrustedAdvisorServerConnection,
+} from "../lib/finops-trusted-advisor-standard-orchestration";
+import {
+  FINOPS_TA_ACCOUNT_COLLECT_JOB_KIND,
+  FINOPS_TA_MANIFEST_FINALIZE_JOB_KIND,
+} from "../lib/finops-trusted-advisor-organization-job";
+import {
+  createTrustedAdvisorTaxonomySignatureVerifier,
+} from "../lib/finops-trusted-advisor-taxonomy-kms";
+import { FinopsSourceJobLedgerRepository } from "./finops-source-job-ledger-repository";
+import { FinopsSourceSnapshotRepository } from "./finops-source-snapshot-repository";
+import { TrustedAdvisorOrganizationRepository } from "./finops-trusted-advisor-organization-repository";
+import { EvidenceRepository } from "./evidence-repository";
+import { ComputeOptimizerExportPlanEnvelope } from
+  "../lib/finops-compute-optimizer-export-plan-envelope.ts";
+import { readComputeOptimizerExportPlanSet } from
+  "../lib/finops-compute-optimizer-export-plan-set-reader.ts";
+import {
+  FINOPS_COMPUTE_OPTIMIZER_MATERIALIZE_JOB_KIND,
+  runComputeOptimizerMaterializationJob,
+  type ComputeOptimizerMaterializationOutcome,
+} from "../lib/finops-compute-optimizer-materialization-runtime.ts";
+import {
+  FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_LAUNCH_JOB_KIND,
+  FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_RECONCILE_JOB_KIND,
+} from "../lib/finops-compute-optimizer-activation-jobs.ts";
+import { FINOPS_COMPUTE_OPTIMIZER_DISCOVERY_JOB_KIND } from
+  "../lib/finops-compute-optimizer-discovery-job.ts";
+import {
+  runComputeOptimizerActivationLaunchProductionHandler,
+  runComputeOptimizerActivationReconcileProductionHandler,
+  runComputeOptimizerDiscoveryProductionHandler,
+} from "./finops-compute-optimizer-activation-composition.ts";
+import { AWS_NEWS_FEEDS_JOB_KIND } from
+  "../lib/finops-aws-news-feeds-job.ts";
+import { createAwsNewsFeedsProductionComposition } from
+  "../lib/finops-aws-news-feeds-production-composition.ts";
+import { AWS_BUDGETS_DURABLE_JOB_KIND } from
+  "../lib/finops-aws-budgets-durable-binding.ts";
+import {
+  createAwsBudgetsProductionComposition,
+  scheduleAwsBudgetsProductionTick,
+} from "../lib/finops-aws-budgets-production-composition.ts";
+import { EXTENDED_SUPPORT_RUNTIME_JOB_KIND } from
+  "../lib/finops-extended-support-runtime-binding.ts";
+import { createExtendedSupportProductionComposition } from
+  "../lib/finops-extended-support-production-composition.ts";
+import { AWS_SUPPORT_CASES_RUNTIME_JOB_KIND } from
+  "../lib/finops-aws-support-cases-runtime-binding.ts";
+import { createAwsSupportCasesProductionComposition } from
+  "../lib/finops-aws-support-cases-production-composition.ts";
+import { AWS_HEALTH_RUNTIME_JOB_KIND } from
+  "../lib/finops-aws-health-runtime-binding.ts";
+import { createAwsHealthProductionComposition } from
+  "../lib/finops-aws-health-production-composition.ts";
+import { RESILIENCE_VUE_RUNTIME_JOB_KIND } from
+  "../lib/finops-resilience-vue-runtime-binding.ts";
+import { createResilienceVueProductionComposition } from
+  "../lib/finops-resilience-vue-production-composition.ts";
+import { DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND } from
+  "../lib/finops-dcf-durable-runtime-binding.ts";
+import { createDcfProductionComposition } from
+  "../lib/finops-dcf-production-composition.ts";
+import { END_USER_COMPUTING_DURABLE_JOB_KIND } from
+  "../lib/finops-end-user-computing-runtime-binding.ts";
+import { createEndUserComputingProductionComposition } from
+  "../lib/finops-end-user-computing-production-composition.ts";
+import { EndUserComputingRuntimeContextRepository } from
+  "./finops-end-user-computing-runtime-context-repository.ts";
+import { GRAVITON_MATERIALIZATION_JOB_KIND } from "../lib/finops-graviton-runtime-binding.ts";
+import { createGravitonProductionComposition } from "../lib/finops-graviton-production-composition.ts";
+import { createGravitonEvidenceSignerFromEnvironment } from "../lib/finops-graviton-evidence-signer.ts";
+export {
+  dispatchComputeOptimizerOutboxTick,
+  recoverComputeOptimizerActivationTick,
+  scheduleComputeOptimizerDailyTick,
+} from "./finops-compute-optimizer-activation-composition.ts";
+
+function awsNewsFeedsProductionComposition() {
+  return createAwsNewsFeedsProductionComposition({
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Six-hour deterministic ADV-07 scheduler hook for the internal job tick. */
+export function scheduleAwsNewsFeedsTick(scheduledAtMs = Date.now()) {
+  return awsNewsFeedsProductionComposition().scheduleTick(scheduledAtMs);
+}
+
+function awsBudgetsProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_BUDGETS_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsBudgetsProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Six-hour deterministic ADV-08 scheduler hook for the internal job tick. */
+export function scheduleAwsBudgetsTick(scheduledAtMs = Date.now()) {
+  return scheduleAwsBudgetsProductionTick(scheduledAtMs);
+}
+
+/**
+ * Scheduling a provider vertical must never require broker credentials. Each tick only enqueues a
+ * scoped durable job; the signed broker is resolved later, by the claimed handler. Several
+ * compositions still build the broker eagerly, so on a deployment without asymmetric broker signing
+ * keys the first gated vertical threw and aborted the entire internal drain — every later tick and
+ * runDueBackgroundJobs() never ran at all.
+ *
+ * Absorb only these enumerated gate codes, report the vertical as unavailable carrying its exact
+ * code, and let the rest of the drain proceed. Every other error still propagates, so a real
+ * scheduling fault stays loud, and a gated tick is never reported as a successful zero-enqueue tick.
+ */
+const BROKER_GATED_SCHEDULE_CODES: ReadonlySet<string> = new Set([
+  "AWS_HEALTH_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "AWS_SUPPORT_CASES_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "DCF_STEP_FUNCTIONS_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "END_USER_COMPUTING_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "EXTENDED_SUPPORT_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "GRAVITON_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+  "RESILIENCE_VUE_ASYMMETRIC_BROKER_AUTH_REQUIRED",
+]);
+
+export interface UnavailableScheduleTick {
+  readonly scheduled: false;
+  readonly unavailableCode: string;
+}
+
+async function gatedScheduleTick<T>(
+  tick: () => T | Promise<T>,
+): Promise<T | UnavailableScheduleTick> {
+  try {
+    return await tick();
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (!BROKER_GATED_SCHEDULE_CODES.has(code)) throw error;
+    return { scheduled: false, unavailableCode: code };
+  }
+}
+
+function extendedSupportProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("EXTENDED_SUPPORT_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createExtendedSupportProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-04 scheduler hook for the internal job tick. */
+export function scheduleExtendedSupportTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(() => extendedSupportProductionComposition().scheduleTick(scheduledAtMs));
+}
+
+function awsSupportCasesProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_SUPPORT_CASES_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsSupportCasesProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-09 organization scheduler hook. */
+export function scheduleAwsSupportCasesTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(() => awsSupportCasesProductionComposition().scheduleTick(scheduledAtMs));
+}
+
+function awsHealthProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("AWS_HEALTH_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createAwsHealthProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Daily deterministic ADV-06 organization-view scheduler hook. */
+export function scheduleAwsHealthTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(() => awsHealthProductionComposition().scheduleTick(scheduledAtMs));
+}
+
+let resilienceVueComposition: ReturnType<typeof createResilienceVueProductionComposition>
+  | undefined;
+
+function resilienceVueProductionComposition() {
+  if (resilienceVueComposition !== undefined) return resilienceVueComposition;
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("RESILIENCE_VUE_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  const pending = createResilienceVueProductionComposition({
+    env: env as unknown as Readonly<Record<string, string | undefined>>,
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+  resilienceVueComposition = pending;
+  void pending.catch(() => {
+    if (resilienceVueComposition === pending) resilienceVueComposition = undefined;
+  });
+  return pending;
+}
+
+/** Daily deterministic ADV-10 connection-scoped ResilienceVue scheduler hook. */
+export async function scheduleResilienceVueTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(async () => (await resilienceVueProductionComposition()).scheduleTick(scheduledAtMs));
+}
+
+function dcfStepFunctionsProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("DCF_STEP_FUNCTIONS_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  return createDcfProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+  });
+}
+
+/** Hourly deterministic ADV-12 connection-scoped Step Functions scheduler. */
+export function scheduleDcfStepFunctionsTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(() => dcfStepFunctionsProductionComposition().scheduleTick(scheduledAtMs));
+}
+
+function endUserComputingProductionComposition() {
+  const secrets = getPilotSecrets();
+  if (secrets.brokerAuthentication.mode !== "asymmetric") {
+    throw new Error("END_USER_COMPUTING_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  }
+  const runtime = new EndUserComputingRuntimeContextRepository();
+  return createEndUserComputingProductionComposition({
+    brokerConfiguration: {
+      brokerOrigin: secrets.brokerUrl,
+      signing: secrets.brokerAuthentication,
+    },
+    fetcher: (input, init) => fetch(input, init),
+    loadEligibleBoundaries: runtime.listEligibleBoundaries.bind(runtime),
+    loadRuntimeContext: runtime.loadRuntimeContext.bind(runtime),
+  });
+}
+
+/** Six-hour deterministic ADV-11 End User Computing scheduler. */
+export function scheduleEndUserComputingTick(scheduledAtMs = Date.now()) {
+  return gatedScheduleTick(() => endUserComputingProductionComposition().scheduleTick(scheduledAtMs));
+}
+
+function gravitonProductionComposition(){const secrets=getPilotSecrets();
+  if(secrets.brokerAuthentication.mode!=="asymmetric")throw new Error("GRAVITON_ASYMMETRIC_BROKER_AUTH_REQUIRED");
+  const runtimeEnv=env as unknown as Readonly<Record<string,string|undefined>>;
+  const required=(name:string)=>{const value=runtimeEnv[name]?.trim();if(value===undefined||value.length===0)
+    throw new Error("GRAVITON_AUTHORITY_NOT_CONFIGURED");return value;};
+  return createGravitonProductionComposition({brokerConfiguration:{brokerOrigin:secrets.brokerUrl,
+    signing:secrets.brokerAuthentication},fetcher:(input,init)=>fetch(input,init),
+    signer:createGravitonEvidenceSignerFromEnvironment(runtimeEnv),authorityConfiguration:{
+      pricingCatalogVersion:required("SUTRA_GRAVITON_PRICING_CATALOG_VERSION"),
+      pricingContentSha256:required("SUTRA_GRAVITON_PRICING_CONTENT_SHA256"),
+      compatibilityPolicyVersion:required("SUTRA_GRAVITON_COMPATIBILITY_POLICY_VERSION"),
+      compatibilityContentSha256:required("SUTRA_GRAVITON_COMPATIBILITY_CONTENT_SHA256"),
+      workloadAttestationSetId:required("SUTRA_GRAVITON_WORKLOAD_ATTESTATION_SET_ID"),
+      workloadAttestationSha256:required("SUTRA_GRAVITON_WORKLOAD_ATTESTATION_SHA256"),
+      licenseAttestationSetId:required("SUTRA_GRAVITON_LICENSE_ATTESTATION_SET_ID"),
+      licenseAttestationSha256:required("SUTRA_GRAVITON_LICENSE_ATTESTATION_SHA256"),
+    }});}
+/** Daily deterministic ADV-05 Graviton Savings scheduler. */
+export function scheduleGravitonSavingsTick(scheduledAtMs=Date.now()){
+  return gatedScheduleTick(() => gravitonProductionComposition().scheduleTick(scheduledAtMs));}
 
 const CASE_STATUSES: ReadonlySet<CaseStatusLike> = new Set<CaseStatusLike>([
   "open", "investigating", "resolved", "accepted_risk",
 ]);
+
+const TRUSTED_ADVISOR_ORGANIZATIONS_CONTRACT_ID =
+  "aws-organizations-taxonomy-read-v1";
+const TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS = new Set([
+  "standard-2026-08.2",
+  "standard-2026-08.3",
+]);
+
+function trustedAdvisorServerConnection(
+  organizationId: string,
+  connection: Awaited<ReturnType<typeof getConnectionForOrg>>,
+): TrustedAdvisorServerConnection | null {
+  if (
+    connection === null
+    || connection.sourceKind !== "aws_trust_role"
+    || connection.status !== "active"
+    || connection.partition !== "aws"
+    || !TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS.has(connection.permissionPackVersion)
+  ) return null;
+  return {
+    organizationId,
+    customerId: connection.customerId,
+    connectionId: connection.id,
+    awsAccountId: connection.awsAccountId,
+    partition: connection.partition,
+    sourceKind: connection.sourceKind,
+    status: connection.status,
+  };
+}
+
+async function listTrustedAdvisorCustomerConnections(scope: {
+  readonly organizationId: string;
+  readonly customerId: string;
+}): Promise<readonly TrustedAdvisorServerConnection[]> {
+  const batches = await Promise.all(
+    [...TRUSTED_ADVISOR_ADVANCED_PERMISSION_PACKS].map((permissionPackVersion) =>
+      listActiveAwsConnectionsForCustomer(
+        scope.organizationId,
+        scope.customerId,
+        permissionPackVersion,
+      )
+    ),
+  );
+  // During a permission-pack rollout the same AWS account can temporarily have
+  // both an .8.2 and .8.3 connection. Prefer the successor and fan out once per
+  // account so a safe role upgrade cannot create duplicate TA evidence.
+  const selected = new Map<string, (typeof batches)[number][number]>();
+  for (const connection of batches.flat().sort((left, right) =>
+    right.permissionPackVersion.localeCompare(left.permissionPackVersion)
+      || left.awsAccountId.localeCompare(right.awsAccountId)
+      || left.id.localeCompare(right.id)
+  )) {
+    if (!selected.has(connection.awsAccountId)) {
+      selected.set(connection.awsAccountId, connection);
+    }
+  }
+  return [...selected.values()].sort((left, right) =>
+    left.awsAccountId.localeCompare(right.awsAccountId) || left.id.localeCompare(right.id)
+  ).slice(0, 10_001).flatMap((connection) => {
+    const mapped = trustedAdvisorServerConnection(scope.organizationId, connection);
+    return mapped === null ? [] : [mapped];
+  });
+}
+
+/** Production composition for the signed Organizations activation job. */
+export async function runTrustedAdvisorOrganizationActivationHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  const verifier = createTrustedAdvisorTaxonomySignatureVerifier(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  await runTrustedAdvisorOrganizationActivationJob(job, {
+    repository,
+    queue: new JobQueueRepository(),
+    getAnchorConnection: async (scope) => trustedAdvisorServerConnection(
+      scope.organizationId,
+      await getConnectionForOrg(scope.organizationId, scope.connectionId),
+    ),
+    listCustomerConnections: listTrustedAdvisorCustomerConnections,
+    collectSignedTaxonomy: (input) => {
+      if (input.operations !== TRUSTED_ADVISOR_ORGANIZATIONS_TAXONOMY_OPERATIONS) {
+        throw new Error("trusted-advisor-taxonomy-operations-invalid");
+      }
+      return runSignedOrganizationsTaxonomy({
+        tenantId: input.scope.organizationId,
+        customerId: input.scope.customerId,
+        connectionId: input.scope.connectionId,
+        jobId: job.id,
+        contractId: TRUSTED_ADVISOR_ORGANIZATIONS_CONTRACT_ID,
+      });
+    },
+    verifyTaxonomySignature: verifier.verify,
+    expectedSignerKeyId: verifier.expectedSignerKeyId,
+    now: Date.now,
+  });
+}
+
+/** Production composition for one frozen member-account standard-check job. */
+export async function runTrustedAdvisorAccountCollectionHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  const snapshots = new FinopsSourceSnapshotRepository();
+  const evidence = new EvidenceRepository();
+  const sealer = await FinopsEvidenceReferenceSealer.fromEnvironment(
+    env as unknown as Readonly<Record<string, string | undefined>>,
+  );
+  await runTrustedAdvisorAccountCollectionJob(job, {
+    repository,
+    queue: new JobQueueRepository(),
+    findManifest: (input) => repository.getManifestByIdentity(input),
+    collectCompletedStandardChecks: async (input) => {
+      const sourceJob: RunnableJob = {
+        ...job,
+        connectionId: input.connectionId,
+        kind: FINOPS_SOURCE_COLLECT_JOB_KIND,
+        payload: {
+          connectionId: input.connectionId,
+          sourceId: input.sourceId,
+          contractId: input.contractId,
+        },
+      };
+      await runFinopsSourceCollectJob(sourceJob, {
+        getConnection: (organizationId, connectionId) =>
+          getConnectionForOrg(organizationId, connectionId),
+        collect: runFinopsSourceCollection,
+        ledger: new FinopsSourceJobLedgerRepository(),
+        evidence,
+        snapshots,
+        evidenceReferenceSealer: sealer,
+        now: Date.now,
+      });
+      const scope = {
+        organizationId: input.organizationId,
+        customerId: input.customerId,
+        connectionId: input.connectionId,
+      };
+      const snapshot = await snapshots.getSnapshotForAttempt(
+        scope,
+        TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+        input.orchestrationJobId,
+        input.attempt,
+      );
+      if (
+        snapshot === null
+        || (snapshot.status !== "complete" && snapshot.status !== "partial")
+        || snapshot.sourceId !== TRUSTED_ADVISOR_STANDARD_SOURCE_ID
+      ) throw new Error("trusted-advisor-standard-snapshot-unavailable");
+      const objectId = await sealer.open(snapshot.evidenceReference, {
+        ...scope,
+        sourceId: TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+        generationId: snapshot.generationId,
+      });
+      const stored = await evidence.readFinopsSourceSnapshot({
+        scope: {
+          orgId: scope.organizationId,
+          customerId: scope.customerId,
+          connectionId: scope.connectionId,
+        },
+        objectId,
+        snapshotId: snapshot.generationId,
+        contentSha256: snapshot.contentSha256,
+      });
+      return {
+        snapshot: {
+          ...snapshot,
+          sourceId: TRUSTED_ADVISOR_STANDARD_SOURCE_ID,
+          status: snapshot.status,
+          schemaVersion: "sutra.finops-source-evidence.v2" as const,
+        },
+        verifiedBody: stored.body,
+      };
+    },
+    now: Date.now,
+  });
+}
+
+/** Production composition for the retrying manifest finalizer. */
+export async function runTrustedAdvisorManifestFinalizeHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const repository = new TrustedAdvisorOrganizationRepository();
+  await runTrustedAdvisorManifestFinalizeJob(job, {
+    repository,
+    findManifest: (input) => repository.getManifestByIdentity(input),
+    now: Date.now,
+  });
+}
 
 interface ItsmDispatchPayload {
   readonly customerId: string;
@@ -131,7 +673,15 @@ async function runItsmDispatch(job: RunnableJob): Promise<void> {
       projectKey: connector.projectKey,
     },
     itsmCase: payload.itsmCase,
+    environment: env as unknown as ManagedOutboundEnvironment,
   });
+  if (result.delivered) {
+    await new ItsmConnectorRepository().recordOutboundSuccess(
+      { orgId: job.orgId, customerId: payload.customerId },
+      connector.id,
+      connector.updatedAt,
+    );
+  }
   const outcome = deliveryOutcome(result);
   await addCaseNote({
     orgId: job.orgId,
@@ -144,6 +694,36 @@ async function runItsmDispatch(job: RunnableJob): Promise<void> {
   // Rethrow on a non-delivery so the queue's own backoff/dead-letter policy
   // decides the next attempt — the note above records what actually happened.
   if (!result.delivered) throw new Error(`itsm-dispatch ${outcome}`);
+}
+
+export async function runItsmSecretCleanupJob(
+  job: RunnableJob,
+  repository: Pick<ItsmConnectorRepository, "cleanupDeletedManagedSecret"> =
+    new ItsmConnectorRepository(),
+): Promise<void> {
+  if (
+    job.customerId === null ||
+    typeof job.payload !== "object" ||
+    job.payload === null ||
+    Array.isArray(job.payload)
+  ) {
+    throw new Error("itsm-secret-cleanup-payload-invalid");
+  }
+  const payload = job.payload as Record<string, unknown>;
+  if (
+    Object.keys(payload).some((key) => key !== "connectorId" && key !== "secretReference") ||
+    typeof payload.connectorId !== "string" ||
+    !/^itc_[a-f0-9]{32}$/u.test(payload.connectorId) ||
+    typeof payload.secretReference !== "string" ||
+    payload.secretReference.length > 512
+  ) {
+    throw new Error("itsm-secret-cleanup-payload-invalid");
+  }
+  await repository.cleanupDeletedManagedSecret(
+    { orgId: job.orgId, customerId: job.customerId },
+    payload.connectorId,
+    payload.secretReference,
+  );
 }
 
 const REPORT_ID = /^fsr_[a-f0-9]{32}$/u;
@@ -288,8 +868,6 @@ export interface AlertEvaluationSummary {
 }
 
 const MAX_ALERT_MESSAGE = 2_000;
-const ALERT_PUBLIC_ORIGIN = "https://app.sutracmdb.com";
-
 /**
  * Evaluate a tenant's enabled alert rules against freshly assembled metrics,
  * record each firing, and dispatch it through the EXISTING notification system.
@@ -462,6 +1040,7 @@ export async function dispatchFiredAlert(input: AlertDispatchInput): Promise<Ale
   const rule = input.evaluation.rule;
   const title = alertText(rule.name, 200);
   const summary = alertText(input.message, 1_000);
+  const publicOrigin = requiredConfiguredPublicOrigin();
   let enqueued = 0;
   for (const destination of targets) {
     const event = normalizeSecurityNotificationEvent({
@@ -474,11 +1053,11 @@ export async function dispatchFiredAlert(input: AlertDispatchInput): Promise<Ale
       summary,
       occurredAt: new Date(input.firedAtMs).toISOString(),
       findingCount: 1,
-      reportUrl: `${ALERT_PUBLIC_ORIGIN}/alerts`,
+      reportUrl: `${publicOrigin}/alerts`,
       evidenceSha256: await alertEvidenceHash(
         `${input.scope.orgId}\u0000${input.scope.customerId}\u0000${rule.id}\u0000${input.firedAtMs}\u0000${input.evaluation.observedValue}`,
       ),
-    }, ALERT_PUBLIC_ORIGIN);
+    }, publicOrigin);
     const emailRecipients = destination.configuration.channel === "email"
       ? destination.configuration.recipients
       : ["notifications@sutracmdb.com"];
@@ -692,7 +1271,7 @@ const FINOPS_SWEEP_ACTOR_ID = "system_finops_alert_sweep";
  */
 async function recordFinopsAlertSweepAudit(outcome: FinopsAlertSweepOutcome): Promise<void> {
   const requestKey = (await alertEvidenceHash(
-    `${outcome.orgId} ${outcome.customerId} ${outcome.jobId} ${outcome.attempt}`,
+    `${outcome.orgId}\u0000${outcome.customerId}\u0000${outcome.jobId}\u0000${outcome.attempt}`,
   )).slice(0, 32);
   await appendAuditEvent({
     orgId: outcome.orgId,
@@ -718,6 +1297,142 @@ async function recordFinopsAlertSweepAudit(outcome: FinopsAlertSweepOutcome): Pr
   });
 }
 
+const COMPUTE_OPTIMIZER_MATERIALIZATION_ACTOR_ID =
+  "system_finops_compute_optimizer_materializer";
+
+async function recordComputeOptimizerMaterializationOutcome(
+  value: ComputeOptimizerMaterializationOutcome,
+  maximumJobAttempts?: number,
+): Promise<void> {
+  const activationRepository = new ComputeOptimizerActivationRepository();
+  const scope = {
+    organizationId: value.organizationId,
+    customerId: value.customerId,
+    connectionId: value.connectionId,
+  };
+  if (value.status === "GENERATION_ACCEPTED" || value.status === "ALREADY_ACCEPTED") {
+    const activation = await activationRepository.getActivation(scope, value.activationId);
+    if (activation?.state === "MATERIALIZATION_PENDING") {
+      await activationRepository.transitionActivation(scope, {
+        activationId: value.activationId,
+        expectedState: "MATERIALIZATION_PENDING",
+        nextState: "COMPLETE",
+        expectedAttempt: activation.attempt,
+        nextAttempt: activation.attempt,
+        failureCode: null,
+      });
+    }
+  } else if (maximumJobAttempts !== undefined
+    && value.jobAttempt >= maximumJobAttempts) {
+    const activation = await activationRepository.getActivation(scope, value.activationId);
+    if (activation?.state === "MATERIALIZATION_PENDING") {
+      await activationRepository.transitionActivation(scope, {
+        activationId: value.activationId,
+        expectedState: "MATERIALIZATION_PENDING",
+        nextState: "FAILED",
+        expectedAttempt: activation.attempt,
+        nextAttempt: activation.attempt,
+        failureCode: "MATERIALIZATION_EXHAUSTED",
+      });
+    }
+  }
+  await appendAuditEvent({
+    orgId: value.organizationId,
+    actorType: "system",
+    actorId: COMPUTE_OPTIMIZER_MATERIALIZATION_ACTOR_ID,
+    action: "finops.compute_optimizer.materialization.outcome",
+    targetType: "finops_compute_optimizer_plan_set",
+    targetId: value.planSetId,
+    customerId: value.customerId,
+    outcome: value.status === "GENERATION_ACCEPTED"
+      || value.status === "ALREADY_ACCEPTED" ? "allowed" : "failed",
+    requestId: `finops.co.materialize:${value.jobId}:${value.jobAttempt}`,
+    metadata: {
+      connectionId: value.connectionId,
+      activationId: value.activationId,
+      planCheckpointId: value.planCheckpointId,
+      status: value.status,
+      runtimeCheckpointId: value.runtimeCheckpointId,
+      generationId: value.generationId,
+      generationContentSha256: value.generationContentSha256,
+      mappedRegionCount: value.mappedRegionCount,
+      blockedRegionCount: value.blockedRegionCount,
+      jobAttempt: value.jobAttempt,
+    },
+  });
+}
+
+/** Production composition for the exact Compute Optimizer materialization job. */
+export async function runComputeOptimizerMaterializationHandler(
+  job: RunnableJob,
+): Promise<void> {
+  const exactRepository = new ComputeOptimizerExactGenerationRepository();
+  await runComputeOptimizerMaterializationJob(job, {
+    getConnection: (organizationId, connectionId) =>
+      resolveComputeOptimizerMaterializationConnection(organizationId, connectionId, {
+        getGenericConnection: getConnectionForOrg,
+        getCurrentCapability: (scope) =>
+          new ComputeOptimizerActivationRepository().getCurrentCapability(scope),
+      }),
+    loadPersistedPlanSet: async (scope) => {
+      const planSetRepository = new ComputeOptimizerExportPlanSetRepository();
+      const planRepository = new ComputeOptimizerExportPlanRepository();
+      const discoveryRepository = new ComputeOptimizerDiscoveryRepository();
+      const repositoryScope = {
+        organizationId: scope.organizationId,
+        customerId: scope.customerId,
+        connectionId: scope.connectionId,
+      };
+      const storedPlanSet = await planSetRepository.getPlanSet(
+        repositoryScope,
+        scope.planSetId,
+      );
+      if (storedPlanSet === null) throw new Error("compute-optimizer-plan-set-not-found");
+      const storedPlans = [];
+      for (const planId of storedPlanSet.planIds) {
+        const stored = await planRepository.getPlan(repositoryScope, planId);
+        if (stored === null) throw new Error("compute-optimizer-plan-not-found");
+        storedPlans.push(stored);
+      }
+      const envelope = await ComputeOptimizerExportPlanEnvelope.fromEnvironment(
+        env as unknown as Readonly<Record<string, string | undefined>>,
+      );
+      const planSet = await readComputeOptimizerExportPlanSet({
+        scope: repositoryScope,
+        storedPlanSet,
+        storedPlans,
+        envelope,
+      });
+      const discoveryEvidence = [];
+      for (const stored of storedPlans) {
+        const evidence = await discoveryRepository.getFinalizedExportEvidence(
+          repositoryScope,
+          stored.discoveryRunId,
+        );
+        if (evidence === null) {
+          throw new Error("compute-optimizer-discovery-evidence-not-found");
+        }
+        discoveryEvidence.push({ region: stored.region, evidence });
+      }
+      return { planSet, discoveryEvidence };
+    },
+    findAcceptedGeneration: (scope, planSet) =>
+      exactRepository.getAcceptedHeadForPlanSet(scope, planSet),
+    persistence: exactRepository,
+    describeTransport: {
+      describeExact: (request, context) =>
+        runComputeOptimizerExportExactDescribe(request, context),
+    },
+    objectTransport: {
+      readChunk: (request, context) =>
+        runComputeOptimizerExportObjectChunkRead(request, context),
+    },
+    recordOutcome: (outcome) =>
+      recordComputeOptimizerMaterializationOutcome(outcome, job.maxAttempts),
+    now: Date.now,
+  });
+}
+
 /**
  * The app-side registry of durable job handlers. Each handler does real work and
  * throws on failure — nothing is fabricated, and the runner completes a job only
@@ -729,6 +1444,7 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       await new RetentionSweepRepository().sweep(job.orgId);
     },
     "itsm-dispatch": runItsmDispatch,
+    [ITSM_SECRET_CLEANUP_JOB_KIND]: runItsmSecretCleanupJob,
     "finops-scheduled-report": (job) => runScheduledReportJob(job, {
       scheduleRepo: new FinopsScheduledReportRepository(),
       finopsRepo: new FinopsWorkspaceRepository(),
@@ -751,7 +1467,10 @@ export function buildJobHandlers(): Record<string, JobHandler> {
       listDestinations: (orgId, customerId) => new SecurityNotificationRepository().listDestinations(orgId, customerId),
       evaluate: async (orgId, customerId, connectionIds) =>
         (await evaluateFinopsAlertsForCustomer(orgId, customerId, connectionIds)).evaluation,
-      dispatch: (args) => enqueueFinopsAlert(new SecurityNotificationRepository(), args),
+      dispatch: (args) => enqueueFinopsAlert(
+        new SecurityNotificationRepository(),
+        { ...args, publicOrigin: requiredConfiguredPublicOrigin() },
+      ),
       onDispatchError: (alertId, destinationId, error) => {
         // Visible without aborting the sweep; the runner still completes the job.
         console.warn(`finops-alert-sweep dispatch failed for ${alertId} → ${destinationId}: ${String(error)}`);
@@ -766,9 +1485,151 @@ export function buildJobHandlers(): Record<string, JobHandler> {
     [HOSTED_BROKER_INGEST_JOB_KIND]: (job) => runHostedBrokerIngestJob(job, {
       getConnection: (orgId, connectionId) => getConnectionForOrg(orgId, connectionId),
       createSyncRun: (connectionId, options) => createSyncRun(connectionId, options),
-      persistSnapshot: ({ runId, payload, actorId, origin, orgId }) =>
-        persistSnapshot(runId, payload, actorId, origin, null, null, orgId),
+      persistSnapshot: ({ runId, payload, actorId, origin, orgId, rawEvidenceBytes }) =>
+        persistSnapshot(runId, payload, actorId, origin, null, null, orgId, rawEvidenceBytes),
     }),
+    [HOSTED_COLLECTOR_COLLECT_JOB_KIND]: (job) => runHostedCollectorJob(job, {
+      getConnection: (orgId, connectionId) => getConnectionForOrg(orgId, connectionId),
+      listOperationRuns: (input) => listHostedCollectorOperationRuns(input),
+      createSyncRun: (connectionId, options) => createSyncRun(connectionId, options),
+      runCollectorSync,
+      persistSnapshot: ({ runId, payload, rawEvidenceBytes, actorId, origin, orgId }) =>
+        persistSnapshot(runId, payload, actorId, origin, null, null, orgId, rawEvidenceBytes),
+      failSyncRun,
+      markConnectionNeedsAttention,
+      safeFailureCode: safeCollectionFailureCode,
+    }),
+    [FINOPS_DATA_EXPORT_INGEST_JOB_KIND]: (job) =>
+      runFinopsDataExportIngestJob(job, {
+        getConnection: (orgId, connectionId) =>
+          getConnectionForOrg(orgId, connectionId),
+        repository: new FinopsBillingEngineRepository(),
+        readObject: (boundary, request) =>
+          createFinopsBrokerObjectReader(boundary, {
+            readChunk: runFinopsExportChunkRead,
+          })(request),
+        now: Date.now,
+      }),
+    [FINOPS_SOURCE_COLLECT_JOB_KIND]: async (job) =>
+      runFinopsSourceCollectJob(job, {
+        getConnection: (orgId, connectionId) =>
+          getConnectionForOrg(orgId, connectionId),
+        collect: runFinopsSourceCollection,
+        ledger: new FinopsSourceJobLedgerRepository(),
+        evidence: new EvidenceRepository(),
+        snapshots: new FinopsSourceSnapshotRepository(),
+        evidenceReferenceSealer:
+          await FinopsEvidenceReferenceSealer.fromEnvironment(
+            env as unknown as Readonly<Record<string, string | undefined>>,
+          ),
+        now: Date.now,
+      }),
+    [AWS_NEWS_FEEDS_JOB_KIND]: (job) =>
+      awsNewsFeedsProductionComposition().handler(job),
+    [AWS_BUDGETS_DURABLE_JOB_KIND]: (job) =>
+      awsBudgetsProductionComposition().handler(job),
+    [EXTENDED_SUPPORT_RUNTIME_JOB_KIND]: (job) =>
+      extendedSupportProductionComposition().handler(job),
+    [AWS_SUPPORT_CASES_RUNTIME_JOB_KIND]: (job) =>
+      awsSupportCasesProductionComposition().handler(job),
+    [AWS_HEALTH_RUNTIME_JOB_KIND]: (job) =>
+      awsHealthProductionComposition().handler(job),
+    [RESILIENCE_VUE_RUNTIME_JOB_KIND]: async (job) =>
+      (await resilienceVueProductionComposition()).handler(job),
+    [DCF_STEP_FUNCTIONS_RUNTIME_JOB_KIND]: (job) =>
+      dcfStepFunctionsProductionComposition().handler(job),
+    [END_USER_COMPUTING_DURABLE_JOB_KIND]: (job) =>
+      endUserComputingProductionComposition().handler(job),
+    [GRAVITON_MATERIALIZATION_JOB_KIND]:(job)=>gravitonProductionComposition().handler(job),
+    [FINOPS_TA_ORGANIZATION_ACTIVATE_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorOrganizationActivationHandler(job);
+    },
+    [FINOPS_TA_ACCOUNT_COLLECT_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorAccountCollectionHandler(job);
+    },
+    [FINOPS_TA_MANIFEST_FINALIZE_JOB_KIND]: async (job) => {
+      await runTrustedAdvisorManifestFinalizeHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_MATERIALIZE_JOB_KIND]: async (job) => {
+      await runComputeOptimizerMaterializationHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_LAUNCH_JOB_KIND]: async (job) => {
+      await runComputeOptimizerActivationLaunchProductionHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_DISCOVERY_JOB_KIND]: async (job) => {
+      await runComputeOptimizerDiscoveryProductionHandler(job);
+    },
+    [FINOPS_COMPUTE_OPTIMIZER_ACTIVATION_RECONCILE_JOB_KIND]: async (job) => {
+      await runComputeOptimizerActivationReconcileProductionHandler(job);
+    },
+    "agentless-teardown-sweep": (job) => {
+      const repository = new AgentlessScanRepository();
+      return runAgentlessTeardownSweepJob(job, {
+        // Keep one broker call inside its five-minute authenticated request
+        // bound even when AWS applies the SDK's full retry budget.
+        listOutstanding: (orgId) => repository.listOpenTeardownDebt(orgId, 25),
+        sweep: (resources) => requestAgentlessTeardownSweep({
+          tenantId: job.orgId,
+          operationId: job.id,
+          resources: resources.map((resource) => ({
+            connectionId: resource.connectionId,
+            resourceId: resource.resourceId,
+            resourceKind: resource.resourceKind,
+            accountScope: resource.accountScope,
+            region: resource.region,
+          })),
+        }),
+        settle: (orgId, resourceId) =>
+          repository.resolveTeardownDebt(orgId, resourceId),
+        recordAttempt: (orgId, resourceId, detail) =>
+          repository.recordTeardownAttempt(orgId, resourceId, detail),
+      });
+    },
+    "vuln-feed-refresh": (job) => {
+      const repository = new VulnerabilityMirrorRepository();
+      return runVulnFeedRefreshJob(job, {
+        readFeedState: () => repository.feedStates(),
+        plan: (states, now) => planVulnFeedRefresh(states, {}, now),
+        refreshFeed: (feed, options) => refreshBoundedVulnerabilityFeed({
+          feed,
+          repository,
+          environment: env as unknown as ManagedOutboundEnvironment,
+          ...(options.nvdWindowDays === undefined
+            ? {}
+            : { nvdWindowDays: options.nvdWindowDays }),
+        }),
+        audit: async (event) => {
+          const numberValue = (key: string): number => {
+            const value = event[key];
+            return typeof value === "number" && Number.isFinite(value) ? value : 0;
+          };
+          const failureCount = Array.isArray(event.failures)
+            ? event.failures.length
+            : 0;
+          await appendAuditEvent({
+            orgId: job.orgId,
+            actorType: "system",
+            actorId: "system:vulnerability-feed-refresh",
+            action: "vulnerability.feed_refresh.completed",
+            targetType: "vulnerability_feed_mirror",
+            targetId: job.id,
+            customerId: job.customerId,
+            outcome: failureCount === 0 ? "allowed" : "failed",
+            requestId: `vuln.feed_refresh:${job.id}:${job.attempt}`,
+            // Upstream exception text can contain URLs/request identifiers.
+            // Persist only bounded counts and the explicit host-handoff flag.
+            metadata: {
+              refreshed: numberValue("refreshed"),
+              rowsWritten: numberValue("rowsWritten"),
+              deferredToHost: numberValue("deferredToHost"),
+              needsHostRun: event.needsHostRun === true,
+              failureCount,
+              attempt: job.attempt,
+            },
+          });
+        },
+      });
+    },
   };
 }
 
@@ -851,7 +1712,7 @@ export async function ensureDueAlertEvaluationsEnqueued(
   const enabled = await rules.listEnabledForAllTenants(now);
   const tenants = new Map<string, { readonly orgId: string; readonly customerId: string }>();
   for (const rule of enabled) {
-    tenants.set(`${rule.scope.orgId} ${rule.scope.customerId}`, rule.scope);
+    tenants.set(`${rule.scope.orgId}\u0000${rule.scope.customerId}`, rule.scope);
   }
   let enqueued = 0;
   for (const tenant of tenants.values()) {
@@ -947,18 +1808,20 @@ export const AGENTLESS_TEARDOWN_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 export interface AgentlessTeardownSweepDeps {
   /** Open debt for the org. Org-scoped on purpose — see the repository comment. */
   listOutstanding: (orgId: string) => Promise<readonly {
+    readonly connectionId: string;
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
-    readonly accountScope: string;
+    readonly accountScope: "customer" | "sutra-scan-account";
     readonly attempts: number;
     readonly firstSeenAt: string;
   }[]>;
   sweep: (resources: readonly {
+    readonly connectionId: string;
     readonly resourceId: string;
-    readonly resourceKind: "snapshot" | "volume";
+    readonly resourceKind: "snapshot" | "volume" | "instance";
     readonly region: string;
-    readonly accountScope: string;
+    readonly accountScope: "customer" | "sutra-scan-account";
     readonly attempts: number;
     readonly firstSeenAt: string;
   }[]) => Promise<{

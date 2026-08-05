@@ -12,6 +12,7 @@ import {
   sessionStatus,
   type SessionAdministrationRecord,
 } from "../lib/session-administration";
+import { computeAuditEventHash } from "../lib/audit-export.ts";
 
 const SESSION_ID = /^sess_[a-f0-9]{32}$/u;
 
@@ -48,11 +49,6 @@ async function database(): Promise<D1Database> {
 
 function opaqueId(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replaceAll("-", "")}`;
-}
-
-async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function publicRecord(row: SessionAdminRow, currentSessionId: string, now: number): SessionAdministrationRecord {
@@ -184,11 +180,13 @@ export function revokeManagedSession(
       const eventId = opaqueId("audit");
       const occurredAt = Math.max(now, (previous?.occurred_at ?? -1) + 1);
       const previousHash = previous?.event_hash ?? null;
-      const eventHash = await sha256Hex(canonicalJson({
+      const hashVersion = 2 as const;
+      const eventHash = await computeAuditEventHash({
         eventId,
         orgId: actor.subject.orgId,
         customerId: null,
         occurredAt,
+        actorType: "user",
         actorId: actor.subject.userId,
         action: "auth.session.revoked",
         targetType: "session",
@@ -196,8 +194,9 @@ export function revokeManagedSession(
         outcome: "allowed",
         requestId,
         metadataJson,
-        previousHash,
-      }));
+        previousEventHash: previousHash,
+        hashVersion,
+      });
       try {
         const results = await db.batch([
           db.prepare(
@@ -222,14 +221,15 @@ export function revokeManagedSession(
              INSERT INTO audit_events
               (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
                target_type, target_id, outcome, request_id, metadata_json,
-               previous_event_hash, event_hash)
+               previous_event_hash, event_hash, hash_version)
              SELECT ?, ?, NULL, ?, 'user', ?, 'auth.session.revoked',
-                    'session', ?, 'allowed', ?, ?, ?, ?
+                    'session', ?, 'allowed', ?, ?, ?, ?, ?
                FROM chain_guard, mutation_guard
               WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
              UNION ALL
-             SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL
+             SELECT NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL
                FROM chain_guard, mutation_guard
               WHERE chain_guard.valid = 0 OR mutation_guard.valid = 0`,
           ).bind(
@@ -250,6 +250,7 @@ export function revokeManagedSession(
             metadataJson,
             previousHash,
             eventHash,
+            hashVersion,
           ),
         ]);
         if (results.every((result) => Number(result.meta?.changes ?? 0) === 1)) {
@@ -321,11 +322,13 @@ export function switchActiveOrganization(
       const eventId = opaqueId("audit");
       const occurredAt = Math.max(now, (previous?.occurred_at ?? -1) + 1);
       const previousHash = previous?.event_hash ?? null;
-      const eventHash = await sha256Hex(canonicalJson({
+      const hashVersion = 2 as const;
+      const eventHash = await computeAuditEventHash({
         eventId,
         orgId: targetOrgId,
         customerId: null,
         occurredAt,
+        actorType: "user",
         actorId: actor.subject.userId,
         action: "auth.session.org_switched",
         targetType: "session",
@@ -333,8 +336,9 @@ export function switchActiveOrganization(
         outcome: "allowed",
         requestId,
         metadataJson,
-        previousHash,
-      }));
+        previousEventHash: previousHash,
+        hashVersion,
+      });
       try {
         const results = await db.batch([
           db.prepare(
@@ -359,14 +363,15 @@ export function switchActiveOrganization(
              INSERT INTO audit_events
               (id, org_id, customer_id, occurred_at, actor_type, actor_id, action,
                target_type, target_id, outcome, request_id, metadata_json,
-               previous_event_hash, event_hash)
+               previous_event_hash, event_hash, hash_version)
              SELECT ?, ?, NULL, ?, 'user', ?, 'auth.session.org_switched',
-                    'session', ?, 'allowed', ?, ?, ?, ?
+                    'session', ?, 'allowed', ?, ?, ?, ?, ?
                FROM chain_guard, mutation_guard
               WHERE chain_guard.valid = 1 AND mutation_guard.valid = 1
              UNION ALL
-             SELECT NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                    NULL, NULL, NULL, NULL, NULL, NULL, NULL
+             SELECT NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL,
+                    NULL, NULL, NULL, NULL, NULL
                FROM chain_guard, mutation_guard
               WHERE chain_guard.valid = 0 OR mutation_guard.valid = 0`,
           ).bind(
@@ -386,6 +391,7 @@ export function switchActiveOrganization(
             metadataJson,
             previousHash,
             eventHash,
+            hashVersion,
           ),
         ]);
         if (results.every((result) => Number(result.meta?.changes ?? 0) === 1)) {

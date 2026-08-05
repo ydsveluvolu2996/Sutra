@@ -1,17 +1,22 @@
 import { getConnectionForOrg, getPilotStateForOrg } from "../../../../db/pilot-repository";
 import { errorResponse, jsonResponse, requirePilotActor } from "../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../lib/api-auth";
+import { safeCsvCell } from "../../../../lib/safe-csv";
 
 export const dynamic = "force-dynamic";
-
-function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? "" : String(value);
-  return `"${text.replaceAll('"', '""')}"`;
-}
 
 export async function GET(request: Request): Promise<Response> {
   try {
     const actor = await requirePilotActor(request, "workspace:read");
+    if (
+      process.env.SUTRA_DEPLOYMENT_ENV === "production" ||
+      process.env.SUTRA_HOSTED_ENABLED === "true"
+    ) {
+      throw Object.assign(
+        new Error("Use the managed evidence export workflow"),
+        { code: "INVALID_STATE" },
+      );
+    }
     const url = new URL(request.url);
     const format = url.searchParams.get("format") ?? "json";
     const connectionId = url.searchParams.get("connectionId");
@@ -41,7 +46,9 @@ export async function GET(request: Request): Promise<Response> {
     }
     const header = [
       "resource_key", "service", "resource_type", "native_id", "arn", "name", "region", "state",
-      "account_id", "collected_at", "content_sha256", "snapshot_id", "origin_kind", "fixture_id", "fixture_version",
+      "lifecycle_state", "consecutive_complete_misses", "account_id", "collected_at",
+      "content_sha256", "evidence_snapshot_id", "evidence_snapshot_sha256",
+      "active_snapshot_id", "origin_kind", "fixture_id", "fixture_version",
     ];
     const rows = state.resources.map((resource) => [
       resource.resourceKey,
@@ -52,15 +59,19 @@ export async function GET(request: Request): Promise<Response> {
       resource.name,
       resource.region,
       resource.state,
+      resource.lifecycleState ?? "active",
+      resource.consecutiveCompleteMisses ?? 0,
       resource.source.accountId,
       resource.source.collectedAt,
       resource.contentSha256,
+      resource.evidenceSnapshot?.id,
+      resource.evidenceSnapshot?.snapshotSha256,
       state.activeSnapshot?.id,
       state.activeSnapshot?.origin.kind,
       state.activeSnapshot?.origin.fixtureId,
       state.activeSnapshot?.origin.fixtureVersion,
     ]);
-    const csv = `${header.map(csvCell).join(",")}\r\n${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
+    const csv = `${header.map(safeCsvCell).join(",")}\r\n${rows.map((row) => row.map(safeCsvCell).join(",")).join("\r\n")}\r\n`;
     return new Response(csv, {
       headers: {
         "content-type": "text/csv; charset=utf-8",

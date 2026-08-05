@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Immutable regional Compute Optimizer export-object read add-on for the
+  dedicated Sutra collector role. It grants only current/specific-version reads
+  below one account-bound provider prefix and, when selected, use of one exact
+  symmetric customer-managed KMS key through regional Amazon S3. Contract:
+  compute-optimizer-export-read-v1.
+
+Metadata:
+  SutraPermissionAddOn:
+    Name: compute-optimizer-export-read
+    Version: compute-optimizer-export-read-v1
+    RequiredBasePermissionPack: standard-2026-08.4
+    Scope: one-stack-region-one-existing-bucket-one-requester-account
+    RuntimeNarrowing: exact-object-assume-role-session-policy-v1
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Existing Sutra collector contract
+        Parameters:
+          - CollectorRoleName
+          - BaseCollectorPermissionPackVersion
+          - ExpectedPartition
+          - RequesterAccountId
+          - ExportRegion
+      - Label:
+          default: Regional Compute Optimizer export destination
+        Parameters:
+          - ExistingBucketName
+          - ExportBasePrefix
+          - ExistingBucketKmsKeyArn
+          - ExistingBucketKmsKeyContract
+
+Parameters:
+  CollectorRoleName:
+    Type: String
+    Default: SutraCollectorRole
+    AllowedValues:
+      - SutraCollectorRole
+      - SutraReadOnlyRole
+    Description: >-
+      Name of the existing standard-2026-08.4 role under /sutra/. This add-on
+      attaches one inline policy; it never creates or replaces the role.
+
+  BaseCollectorPermissionPackVersion:
+    Type: String
+    Default: standard-2026-08.4
+    AllowedValues:
+      - standard-2026-08.4
+    Description: Exact immutable base-role permission pack required by this add-on.
+
+  ExpectedPartition:
+    Type: String
+    AllowedValues:
+      - aws
+      - aws-us-gov
+      - aws-cn
+    Description: Server-persisted partition of the attested Sutra connection.
+
+  RequesterAccountId:
+    Type: String
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: '^[0-9]{12}$'
+    Description: >-
+      Exact export-requester account. It must be the stack account and is
+      embedded into the sealed Compute Optimizer provider prefix.
+
+  ExportRegion:
+    Type: String
+    AllowedPattern: '^[a-z]{2}(-gov)?-[a-z]+-[0-9]$'
+    Description: Exact source and destination Region; it must be the stack Region.
+
+  ExistingBucketName:
+    Type: String
+    MinLength: 3
+    MaxLength: 63
+    AllowedPattern: '^(?!.*\.\.)(?![0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: Must be one exact existing general-purpose S3 bucket name.
+
+  ExportBasePrefix:
+    Type: String
+    Default: ''
+    MaxLength: 180
+    AllowedPattern: '^$|^(?!.*//)(?!.*(^|/)\.{1,2}(/|$))[A-Za-z0-9][A-Za-z0-9._=-]{0,62}(/[A-Za-z0-9][A-Za-z0-9._=-]{0,62}){0,3}/$'
+    ConstraintDescription: >-
+      Empty or one sealed slash-terminated prefix without empty/dot segments.
+      The template appends compute-optimizer/<RequesterAccountId>/.
+
+  ExistingBucketKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:(aws|aws-us-gov|aws-cn):kms:[a-z]{2}(-gov)?-[a-z]+-[0-9]:[0-9]{12}:key/[A-Za-z0-9-]{1,128}$'
+    ConstraintDescription: >-
+      Empty for SSE-S3, or the exact ARN (never an alias or wildcard) of the
+      existing bucket's symmetric customer-managed KMS key.
+
+  ExistingBucketKmsKeyContract:
+    Type: String
+    Default: not-applicable
+    AllowedValues:
+      - not-applicable
+      - symmetric-customer-managed-same-partition-account-region
+    Description: >-
+      Attests that a supplied key is symmetric, customer-managed, and belongs
+      to the exact stack partition, account, and Region.
+
+Rules:
+  BindExactStackContext:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExpectedPartition
+            - Ref: AWS::Partition
+        AssertDescription: ExpectedPartition must equal the CloudFormation stack partition.
+      - Assert:
+          Fn::Equals:
+            - Ref: RequesterAccountId
+            - Ref: AWS::AccountId
+        AssertDescription: RequesterAccountId must equal the CloudFormation stack account.
+      - Assert:
+          Fn::Equals:
+            - Ref: ExportRegion
+            - Ref: AWS::Region
+        AssertDescription: ExportRegion must equal the CloudFormation stack Region.
+
+  BindKmsAttestation:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::And:
+                - Fn::Equals:
+                    - Ref: ExistingBucketKmsKeyArn
+                    - ''
+                - Fn::Equals:
+                    - Ref: ExistingBucketKmsKeyContract
+                    - not-applicable
+            - Fn::And:
+                - Fn::Not:
+                    - Fn::Equals:
+                        - Ref: ExistingBucketKmsKeyArn
+                        - ''
+                - Fn::Equals:
+                    - Ref: ExistingBucketKmsKeyContract
+                    - symmetric-customer-managed-same-partition-account-region
+        AssertDescription: >-
+          A KMS ARN requires the exact symmetric customer-managed same-context
+          attestation; SSE-S3 mode requires not-applicable.
+
+Conditions:
+  HasCustomerManagedKmsKey:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: ExistingBucketKmsKeyArn
+          - ''
+
+Resources:
+  ComputeOptimizerExportObjectReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: 'SutraComputeOptimizerExportReadV1-${AWS::Region}-${ExistingBucketName}'
+      Roles:
+        - Ref: CollectorRoleName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadSealedComputeOptimizerExportPrefix
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource:
+              Fn::Sub: >-
+                arn:${AWS::Partition}:s3:::${ExistingBucketName}/${ExportBasePrefix}compute-optimizer/${RequesterAccountId}/*
+          - Fn::If:
+              - HasCustomerManagedKmsKey
+              - Sid: UseExactExportKeyThroughRegionalS3
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  Ref: ExistingBucketKmsKeyArn
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      Fn::Sub: 's3.${AWS::Region}.amazonaws.com'
+              - Ref: AWS::NoValue
+
+Outputs:
+  ContractVersion:
+    Description: Immutable add-on permission contract.
+    Value: compute-optimizer-export-read-v1
+
+  RequiredBasePermissionPackVersion:
+    Description: Exact base-role ceiling required for this add-on.
+    Value:
+      Ref: BaseCollectorPermissionPackVersion
+
+  CollectorRoleName:
+    Description: Exact existing collector role receiving the inline policy.
+    Value:
+      Ref: CollectorRoleName
+
+  CollectorRoleArn:
+    Description: Derived /sutra/ role ARN for server-side attestation.
+    Value:
+      Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/sutra/${CollectorRoleName}'
+
+  StackPartition:
+    Description: Partition asserted against the server-persisted connection.
+    Value:
+      Ref: AWS::Partition
+
+  RequesterAccountId:
+    Description: Account embedded in the provider-owned key suffix.
+    Value:
+      Ref: AWS::AccountId
+
+  ExportRegion:
+    Description: Single Region owned by this add-on stack.
+    Value:
+      Ref: AWS::Region
+
+  ExistingBucketName:
+    Description: Exact existing regional export bucket.
+    Value:
+      Ref: ExistingBucketName
+
+  ExportBasePrefix:
+    Description: Optional sealed operator prefix, including its trailing slash.
+    Value:
+      Ref: ExportBasePrefix
+
+  EffectivePrefix:
+    Description: Exact provider prefix persisted with the export plan.
+    Value:
+      Fn::Sub: '${ExportBasePrefix}compute-optimizer/${RequesterAccountId}/'
+
+  ObjectArnPrefix:
+    Description: Permanent-policy object ARN prefix; runtime sessions narrow this to one object.
+    Value:
+      Fn::Sub: >-
+        arn:${AWS::Partition}:s3:::${ExistingBucketName}/${ExportBasePrefix}compute-optimizer/${RequesterAccountId}/*
+
+  KmsMode:
+    Description: Effective destination encryption authorization mode.
+    Value:
+      Fn::If:
+        - HasCustomerManagedKmsKey
+        - SSE_KMS
+        - SSE_S3
+
+  KmsKeyArn:
+    Description: Exact customer-managed KMS key ARN, or NONE in SSE-S3 mode.
+    Value:
+      Fn::If:
+        - HasCustomerManagedKmsKey
+        - Ref: ExistingBucketKmsKeyArn
+        - NONE
+
+  AttachedPolicyName:
+    Description: Deterministic regional/bucket inline-policy identity.
+    Value:
+      Fn::Sub: 'SutraComputeOptimizerExportReadV1-${AWS::Region}-${ExistingBucketName}'

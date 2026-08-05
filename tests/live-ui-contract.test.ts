@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { navGroups } from "../app/components/navigation-config.ts";
@@ -16,7 +16,37 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
+async function productionSourceFiles(directory: string): Promise<readonly string[]> {
+  const files: string[] = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.name.startsWith(".") || ["dist", "fixtures", "node_modules", "test", "tests"].includes(entry.name)) {
+      continue;
+    }
+    const candidate = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await productionSourceFiles(candidate));
+    else if (/\.(?:mjs|ts|tsx)$/u.test(entry.name)) files.push(candidate);
+  }
+  return files;
+}
+
 describe("hosted live UI contract", () => {
+  it("never emits links for the retired app.sutracmdb.com host", async () => {
+    const files = (
+      await Promise.all(
+        ["app", "db", "lib", "services"].map((directory) =>
+          productionSourceFiles(path.join(root, directory))),
+      )
+    ).flat();
+    for (const file of files) {
+      const source = await readFile(file, "utf8");
+      assert.equal(
+        source.includes("https://app.sutracmdb.com"),
+        false,
+        `${path.relative(root, file)} emits the retired production origin`,
+      );
+    }
+  });
+
   it("backs every visible navigation destination with a real page", async () => {
     const dynamicKubernetesSections = new Set(KUBERNETES_SECTION_KEYS);
     for (const item of navGroups.flatMap((group) => group.items)) {
@@ -76,6 +106,31 @@ describe("hosted live UI contract", () => {
     assert.doesNotMatch(source, /Run (?:another )?simulation/u);
     assert.doesNotMatch(source, /Preview — populated/u);
     assert.match(source, /No sample metrics/u);
+  });
+
+  it("does not claim a clean dashboard posture before evidence is published", async () => {
+    const dashboard = await readFile(path.join(root, "app/dashboard/page.tsx"), "utf8");
+    assert.match(dashboard, /const hasPublishedSnapshot =/u);
+    assert.match(dashboard, /Score unavailable/u);
+    assert.match(dashboard, /No finding snapshot published/u);
+    assert.match(dashboard, /does not infer a clean posture before the first complete collection/u);
+  });
+
+  it("rejects simulated workspace evidence from hosted API responses", async () => {
+    const [stateRoute, portfolioRoute, pilotServer] = await Promise.all([
+      readFile(path.join(root, "app/api/pilot/state/route.ts"), "utf8"),
+      readFile(path.join(root, "app/api/v1/portfolio/route.ts"), "utf8"),
+      readFile(path.join(root, "lib/pilot-server.ts"), "utf8"),
+    ]);
+    assert.match(stateRoute, /allowSimulatedEvidence = isLocalSimulationRuntime\(\)/u);
+    assert.match(stateRoute, /connection\.sourceKind === "simulated_fixture"/u);
+    assert.match(portfolioRoute, /portfolioForRuntime\(portfolio, isLocalSimulationRuntime\(\)\)/u);
+    assert.match(pilotServer, /!isLocalSimulationRuntime\(\) && health\.mode !== "live"/u);
+  });
+
+  it("does not publish social icons with placeholder destinations", async () => {
+    const landing = await readFile(path.join(root, "app/components/landing-zone.tsx"), "utf8");
+    assert.doesNotMatch(landing, /href="#top" aria-label="(?:X|LinkedIn|RSS)"/u);
   });
 
   it("starts enterprise AWS onboarding without pilot labels or sample account data", async () => {

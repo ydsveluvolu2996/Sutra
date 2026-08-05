@@ -35,7 +35,7 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     createHash("sha256").update(infrastructure, "utf8").digest("hex"),
     AWS_CUSTOMER_ROLE_TEMPLATE_SHA256,
   );
-  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.3");
+  assert.equal(AWS_CUSTOMER_ROLE_TEMPLATE_VERSION, "standard-2026-07.4");
   for (const action of [
     "ec2:DescribeRegions",
     "ec2:DescribeInstances",
@@ -80,6 +80,10 @@ test("standard customer onboarding role is the reviewed public artifact", async 
     "securityhub:GetFindings",
     "inspector2:BatchGetAccountStatus",
     "inspector2:ListFindings",
+    "bedrock:ListGuardrails",
+    "bedrock:GetGuardrail",
+    "bedrock:GetModelInvocationLoggingConfiguration",
+    "bedrock:GetAccountDataRetention",
     "ce:GetCostAndUsage",
     "ce:GetCostForecast",
     "ssm:DescribeInstanceInformation",
@@ -110,8 +114,8 @@ test("standard customer onboarding role is the reviewed public artifact", async 
   assert.match(infrastructure, /Path: \/sutra\//u);
   assert.match(infrastructure, /Sid: TrustContractAttestation/u);
   assert.match(infrastructure, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
-  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.3/u);
-  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.3/u);
+  assert.match(infrastructure, /sutra:permission-pack[\s\S]+standard-2026-07.4/u);
+  assert.match(infrastructure, /PermissionPackVersion:[\s\S]+standard-2026-07.4/u);
 
   const implemented = statementActions(infrastructure, "ImplementedMetadataApis");
   const trust = statementActions(infrastructure, "TrustContractAttestation");
@@ -126,7 +130,7 @@ test("public customer role advertises the enterprise permission-pack version", a
     "utf8",
   );
 
-  assert.match(publicRole, /TemplateVersion:\s*\n\s+Value: standard-2026-07\.3/u);
+  assert.match(publicRole, /TemplateVersion:\s*\n\s+Value: standard-2026-07\.4/u);
   assert.doesNotMatch(publicRole, /local-pilot|sandbox/u);
 });
 
@@ -227,7 +231,7 @@ test("SutraOperator permission-set policy is the exact account-scoped live contr
   const policy = JSON.parse(source);
   assert.equal(
     createHash("sha256").update(source, "utf8").digest("hex"),
-    "07bb29c0c1edf17d9b7747229983f3e41f05970e6a7cb5f33abbc9b33daf39d3",
+    "2393c14eca626b985ec247d806034fcdc52d1c8068ac384f7173ffd24fbee4ca",
   );
   assert.equal(policy.Version, "2012-10-17");
   assert.ok(Array.isArray(policy.Statement));

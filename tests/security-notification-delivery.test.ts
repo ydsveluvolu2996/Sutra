@@ -95,7 +95,7 @@ function dependencies(overrides: Partial<SecurityNotificationDeliveryDependencie
             webhookUrl: "https://hooks.slack.com/services/T12345678/B12345678/abcdefghijklmnop",
             expectedHostname: "hooks.slack.com",
           } : {
-            webhookUrl: "https://prod-00.westus.logic.azure.com/workflows/abc/triggers/manual/paths/invoke?api-version=2016-10-01&sig=secret",
+            webhookUrl: "https://prod-00.westus.logic.azure.com/workflows/01234567-89ab-cdef-0123-456789abcdef/triggers/manual/paths/invoke?api-version=2016-10-01&sig=secret",
             expectedHostname: "prod-00.westus.logic.azure.com",
             idempotencyHeader: "Idempotency-Key",
           };
@@ -147,14 +147,53 @@ test("delivers SES v2, Slack, and Teams through bounded injected transports", as
   assert.equal(ses?.timeoutMs, 5_000);
   assert.equal(ses?.redirect, "error");
   assert.equal("accessKeyId" in (ses ?? {}), false);
+  const sesBody = JSON.parse(new TextDecoder().decode(
+    ses?.body as Uint8Array,
+  )) as { EmailTags?: Array<{ Name: string; Value: string }> };
+  assert.deepEqual(sesBody.EmailTags, [{
+    Name: "sutra_delivery_id",
+    Value: deliveryId,
+  }]);
 
   const webhooks = fixture.calls.filter((call) => call.kind === "webhook");
   assert.equal(webhooks.length, 2);
   assert.ok(webhooks.every((call) => call.timeoutMs === 5_000 && call.redirect === "error"));
-  const teams = webhooks.find((call) => String(call.url).includes("logic.azure.com"));
+  const teams = webhooks.find(
+    (call) => new URL(String(call.url)).hostname === "prod-00.westus.logic.azure.com",
+  );
   assert.equal((teams?.headers as Record<string, string>)["Idempotency-Key"], deliveryId);
-  const slack = webhooks.find((call) => String(call.url).includes("hooks.slack.com"));
+  const slack = webhooks.find((call) => new URL(String(call.url)).hostname === "hooks.slack.com");
   assert.equal("Idempotency-Key" in (slack?.headers as Record<string, string>), false);
+});
+
+test("reports SES as unconfigured when its event-publishing path is absent", async () => {
+  const fixture = dependencies({
+    ses: {
+      async post() {
+        return {
+          status: 0,
+          headers: {},
+          bodyBytes: new Uint8Array(),
+          adapterErrorCode: "ADAPTER_NOT_CONFIGURED",
+        };
+      },
+    },
+  });
+  const [result] = await deliverSecurityNotification({
+    deliveryId,
+    payloads: await payloads(),
+    destinations: {
+      email: { region: "ap-south-1", fromAddress: "alerts@sutracmdb.com" },
+    },
+    dependencies: fixture.dependencies,
+  });
+  assert.deepEqual(result, {
+    channel: "email",
+    status: "permanent_failure",
+    providerStatus: null,
+    errorCode: "ADAPTER_NOT_CONFIGURED",
+    retryAfterSeconds: null,
+  });
 });
 
 test("uses secret references only and rejects hostile provider destinations", async () => {
@@ -333,7 +372,7 @@ test("classifies throttles, provider failures, permanent failures, and timeouts"
   assert.equal(timeout.status, "retryable_failure");
 });
 
-test("delivers a generic ticketing webhook to any pinned public host and sends the ticket envelope", async () => {
+test("delivers a provider-bounded Jira Cloud ticket webhook and sends the ticket envelope", async () => {
   const calls: Array<Record<string, unknown>> = [];
   const built = await payloads();
   const results = await deliverSecurityNotification({
@@ -341,15 +380,12 @@ test("delivers a generic ticketing webhook to any pinned public host and sends t
     payloads: built,
     destinations: { genericWebhookSecretReference: "secret://notifications/org_sutra/cust_customer/generic_webhook/jira" },
     dependencies: {
-      // A generic webhook has no fixed provider host, so an arbitrary — but
-      // pinned and public — hostname must be accepted. Safety comes from the
-      // expectedHostname pin plus public-address enforcement, not an allowlist.
       secrets: {
         async resolveWebhook({ channel }) {
           assert.equal(channel, "generic_webhook");
           return {
-            webhookUrl: "https://sutra.example-ticketing.com/inbound/9f8e7d6c",
-            expectedHostname: "sutra.example-ticketing.com",
+            webhookUrl: "https://automation.atlassian.com/pro/hooks/0123456789abcdef0123456789abcdef",
+            expectedHostname: "automation.atlassian.com",
             idempotencyHeader: "Idempotency-Key",
           };
         },
@@ -368,7 +404,7 @@ test("delivers a generic ticketing webhook to any pinned public host and sends t
     ["generic_webhook", "delivered"],
   ]);
   const call = calls[0];
-  assert.equal(String(call?.url), "https://sutra.example-ticketing.com/inbound/9f8e7d6c");
+  assert.equal(String(call?.url), "https://automation.atlassian.com/pro/hooks/0123456789abcdef0123456789abcdef");
   assert.equal((call?.headers as Record<string, string>)["Idempotency-Key"], deliveryId);
   const body = JSON.parse(new TextDecoder().decode(call?.body as Uint8Array));
   assert.equal(body.schema, "sutra.ticket.v1");

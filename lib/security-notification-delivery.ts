@@ -4,6 +4,7 @@ import type {
   SecurityNotificationPayloads,
 } from "./security-notifications.ts";
 import { canonicalJson } from "./canonical-json.ts";
+import { classifyManagedProviderWebhookUrl } from "./managed-provider-webhooks.ts";
 
 const SECRET_REFERENCE = /^secret:\/\/[A-Za-z0-9][A-Za-z0-9._/-]{2,190}$/u;
 const AWS_REGION = /^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u;
@@ -42,7 +43,8 @@ export interface SecurityNotificationDeliveryResult {
     | "PROVIDER_THROTTLED"
     | "PROVIDER_UNAVAILABLE"
     | "REQUEST_TIMEOUT"
-    | "TRANSPORT_FAILURE";
+    | "TRANSPORT_FAILURE"
+    | "ADAPTER_NOT_CONFIGURED";
   readonly retryAfterSeconds: number | null;
 }
 
@@ -86,13 +88,17 @@ export interface NotificationHttpResponse {
   readonly status: number;
   readonly headers: Readonly<Record<string, string | undefined>>;
   readonly bodyBytes: Uint8Array;
+  /** Sanitized worker-local state; never populated from a provider response. */
+  readonly adapterErrorCode?: "ADAPTER_NOT_CONFIGURED";
 }
 
 /**
- * Implementations must connect only to one of `validatedAddresses`, disable
- * redirects, preserve the original TLS SNI/Host, enforce `timeoutMs`, and stop
- * reading after `maximumResponseBytes`. This avoids DNS-rebinding races that a
- * separate DNS preflight plus ordinary fetch would leave open.
+ * Direct implementations must connect only to one of `validatedAddresses`,
+ * disable redirects, preserve the original TLS SNI/Host, enforce `timeoutMs`,
+ * and stop reading after `maximumResponseBytes`. Managed-gateway
+ * implementations may delegate DNS resolution to the gateway after exact
+ * registered-target classification. Both designs avoid the rebinding race that
+ * a separate DNS preflight plus ordinary fetch would leave open.
  */
 export interface PinnedNotificationHttpTransport {
   post(input: {
@@ -103,6 +109,8 @@ export interface PinnedNotificationHttpTransport {
     readonly redirect: "error";
     readonly timeoutMs: 5_000;
     readonly maximumResponseBytes: 16_384;
+    /** Stable business-operation key consumed by the managed gateway only. */
+    readonly gatewayIdempotencyKey: string;
   }): Promise<NotificationHttpResponse>;
 }
 
@@ -174,14 +182,6 @@ function validHostname(hostname: string): boolean {
     hostname.split(".").every((label) => HOST_LABEL.test(label));
 }
 
-function providerHostname(channel: "slack" | "microsoft_teams", hostname: string): boolean {
-  if (channel === "slack") return hostname === "hooks.slack.com";
-  return (
-    hostname.endsWith(".logic.azure.com") ||
-    hostname.endsWith(".environment.api.powerplatform.com")
-  ) && hostname.split(".").length >= 4;
-}
-
 function webhookUrl(
   channel: WebhookNotificationChannel,
   resolved: ResolvedWebhookSecret,
@@ -192,11 +192,6 @@ function webhookUrl(
   } catch {
     return invalid("UNSAFE_DESTINATION");
   }
-  // A generic ticketing webhook has no fixed provider host, so it cannot be
-  // hostname-allowlisted like Slack/Teams. Safety instead rests on the exact
-  // expectedHostname pin recorded when the managed secret was provisioned, plus
-  // the public-address enforcement in validatedAddresses and the shared
-  // https/no-credentials/no-redirect/bounded-payload guarantees below.
   if (
     url.protocol !== "https:" ||
     url.username !== "" ||
@@ -205,15 +200,24 @@ function webhookUrl(
     (url.port !== "" && url.port !== "443") ||
     !validHostname(url.hostname) ||
     url.hostname !== resolved.expectedHostname ||
-    (channel !== "generic_webhook" && !providerHostname(channel, url.hostname)) ||
     url.pathname.length < 2 ||
     url.pathname.length > 2_048 ||
     url.search.length > 4_096
   ) invalid("UNSAFE_DESTINATION");
-  if (channel === "slack" && (
-    url.search !== "" ||
-    !/^\/services\/[A-Za-z0-9_-]{8,}\/[A-Za-z0-9_-]{8,}\/[A-Za-z0-9_-]{16,}$/u.test(url.pathname)
-  )) invalid("UNSAFE_DESTINATION");
+  const target = classifyManagedProviderWebhookUrl(url);
+  if (
+    (channel === "slack" && target !== "slack-webhook") ||
+    (
+      channel === "microsoft_teams" &&
+      target !== "teams-logic-workflow" &&
+      target !== "teams-powerplatform-workflow"
+    ) ||
+    (
+      channel === "generic_webhook" &&
+      target !== "jira-cloud-webhook" &&
+      target !== "servicenow-webhook"
+    )
+  ) invalid("UNSAFE_DESTINATION");
   return url;
 }
 
@@ -386,6 +390,7 @@ async function deliverWebhook(input: {
       redirect: "error",
       timeoutMs: TIMEOUT_MS,
       maximumResponseBytes: MAXIMUM_RESPONSE_BYTES,
+      gatewayIdempotencyKey: input.deliveryId,
     });
     return classify(input.channel, response);
   } catch (error) {
@@ -406,6 +411,7 @@ function permanentDestinationRejected(
 }
 
 async function deliverPagerDuty(input: {
+  readonly deliveryId: string;
   readonly secretReference: string;
   readonly payload: SecurityNotificationPayloads["pagerduty"];
   readonly dependencies: SecurityNotificationDeliveryDependencies;
@@ -453,6 +459,7 @@ async function deliverPagerDuty(input: {
       redirect: "error",
       timeoutMs: TIMEOUT_MS,
       maximumResponseBytes: MAXIMUM_RESPONSE_BYTES,
+      gatewayIdempotencyKey: input.deliveryId,
     });
     return classify("pagerduty", response);
   } catch (error) {
@@ -475,6 +482,9 @@ async function deliverEmail(input: {
   const body = jsonBytes({
     FromEmailAddress: input.destination.fromAddress,
     Destination: { ToAddresses: input.payload.to },
+    // The worker's durable delivery ID is safe provider metadata and gives an
+    // SES configuration-set event consumer an exact outbox correlation key.
+    EmailTags: [{ Name: "sutra_delivery_id", Value: input.deliveryId }],
     Content: {
       Simple: {
         Subject: { Data: input.payload.subject, Charset: "UTF-8" },
@@ -495,6 +505,17 @@ async function deliverEmail(input: {
       timeoutMs: TIMEOUT_MS,
       maximumResponseBytes: MAXIMUM_RESPONSE_BYTES,
     });
+    // Do not send SES mail without the feedback path required to reconcile
+    // delivery, bounce, and complaint events.
+    if (response.adapterErrorCode === "ADAPTER_NOT_CONFIGURED") {
+      return {
+        channel: "email",
+        status: "permanent_failure",
+        providerStatus: null,
+        errorCode: "ADAPTER_NOT_CONFIGURED",
+        retryAfterSeconds: null,
+      };
+    }
     return classify("email", response);
   } catch (error) {
     return transportFailure("email", error);
@@ -569,6 +590,7 @@ export async function deliverSecurityNotification(input: {
   }
   if (input.destinations.pagerdutySecretReference !== undefined) {
     deliveries.push(deliverPagerDuty({
+      deliveryId: input.deliveryId,
       secretReference: input.destinations.pagerdutySecretReference,
       payload: input.payloads.pagerduty,
       dependencies: input.dependencies,

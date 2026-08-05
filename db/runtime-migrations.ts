@@ -64,6 +64,68 @@ import governancePoliciesSchemaSql from "../drizzle/0064_governance_policies.sql
 import agentlessScansSchemaSql from "../drizzle/0065_agentless_scans.sql?raw";
 import invitationZohoProviderSchemaSql from "../drizzle/0066_invitation_zoho_provider.sql?raw";
 import awsLiveSnapshotOriginSchemaSql from "../drizzle/0067_aws_live_snapshot_origin.sql?raw";
+import samlAssertionReplaysSchemaSql from "../drizzle/0068_saml_assertion_replays.sql?raw";
+import dspmWorkspaceSchemaSql from "../drizzle/0069_dspm_workspace.sql?raw";
+import scimIdentityLifecycleSchemaSql from "../drizzle/0070_scim_identity_lifecycle.sql?raw";
+import itsmManagedSecretsSchemaSql from "../drizzle/0071_itsm_managed_secrets.sql?raw";
+import auditHashVersionSchemaSql from "../drizzle/0072_audit_hash_version.sql?raw";
+import awsGlobalOwnershipSchemaSql from "../drizzle/0073_aws_global_ownership.sql?raw";
+import cmdbResourceRetirementSchemaSql from "../drizzle/0074_cmdb_resource_retirement.sql?raw";
+import managedEvidenceObjectsSchemaSql from "../drizzle/0075_managed_evidence_objects.sql?raw";
+import itsmDeliveryEvidenceSchemaSql from "../drizzle/0076_itsm_delivery_evidence.sql?raw";
+import sesDeliveryFeedbackSchemaSql from "../drizzle/0077_ses_delivery_feedback.sql?raw";
+import finopsBillingEngineV2SchemaSql from "../drizzle/0078_finops_billing_engine_v2.sql?raw";
+import finopsFoundationalConfigSchemaSql from "../drizzle/0079_finops_foundational_config.sql?raw";
+import finopsSourceJobLedgerSchemaSql from "../drizzle/0080_finops_source_job_ledger.sql?raw";
+import finopsSourceSnapshotsSchemaSql from "../drizzle/0081_finops_source_snapshots.sql?raw";
+import finopsSourceEvidenceArtifactSchemaSql from "../drizzle/0082_finops_source_evidence_artifact.sql?raw";
+import finopsDataExportObservationsSchemaSql from "../drizzle/0083_finops_data_export_observations.sql?raw";
+import finopsTrustedAdvisorOrganizationSchemaSql from "../drizzle/0084_finops_trusted_advisor_organization.sql?raw";
+import finopsComputeOptimizerDiscoverySchemaSql from "../drizzle/0085_finops_compute_optimizer_discovery.sql?raw";
+import finopsActiveFileCountSchemaSql from "../drizzle/0086_finops_active_file_count.sql?raw";
+import finopsAwsConfigComplianceSchemaSql from "../drizzle/0087_finops_aws_config_compliance.sql?raw";
+import finopsPricingChangeMaterializationsSchemaSql from "../drizzle/0088_finops_pricing_change_materializations.sql?raw";
+import finopsCoraSnapshotsSchemaSql from "../drizzle/0089_finops_cora_snapshots.sql?raw";
+import finopsAwsNewsFeedSnapshotsSchemaSql from "../drizzle/0090_finops_aws_news_feed_snapshots.sql?raw";
+import finopsAwsBudgetsOrganizationSchemaSql from "../drizzle/0091_finops_aws_budgets_organization.sql?raw";
+import finopsAwsSupportCasesSchemaSql from "../drizzle/0092_finops_aws_support_cases.sql?raw";
+import finopsResilienceVueSchemaSql from "../drizzle/0093_finops_resilience_vue.sql?raw";
+import finopsEndUserComputingSchemaSql from "../drizzle/0094_finops_end_user_computing.sql?raw";
+import finopsMediaServicesInsightsSchemaSql from "../drizzle/0095_finops_media_services_insights.sql?raw";
+import finopsMarketplaceSpgSchemaSql from "../drizzle/0096_finops_marketplace_spg.sql?raw";
+import finopsKubecostAllocationSchemaSql from "../drizzle/0097_finops_kubecost_allocation.sql?raw";
+import finopsScadAllocationSchemaSql from "../drizzle/0098_finops_scad_allocation.sql?raw";
+import finopsSustainabilityCarbonSchemaSql from "../drizzle/0099_finops_sustainability_carbon.sql?raw";
+import finopsAmazonConnectCostInsightsSchemaSql from "../drizzle/0100_finops_amazon_connect_cost_insights.sql?raw";
+import finopsComputeOptimizerExportHistorySchemaSql from "../drizzle/0101_finops_compute_optimizer_export_history.sql?raw";
+import finopsExtendedSupportProjectionSchemaSql from "../drizzle/0102_finops_extended_support_projection.sql?raw";
+import finopsGravitonSavingsSchemaSql from "../drizzle/0103_finops_graviton_savings.sql?raw";
+import finopsAwsHealthEventsSchemaSql from "../drizzle/0104_finops_aws_health_events.sql?raw";
+import finopsAzureCidSchemaSql from "../drizzle/0105_finops_azure_cid.sql?raw";
+import finopsGcpCloudIntelligenceSchemaSql from "../drizzle/0106_finops_gcp_cloud_intelligence.sql?raw";
+import finopsDcfExecutionHistorySchemaSql from "../drizzle/0107_finops_dcf_execution_history.sql?raw";
+import finopsCoraExportObjectsSchemaSql from "../drizzle/0108_finops_cora_export_objects.sql?raw";
+import finopsAwsBudgetsDurableAttemptsSchemaSql from "../drizzle/0109_finops_aws_budgets_durable_attempts.sql?raw";
+import finopsEucRuntimeAttemptsSchemaSql from "../drizzle/0110_finops_euc_runtime_attempts.sql?raw";
+import finopsKubecostRuntimeAttemptsSchemaSql from "../drizzle/0111_finops_kubecost_runtime_attempts.sql?raw";
+import finopsComputeOptimizerExportPlansSchemaSql from "../drizzle/0112_finops_compute_optimizer_export_plans.sql?raw";
+import finopsComputeOptimizerExportPlanSetsSchemaSql from "../drizzle/0113_finops_compute_optimizer_export_plan_sets.sql?raw";
+import finopsComputeOptimizerExportPlanTimestampGuardSchemaSql from "../drizzle/0114_finops_compute_optimizer_export_plan_timestamp_guard.sql?raw";
+import finopsComputeOptimizerExactGenerationsSchemaSql from "../drizzle/0115_finops_compute_optimizer_exact_generations.sql?raw";
+import finopsComputeOptimizerActivationOutboxSchemaSql from "../drizzle/0116_finops_compute_optimizer_activation_outbox.sql?raw";
+import finopsAwsNewsFeedsReplaySchemaSql from "../drizzle/0117_finops_aws_news_feeds_replay.sql?raw";
+import finopsExtendedSupportRuntimeSchemaSql from "../drizzle/0118_finops_extended_support_runtime.sql?raw";
+import finopsAwsHealthRuntimeSchemaSql from "../drizzle/0119_finops_aws_health_runtime.sql?raw";
+import finopsResilienceVueRuntimeSchemaSql from "../drizzle/0120_finops_resilience_vue_runtime.sql?raw";
+import finopsDcfRuntimeSchemaSql from "../drizzle/0121_finops_dcf_runtime.sql?raw";
+import finopsGravitonRuntimeSchemaSql from "../drizzle/0122_finops_graviton_runtime.sql?raw";
+import finopsMarketplaceSpgRuntimeSchemaSql from "../drizzle/0123_finops_marketplace_spg_runtime.sql?raw";
+import finopsCoraRuntimeAttemptsSchemaSql from "../drizzle/0124_finops_cora_runtime_attempts.sql?raw";
+import finopsScadRuntimeAttemptsSchemaSql from "../drizzle/0125_finops_scad_runtime_attempts.sql?raw";
+import finopsSustainabilityTargetsSchemaSql from "../drizzle/0126_finops_sustainability_targets.sql?raw";
+import finopsAmazonConnectRuntimeSchemaSql from "../drizzle/0127_finops_amazon_connect_runtime.sql?raw";
+import finopsPricingChangeRuntimeSchemaSql from "../drizzle/0128_finops_pricing_change_runtime.sql?raw";
+import finopsAwsConfigComplianceRuntimeSchemaSql from "../drizzle/0129_finops_aws_config_compliance_runtime.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -145,6 +207,68 @@ const migrations = [
   { id: "0065_agentless_scans", statements: statementsFrom(agentlessScansSchemaSql) },
   { id: "0066_invitation_zoho_provider", statements: statementsFrom(invitationZohoProviderSchemaSql) },
   { id: "0067_aws_live_snapshot_origin", statements: statementsFrom(awsLiveSnapshotOriginSchemaSql) },
+  { id: "0068_saml_assertion_replays", statements: statementsFrom(samlAssertionReplaysSchemaSql) },
+  { id: "0069_dspm_workspace", statements: statementsFrom(dspmWorkspaceSchemaSql) },
+  { id: "0070_scim_identity_lifecycle", statements: statementsFrom(scimIdentityLifecycleSchemaSql) },
+  { id: "0071_itsm_managed_secrets", statements: statementsFrom(itsmManagedSecretsSchemaSql) },
+  { id: "0072_audit_hash_version", statements: statementsFrom(auditHashVersionSchemaSql) },
+  { id: "0073_aws_global_ownership", statements: statementsFrom(awsGlobalOwnershipSchemaSql) },
+  { id: "0074_cmdb_resource_retirement", statements: statementsFrom(cmdbResourceRetirementSchemaSql) },
+  { id: "0075_managed_evidence_objects", statements: statementsFrom(managedEvidenceObjectsSchemaSql) },
+  { id: "0076_itsm_delivery_evidence", statements: statementsFrom(itsmDeliveryEvidenceSchemaSql) },
+  { id: "0077_ses_delivery_feedback", statements: statementsFrom(sesDeliveryFeedbackSchemaSql) },
+  { id: "0078_finops_billing_engine_v2", statements: statementsFrom(finopsBillingEngineV2SchemaSql) },
+  { id: "0079_finops_foundational_config", statements: statementsFrom(finopsFoundationalConfigSchemaSql) },
+  { id: "0080_finops_source_job_ledger", statements: statementsFrom(finopsSourceJobLedgerSchemaSql) },
+  { id: "0081_finops_source_snapshots", statements: statementsFrom(finopsSourceSnapshotsSchemaSql) },
+  { id: "0082_finops_source_evidence_artifact", statements: statementsFrom(finopsSourceEvidenceArtifactSchemaSql) },
+  { id: "0083_finops_data_export_observations", statements: statementsFrom(finopsDataExportObservationsSchemaSql) },
+  { id: "0084_finops_trusted_advisor_organization", statements: statementsFrom(finopsTrustedAdvisorOrganizationSchemaSql) },
+  { id: "0085_finops_compute_optimizer_discovery", statements: statementsFrom(finopsComputeOptimizerDiscoverySchemaSql) },
+  { id: "0086_finops_active_file_count", statements: statementsFrom(finopsActiveFileCountSchemaSql) },
+  { id: "0087_finops_aws_config_compliance", statements: statementsFrom(finopsAwsConfigComplianceSchemaSql) },
+  { id: "0088_finops_pricing_change_materializations", statements: statementsFrom(finopsPricingChangeMaterializationsSchemaSql) },
+  { id: "0089_finops_cora_snapshots", statements: statementsFrom(finopsCoraSnapshotsSchemaSql) },
+  { id: "0090_finops_aws_news_feed_snapshots", statements: statementsFrom(finopsAwsNewsFeedSnapshotsSchemaSql) },
+  { id: "0091_finops_aws_budgets_organization", statements: statementsFrom(finopsAwsBudgetsOrganizationSchemaSql) },
+  { id: "0092_finops_aws_support_cases", statements: statementsFrom(finopsAwsSupportCasesSchemaSql) },
+  { id: "0093_finops_resilience_vue", statements: statementsFrom(finopsResilienceVueSchemaSql) },
+  { id: "0094_finops_end_user_computing", statements: statementsFrom(finopsEndUserComputingSchemaSql) },
+  { id: "0095_finops_media_services_insights", statements: statementsFrom(finopsMediaServicesInsightsSchemaSql) },
+  { id: "0096_finops_marketplace_spg", statements: statementsFrom(finopsMarketplaceSpgSchemaSql) },
+  { id: "0097_finops_kubecost_allocation", statements: statementsFrom(finopsKubecostAllocationSchemaSql) },
+  { id: "0098_finops_scad_allocation", statements: statementsFrom(finopsScadAllocationSchemaSql) },
+  { id: "0099_finops_sustainability_carbon", statements: statementsFrom(finopsSustainabilityCarbonSchemaSql) },
+  { id: "0100_finops_amazon_connect_cost_insights", statements: statementsFrom(finopsAmazonConnectCostInsightsSchemaSql) },
+  { id: "0101_finops_compute_optimizer_export_history", statements: statementsFrom(finopsComputeOptimizerExportHistorySchemaSql) },
+  { id: "0102_finops_extended_support_projection", statements: statementsFrom(finopsExtendedSupportProjectionSchemaSql) },
+  { id: "0103_finops_graviton_savings", statements: statementsFrom(finopsGravitonSavingsSchemaSql) },
+  { id: "0104_finops_aws_health_events", statements: statementsFrom(finopsAwsHealthEventsSchemaSql) },
+  { id: "0105_finops_azure_cid", statements: statementsFrom(finopsAzureCidSchemaSql) },
+  { id: "0106_finops_gcp_cloud_intelligence", statements: statementsFrom(finopsGcpCloudIntelligenceSchemaSql) },
+  { id: "0107_finops_dcf_execution_history", statements: statementsFrom(finopsDcfExecutionHistorySchemaSql) },
+  { id: "0108_finops_cora_export_objects", statements: statementsFrom(finopsCoraExportObjectsSchemaSql) },
+  { id: "0109_finops_aws_budgets_durable_attempts", statements: statementsFrom(finopsAwsBudgetsDurableAttemptsSchemaSql) },
+  { id: "0110_finops_euc_runtime_attempts", statements: statementsFrom(finopsEucRuntimeAttemptsSchemaSql) },
+  { id: "0111_finops_kubecost_runtime_attempts", statements: statementsFrom(finopsKubecostRuntimeAttemptsSchemaSql) },
+  { id: "0112_finops_compute_optimizer_export_plans", statements: statementsFrom(finopsComputeOptimizerExportPlansSchemaSql) },
+  { id: "0113_finops_compute_optimizer_export_plan_sets", statements: statementsFrom(finopsComputeOptimizerExportPlanSetsSchemaSql) },
+  { id: "0114_finops_compute_optimizer_export_plan_timestamp_guard", statements: statementsFrom(finopsComputeOptimizerExportPlanTimestampGuardSchemaSql) },
+  { id: "0115_finops_compute_optimizer_exact_generations", statements: statementsFrom(finopsComputeOptimizerExactGenerationsSchemaSql) },
+  { id: "0116_finops_compute_optimizer_activation_outbox", statements: statementsFrom(finopsComputeOptimizerActivationOutboxSchemaSql) },
+  { id: "0117_finops_aws_news_feeds_replay", statements: statementsFrom(finopsAwsNewsFeedsReplaySchemaSql) },
+  { id: "0118_finops_extended_support_runtime", statements: statementsFrom(finopsExtendedSupportRuntimeSchemaSql) },
+  { id: "0119_finops_aws_health_runtime", statements: statementsFrom(finopsAwsHealthRuntimeSchemaSql) },
+  { id: "0120_finops_resilience_vue_runtime", statements: statementsFrom(finopsResilienceVueRuntimeSchemaSql) },
+  { id: "0121_finops_dcf_runtime", statements: statementsFrom(finopsDcfRuntimeSchemaSql) },
+  { id: "0122_finops_graviton_runtime", statements: statementsFrom(finopsGravitonRuntimeSchemaSql) },
+  { id: "0123_finops_marketplace_spg_runtime", statements: statementsFrom(finopsMarketplaceSpgRuntimeSchemaSql) },
+  { id: "0124_finops_cora_runtime_attempts", statements: statementsFrom(finopsCoraRuntimeAttemptsSchemaSql) },
+  { id: "0125_finops_scad_runtime_attempts", statements: statementsFrom(finopsScadRuntimeAttemptsSchemaSql) },
+  { id: "0126_finops_sustainability_targets", statements: statementsFrom(finopsSustainabilityTargetsSchemaSql) },
+  { id: "0127_finops_amazon_connect_runtime", statements: statementsFrom(finopsAmazonConnectRuntimeSchemaSql) },
+  { id: "0128_finops_pricing_change_runtime", statements: statementsFrom(finopsPricingChangeRuntimeSchemaSql) },
+  { id: "0129_finops_aws_config_compliance_runtime", statements: statementsFrom(finopsAwsConfigComplianceRuntimeSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;
@@ -192,8 +316,15 @@ export function ensureRuntimeSchema(db: D1Database): Promise<void> {
         `SELECT migration_id FROM sutra_runtime_migrations WHERE migration_id = ? LIMIT 1`,
       ).bind(migration.id).first<{ migration_id: string }>();
       if (applied !== null) continue;
-      for (const statement of migration.statements) {
-        await applyStatement(db, statement);
+      if (migration.id === "0082_finops_source_evidence_artifact") {
+        // Rebuilding the checked evidence table also rebuilds its two FK child
+        // tables. D1 batch is transactional, so a replica cannot be left with
+        // immutability triggers removed or a half-copied evidence graph.
+        await db.batch(migration.statements.map((statement) => db.prepare(statement)));
+      } else {
+        for (const statement of migration.statements) {
+          await applyStatement(db, statement);
+        }
       }
       await db.prepare(
         `INSERT OR IGNORE INTO sutra_runtime_migrations (migration_id) VALUES (?)`,

@@ -3,9 +3,9 @@ import { ItsmConnectorRepository } from "../../../../../db/itsm-connector-reposi
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { requireConnectionScope } from "../../../../../lib/api-connection-scope";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
-import { buildOutboundTicket, signOutboundBody, type ItsmCaseLike } from "../../../../../lib/itsm-sync";
+import { deliverItsmTicket } from "../../../../../lib/itsm-delivery";
+import type { ItsmCaseLike } from "../../../../../lib/itsm-sync";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
-import { assertSafeOutboundUrl } from "../../../../../lib/ssrf-guard";
 
 export const dynamic = "force-dynamic";
 
@@ -40,30 +40,23 @@ export async function POST(request: Request): Promise<Response> {
       priority: current.priority,
       status: current.status === "closed" ? "accepted_risk" : current.status,
     };
-    const ticket = buildOutboundTicket(itsmCase, connector.connectorType, connector.projectKey);
-    const outboundBody = JSON.stringify(ticket.payload);
-    let delivered = false;
-    let statusCode: number | undefined;
-    let deliveryError: string | undefined;
-    try {
-      // Re-check the stored base URL right before egress (defense in depth) and
-      // refuse to follow redirects so a 3xx to an internal target cannot bypass
-      // the SSRF guard after the first hop.
-      const target = assertSafeOutboundUrl(connector.baseUrl);
-      const response = await fetch(target, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-sutra-signature": await signOutboundBody(connector.sharedSecret, outboundBody),
-        },
-        body: outboundBody,
-        redirect: "error",
-        signal: AbortSignal.timeout(10_000),
-      });
-      statusCode = response.status;
-      delivered = response.ok;
-    } catch (caught) {
-      deliveryError = caught instanceof Error ? caught.name : "dispatch-error";
+    const delivery = await deliverItsmTicket({
+      connector: {
+        baseUrl: connector.baseUrl,
+        sharedSecret: connector.sharedSecret,
+        connectorType: connector.connectorType,
+        projectKey: connector.projectKey,
+      },
+      itsmCase,
+    });
+    const {
+      delivered,
+      statusCode,
+      error: deliveryError,
+      payloadPreview,
+    } = delivery;
+    if (delivered) {
+      await repository.recordOutboundSuccess(scope, connector.id, connector.updatedAt);
     }
     // Deliberately one attempt: durable retries are owned by background_jobs.
     const outcome = delivered ? `delivered (${statusCode})` : statusCode === undefined ? `failed (${deliveryError})` : `rejected (${statusCode})`;
@@ -101,7 +94,7 @@ export async function POST(request: Request): Promise<Response> {
     return jsonResponse({
       delivered,
       ...(statusCode === undefined ? { error: deliveryError ?? "dispatch-error" } : { statusCode }),
-      payloadPreview: outboundBody.slice(0, 500),
+      payloadPreview,
       durableRetryScheduled,
     });
   } catch (error) {

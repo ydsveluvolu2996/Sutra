@@ -1,0 +1,156 @@
+import {
+  buildSustainabilityCarbonDashboard,
+  type SustainabilityCarbonDashboard,
+  type SustainabilityCarbonSnapshot,
+  type SustainabilityProxyMetric,
+  type SustainabilityProxyUnit,
+} from "./finops-sustainability-carbon.ts";
+import { SUSTAINABILITY_OFFICIAL_DEFINITION } from "./finops-sustainability-official-definition.ts";
+
+export interface SustainabilityDashboardFilters {
+  readonly accountId?: string; readonly region?: string; readonly service?: string;
+  readonly workloadTagValue?: string; readonly proxyMetric?: SustainabilityProxyMetric;
+  readonly carbonModelVersion?: string; readonly carbonProductCode?: string;
+}
+
+export interface SustainabilityGovernedTarget {
+  readonly targetId: string; readonly versionId: string;
+  readonly metric: SustainabilityProxyMetric;
+  readonly workloadTagKey: string | null; readonly workloadTagValue: string | null;
+  readonly periodStart: string; readonly targetValueMicros: string | null;
+  readonly unit: SustainabilityProxyUnit; readonly state: "ACTIVE" | "REVOKED";
+  readonly reason: string; readonly actorId: string; readonly createdAtIso: string;
+}
+
+function sum(values: readonly (string | null)[]): string | null {
+  const present = values.filter((value): value is string => value !== null);
+  return present.length === 0 ? null
+    : present.reduce((total, value) => total + BigInt(value), BigInt(0)).toString();
+}
+
+function proxyTrend(series: SustainabilityCarbonDashboard["proxySeries"]) {
+  const groups = new Map<string, typeof series>();
+  for (const row of series) {
+    const key = `${row.usagePeriod}|${row.metric}|${row.unit}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const [usagePeriod, metric, unit] = key.split("|");
+    return { usagePeriod, metric: metric as SustainabilityProxyMetric, unit,
+      valueMicros: sum(rows.map((row) => row.valueMicros))!,
+      sourceRowCount: rows.reduce((total, row) => total + row.sourceRowCount, 0) };
+  }).sort((a, b) => `${a.metric}|${a.usagePeriod}`.localeCompare(`${b.metric}|${b.usagePeriod}`));
+}
+
+function carbonTrend(series: SustainabilityCarbonDashboard["providerCarbonSeries"]) {
+  const groups = new Map<string, typeof series>();
+  for (const row of series) {
+    const key = `${row.usagePeriod}|${row.modelVersion}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return [...groups.entries()].map(([key, rows]) => {
+    const [usagePeriod, modelVersion] = key.split("|");
+    return { usagePeriod, modelVersion, unit: "MTCO2e" as const,
+      totalLbmMicroMtco2e: sum(rows.map((row) => row.totalLbmMicroMtco2e)),
+      totalMbmMicroMtco2e: sum(rows.map((row) => row.totalMbmMicroMtco2e)),
+      scope1MicroMtco2e: sum(rows.map((row) => row.scope1MicroMtco2e))!,
+      scope2LbmMicroMtco2e: sum(rows.map((row) => row.scope2LbmMicroMtco2e))!,
+      scope2MbmMicroMtco2e: sum(rows.map((row) => row.scope2MbmMicroMtco2e))!,
+      scope3LbmMicroMtco2e: sum(rows.map((row) => row.scope3LbmMicroMtco2e))!,
+      scope3MbmMicroMtco2e: sum(rows.map((row) => row.scope3MbmMicroMtco2e))! };
+  }).sort((a, b) => a.usagePeriod.localeCompare(b.usagePeriod));
+}
+
+const ACTIONS: Readonly<Record<SustainabilityProxyMetric, string>> = {
+  COMPUTE_VCPU_HOURS: "Review instance rightsizing, schedules, and autoscaling against service demand.",
+  COMPUTE_MEMORY_GB_HOURS: "Review memory requests, instance families, and idle capacity.",
+  LAMBDA_GB_SECONDS: "Review function memory sizing, duration, and invocation architecture.",
+  STORAGE_GB_HOURS: "Review retention, lifecycle, compression, and unattached storage.",
+  STORAGE_REQUESTS: "Review request batching, caching, and storage access patterns.",
+  DATA_TRANSFER_GB: "Review architecture locality, caching, compression, and cross-zone or cross-Region paths.",
+  DATABASE_VCPU_HOURS: "Review database sizing, schedules, replicas, and serverless scaling.",
+};
+
+function plans(trend: ReturnType<typeof proxyTrend>) {
+  return [...new Set(trend.map((row) => row.metric))].map((metric) => {
+    const rows = trend.filter((row) => row.metric === metric)
+      .sort((a, b) => a.usagePeriod.localeCompare(b.usagePeriod));
+    const latest = rows.at(-1)!; const previous = rows.at(-2);
+    const delta = previous === undefined ? null
+      : (BigInt(latest.valueMicros) - BigInt(previous.valueMicros)).toString();
+    return { metric, latestPeriod: latest.usagePeriod, latestValueMicros: latest.valueMicros,
+      previousPeriod: previous?.usagePeriod ?? null, deltaMicros: delta,
+      direction: delta === null ? "UNKNOWN" : BigInt(delta) > BigInt(0) ? "INCREASED"
+        : BigInt(delta) < BigInt(0) ? "DECREASED" : "FLAT",
+      action: ACTIONS[metric], claim: "TECHNICAL_RESOURCE_PLAN_NOT_CARBON_REDUCTION_CLAIM" as const };
+  });
+}
+
+function targets(
+  proxy: SustainabilityCarbonDashboard["proxySeries"],
+  configured: readonly SustainabilityGovernedTarget[],
+) {
+  if (configured.length === 0) {
+    return { configured: false as const,
+      reason: "NO_SERVER_OWNED_SUSTAINABILITY_TARGETS_CONFIGURED",
+      workloadTagGoals: [...new Set(proxy.map((row) => row.workloadTagValue)
+        .filter((value): value is string => value !== null))]
+        .map((workloadTagValue) => ({ workloadTagValue, target: null, state: "NOT_CONFIGURED" as const })) };
+  }
+  return {
+    configured: true as const,
+    reason: "IMMUTABLE_SERVER_OWNED_TARGET_VERSIONS",
+    workloadTagGoals: configured.filter((target) => target.state === "ACTIVE")
+      .map((target) => {
+        const matching = proxy.filter((row) => row.metric === target.metric
+          && row.usagePeriod === target.periodStart
+          && (target.workloadTagKey === null || (row.workloadTagKey === target.workloadTagKey
+            && row.workloadTagValue === target.workloadTagValue)));
+        const actualValueMicros = sum(matching.map((row) => row.valueMicros));
+        return {
+          targetId: target.targetId, versionId: target.versionId,
+          workloadTagKey: target.workloadTagKey, workloadTagValue: target.workloadTagValue,
+          metric: target.metric, periodStart: target.periodStart, unit: target.unit,
+          targetValueMicros: target.targetValueMicros,
+          actualValueMicros,
+          state: actualValueMicros === null ? "COLLECTING" as const
+            : BigInt(actualValueMicros) <= BigInt(target.targetValueMicros!)
+              ? "AT_OR_BELOW_TARGET" as const : "ABOVE_TARGET" as const,
+          reason: target.reason, governedBy: target.actorId, versionedAt: target.createdAtIso,
+          interpretation: "TECHNICAL_RESOURCE_USE_TARGET_NOT_CARBON_TARGET" as const,
+        };
+      }),
+  };
+}
+
+export function buildSustainabilityDashboard(
+  snapshot: SustainabilityCarbonSnapshot,
+  filters: SustainabilityDashboardFilters = {},
+  nowMs = Date.now(),
+  governedTargets: readonly SustainabilityGovernedTarget[] = [],
+) {
+  const source = buildSustainabilityCarbonDashboard(snapshot, nowMs);
+  const proxy = source.proxySeries.filter((row) =>
+    (filters.accountId === undefined || row.usageAccountId === filters.accountId)
+    && (filters.region === undefined || row.region === filters.region)
+    && (filters.service === undefined || row.service === filters.service)
+    && (filters.workloadTagValue === undefined || row.workloadTagValue === filters.workloadTagValue)
+    && (filters.proxyMetric === undefined || row.metric === filters.proxyMetric));
+  const carbon = source.providerCarbonSeries.filter((row) =>
+    (filters.accountId === undefined || row.usageAccountId === filters.accountId)
+    && (filters.region === undefined || row.regionCode === filters.region)
+    && (filters.carbonModelVersion === undefined || row.modelVersion === filters.carbonModelVersion)
+    && (filters.carbonProductCode === undefined || row.productCode === filters.carbonProductCode));
+  const proxyTrends = proxyTrend(proxy); const carbonTrends = carbonTrend(carbon);
+  return { schema: "sutra.finops-sustainability-dashboard.v1" as const,
+    state: source.state, filters, officialDefinition: SUSTAINABILITY_OFFICIAL_DEFINITION,
+    lineage: source.lineage,
+    proxy: { interpretation: "RESOURCE_USE_PROXY_NOT_CARBON" as const, series: proxy,
+      trends: proxyTrends, targets: targets(proxy, governedTargets),
+      technicalPlans: plans(proxyTrends) },
+    providerCarbon: { interpretation: "AWS_PROVIDER_ESTIMATE_NOT_PROXY_DERIVATION" as const,
+      series: carbon, trends: carbonTrends },
+    separation: { proxyConvertedToCarbon: false as const, carbonAllocatedToWorkloads: false as const,
+      seriesMayBeComparedVisuallyButNotMathematicallyCombined: true as const },
+    limitations: source.limitations };
+}

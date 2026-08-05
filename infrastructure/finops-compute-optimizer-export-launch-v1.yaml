@@ -1,0 +1,371 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Regional Compute Optimizer export launch/provision add-on for the immutable
+  standard-2026-08.5 Sutra collector role. It creates one dedicated private,
+  versioned, SSE-KMS bucket with a dedicated customer-managed key; grants the
+  Compute Optimizer service only the three
+  documented destination operations; and grants the collector only the eight
+  export operations, their documented read dependencies, and reads below the
+  account-bound provider prefix. Contract: compute-optimizer-export-launch-v1.
+
+Metadata:
+  SutraPermissionAddOn:
+    Name: compute-optimizer-export-launch
+    Version: compute-optimizer-export-launch-v1
+    RequiredBasePermissionPack: standard-2026-08.5
+    Scope: one-stack-region-one-account-one-cloudformation-owned-bucket
+    Encryption: SSE_KMS_CUSTOMER_MANAGED
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Existing Sutra collector contract
+        Parameters:
+          - CollectorRoleName
+          - BaseCollectorPermissionPackVersion
+          - ExpectedPartition
+          - RequesterAccountId
+          - ExportRegion
+      - Label:
+          default: Dedicated regional export destination
+        Parameters:
+          - ExportBasePrefix
+
+Parameters:
+  CollectorRoleName:
+    Type: String
+    Default: SutraCollectorRole
+    AllowedValues:
+      - SutraCollectorRole
+      - SutraReadOnlyRole
+    Description: >-
+      Existing standard-2026-08.5 role name under /sutra/. The template attaches
+      one inline policy; it never creates, replaces, or broadens the role trust.
+
+  BaseCollectorPermissionPackVersion:
+    Type: String
+    Default: standard-2026-08.5
+    AllowedValues:
+      - standard-2026-08.5
+    Description: Exact immutable base-role ceiling required by this add-on.
+
+  ExpectedPartition:
+    Type: String
+    AllowedValues:
+      - aws
+      - aws-us-gov
+      - aws-cn
+    Description: Server-persisted partition of the attested Sutra connection.
+
+  RequesterAccountId:
+    Type: String
+    MinLength: 12
+    MaxLength: 12
+    AllowedPattern: '^[0-9]{12}$'
+    Description: >-
+      Exact export-requester account. It must be the stack account and is
+      embedded into the sealed Compute Optimizer provider prefix.
+
+  ExportRegion:
+    Type: String
+    AllowedPattern: '^[a-z]{2}(-gov)?-[a-z]+-[0-9]$'
+    Description: Exact Compute Optimizer source and S3 destination Region.
+
+  ExportBasePrefix:
+    Type: String
+    Default: sutra-finops/
+    MaxLength: 180
+    AllowedPattern: '^$|^(?!.*//)(?!.*(^|/)\.{1,2}(/|$))[A-Za-z0-9][A-Za-z0-9._=-]{0,62}(/[A-Za-z0-9][A-Za-z0-9._=-]{0,62}){0,3}/$'
+    ConstraintDescription: >-
+      Empty or one sealed slash-terminated prefix without empty or dot segments.
+      Compute Optimizer appends compute-optimizer/<RequesterAccountId>/.
+
+Rules:
+  BindExactStackContext:
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExpectedPartition
+            - Ref: AWS::Partition
+        AssertDescription: ExpectedPartition must equal the stack partition.
+      - Assert:
+          Fn::Equals:
+            - Ref: RequesterAccountId
+            - Ref: AWS::AccountId
+        AssertDescription: RequesterAccountId must equal the stack account.
+      - Assert:
+          Fn::Equals:
+            - Ref: ExportRegion
+            - Ref: AWS::Region
+        AssertDescription: ExportRegion must equal the stack Region.
+
+Resources:
+  ComputeOptimizerExportKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description:
+        Fn::Sub: 'Sutra Compute Optimizer regional export key (${AWS::Region})'
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      MultiRegion: false
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableAccountKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: kms:*
+            Resource: '*'
+          - Sid: AllowComputeOptimizerExportEncryption
+            Effect: Allow
+            Principal:
+              Service: compute-optimizer.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: '*'
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              StringLike:
+                aws:SourceArn:
+                  Fn::Sub: 'arn:${AWS::Partition}:compute-optimizer:${AWS::Region}:${AWS::AccountId}:*'
+      Tags:
+        - Key: sutra:managed-by
+          Value: cloudformation
+        - Key: sutra:contract
+          Value: compute-optimizer-export-launch-v1
+        - Key: sutra:account-id
+          Value:
+            Ref: AWS::AccountId
+        - Key: sutra:region
+          Value:
+            Ref: AWS::Region
+
+  ComputeOptimizerExportBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt:
+                  - ComputeOptimizerExportKey
+                  - Arn
+            BucketKeyEnabled: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: sutra:managed-by
+          Value: cloudformation
+        - Key: sutra:contract
+          Value: compute-optimizer-export-launch-v1
+        - Key: sutra:account-id
+          Value:
+            Ref: AWS::AccountId
+        - Key: sutra:region
+          Value:
+            Ref: AWS::Region
+
+  ComputeOptimizerExportBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Ref: ComputeOptimizerExportBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowComputeOptimizerGetBucketAcl
+            Effect: Allow
+            Principal:
+              Service: compute-optimizer.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource:
+              Fn::GetAtt:
+                - ComputeOptimizerExportBucket
+                - Arn
+          - Sid: AllowComputeOptimizerGetBucketPolicyStatus
+            Effect: Allow
+            Principal:
+              Service: compute-optimizer.amazonaws.com
+            Action: s3:GetBucketPolicyStatus
+            Resource:
+              Fn::GetAtt:
+                - ComputeOptimizerExportBucket
+                - Arn
+          - Sid: AllowComputeOptimizerPutOnlyBelowSealedProviderPrefix
+            Effect: Allow
+            Principal:
+              Service: compute-optimizer.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub: >-
+                ${ComputeOptimizerExportBucket.Arn}/${ExportBasePrefix}compute-optimizer/${AWS::AccountId}/*
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: 'arn:${AWS::Partition}:compute-optimizer:${AWS::Region}:${AWS::AccountId}:*'
+
+  ComputeOptimizerExportLaunchPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName:
+        Fn::Sub: 'SutraComputeOptimizerExportLaunchV1-${AWS::Region}'
+      Roles:
+        - Ref: CollectorRoleName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: LaunchAllDocumentedComputeOptimizerExports
+            Effect: Allow
+            Action:
+              - compute-optimizer:ExportAutoScalingGroupRecommendations
+              - compute-optimizer:ExportEBSVolumeRecommendations
+              - compute-optimizer:ExportEC2InstanceRecommendations
+              - compute-optimizer:ExportECSServiceRecommendations
+              - compute-optimizer:ExportIdleRecommendations
+              - compute-optimizer:ExportLambdaFunctionRecommendations
+              - compute-optimizer:ExportLicenseRecommendations
+              - compute-optimizer:ExportRDSDatabaseRecommendations
+            Resource: '*'
+          - Sid: ReadDocumentedComputeOptimizerExportDependencies
+            Effect: Allow
+            Action:
+              - compute-optimizer:GetAutoScalingGroupRecommendations
+              - compute-optimizer:GetEBSVolumeRecommendations
+              - compute-optimizer:GetEC2InstanceRecommendations
+              - compute-optimizer:GetECSServiceRecommendations
+              - compute-optimizer:GetIdleRecommendations
+              - compute-optimizer:GetLambdaFunctionRecommendations
+              - compute-optimizer:GetLicenseRecommendations
+              - compute-optimizer:GetRDSDatabaseRecommendations
+              - autoscaling:DescribeAutoScalingGroups
+              - ec2:DescribeInstances
+              - ec2:DescribeVolumes
+              - ecs:ListClusters
+              - ecs:ListServices
+              - lambda:ListFunctions
+              - lambda:ListProvisionedConcurrencyConfigs
+              - rds:DescribeDBClusters
+              - rds:DescribeDBInstances
+            Resource: '*'
+          - Sid: ReadSealedComputeOptimizerExportPrefix
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource:
+              Fn::Sub: >-
+                ${ComputeOptimizerExportBucket.Arn}/${ExportBasePrefix}compute-optimizer/${AWS::AccountId}/*
+
+Outputs:
+  ContractVersion:
+    Description: Immutable launch/provision add-on permission contract.
+    Value: compute-optimizer-export-launch-v1
+
+  RequiredBasePermissionPackVersion:
+    Description: Exact base-role ceiling required by this add-on.
+    Value:
+      Ref: BaseCollectorPermissionPackVersion
+
+  CollectorRoleName:
+    Description: Exact existing collector role receiving the inline policy.
+    Value:
+      Ref: CollectorRoleName
+
+  CollectorRoleArn:
+    Description: Derived /sutra/ role ARN for server-side attestation.
+    Value:
+      Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/sutra/${CollectorRoleName}'
+
+  StackPartition:
+    Description: Partition asserted against the server-persisted connection.
+    Value:
+      Ref: AWS::Partition
+
+  RequesterAccountId:
+    Description: Account embedded in the provider-owned object-key suffix.
+    Value:
+      Ref: AWS::AccountId
+
+  ExportRegion:
+    Description: Single Region owned by this add-on stack and bucket.
+    Value:
+      Ref: AWS::Region
+
+  ExportBucketName:
+    Description: Exact CloudFormation-owned regional export bucket.
+    Value:
+      Ref: ComputeOptimizerExportBucket
+
+  ExportBucketArn:
+    Description: Exact CloudFormation-owned regional export bucket ARN.
+    Value:
+      Fn::GetAtt:
+        - ComputeOptimizerExportBucket
+        - Arn
+
+  ExportBasePrefix:
+    Description: Sealed launcher keyPrefix input, including its trailing slash.
+    Value:
+      Ref: ExportBasePrefix
+
+  EffectivePrefix:
+    Description: Exact provider prefix persisted with launched export jobs.
+    Value:
+      Fn::Sub: '${ExportBasePrefix}compute-optimizer/${AWS::AccountId}/'
+
+  ObjectArnPrefix:
+    Description: Permanent read/write upper bound; runtime sessions narrow reads to one object.
+    Value:
+      Fn::Sub: >-
+        ${ComputeOptimizerExportBucket.Arn}/${ExportBasePrefix}compute-optimizer/${AWS::AccountId}/*
+
+  EncryptionMode:
+    Description: Exact destination encryption contract.
+    Value: SSE_KMS
+
+  KmsKeyArn:
+    Description: Exact regional customer-managed key used by the destination bucket.
+    Value:
+      Fn::GetAtt:
+        - ComputeOptimizerExportKey
+        - Arn
+
+  BucketVersioningStatus:
+    Description: Immutable object identity support required by the reader.
+    Value: Enabled
+
+  ComputeOptimizerServicePrincipal:
+    Description: Service principal used in aws, aws-cn, and aws-us-gov.
+    Value: compute-optimizer.amazonaws.com
+
+  AttachedPolicyName:
+    Description: Deterministic regional launch/read policy identity.
+    Value:
+      Fn::Sub: 'SutraComputeOptimizerExportLaunchV1-${AWS::Region}'
+
+  BucketPolicyLogicalId:
+    Description: Exact CloudFormation-owned bucket-policy resource identity.
+    Value: ComputeOptimizerExportBucketPolicy

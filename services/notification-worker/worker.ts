@@ -12,9 +12,16 @@ export interface SecurityNotificationWorkerRepository {
   finish(
     jobId: string,
     leaseToken: string,
-    status: "delivered" | "retry_scheduled" | "dead_letter" | "not_configured",
+    status:
+      | "provider_accepted"
+      | "delivered"
+      | "delivery_failed"
+      | "retry_scheduled"
+      | "dead_letter"
+      | "not_configured",
     errorCode: string | null,
     nextAttemptAt: number | null,
+    providerDeliveryId?: string | null,
   ): Promise<void>;
 }
 
@@ -22,7 +29,14 @@ export async function processOneSecurityNotification(input: {
   readonly repository: SecurityNotificationWorkerRepository;
   readonly delivery?: SecurityNotificationDeliveryDependencies;
   readonly now?: () => number;
-}): Promise<"idle" | "delivered" | "retry_scheduled" | "dead_letter" | "not_configured"> {
+}): Promise<
+  | "idle"
+  | "provider_accepted"
+  | "delivered"
+  | "retry_scheduled"
+  | "dead_letter"
+  | "not_configured"
+> {
   const repository = input.repository;
   const now = input.now ?? Date.now;
   const claimed = await repository.claim(now());
@@ -71,8 +85,29 @@ export async function processOneSecurityNotification(input: {
     dependencies: input.delivery,
   });
   if (result.status === "delivered") {
+    if (configuration.channel === "email") {
+      await repository.finish(
+        claimed.id,
+        claimed.leaseToken,
+        "provider_accepted",
+        null,
+        null,
+        claimed.event.eventId,
+      );
+      return "provider_accepted";
+    }
     await repository.finish(claimed.id, claimed.leaseToken, "delivered", null, null);
     return "delivered";
+  }
+  if (result.errorCode === "ADAPTER_NOT_CONFIGURED") {
+    await repository.finish(
+      claimed.id,
+      claimed.leaseToken,
+      "not_configured",
+      "DELIVERY_ADAPTER_NOT_CONFIGURED",
+      null,
+    );
+    return "not_configured";
   }
   if (result.status === "permanent_failure" || claimed.attemptCount >= 5) {
     await repository.finish(

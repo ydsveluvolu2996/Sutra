@@ -17,7 +17,7 @@
  * Honesty rules (never relaxed):
  *  - Sutra's customer trust role is READ-ONLY by construction. Therefore no
  *    action here mutates a customer resource: every action is either performed
- *    by Sutra inside Sutra (open/route a case, notify a destination, record an
+ *    by Sutra inside Sutra (propose a case, notify a destination, record an
  *    accepted-risk exception with an expiry) or produces something the CUSTOMER
  *    applies themselves (a remediation artefact, a CI gate result their own
  *    pipeline enforces). `mutatesCustomerCloud` is `false` for every action and
@@ -176,10 +176,10 @@ export interface GovernanceActionDescriptor {
 export const GOVERNANCE_ACTION_DESCRIPTORS: readonly GovernanceActionDescriptor[] = [
   {
     kind: "open-case",
-    label: "Sutra opens and routes a case",
+    label: "Sutra proposes opening a case",
     performedBy: "sutra",
     description:
-      "Creates a case in Sutra and routes it through the configured case-routing rules (including any ITSM connector). Nothing changes in the customer's cloud account.",
+      "Produces a governed proposal to create a case in Sutra. Policy evaluation creates and routes nothing: current case-routing rules are preview-only, and ITSM delivery requires a separate authorized dispatch. Nothing changes in the customer's cloud account.",
     mutatesCustomerCloud: false,
   },
   {
@@ -379,7 +379,7 @@ export interface GovernancePolicyReport {
 export const GOVERNANCE_POLICY_DISCLAIMER =
   "Governance policies decide, they do not act. Sutra holds read-only access to " +
   "customer accounts, so no policy can stop, patch, resize or delete a customer " +
-  "resource: an action either happens inside Sutra (open/route a case, notify a " +
+  "resource: an action either happens inside Sutra (propose a case, notify a " +
   "destination, record an accepted-risk exception with an expiry) or produces " +
   "something the customer applies themselves (a remediation artefact, or a CI " +
   "gate result their own pipeline enforces). A policy matches only on signals " +

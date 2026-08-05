@@ -6,17 +6,17 @@ import {
 } from "node:crypto";
 import {
   chmod,
-  lstat,
   mkdir,
   open,
-  readFile,
   rename,
   rm,
 } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
 import type {
   AwsRoleProvisioningMode,
+  ComputeOptimizerExportLaunchProvisioningVerification,
   ConnectionScope,
   OnboardingTrustVerification,
   ScopedConnectionRegistry,
@@ -24,10 +24,35 @@ import type {
 } from "./types.js";
 import {
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
+  AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
+  AWS_HEALTH_PERMISSION_PACK_VERSION,
+  RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
+  GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
   LEGACY_PERMISSION_PACK_VERSION,
+  OLDER_PERMISSION_PACK_VERSION,
   PREVIOUS_PERMISSION_PACK_VERSION,
   PRIOR_PERMISSION_PACK_VERSION,
 } from "./types.js";
+import { parseFoundationalFinopsContracts } from "./finops-permission-contract.js";
+import { parseFinopsSourceContracts } from "./finops-source-contract.js";
+import {
+  parseComputeOptimizerExportObjectContracts,
+} from "./compute-optimizer-export-object-contract.js";
+import {
+  parseComputeOptimizerExportLaunchContracts,
+} from "./compute-optimizer-export-launch-contract.js";
+import {
+  validateComputeOptimizerExportLaunchProvisioningContractSet,
+  validateComputeOptimizerExportLaunchProvisioningVerification,
+} from "./compute-optimizer-export-launch-provisioning.js";
 import {
   isValidAwsRegionSelection,
   type AwsRegionSelection,
@@ -140,6 +165,26 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ...(connection.sessionNamePrefix === undefined
         ? {}
         : { sessionNamePrefix: connection.sessionNamePrefix }),
+      ...(connection.foundationalFinopsContracts === undefined
+        ? {}
+        : { foundationalFinopsContracts: structuredClone(connection.foundationalFinopsContracts) }),
+      ...(connection.finopsSourceContracts === undefined
+        ? {}
+        : { finopsSourceContracts: structuredClone(connection.finopsSourceContracts) }),
+      ...(connection.computeOptimizerExportObjectContracts === undefined
+        ? {}
+        : {
+            computeOptimizerExportObjectContracts: structuredClone(
+              connection.computeOptimizerExportObjectContracts,
+            ),
+          }),
+      ...(connection.computeOptimizerExportLaunchContracts === undefined
+        ? {}
+        : {
+            computeOptimizerExportLaunchContracts: structuredClone(
+              connection.computeOptimizerExportLaunchContracts,
+            ),
+          }),
     };
   }
 
@@ -191,6 +236,34 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
           ...document.connections,
           [key]: {
             ...parsed,
+            ...(unchanged && previous.foundationalFinopsContracts !== undefined
+              ? {
+                  foundationalFinopsContracts: structuredClone(
+                    previous.foundationalFinopsContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.finopsSourceContracts !== undefined
+              ? {
+                  finopsSourceContracts: structuredClone(
+                    previous.finopsSourceContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.computeOptimizerExportObjectContracts !== undefined
+              ? {
+                  computeOptimizerExportObjectContracts: structuredClone(
+                    previous.computeOptimizerExportObjectContracts,
+                  ),
+                }
+              : {}),
+            ...(unchanged && previous.computeOptimizerExportLaunchContracts !== undefined
+              ? {
+                  computeOptimizerExportLaunchContracts: structuredClone(
+                    previous.computeOptimizerExportLaunchContracts,
+                  ),
+                }
+              : {}),
             status: unchanged ? previous.status : "PENDING",
             permissionPackVersion: unchanged
               ? previous.permissionPackVersion
@@ -324,6 +397,117 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     });
   }
 
+  /** Stage an explicitly attested .8.5 successor without auto-activation. */
+  public async markComputeOptimizerExportLaunchProvisioningVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    unsafeVerification: ComputeOptimizerExportLaunchProvisioningVerification,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined) throw new RegistryConnectionNotFoundError();
+      if (connection.status !== "ACTIVE" || !new Set<StoredAwsConnection["permissionPackVersion"]>([
+        CURRENT_PERMISSION_PACK_VERSION,
+        FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+        ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+        ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+      ]).has(connection.permissionPackVersion)) throw new RegistryStateError();
+      let verification: ComputeOptimizerExportLaunchProvisioningVerification;
+      try {
+        verification = validateComputeOptimizerExportLaunchProvisioningVerification(
+          unsafeVerification,
+          connection,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      if (connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) {
+        if (JSON.stringify(connection.finopsSourceContracts) !==
+            JSON.stringify(verification.sourceContracts)
+          || JSON.stringify(connection.computeOptimizerExportObjectContracts) !==
+            JSON.stringify(verification.objectContracts)
+          || JSON.stringify(connection.computeOptimizerExportLaunchContracts) !==
+            JSON.stringify(verification.launchContracts)) {
+          throw new RegistryIntegrityError();
+        }
+        return document;
+      }
+      return {
+        version: 3,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "VERIFIED",
+            permissionPackVersion:
+              COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+            finopsSourceContracts: structuredClone(verification.sourceContracts),
+            computeOptimizerExportObjectContracts:
+              structuredClone(verification.objectContracts),
+            computeOptimizerExportLaunchContracts:
+              structuredClone(verification.launchContracts),
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /** Explicit second phase for a staged, exact-role .8.5 promotion. */
+  public async activateComputeOptimizerExportLaunchProvisioning(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined || connection.roleArn !== expectedRoleArn) {
+        throw new RegistryStateError();
+      }
+      if (connection.status === "ACTIVE" && connection.permissionPackVersion ===
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION) return document;
+      if (connection.status !== "VERIFIED"
+        || connection.permissionPackVersion !==
+          COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+        || connection.finopsSourceContracts === undefined
+        || connection.computeOptimizerExportObjectContracts === undefined
+        || connection.computeOptimizerExportLaunchContracts === undefined) {
+        throw new RegistryStateError();
+      }
+      try {
+        validateComputeOptimizerExportLaunchProvisioningContractSet(
+          connection,
+          connection.enabledRegions,
+          connection.finopsSourceContracts,
+          connection.computeOptimizerExportObjectContracts,
+          connection.computeOptimizerExportLaunchContracts,
+        );
+      } catch {
+        throw new RegistryIntegrityError();
+      }
+      return {
+        version: 3,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
+            status: "ACTIVE",
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
   /**
    * Make an attested candidate runnable only after the durable control plane
    * has committed the same exact role ARN. The role comparison is an optimistic
@@ -418,12 +602,19 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
   }
 
   private async readDocument(): Promise<RegistryDocument> {
+    let handle;
     try {
-      const metadata = await lstat(this.filePath);
-      if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      // Open the object once without following a final symlink, then inspect
+      // and read that same descriptor. A path swap cannot redirect this read.
+      handle = await open(
+        this.filePath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+      const metadata = await handle.stat();
+      if (!metadata.isFile() || metadata.size > 8 * 1024 * 1024) {
         throw new RegistryIntegrityError();
       }
-      const raw = await readFile(this.filePath, { encoding: "utf8" });
+      const raw = await handle.readFile({ encoding: "utf8" });
       if (Buffer.byteLength(raw, "utf8") > 8 * 1024 * 1024) {
         throw new RegistryIntegrityError();
       }
@@ -444,6 +635,8 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       if (isMissingFile(error)) return emptyDocument();
       if (error instanceof RegistryError) throw error;
       throw new RegistryIntegrityError();
+    } finally {
+      if (handle !== undefined) await handle.close().catch(() => undefined);
     }
   }
 
@@ -525,7 +718,7 @@ function decodeAes256Key(value: string): Buffer {
   return decoded;
 }
 
-function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsConnection {
+export function parseConnectionInput(input: RegisterAwsConnectionInput): RegisteredAwsConnection {
   if (!IDENTIFIER.test(input.tenantId) || !IDENTIFIER.test(input.connectionId)) {
     throw new RegistryIntegrityError();
   }
@@ -669,7 +862,7 @@ function parseTombstone(value: unknown): RegistryTombstone {
   };
 }
 
-function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
+export function parsePersistedConnection(value: Record<string, unknown>): RegisteredAwsConnection {
   const legacyKeys = [
     "tenantId",
     "connectionId",
@@ -690,14 +883,26 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
     "expectedRolePath",
     "expectedRoleName",
   ];
-  const record = exactRecord(
-    value,
-    Object.hasOwn(value, "roleProvisioningMode")
+  const selectedKeys = Object.hasOwn(value, "roleProvisioningMode")
       ? roleContractKeys
       : Object.hasOwn(value, "permissionPackVersion")
         ? currentKeys
-        : legacyKeys,
-  );
+        : legacyKeys;
+  const optionalContractKeys = [
+    ...(Object.hasOwn(value, "foundationalFinopsContracts")
+      ? ["foundationalFinopsContracts"]
+      : []),
+    ...(Object.hasOwn(value, "finopsSourceContracts")
+      ? ["finopsSourceContracts"]
+      : []),
+    ...(Object.hasOwn(value, "computeOptimizerExportObjectContracts")
+      ? ["computeOptimizerExportObjectContracts"]
+      : []),
+    ...(Object.hasOwn(value, "computeOptimizerExportLaunchContracts")
+      ? ["computeOptimizerExportLaunchContracts"]
+      : []),
+  ];
+  const record = exactRecord(value, [...selectedKeys, ...optionalContractKeys]);
   if (
     typeof record.tenantId !== "string" ||
     typeof record.connectionId !== "string" ||
@@ -746,16 +951,129 @@ function parsePersistedConnection(value: Record<string, unknown>): RegisteredAws
   const permissionPackVersion = record.permissionPackVersion ?? LEGACY_PERMISSION_PACK_VERSION;
   if (
     permissionPackVersion !== LEGACY_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== OLDER_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PREVIOUS_PERMISSION_PACK_VERSION &&
     permissionPackVersion !== PRIOR_PERMISSION_PACK_VERSION &&
-    permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION
+    permissionPackVersion !== CURRENT_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== ADVANCED_FINOPS_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION &&
+    permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
+    && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+    && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
+    && permissionPackVersion !== GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
   ) {
     throw new RegistryIntegrityError();
+  }
+  let foundationalFinopsContracts;
+  if (Object.hasOwn(record, "foundationalFinopsContracts")) {
+    try {
+      foundationalFinopsContracts = parseFoundationalFinopsContracts(
+        record.foundationalFinopsContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
+  let finopsSourceContracts;
+  if (Object.hasOwn(record, "finopsSourceContracts")) {
+    try {
+      finopsSourceContracts = parseFinopsSourceContracts(
+        record.finopsSourceContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
+  let computeOptimizerExportObjectContracts;
+  if (Object.hasOwn(record, "computeOptimizerExportObjectContracts")) {
+    if (
+      permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION
+      && permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
+    ) throw new RegistryIntegrityError();
+    try {
+      computeOptimizerExportObjectContracts = parseComputeOptimizerExportObjectContracts(
+        record.computeOptimizerExportObjectContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+  }
+  let computeOptimizerExportLaunchContracts;
+  if (Object.hasOwn(record, "computeOptimizerExportLaunchContracts")) {
+    if (
+      permissionPackVersion !==
+        COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== AWS_HEALTH_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== RESILIENCE_VUE_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== END_USER_COMPUTING_PERMISSION_PACK_VERSION
+      && permissionPackVersion !== GRAVITON_SAVINGS_PERMISSION_PACK_VERSION
+    ) throw new RegistryIntegrityError();
+    try {
+      computeOptimizerExportLaunchContracts = parseComputeOptimizerExportLaunchContracts(
+        record.computeOptimizerExportLaunchContracts,
+        {
+          tenantId: parsed.tenantId,
+          connectionId: parsed.connectionId,
+          expectedAccountId: parsed.expectedAccountId,
+          partition: parsed.partition,
+        },
+      );
+    } catch {
+      throw new RegistryIntegrityError();
+    }
   }
   return {
     ...parsed,
     status: record.status,
     permissionPackVersion,
+    ...(foundationalFinopsContracts === undefined
+      ? {}
+      : { foundationalFinopsContracts }),
+    ...(finopsSourceContracts === undefined
+      ? {}
+      : { finopsSourceContracts }),
+    ...(computeOptimizerExportObjectContracts === undefined
+      ? {}
+      : { computeOptimizerExportObjectContracts }),
+    ...(computeOptimizerExportLaunchContracts === undefined
+      ? {}
+      : { computeOptimizerExportLaunchContracts }),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };

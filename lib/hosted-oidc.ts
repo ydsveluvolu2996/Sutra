@@ -4,6 +4,10 @@ import {
   type OidcClientConfiguration,
 } from "./oidc-pkce.ts";
 import type { OidcJsonWebKey } from "./oidc-id-token.ts";
+import {
+  productionOutboundFetch,
+  type ManagedOutboundEnvironment,
+} from "./managed-outbound-fetch.ts";
 
 const MAX_TOKEN_RESPONSE_BYTES = 32 * 1024;
 const MAX_JWKS_BYTES = 128 * 1024;
@@ -62,10 +66,12 @@ export async function exchangeOidcAuthorizationCode(
   configuration: HostedOidcConfiguration,
   code: string,
   codeVerifier: string,
-  fetcher: Fetcher = fetch,
+  fetcher?: Fetcher,
+  environment: ManagedOutboundEnvironment = {},
 ): Promise<string> {
   validateHostedOidcConfiguration(configuration);
-  const response = await fetcher(configuration.tokenEndpoint, {
+  const outboundFetch = productionOutboundFetch(environment, fetcher);
+  const response = await outboundFetch(configuration.tokenEndpoint, {
     method: "POST",
     headers: {
       accept: "application/json",
@@ -92,10 +98,12 @@ export async function exchangeOidcAuthorizationCode(
 
 export async function fetchOidcJwks(
   configuration: HostedOidcConfiguration,
-  fetcher: Fetcher = fetch,
+  fetcher?: Fetcher,
+  environment: ManagedOutboundEnvironment = {},
 ): Promise<{ readonly keys: readonly OidcJsonWebKey[] }> {
   validateHostedOidcConfiguration(configuration);
-  const response = await fetcher(configuration.jwksUrl, {
+  const outboundFetch = productionOutboundFetch(environment, fetcher);
+  const response = await outboundFetch(configuration.jwksUrl, {
     headers: { accept: "application/json" },
     // See the token exchange above: manual is the Workerd-compatible mode, and
     // the explicit response.ok check still refuses every redirect response.

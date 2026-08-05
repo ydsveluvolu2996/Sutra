@@ -1,4 +1,3 @@
-import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
   commitVerifiedConnectionRole,
   getStoredConnectionSecretForOrg,
@@ -23,6 +22,8 @@ import {
 import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { withLocalOnboardingAccountLock } from "../../../../../lib/local-onboarding-lock";
 import { stageVerifyThenCommitRole } from "../../../../../lib/local-aws-lifecycle";
+import { JobQueueRepository } from "../../../../../db/job-queue-repository";
+import { enqueueTenantCollectionJob } from "../../../../../lib/hosted-collector-job";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,15 @@ function parseBody(value: unknown): { connectionId: string; roleArn: string } {
   }
   return { connectionId: body.connectionId, roleArn: body.roleArn };
 }
+
+async function onboardingCollectionOperationId(connectionId: string, roleArn: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${connectionId}\u0000${roleArn}`),
+  ));
+  return `role_${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
 export async function POST(request: Request): Promise<Response> {
   try {
     const actor = await requirePilotActor(request, "workspace:read");
@@ -49,7 +59,11 @@ export async function POST(request: Request): Promise<Response> {
     const body = parseBody(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, body.connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
-    requireRecentMfa(actor.authenticated);
+    // The normal API authorization boundary already requires an MFA-verified
+    // session. Do not force the customer to enter a second one-time code during
+    // onboarding; exact customer capability, same-origin checks, server-held
+    // ExternalId, and positive plus negative AWS trust attestation remain
+    // mandatory before the role can be committed.
     return await withLocalOnboardingAccountLock(
       stored.partition,
       stored.accountId,
@@ -119,6 +133,7 @@ export async function POST(request: Request): Promise<Response> {
           stageCollector: () => registerRoleWithCollector(role.arn),
           verifyCollector: verifyRoleWithCollector,
           commitVerifiedControlPlaneRole: (verification) => commitVerifiedConnectionRole({
+            orgId: actor.orgId,
             connectionId: current.connectionId,
             expectedPreviousRoleArn: current.roleArn.length === 0 ? null : current.roleArn,
             roleArn: role.arn,
@@ -154,10 +169,21 @@ export async function POST(request: Request): Promise<Response> {
             await activateRoleWithCollector(current.roleArn);
           },
         });
+        // Role activation is only the trust handoff. The first real inventory is
+        // scheduled durably and drained by the private production job runner.
+        // A stable operation id makes an HTTP retry converge on the same logical
+        // collection even if it creates a second at-least-once queue envelope.
+        const collection = await enqueueTenantCollectionJob(new JobQueueRepository(), {
+          orgId: actor.orgId,
+          customerId: current.customerId,
+          connectionId: current.connectionId,
+          operationId: await onboardingCollectionOperationId(current.connectionId, role.arn),
+        });
         return jsonResponse({
           connection: result.connection,
           registered: true,
           verification: result.verification,
+          collection: { jobId: collection.jobId, status: "queued" },
         });
       },
     );

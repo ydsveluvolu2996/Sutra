@@ -1,0 +1,61 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { register } from "node:module";
+import path from "node:path";
+import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Miniflare } from "miniflare";
+import react from "@vitejs/plugin-react";
+import { createServer } from "vite";
+
+register(new URL("./cloudflare-loader.mjs",import.meta.url));
+const runtimeMigrations = await import("../db/runtime-migrations.ts");
+const { MediaServicesRepository } = await import("../db/finops-media-services-repository.ts");
+const { normalizeMediaServicesCapture } = await import("../lib/finops-media-services-insights.ts");
+const { buildMediaServicesPortfolio } = await import("../lib/finops-media-services-dashboard.ts");
+const { mediaServicesCollectionWindow,mediaServicesJobIdempotencyKey,runMediaServicesCollectionJob } = await import("../lib/finops-media-services-collector-job.ts");
+
+const root = path.resolve(import.meta.dirname,".."); const CONNECTION_A=`conn_${"a".repeat(32)}`; const CONNECTION_B=`conn_${"b".repeat(32)}`;
+const SCOPE_A={ organizationId:"org_media_a",customerId:"customer_media_a",connectionId:CONNECTION_A };
+const TARGET_A={ orgId:SCOPE_A.organizationId,customerId:SCOPE_A.customerId,connectionId:SCOPE_A.connectionId,accountId:"111122223333",partition:"aws",region:"us-east-1" };
+const PROVIDERS=["MEDIACONNECT","MEDIACONVERT","MEDIALIVE","MEDIAPACKAGE_V1","MEDIAPACKAGE_V2","MEDIATAILOR"];
+function capture(character,completedAt,complete=true) {
+  const flowArn=`arn:aws:mediaconnect:us-east-1:${TARGET_A.accountId}:flow:flow-123:live-news`;
+  const collections=PROVIDERS.map((provider) => ({ provider,configured:true,regionSupported:true,readPermissionsValidated:true,paginationExhausted:true,apiCallCount:1,failureCode:null,resources:[] }));
+  collections[0].resources=[{ provider:"MEDIACONNECT",service:"MEDIACONNECT",resourceType:"FLOW",resourceArn:flowArn,resourceId:"flow-123",name:"live-news",state:"ACTIVE",observedAtIso:completedAt,tags:[{ key:"CostCenter",value:"broadcast" }],attributes:[{ key:"output_count",value:"2" },{ key:"source_count",value:"1" }] }];
+  const costs=["2026-05-01T00:00:00.000Z","2026-06-01T00:00:00.000Z","2026-07-01T00:00:00.000Z"].map((start,index) => ({ rowId:`row-${index}`,service:"MEDIACONNECT",accountId:TARGET_A.accountId,region:TARGET_A.region,resourceArn:flowArn,chargePeriodStartIso:start,chargePeriodEndIso:new Date(Date.parse(start)+3_600_000).toISOString(),operation:"RunFlow",usageType:"USE1-ActiveFlowHours",usageUnit:"Hrs",usageQuantityMicros:"1000000",costMicros:String((index+1)*1_000_000),chargeCategory:"USAGE" }));
+  return { schemaVersion:"sutra.media-services-insights.v1",scope:TARGET_A,captureId:`media_${character.repeat(64)}`,startedAtIso:new Date(Date.parse(completedAt)-60_000).toISOString(),completedAtIso:completedAt,execution:{ concurrencyLimit:4,observedPeakConcurrency:2 },collections,costEvidence:{ source:"AWS_CUR2_ACTIVE_GENERATION",generationId:`fbg_${"c".repeat(64)}`,manifestSha256:"d".repeat(64),dataThroughAtIso:completedAt,costBasis:"NET_AMORTIZED",currency:"USD",rowsExhausted:complete,rows:costs } };
+}
+function connection(database,id,orgId,customerId,accountId) { return database.prepare(`INSERT INTO aws_connections (id,org_id,customer_id,source_kind,partition,aws_account_id,role_arn,external_id_ciphertext,external_id_key_version,permission_pack_version,status,enabled_regions_json) VALUES (?,?,?,'aws_trust_role','aws',?,?,'ct','v1','standard-2026-08.1','active','[]')`).bind(id,orgId,customerId,accountId,`arn:aws:iam::${accountId}:role/sutra/SutraCollectorRole`); }
+async function withRepository(run) {
+  const miniflare=new Miniflare({ modules:true,script:"export default {fetch(){return new Response('ok')}}",compatibilityDate:"2026-05-22",d1Databases:{ DB:`media-${crypto.randomUUID()}` },d1Persist:false });
+  try { const database=await miniflare.getD1Database("DB"); runtimeMigrations.resetRuntimeSchemaCacheForTests(); await runtimeMigrations.ensureRuntimeSchema(database);
+    await database.batch([database.prepare("INSERT INTO organizations (id,slug,name,status) VALUES (?,'media-a','Media A','active')").bind(SCOPE_A.organizationId),database.prepare("INSERT INTO organizations (id,slug,name,status) VALUES ('org_media_b','media-b','Media B','active')"),database.prepare("INSERT INTO customers (id,org_id,slug,name,status) VALUES (?,?,'mediac-a','Media CA','active')").bind(SCOPE_A.customerId,SCOPE_A.organizationId),database.prepare("INSERT INTO customers (id,org_id,slug,name,status) VALUES ('customer_media_b','org_media_b','mediac-b','Media CB','active')"),connection(database,CONNECTION_A,SCOPE_A.organizationId,SCOPE_A.customerId,TARGET_A.accountId),connection(database,CONNECTION_B,"org_media_b","customer_media_b","999900001111")]);
+    await run({ database,repository:new MediaServicesRepository(database) });
+  } finally { await miniflare.dispose(); }
+}
+
+test("immutable complete target heads are tenant scoped and partial evidence cannot displace them",async () => {
+  await withRepository(async ({ database,repository }) => { const first=capture("a","2026-07-31T12:00:00.000Z"); const stored=await repository.recordCapture(SCOPE_A,TARGET_A,first,Date.parse(first.completedAtIso)); assert.equal(stored.becameActive,true); assert.equal((await repository.listActiveSnapshots(SCOPE_A)).length,1); assert.equal((await repository.recordCapture(SCOPE_A,TARGET_A,first,Date.parse(first.completedAtIso))).becameActive,false); const partial=capture("b","2026-07-31T18:00:00.000Z",false); assert.equal((await repository.recordCapture(SCOPE_A,TARGET_A,partial,Date.parse(partial.completedAtIso))).becameActive,false); assert.equal((await repository.listActiveSnapshots(SCOPE_A))[0].snapshot.captureId,first.captureId); assert.deepEqual((await repository.listHistory(SCOPE_A)).map((item) => item.state),["partial","current"]); await assert.rejects(database.prepare("UPDATE finops_media_services_snapshots SET source_state='stale' WHERE capture_id=?").bind(first.captureId).run(),/FINOPS_MEDIA_SERVICES_SNAPSHOT_IMMUTABLE/u); assert.equal((await repository.listActiveSnapshots({ organizationId:"org_media_b",customerId:"customer_media_b",connectionId:CONNECTION_B })).length,0); });
+});
+
+test("portfolio keeps exact cost classes, workflow drilldowns, trends, forecast labels, and evidence gaps",() => {
+  const snapshot=normalizeMediaServicesCapture(capture("c","2026-07-31T12:00:00.000Z"),TARGET_A,Date.parse("2026-07-31T12:00:00.000Z")); const report=buildMediaServicesPortfolio([{ generationId:`msg_${"e".repeat(64)}`,contentSha256:"e".repeat(64),snapshot }],{ accountId:null,region:null,service:null,provider:null,resourceType:null,search:null },Date.parse("2026-07-31T12:00:00.000Z")); assert.equal(report.executiveSummary.costGroups[0].costMicros,"6000000"); assert.equal(report.workflows.find((item) => item.id==="MEDIACONNECT_FLOW").resourceCount,1); assert.deepEqual(report.trends.map((item) => item.period),["2026-05","2026-06","2026-07"]); assert.equal(report.forecast[0].method,"SUTRA_TRAILING_THREE_PERIOD_MEAN"); assert.equal(report.forecast[0].costMicros,"2000000"); assert.equal(report.budget.available,false); assert.equal(report.reservations.savingsStatus,"unavailable");
+});
+
+test("daily server-owned job pins trusted targets, active CUR2 generation, operations, and bounds",async () => {
+  const seen=[]; const captured=capture("d","2026-07-31T12:00:00.000Z"); const result=await runMediaServicesCollectionJob({ id:"job_media",orgId:SCOPE_A.organizationId,customerId:SCOPE_A.customerId,connectionId:SCOPE_A.connectionId,payload:{ scheduledWindow:"2026-07-31T00:00:00.000Z" } },{ listTargets:async () => [{ ...TARGET_A,lastAcceptedCompletedAtIso:"2026-07-30T12:00:00.000Z",activeBillingGenerationId:captured.costEvidence.generationId }],adapter:{ collect:async (request) => { seen.push(request); return captured; } },recordCapture:async () => ({ snapshot:{ generationId:`msg_${"f".repeat(64)}`,contentSha256:"f".repeat(64),snapshot:{ complete:true },scope:SCOPE_A,createdAtIso:captured.completedAtIso,committedAtIso:captured.completedAtIso },becameActive:true }),now:() => Date.parse(captured.completedAtIso) }); assert.equal(result.acceptedHeadCount,1); assert.equal(seen[0].scope.accountId,TARGET_A.accountId); assert.equal(seen[0].requiredBillingGenerationId,captured.costEvidence.generationId); assert.ok(seen[0].operations.MEDIALIVE.includes("medialive:ListReservations")); assert.equal(mediaServicesCollectionWindow(Date.parse("2026-07-31T18:00:00.000Z")),"2026-07-31T00:00:00.000Z"); assert.match(mediaServicesJobIdempotencyKey(SCOPE_A,"2026-07-31T00:00:00.000Z"),/^media-services:org_media_a/u);
+});
+
+test("route is authenticated, same-tenant, accepted-head only, bounded, and activation honest",async () => {
+  const route=await readFile(new URL("../app/api/v1/finops/media-services-insights/route.ts",import.meta.url),"utf8"); assert.match(route,/requireApiSession\(request\)/u); assert.match(route,/getConnectionForOrg\(authenticated\.subject\.orgId/u); assert.match(route,/assertSessionCapability\(authenticated,"connection:read",connection\.customerId\)/u); assert.match(route,/repository\.listActiveSnapshots\(scope\)/u); assert.match(route,/MEDIA_SERVICES_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED/u); assert.doesNotMatch(route,/searchParams\.get\("orgId"\)|searchParams\.get\("customerId"\)/u);
+});
+
+test("SQLite and PostgreSQL enforce immutable complete-only target heads and PUBLIC revokes",async () => {
+  for (const url of [new URL("../drizzle/0095_finops_media_services_insights.sql",import.meta.url),new URL("../postgres/migrations/0090_finops_media_services_insights.sql",import.meta.url)]) { const sql=await readFile(url,"utf8"); assert.match(sql,/FINOPS_MEDIA_SERVICES_SNAPSHOT_IMMUTABLE/u); assert.match(sql,/candidate\.`?complete`?\s*=\s*1|NOT candidate\.complete/u); assert.match(sql,/candidate\.`?completed_at`?\s*>\s*active\.`?completed_at`?/u); } assert.match(await readFile(new URL("../postgres/migrations/0090_finops_media_services_insights.sql",import.meta.url),"utf8"),/REVOKE ALL ON finops_media_services_snapshots FROM PUBLIC/u);
+});
+
+test("native visual renders all media workflows, filters, trends, forecast, budget, evidence, and drilldowns",async () => {
+  const snapshot=normalizeMediaServicesCapture(capture("e","2026-07-31T12:00:00.000Z"),TARGET_A,Date.parse("2026-07-31T12:00:00.000Z")); const portfolio=buildMediaServicesPortfolio([{ generationId:`msg_${"e".repeat(64)}`,contentSha256:"e".repeat(64),snapshot }],{ accountId:null,region:null,service:null,provider:null,resourceType:null,search:null },Date.parse("2026-07-31T12:00:00.000Z")); const vite=await createServer({ root,configFile:false,logLevel:"silent",plugins:[react()],server:{ middlewareMode:true } }); try { const dashboardModule=await vite.ssrLoadModule("/app/costs/finops-media-services-insights-dashboard.tsx"); const report={ ...portfolio,connectionId:CONNECTION_A,sourceState:"partial",freshness:{ dataThroughAt:snapshot.costEvidence.dataThroughAtIso,ageHours:2,staleAfterHours:48 },history:[{ generationId:`msg_${"e".repeat(64)}`,completedAtIso:snapshot.completedAtIso,accountId:TARGET_A.accountId,region:TARGET_A.region,state:"current",complete:true,resourceCount:1,costRowCount:3,billingGenerationId:snapshot.costEvidence.generationId }],evidence:{ acceptedHeads:[`msg_${"e".repeat(64)}`] },collection:{ available:false,reason:"MEDIA_SERVICES_AWS_ADAPTER_JOB_HANDLER_NOT_REGISTERED" } }; const html=renderToStaticMarkup(createElement(dashboardModule.MediaServicesInsightsReportView,{ report,filters:{ accountId:null,region:null,service:null,provider:null,resourceType:null,search:null },onFiltersChange:() => undefined })); for (const expected of ["Executive summary","MediaConnect connections","MediaConvert jobs","MediaLive channels","MediaTailor ad insertion","MediaPackage packaging","Account / payer scope","Trends","SUTRA projection","Budget guardrail","Savings unavailable","Export visible rows","Provider coverage","Workflow resource drilldown","CUR2","newer target collection is incomplete"]) assert.match(html,new RegExp(expected,"iu")); } finally { await vite.close(); }
+});

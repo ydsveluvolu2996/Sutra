@@ -7,8 +7,13 @@ const files = {
   postgres: new URL("../postgres/migrations/0011_notification_destinations_outbox.sql", import.meta.url),
   repository: new URL("../db/security-notification-repository.ts", import.meta.url),
   route: new URL("../app/api/v1/notification-destinations/route.ts", import.meta.url),
+  apiAuth: new URL("../lib/api-auth.ts", import.meta.url),
   worker: new URL("../services/notification-worker/worker.ts", import.meta.url),
+  workerRepository: new URL("../services/notification-worker/postgres-repository.ts", import.meta.url),
+  sesFeedbackSqlite: new URL("../drizzle/0077_ses_delivery_feedback.sql", import.meta.url),
+  sesFeedbackPostgres: new URL("../postgres/migrations/0072_ses_delivery_feedback.sql", import.meta.url),
   migrator: new URL("../scripts/postgres-migrate.mjs", import.meta.url),
+  bootstrap: new URL("../deploy/production/bootstrap-ha.sh", import.meta.url),
 };
 
 test("migrations persist tenant-scoped destinations and a unique durable outbox", async () => {
@@ -42,13 +47,27 @@ test("repository claims atomically, recovers expired leases, and scopes every re
 });
 
 test("authenticated web API only queues; provider delivery remains worker-owned", async () => {
-  const [route, worker] = await Promise.all([
+  const [route, apiAuth, worker, bootstrap] = await Promise.all([
     readFile(files.route, "utf8"),
+    readFile(files.apiAuth, "utf8"),
     readFile(files.worker, "utf8"),
+    readFile(files.bootstrap, "utf8"),
   ]);
   assert.match(route, /requireApiSession/);
   assert.match(route, /assertSessionCapability/);
   assert.match(route, /assertSameOrigin/);
+  assert.match(route, /requiredConfiguredPublicOrigin/u);
+  assert.match(route, /const publicOrigin = requiredConfiguredPublicOrigin\(\)/u);
+  assert.doesNotMatch(
+    route,
+    /^(?:[\s\S]*https:\/\/app\.sutracmdb\.com[\s\S]*)$/u,
+  );
+  assert.match(apiAuth, /export function requiredConfiguredPublicOrigin/u);
+  assert.match(apiAuth, /parsed\.origin !== value/u);
+  assert.match(
+    bootstrap,
+    /\[\[ "\$\{PUBLIC_ORIGIN\}" == "https:\/\/www\.sutracmdb\.com" \]\]/u,
+  );
   assert.match(route, /\.enqueue\(/);
   assert.doesNotMatch(route, /deliverSecurityNotification|fetch\(\s*["'`]https:\/\/|resolveWebhook/u);
   assert.match(worker, /deliverSecurityNotification/);
@@ -66,4 +85,33 @@ test("runtime manifests include the reserved additive migration numbers", async 
   assert.match(sqlite, /0017_notification_destinations_outbox/);
   assert.match(postgres, /0011_notification_destinations_outbox/);
   assert.match(migrator, /0011_notification_destinations_outbox\.sql/);
+  assert.match(sqlite, /0077_ses_delivery_feedback/);
+  assert.match(postgres, /0072_ses_delivery_feedback/);
+  assert.match(migrator, /0072_ses_delivery_feedback\.sql/);
+});
+
+test("SES feedback evidence is tenant-derived, idempotent, and terminal-state aware", async () => {
+  const [sqlite, postgres, repository] = await Promise.all([
+    readFile(files.sesFeedbackSqlite, "utf8"),
+    readFile(files.sesFeedbackPostgres, "utf8"),
+    readFile(files.workerRepository, "utf8"),
+  ]);
+  for (const migration of [sqlite, postgres]) {
+    assert.match(migration, /security_notification_ses_feedback/u);
+    assert.match(migration, /event_id[\s\S]*PRIMARY KEY/u);
+    assert.match(migration, /org_id/u);
+    assert.match(migration, /customer_id/u);
+    assert.match(migration, /destination_id/u);
+    assert.match(migration, /payload_sha256/u);
+    assert.match(migration, /reconciled_at/u);
+    assert.match(migration, /security_notification_outbox_ses_delivery_uq/u);
+  }
+  assert.match(
+    repository,
+    /d\.id = o\.destination_id[\s\S]*d\.org_id = o\.org_id[\s\S]*d\.customer_id = o\.customer_id[\s\S]*d\.channel = 'email'/u,
+  );
+  assert.match(repository, /ON CONFLICT \(event_id\) DO NOTHING/u);
+  assert.match(repository, /existing\.payload_sha256 !== event\.payloadSha256/u);
+  assert.match(repository, /status NOT IN \('delivered', 'delivery_failed'\)/u);
+  assert.match(repository, /THEN 'delivery_failed'/u);
 });

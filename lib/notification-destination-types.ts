@@ -36,7 +36,9 @@ export interface NotificationDestination {
 export type NotificationOutboxStatus =
   | "pending"
   | "processing"
+  | "provider_accepted"
   | "delivered"
+  | "delivery_failed"
   | "retry_scheduled"
   | "dead_letter"
   | "not_configured";

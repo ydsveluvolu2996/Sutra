@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PilotFinding, PilotResource } from "../../lib/pilot-types";
 import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
+import { downloadManagedEvidenceExport, type ManagedEvidenceExportFormat } from "../components/managed-evidence-export";
 import { CmdbWorkspacePanels } from "./workspace-panels";
 
 const MAX_ROWS = 200;
@@ -26,6 +27,7 @@ export function InventoryBrowser() {
   const [service, setService] = useState("all");
   const [region, setRegion] = useState("all");
   const [syncing, setSyncing] = useState(false);
+  const [exporting, setExporting] = useState<ManagedEvidenceExportFormat | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const resources = useMemo(() => state?.resources ?? [], [state?.resources]);
   const relationships = useMemo(() => state?.relationships ?? [], [state?.relationships]);
@@ -80,11 +82,24 @@ export function InventoryBrowser() {
     }
   }
 
+  async function exportInventory(format: ManagedEvidenceExportFormat) {
+    if (!connection) return;
+    setExporting(format);
+    setActionError(null);
+    try {
+      await downloadManagedEvidenceExport(connection.id, format);
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "The managed export failed");
+    } finally {
+      setExporting(null);
+    }
+  }
+
   return (
     <>
       <section className="page-heading">
         <div><p className="eyebrow">Configuration management database</p><h1>AWS resource inventory</h1><p className="page-subtitle">Search the latest complete snapshot, trace relationships, and verify per-collector coverage.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href={`/api/pilot/export?format=json${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export JSON</a>{connection && canRunAwsSync ? <button className="button button-primary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync inventory"}</button> : !connection ? <a className="button button-primary" href="/onboard">Connect account</a> : null}</div>
+        <div className="heading-actions"><button className="button button-secondary" type="button" disabled={!connection || exporting !== null} onClick={() => void exportInventory("csv")}>{exporting === "csv" ? "Preparing…" : "Export CSV"}</button><button className="button button-secondary" type="button" disabled={!connection || exporting !== null} onClick={() => void exportInventory("json")}>{exporting === "json" ? "Preparing…" : "Export JSON"}</button>{connection && canRunAwsSync ? <button className="button button-primary" type="button" disabled={syncing || refreshing || connection.status !== "active"} onClick={() => void runSync()}>{syncing ? "Collecting…" : "Sync inventory"}</button> : !connection ? <a className="button button-primary" href="/onboard">Connect account</a> : null}</div>
       </section>
       <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready; no snapshot selected." : health?.mode === "fixture" ? "Fixture collector ready; no snapshot selected." : "Stored snapshot view."}</strong> Sutra inventories and assesses metadata only; it does not change customer resources or replace runtime threat and vulnerability engines.</span><a href="/controls">Review coverage</a></div>
 
@@ -127,7 +142,7 @@ export function InventoryBrowser() {
                   <span className="primary-cell"><a className="resource-link" href={`/cmdb/resource?key=${encodeURIComponent(resource.resourceKey)}`} title={`Open Resource 360 for ${resourceLabel(resource)}`}><strong>{resourceLabel(resource)}</strong><small title={resource.arn ?? resource.nativeId}>{resource.resourceType} · {compactIdentifier(resource.nativeId, 18)}</small></a></span>
                   <span className="primary-cell"><strong>{connection.customerName}</strong><small>{connection.awsAccountId}</small></span>
                   <span><code className="region-code">{resource.region}</code></span>
-                  <span><span className="resource-state">{resource.state || "observed"}</span></span>
+                  <span><span className="resource-state">{resource.lifecycleState === "retirement_pending" ? `retirement pending · ${resource.consecutiveCompleteMisses ?? 1} complete miss` : resource.state || "observed"}</span></span>
                   <span className="muted-cell">{edgeCount} edge{edgeCount === 1 ? "" : "s"}</span>
                 </div>;
               })}

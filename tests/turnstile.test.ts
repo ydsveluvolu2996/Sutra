@@ -90,6 +90,11 @@ test("verification binds the one-time token to the exact route action and canoni
     "https://challenges.cloudflare.com/turnstile/v0/siteverify",
   );
   assert.equal(call?.init.method, "POST");
+  const headers = new Headers(call?.init.headers);
+  assert.match(
+    headers.get("idempotency-key") ?? "",
+    /^sutra-turnstile-[a-f0-9]{64}$/u,
+  );
   assert.equal(call?.body.get("secret"), ACTIVE.SUTRA_TURNSTILE_SECRET_KEY);
   assert.equal(call?.body.get("response"), TOKEN);
   assert.match(call?.body.get("idempotency_key") ?? "", /^[a-f0-9-]{36}$/u);
@@ -98,6 +103,7 @@ test("verification binds the one-time token to the exact route action and canoni
 test("a transient Siteverify failure is retried once with the same idempotency key", async () => {
   let calls = 0;
   const idempotencyKeys: string[] = [];
+  const gatewayIdempotencyKeys: string[] = [];
   await verifyTurnstileToken(
     new Request("https://www.sutracmdb.com/api/auth/login"),
     ACTIVE,
@@ -109,6 +115,9 @@ test("a transient Siteverify failure is retried once with the same idempotency k
         calls += 1;
         assert.ok(init?.body instanceof URLSearchParams);
         idempotencyKeys.push(init.body.get("idempotency_key") ?? "");
+        gatewayIdempotencyKeys.push(
+          new Headers(init.headers).get("idempotency-key") ?? "",
+        );
         if (calls === 1) throw new Error("temporary network failure");
         return siteverify();
       },
@@ -117,6 +126,7 @@ test("a transient Siteverify failure is retried once with the same idempotency k
   assert.equal(calls, 2);
   assert.match(idempotencyKeys[0] ?? "", /^[a-f0-9-]{36}$/u);
   assert.equal(idempotencyKeys[1], idempotencyKeys[0]);
+  assert.equal(gatewayIdempotencyKeys[1], gatewayIdempotencyKeys[0]);
 });
 
 test("a transient Siteverify HTTP response is retried once", async () => {
@@ -419,6 +429,24 @@ test("configuration is deny-by-default and rejects malformed boolean or key valu
         error.code === "TURNSTILE_CONFIGURATION_INVALID",
     );
   }
+});
+
+test("a partial managed outbound tuple is a configuration error before egress", async () => {
+  assert.deepEqual(
+    await rejectedCode(
+      verifyTurnstileToken(
+        new Request("https://www.sutracmdb.com/api/auth/login"),
+        {
+          ...ACTIVE,
+          SUTRA_MANAGED_OUTBOUND_URL: "https://outbound.sutracmdb.com",
+        },
+        TOKEN,
+        TURNSTILE_ACTIONS.login,
+        { now: NOW },
+      ),
+    ),
+    { code: "TURNSTILE_CONFIGURATION_INVALID", status: 503 },
+  );
 });
 
 test("network runtimes reject Cloudflare's public test credentials while local testing remains possible", () => {

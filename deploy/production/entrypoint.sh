@@ -1,0 +1,211 @@
+#!/bin/sh
+# Materialize the managed production task environment into the application runtime
+# file, then start the immutable Sutra image. This entrypoint deliberately does
+# not generate per-task keys: every replica must receive the same rotated,
+# environment-scoped values from Secrets Manager.
+set -eu
+
+umask 077
+mkdir -p /app/runtime /app/.sutra /app/.wrangler
+
+required_values="
+SUTRA_DB_HOST
+SUTRA_DB_PORT
+SUTRA_DB_NAME
+SUTRA_DB_APP_USER
+SUTRA_DB_APP_PASSWORD
+SUTRA_PUBLIC_ORIGIN
+SUTRA_CUSTOMER_ROLE_TEMPLATE_URL
+SUTRA_RELEASE_IMAGE
+SUTRA_AUTH_ENCRYPTION_KEY
+SUTRA_CONNECTION_ENCRYPTION_KEY
+SUTRA_REGISTRY_ENCRYPTION_KEY
+SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY
+SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION
+SUTRA_JOB_RUNNER_TOKEN
+SUTRA_TURNSTILE_SITE_KEY
+SUTRA_TURNSTILE_SECRET_KEY
+SUTRA_CONTACT_RECIPIENT
+SUTRA_CONTACT_FROM
+SUTRA_INVITATION_FROM
+SUTRA_ZOHO_DATACENTER
+SUTRA_ZOHO_MAIL_ACCOUNT_ID
+SUTRA_ZOHO_CLIENT_ID
+SUTRA_ZOHO_CLIENT_SECRET
+SUTRA_ZOHO_REFRESH_TOKEN
+SUTRA_MANAGED_OUTBOUND_URL
+SUTRA_MANAGED_OUTBOUND_KEY_ID
+SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY
+SUTRA_IDENTITY_MODE
+SUTRA_OIDC_PROVIDERS
+SUTRA_OIDC_TRANSACTION_KEY
+SUTRA_BROKER_URL
+SUTRA_BROKER_CLIENT_KEY_ID
+SUTRA_BROKER_CLIENT_PRIVATE_KEY
+SUTRA_BROKER_RESPONSE_KEY_ID
+SUTRA_BROKER_RESPONSE_PUBLIC_KEY
+SUTRA_ITSM_SECRET_BACKEND
+SUTRA_ITSM_SECRET_PREFIX
+SUTRA_ITSM_SECRET_KMS_KEY_ARN
+SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES
+SUTRA_EVIDENCE_BACKEND
+SUTRA_EVIDENCE_BUCKET
+SUTRA_EVIDENCE_KMS_KEY_ARN
+SUTRA_EVIDENCE_RETENTION_DAYS
+SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN
+"
+
+require_one_line() {
+  name="$1"
+  eval "value=\${$name:-}"
+  [ -n "$value" ] || {
+    printf 'Managed production configuration is missing %s\n' "$name" >&2
+    exit 1
+  }
+  case "$value" in
+    *'
+'*) printf 'Managed production configuration %s contains a newline\n' "$name" >&2; exit 1 ;;
+  esac
+  [ "$(printf %s "$value" | tr -d '\r')" = "$value" ] || {
+    printf 'Managed production configuration %s contains a carriage return\n' "$name" >&2
+    exit 1
+  }
+}
+
+for name in $required_values; do
+  require_one_line "$name"
+done
+
+case "$SUTRA_IDENTITY_MODE" in
+  oidc)
+    ;;
+  federated)
+    for name in SUTRA_SAML_PROVIDERS SUTRA_SAML_TRANSACTION_KEY; do
+      require_one_line "$name"
+    done
+    ;;
+  *)
+    printf 'Managed production identity mode must be oidc or federated\n' >&2
+    exit 1
+    ;;
+esac
+
+case "$SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES" in
+  2|3|4|5|6|7|8|9|1[0-9]|2[0-9]|30)
+    ;;
+  *)
+    printf 'Managed production resource retirement complete misses must be an integer from 2 through 30\n' >&2
+    exit 1
+    ;;
+esac
+
+case "$SUTRA_EVIDENCE_BACKEND" in
+  s3) ;;
+  *)
+    printf 'Managed production evidence backend must be s3\n' >&2
+    exit 1
+    ;;
+esac
+
+case "$SUTRA_EVIDENCE_RETENTION_DAYS" in
+  *[!0-9]*|'')
+    printf 'Managed production evidence retention must be an integer\n' >&2
+    exit 1
+    ;;
+esac
+[ "$SUTRA_EVIDENCE_RETENTION_DAYS" -ge 30 ] &&
+  [ "$SUTRA_EVIDENCE_RETENTION_DAYS" -le 3650 ] || {
+    printf 'Managed production evidence retention must be from 30 through 3650 days\n' >&2
+    exit 1
+  }
+
+# URL construction is delegated to Node so credentials are percent-encoded
+# correctly even after a Secrets Manager rotation.
+DATABASE_URL="$(
+  node -e '
+    const url = new URL("postgresql://placeholder/");
+    url.username = process.env.SUTRA_DB_APP_USER;
+    url.password = process.env.SUTRA_DB_APP_PASSWORD;
+    url.hostname = process.env.SUTRA_DB_HOST;
+    url.port = process.env.SUTRA_DB_PORT;
+    url.pathname = `/${process.env.SUTRA_DB_NAME}`;
+    url.searchParams.set("sslmode", "require");
+    process.stdout.write(url.toString());
+  '
+)"
+export DATABASE_URL
+
+runtime_file=/app/runtime/.dev.vars
+{
+  printf '%s\n' \
+    'SUTRA_DEPLOYMENT_ENV=production' \
+    'SUTRA_LOCAL_MODE=false' \
+    'SUTRA_WEB_HOST=0.0.0.0' \
+    "SUTRA_PUBLIC_ORIGIN=$SUTRA_PUBLIC_ORIGIN" \
+    "SUTRA_CUSTOMER_ROLE_TEMPLATE_URL=$SUTRA_CUSTOMER_ROLE_TEMPLATE_URL" \
+    "SUTRA_RELEASE_IMAGE=$SUTRA_RELEASE_IMAGE" \
+    "SUTRA_IDENTITY_MODE=$SUTRA_IDENTITY_MODE" \
+    "SUTRA_OIDC_PROVIDERS=$SUTRA_OIDC_PROVIDERS" \
+    "SUTRA_OIDC_TRANSACTION_KEY=$SUTRA_OIDC_TRANSACTION_KEY" \
+    'SUTRA_HOSTED_ENABLED=true' \
+    'SUTRA_HOSTED_SELF_SERVE_SIGNUP=false' \
+    'SUTRA_PASSWORD_IDENTITY_ENABLED=false' \
+    'SUTRA_DATABASE_MODE=postgres-tls' \
+    'SUTRA_SECRET_STORE=managed' \
+    'SUTRA_ENVIRONMENT_KEY_SCOPE=isolated' \
+    "SUTRA_AUTH_ENCRYPTION_KEY=$SUTRA_AUTH_ENCRYPTION_KEY" \
+    'SUTRA_AUTH_KEY_VERSION=production-auth-v1' \
+    "SUTRA_CONNECTION_ENCRYPTION_KEY=$SUTRA_CONNECTION_ENCRYPTION_KEY" \
+    'SUTRA_CONNECTION_KEY_VERSION=production-connection-v1' \
+    "SUTRA_REGISTRY_ENCRYPTION_KEY=$SUTRA_REGISTRY_ENCRYPTION_KEY" \
+    "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY=$SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY" \
+    "SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION=$SUTRA_FINOPS_EVIDENCE_REFERENCE_KEY_VERSION" \
+    "SUTRA_JOB_RUNNER_TOKEN=$SUTRA_JOB_RUNNER_TOKEN" \
+    'SUTRA_JOB_RUNNER_INTERVAL_MS=15000' \
+    'SUTRA_JOB_RUNNER_SELF_TICK=false' \
+    "SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES=$SUTRA_RESOURCE_RETIREMENT_COMPLETE_MISSES" \
+    "SUTRA_EVIDENCE_BACKEND=$SUTRA_EVIDENCE_BACKEND" \
+    "SUTRA_EVIDENCE_BUCKET=$SUTRA_EVIDENCE_BUCKET" \
+    "SUTRA_EVIDENCE_KMS_KEY_ARN=$SUTRA_EVIDENCE_KMS_KEY_ARN" \
+    "SUTRA_EVIDENCE_RETENTION_DAYS=$SUTRA_EVIDENCE_RETENTION_DAYS" \
+    "SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN=$SUTRA_TA_TAXONOMY_SIGNING_KEY_ARN" \
+    'SUTRA_NOTIFICATION_WORKER_CONFIGURED=true' \
+    'SUTRA_TURNSTILE_ENABLED=true' \
+    "SUTRA_TURNSTILE_SITE_KEY=$SUTRA_TURNSTILE_SITE_KEY" \
+    "SUTRA_TURNSTILE_SECRET_KEY=$SUTRA_TURNSTILE_SECRET_KEY" \
+    'SUTRA_TURNSTILE_DEV_BYPASS=false' \
+    "SUTRA_CONTACT_RECIPIENT=$SUTRA_CONTACT_RECIPIENT" \
+    "SUTRA_CONTACT_FROM=$SUTRA_CONTACT_FROM" \
+    'SUTRA_CONTACT_PROVIDER=zoho' \
+    "SUTRA_INVITATION_FROM=$SUTRA_INVITATION_FROM" \
+    'SUTRA_INVITATION_EMAIL_PROVIDER=zoho' \
+    "SUTRA_ZOHO_DATACENTER=$SUTRA_ZOHO_DATACENTER" \
+    "SUTRA_ZOHO_MAIL_ACCOUNT_ID=$SUTRA_ZOHO_MAIL_ACCOUNT_ID" \
+    "SUTRA_ZOHO_CLIENT_ID=$SUTRA_ZOHO_CLIENT_ID" \
+    "SUTRA_ZOHO_CLIENT_SECRET=$SUTRA_ZOHO_CLIENT_SECRET" \
+    "SUTRA_ZOHO_REFRESH_TOKEN=$SUTRA_ZOHO_REFRESH_TOKEN" \
+    "SUTRA_MANAGED_OUTBOUND_URL=$SUTRA_MANAGED_OUTBOUND_URL" \
+    "SUTRA_MANAGED_OUTBOUND_KEY_ID=$SUTRA_MANAGED_OUTBOUND_KEY_ID" \
+    "SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY=$SUTRA_MANAGED_OUTBOUND_PRIVATE_KEY" \
+    "SUTRA_BROKER_URL=$SUTRA_BROKER_URL" \
+    'SUTRA_BROKER_AUTH_MODE=asymmetric' \
+    "SUTRA_BROKER_CLIENT_KEY_ID=$SUTRA_BROKER_CLIENT_KEY_ID" \
+    "SUTRA_BROKER_CLIENT_PRIVATE_KEY=$SUTRA_BROKER_CLIENT_PRIVATE_KEY" \
+    "SUTRA_BROKER_RESPONSE_KEY_ID=$SUTRA_BROKER_RESPONSE_KEY_ID" \
+    "SUTRA_BROKER_RESPONSE_PUBLIC_KEY=$SUTRA_BROKER_RESPONSE_PUBLIC_KEY" \
+    "SUTRA_ITSM_SECRET_BACKEND=$SUTRA_ITSM_SECRET_BACKEND" \
+    "SUTRA_ITSM_SECRET_PREFIX=$SUTRA_ITSM_SECRET_PREFIX" \
+    "SUTRA_ITSM_SECRET_KMS_KEY_ARN=$SUTRA_ITSM_SECRET_KMS_KEY_ARN" \
+    "DATABASE_URL=$DATABASE_URL"
+} > "$runtime_file"
+
+if [ "$SUTRA_IDENTITY_MODE" = "federated" ]; then
+  {
+    printf '%s\n' \
+      "SUTRA_SAML_PROVIDERS=$SUTRA_SAML_PROVIDERS" \
+      "SUTRA_SAML_TRANSACTION_KEY=$SUTRA_SAML_TRANSACTION_KEY"
+  } >> "$runtime_file"
+fi
+chmod 0600 "$runtime_file"
+
+exec node /app/scripts/start-pilot.mjs

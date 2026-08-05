@@ -1,3 +1,9 @@
+import {
+  ManagedOutboundClientConfigurationError,
+  productionOutboundFetch,
+  type ManagedOutboundEnvironment,
+} from "./managed-outbound-fetch.ts";
+
 const EMAIL = /^[^\s@]{1,64}@[^\s@.]+(?:\.[^\s@.]+)+$/u;
 const SAFE_IDENTIFIER = /^[A-Za-z0-9._-]{3,512}$/u;
 const ACCOUNT_ID = /^[0-9]{4,32}$/u;
@@ -47,7 +53,7 @@ const DATA_CENTERS = {
 
 export type ZohoDataCenter = keyof typeof DATA_CENTERS;
 
-export interface ZohoMailEnvironment {
+export interface ZohoMailEnvironment extends ManagedOutboundEnvironment {
   readonly SUTRA_ZOHO_DATACENTER?: string;
   readonly SUTRA_ZOHO_MAIL_ACCOUNT_ID?: string;
   readonly SUTRA_ZOHO_CLIENT_ID?: string;
@@ -60,6 +66,39 @@ export interface ZohoMailMessage {
   readonly toAddress: string;
   readonly subject: string;
   readonly content: string;
+  /**
+   * Stable non-secret business operation reference where the caller owns one.
+   * It is hashed before leaving the process. When absent, the exact normalized
+   * message is hashed so identical retries still converge on one operation.
+   */
+  readonly operationId?: string;
+}
+
+async function stableIdempotencyKey(
+  scope: "mail" | "oauth",
+  message: ZohoMailMessage,
+): Promise<string> {
+  const operation =
+    message.operationId !== undefined &&
+    message.operationId.length > 0 &&
+    message.operationId.length <= 2_048
+      ? message.operationId
+      : JSON.stringify({
+          content: message.content,
+          fromAddress: message.fromAddress,
+          subject: message.subject,
+          toAddress: message.toAddress,
+        });
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(`sutra.zoho.${scope}.v1\u0000${operation}`),
+    ),
+  );
+  const encoded = [...digest]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  return `sutra-zoho-${scope}-${encoded}`;
 }
 
 export interface ZohoMailDeliveryResult {
@@ -180,7 +219,7 @@ async function accessToken(response: Response): Promise<string | null> {
 export async function sendZohoMail(
   environment: ZohoMailEnvironment,
   message: ZohoMailMessage,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<ZohoMailDeliveryResult> {
   const configuration = resolveZohoMailConfiguration(environment);
   if (configuration === null) {
@@ -199,7 +238,9 @@ export async function sendZohoMail(
   }
 
   try {
-    const tokenResponse = await fetchImpl(configuration.tokenEndpoint, {
+    const outboundFetch = productionOutboundFetch(environment, fetchImpl);
+    const mailIdempotencyKey = await stableIdempotencyKey("mail", message);
+    const tokenResponse = await outboundFetch(configuration.tokenEndpoint, {
       method: "POST",
       // Workerd rejects redirect mode "error" before issuing the request.
       // "manual" still prevents redirect following because every 3xx response
@@ -221,13 +262,14 @@ export async function sendZohoMail(
     const token = await accessToken(tokenResponse);
     if (token === null) return classifiedFailure(401);
 
-    const response = await fetchImpl(configuration.sendEndpoint, {
+    const response = await outboundFetch(configuration.sendEndpoint, {
       method: "POST",
       redirect: "manual",
       headers: {
         accept: "application/json",
         authorization: `Zoho-oauthtoken ${token}`,
         "content-type": "application/json; charset=utf-8",
+        "idempotency-key": mailIdempotencyKey,
       },
       body: JSON.stringify({
         fromAddress: message.fromAddress,
@@ -240,7 +282,14 @@ export async function sendZohoMail(
     });
     if (!response.ok) return classifiedFailure(response.status);
     return { status: "accepted", errorCode: null, httpStatus: response.status };
-  } catch {
+  } catch (error) {
+    if (error instanceof ManagedOutboundClientConfigurationError) {
+      return {
+        status: "failed",
+        errorCode: "EMAIL_CONFIGURATION_INVALID",
+        httpStatus: null,
+      };
+    }
     return {
       status: "unknown",
       errorCode: "PROVIDER_RESULT_UNKNOWN",

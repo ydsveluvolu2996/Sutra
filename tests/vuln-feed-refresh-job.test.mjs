@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { register } from "node:module";
 import test from "node:test";
 
@@ -14,6 +15,10 @@ const {
 } = await import("../db/background-job-handlers.ts");
 
 const NOW = 1_785_000_000_000;
+const handlerSource = await readFile(
+  new URL("../db/background-job-handlers.ts", import.meta.url),
+  "utf8",
+);
 
 function job(overrides = {}) {
   return { id: "job1", orgId: "org1", customerId: "cust1", connectionId: null, kind: "vuln-feed-refresh", payload: {}, attempt: 1, maxAttempts: 3, ...overrides };
@@ -43,6 +48,20 @@ test("refreshes each planned feed and records rows written", async () => {
   assert.deepEqual(called, ["kev:-", "nvd:3"]);
   assert.equal(audits[0]?.refreshed, 2);
   assert.equal(audits[0]?.rowsWritten, 1700);
+});
+
+test("the production refresh handler persists a redacted idempotent audit event", () => {
+  assert.match(handlerSource, /action: "vulnerability\.feed_refresh\.completed"/u);
+  assert.match(handlerSource, /requestId: `vuln\.feed_refresh:\$\{job\.id\}:\$\{job\.attempt\}`/u);
+  assert.match(handlerSource, /failureCount/u);
+  assert.doesNotMatch(
+    handlerSource.slice(
+      handlerSource.indexOf('action: "vulnerability.feed_refresh.completed"'),
+      handlerSource.indexOf('action: "vulnerability.feed_refresh.completed"') + 1_200,
+    ),
+    /failures:/u,
+    "raw upstream failures must not enter the durable audit metadata",
+  );
 });
 
 test("EPSS is never fetched in-runtime, and needsHostRun is recorded every run", async () => {

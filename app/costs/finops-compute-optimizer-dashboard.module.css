@@ -1,0 +1,51 @@
+.root { display: grid; gap: 1rem; color: #e9eef8; }
+.disclosure, .warning, .error { padding: .85rem 1rem; border: 1px solid #3d5576; border-radius: .75rem; background: #111d31; }
+.warning { border-color: #98742d; background: #2d2516; color: #ffe5a3; }
+.error { border-color: #a94a5a; background: #331923; }
+.definition, .filters, .section { padding: 1rem; border: 1px solid #2d405b; border-radius: .85rem; background: linear-gradient(145deg, #0e1829, #122139); }
+.definition header, .section header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.definition h3, .section h3 { margin: .2rem 0; }
+.definition header small, .definition header span, .definition > small, .definition p { color: #9eb1cc; font-size: .72rem; line-height: 1.5; }
+.definition p { margin: .75rem 0; }
+.moduleGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; margin-bottom: .75rem; }
+.moduleGrid article { display: grid; gap: .25rem; padding: .7rem; border: 1px solid #334966; border-radius: .6rem; background: #111e32; }
+.moduleGrid strong { font-size: .8rem; }
+.moduleGrid span { color: #91a4c0; font-size: .68rem; }
+.previewInventory { margin: 0 0 .75rem; padding: .7rem; border: 1px solid #334966; border-radius: .6rem; }
+.previewInventory summary { color: #cbd8e9; font-size: .75rem; cursor: pointer; }
+.previewInventory ul { columns: 2; margin: .65rem 0 0; padding-left: 1rem; color: #9eb1cc; font-size: .7rem; line-height: 1.7; }
+.filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .65rem; }
+.filters label { display: grid; gap: .3rem; color: #a6b7d0; font-size: .75rem; }
+.filters select, .filters input { min-width: 0; padding: .6rem; border: 1px solid #3b506e; border-radius: .5rem; background: #132139; color: #f1f5fb; }
+.section button { padding: .55rem .8rem; border: 1px solid #4c7fc2; border-radius: .5rem; background: #184272; color: #fff; }
+.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin-top: .8rem; }
+.cards article { display: grid; gap: .25rem; padding: .75rem; border: 1px solid #334966; border-radius: .6rem; }
+.cards span { color: #94a8c5; font-size: .72rem; text-transform: uppercase; }
+.visualGrid, .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.bars { display: grid; gap: .65rem; margin-top: .8rem; }
+.bars > div { display: grid; grid-template-columns: 1fr auto; gap: .25rem .6rem; font-size: .75rem; }
+.bars i { grid-column: 1 / -1; height: .45rem; overflow: hidden; border-radius: 99px; background: #253953; }
+.bars em { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #61d1d6, #ee7fbb); }
+.rank { display: grid; grid-template-columns: 1fr auto; gap: .15rem .6rem; padding: .5rem 0; border-bottom: 1px solid #2a3b55; }
+.rank small { grid-column: 1 / 3; color: #91a4c0; }
+.empty { color: #91a4c0; font-size: .78rem; }
+.scroll { overflow: auto; margin-top: .8rem; }
+.scroll:focus-visible { outline: 3px solid #61d1d6; outline-offset: 2px; }
+.scroll table { width: 100%; min-width: 1100px; border-collapse: collapse; }
+.scroll caption { width: 1px; height: 1px; position: absolute; overflow: hidden; clip-path: inset(50%); }
+.scroll th, .scroll td { padding: .55rem; border-bottom: 1px solid #293a53; font-size: .75rem; text-align: left; vertical-align: top; }
+.scroll th { color: #a5b6cf; }
+.scroll td small { display: block; max-width: 280px; overflow-wrap: anywhere; color: #91a4c0; }
+.evidence pre { overflow-wrap: anywhere; font-size: .7rem; white-space: pre-wrap; }
+
+@media (max-width: 1000px) {
+  .filters, .cards, .moduleGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .visualGrid, .grid3 { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 650px) {
+  .filters, .cards, .moduleGrid { grid-template-columns: 1fr; }
+  .previewInventory ul { columns: 1; }
+  .definition header, .section header { align-items: flex-start; flex-direction: column; }
+  .filters select, .filters input { min-height: 44px; font-size: 16px; }
+}

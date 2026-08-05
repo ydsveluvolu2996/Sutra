@@ -1,4 +1,5 @@
 import type { KubernetesAttackPath } from "./kubernetes-attack-paths.ts";
+import { safeCsvCell } from "./safe-csv.ts";
 
 export type RiskSeverity = "critical" | "high" | "medium" | "low";
 export type RiskSource = "attack_path" | "posture" | "scanner";
@@ -163,11 +164,6 @@ export function buildKubernetesRiskQueue(input: {
   };
 }
 
-function csvCell(value: string | number): string {
-  const text = String(value);
-  return /[",\r\n]/u.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
-
 export function toRiskQueueCsv(summary: RiskQueueSummary): string {
   const header = ["priority", "severity", "source", "title", "subject", "blast_radius", "recommendation", "evidence_ref"];
   const rows = summary.items.map((item) => [
@@ -179,6 +175,6 @@ export function toRiskQueueCsv(summary: RiskQueueSummary): string {
     item.blastRadius,
     item.recommendation,
     item.evidenceRef,
-  ].map(csvCell).join(","));
+  ].map(safeCsvCell).join(","));
   return [header.join(","), ...rows].join("\r\n");
 }

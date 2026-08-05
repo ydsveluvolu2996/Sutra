@@ -7,8 +7,12 @@ const JOB_ID = /^job_[a-f0-9]{32}$/u;
 const JOB_KIND = /^[a-z][a-z0-9.-]{0,63}$/u;
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const MAX_ERROR_LENGTH = 2_000;
+const MAX_IDEMPOTENCY_KEY_LENGTH = 512;
 const BASE_RETRY_DELAY_MS = 5_000;
-const LEASE_MS = 60_000;
+// A live AWS inventory request is bounded at 330 seconds. Keep the durable
+// queue lease beyond that boundary so a healthy collection cannot be reclaimed
+// by another replica while the authenticated broker request is still running.
+const LEASE_MS = 7 * 60_000;
 
 export type BackgroundJobStatus = "queued" | "leased" | "succeeded" | "failed" | "dead_letter";
 
@@ -48,6 +52,26 @@ function invalid(): never {
   throw new JobQueueRepositoryError("INVALID_INPUT");
 }
 
+async function deterministicJobId(input: {
+  readonly orgId: string;
+  readonly customerId: string | null;
+  readonly connectionId: string | null;
+  readonly kind: string;
+  readonly idempotencyKey: string;
+}): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(JSON.stringify({
+      schema: "sutra.background-job-idempotency.v1",
+      ...input,
+    })),
+  );
+  return `job_${[...new Uint8Array(digest)]
+    .slice(0, 16)
+    .map((part) => part.toString(16).padStart(2, "0"))
+    .join("")}`;
+}
+
 function parseRow(row: JobRow): BackgroundJob {
   let payload: unknown;
   try { payload = JSON.parse(row.payload_json); } catch { payload = { coverage: "unknown", reason: "invalid-stored-payload" }; }
@@ -68,6 +92,7 @@ export class JobQueueRepository {
   public async enqueue(input: {
     readonly orgId: string; readonly customerId: string | null; readonly connectionId?: string | null;
     readonly kind: string; readonly payload: unknown; readonly maxAttempts?: number; readonly runAfter?: number;
+    readonly idempotencyKey?: string;
   }, now = Date.now()): Promise<BackgroundJob> {
     if (!IDENTIFIER.test(input.orgId) || (input.customerId !== null && !IDENTIFIER.test(input.customerId)) || !JOB_KIND.test(input.kind)) invalid();
     const connectionId = input.connectionId ?? null;
@@ -77,15 +102,38 @@ export class JobQueueRepository {
     if (connectionId !== null && (!IDENTIFIER.test(connectionId) || input.customerId === null)) invalid();
     const maxAttempts = input.maxAttempts ?? 5;
     const runAfter = input.runAfter ?? now;
-    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 25 || !Number.isFinite(runAfter)) invalid();
+    if (
+      !Number.isSafeInteger(maxAttempts)
+      || maxAttempts < 1
+      || maxAttempts > 25
+      || !Number.isFinite(runAfter)
+      || (
+        input.idempotencyKey !== undefined
+        && (
+          typeof input.idempotencyKey !== "string"
+          || input.idempotencyKey.length < 1
+          || input.idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH
+          || input.idempotencyKey.includes("\0")
+        )
+      )
+    ) invalid();
     let payloadJson: string;
     try { payloadJson = JSON.stringify(input.payload); } catch { invalid(); }
     if (payloadJson === undefined || new TextEncoder().encode(payloadJson).byteLength > MAX_PAYLOAD_BYTES) invalid();
     const db = await this.ready();
-    const id = `job_${crypto.randomUUID().replaceAll("-", "")}`;
+    const id = input.idempotencyKey === undefined
+      ? `job_${crypto.randomUUID().replaceAll("-", "")}`
+      : await deterministicJobId({
+          orgId: input.orgId,
+          customerId: input.customerId,
+          connectionId,
+          kind: input.kind,
+          idempotencyKey: input.idempotencyKey,
+        });
+    const insert = input.idempotencyKey === undefined ? "INSERT" : "INSERT OR IGNORE";
     const result = connectionId !== null
       ? await db.prepare(
-        `INSERT INTO background_jobs
+        `${insert} INTO background_jobs
           (id, org_id, customer_id, connection_id, kind, payload_json, status, attempt, max_attempts, run_after, created_at, updated_at)
          SELECT ?, cn.org_id, cn.customer_id, cn.id, ?, ?, 'queued', 0, ?, ?, ?, ?
            FROM aws_connections cn
@@ -95,20 +143,30 @@ export class JobQueueRepository {
       ).bind(id, input.kind, payloadJson, maxAttempts, runAfter, now, now, connectionId, input.orgId, input.customerId).run()
       : input.customerId === null
       ? await db.prepare(
-        `INSERT INTO background_jobs
+        `${insert} INTO background_jobs
           (id, org_id, customer_id, kind, payload_json, status, attempt, max_attempts, run_after, created_at, updated_at)
          SELECT ?, o.id, NULL, ?, ?, 'queued', 0, ?, ?, ?, ?
            FROM organizations o WHERE o.id = ? AND o.status = 'active'`,
       ).bind(id, input.kind, payloadJson, maxAttempts, runAfter, now, now, input.orgId).run()
       : await db.prepare(
-        `INSERT INTO background_jobs
+        `${insert} INTO background_jobs
           (id, org_id, customer_id, kind, payload_json, status, attempt, max_attempts, run_after, created_at, updated_at)
          SELECT ?, c.org_id, c.id, ?, ?, 'queued', 0, ?, ?, ?, ?
            FROM customers c WHERE c.id = ? AND c.org_id = ? AND c.status IN ('active', 'trial')`,
       ).bind(id, input.kind, payloadJson, maxAttempts, runAfter, now, now, input.customerId, input.orgId).run();
-    if (Number(result.meta?.changes ?? 0) === 0) throw new JobQueueRepositoryError("SCOPE_NOT_FOUND");
+    if (Number(result.meta?.changes ?? 0) === 0 && input.idempotencyKey === undefined) {
+      throw new JobQueueRepositoryError("SCOPE_NOT_FOUND");
+    }
     const stored = await db.prepare(`SELECT * FROM background_jobs WHERE id = ?`).bind(id).first<JobRow>();
     if (stored === null) throw new JobQueueRepositoryError("SCOPE_NOT_FOUND");
+    if (
+      stored.org_id !== input.orgId
+      || stored.customer_id !== input.customerId
+      || stored.connection_id !== connectionId
+      || stored.kind !== input.kind
+      || stored.payload_json !== payloadJson
+      || Number(stored.max_attempts) !== maxAttempts
+    ) throw new JobQueueRepositoryError("INVALID_STATE");
     return parseRow(stored);
   }
 

@@ -88,7 +88,7 @@ export function CaseRoutingWorkspace() {
   return (
     <>
       <section className="page-heading">
-        <div><p className="eyebrow">GA hardening · triage automation</p><h1>Case routing rules</h1><p className="page-subtitle">Route remediation cases to an owner, team, or external destination by severity and customer. Rules drive a live preview only — they never change a case&rsquo;s real assignee, so a misconfigured rule can&rsquo;t silently reassign work.</p></div>
+        <div><p className="eyebrow">TRIAGE PLANNING · PREVIEW ONLY</p><h1>Case routing rules</h1><p className="page-subtitle">Preview how remediation cases would be assigned to an owner, team, or external destination by severity and customer. Rules never change a case&rsquo;s real assignee or dispatch to an ITSM provider.</p></div>
         <div className="heading-actions"><a className="button button-secondary" href="/cases">Cases</a><button className="button button-primary" disabled={busy} onClick={() => void load()} type="button">{busy ? "Refreshing…" : "Refresh"}</button></div>
       </section>
 
@@ -100,8 +100,8 @@ export function CaseRoutingWorkspace() {
         <section className="inventory-stats">
           <article><small>Routing rules</small><strong>{data.rules.length}</strong><span>evaluated by priority</span></article>
           <article><small>Open cases</small><strong>{data.openCases}</strong><span>previewed</span></article>
-          <article><small>Routed</small><strong>{summary.routed}</strong><span>{summary.matchedByRule} by rule</span></article>
-          <article><small>Unrouted</small><strong>{summary.unrouted}</strong><span>no matching rule</span></article>
+          <article><small>Would route</small><strong>{summary.routed}</strong><span>{summary.matchedByRule} by rule</span></article>
+          <article><small>Would remain unrouted</small><strong>{summary.unrouted}</strong><span>no matching rule</span></article>
         </section>
 
         <section className="panel">
@@ -131,7 +131,7 @@ export function CaseRoutingWorkspace() {
           {data.preview.decisions.length > 0 ? <div className="vuln-delta-list">{data.preview.decisions.map((decision) => <article className="case-routing-rule-row" key={decision.caseId}>
             <span className={decision.route ? "settings-pill is-good" : "settings-pill"}>{decision.route ? "routed" : "unrouted"}</span>
             <div><strong>{decision.caseId}</strong><small>{targetLabel(decision.route)} · {decision.reason}</small></div>
-          </article>)}</div> : <p className="panel-footnote">No open cases to preview. Rules apply to open cases once they exist.</p>}
+          </article>)}</div> : <p className="panel-footnote">No open cases to preview. Preview decisions appear when open cases exist; rules do not mutate those cases.</p>}
           <p className="panel-footnote">{data.preview.disclaimer}</p>
         </section>
       </> : null}

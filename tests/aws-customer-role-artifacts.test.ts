@@ -23,7 +23,7 @@ const input: CustomerManagedRoleArtifactInput = {
   externalId: "sutra_ext_0123456789abcdef0123456789abcdef",
   roleSessionName: "sutra-",
   customerTenantId: "cus_0123456789abcdef",
-  permissionPackVersion: "standard-2026-07.3",
+  permissionPackVersion: "standard-2026-07.4",
   rolePath: "/sutra/acme-production/",
   roleName: "SutraCustomerReadOnly",
 };
@@ -64,7 +64,7 @@ test("CloudFormation and Terraform include the exact trust, tags, inline contrac
   assert.match(artifacts.cloudFormationYaml, /Sid: DenyUnimplementedActions[\s\S]+Effect: Deny[\s\S]+NotAction:/u);
   assert.match(artifacts.cloudFormationYaml, new RegExp(`PolicyName: ${SUTRA_ROLE_POLICY_NAME}`, "u"));
   assert.match(artifacts.cloudFormationYaml, /Key: 'sutra:managed-by'[\s\S]+Value: customer/u);
-  assert.match(artifacts.cloudFormationYaml, /Key: 'sutra:permission-pack'[\s\S]+standard-2026-07.3/u);
+  assert.match(artifacts.cloudFormationYaml, /Key: 'sutra:permission-pack'[\s\S]+standard-2026-07.4/u);
   assert.match(artifacts.cloudFormationYaml, /MaxSessionDuration: 3600/u);
   for (const action of expectedCeiling) {
     assert.match(artifacts.cloudFormationYaml, new RegExp(`- ${action.replaceAll("*", "\\*")}`, "u"));

@@ -22,7 +22,7 @@ const CONN_A = `conn_${"a".repeat(32)}`;
 const CONN_B = `conn_${"b".repeat(32)}`;
 const ACCOUNT_A = "111111111111";
 const ACCOUNT_B = "222222222222";
-const PERMISSION_PACK = "standard-2026-07.3";
+const PERMISSION_PACK = "standard-2026-07.4";
 
 // Real repository deps: this is the exact wiring buildJobHandlers registers, so
 // a passing test exercises the true createSyncRun -> persistSnapshot path.
@@ -30,8 +30,8 @@ function realDeps() {
   return {
     getConnection: (orgId, connectionId) => pilotRepository.getConnectionForOrg(orgId, connectionId),
     createSyncRun: (connectionId, options) => pilotRepository.createSyncRun(connectionId, options),
-    persistSnapshot: ({ runId, payload, actorId, origin, orgId }) =>
-      pilotRepository.persistSnapshot(runId, payload, actorId, origin, null, null, orgId),
+    persistSnapshot: ({ runId, payload, actorId, origin, orgId, rawEvidenceBytes }) =>
+      pilotRepository.persistSnapshot(runId, payload, actorId, origin, null, null, orgId, rawEvidenceBytes),
   };
 }
 
@@ -154,11 +154,25 @@ test("valid payload persists the inventory scoped to the job's tenant", async ()
 
     // The sync run is keyed by the broker's signed job id and marked succeeded.
     const run = await database.prepare(
-      "SELECT status, idempotency_key, customer_id FROM sync_runs WHERE org_id = ? AND connection_id = ?",
+      "SELECT id, status, idempotency_key, customer_id FROM sync_runs WHERE org_id = ? AND connection_id = ?",
     ).bind(ORG_A, CONN_A).first();
     assert.equal(run.status, "succeeded");
     assert.equal(run.idempotency_key, brokerJobId);
     assert.equal(run.customer_id, CUSTOMER_A);
+
+    // Archive-before-promotion retained the exact broker-authenticated bytes,
+    // not a parsed/re-serialized approximation.
+    const evidence = await database.prepare(
+      `SELECT o.status, o.content_sha256, o.byte_size, p.body_base64
+         FROM evidence_objects o
+         JOIN evidence_local_payloads p ON p.object_id = o.id
+        WHERE o.org_id = ? AND o.customer_id = ? AND o.connection_id = ?
+          AND o.run_id = ? AND o.artifact_kind = 'aws_snapshot_raw'`,
+    ).bind(ORG_A, CUSTOMER_A, CONN_A, run.id).first();
+    assert.equal(evidence.status, "available");
+    assert.equal(evidence.content_sha256, envelope.bodySha256);
+    assert.equal(Number(evidence.byte_size), envelope.byteLength);
+    assert.equal(evidence.body_base64, envelope.bodyBase64);
 
     // The publication audit event is chained under the tenant org, not local.
     const audit = await database.prepare(

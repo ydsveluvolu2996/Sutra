@@ -10,6 +10,7 @@ import {
   StaticInventoryRegionSelector,
   awsInventorySdkClientConfig,
   type AwsInventoryClientFactory,
+  type BedrockInventoryClient,
   type CloudTrailInventoryClient,
   type DynamoDbInventoryClient,
   type Ec2InventoryClient,
@@ -1015,7 +1016,7 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "sutra_external_id_1234567890abcd",
     status: "ACTIVE" as const,
-    permissionPackVersion: "standard-2026-07.3" as const,
+    permissionPackVersion: "standard-2026-07.4" as const,
     enabledRegions: ["us-east-1"],
     createdAt: completedAt.toISOString(),
     updatedAt: completedAt.toISOString(),
@@ -1733,7 +1734,7 @@ test("imports sanitized AWS-native findings with stable severity, status, finger
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "sutra_external_id_1234567890abcd",
     status: "ACTIVE" as const,
-    permissionPackVersion: "standard-2026-07.3" as const,
+    permissionPackVersion: "standard-2026-07.4" as const,
     enabledRegions: ["us-east-1"],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -2072,7 +2073,7 @@ test("regional account findings are unique and the live multi-Region snapshot pa
     roleArn: "arn:aws:iam::123456789012:role/sutra/SutraReadOnlyRole",
     externalId: "sutra_external_id_1234567890abcd",
     status: "ACTIVE" as const,
-    permissionPackVersion: "standard-2026-07.3" as const,
+    permissionPackVersion: "standard-2026-07.4" as const,
     enabledRegions: ["us-east-1", "us-west-2"],
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -2634,4 +2635,149 @@ test("read-only SSM patch-state collection is honest about managed, non-complian
   const coverage = collection.collectorCoverage.find((entry) => entry.collectorKey === "ssm.patch-states");
   assert.equal(coverage?.status, "SUCCEEDED");
   assert.equal(coverage?.region, "us-east-1");
+});
+
+class BedrockPostureClientFactory extends FakeClientFactory {
+  public bedrock(region: string): BedrockInventoryClient {
+    return {
+      listGuardrails: async (input) => ({
+        $metadata: {},
+        guardrails: input.nextToken === undefined
+          ? [{
+            id: "gr-123456",
+            arn: `arn:aws:bedrock:${region}:123456789012:guardrail/gr-123456`,
+            status: "READY",
+            name: "customer-support",
+            version: "1",
+            createdAt: new Date("2026-07-01T00:00:00Z"),
+            updatedAt: new Date("2026-07-02T00:00:00Z"),
+          }]
+          : [],
+      }),
+      getGuardrail: async (input) => {
+        assert.equal(input.guardrailIdentifier, "gr-123456");
+        assert.equal(input.guardrailVersion, "1");
+        return {
+          $metadata: {},
+          name: "customer-support",
+          description: "must-not-cross-the-boundary",
+          guardrailId: "gr-123456",
+          guardrailArn: `arn:aws:bedrock:${region}:123456789012:guardrail/gr-123456`,
+          version: "1",
+          status: "READY",
+          createdAt: new Date("2026-07-01T00:00:00Z"),
+          updatedAt: new Date("2026-07-02T00:00:00Z"),
+          blockedInputMessaging: "confidential blocked input message",
+          blockedOutputsMessaging: "confidential blocked output message",
+          contentPolicy: {
+            filters: [{
+              type: "HATE",
+              inputStrength: "HIGH",
+              outputStrength: "HIGH",
+              inputAction: "BLOCK",
+              outputAction: "NONE",
+              inputEnabled: true,
+              outputEnabled: true,
+            }],
+          },
+          sensitiveInformationPolicy: {
+            piiEntities: [],
+            regexes: [{
+              name: "customer-secret",
+              description: "must-not-cross-the-boundary",
+              pattern: "secret-[0-9]+",
+              action: "BLOCK",
+            }],
+          },
+          topicPolicy: {
+            topics: [{
+              name: "private-topic",
+              definition: "must-not-cross-the-boundary",
+              examples: ["must-not-cross-the-boundary"],
+              type: "DENY",
+            }],
+          },
+          contextualGroundingPolicy: {
+            filters: [{
+              type: "GROUNDING",
+              threshold: 0.8,
+              action: "BLOCK",
+              enabled: true,
+            }],
+          },
+        };
+      },
+      getModelInvocationLoggingConfiguration: async () => ({
+        $metadata: {},
+      }),
+      getAccountDataRetention: async () => ({
+        $metadata: {},
+        mode: "provider_data_share",
+        updatedAt: new Date("2026-07-03T00:00:00Z"),
+      }),
+    };
+  }
+}
+
+test("Bedrock posture collects guardrail controls without retaining policy contents", async () => {
+  const sink = new CapturingSink();
+  const completedAt = new Date("2026-07-16T12:00:00Z");
+  const runner = new SingleAccountAwsInventoryRunner({
+    clients: new BedrockPostureClientFactory(),
+    sink,
+    regionSelector: new StaticInventoryRegionSelector(["us-east-1"]),
+    globalControlRegion: "us-east-1",
+    maxConcurrency: 4,
+    now: () => completedAt,
+  });
+
+  const collection = await runner.collect(context());
+  const resources = sink.batches.flatMap((batch) => batch.resources);
+  const evidence = sink.batches.flatMap((batch) => batch.evidence);
+  const guardrail = resources.find((resource) => resource.resourceType === "aws.bedrock.guardrail");
+  assert.equal(guardrail?.sourceApi, "bedrock:ListGuardrails+GetGuardrail");
+  assert.equal(guardrail?.configuration.status, "READY");
+  assert.deepEqual(guardrail?.configuration.sensitiveInformationPolicy, {
+    piiEntityCount: 0,
+    piiEntities: [],
+    regexCount: 1,
+  });
+  const serialized = JSON.stringify({ resources, evidence });
+  assert.equal(serialized.includes("must-not-cross-the-boundary"), false);
+  assert.equal(serialized.includes("secret-[0-9]+"), false);
+  assert.equal(serialized.includes("confidential blocked"), false);
+
+  const snapshot = normalizeLiveSnapshot(
+    {
+      tenantId: "tenant-01",
+      connectionId: "conn-01",
+      expectedAccountId: "123456789012",
+      partition: "aws",
+      roleArn: "arn:aws:iam::123456789012:role/sutra/SutraCollectorRole",
+      externalId: "sutra_external_id_1234567890abcd",
+      status: "ACTIVE",
+      permissionPackVersion: "standard-2026-07.4",
+      enabledRegions: ["us-east-1"],
+      createdAt: completedAt.toISOString(),
+      updatedAt: completedAt.toISOString(),
+    },
+    "job-bedrock-posture",
+    "sutra-job-bedrock-posture",
+    resources,
+    evidence,
+    collection.coverage,
+    collection.collectorCoverage,
+    completedAt,
+  );
+  const controls = new Set(snapshot.findings.map((finding) => finding.controlKey));
+  assert.equal(controls.has("SUTRA.AWS.BEDROCK.CONTENT_FILTER_ENFORCEMENT"), true);
+  assert.equal(controls.has("SUTRA.AWS.BEDROCK.INVOCATION_LOGGING"), true);
+  assert.equal(controls.has("SUTRA.AWS.BEDROCK.PROVIDER_DATA_SHARE"), true);
+  assert.equal(controls.has("SUTRA.AWS.BEDROCK.SENSITIVE_INFORMATION"), false);
+  assert.equal(
+    collection.collectorCoverage.some((entry) =>
+      entry.collectorKey === "bedrock.guardrails" && entry.status === "SUCCEEDED"
+    ),
+    true,
+  );
 });

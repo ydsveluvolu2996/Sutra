@@ -141,6 +141,10 @@ Resources:
                   - securityhub:GetFindings
                   - inspector2:BatchGetAccountStatus
                   - inspector2:ListFindings
+                  - bedrock:ListGuardrails
+                  - bedrock:GetGuardrail
+                  - bedrock:GetModelInvocationLoggingConfiguration
+                  - bedrock:GetAccountDataRetention
                   - ce:GetCostAndUsage
                   - ce:GetCostForecast
                   - cloudwatch:GetMetricData
@@ -198,6 +202,10 @@ Resources:
                   - securityhub:GetFindings
                   - inspector2:BatchGetAccountStatus
                   - inspector2:ListFindings
+                  - bedrock:ListGuardrails
+                  - bedrock:GetGuardrail
+                  - bedrock:GetModelInvocationLoggingConfiguration
+                  - bedrock:GetAccountDataRetention
                   - ce:GetCostAndUsage
                   - ce:GetCostForecast
                   - cloudwatch:GetMetricData
@@ -222,7 +230,7 @@ Resources:
         - Key: sutra:access-mode
           Value: read-only
         - Key: sutra:permission-pack
-          Value: standard-2026-07.3
+          Value: standard-2026-07.4
         - Key: sutra:managed-by
           Value: cloudformation
 
@@ -236,4 +244,4 @@ Outputs:
 
   PermissionPackVersion:
     Description: Immutable permission contract attested by this Sutra release.
-    Value: standard-2026-07.3
+    Value: standard-2026-07.4

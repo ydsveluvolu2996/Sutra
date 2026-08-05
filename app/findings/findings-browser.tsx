@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { JsonValue, PilotFinding } from "../../lib/pilot-types";
 import { compactIdentifier, formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
+import { downloadManagedEvidenceExport } from "../components/managed-evidence-export";
 
 const severityOrder = ["critical", "high", "medium", "low", "informational"] as const;
 
@@ -23,6 +24,7 @@ export function FindingsBrowser() {
   const [status, setStatus] = useState("open");
   const [query, setQuery] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [updating, setUpdating] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const findings = useMemo(() => state?.findings ?? [], [state?.findings]);
@@ -51,6 +53,19 @@ export function FindingsBrowser() {
     }
   }
 
+  async function exportFindings() {
+    if (!connection) return;
+    setExporting(true);
+    setActionError(null);
+    try {
+      await downloadManagedEvidenceExport(connection.id, "csv");
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : "The managed export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function updateWorkflow(finding: PilotFinding, nextStatus: "open" | "acknowledged") {
     if (!connection) return;
     setUpdating(finding.fingerprint);
@@ -74,7 +89,7 @@ export function FindingsBrowser() {
     <>
       <section className="page-heading">
         <div><p className="eyebrow">Evidence-backed posture</p><h1>Security findings</h1><p className="page-subtitle">Explainable configuration checks, affected resources, evidence, and suggested remediation from the active snapshot.</p></div>
-        <div className="heading-actions"><a className="button button-secondary" href={`/api/pilot/export?format=csv${connection ? `&connectionId=${encodeURIComponent(connection.id)}` : ""}`}>Export CSV</a><a className="button button-secondary" href="/controls">Control library</a>{canRunAwsSync ? <button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button> : null}</div>
+        <div className="heading-actions"><button className="button button-secondary" type="button" disabled={!connection || exporting} onClick={() => void exportFindings()}>{exporting ? "Preparing…" : "Export CSV"}</button><a className="button button-secondary" href="/controls">Control library</a>{canRunAwsSync ? <button className="button button-primary" type="button" disabled={!connection || connection.status !== "active" || syncing || refreshing} onClick={() => void runAssessment()}>{syncing ? "Assessing…" : "Run assessment"}</button> : null}</div>
       </section>
       <div className="trust-strip" role="note"><span className="trust-icon">i</span><span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready; no finding snapshot selected." : health?.mode === "fixture" ? "Fixture collector ready; no finding snapshot selected." : "Stored finding evidence."}</strong> These findings are deterministic posture observations—not proof of compromise, behavior analytics, package vulnerability scanning, or an AWS Inspector/GuardDuty replacement.</span><a href="/controls#architecture">See limitations</a></div>
 

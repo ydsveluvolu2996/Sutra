@@ -1,8 +1,16 @@
 # Security and quality plan for the MSP CMDB
 
-Status: proposed release gates for the first production-shaped slice  
-Applies to: Cloudflare control plane, D1 hot state, asynchronous jobs, R2 evidence snapshots, and an AWS-hosted collector/broker  
+Status: active release gates; source implementation and live acceptance are tracked separately
+
+Applies to: HA application/worker/broker tasks, PostgreSQL durable state, private S3 evidence and the retained local/legacy paths
+
 Security baseline: OWASP ASVS Level 2 for the web/API surface, least-privilege AWS IAM, encrypted transport and storage, and deny-by-default authorization
+
+The original control names remain in parts of this document. For managed
+production, “Cloudflare control plane” maps to the HA application service, D1 maps
+to Multi-AZ PostgreSQL, R2 maps to private KMS-encrypted S3, and queue/workflow maps
+to PostgreSQL-backed durable jobs and worker sidecars. The concrete deployment
+contract is [`../deploy/production/README.md`](../deploy/production/README.md).
 
 ## 1. Scope and release posture
 
@@ -10,12 +18,20 @@ The first runnable slice is:
 
 1. An authenticated MSP user creates a customer workspace and grants scoped access.
 2. The service generates a unique `ExternalId` and onboarding template for a read-only customer role.
-3. An AWS-hosted collector/broker, running with a workload IAM role, validates the customer role with AWS STS.
+3. The private HA collector/broker, running with a workload IAM role, validates the customer role with AWS STS.
 4. A manual sync becomes an authenticated, idempotent asynchronous job.
-5. The collector writes a raw snapshot to R2 through the control plane's authenticated ingestion boundary; normalized resources, relationships, tags, control evaluations, and current findings are stored in D1.
+5. The application archives exact raw snapshot bytes in private checksummed
+   KMS-encrypted S3 before promotion; normalized resources, relationships, tags,
+   control evaluations and current findings are stored in PostgreSQL.
 6. Authorized MSP or customer users can browse the CMDB, findings, sync status, and audit trail only within their assigned scope.
 
-The Cloudflare web worker must not hold a permanent AWS access key. Real AWS collection is not production-ready until the AWS-hosted broker uses workload identity, its request/response protocol is authenticated, and its role is restricted to assuming only registered customer roles. A local fake collector is acceptable for UI development, but it must be visibly identified and impossible to enable in production.
+The application must not hold a permanent AWS access key. The hosted broker
+workload-identity, Ed25519 request/response, replay, scoped-connection and
+registered-role restrictions are implemented and contract-tested. Real AWS
+collection is not production-accepted until those controls pass from the deployed
+workload role in a disposable sandbox. A local fake collector is acceptable for UI
+development, but it must be visibly identified and impossible to enable in
+production.
 
 This slice provides evidence-backed configuration and posture checks. It is not a replacement for Inspector's package/runtime vulnerability coverage, GuardDuty's threat telemetry, Security Hub's aggregation, an EDR agent, or human incident response. Product claims must distinguish deterministic configuration checks from vulnerability scanning and behavioral threat detection.
 
@@ -235,7 +251,14 @@ Webhooks are outside the initial slice. Before adding them:
 - Every observation records `run_id`, `observed_at` from collection, `ingested_at` from the control plane, collector version, source account/region, content hash, and raw evidence reference/checksum.
 - Collect into run-scoped staging. Promote a manifest atomically only when required collectors and pagination complete and all checksums pass. A partial run remains visible as partial but cannot mark unseen resources deleted.
 - Use monotonic run generation/compare-and-swap so a late older run cannot overwrite a newer snapshot. At-least-once delivery must converge under idempotent upserts.
-- Mark resources `not_seen` only after a complete run. Use a configurable grace period or multiple complete misses before `retired`; never hard-delete immediately. Preserve history needed to explain a finding.
+- Advance a resource lifecycle only after a successful complete run. The
+  production default is two consecutive complete misses (configurable from 2
+  through 30): the first miss is `retirement_pending`, remains in the live CMDB,
+  and points to its last observed immutable resource row and snapshot checksum.
+  Partial/failed runs do not advance misses. Reappearance resets the state.
+  Emit `removed` history only at the retirement threshold; a stale completion
+  may retain its snapshot but cannot alter the head, lifecycle, or projected
+  change history. Never hard-delete collected evidence.
 - Relationships require both endpoints in the same scope. Reject or quarantine dangling and cross-scope edges.
 - Store raw evidence as immutable objects. Corrections create a new version; they do not overwrite prior evidence. Object keys include non-guessable scoped IDs, and bucket listing/public access is disabled.
 
@@ -335,7 +358,7 @@ No release proceeds with a known cross-tenant leak, bypassable ExternalId, store
 | AT-18 | Page missing, checksum mismatch, timeout, or collector denied | Fault injection | Run is partial/failed; last complete snapshot stays current; unknown is not pass | P0 |
 | AT-19 | Older run completes after a newer run | Concurrency integration | Older run cannot overwrite current generation | P0 |
 | AT-20 | Duplicate/out-of-order pages and at-least-once ingest | Property/integration | Stable normalized state; counts/hashes converge; no duplicate resources | P0 |
-| AT-21 | Resource disappears in one complete vs partial run | Integration | Partial run never retires it; complete miss follows documented grace state | P0 |
+| AT-21 | Resource disappears in complete, partial, failed, stale, and reappearance runs | Integration/API | Partial/failed/rolled-back runs do not increment; first complete miss is visibly pending with prior checksum-honest evidence; threshold retires; reappearance resets; stale completion cannot regress projection/history | P0 |
 | AT-22 | Relationship points across customer scope | DB/integration | Constraint or ingestion validation rejects/quarantines edge | P0 |
 | AT-23 | AWS names/tags contain XSS, control chars, huge values, and CSV formulas | E2E/export | UI/log/CSV remains inert and bounded; original evidence retained safely | P0 |
 | AT-24 | Deterministic control evaluated twice on identical evidence | Unit/property | Same status/reason/hash; evaluation records rule and evidence versions | P0 |

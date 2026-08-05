@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  CMDB_RESOURCE_COLUMNS,
   REPORT_MAX_LIMIT,
   buildReport,
   toCsv,
@@ -149,7 +150,7 @@ describe("buildReport — cmdb-resources dataset (reuses runCmdbQuery)", () => {
       columns: [],
     };
     const report = buildReport(definition, FLEET);
-    assert.equal(report.columns.length, 8);
+    assert.equal(report.columns.length, CMDB_RESOURCE_COLUMNS.length);
     assert.equal(report.rowCount, 3);
   });
 });

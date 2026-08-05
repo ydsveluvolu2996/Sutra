@@ -46,8 +46,8 @@ export interface SecurityNotificationPayloads {
       readonly content: Record<string, unknown>;
     }];
   };
-  // Provider-neutral JSON envelope for a generic ticketing/CMDB webhook
-  // (Jira/ServiceNow/PagerDuty inbound automations, custom integrations).
+  // Provider-neutral JSON envelope for the registered Jira Cloud Automation
+  // and ServiceNow API webhook targets.
   // Stable, flat, and self-describing so a receiving system can map fields
   // without Sutra-specific parsing.
   readonly genericWebhook: {

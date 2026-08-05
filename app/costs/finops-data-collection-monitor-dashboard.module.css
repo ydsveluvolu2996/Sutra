@@ -1,0 +1,40 @@
+.root { min-width: 0; display: grid; gap: 14px; color: #172b2a; }
+.official { min-width: 0; display: grid; gap: 11px; padding: 15px; border: 1px solid #99d3ca; border-radius: 14px; background: linear-gradient(135deg,#effbf8,#f8fbfa); }
+.official > header { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(330px,.65fr); gap: 15px; }
+.official h3, .official h4 { margin: 4px 0; }
+.official p { margin: 0; color: #526866; font-size: 10px; line-height: 1.55; }
+.official code { color: #075e54; font-size: 9px; }
+.official dl { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px; margin: 0; }
+.official dl div { min-width: 0; padding: 7px; border: 1px solid #d8e5e2; border-radius: 8px; background: rgba(255,255,255,.82); }
+.official dt { color: #647a77; font-size: 8px; text-transform: uppercase; }
+.official dd { display: grid; gap: 4px; margin: 3px 0 0; overflow-wrap: anywhere; font-size: 10px; font-weight: 750; }
+.official dd span { border-radius: 6px; background: #e8f6f2; padding: 4px 6px; color: #075e54; font-size: 8px; }
+.official dd span[data-state="SERVER_PINNED"] { background: #fff4db; color: #805814; }
+.artifacts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
+.artifacts article { min-width: 0; display: grid; gap: 4px; padding: 8px; border: 1px solid #d8e5e2; border-radius: 8px; background: #fff; }
+.artifacts strong { overflow: hidden; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.artifacts small, .official > header small, .official > nav small, .sheetEvidence small { color: #647a77; font-size: 8px; }
+.official > nav { display: flex; gap: 7px; overflow-x: auto; padding-bottom: 4px; }
+.official > nav button { min-width: 200px; display: grid; gap: 4px; padding: 9px; border: 1px solid #cbd9d6; border-radius: 9px; background: #fff; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.official > nav button[aria-current="page"] { border-color: #17766b; box-shadow: 0 0 0 2px rgba(23,118,107,.13); }
+.sheetEvidence { display: grid; grid-template-columns: minmax(0,.8fr) minmax(380px,1.2fr); gap: 14px; padding: 11px; border-left: 4px solid #17766b; border-radius: 7px; background: rgba(255,255,255,.75); }
+.gap { margin-top: 6px !important; color: #805814 !important; }
+.notice { padding: 12px 14px; border: 1px solid #b9d8d2; border-radius: 12px; background: #f2fbf8; font-size: 12px; }
+.controls { display: grid; grid-template-columns: repeat(4,minmax(140px,1fr)); gap: 9px; }
+.controls label { display: grid; gap: 5px; color: #526866; font-size: 10px; font-weight: 750; }
+.controls select { min-width: 0; min-height: 38px; border: 1px solid #cbd9d6; border-radius: 8px; background: #fff; padding: 0 9px; color: inherit; }
+.statusCards, .summaryCards { display: grid; grid-template-columns: repeat(auto-fit,minmax(140px,1fr)); gap: 8px; }
+.statusCards article, .summaryCards article { display: grid; gap: 5px; padding: 11px; border: 1px solid #d8e5e2; border-radius: 10px; background: #fff; }
+.statusCards span, .summaryCards span { color: #647a77; font-size: 9px; text-transform: capitalize; }
+.statusCards strong, .summaryCards strong { font-size: 18px; }
+.tableWrap { overflow-x: auto; border: 1px solid #d8e5e2; border-radius: 11px; background: #fff; }
+.tableWrap table { width: 100%; min-width: 800px; border-collapse: collapse; font-size: 10px; }
+.tableWrap th, .tableWrap td { padding: 9px 10px; border-bottom: 1px solid #edf1f0; text-align: left; }
+.tableWrap th { color: #607370; background: #f8faf9; font-size: 9px; text-transform: uppercase; }
+.executions { display: grid; gap: 7px; }
+.executions details { padding: 10px 12px; border: 1px solid #d8e5e2; border-radius: 9px; background: #fff; font-size: 10px; }
+.executions summary { color: #075e54; font-weight: 750; cursor: pointer; }
+.executions a { color: #075e54; font-weight: 750; }
+.official button:focus-visible, .controls select:focus-visible, .executions summary:focus-visible, .executions a:focus-visible { outline: 3px solid rgba(23,118,107,.25); outline-offset: 2px; }
+@media (max-width: 1000px) { .official > header, .sheetEvidence { grid-template-columns: 1fr; } .artifacts, .controls { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 560px) { .official dl, .artifacts, .controls { grid-template-columns: 1fr; } .official > nav button { min-width: 170px; min-height: 48px; } .controls select { min-height: 44px; } }

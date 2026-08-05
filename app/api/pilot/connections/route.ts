@@ -1,8 +1,8 @@
-import { createConnectionDraft, LOCAL_ORG_ID } from "../../../../db/pilot-repository";
+import { createConnectionDraft } from "../../../../db/pilot-repository";
 import {
   assertSameOrigin,
   decryptExternalId,
-  deriveLocalAwsConnectionIdentity,
+  deriveScopedAwsConnectionIdentity,
   encryptExternalId,
   generateExternalId,
   parseAwsConnectionDraftRequest,
@@ -31,12 +31,6 @@ function slug(value: string, customerId: string): string {
 export async function POST(request: Request): Promise<Response> {
   try {
     const actor = await requirePilotActor(request, "customer:create");
-    if (actor.orgId !== LOCAL_ORG_ID) {
-      throw Object.assign(
-        new Error("Hosted AWS onboarding remains disabled until the tenant-scoped durable job adapter is active"),
-        { code: "AUTHORIZATION_DENIED" },
-      );
-    }
     assertSameOrigin(request);
     const body = parseAwsConnectionDraftRequest(await readBoundedJson(request));
     const createHandoff = (publicTemplateUrl: string | null) => withLocalOnboardingAccountLock(
@@ -47,7 +41,8 @@ export async function POST(request: Request): Promise<Response> {
           if (!health.ok || !health.principalArn || health.mode !== "live") {
             throw Object.assign(new Error("The local AWS collector is not ready"), { code: "INVALID_STATE" });
           }
-          const { customerId, connectionId } = await deriveLocalAwsConnectionIdentity(
+          const { customerId, connectionId } = await deriveScopedAwsConnectionIdentity(
+            actor.orgId,
             body.awsAccountId,
             body.partition,
           );
@@ -57,9 +52,10 @@ export async function POST(request: Request): Promise<Response> {
             generatedExternalId,
             secrets.connectionEncryptionKey,
             secrets.connectionKeyVersion,
-            { orgId: LOCAL_ORG_ID, customerId, connectionId },
+            { orgId: actor.orgId, customerId, connectionId },
           );
           const handoff = await createConnectionDraft({
+            orgId: actor.orgId,
             actorId: actor.id,
             operationId: body.operationId,
             customerId,
@@ -84,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
               keyVersion: handoff.externalIdKeyVersion,
             },
             secrets.connectionEncryptionKey,
-            { orgId: LOCAL_ORG_ID, customerId, connectionId },
+            { orgId: actor.orgId, customerId, connectionId },
           );
           return jsonResponse({
             connection: handoff.connection,

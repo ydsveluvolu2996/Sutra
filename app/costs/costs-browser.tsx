@@ -9,10 +9,54 @@ import { FinopsWave3Panels } from "./finops-wave3-panels";
 import FinopsAiGpuPanel from "./finops-ai-gpu-panel";
 import FinopsSchedulePanel from "./finops-schedule-panel";
 import FinopsExternalCostPanel from "./finops-external-cost-panel";
+import { FinopsSourcesPanel } from "./finops-sources-panel";
+import { FinopsDashboardCatalogNav } from "./finops-dashboard-catalog-nav";
+import {
+  FinopsFoundationalPanels,
+  type FinopsFoundationalAvailability,
+  type FinopsFoundationalSection,
+} from "./finops-foundational-panels";
 import type { StoredCostSnapshot } from "../../lib/cost-types";
 import { buildCostOptimizations } from "../../lib/aws-cost-optimization";
 import { compactIdentifier, formatTimestamp, usePilotState } from "../components/use-pilot-state";
 import styles from "./costs.module.css";
+
+type FinopsSection =
+  | "overview"
+  | "explorer"
+  | "allocation"
+  | "optimization"
+  | "commitments"
+  | "budgets"
+  | "containers"
+  | "services"
+  | "marketplace"
+  | "sustainability"
+  | "operations"
+  | "sources";
+
+interface FinopsSectionDefinition {
+  readonly key: FinopsSection;
+  readonly label: string;
+  readonly shortLabel: string;
+  readonly description: string;
+  readonly availability: "available" | "foundation" | "source-required";
+}
+
+const FINOPS_SECTIONS: readonly FinopsSectionDefinition[] = [
+  { key: "overview", label: "Executive overview", shortLabel: "Overview", description: "Current spend, forecast, concentration, signals, and immutable evidence provenance.", availability: "available" },
+  { key: "explorer", label: "Cost explorer", shortLabel: "Explorer", description: "Daily, regional, resource, billing-line, and evidence-backed cost analysis.", availability: "available" },
+  { key: "allocation", label: "Allocation & unit economics", shortLabel: "Allocation", description: "Tags, cost ownership, business units, external costs, and unit-cost outcomes.", availability: "available" },
+  { key: "optimization", label: "Optimization", shortLabel: "Optimization", description: "Evidence-backed efficiency opportunities and advisory resource scheduling.", availability: "available" },
+  { key: "commitments", label: "Commitments", shortLabel: "Commitments", description: "Amortized cost, Reserved Instance, and Savings Plan coverage and utilization.", availability: "available" },
+  { key: "budgets", label: "Budgets & anomalies", shortLabel: "Budgets", description: "Budget guardrails, allocation policy, spend alerts, and governed customer economics.", availability: "available" },
+  { key: "containers", label: "Container economics", shortLabel: "Containers", description: "Kubernetes and split-cost allocation by cluster, namespace, workload, pod, and container.", availability: "foundation" },
+  { key: "services", label: "Service intelligence", shortLabel: "Services", description: "Service-specific cost and usage intelligence, including AI/ML and accelerated compute.", availability: "available" },
+  { key: "marketplace", label: "Marketplace", shortLabel: "Marketplace", description: "AWS Marketplace spend, agreements, licenses, entitlements, and expirations.", availability: "source-required" },
+  { key: "sustainability", label: "Sustainability", shortLabel: "Sustainability", description: "Efficiency proxy metrics and AWS carbon-export evidence with explicit units.", availability: "source-required" },
+  { key: "operations", label: "Operations intelligence", shortLabel: "Operations", description: "Advisor, health, support, resilience, compliance, and operational cost context.", availability: "source-required" },
+  { key: "sources", label: "Data sources & health", shortLabel: "Data sources", description: "Integration readiness, delivery freshness, coverage, failures, and reconciliation.", availability: "foundation" },
+] as const;
 
 interface CostApiResponse {
   readonly snapshot: StoredCostSnapshot | null;
@@ -48,10 +92,13 @@ async function readJson(response: Response): Promise<CostApiResponse> {
 
 export function CostsBrowser() {
   const { state, loading: stateLoading, error: stateError } = usePilotState();
+  const [activeSection, setActiveSection] = useState<FinopsSection>("overview");
   const [snapshot, setSnapshot] = useState<StoredCostSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [foundationalAvailability, setFoundationalAvailability] =
+    useState<FinopsFoundationalAvailability>("checking");
   const connection = state?.connection ?? null;
   const connectionId = connection?.id ?? null;
 
@@ -127,14 +174,41 @@ export function CostsBrowser() {
     [payload?.monthlyTrend],
   );
   const overallError = stateError ?? error;
+  const activeSectionDefinition = FINOPS_SECTIONS.find((section) => section.key === activeSection) ?? FINOPS_SECTIONS[0];
+
+  const navigateToSection = useCallback((section: FinopsSection) => {
+    setActiveSection(section);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#finops-${section}`);
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(`finops-${section}`);
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+        target?.focus({ preventScroll: true });
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncFromHash = () => {
+      const requested = window.location.hash.replace(/^#finops-/u, "") as FinopsSection;
+      if (FINOPS_SECTIONS.some((section) => section.key === requested)) setActiveSection(requested);
+    };
+    window.addEventListener("hashchange", syncFromHash);
+    const frame = window.requestAnimationFrame(syncFromHash);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("hashchange", syncFromHash);
+    };
+  }, []);
 
   return (
     <>
       <section className="page-heading">
         <div>
           <p className="eyebrow">FinOps command center</p>
-          <h1>AWS cost intelligence</h1>
-          <p className="page-subtitle">Actual Cost Explorer evidence, spend concentration, explainable signals, and forecast provenance for the selected customer account.</p>
+          <h1>Cloud cost intelligence</h1>
+          <p className="page-subtitle">Evidence-backed cloud cost dashboards, spend concentration, explainable signals, and forecast provenance for the selected customer account.</p>
         </div>
         <div className="heading-actions">
           <button
@@ -143,16 +217,55 @@ export function CostsBrowser() {
             onClick={() => void collect()}
             type="button"
           >
-            {collecting ? "Collecting AWS costs…" : snapshot === null ? "Collect AWS costs" : "Refresh from AWS"}
+            {collecting ? "Collecting connected AWS costs…" : snapshot === null ? "Collect connected AWS costs" : "Refresh connected AWS costs"}
           </button>
         </div>
       </section>
 
       <div className="trust-strip" role="note">
         <span className="trust-icon">✓</span>
-        <span><strong>Read-only billing evidence.</strong> Sutra requests only Cost Explorer usage and forecast APIs through the customer trust role. It never creates budgets, commitments, or AWS resources.</span>
+        <span><strong>Read-only billing evidence.</strong> The permanent collector reads Cost Explorer metadata and only the customer-owned billing export prefix configured for this connection. Export provisioning and every write or remediation action remain in separate, approval-controlled roles.</span>
         <a href="/onboard">Review role</a>
       </div>
+
+      <FinopsDashboardCatalogNav
+        connectionId={connectionId}
+        onOpenSharedAnalysis={navigateToSection}
+      />
+
+      <section className={styles.workspace} aria-label="FinOps workspace">
+        <nav className={styles.workspaceNav} aria-label="FinOps sections">
+          {FINOPS_SECTIONS.map((section) => (
+            <button
+              aria-current={activeSection === section.key ? "page" : undefined}
+              className={activeSection === section.key ? styles.workspaceNavActive : undefined}
+              key={section.key}
+              onClick={() => navigateToSection(section.key)}
+              type="button"
+            >
+              <span>{section.shortLabel}</span>
+              <i
+                aria-label={section.availability === "available" ? "Implemented shared analysis" : section.availability === "foundation" ? "Foundation in progress" : "Additional AWS source required"}
+                className={section.availability === "available" ? styles.navReady : section.availability === "foundation" ? styles.navProgress : styles.navSource}
+              />
+            </button>
+          ))}
+        </nav>
+        <header
+          className={styles.sectionHeading}
+          id={`finops-${activeSection}`}
+          tabIndex={-1}
+        >
+          <div>
+            <p className="eyebrow">FinOps workspace</p>
+            <h2>{activeSectionDefinition.label}</h2>
+            <p>{activeSectionDefinition.description}</p>
+          </div>
+          <span className={activeSectionDefinition.availability === "available" ? styles.sectionReady : activeSectionDefinition.availability === "foundation" ? styles.sectionProgress : styles.sectionSource}>
+            {activeSectionDefinition.availability === "available" ? "Implemented shared analysis" : activeSectionDefinition.availability === "foundation" ? "Engine foundation" : "AWS source required"}
+          </span>
+        </header>
+      </section>
 
       {overallError ? <div className="page-alert page-alert-error" role="alert"><strong>Cost evidence needs attention</strong><span>{overallError}</span><button onClick={() => void load()} type="button">Retry</button></div> : null}
       {stateLoading || loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading persisted Cost Explorer evidence…</div> : null}
@@ -194,7 +307,24 @@ export function CostsBrowser() {
         </section>
       ) : null}
 
-      {payload !== null && snapshot !== null && payload.status !== "UNAVAILABLE" ? (
+      {(
+        [
+          "overview",
+          "explorer",
+          "allocation",
+          "optimization",
+          "commitments",
+          "services",
+        ] as readonly FinopsFoundationalSection[]
+      ).includes(activeSection as FinopsFoundationalSection) ? (
+        <FinopsFoundationalPanels
+          connectionId={connectionId}
+          section={activeSection as FinopsFoundationalSection}
+          onAvailabilityChange={setFoundationalAvailability}
+        />
+      ) : null}
+
+      {activeSection === "overview" && foundationalAvailability === "legacy" && payload !== null && snapshot !== null && payload.status !== "UNAVAILABLE" ? (
         <>
           {payload.status === "PARTIAL" ? <div className="page-alert page-alert-warning" role="status"><strong>Partial AWS cost evidence</strong><span>Core spend is available. {payload.limitations.map((item) => item.replaceAll("_", " ")).join(" · ")}</span></div> : null}
 
@@ -264,22 +394,42 @@ export function CostsBrowser() {
           </section>
         </>
       ) : null}
-      <VisibilityPanels connectionId={connectionId} />
-      <FinopsMorePanels connectionId={connectionId} />
-      <FinopsCommitmentsPanels connectionId={connectionId} />
-      <FinopsWave3Panels connectionId={connectionId} />
+      {activeSection === "explorer" && foundationalAvailability === "legacy" ? (
+        <>
+          <VisibilityPanels connectionId={connectionId} />
+          <FinopsPanels connectionId={connectionId} />
+        </>
+      ) : null}
+      {activeSection === "allocation" && foundationalAvailability === "legacy" ? (
+        <>
+          <FinopsMorePanels connectionId={connectionId} />
+          {connectionId !== null ? <FinopsExternalCostPanel connectionId={connectionId} /> : null}
+        </>
+      ) : null}
+      {activeSection === "commitments" && foundationalAvailability === "legacy" ? <FinopsCommitmentsPanels connectionId={connectionId} /> : null}
+      {activeSection === "budgets" ? <FinopsWave3Panels connectionId={connectionId} /> : null}
       {/* AI/LLM token + GPU spend, schedule savings, and operator-asserted
           external costs. These panels require a resolved connection, so they
           are gated here rather than each re-checking for null. Every one
           discloses when its own input data is absent. */}
-      {connectionId !== null ? (
-        <>
-          <FinopsAiGpuPanel connectionId={connectionId} />
-          <FinopsSchedulePanel connectionId={connectionId} />
-          <FinopsExternalCostPanel connectionId={connectionId} />
-        </>
+      {connectionId !== null && activeSection === "services" && foundationalAvailability === "legacy" ? <FinopsAiGpuPanel connectionId={connectionId} /> : null}
+      {connectionId !== null && activeSection === "optimization" && foundationalAvailability === "legacy" ? <FinopsSchedulePanel connectionId={connectionId} /> : null}
+      {activeSection === "sources" ? <FinopsSourcesPanel connectionId={connectionId} /> : null}
+      {connection?.sourceKind === "aws_trust_role"
+        && connection.status === "active"
+        && (["containers", "marketplace", "sustainability", "operations"] as const).includes(activeSection as never) ? (
+        <section className={`panel ${styles.capabilityBoundary}`}>
+          <div className={styles.capabilityBoundaryIcon} aria-hidden="true">AWS</div>
+          <div>
+            <p className="eyebrow">Evidence boundary</p>
+            <h2>{activeSectionDefinition.label} is not yet source-ready</h2>
+            <p>
+              Sutra will not display inferred, sample, or placeholder results here. The section becomes available only after its authoritative AWS source is connected, validated, tenant-scoped, and reconciled.
+            </p>
+          </div>
+          <a className="button button-secondary" href="/onboard">Review AWS connection</a>
+        </section>
       ) : null}
-      <FinopsPanels connectionId={connectionId} />
     </>
   );
 }

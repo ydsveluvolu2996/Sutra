@@ -219,7 +219,7 @@ const EXPLORE_LINKS: readonly { readonly href: string; readonly glyph: string; r
   { href: "/kubernetes/supply-chain", glyph: "SC", label: "Supply chain", blurb: "SBOM inventory and artifact provenance trust" },
   { href: "/kubernetes/attack-paths", glyph: "AP", label: "Attack paths", blurb: "Reachable cross-plane attack chains" },
   { href: "/kubernetes/permissions", glyph: "EP", label: "Effective permissions", blurb: "CIEM effective-access analysis" },
-  { href: "/cases/routing", glyph: "CR", label: "Case routing", blurb: "Automatic case assignment routing rules" },
+  { href: "/cases/routing", glyph: "CR", label: "Case routing", blurb: "Preview tenant-scoped assignment and ITSM routing decisions" },
   { href: "/findings/exceptions", glyph: "FE", label: "Finding exceptions", blurb: "Governed, time-boxed risk acceptances" },
   { href: "/vulnerabilities/exploitability", glyph: "XP", label: "Exploitability", blurb: "KEV-first, EPSS-ranked exploitability" },
 ];
@@ -243,6 +243,7 @@ export default function Home() {
   const maxServiceCount = Math.max(...serviceCounts.map(([, count]) => count), 1);
   const succeededCoverage = state?.coverage.filter((entry) => entry.status === "succeeded").length ?? 0;
   const totalCoverage = state?.coverage.length ?? 0;
+  const hasPublishedSnapshot = state?.activeSnapshot !== null && state?.activeSnapshot !== undefined;
   const coveredRegions = useMemo(() => [...new Set(
     (state?.coverage ?? [])
       .map((entry) => entry.region)
@@ -263,10 +264,12 @@ export default function Home() {
   // Deterministic security score: 100 minus a bounded penalty from the open
   // finding severity mix. Purely from current evidence; trend over time arrives
   // with the posture-history work.
-  const securityScore = Math.max(
-    2,
-    Math.round(100 - Math.min(98, openBySeverity.critical * 14 + openBySeverity.high * 6 + openBySeverity.medium * 2 + openBySeverity.low * 0.5)),
-  );
+  const securityScore = hasPublishedSnapshot
+    ? Math.max(
+        2,
+        Math.round(100 - Math.min(98, openBySeverity.critical * 14 + openBySeverity.high * 6 + openBySeverity.medium * 2 + openBySeverity.low * 0.5)),
+      )
+    : null;
   const resolvedCount = findings.filter((finding) => finding.status === "resolved" || finding.status === "suppressed").length;
 
   // Platform posture: one query per vertical, each carrying the active
@@ -385,13 +388,13 @@ export default function Home() {
             </article>
             <article className="metric-card">
               <div className="metric-topline"><span>Managed assets</span><span className="metric-glyph">CMDB</span></div>
-              <strong className="metric-value">{resources.length.toLocaleString()}</strong>
-              <p>From the latest complete snapshot</p>
+              <strong className="metric-value">{hasPublishedSnapshot ? resources.length.toLocaleString() : "—"}</strong>
+              <p>{hasPublishedSnapshot ? "From the latest complete snapshot" : "No complete snapshot published"}</p>
             </article>
             <article className="metric-card">
               <div className="metric-topline"><span>Open findings</span><span className="metric-glyph metric-glyph-alert">!</span></div>
-              <strong className="metric-value">{openFindings.length.toLocaleString()}</strong>
-              <p><span className="severity-dot severity-critical" /> {openFindings.filter((finding) => finding.severity === "critical" || finding.severity === "high").length} critical or high</p>
+              <strong className="metric-value">{hasPublishedSnapshot ? openFindings.length.toLocaleString() : "—"}</strong>
+              <p>{hasPublishedSnapshot ? <><span className="severity-dot severity-critical" /> {openFindings.filter((finding) => finding.severity === "critical" || finding.severity === "high").length} critical or high</> : "No finding evidence published"}</p>
             </article>
             <article className="metric-card">
               <div className="metric-topline"><span>Active snapshot coverage</span><span className="metric-glyph">AWS</span></div>
@@ -403,34 +406,36 @@ export default function Home() {
           <section className="exec-cards" aria-label="Security posture summary">
             <article className="panel exec-card exec-card-score">
               <div className="panel-heading"><div><p className="eyebrow">Posture</p><h2>Security score</h2></div></div>
-              <ScoreGauge value={securityScore} caption="Computed from open findings" />
-              <p className="panel-footnote">100 minus a bounded penalty from the open-finding severity mix. Trend over time arrives with posture history.</p>
+              {securityScore === null
+                ? <div className="empty-state"><strong>Score unavailable</strong><span>A complete snapshot is required before Sutra computes posture.</span></div>
+                : <><ScoreGauge value={securityScore} caption="Computed from open findings" /><p className="panel-footnote">100 minus a bounded penalty from the open-finding severity mix. Trend over time arrives with posture history.</p></>}
             </article>
             <article className="panel exec-card">
               <div className="panel-heading"><div><p className="eyebrow">Open issues</p><h2>By severity</h2></div><span className="result-count">{openFindings.length} open</span></div>
-              <div className="severity-bars">
+              {hasPublishedSnapshot ? <div className="severity-bars">
                 {SEVERITY_KEYS.map((severity) => <div className="severity-bar" key={severity}>
                   <span className={`severity-badge severity-${severity}`}>{severity}</span>
                   <i><b className={`severity-fill severity-fill-${severity}`} style={{ width: `${(openBySeverity[severity] / maxSeverityCount) * 100}%` }} /></i>
                   <strong>{openBySeverity[severity]}</strong>
                 </div>)}
-              </div>
+              </div> : <div className="empty-state"><strong>No severity evidence</strong><span>Counts appear only after a complete snapshot is published.</span></div>}
             </article>
             <article className="panel exec-card">
               <div className="panel-heading"><div><p className="eyebrow">Remediation</p><h2>Open vs. SLA target</h2></div></div>
-              <div className="sla-list">
+              {hasPublishedSnapshot ? <div className="sla-list">
                 {SEVERITY_KEYS.map((severity) => <div className="sla-row" key={severity}>
                   <span className={`severity-dot severity-${severity}`} />
                   <div><strong>{severity}</strong><small>SLA target {SLA_TARGET_DAYS[severity]} days</small></div>
                   <b>{openBySeverity[severity]} open</b>
                 </div>)}
-              </div>
-              <p className="panel-footnote">Per-issue age and SLA-breach tracking arrive with posture history.</p>
+              </div> : <div className="empty-state"><strong>No remediation baseline</strong><span>SLA counts require a complete finding snapshot.</span></div>}
+              {hasPublishedSnapshot ? <p className="panel-footnote">Per-issue age and SLA-breach tracking arrive with posture history.</p> : null}
             </article>
             <article className="panel exec-card">
               <div className="panel-heading"><div><p className="eyebrow">Coverage &amp; throughput</p><h2>Collection</h2></div></div>
-              <ScoreGauge value={coveragePercent} caption="Collector checks succeeded" />
-              <div className="throughput-row"><div><small>Open</small><strong>{openFindings.length}</strong></div><div><small>Resolved / excepted</small><strong>{resolvedCount}</strong></div></div>
+              {hasPublishedSnapshot
+                ? <><ScoreGauge value={coveragePercent} caption="Collector checks succeeded" /><div className="throughput-row"><div><small>Open</small><strong>{openFindings.length}</strong></div><div><small>Resolved / excepted</small><strong>{resolvedCount}</strong></div></div></>
+                : <div className="empty-state"><strong>No active collection</strong><span>Coverage and throughput appear after a complete snapshot.</span></div>}
             </article>
           </section>
 
@@ -465,7 +470,7 @@ export default function Home() {
                   <span><a className="row-action" href="/findings" aria-label={`Open ${finding.title}`}>→</a></span>
                 </div>;
               })}
-              {priorityFindings.length === 0 ? <div className="empty-state"><strong>No open critical or high findings</strong><span>This reflects the active snapshot and configured control coverage only.</span></div> : null}
+              {priorityFindings.length === 0 ? <div className="empty-state"><strong>{hasPublishedSnapshot ? "No open critical or high findings" : "No finding snapshot published"}</strong><span>{hasPublishedSnapshot ? "This reflects the active snapshot and configured control coverage only." : "Sutra does not infer a clean posture before the first complete collection."}</span></div> : null}
             </div>
           </section>
 

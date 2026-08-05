@@ -32,9 +32,15 @@ import {
   type AwsTemporaryCredentials,
   type CallerIdentityClientFactory,
   type ConnectionScope,
+  type ComputeOptimizerExportLaunchContract,
+  type ComputeOptimizerExportObjectContract,
+  type FoundationalFinopsAddOnContract,
+  type FoundationalFinopsBindingRequest,
+  type FinopsSourceContract,
   type NegativeExternalIdProbe,
   type OnboardingTrustVerification,
   type ParsedIamRoleArn,
+  type PermissionPackVersion,
   type PermissionCapabilityAssessment,
   type RoleContractClient,
   type RoleContractClientFactory,
@@ -42,7 +48,91 @@ import {
   type StoredAwsConnection,
   type ValidatedRoleSession,
   CURRENT_PERMISSION_PACK_VERSION,
+  FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION,
+  ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
+  ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION,
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION,
+  EXTENDED_SUPPORT_PERMISSION_PACK_VERSION,
+  AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION,
+  AWS_HEALTH_PERMISSION_PACK_VERSION,
+  RESILIENCE_VUE_PERMISSION_PACK_VERSION,
+  DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION,
+  END_USER_COMPUTING_PERMISSION_PACK_VERSION,
+  GRAVITON_SAVINGS_PERMISSION_PACK_VERSION,
 } from "./types.js";
+import {
+  foundationalFinopsObjectArn,
+  parseFoundationalFinopsContracts,
+  resolveFoundationalFinopsContract,
+} from "./finops-permission-contract.js";
+import {
+  actionsForFinopsSourceContracts,
+  FINOPS_SOURCE_DEFINITIONS,
+  parseFinopsSourceContracts,
+  resolveFinopsSourceContract,
+} from "./finops-source-contract.js";
+import {
+  computeOptimizerExportObjectPrefixArn,
+  computeOptimizerKmsViaService,
+  parseComputeOptimizerExportObjectAddress,
+  parseComputeOptimizerExportObjectContracts,
+  parseComputeOptimizerExportObjectVersionIdentity,
+  resolveComputeOptimizerExportObjectContract,
+  type ComputeOptimizerExportObjectVersionIdentity,
+} from "./compute-optimizer-export-object-contract.js";
+import {
+  computeOptimizerExportLaunchPrefixArn,
+  parseComputeOptimizerExportLaunchObjectAddress,
+  parseComputeOptimizerExportLaunchContracts,
+  resolveComputeOptimizerExportLaunchContract,
+  resolveComputeOptimizerExportLaunchContractForRegion,
+} from "./compute-optimizer-export-launch-contract.js";
+import { AWS_BUDGETS_PROVIDER_SESSION_ACTIONS } from
+  "./aws-budgets-provider-adapter.js";
+import {
+  EXTENDED_SUPPORT_PROVIDER_OPERATIONS,
+  EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS,
+} from
+  "./extended-support-provider-adapter.js";
+import {
+  AWS_SUPPORT_CASES_PERMISSION_ACTIONS,
+  AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME,
+} from "./aws-support-cases-permission-contract.js";
+import { AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS } from
+  "./aws-support-cases-provider-adapter.js";
+import { awsSupportCasesProviderSessionPolicy } from
+  "./aws-support-cases-session-policy.js";
+import {
+  AWS_HEALTH_PERMISSION_ACTIONS,
+  AWS_HEALTH_PERMISSION_POLICY_NAME,
+  AWS_HEALTH_SESSION_ACTIONS,
+} from "./aws-health-permission-contract.js";
+import { awsHealthSessionPolicy } from "./aws-health-session-policy.js";
+import {
+  RESILIENCE_VUE_PERMISSION_ACTIONS,
+  RESILIENCE_VUE_PERMISSION_POLICY_NAME,
+  RESILIENCE_VUE_SESSION_ACTIONS,
+} from "./resilience-vue-permission-contract.js";
+import { resilienceVueProviderSessionPolicy } from "./resilience-vue-session-policy.js";
+import {
+  DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS,
+  DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME,
+  exactDcfPermissionResources,
+} from "./dcf-step-functions-permission-contract.js";
+import { DCF_PROVIDER_SESSION_ACTIONS } from
+  "./dcf-step-functions-provider-adapter.js";
+import { dcfStepFunctionsSessionPolicy } from
+  "./dcf-step-functions-session-policy.js";
+import {
+  END_USER_COMPUTING_PERMISSION_ACTIONS,
+  END_USER_COMPUTING_PERMISSION_POLICY_NAME,
+  END_USER_COMPUTING_SESSION_ACTIONS,
+} from "./end-user-computing-permission-contract.js";
+import { endUserComputingSessionPolicy } from "./end-user-computing-session-policy.js";
+import { GRAVITON_SAVINGS_PERMISSION_ACTIONS, GRAVITON_SAVINGS_PERMISSION_POLICY_NAME,
+  GRAVITON_SAVINGS_SESSION_ACTIONS } from "./graviton-savings-permission-contract.js";
+import { gravitonSavingsSessionPolicy } from "./graviton-savings-session-policy.js";
 
 const IAM_ROLE_ARN =
   /^arn:(aws|aws-us-gov|aws-cn):iam::([0-9]{12}):role\/([A-Za-z0-9_+=,.@\/-]+)$/;
@@ -54,6 +144,7 @@ const ACCOUNT_ID = /^[0-9]{12}$/;
 const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const SESSION_PREFIX = /^[A-Za-z0-9_+=,.@-]{3,32}$/;
 const SESSION_NAME = /^[A-Za-z0-9_+=,.@-]{2,64}$/;
+const PROVIDER_EXPORT_JOB_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/u;
 const EXPECTED_ROLE_PATH = "/sutra/";
 // Both names are valid Sutra-template roles. `SutraCollectorRole` is what new
 // stacks create; `SutraReadOnlyRole` is the pre-2026-07-28 name that every
@@ -71,6 +162,159 @@ const UNSAFE_SHARED_ROLE_NAME =
   /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
 const EXPECTED_POLICY_NAME = "SutraImplementedMetadataCollectors";
 const PERMISSION_PACK_VERSION = CURRENT_PERMISSION_PACK_VERSION;
+const FINOPS_PERMISSION_PACK_VERSION = FOUNDATIONAL_FINOPS_PERMISSION_PACK_VERSION;
+const ORGANIZATION_FINOPS_PACK_VERSION = ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION;
+const ADVANCED_FINOPS_PACK_VERSION = ADVANCED_FINOPS_PERMISSION_PACK_VERSION;
+const COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION =
+  COMPUTE_OPTIMIZER_EXPORT_OBJECT_PERMISSION_PACK_VERSION;
+const COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION =
+  COMPUTE_OPTIMIZER_EXPORT_LAUNCH_PERMISSION_PACK_VERSION;
+const EXTENDED_SUPPORT_PACK_VERSION = EXTENDED_SUPPORT_PERMISSION_PACK_VERSION;
+const EXTENDED_SUPPORT_POLICY_NAME = "SutraFinopsExtendedSupportProjectionReadV1";
+const AWS_SUPPORT_CASES_PACK_VERSION = AWS_SUPPORT_CASES_PERMISSION_PACK_VERSION;
+const AWS_HEALTH_PACK_VERSION = AWS_HEALTH_PERMISSION_PACK_VERSION;
+const RESILIENCE_VUE_PACK_VERSION = RESILIENCE_VUE_PERMISSION_PACK_VERSION;
+const DCF_STEP_FUNCTIONS_PACK_VERSION = DCF_STEP_FUNCTIONS_PERMISSION_PACK_VERSION;
+const END_USER_COMPUTING_PACK_VERSION = END_USER_COMPUTING_PERMISSION_PACK_VERSION;
+const GRAVITON_SAVINGS_PACK_VERSION = GRAVITON_SAVINGS_PERMISSION_PACK_VERSION;
+const FINOPS_SOURCES_BY_PACK = Object.freeze({
+  [FINOPS_PERMISSION_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+  ]),
+  [ORGANIZATION_FINOPS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+  ]),
+  [ADVANCED_FINOPS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [EXTENDED_SUPPORT_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [AWS_SUPPORT_CASES_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+  ]),
+  [AWS_HEALTH_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+  ]),
+  [RESILIENCE_VUE_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+  ]),
+  [DCF_STEP_FUNCTIONS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+  ]),
+  [END_USER_COMPUTING_PACK_VERSION]: new Set([
+    "cost_anomaly_detection",
+    "trusted_advisor_standard_checks",
+    "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export",
+    "aws_health_organization",
+    "aws_resilience_hub",
+    "end_user_computing",
+  ]),
+  [GRAVITON_SAVINGS_PACK_VERSION]: new Set([
+    "cost_anomaly_detection", "trusted_advisor_standard_checks", "aws_organizations_taxonomy",
+    "compute_optimizer_organization_export", "aws_health_organization", "aws_resilience_hub",
+    "end_user_computing", "graviton_savings",
+  ]),
+});
+
+function isComputeOptimizerLaunchCapablePack(value: PermissionPackVersion): boolean {
+  return value === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    || value === EXTENDED_SUPPORT_PACK_VERSION
+    || value === AWS_SUPPORT_CASES_PACK_VERSION
+    || value === AWS_HEALTH_PACK_VERSION
+    || value === RESILIENCE_VUE_PACK_VERSION
+    || value === DCF_STEP_FUNCTIONS_PACK_VERSION
+    || value === END_USER_COMPUTING_PACK_VERSION
+    || value === GRAVITON_SAVINGS_PACK_VERSION;
+}
+
+function permissionPackSupportsSource(
+  permissionPackVersion: keyof typeof FINOPS_SOURCES_BY_PACK,
+  sourceId: string,
+): boolean {
+  return FINOPS_SOURCES_BY_PACK[permissionPackVersion].has(sourceId);
+}
+const FINOPS_CEILING_ACTIONS = [
+  "s3:ListBucket",
+  "s3:GetBucketLocation",
+  "s3:GetObject",
+  "s3:GetObjectAttributes",
+  "kms:Decrypt",
+  "bcm-data-exports:ListExports",
+  "bcm-data-exports:GetExport",
+] as const;
+const COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS = [
+  "s3:GetObjectVersion",
+  "kms:GenerateDataKey",
+] as const;
+/** The exact eight launch operations and 17 AWS-documented dependencies. */
+export const COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS = Object.freeze([
+  "compute-optimizer:ExportAutoScalingGroupRecommendations",
+  "compute-optimizer:ExportEBSVolumeRecommendations",
+  "compute-optimizer:ExportEC2InstanceRecommendations",
+  "compute-optimizer:ExportECSServiceRecommendations",
+  "compute-optimizer:ExportIdleRecommendations",
+  "compute-optimizer:ExportLambdaFunctionRecommendations",
+  "compute-optimizer:ExportLicenseRecommendations",
+  "compute-optimizer:ExportRDSDatabaseRecommendations",
+  "compute-optimizer:GetAutoScalingGroupRecommendations",
+  "compute-optimizer:GetEBSVolumeRecommendations",
+  "compute-optimizer:GetEC2InstanceRecommendations",
+  "compute-optimizer:GetECSServiceRecommendations",
+  "compute-optimizer:GetIdleRecommendations",
+  "compute-optimizer:GetLambdaFunctionRecommendations",
+  "compute-optimizer:GetLicenseRecommendations",
+  "compute-optimizer:GetRDSDatabaseRecommendations",
+  "autoscaling:DescribeAutoScalingGroups",
+  "ec2:DescribeInstances",
+  "ec2:DescribeVolumes",
+  "ecs:ListClusters",
+  "ecs:ListServices",
+  "lambda:ListFunctions",
+  "lambda:ListProvisionedConcurrencyConfigs",
+  "rds:DescribeDBClusters",
+  "rds:DescribeDBInstances",
+] as const);
+export const COMPUTE_OPTIMIZER_EXPORT_EXACT_DESCRIBE_ACTION =
+  "compute-optimizer:DescribeRecommendationExportJobs" as const;
 export const IMPLEMENTED_READ_ACTIONS = [
   "sts:GetCallerIdentity",
   "ec2:DescribeRegions",
@@ -117,6 +361,10 @@ export const IMPLEMENTED_READ_ACTIONS = [
   "securityhub:GetFindings",
   "inspector2:BatchGetAccountStatus",
   "inspector2:ListFindings",
+  "bedrock:ListGuardrails",
+  "bedrock:GetGuardrail",
+  "bedrock:GetModelInvocationLoggingConfiguration",
+  "bedrock:GetAccountDataRetention",
   "ce:GetCostAndUsage",
   "ce:GetCostForecast",
   "cloudwatch:GetMetricData",
@@ -164,6 +412,10 @@ const SESSION_READ_ACTIONS = [
   "securityhub:Get*",
   "inspector2:BatchGet*",
   "inspector2:List*",
+  "bedrock:ListGuardrails",
+  "bedrock:GetGuardrail",
+  "bedrock:GetModelInvocationLoggingConfiguration",
+  "bedrock:GetAccountDataRetention",
   "ce:Get*",
   "cloudwatch:GetMetricData",
   "cloudwatch:ListMetrics",
@@ -204,6 +456,27 @@ export interface WorkloadIdentityRoleBrokerOptions {
   readonly principalArn: string;
   readonly region?: string;
   readonly maxAttempts?: number;
+}
+
+export interface ComputeOptimizerExportObjectSessionRequest {
+  readonly contractId: string;
+  readonly plannedJobId: string;
+  readonly region: string;
+  readonly bucket: string;
+  readonly objectKey: string;
+  readonly versionIdentity: ComputeOptimizerExportObjectVersionIdentity;
+}
+
+export interface ComputeOptimizerExportLaunchSessionRequest {
+  readonly contractId: string;
+  readonly region: string;
+}
+
+export interface ComputeOptimizerExportDescribeSessionRequest {
+  /** Opaque compute_optimizer_organization_export source contract identity. */
+  readonly contractId: string;
+  readonly region: string;
+  readonly plannedJobIds: readonly string[];
 }
 
 export const AWS_BROKER_CONNECTION_TIMEOUT_MS = 5_000;
@@ -376,6 +649,256 @@ export function agentlessSnapshotSessionPolicy(roleArn: string): string {
   return policy;
 }
 
+/**
+ * Per-export STS intersection for the object broker. It intentionally excludes
+ * ListBucket, bucket-location and Data Exports APIs: the chunk path needs only
+ * the pinned object plus the four IAM calls required to re-attest the role.
+ */
+export function finopsDataExportSessionPolicy(
+  roleArn: string,
+  contract: FoundationalFinopsAddOnContract,
+): string {
+  const parsed = parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: TRUST_ATTESTATION_ACTIONS,
+        Resource: roleArn,
+      },
+      {
+        Effect: "Allow",
+        Action: ["s3:GetObject", "s3:GetObjectAttributes"],
+        Resource: foundationalFinopsObjectArn(contract, parsed.partition),
+      },
+    ],
+  });
+  if (policy.length > 900) {
+    throw new ConnectionIntegrityError("The FinOps STS session policy exceeds its safe limit");
+  }
+  return policy;
+}
+
+/** Exact STS intersection for one attested server-owned FinOps source. */
+export function finopsSourceSessionPolicy(
+  roleArn: string,
+  contract: FinopsSourceContract,
+): string {
+  parseIamRoleArn(roleArn);
+  const definition = FINOPS_SOURCE_DEFINITIONS[
+    contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+  ];
+  if (
+    definition === undefined ||
+    definition.implementationState !== "IMPLEMENTED" ||
+    definition.permissionContractId !== contract.permissionContractId ||
+    definition.policyName !== contract.policyName ||
+    definition.actions.length === 0
+  ) {
+    throw new ConnectionIntegrityError("The FinOps source permission contract is invalid");
+  }
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      { Effect: "Allow", Action: TRUST_ATTESTATION_ACTIONS, Resource: roleArn },
+      { Effect: "Allow", Action: definition.actions, Resource: "*" },
+    ],
+  });
+  if (policy.length > 900) {
+    throw new ConnectionIntegrityError("The FinOps source STS session policy exceeds its safe limit");
+  }
+  return policy;
+}
+
+/** IAM-only first-stage session used to attest the .8.4 role and add-ons. */
+export function computeOptimizerExportAttestationSessionPolicy(roleArn: string): string {
+  parseIamRoleArn(roleArn);
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      { Effect: "Allow", Action: TRUST_ATTESTATION_ACTIONS, Resource: roleArn },
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** The activation-manifest route needs identity proof, never AWS data access. */
+export function computeOptimizerActivationIdentitySessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "VerifyCallerIdentityOnly",
+      Effect: "Allow",
+      Action: "sts:GetCallerIdentity",
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Exact read-only STS intersection for the ADV-08 provider collector. */
+export function awsBudgetsProviderSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ReadAwsBudgetsAndOrganizationHierarchy",
+      Effect: "Allow",
+      Action: AWS_BUDGETS_PROVIDER_SESSION_ACTIONS,
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Exact read-only STS intersection for the ADV-04 provider collector. */
+export function extendedSupportProviderSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Sid: "ReadExtendedSupportInventoryAndPricing",
+      Effect: "Allow",
+      Action: EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS,
+      Resource: "*",
+    }],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Second-stage launch ceiling: caller identity plus the exact 25 operations. */
+export function computeOptimizerExportLaunchSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      { Effect: "Allow", Action: COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS, Resource: "*" },
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Second-stage exact-ID observation ceiling; no launch, list, S3 or KMS grant. */
+export function computeOptimizerExportDescribeSessionPolicy(): string {
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: COMPUTE_OPTIMIZER_EXPORT_EXACT_DESCRIBE_ACTION,
+        Resource: "*",
+      },
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/**
+ * Second-stage STS intersection for exactly one provider-created object. It
+ * deliberately contains no IAM attestation, bucket-listing, prefix wildcard,
+ * GetObjectAttributes, write action, or neighboring object permission.
+ */
+export function computeOptimizerExportObjectSessionPolicy(
+  contract: ComputeOptimizerExportObjectContract,
+  objectArn: string,
+  versionIdentity: ComputeOptimizerExportObjectVersionIdentity,
+): string {
+  const parsedRolePartition = /^arn:(aws|aws-us-gov|aws-cn):s3:::/u.exec(objectArn)?.[1];
+  if (
+    parsedRolePartition !== contract.partition ||
+    objectArn.includes("*") ||
+    !objectArn.startsWith(`arn:${contract.partition}:s3:::${contract.bucket}/`)
+  ) throw new ConnectionIntegrityError("The Compute Optimizer object address is invalid");
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: versionIdentity.kind === "CURRENT"
+          ? "s3:GetObject"
+          : "s3:GetObjectVersion",
+        Resource: objectArn,
+        ...(versionIdentity.kind === "VERSION"
+          ? {
+              Condition: {
+                StringEquals: { "s3:VersionId": versionIdentity.versionId },
+              },
+            }
+          : {}),
+      },
+      ...(contract.encryptionMode === "SSE_KMS"
+        ? [{
+            Effect: "Allow",
+            Action: ["kms:Decrypt", "kms:GenerateDataKey"],
+            Resource: contract.kmsKeyArn,
+            Condition: {
+              StringEquals: {
+                "kms:ViaService": computeOptimizerKmsViaService(contract),
+              },
+            },
+          }]
+        : []),
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+/** Exact-object/version plus exact-key intersection for the SSE-KMS .8.5 bucket. */
+export function computeOptimizerExportLaunchObjectSessionPolicy(
+  contract: ComputeOptimizerExportLaunchContract,
+  objectArn: string,
+  versionIdentity: ComputeOptimizerExportObjectVersionIdentity,
+): string {
+  if (
+    objectArn.includes("*") ||
+    !objectArn.startsWith(`arn:${contract.partition}:s3:::${contract.bucket}/${contract.effectivePrefix}`)
+  ) throw new ConnectionIntegrityError("The Compute Optimizer launch object address is invalid");
+  const policy = JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      { Effect: "Allow", Action: "sts:GetCallerIdentity", Resource: "*" },
+      {
+        Effect: "Allow",
+        Action: versionIdentity.kind === "CURRENT" ? "s3:GetObject" : "s3:GetObjectVersion",
+        Resource: objectArn,
+        ...(versionIdentity.kind === "VERSION"
+          ? { Condition: { StringEquals: { "s3:VersionId": versionIdentity.versionId } } }
+          : {}),
+      },
+      {
+        Effect: "Allow",
+        Action: ["kms:Decrypt", "kms:GenerateDataKey"],
+        Resource: contract.kmsKeyArn,
+        Condition: {
+          StringEquals: {
+            "kms:ViaService": computeOptimizerKmsViaService(contract),
+          },
+        },
+      },
+    ],
+  });
+  assertAwsInlineSessionPolicyLength(policy);
+  return policy;
+}
+
+function assertAwsInlineSessionPolicyLength(policy: string): void {
+  // STS documents a 2,048-character plaintext aggregate limit for inline JSON.
+  if (policy.length > 2_048) {
+    throw new ConnectionIntegrityError("The exact STS session policy exceeds AWS limits");
+  }
+}
+
 type JsonRecord = Record<string, unknown>;
 
 function record(value: unknown): JsonRecord {
@@ -412,6 +935,20 @@ function stringList(value: unknown): readonly string[] {
 function sameStringSet(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length &&
     [...actual].sort().every((value, index) => value === [...expected].sort()[index]);
+}
+
+function assertActiveProvisioningSignal(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) throw new ConnectionStateError();
+}
+
+async function awaitWithActiveProvisioningSignal<T>(
+  signal: AbortSignal | undefined,
+  operation: () => Promise<T>,
+): Promise<T> {
+  assertActiveProvisioningSignal(signal);
+  const result = await operation();
+  assertActiveProvisioningSignal(signal);
+  return result;
 }
 
 function assertExpectedTrustPolicy(
@@ -457,6 +994,21 @@ function assertExpectedPermissionPolicy(
   value: string | undefined,
   roleArn: string,
   provisioningMode: AwsRoleProvisioningMode,
+  permissionPackVersion:
+    | typeof PERMISSION_PACK_VERSION
+    | typeof FINOPS_PERMISSION_PACK_VERSION
+    | typeof ORGANIZATION_FINOPS_PACK_VERSION
+    | typeof ADVANCED_FINOPS_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    | typeof EXTENDED_SUPPORT_PACK_VERSION
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION
+    | typeof AWS_HEALTH_PACK_VERSION
+    | typeof RESILIENCE_VUE_PACK_VERSION
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+    | typeof END_USER_COMPUTING_PACK_VERSION
+    | typeof GRAVITON_SAVINGS_PACK_VERSION = PERMISSION_PACK_VERSION,
+  additionalCeilingActions: readonly string[] = [],
 ): PermissionCapabilityAssessment {
   const document = policyDocument(value);
   exactKeys(document, ["Version", "Statement"]);
@@ -480,7 +1032,87 @@ function assertExpectedPermissionPolicy(
     ceiling.Resource !== "*" ||
     !sameStringSet(
       stringList(ceiling.NotAction),
-      [...IMPLEMENTED_READ_ACTIONS, ...TRUST_ATTESTATION_ACTIONS],
+      [...new Set([
+        ...IMPLEMENTED_READ_ACTIONS,
+        ...TRUST_ATTESTATION_ACTIONS,
+        ...(permissionPackVersion === FINOPS_PERMISSION_PACK_VERSION
+            || permissionPackVersion === ORGANIZATION_FINOPS_PACK_VERSION
+            || permissionPackVersion === ADVANCED_FINOPS_PACK_VERSION
+            || permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+            || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? FINOPS_CEILING_ACTIONS
+          : []),
+        ...(permissionPackVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+            || permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? COMPUTE_OPTIMIZER_OBJECT_CEILING_ACTIONS
+          : []),
+        ...(permissionPackVersion === COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+            || permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS
+          : []),
+        ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? EXTENDED_SUPPORT_PROVIDER_OPERATIONS
+          : []),
+        ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? AWS_SUPPORT_CASES_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? AWS_HEALTH_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? RESILIENCE_VUE_PERMISSION_ACTIONS
+          : []),
+        ...((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+          ? DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS
+          : []),
+        ...((permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+          ? END_USER_COMPUTING_PERMISSION_ACTIONS
+          : []),
+        ...(permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? GRAVITON_SAVINGS_PERMISSION_ACTIONS : []),
+        ...additionalCeilingActions,
+      ])],
     ) ||
     metadata.Effect !== "Allow" ||
     metadata.Resource !== "*" ||
@@ -501,10 +1133,200 @@ function assertExpectedPermissionPolicy(
   };
 }
 
+function assertExtendedSupportProjectionPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected Extended Support policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactExtendedSupportProjectionRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), EXTENDED_SUPPORT_PROVIDER_OPERATIONS)) {
+    throw new Error("unexpected Extended Support policy");
+  }
+}
+
+function assertAwsSupportCasesPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected AWS Support Cases policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactSupportCasesRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), AWS_SUPPORT_CASES_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected AWS Support Cases policy");
+  }
+}
+
+function assertAwsHealthPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected AWS Health policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactHealthOrganizationRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), AWS_HEALTH_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected AWS Health policy");
+  }
+}
+
+function assertResilienceVuePolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected ResilienceVue policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactResilienceVueRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), RESILIENCE_VUE_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected ResilienceVue policy");
+  }
+}
+
+function assertEndUserComputingPolicy(value: string | undefined): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 1) throw new Error("unexpected End User Computing policy");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (statement.Sid !== "ExactEndUserComputingRead"
+    || statement.Effect !== "Allow" || statement.Resource !== "*"
+    || !sameStringSet(stringList(statement.Action), END_USER_COMPUTING_PERMISSION_ACTIONS)) {
+    throw new Error("unexpected End User Computing policy");
+  }
+}
+function assertGravitonSavingsPolicy(value:string|undefined):void{
+  const document=policyDocument(value);exactKeys(document,["Version","Statement"]);
+  if(document.Version!=="2012-10-17"||!Array.isArray(document.Statement)||document.Statement.length!==1)
+    throw new Error("unexpected Graviton Savings policy");
+  const statement=record(document.Statement[0]);exactKeys(statement,["Sid","Effect","Action","Resource"]);
+  if(statement.Sid!=="ExactGravitonSavingsRead"||statement.Effect!=="Allow"||statement.Resource!=="*"
+    ||!sameStringSet(stringList(statement.Action),GRAVITON_SAVINGS_PERMISSION_ACTIONS))
+    throw new Error("unexpected Graviton Savings policy");
+}
+
+function assertDcfStepFunctionsPolicy(
+  value: string | undefined,
+  stateMachineArns: readonly string[],
+): void {
+  const resources = exactDcfPermissionResources(stateMachineArns);
+  const executionArns = resources.slice(stateMachineArns.length);
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (document.Version !== "2012-10-17" || !Array.isArray(document.Statement)
+    || document.Statement.length !== 2) throw new Error("unexpected DCF policy");
+  const statements = document.Statement.map(record);
+  const machines = statements.find((statement) => statement.Sid === "ReadExactDcfStateMachines");
+  const executions = statements.find((statement) => statement.Sid === "ReadExactDcfExecutions");
+  if (machines === undefined || executions === undefined) throw new Error("unexpected DCF policy");
+  for (const statement of [machines, executions]) {
+    exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+    if (statement.Effect !== "Allow") throw new Error("unexpected DCF policy");
+  }
+  if (!sameStringSet(
+    stringList(machines.Action),
+    DCF_STEP_FUNCTIONS_PERMISSION_ACTIONS.filter((action) => action !== "states:DescribeExecution"),
+  ) || !sameStringSet(stringList(machines.Resource), stateMachineArns)
+    || !sameStringSet(stringList(executions.Action), ["states:DescribeExecution"])
+    || !sameStringSet(stringList(executions.Resource), executionArns)) {
+    throw new Error("unexpected DCF policy");
+  }
+}
+
+function assertFinopsSourcePolicy(
+  value: string | undefined,
+  contract: FinopsSourceContract,
+): void {
+  const definition = FINOPS_SOURCE_DEFINITIONS[
+    contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+  ];
+  if (
+    definition === undefined ||
+    definition.implementationState !== "IMPLEMENTED" ||
+    definition.permissionContractId !== contract.permissionContractId ||
+    definition.policyName !== contract.policyName ||
+    definition.actions.length === 0
+  ) throw new Error("unsupported FinOps source permission contract");
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== 1
+  ) throw new Error("unexpected FinOps source policy shape");
+  const statement = record(document.Statement[0]);
+  exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    statement.Sid !== "ExactFinopsSourceRead" ||
+    statement.Effect !== "Allow" ||
+    statement.Resource !== "*" ||
+    !sameStringSet(stringList(statement.Action), definition.actions)
+  ) throw new Error("unexpected FinOps source permission policy");
+}
+
+function assertComputeOptimizerExportLaunchPolicy(
+  value: string | undefined,
+  contract: ComputeOptimizerExportLaunchContract,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  if (
+    document.Version !== "2012-10-17" || !Array.isArray(document.Statement) ||
+    document.Statement.length !== 3
+  ) throw new Error("unexpected Compute Optimizer launch policy shape");
+  const statements = document.Statement.map(record);
+  const exactStatement = (sid: string): JsonRecord => {
+    const matches = statements.filter((statement) => statement.Sid === sid);
+    if (matches.length !== 1) throw new Error("missing or duplicate launch statement");
+    return matches[0] as JsonRecord;
+  };
+  const launch = exactStatement("LaunchAllDocumentedComputeOptimizerExports");
+  const dependencies = exactStatement("ReadDocumentedComputeOptimizerExportDependencies");
+  const objects = exactStatement("ReadSealedComputeOptimizerExportPrefix");
+  for (const statement of [launch, dependencies, objects]) {
+    exactKeys(statement, ["Sid", "Effect", "Action", "Resource"]);
+    if (statement.Effect !== "Allow") throw new Error("unexpected launch permission effect");
+  }
+  if (
+    launch.Resource !== "*" || dependencies.Resource !== "*" ||
+    !sameStringSet(
+      stringList(launch.Action),
+      COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS.slice(0, 8),
+    ) ||
+    !sameStringSet(
+      stringList(dependencies.Action),
+      COMPUTE_OPTIMIZER_EXPORT_LAUNCH_ACTIONS.slice(8),
+    ) ||
+    !sameStringSet(stringList(objects.Action), ["s3:GetObject", "s3:GetObjectVersion"]) ||
+    objects.Resource !== computeOptimizerExportLaunchPrefixArn(contract)
+  ) throw new Error("unexpected Compute Optimizer launch permission policy");
+}
+
 function assertExpectedRole(
   role: Awaited<ReturnType<RoleContractClient["getRole"]>>,
   resolved: ResolvedConnection,
   expectedPrincipalArn: string,
+  permissionPackVersion:
+    | typeof PERMISSION_PACK_VERSION
+    | typeof FINOPS_PERMISSION_PACK_VERSION
+    | typeof ORGANIZATION_FINOPS_PACK_VERSION
+    | typeof ADVANCED_FINOPS_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+    | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+    | typeof EXTENDED_SUPPORT_PACK_VERSION
+    | typeof AWS_SUPPORT_CASES_PACK_VERSION
+    | typeof AWS_HEALTH_PACK_VERSION
+    | typeof RESILIENCE_VUE_PACK_VERSION
+    | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+    | typeof END_USER_COMPUTING_PACK_VERSION
+    | typeof GRAVITON_SAVINGS_PACK_VERSION = PERMISSION_PACK_VERSION,
 ): void {
   const expectedRolePathAndName =
     `${resolved.expectedRolePath.slice(1)}${resolved.expectedRoleName}`;
@@ -526,7 +1348,7 @@ function assertExpectedRole(
   }
   if (
     tags.get("sutra:access-mode") !== "read-only" ||
-    tags.get("sutra:permission-pack") !== PERMISSION_PACK_VERSION ||
+    tags.get("sutra:permission-pack") !== permissionPackVersion ||
     tags.get("sutra:managed-by") !==
       (resolved.roleProvisioningMode === "sutra_template" ? "cloudformation" : "customer")
   ) {
@@ -540,15 +1362,172 @@ function assertExpectedRole(
   );
 }
 
+function assertFoundationalFinopsPolicy(
+  value: string | undefined,
+  contract: FoundationalFinopsAddOnContract,
+  partition: AwsPartition,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  const expectedCount =
+    contract.contractId === "foundational-cur2-export-v1" ? 5 : 4;
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== expectedCount
+  ) {
+    throw new Error("unexpected Foundational FinOps policy shape");
+  }
+  const statements = document.Statement.map(record);
+  const statement = (sid: string): JsonRecord => {
+    const matches = statements.filter((candidate) => candidate.Sid === sid);
+    if (matches.length !== 1) throw new Error("missing or duplicate FinOps statement");
+    return matches[0] as JsonRecord;
+  };
+  const bucketArn = `arn:${partition}:s3:::${contract.bucket}`;
+  const objectArn = foundationalFinopsObjectArn(contract, partition);
+  const prefixRoot = contract.prefix.slice(0, -1);
+
+  const listSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ListOnlyExactFoundationalExportPrefix"
+    : "ListOnlyExactFocus12ExportPrefix";
+  const list = statement(listSid);
+  exactKeys(list, ["Sid", "Effect", "Action", "Resource", "Condition"]);
+  const condition = record(list.Condition);
+  exactKeys(condition, ["StringLike"]);
+  const like = record(condition.StringLike);
+  exactKeys(like, ["s3:prefix"]);
+  if (
+    list.Effect !== "Allow" ||
+    !sameStringSet(stringList(list.Action), ["s3:ListBucket"]) ||
+    list.Resource !== bucketArn ||
+    !sameStringSet(stringList(like["s3:prefix"]), [prefixRoot, `${prefixRoot}/*`])
+  ) {
+    throw new Error("unexpected FinOps list permission");
+  }
+
+  const locationSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadDedicatedBucketLocation"
+    : "ReadDedicatedFocus12BucketLocation";
+  const location = statement(locationSid);
+  exactKeys(location, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    location.Effect !== "Allow" ||
+    !sameStringSet(stringList(location.Action), ["s3:GetBucketLocation"]) ||
+    location.Resource !== bucketArn
+  ) {
+    throw new Error("unexpected FinOps bucket permission");
+  }
+
+  const objectSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadOnlyExactFoundationalExportObjects"
+    : "ReadOnlyExactFocus12ExportObjects";
+  const objects = statement(objectSid);
+  exactKeys(objects, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    objects.Effect !== "Allow" ||
+    !sameStringSet(
+      stringList(objects.Action),
+      ["s3:GetObject", "s3:GetObjectAttributes"],
+    ) ||
+    objects.Resource !== objectArn
+  ) {
+    throw new Error("unexpected FinOps object permission");
+  }
+
+  if (contract.contractId === "foundational-cur2-export-v1") {
+    const listExports = statement("ListDataExports");
+    exactKeys(listExports, ["Sid", "Effect", "Action", "Resource"]);
+    if (
+      listExports.Effect !== "Allow" ||
+      !sameStringSet(stringList(listExports.Action), ["bcm-data-exports:ListExports"]) ||
+      listExports.Resource !== "*"
+    ) {
+      throw new Error("unexpected Data Exports list permission");
+    }
+  }
+
+  const exportSid = contract.contractId === "foundational-cur2-export-v1"
+    ? "ReadOnlyThisDataExport"
+    : "ReadOnlyThisFocus12ExportStatus";
+  const dataExport = statement(exportSid);
+  exactKeys(dataExport, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    dataExport.Effect !== "Allow" ||
+    !sameStringSet(stringList(dataExport.Action), ["bcm-data-exports:GetExport"]) ||
+    dataExport.Resource !== contract.exportArn
+  ) {
+    throw new Error("unexpected Data Export permission");
+  }
+}
+
+function assertComputeOptimizerExportObjectPolicy(
+  value: string | undefined,
+  contract: ComputeOptimizerExportObjectContract,
+): void {
+  const document = policyDocument(value);
+  exactKeys(document, ["Version", "Statement"]);
+  const expectedCount = contract.encryptionMode === "SSE_KMS" ? 2 : 1;
+  if (
+    document.Version !== "2012-10-17" ||
+    !Array.isArray(document.Statement) ||
+    document.Statement.length !== expectedCount
+  ) throw new Error("unexpected Compute Optimizer object policy shape");
+  const statements = document.Statement.map(record);
+  const objectStatements = statements.filter((statement) =>
+    statement.Sid === "ReadSealedComputeOptimizerExportPrefix"
+  );
+  if (objectStatements.length !== 1) throw new Error("missing object-prefix statement");
+  const objectStatement = objectStatements[0] as JsonRecord;
+  exactKeys(objectStatement, ["Sid", "Effect", "Action", "Resource"]);
+  if (
+    objectStatement.Effect !== "Allow" ||
+    !sameStringSet(
+      stringList(objectStatement.Action),
+      ["s3:GetObject", "s3:GetObjectVersion"],
+    ) ||
+    objectStatement.Resource !== computeOptimizerExportObjectPrefixArn(contract)
+  ) throw new Error("unexpected Compute Optimizer object-prefix permission");
+
+  const kmsStatements = statements.filter((statement) =>
+    statement.Sid === "UseExactExportKeyThroughRegionalS3"
+  );
+  if (contract.encryptionMode === "SSE_S3") {
+    if (kmsStatements.length !== 0 || contract.kmsKeyArn !== null) {
+      throw new Error("unexpected Compute Optimizer KMS permission");
+    }
+    return;
+  }
+  if (kmsStatements.length !== 1 || contract.kmsKeyArn === null) {
+    throw new Error("missing Compute Optimizer KMS permission");
+  }
+  const kms = kmsStatements[0] as JsonRecord;
+  exactKeys(kms, ["Sid", "Effect", "Action", "Resource", "Condition"]);
+  const condition = record(kms.Condition);
+  exactKeys(condition, ["StringEquals"]);
+  const equals = record(condition.StringEquals);
+  exactKeys(equals, ["kms:ViaService"]);
+  if (
+    kms.Effect !== "Allow" ||
+    !sameStringSet(stringList(kms.Action), ["kms:Decrypt", "kms:GenerateDataKey"]) ||
+    kms.Resource !== contract.kmsKeyArn ||
+    equals["kms:ViaService"] !== computeOptimizerKmsViaService(contract)
+  ) throw new Error("unexpected Compute Optimizer KMS permission");
+}
+
 async function allInlinePolicyNames(
   client: RoleContractClient,
   roleName: string,
+  signal?: AbortSignal,
 ): Promise<string[]> {
   const names: string[] = [];
   let marker: string | undefined;
   const seen = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
-    const output = await client.listRolePolicies(roleName, marker);
+    const output = await awaitWithActiveProvisioningSignal(
+      signal,
+      () => client.listRolePolicies(roleName, marker),
+    );
     names.push(...output.policyNames);
     if (!output.isTruncated) return [...new Set(names)].sort();
     if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
@@ -563,12 +1542,16 @@ async function allInlinePolicyNames(
 async function allAttachedManagedPolicies(
   client: RoleContractClient,
   roleName: string,
+  signal?: AbortSignal,
 ): Promise<readonly { readonly policyName?: string; readonly policyArn?: string }[]> {
   const policies: { policyName?: string; policyArn?: string }[] = [];
   let marker: string | undefined;
   const seen = new Set<string>();
   for (let page = 0; page < 100; page += 1) {
-    const output = await client.listAttachedRolePolicies(roleName, marker);
+    const output = await awaitWithActiveProvisioningSignal(
+      signal,
+      () => client.listAttachedRolePolicies(roleName, marker),
+    );
     policies.push(...output.policies);
     if (!output.isTruncated) return policies;
     if (output.marker === undefined || output.marker.length === 0 || seen.has(output.marker)) {
@@ -643,6 +1626,1026 @@ export class AwsRoleBroker {
     // expand the compact read-family session cap.
     await this.attestRoleContract(resolved, validated.credentials);
     return validated;
+  }
+
+  /**
+   * ADV-08 session with an exact read-only intersection. Scope, account,
+   * partition and action set are server-pinned before STS; provider credentials
+   * never cross the collector process.
+   */
+  public async assumeValidatedAwsBudgetsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: typeof AWS_BUDGETS_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_BUDGETS_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Budgets session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-budgets`,
+      awsBudgetsProviderSessionPolicy,
+      input.signal,
+    );
+  }
+
+  /**
+   * ADV-04 session with an exact read-only intersection. Scope, account,
+   * partition and action set are server-pinned before STS; provider credentials
+   * never cross the collector process.
+   */
+  public async assumeValidatedExtendedSupportSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: typeof EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, EXTENDED_SUPPORT_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The Extended Support session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== EXTENDED_SUPPORT_PERMISSION_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-extsupport`,
+      extendedSupportProviderSessionPolicy,
+      input.signal,
+    );
+  }
+
+  /**
+   * ADV-09 session with an exact read-only intersection. The collector pins
+   * scope, account, partition, action set and immutable .8.7 pack before STS.
+   */
+  public async assumeValidatedAwsSupportCasesSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: "aws" | "aws-us-gov";
+      readonly sessionActions: typeof AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_SUPPORT_CASES_PROVIDER_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Support Cases session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-support`,
+      awsSupportCasesProviderSessionPolicy,
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      resolved.connection.permissionPackVersion,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-06 session with the exact .8.8 Health/Organizations read intersection.
+   * The server pins identity, partition, action set and immutable pack before STS.
+   */
+  public async assumeValidatedAwsHealthSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: "aws" | "aws-us-gov";
+      readonly sessionActions: typeof AWS_HEALTH_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov"].includes(input.partition)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, AWS_HEALTH_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The AWS Health session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId}-health`,
+      awsHealthSessionPolicy,
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      resolved.connection.permissionPackVersion,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-10 session with the exact .8.9 Resilience Hub read intersection.
+   * Account, partition, Region, action set and immutable pack are server-pinned.
+   */
+  public async assumeValidatedResilienceVueSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof RESILIENCE_VUE_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, RESILIENCE_VUE_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The ResilienceVue session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId}-resilience`,
+      () => resilienceVueProviderSessionPolicy({
+        accountId: input.expectedAccountId,
+        partition: input.partition,
+        region: input.region,
+      }),
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      resolved.connection.permissionPackVersion,
+      input.signal,
+    );
+    return validated;
+  }
+
+  /**
+   * ADV-12 session with an exact `.8.10` read-only intersection for the
+   * server-resolved Step Functions state machines and their executions.
+   */
+  public async assumeValidatedDcfStepFunctionsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    boundaryId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof DCF_PROVIDER_SESSION_ACTIONS;
+      readonly stateMachineArns: readonly string[];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (!/^dcfb_[a-f0-9]{64}$/u.test(boundaryId)
+      || typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions",
+        "signal", "stateMachineArns",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, DCF_PROVIDER_SESSION_ACTIONS)
+      || !Array.isArray(input.stateMachineArns)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The DCF Step Functions session request is invalid");
+    }
+    try {
+      exactDcfPermissionResources(input.stateMachineArns);
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The DCF Step Functions resource scope is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const expectedArnPrefix = `arn:${input.partition}:states:${input.region}:${input.expectedAccountId}:stateMachine:`;
+    if (input.stateMachineArns.some((arn) => !arn.startsWith(expectedArnPrefix))) {
+      throw new ConnectionIntegrityError("The DCF Step Functions resource scope is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      `${boundaryId.slice(0, 24)}-dcf`,
+      () => dcfStepFunctionsSessionPolicy({ stateMachineArns: input.stateMachineArns }),
+      input.signal,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      resolved.connection.permissionPackVersion,
+      input.signal,
+      input.stateMachineArns,
+    );
+    return validated;
+  }
+
+  /** ADV-11 session with the exact `.8.11` read-only account/Region cap. */
+  public async assumeValidatedEndUserComputingSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    requestId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly region: string;
+      readonly sessionActions: typeof END_USER_COMPUTING_SESSION_ACTIONS;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<ValidatedRoleSession> {
+    if (typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "region", "sessionActions", "signal",
+      ])
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || !["aws", "aws-us-gov", "aws-cn"].includes(input.partition)
+      || !/^[a-z]{2}(?:-[a-z0-9]+)+-\d$/u.test(input.region)
+      || !Array.isArray(input.sessionActions)
+      || !sameStringSet(input.sessionActions, END_USER_COMPUTING_SESSION_ACTIONS)
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError("The End User Computing session request is invalid");
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if ((resolved.connection.permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && resolved.connection.permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition) {
+      throw new ConnectionStateError();
+    }
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${requestId.slice(0, 40)}-euc`,
+      () => endUserComputingSessionPolicy({
+        accountId: input.expectedAccountId,
+        partition: input.partition,
+        region: input.region,
+      }),
+      input.signal,
+    );
+  }
+
+  /** ADV-05 exact `.8.12` read-only account/Region session. */
+  public async assumeValidatedGravitonSavingsSession(scope:ConnectionScope,connectionId:string,requestId:string,input:{
+    readonly expectedAccountId:string;readonly partition:AwsPartition;readonly region:string;
+    readonly sessionActions:typeof GRAVITON_SAVINGS_SESSION_ACTIONS;readonly signal:AbortSignal;
+  }):Promise<ValidatedRoleSession>{
+    if(typeof input!=="object"||input===null||!sameStringSet(Object.keys(input),
+      ["expectedAccountId","partition","region","sessionActions","signal"])
+      ||!ACCOUNT_ID.test(input.expectedAccountId)||!["aws","aws-us-gov","aws-cn"].includes(input.partition)
+      ||!/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u.test(input.region)
+      ||!sameStringSet(input.sessionActions,GRAVITON_SAVINGS_SESSION_ACTIONS)||!(input.signal instanceof AbortSignal))
+      throw new ConnectionIntegrityError("The Graviton Savings session request is invalid");
+    assertActiveProvisioningSignal(input.signal);const resolved=await this.resolveConnection(scope,connectionId,["ACTIVE"]);
+    if(resolved.connection.permissionPackVersion!==GRAVITON_SAVINGS_PACK_VERSION
+      ||resolved.connection.expectedAccountId!==input.expectedAccountId||resolved.parsedRoleArn.partition!==input.partition)
+      throw new ConnectionStateError();
+    return this.assumeAndValidateIdentity(resolved,`${requestId.slice(0,40)}-graviton`,()=>gravitonSavingsSessionPolicy({
+      accountId:input.expectedAccountId,partition:input.partition,region:input.region}),input.signal);
+  }
+
+  /**
+   * Prove the ACTIVE .8.5 connection identity without returning credentials or
+   * granting any provider read/launch action to the manifest route.
+   */
+  public async attestComputeOptimizerActivationManifestIdentity(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    input: {
+      readonly expectedAccountId: string;
+      readonly partition: AwsPartition;
+      readonly sessionActions: readonly ["sts:GetCallerIdentity"];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<{
+    readonly verified: true;
+    readonly connectionId: string;
+    readonly accountId: string;
+    readonly partition: AwsPartition;
+  }> {
+    if (
+      typeof input !== "object" || input === null
+      || !sameStringSet(Object.keys(input), [
+        "expectedAccountId", "partition", "sessionActions", "signal",
+      ])
+      || typeof input.expectedAccountId !== "string"
+      || !ACCOUNT_ID.test(input.expectedAccountId)
+      || (input.partition !== "aws" && input.partition !== "aws-us-gov"
+        && input.partition !== "aws-cn")
+      || !Array.isArray(input.sessionActions)
+      || input.sessionActions.length !== 1
+      || input.sessionActions[0] !== "sts:GetCallerIdentity"
+      || !(input.signal instanceof AbortSignal)
+    ) throw new ConnectionIntegrityError("The activation identity request is invalid");
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    assertActiveProvisioningSignal(input.signal);
+    if (
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion)
+      || resolved.connection.expectedAccountId !== input.expectedAccountId
+      || resolved.parsedRoleArn.partition !== input.partition
+    ) throw new ConnectionStateError();
+    const identity = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-co85-identity`,
+      computeOptimizerActivationIdentitySessionPolicy,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    return Object.freeze({
+      verified: true,
+      connectionId: identity.connectionId,
+      accountId: identity.accountId,
+      partition: identity.partition,
+    });
+  }
+
+  /**
+   * Successor-only session for one immutable Foundational FinOps export.
+   * The request is matched against server-owned CloudFormation outputs before
+   * STS, then both the .8.1 base policy and every recorded add-on are attested.
+   */
+  public async assumeValidatedFinopsSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: FoundationalFinopsBindingRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      resolved.connection.permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION ||
+      resolved.connection.foundationalFinopsContracts === undefined
+    ) {
+      throw new ConnectionStateError();
+    }
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let contracts: readonly FoundationalFinopsAddOnContract[];
+    let sourceContracts: readonly FinopsSourceContract[];
+    let contract: FoundationalFinopsAddOnContract;
+    try {
+      contracts = parseFoundationalFinopsContracts(
+        resolved.connection.foundationalFinopsContracts,
+        owner,
+      );
+      contract = resolveFoundationalFinopsContract(contracts, owner, request);
+      sourceContracts = resolved.connection.finopsSourceContracts === undefined
+        ? []
+        : parseFinopsSourceContracts(
+            resolved.connection.finopsSourceContracts,
+            owner,
+          );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "Stored Foundational FinOps binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      jobId,
+      (roleArn) => finopsDataExportSessionPolicy(roleArn, contract),
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      contracts,
+      sourceContracts,
+    );
+    return validated;
+  }
+
+  /**
+   * Successor-only session for one persisted FinOps source identity. The caller
+   * supplies only the opaque contract ID; source actions and endpoint scope are
+   * recovered from encrypted registry state and the compiled source catalog.
+   */
+  public async assumeValidatedFinopsSourceSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    contractId: string,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    const permissionPackVersion = resolved.connection.permissionPackVersion;
+    if (
+      (permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
+        && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
+        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
+        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION
+        ) ||
+      resolved.connection.finopsSourceContracts === undefined
+    ) throw new ConnectionStateError();
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let sourceContracts: readonly FinopsSourceContract[];
+    let foundationalContracts: readonly FoundationalFinopsAddOnContract[];
+    let objectContracts: readonly ComputeOptimizerExportObjectContract[];
+    let launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+    let contract: FinopsSourceContract | null;
+    try {
+      sourceContracts = parseFinopsSourceContracts(
+        resolved.connection.finopsSourceContracts,
+        owner,
+      );
+      contract = resolveFinopsSourceContract(sourceContracts, owner, contractId);
+      foundationalContracts = resolved.connection.foundationalFinopsContracts === undefined
+        ? []
+        : parseFoundationalFinopsContracts(
+            resolved.connection.foundationalFinopsContracts,
+            owner,
+          );
+      objectContracts = resolved.connection.computeOptimizerExportObjectContracts === undefined
+        ? []
+        : parseComputeOptimizerExportObjectContracts(
+            resolved.connection.computeOptimizerExportObjectContracts,
+            owner,
+          );
+      launchContracts = resolved.connection.computeOptimizerExportLaunchContracts === undefined
+        ? []
+        : parseComputeOptimizerExportLaunchContracts(
+            resolved.connection.computeOptimizerExportLaunchContracts,
+            owner,
+          );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "Stored FinOps source binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    if (contract === null) throw new ConnectionStateError();
+    const definition = FINOPS_SOURCE_DEFINITIONS[
+      contract.sourceId as keyof typeof FINOPS_SOURCE_DEFINITIONS
+    ];
+    if (
+      definition?.implementationState !== "IMPLEMENTED"
+      || !permissionPackSupportsSource(permissionPackVersion, contract.sourceId)
+    ) {
+      throw new ConnectionStateError();
+    }
+    const validated = await this.assumeAndValidateIdentity(
+      resolved,
+      jobId,
+      (roleArn) => finopsSourceSessionPolicy(roleArn, contract),
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      validated.credentials,
+      foundationalContracts,
+      sourceContracts,
+      objectContracts,
+      launchContracts,
+    );
+    return validated;
+  }
+
+  /**
+   * Trusted control-plane attestation for an explicit .8.5 promotion. Unlike a
+   * collection session, this accepts only already-derived server contracts and
+   * does not mutate registry state. The caller must stage the returned proof
+   * through the encrypted registry and activate it in a separate step.
+   */
+  public async attestComputeOptimizerExportLaunchProvisioning(
+    scope: ConnectionScope,
+    connectionId: string,
+    operationId: string,
+    input: {
+      readonly sourceContracts: readonly FinopsSourceContract[];
+      readonly objectContracts: readonly ComputeOptimizerExportObjectContract[];
+      readonly launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+      readonly signal: AbortSignal;
+    },
+  ): Promise<{
+    readonly identityAttested: true;
+    readonly permissionPolicyAttested: true;
+    readonly launchPoliciesAttested: true;
+  }> {
+    if (typeof input !== "object" || input === null || Array.isArray(input)
+      || !sameStringSet(Object.keys(input), [
+        "sourceContracts", "objectContracts", "launchContracts", "signal",
+      ])
+      || !(input.signal instanceof AbortSignal)) {
+      throw new ConnectionIntegrityError(
+        "The Compute Optimizer provisioning attestation input is invalid",
+      );
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    assertActiveProvisioningSignal(input.signal);
+    if (!new Set<PermissionPackVersion>([
+      PERMISSION_PACK_VERSION,
+      FINOPS_PERMISSION_PACK_VERSION,
+      ORGANIZATION_FINOPS_PACK_VERSION,
+      ADVANCED_FINOPS_PACK_VERSION,
+      COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION,
+      COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+    ]).has(resolved.connection.permissionPackVersion)) throw new ConnectionStateError();
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let sources: readonly FinopsSourceContract[];
+    let objects: readonly ComputeOptimizerExportObjectContract[];
+    let launches: readonly ComputeOptimizerExportLaunchContract[];
+    try {
+      sources = parseFinopsSourceContracts(input.sourceContracts, owner);
+      objects = parseComputeOptimizerExportObjectContracts(input.objectContracts, owner);
+      launches = parseComputeOptimizerExportLaunchContracts(input.launchContracts, owner);
+      const sourceRegions = sources
+        .filter(({ sourceId }) => sourceId === "compute_optimizer_organization_export")
+        .map(({ region }) => region)
+        .sort();
+      const launchRegions = launches.map(({ region }) => region).sort();
+      const objectRegions = objects.map(({ region }) => region).sort();
+      if (sourceRegions.length === 0
+        || JSON.stringify(sourceRegions) !== JSON.stringify(objectRegions)
+        || JSON.stringify(sourceRegions) !== JSON.stringify(launchRegions)
+        || objects.some((objectContract) => {
+          const launchContract = launches.find(({ region }) => region === objectContract.region);
+          return launchContract === undefined
+            || objectContract.bucket !== launchContract.bucket
+            || objectContract.effectivePrefix !== launchContract.effectivePrefix
+            || objectContract.encryptionMode !== "SSE_KMS"
+            || objectContract.kmsKeyArn !== launchContract.kmsKeyArn;
+        })) {
+        throw new Error("regional provisioning contract mismatch");
+      }
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The Compute Optimizer provisioning binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    assertActiveProvisioningSignal(input.signal);
+    const attestation = await this.assumeAndValidateIdentity(
+      resolved,
+      `${operationId}-co85-attest`,
+      computeOptimizerExportAttestationSessionPolicy,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    await this.attestFinopsRoleContract(
+      resolved,
+      attestation.credentials,
+      undefined,
+      sources,
+      objects,
+      launches,
+      COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION,
+      input.signal,
+    );
+    assertActiveProvisioningSignal(input.signal);
+    return {
+      identityAttested: true,
+      permissionPolicyAttested: true,
+      launchPoliciesAttested: true,
+    };
+  }
+
+  /**
+   * Resolve and re-attest one immutable regional .8.5 launch add-on, then
+   * issue a distinct session containing only caller identity and the exact 25
+   * documented launch/dependency actions. Destination/account/partition are
+   * recovered from encrypted server state rather than from public input.
+   */
+  public async assumeValidatedComputeOptimizerExportLaunchSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: ComputeOptimizerExportLaunchSessionRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion) ||
+      resolved.connection.computeOptimizerExportLaunchContracts === undefined
+    ) throw new ConnectionStateError();
+    if (
+      typeof request !== "object" || request === null ||
+      !sameStringSet(Object.keys(request), ["contractId", "region"])
+    ) throw new ConnectionIntegrityError("The Compute Optimizer launch request is invalid");
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+    let launchContract: ComputeOptimizerExportLaunchContract;
+    try {
+      launchContracts = parseComputeOptimizerExportLaunchContracts(
+        resolved.connection.computeOptimizerExportLaunchContracts,
+        owner,
+      );
+      launchContract = resolveComputeOptimizerExportLaunchContract(
+        launchContracts,
+        owner,
+        request.contractId,
+        request.region,
+      );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The Compute Optimizer launch binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const attestation = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-attest`,
+      computeOptimizerExportAttestationSessionPolicy,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      attestation.credentials,
+      undefined,
+      undefined,
+      undefined,
+      launchContracts,
+    );
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-launch-${createHash("sha256").update(launchContract.contractId).digest("hex").slice(0, 12)}`,
+      computeOptimizerExportLaunchSessionPolicy,
+    );
+  }
+
+  /**
+   * .8.5-only exact-ID observation session. The opaque contract must resolve
+   * to the regional Compute Optimizer source and that Region must also have an
+   * attested launch destination. The provider job IDs are bounded and unique;
+   * AWS offers no resource-level condition for this API, so the exact IDs are
+   * enforced again by the credential-owning Describe runner.
+   */
+  public async assumeValidatedComputeOptimizerExportDescribeSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: ComputeOptimizerExportDescribeSessionRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      !isComputeOptimizerLaunchCapablePack(resolved.connection.permissionPackVersion) ||
+      resolved.connection.finopsSourceContracts === undefined ||
+      resolved.connection.computeOptimizerExportLaunchContracts === undefined ||
+      typeof request !== "object" || request === null ||
+      !sameStringSet(Object.keys(request), ["contractId", "region", "plannedJobIds"]) ||
+      !Array.isArray(request.plannedJobIds) || request.plannedJobIds.length < 1 ||
+      request.plannedJobIds.length > 8 ||
+      request.plannedJobIds.some((plannedJobId) =>
+        typeof plannedJobId !== "string" || !PROVIDER_EXPORT_JOB_ID.test(plannedJobId)
+      ) ||
+      new Set(request.plannedJobIds).size !== request.plannedJobIds.length
+    ) throw new ConnectionIntegrityError("The Compute Optimizer exact Describe request is invalid");
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let sourceContracts: readonly FinopsSourceContract[];
+    let launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+    try {
+      sourceContracts = parseFinopsSourceContracts(
+        resolved.connection.finopsSourceContracts,
+        owner,
+      );
+      const sourceContract = resolveFinopsSourceContract(
+        sourceContracts,
+        owner,
+        request.contractId,
+      );
+      if (
+        sourceContract === null ||
+        sourceContract.sourceId !== "compute_optimizer_organization_export" ||
+        sourceContract.region !== request.region
+      ) throw new Error("source contract mismatch");
+      launchContracts = parseComputeOptimizerExportLaunchContracts(
+        resolved.connection.computeOptimizerExportLaunchContracts,
+        owner,
+      );
+      resolveComputeOptimizerExportLaunchContractForRegion(
+        launchContracts,
+        owner,
+        request.region,
+      );
+    } catch (cause) {
+      const failure = new ConnectionIntegrityError(
+        "The Compute Optimizer exact Describe binding is invalid",
+      );
+      (failure as { cause?: unknown }).cause = cause;
+      throw failure;
+    }
+    const attestation = await this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-attest`,
+      computeOptimizerExportAttestationSessionPolicy,
+    );
+    await this.attestFinopsRoleContract(
+      resolved,
+      attestation.credentials,
+      undefined,
+      sourceContracts,
+      undefined,
+      launchContracts,
+    );
+    const jobSetDigest = createHash("sha256")
+      .update([...request.plannedJobIds].sort().join("\0"), "utf8")
+      .digest("hex")
+      .slice(0, 12);
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-describe-${jobSetDigest}`,
+      computeOptimizerExportDescribeSessionPolicy,
+    );
+  }
+
+  /**
+   * Resolve a server-owned .8.4 binding, attest the complete role contract with
+   * an IAM-only session, then issue a distinct 900-second session for exactly
+   * one CSV or CSVW metadata object.
+   */
+  public async assumeValidatedComputeOptimizerExportObjectSession(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+    request: ComputeOptimizerExportObjectSessionRequest,
+  ): Promise<ValidatedRoleSession> {
+    const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
+    if (
+      typeof request !== "object" || request === null ||
+      !sameStringSet(
+        Object.keys(request),
+        ["contractId", "plannedJobId", "region", "bucket", "objectKey", "versionIdentity"],
+      )
+    ) throw new ConnectionIntegrityError("The Compute Optimizer object request is invalid");
+    const packVersion = resolved.connection.permissionPackVersion;
+    if (
+      (packVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION ||
+        resolved.connection.computeOptimizerExportObjectContracts === undefined) &&
+      (packVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION ||
+        resolved.connection.computeOptimizerExportLaunchContracts === undefined)
+    ) throw new ConnectionStateError();
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let versionIdentity: ComputeOptimizerExportObjectVersionIdentity;
+    let objectArn: string;
+    let sessionPolicy: () => string;
+    if (packVersion === COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION) {
+      let contracts: readonly ComputeOptimizerExportObjectContract[];
+      let contract: ComputeOptimizerExportObjectContract;
+      try {
+        contracts = parseComputeOptimizerExportObjectContracts(
+          resolved.connection.computeOptimizerExportObjectContracts,
+          owner,
+        );
+        contract = resolveComputeOptimizerExportObjectContract(
+          contracts,
+          owner,
+          request.contractId,
+        );
+        versionIdentity = parseComputeOptimizerExportObjectVersionIdentity(request.versionIdentity);
+        objectArn = parseComputeOptimizerExportObjectAddress(
+          contract,
+          resolved.parsedRoleArn.partition,
+          request.region,
+          request.bucket,
+          request.objectKey,
+          request.plannedJobId,
+        ).objectArn;
+      } catch (cause) {
+        const failure = new ConnectionIntegrityError(
+          "The Compute Optimizer export object binding is invalid",
+        );
+        (failure as { cause?: unknown }).cause = cause;
+        throw failure;
+      }
+      const attestation = await this.assumeAndValidateIdentity(
+        resolved,
+        `${jobId}-attest`,
+        computeOptimizerExportAttestationSessionPolicy,
+      );
+      await this.attestComputeOptimizerExportObjectRoleContract(
+        resolved,
+        attestation.credentials,
+        contracts,
+      );
+      sessionPolicy = () => computeOptimizerExportObjectSessionPolicy(
+        contract,
+        objectArn,
+        versionIdentity,
+      );
+    } else {
+      let launchContracts: readonly ComputeOptimizerExportLaunchContract[];
+      let launchContract: ComputeOptimizerExportLaunchContract;
+      try {
+        launchContracts = parseComputeOptimizerExportLaunchContracts(
+          resolved.connection.computeOptimizerExportLaunchContracts,
+          owner,
+        );
+        launchContract = resolveComputeOptimizerExportLaunchContract(
+          launchContracts,
+          owner,
+          request.contractId,
+          request.region,
+        );
+        versionIdentity = parseComputeOptimizerExportObjectVersionIdentity(request.versionIdentity);
+        objectArn = parseComputeOptimizerExportLaunchObjectAddress(
+          launchContract,
+          request.region,
+          request.bucket,
+          request.objectKey,
+          request.plannedJobId,
+        );
+      } catch (cause) {
+        const failure = new ConnectionIntegrityError(
+          "The Compute Optimizer launch object binding is invalid",
+        );
+        (failure as { cause?: unknown }).cause = cause;
+        throw failure;
+      }
+      const attestation = await this.assumeAndValidateIdentity(
+        resolved,
+        `${jobId}-attest`,
+        computeOptimizerExportAttestationSessionPolicy,
+      );
+      await this.attestFinopsRoleContract(
+        resolved,
+        attestation.credentials,
+        undefined,
+        undefined,
+        undefined,
+        launchContracts,
+      );
+      sessionPolicy = () => computeOptimizerExportLaunchObjectSessionPolicy(
+        launchContract,
+        objectArn,
+        versionIdentity,
+      );
+    }
+    const objectSessionDiscriminator = createHash("sha256")
+      .update(objectArn, "utf8")
+      .update("\0", "utf8")
+      .update(versionIdentity.kind, "utf8")
+      .update("\0", "utf8")
+      .update(versionIdentity.versionId ?? "CURRENT", "utf8")
+      .digest("hex")
+      .slice(0, 16);
+    return this.assumeAndValidateIdentity(
+      resolved,
+      `${jobId}-object-${objectSessionDiscriminator}`,
+      sessionPolicy,
+    );
   }
 
   /**
@@ -785,6 +2788,370 @@ export class AwsRoleBroker {
     }
   }
 
+  private async attestFinopsRoleContract(
+    resolved: ResolvedConnection,
+    credentials: AwsTemporaryCredentials,
+    suppliedFoundationalContracts?: readonly FoundationalFinopsAddOnContract[],
+    suppliedSourceContracts?: readonly FinopsSourceContract[],
+    suppliedObjectContracts?: readonly ComputeOptimizerExportObjectContract[],
+    suppliedLaunchContracts?: readonly ComputeOptimizerExportLaunchContract[],
+    suppliedPermissionPackVersion?:
+      | typeof FINOPS_PERMISSION_PACK_VERSION
+      | typeof ORGANIZATION_FINOPS_PACK_VERSION
+      | typeof ADVANCED_FINOPS_PACK_VERSION
+      | typeof COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+      | typeof COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+      | typeof EXTENDED_SUPPORT_PACK_VERSION
+      | typeof AWS_SUPPORT_CASES_PACK_VERSION
+      | typeof AWS_HEALTH_PACK_VERSION
+      | typeof RESILIENCE_VUE_PACK_VERSION
+      | typeof DCF_STEP_FUNCTIONS_PACK_VERSION
+      | typeof END_USER_COMPUTING_PACK_VERSION
+      | typeof GRAVITON_SAVINGS_PACK_VERSION,
+    signal?: AbortSignal,
+    suppliedDcfStateMachineArns?: readonly string[],
+  ): Promise<void> {
+    try {
+      assertActiveProvisioningSignal(signal);
+      const permissionPackVersion = suppliedPermissionPackVersion
+        ?? resolved.connection.permissionPackVersion;
+      if (
+        permissionPackVersion !== FINOPS_PERMISSION_PACK_VERSION
+        && permissionPackVersion !== ORGANIZATION_FINOPS_PACK_VERSION
+        && permissionPackVersion !== ADVANCED_FINOPS_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_OBJECT_PACK_VERSION
+        && permissionPackVersion !== COMPUTE_OPTIMIZER_LAUNCH_PACK_VERSION
+        && permissionPackVersion !== EXTENDED_SUPPORT_PACK_VERSION
+        && permissionPackVersion !== AWS_SUPPORT_CASES_PACK_VERSION
+        && permissionPackVersion !== AWS_HEALTH_PACK_VERSION
+        && permissionPackVersion !== RESILIENCE_VUE_PACK_VERSION
+        && permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION
+      ) throw new Error("unexpected FinOps permission pack");
+      if ((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+          || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+        && suppliedDcfStateMachineArns !== undefined) {
+        exactDcfPermissionResources(suppliedDcfStateMachineArns);
+      } else if (permissionPackVersion !== DCF_STEP_FUNCTIONS_PACK_VERSION
+        && permissionPackVersion !== END_USER_COMPUTING_PACK_VERSION
+        && permissionPackVersion !== GRAVITON_SAVINGS_PACK_VERSION
+        && suppliedDcfStateMachineArns !== undefined) {
+        throw new Error("DCF state-machine scope is unexpected");
+      }
+      const expectedPrincipal = parseIamRoleArn(this.dependencies.expectedPrincipalArn);
+      if (expectedPrincipal.partition !== resolved.parsedRoleArn.partition) {
+        throw new Error("principal partition mismatch");
+      }
+      assertActiveProvisioningSignal(signal);
+      const client = this.dependencies.roleContractClientFactory(credentials);
+      const owner = {
+        tenantId: resolved.connection.tenantId,
+        connectionId: resolved.connection.connectionId,
+        expectedAccountId: resolved.connection.expectedAccountId,
+        partition: resolved.parsedRoleArn.partition,
+      } as const;
+      const contracts = suppliedFoundationalContracts ??
+        (resolved.connection.foundationalFinopsContracts === undefined
+          ? []
+          : parseFoundationalFinopsContracts(
+              resolved.connection.foundationalFinopsContracts,
+              owner,
+            ));
+      const sourceContracts = suppliedSourceContracts ??
+        (resolved.connection.finopsSourceContracts === undefined
+          ? []
+          : parseFinopsSourceContracts(
+              resolved.connection.finopsSourceContracts,
+              owner,
+            ));
+      const objectContracts = suppliedObjectContracts ??
+        (resolved.connection.computeOptimizerExportObjectContracts === undefined
+          ? []
+          : parseComputeOptimizerExportObjectContracts(
+              resolved.connection.computeOptimizerExportObjectContracts,
+              owner,
+            ));
+      const launchContracts = suppliedLaunchContracts ??
+        (resolved.connection.computeOptimizerExportLaunchContracts === undefined
+          ? []
+          : parseComputeOptimizerExportLaunchContracts(
+              resolved.connection.computeOptimizerExportLaunchContracts,
+              owner,
+            ));
+      const role = await awaitWithActiveProvisioningSignal(
+        signal,
+        () => client.getRole(resolved.parsedRoleArn.roleName),
+      );
+      assertExpectedRole(
+        role,
+        resolved,
+        expectedPrincipal.arn,
+        permissionPackVersion,
+      );
+      if (sourceContracts.some((contract) =>
+        !permissionPackSupportsSource(permissionPackVersion, contract.sourceId)
+      )) throw new Error("FinOps source is not provisioned by this permission pack");
+      const attachedPolicies = await allAttachedManagedPolicies(
+        client,
+        resolved.parsedRoleArn.roleName,
+        signal,
+      );
+      if (attachedPolicies.length !== 0) {
+        throw new Error("attached managed policies are prohibited");
+      }
+      const policyNames = await allInlinePolicyNames(
+        client,
+        resolved.parsedRoleArn.roleName,
+        signal,
+      );
+      const expectedPolicyNames = [...new Set([
+        EXPECTED_POLICY_NAME,
+        ...contracts.map(({ policyName }) => policyName),
+        ...sourceContracts.flatMap(({ policyName }) =>
+          policyName === null ? [] : [policyName]
+        ),
+        ...objectContracts.map(({ policyName }) => policyName),
+        ...launchContracts.map(({ policyName }) => policyName),
+        ...(permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+            || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? [EXTENDED_SUPPORT_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+            || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? [AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === AWS_HEALTH_PACK_VERSION
+            || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? [AWS_HEALTH_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+            || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? [RESILIENCE_VUE_PERMISSION_POLICY_NAME]
+          : []),
+        ...((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+            || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+          ? [DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME]
+          : []),
+        ...((permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+            || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+          ? [END_USER_COMPUTING_PERMISSION_POLICY_NAME]
+          : []),
+        ...(permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION
+          ? [GRAVITON_SAVINGS_PERMISSION_POLICY_NAME] : []),
+      ])];
+      if (!sameStringSet(policyNames, expectedPolicyNames)) {
+        throw new Error("unexpected inline policy set");
+      }
+      const basePolicy = await awaitWithActiveProvisioningSignal(
+        signal,
+        () => client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,
+          EXPECTED_POLICY_NAME,
+        ),
+      );
+      assertExpectedPermissionPolicy(
+        basePolicy.policyDocument,
+        resolved.connection.roleArn,
+        resolved.roleProvisioningMode,
+        permissionPackVersion,
+        actionsForFinopsSourceContracts(sourceContracts),
+      );
+      if (permissionPackVersion === EXTENDED_SUPPORT_PACK_VERSION
+        || permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+        || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            EXTENDED_SUPPORT_POLICY_NAME,
+          ),
+        );
+        assertExtendedSupportProjectionPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === AWS_SUPPORT_CASES_PACK_VERSION
+        || permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+        || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            AWS_SUPPORT_CASES_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertAwsSupportCasesPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === AWS_HEALTH_PACK_VERSION
+        || permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+        || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            AWS_HEALTH_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertAwsHealthPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === RESILIENCE_VUE_PACK_VERSION
+        || permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+        || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+        || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            RESILIENCE_VUE_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertResilienceVuePolicy(policy.policyDocument);
+      }
+      if ((permissionPackVersion === DCF_STEP_FUNCTIONS_PACK_VERSION
+          || permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+          || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION)
+        && suppliedDcfStateMachineArns !== undefined) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            DCF_STEP_FUNCTIONS_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertDcfStepFunctionsPolicy(
+          policy.policyDocument,
+          suppliedDcfStateMachineArns,
+        );
+      }
+      if (permissionPackVersion === END_USER_COMPUTING_PACK_VERSION
+        || permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            END_USER_COMPUTING_PERMISSION_POLICY_NAME,
+          ),
+        );
+        assertEndUserComputingPolicy(policy.policyDocument);
+      }
+      if (permissionPackVersion === GRAVITON_SAVINGS_PACK_VERSION) {
+        const policy=await awaitWithActiveProvisioningSignal(signal,()=>client.getRolePolicy(
+          resolved.parsedRoleArn.roleName,GRAVITON_SAVINGS_PERMISSION_POLICY_NAME));
+        assertGravitonSavingsPolicy(policy.policyDocument);
+      }
+      for (const contract of contracts) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
+        );
+        assertFoundationalFinopsPolicy(
+          policy.policyDocument,
+          contract,
+          resolved.parsedRoleArn.partition,
+        );
+      }
+      for (const contract of sourceContracts) {
+        if (contract.policyName === null) continue;
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName as string,
+          ),
+        );
+        assertFinopsSourcePolicy(policy.policyDocument, contract);
+      }
+      for (const contract of objectContracts) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
+        );
+        assertComputeOptimizerExportObjectPolicy(policy.policyDocument, contract);
+      }
+      for (const contract of launchContracts) {
+        const policy = await awaitWithActiveProvisioningSignal(
+          signal,
+          () => client.getRolePolicy(
+            resolved.parsedRoleArn.roleName,
+            contract.policyName,
+          ),
+        );
+        assertComputeOptimizerExportLaunchPolicy(policy.policyDocument, contract);
+      }
+    } catch (reason) {
+      const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
+      (failure as { cause?: unknown }).cause = reason;
+      throw failure;
+    }
+  }
+
+  private async attestComputeOptimizerExportObjectRoleContract(
+    resolved: ResolvedConnection,
+    credentials: AwsTemporaryCredentials,
+    objectContracts: readonly ComputeOptimizerExportObjectContract[],
+  ): Promise<void> {
+    const owner = {
+      tenantId: resolved.connection.tenantId,
+      connectionId: resolved.connection.connectionId,
+      expectedAccountId: resolved.connection.expectedAccountId,
+      partition: resolved.parsedRoleArn.partition,
+    } as const;
+    let foundationalContracts: readonly FoundationalFinopsAddOnContract[];
+    let sourceContracts: readonly FinopsSourceContract[];
+    try {
+      foundationalContracts = resolved.connection.foundationalFinopsContracts === undefined
+        ? []
+        : parseFoundationalFinopsContracts(
+            resolved.connection.foundationalFinopsContracts,
+            owner,
+          );
+      sourceContracts = resolved.connection.finopsSourceContracts === undefined
+        ? []
+        : parseFinopsSourceContracts(resolved.connection.finopsSourceContracts, owner);
+    } catch (reason) {
+      const failure = new UnsafeTrustPolicyError("ROLE_CONTRACT");
+      (failure as { cause?: unknown }).cause = reason;
+      throw failure;
+    }
+    await this.attestFinopsRoleContract(
+      resolved,
+      credentials,
+      foundationalContracts,
+      sourceContracts,
+      objectContracts,
+    );
+  }
+
   private async resolveConnection(
     scope: ConnectionScope,
     connectionId: string,
@@ -882,11 +3249,14 @@ export class AwsRoleBroker {
      * default stays the narrow one.
      */
     sessionPolicy: (roleArn: string) => string = readonlyMetadataSessionPolicy,
+    provisioningSignal?: AbortSignal,
   ): Promise<ValidatedRoleSession> {
+    assertActiveProvisioningSignal(provisioningSignal);
     const roleSessionName = sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix);
     const policy = sessionPolicy(resolved.connection.roleArn);
     let output;
 
+    assertActiveProvisioningSignal(provisioningSignal);
     try {
       output = await this.dependencies.assumeRoleClient.send(
         new AssumeRoleCommand({
@@ -904,16 +3274,19 @@ export class AwsRoleBroker {
       }
       throw new AssumeRoleFailedError(name);
     }
+    assertActiveProvisioningSignal(provisioningSignal);
 
     const credentials = parseTemporaryCredentials(output.Credentials, this.now());
     const identityClient = this.dependencies.callerIdentityClientFactory(credentials);
     let identity;
 
+    assertActiveProvisioningSignal(provisioningSignal);
     try {
       identity = await identityClient.send(new GetCallerIdentityCommand({}));
     } catch (error: unknown) {
       throw new CallerIdentityFailedError(errorName(error));
     }
+    assertActiveProvisioningSignal(provisioningSignal);
 
     const callerIdentityArn = identity.Arn;
     if (

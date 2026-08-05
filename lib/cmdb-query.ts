@@ -1,4 +1,4 @@
-import type { JsonValue } from "./pilot-types";
+import type { JsonValue, ResourceLifecycleState } from "./pilot-types";
 
 /**
  * Pure, deterministic CMDB query engine.
@@ -21,6 +21,11 @@ export interface CmdbQueryResource {
   readonly nativeId: string;
   readonly tags: Readonly<Record<string, string>>;
   readonly configuration: JsonValue;
+  readonly lifecycleState?: ResourceLifecycleState;
+  readonly consecutiveCompleteMisses?: number;
+  readonly evidenceSnapshotId?: string;
+  readonly evidenceSnapshotSha256?: string;
+  readonly contentSha256?: string;
 }
 
 export type CmdbScalarField =

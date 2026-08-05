@@ -61,6 +61,43 @@ test("0052 connection-scoped enqueue binds the job to its tenant connection", as
   });
 });
 
+test("connection-scoped idempotency returns one durable job and rejects key substitution", async () => {
+  await withDatabase(async (repository) => {
+    const input = {
+      orgId: ORG_A,
+      customerId: CUSTOMER_A,
+      connectionId: CONN_A,
+      kind: "finops.data-export.ingest",
+      payload: { manifestSha256: "a".repeat(64) },
+      maxAttempts: 6,
+      idempotencyKey: `finops-data-export:${"b".repeat(64)}`,
+    };
+    const first = await repository.enqueue(input, 1_000);
+    const duplicate = await repository.enqueue(input, 2_000);
+    assert.equal(duplicate.id, first.id);
+    assert.equal(duplicate.createdAt, first.createdAt);
+    assert.match(first.id, /^job_[a-f0-9]{32}$/u);
+
+    const otherTenant = await repository.enqueue({
+      ...input,
+      orgId: ORG_B,
+      customerId: CUSTOMER_B,
+      connectionId: CONN_B,
+    }, 2_000);
+    assert.notEqual(otherTenant.id, first.id);
+
+    await assert.rejects(
+      repository.enqueue(
+        { ...input, payload: { manifestSha256: "c".repeat(64) } },
+        3_000,
+      ),
+      (error) =>
+        error instanceof JobQueueRepositoryError
+        && error.code === "INVALID_STATE",
+    );
+  });
+});
+
 test("0052 rejects enqueuing against a connection owned by another tenant", async () => {
   await withDatabase(async (repository) => {
     // Connection A belongs to ORG_A; ORG_B must never be able to schedule work on it.

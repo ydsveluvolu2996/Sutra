@@ -293,7 +293,7 @@ export async function deliverContactSubmission(
   recipient: string,
   payload: ContactDeliveryPayload,
   env: ContactDeliveryEnv,
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl?: typeof fetch,
 ): Promise<ContactDeliveryResult> {
   const request = buildProviderRequest(env, recipient, payload);
 
@@ -323,7 +323,7 @@ export async function deliverContactSubmission(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DELIVERY_TIMEOUT_MS);
   try {
-    const response = await fetchImpl(request.url, {
+    const response = await (fetchImpl ?? fetch)(request.url, {
       method: "POST",
       redirect: "error",
       headers: { "content-type": "application/json; charset=utf-8", ...request.headers },

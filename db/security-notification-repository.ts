@@ -18,6 +18,7 @@ const DESTINATION_ID = /^ndest_[a-f0-9]{32}$/u;
 const JOB_ID = /^njob_[a-f0-9]{32}$/u;
 const IDEMPOTENCY_KEY = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{7,127}$/u;
 const HASH = /^[a-f0-9]{64}$/u;
+const DELIVERY_ID = /^notify_[a-f0-9]{48}$/u;
 
 interface DestinationRow {
   id: string;
@@ -370,24 +371,41 @@ export class SecurityNotificationRepository {
   public async finish(
     jobId: string,
     leaseToken: string,
-    status: Extract<NotificationOutboxStatus, "delivered" | "retry_scheduled" | "dead_letter" | "not_configured">,
+    status: Extract<
+      NotificationOutboxStatus,
+      | "provider_accepted"
+      | "delivered"
+      | "delivery_failed"
+      | "retry_scheduled"
+      | "dead_letter"
+      | "not_configured"
+    >,
     errorCode: string | null,
     nextAttemptAt: number | null,
+    providerDeliveryId: string | null = null,
   ): Promise<void> {
     if (
       !JOB_ID.test(jobId) ||
       !/^nlease_[a-f0-9]{32}$/u.test(leaseToken) ||
-      (errorCode !== null && !/^[A-Z][A-Z0-9_]{2,63}$/u.test(errorCode))
+      (errorCode !== null && !/^[A-Z][A-Z0-9_]{2,63}$/u.test(errorCode)) ||
+      (
+        providerDeliveryId !== null &&
+        (status !== "provider_accepted" || !DELIVERY_ID.test(providerDeliveryId))
+      ) ||
+      (status === "provider_accepted" && providerDeliveryId === null)
     ) invalid();
     const now = Date.now();
     const result = await (await this.ready()).prepare(
       `UPDATE security_notification_outbox SET
          status = ?, next_attempt_at = ?, last_error_code = ?,
          lease_token = NULL, lease_expires_at = NULL, updated_at = ?,
-         delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END
+         delivered_at = CASE WHEN ? = 'delivered' THEN ? ELSE delivered_at END,
+         ses_delivery_id = COALESCE(?, ses_delivery_id),
+         ses_accepted_at = CASE WHEN ? = 'provider_accepted' THEN ? ELSE ses_accepted_at END
        WHERE id = ? AND lease_token = ? AND status = 'processing'`,
     ).bind(
-      status, nextAttemptAt ?? now, errorCode, now, status, now, jobId, leaseToken,
+      status, nextAttemptAt ?? now, errorCode, now, status, now,
+      providerDeliveryId, status, now, jobId, leaseToken,
     ).run();
     if (Number(result.meta?.changes ?? 0) !== 1) {
       throw new SecurityNotificationRepositoryError("PERSISTENCE_FAILED");

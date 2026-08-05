@@ -15,6 +15,8 @@ interface FalcoRuntimeWorkspaceResponse {
   })[];
 }
 
+const RUNTIME_EVENT_ANCHOR = /^runtime-event-frte_[a-f0-9]{48}$/u;
+
 function priorityTone(priority: FalcoInvestigationTimelineItem["priority"]): string {
   if (priority === "emergency" || priority === "alert" || priority === "critical") return "critical";
   if (priority === "error") return "high";
@@ -56,6 +58,21 @@ export function KubernetesRuntimeWorkspace({
     });
     return () => controller.abort();
   }, [clusterId, connectionId]);
+
+  // The timeline arrives after the document's initial hash navigation. Resolve
+  // a bounded runtime-event anchor once evidence has rendered so links from
+  // notifications reach the exact retained event instead of only the page top.
+  useEffect(() => {
+    if (workspace === null) return;
+    const anchor = window.location.hash.slice(1);
+    if (!RUNTIME_EVENT_ANCHOR.test(anchor)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const event = document.getElementById(anchor);
+      event?.scrollIntoView({ behavior: "smooth", block: "center" });
+      event?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [workspace]);
 
   if (connectionId === null || clusterId === null) {
     return <section className="empty-workspace compact-empty"><span className="empty-workspace-icon">RT</span><h2>No registered cluster</h2><p>Register a customer-scoped Kubernetes cluster before configuring runtime evidence.</p></section>;
@@ -117,7 +134,7 @@ export function KubernetesRuntimeWorkspace({
     {caseNotice !== null ? <div className="page-alert" role="status"><strong>Runtime case created</strong><span>{caseNotice}</span></div> : null}
     <div className="trust-strip" role="note"><span className="trust-icon">R</span><span><strong>Runtime evidence boundary.</strong> Sutra retains normalized Falco rule and workload context, not raw output, environment values, command lines, file contents or arbitrary event fields.</span></div>
     <div className="kubernetes-finding-rows">
-      {workspace.timeline.map((item) => <article key={item.id}>
+      {workspace.timeline.map((item) => <article id={`runtime-event-${item.id}`} key={item.id} tabIndex={-1}>
         <span className={`severity-badge severity-${priorityTone(item.priority)}`}>{item.priority}</span>
         <div><strong>{item.title}</strong><small>{item.subject} · {formatTimestamp(item.occurredAt)}</small></div>
         <p>Evidence {item.evidenceSha256}</p>
@@ -132,7 +149,7 @@ export function KubernetesRuntimeWorkspace({
         </details> : null}
         {item.caseId === null
           ? <button className="button button-secondary button-small" disabled={caseBusy !== null} onClick={() => void createCase(item)} type="button">{caseBusy === item.id ? "Creating…" : "Create case"}</button>
-          : <span className="status-pill status-positive">{item.caseNumber ?? "Case created"}</span>}
+          : <a className="status-pill status-positive" href={`/kubernetes/runtime?connectionId=${encodeURIComponent(connectionId)}#runtime-event-${encodeURIComponent(item.id)}`}>{item.caseNumber ?? "Case created"}</a>}
       </article>)}
       {workspace.timeline.length === 0 ? <div className="empty-state"><strong>Sensor active; no runtime event retained</strong><span>This statement is bounded to the signed ingestion window and does not prove threats are absent.</span></div> : null}
     </div>

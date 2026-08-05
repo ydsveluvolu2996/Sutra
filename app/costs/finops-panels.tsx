@@ -432,7 +432,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       if (!connectionId) throw new Error("No connection selected.");
       if (reportDraft.name.trim().length === 0) throw new Error("Give the report a name.");
       if (reportDraft.deliveryTarget.trim().length === 0) {
-        throw new Error(reportDraft.deliveryKind === "email" ? "Enter a recipient email." : "Enter an HTTPS webhook URL.");
+        throw new Error(reportDraft.deliveryKind === "email" ? "Enter a recipient email." : "Enter a Jira Cloud Automation or ServiceNow webhook URL.");
       }
       await requestJson(`/api/v1/finops/reports?connectionId=${encodeURIComponent(connectionId)}`, {
         method: "POST",
@@ -812,7 +812,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
       </section>
 
       <section className="panel" aria-label="Scheduled cost reports">
-        <div className="panel-heading"><div><h2>Scheduled cost reports</h2><p>Email or webhook a cost summary for this connection on a weekly or monthly cadence. Delivery uses your configured transport; a report is marked delivered only on a 2xx response — never faked.</p></div></div>
+        <div className="panel-heading"><div><h2>Scheduled cost reports</h2><p>Email or send a cost summary to a provider-bounded Jira Cloud Automation or ServiceNow webhook on a weekly or monthly cadence. Delivery is marked complete only on a 2xx response.</p></div></div>
         <div className="cmdbq-row">
           <input aria-label="Report name" placeholder="report name" value={reportDraft.name} onChange={(event) => setReportDraft((draft) => ({ ...draft, name: event.target.value }))} />
           <select aria-label="Cadence" value={reportDraft.cadence} onChange={(event) => setReportDraft((draft) => ({ ...draft, cadence: event.target.value }))}>
@@ -821,7 +821,7 @@ export function FinopsPanels({ connectionId }: { connectionId: string | null }) 
           <select aria-label="Delivery kind" value={reportDraft.deliveryKind} onChange={(event) => setReportDraft((draft) => ({ ...draft, deliveryKind: event.target.value }))}>
             <option value="email">Email</option><option value="webhook">Webhook</option>
           </select>
-          <input aria-label="Delivery target" placeholder={reportDraft.deliveryKind === "email" ? "recipient email" : "https://webhook-url"} value={reportDraft.deliveryTarget} onChange={(event) => setReportDraft((draft) => ({ ...draft, deliveryTarget: event.target.value }))} />
+          <input aria-label="Delivery target" placeholder={reportDraft.deliveryKind === "email" ? "recipient email" : "Jira Automation or ServiceNow HTTPS webhook"} value={reportDraft.deliveryTarget} onChange={(event) => setReportDraft((draft) => ({ ...draft, deliveryTarget: event.target.value }))} />
           <button type="button" className="button button-primary" onClick={() => void saveReport()}>Add schedule</button>
         </div>
         {reportError ? <p className="cmdbq-error" role="alert">{reportError}</p> : null}

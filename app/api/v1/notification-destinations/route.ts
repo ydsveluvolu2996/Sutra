@@ -6,10 +6,17 @@ import {
   normalizeNotificationDestinationConfig,
 } from "../../../../lib/notification-destination-boundary";
 import { appendAuditEvent } from "../../../../db/pilot-repository";
-import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
+import {
+  assertSessionCapability,
+  requiredConfiguredPublicOrigin,
+  requireApiSession,
+} from "../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../lib/aws-pilot-security";
 import type { NotificationDestinationConfig } from "../../../../lib/notification-destination-types";
-import { assessNotificationDeliveryHealth } from "../../../../lib/notification-delivery-health";
+import {
+  assessNotificationDeliveryHealth,
+  withObservedNotificationReadiness,
+} from "../../../../lib/notification-delivery-health";
 import {
   buildSecurityNotificationPayloads,
   normalizeSecurityNotificationEvent,
@@ -95,19 +102,18 @@ export async function GET(request: Request): Promise<Response> {
       repository.listJobs(authenticated.subject.orgId, scopedCustomerId),
     ]);
     const workerConfigured = process.env.SUTRA_NOTIFICATION_WORKER_CONFIGURED === "true";
-    const destinations = storedDestinations.map((destination) => ({
-      ...destination,
-      deliveryReadiness: workerConfigured
-        ? "configured" as const
-        : "adapter_not_configured" as const,
-    }));
+    const destinations = withObservedNotificationReadiness(
+      storedDestinations,
+      jobs,
+      workerConfigured,
+    );
     return jsonResponse({
       destinations,
       jobs,
       worker: {
         configured: workerConfigured,
         message: workerConfigured
-          ? "The notification worker is configured. Delivery outcomes remain visible in the durable outbox."
+          ? "The notification worker is configured. Each destination remains blocked until a successful delivery is observed for its current configuration."
           : "Delivery remains queued until the notification worker receives managed-secret and workload-IAM adapters.",
       },
       health: assessNotificationDeliveryHealth({
@@ -189,7 +195,7 @@ export async function POST(request: Request): Promise<Response> {
         throw Object.assign(new Error("Notification destination not found"), { code: "NOT_FOUND" });
       }
       const eventId = `notify_${crypto.randomUUID().replaceAll("-", "")}${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
-      const publicOrigin = "https://app.sutracmdb.com";
+      const publicOrigin = requiredConfiguredPublicOrigin();
       const event = normalizeSecurityNotificationEvent({
         eventId,
         orgId: authenticated.subject.orgId,

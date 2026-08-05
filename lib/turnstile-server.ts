@@ -2,6 +2,11 @@ import type {
   TurnstileAction,
   TurnstileClientConfiguration,
 } from "./turnstile-contract";
+import {
+  ManagedOutboundClientConfigurationError,
+  productionOutboundFetch,
+  type ManagedOutboundEnvironment,
+} from "./managed-outbound-fetch.ts";
 
 const SITEVERIFY_URL =
   "https://challenges.cloudflare.com/turnstile/v0/siteverify";
@@ -31,7 +36,7 @@ const CLOUDFLARE_TEST_SECRET_KEYS = new Set([
   "3x0000000000000000000000000000000AA",
 ]);
 
-export interface TurnstileEnvironment {
+export interface TurnstileEnvironment extends ManagedOutboundEnvironment {
   readonly SUTRA_DEPLOYMENT_ENV?: string;
   readonly SUTRA_LOCAL_MODE?: string;
   readonly SUTRA_PUBLIC_ORIGIN?: string;
@@ -39,6 +44,35 @@ export interface TurnstileEnvironment {
   readonly SUTRA_TURNSTILE_SITE_KEY?: string;
   readonly SUTRA_TURNSTILE_SECRET_KEY?: string;
   readonly SUTRA_TURNSTILE_DEV_BYPASS?: string;
+}
+
+async function stableTurnstileIdempotency(
+  token: string,
+  action: TurnstileAction,
+  hostname: string,
+): Promise<{ readonly provider: string; readonly gateway: string }> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(
+        `sutra.turnstile.v1\u0000${action}\u0000${hostname}\u0000${token}`,
+      ),
+    ),
+  );
+  const hex = [...digest]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  // Siteverify documents its body idempotency value as a UUID. The stable
+  // digest makes a retry in a new process resolve to the same provider and
+  // gateway operation without putting the one-time token into either key.
+  const provider = [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    `5${hex.slice(13, 16)}`,
+    `8${hex.slice(17, 20)}`,
+    hex.slice(20, 32),
+  ].join("-");
+  return { provider, gateway: `sutra-turnstile-${hex}` };
 }
 
 type TurnstileErrorCode =
@@ -368,23 +402,32 @@ export async function verifyTurnstileToken(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   let responseText: string | undefined;
   try {
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = await stableTurnstileIdempotency(
+      token,
+      action,
+      resolved.expectedHostname,
+    );
+    const outboundFetch = productionOutboundFetch(
+      environment,
+      options.fetch,
+    );
     for (let attempt = 0; attempt < MAX_SITEVERIFY_ATTEMPTS; attempt += 1) {
       let response: Response;
       try {
         response = await abortable(
-          (options.fetch ?? fetch)(SITEVERIFY_URL, {
+          outboundFetch(SITEVERIFY_URL, {
             method: "POST",
             headers: {
               accept: "application/json",
               "content-type": "application/x-www-form-urlencoded",
+              "idempotency-key": idempotencyKey.gateway,
             },
             body: new URLSearchParams({
               secret: resolved.secretKey,
               response: token,
               // Cloudflare uses this key to make retries of a single-use token
               // safe. It must remain identical across both attempts.
-              idempotency_key: idempotencyKey,
+              idempotency_key: idempotencyKey.provider,
             }),
             signal: controller.signal,
           }),
@@ -427,6 +470,9 @@ export async function verifyTurnstileToken(
     if (responseText === undefined) unavailable();
   } catch (error) {
     if (error instanceof TurnstileVerificationError) throw error;
+    if (error instanceof ManagedOutboundClientConfigurationError) {
+      configurationError();
+    }
     unavailable();
   } finally {
     clearTimeout(timeout);

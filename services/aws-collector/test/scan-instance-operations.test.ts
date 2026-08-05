@@ -22,6 +22,7 @@ const SETTINGS: ScanInstanceSettings = {
   region: "ap-south-1",
   runId: "scan_01HXYZABCDEF",
 };
+const VOLUME_ID = "vol-0123456789abcdef0";
 
 const operations = (
   overrides: Partial<ScanInstanceSettings> = {},
@@ -38,13 +39,30 @@ const operations = (
  * the properties that keep that acceptable, asserted rather than assumed.
  */
 test("the user-data embeds no credentials and pipes the registry password", () => {
-  const script = buildScanUserData(SETTINGS, "/dev/sdf");
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
   assert.doesNotMatch(script, /AKIA|aws_secret_access_key|SecretAccessKey/iu, "no static credentials");
   assert.match(script, /get-login-password[\s\S]*--password-stdin/u, "the registry password is piped, never an argument");
 });
 
-test("the container gets SYS_ADMIN and no more — never --privileged", () => {
-  const script = buildScanUserData(SETTINGS, "/dev/sdf");
+test("the host resolves the exact EBS volume and grants only its selected device read-only", () => {
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
+  assert.match(script, /VOLUME_ID=vol-0123456789abcdef0/u);
+  assert.match(script, /VOLUME_SERIAL=vol0123456789abcdef0/u);
+  assert.match(script, /lsblk -dn -o PATH,TYPE,SERIAL/u);
+  assert.match(script, /serial == target/u);
+  assert.match(script, /publish_refusal TARGET_VOLUME_NOT_FOUND/u);
+  assert.match(script, /publish_refusal TARGET_VOLUME_AMBIGUOUS/u);
+  assert.match(script, /publish_refusal TARGET_VOLUME_PARTITIONS_AMBIGUOUS/u);
+  assert.match(script, /--device "\$SCAN_DEVICE":\/dev\/sutra-scan-device:r/u);
+  assert.match(script, /SUTRA_SCAN_DEVICE=\/dev\/sutra-scan-device/u);
+  assert.doesNotMatch(script, /-v \/dev:\/dev/u);
+  assert.doesNotMatch(script, /\/dev:\/dev/u);
+});
+
+test("the container gets only SYS_ADMIN, no network, and no privileged mode", () => {
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
+  assert.match(script, /--network none/u);
+  assert.match(script, /--cap-drop ALL/u);
   assert.match(script, /--cap-add SYS_ADMIN/u);
   assert.match(script, /--security-opt no-new-privileges/u);
   // Asserted against the docker invocation itself, not the whole file: the flag
@@ -56,7 +74,7 @@ test("the container gets SYS_ADMIN and no more — never --privileged", () => {
 });
 
 test("the instance shuts down on every path, including failure", () => {
-  const script = buildScanUserData(SETTINGS, "/dev/sdf");
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
   // Set as a trap on EXIT, so an early `exit 1` still halts and stops billing.
   assert.match(script, /trap 'shutdown -h now' EXIT/u);
   assert.ok(
@@ -65,12 +83,38 @@ test("the instance shuts down on every path, including failure", () => {
   );
 });
 
+test("the private runtime never installs packages from public repositories", () => {
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
+  assert.doesNotMatch(script, /\b(?:dnf|yum|apt-get)\s+install\b/u);
+  assert.match(script, /command -v docker/u);
+  assert.match(script, /command -v aws/u);
+  assert.match(script, /publish_refusal HOST_PREREQUISITES_MISSING/u);
+});
+
 test("a failure publishes a refusal, so no findings and a refusal never look alike", () => {
-  const script = buildScanUserData(SETTINGS, "/dev/sdf");
-  for (const code of ["DOCKER_UNAVAILABLE", "ECR_LOGIN_FAILED", "IMAGE_PULL_FAILED", "SCANNER_FAILED"]) {
+  const script = buildScanUserData(SETTINGS, VOLUME_ID);
+  for (const code of [
+    "TARGET_VOLUME_NOT_FOUND",
+    "TARGET_VOLUME_AMBIGUOUS",
+    "TARGET_VOLUME_PARTITIONS_AMBIGUOUS",
+    "TARGET_DEVICE_INVALID",
+    "HOST_PREREQUISITES_MISSING",
+    "DOCKER_UNAVAILABLE",
+    "ECR_LOGIN_FAILED",
+    "IMAGE_PULL_FAILED",
+    "SCANNER_FAILED",
+  ]) {
     assert.match(script, new RegExp(`publish_refusal ${code}`, "u"), `${code} must be published`);
   }
   assert.match(script, /refusal\.json/u);
+});
+
+test("an invalid EBS volume identity is refused before user-data is created", () => {
+  assert.throws(
+    () => buildScanUserData(SETTINGS, "/dev/sdf"),
+    (error: unknown) =>
+      error instanceof ScanInstanceOperationsError && error.code === "VOLUME_ID_INVALID",
+  );
 });
 
 test("the findings prefix is per-run, so one scan cannot read another's", () => {

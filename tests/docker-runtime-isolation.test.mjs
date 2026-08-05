@@ -42,6 +42,12 @@ test("PostgreSQL verification cannot restart or reuse the live demo Compose proj
   });
 });
 
+test("PostgreSQL 18 persists the versioned cluster root, not its legacy data subdirectory", () => {
+  assert.match(compose, /image: postgres:18\.\d+-alpine@sha256:[a-f0-9]{64}/u);
+  assert.match(compose, /sutra_postgres_data:\/var\/lib\/postgresql(?:\s|$)/u);
+  assert.doesNotMatch(compose, /sutra_postgres_data:\/var\/lib\/postgresql\/data(?:\s|$)/u);
+});
+
 test("Docker builders use the repository package-manager version", () => {
   for (const dockerfile of [rootDockerfile, notificationWorkerDockerfile]) {
     const match = dockerfile.match(/corepack prepare (pnpm@\d+\.\d+\.\d+) --activate/u);

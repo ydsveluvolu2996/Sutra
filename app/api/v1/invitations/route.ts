@@ -7,6 +7,7 @@ import {
   listIdentityInvitations,
   revokeIdentityInvitation,
 } from "../../../../db/identity-invitation-repository";
+import { LocalAuthError } from "../../../../db/auth-repository";
 import { authorizeMembershipManagementRequest, isHostedOidcRuntime } from "../../../../lib/api-auth";
 import {
   assertAuthMutation,
@@ -20,6 +21,10 @@ import {
   deliverInvitationEmail,
   type InvitationDeliveryEnv,
 } from "../../../../lib/invitation-delivery";
+import {
+  hostedIdentityProviderSummaries,
+  resolveHostedIdentityProviderIssuer,
+} from "../../../../lib/hosted-identity-provider-directory";
 import { jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +50,12 @@ function activationBase(requestUrl: string, configuredOrigin: string | undefined
 export async function GET(request: Request): Promise<Response> {
   try {
     const { actor, scope } = await authorizeMembershipManagementRequest(request);
-    return jsonResponse({ invitations: await listIdentityInvitations(actor.authenticated, scope) });
+    return jsonResponse({
+      invitations: await listIdentityInvitations(actor.authenticated, scope),
+      identityProviders: isHostedOidcRuntime()
+        ? hostedIdentityProviderSummaries(request)
+        : [],
+    });
   } catch (error) {
     return authErrorResponse(error);
   }
@@ -60,7 +70,7 @@ export async function POST(request: Request): Promise<Response> {
     const body = exactInputObject(
       await readAuthJson(request, 4 * 1024),
       ["email", "role", "scopeMode", "lifetimeHours"],
-      ["customerId", "allowedIssuer"],
+      ["customerId", "identityProvider"],
     );
     const role = boundedInputString(body.role, { label: "membership role", maximum: 32 }) as OrgRole;
     const scopeMode = boundedInputString(body.scopeMode, { label: "customer scope", maximum: 32 }) as ScopeMode;
@@ -71,12 +81,19 @@ export async function POST(request: Request): Promise<Response> {
       body.customerId === undefined || body.customerId === null
         ? null
         : boundedInputString(body.customerId, { label: "customer identifier", maximum: 128 });
-    // (LOW-2) OPTIONAL: pin the invitation to a specific OIDC issuer/provider so
-    // only an identity from that IdP can accept it. Absent => unpinned (unchanged).
-    const allowedIssuer =
-      body.allowedIssuer === undefined || body.allowedIssuer === null
-        ? null
-        : boundedInputString(body.allowedIssuer, { label: "sign-in provider issuer", maximum: 2048 });
+    // Federated invitations are always bound to one configured provider. The
+    // browser sends only its non-secret descriptor; the exact issuer is
+    // resolved from server configuration and can never be substituted by a
+    // client. Password/local invitations remain deliberately unpinned.
+    let allowedIssuer: string | null;
+    if (isHostedOidcRuntime()) {
+      allowedIssuer = resolveHostedIdentityProviderIssuer(request, body.identityProvider);
+    } else {
+      if (body.identityProvider !== undefined && body.identityProvider !== null) {
+        throw new LocalAuthError(400, "INVALID_INPUT", "Federated sign-in is not enabled");
+      }
+      allowedIssuer = null;
+    }
     const idempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
     const created = await createIdentityInvitationIdempotently(actor.authenticated, scope, {
       email: boundedInputString(body.email, { label: "email address", maximum: 254 }),
@@ -94,14 +111,14 @@ export async function POST(request: Request): Promise<Response> {
         activationUrlShownOnce: false,
       }, { headers: { "cache-control": "no-store" } });
     }
-    // The activation URL depends on how members authenticate. OIDC deployments
-    // hand the token to the federated sign-in start endpoint; local and
+    // The activation URL depends on how members authenticate. Federated
+    // deployments hand the token to the provider-selection login page; local and
     // managed-password deployments send the invitee to the set-password page.
     let invitationUrl: URL;
     const deliveryEnv = env as unknown as InvitationDeliveryEnv;
     const urlBase = activationBase(request.url, deliveryEnv.SUTRA_PUBLIC_ORIGIN);
     if (isHostedOidcRuntime()) {
-      invitationUrl = new URL("/api/auth/oidc/start", urlBase);
+      invitationUrl = new URL("/login", urlBase);
       invitationUrl.searchParams.set("invitation", created.token);
       invitationUrl.searchParams.set("returnTo", "/dashboard");
     } else {
@@ -119,6 +136,7 @@ export async function POST(request: Request): Promise<Response> {
       activationUrl: invitationUrl.toString(),
       expiresAt: created.invitation.expiresAt,
       role: created.invitation.role,
+      operationId: deliveryIdempotencyKey,
     }, deliveryEnv);
     let invitation = begun.invitation;
     try {

@@ -17,14 +17,11 @@
 // already in flight against the old template keep working. Only the new link is
 // broken by publishing late.
 //
-// Hash last changed 2026-07-28 by the SutraReadOnlyRole -> SutraCollectorRole
-// rename. Previous: 8257b9e9ba516795a3a75ca86ddca13199223f0b38fbd577797ffdd8d14eba98
-//
-// VERSION is deliberately NOT bumped: the permission contract itself is
-// unchanged (same actions, same deny), only the default role name moved. The
-// version labels the reviewed permission pack, not the file bytes.
-export const AWS_CUSTOMER_ROLE_TEMPLATE_VERSION = "standard-2026-07.3" as const;
+// Hash last changed 2026-07-30 when permission pack .4 added read-only Amazon
+// Bedrock guardrail, invocation-logging, and data-retention posture. Previous:
+// ca3ac48892789106beaab73acea225555ee3190e6d8cad581c7be0ad89a07d77
+export const AWS_CUSTOMER_ROLE_TEMPLATE_VERSION = "standard-2026-07.4" as const;
 export const AWS_CUSTOMER_ROLE_TEMPLATE_SHA256 =
-  "ca3ac48892789106beaab73acea225555ee3190e6d8cad581c7be0ad89a07d77" as const;
+  "1f08f008ab024bc9c440340340e7a7cfbad7ed394e6704c3df7173766f727fc8" as const;
 export const AWS_CUSTOMER_ROLE_TEMPLATE_PATH =
   "/sutra-customer-onboarding-role.yaml" as const;
