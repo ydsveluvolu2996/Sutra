@@ -13,15 +13,29 @@ overrides:
   undici: 7.29.0
   sharp: 0.35.0
   # GHSA-v2hh-gcrm-f6hx: fast-uri host confusion via literal backslash
-  # authority delimiter. Transitive via ajv (build toolchain). Patched in 3.1.4.
-  "fast-uri@>=3.0.0 <=3.1.3": 3.1.4
-  # CVE-2026-14257: brace-expansion ReDoS. Patched in 5.0.8. Range-scoped to the
+  # authority delimiter. Transitive via ajv (build toolchain). The advisory was
+  # re-scoped to include 3.1.4, so the fixed floor is now 3.1.5.
+  "fast-uri@>=3.0.0 <=3.1.4": 3.1.5
+  # brace-expansion denial of service, three advisories across two major lines.
+  # Both are dev/lint toolchain only; neither reaches the deployed app.
+  #
   # 5.x line (transitive via minimatch@10 in the eslint/typescript-eslint dev
-  # toolchain). The legacy 1.x line (minimatch@3, also eslint-only) is NOT forced
-  # here: brace-expansion 1.x exports a callable default (`module.exports =
-  # expand`) while 5.x exports a named `expand`, so minimatch@3's
-  # `require('brace-expansion')(...)` would throw. No 1.x patch release exists.
-  "brace-expansion@>=5.0.0 <=5.0.7": 5.0.8
+  # toolchain): the unbounded-intermediate-array advisory extends past 5.0.8, so
+  # the fixed floor is 5.0.9.
+  "brace-expansion@>=5.0.0 <=5.0.8": 5.0.9
+  # 1.x line (minimatch@3, also eslint-only). This was previously left unforced
+  # because no 1.x patch existed and cross-forcing to 5.x breaks the call site:
+  # 1.x exports a callable default (`module.exports = expand`) while 5.x exports
+  # a named `expand`, so minimatch@3's `require('brace-expansion')(...)` would
+  # throw. 1.1.18 now exists and fixes both 1.x advisories while staying on the
+  # callable-default API, so the incompatibility no longer applies and the line
+  # can be patched in place.
+  "brace-expansion@<1.1.18": 1.1.18
+  # GHSA-67mh-4wv8-2f99: the esbuild development server accepts requests from any
+  # origin and returns the response. Reached only through drizzle-kit's legacy
+  # @esbuild-kit/core-utils, which pins esbuild 0.18.20; patched in 0.24.3.
+  # Scoped to that one parent so the app's own esbuild is untouched.
+  "@esbuild-kit/core-utils>esbuild": ^0.25.12
 
 allowBuilds:
   esbuild: true
