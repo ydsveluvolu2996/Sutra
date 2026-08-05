@@ -54,6 +54,7 @@ import type {
 import type { FinopsSourceId } from "./finops-source-health";
 
 interface PilotRuntimeEnv {
+  readonly SUTRA_DEPLOYMENT_ENV?: string;
   readonly SUTRA_LOCAL_MODE?: string;
   readonly SUTRA_CONNECTION_ENCRYPTION_KEY?: string;
   readonly SUTRA_CONNECTION_KEY_VERSION?: string;
@@ -139,7 +140,15 @@ export function getPilotSecrets(): PilotSecrets {
     );
   }
   const parsedBrokerUrl = new URL(brokerUrl);
-  const local = config.SUTRA_LOCAL_MODE === "true";
+  const localSimulation = config.SUTRA_LOCAL_MODE === "true";
+  // The retained EC2 private beta is staging-only and keeps its live collector
+  // inside the app container on an unreachable-from-the-network loopback port.
+  // This does not enable local simulation or its fixture/auth routes. Managed
+  // production still has to use the external HTTPS asymmetric broker below.
+  const embeddedStagingBroker = !localSimulation
+    && config.SUTRA_DEPLOYMENT_ENV === "staging"
+    && brokerUrl === "http://127.0.0.1:8788";
+  const hmacBroker = localSimulation || embeddedStagingBroker;
   const validLocalUrl =
     parsedBrokerUrl.protocol === "http:" &&
     isLocalHostname(parsedBrokerUrl.hostname);
@@ -147,7 +156,7 @@ export function getPilotSecrets(): PilotSecrets {
     parsedBrokerUrl.protocol === "https:" &&
     !isLocalHostname(parsedBrokerUrl.hostname);
   if (
-    (local ? !validLocalUrl : !validHostedUrl) ||
+    (hmacBroker ? !validLocalUrl : !validHostedUrl) ||
     parsedBrokerUrl.username ||
     parsedBrokerUrl.password ||
     parsedBrokerUrl.pathname !== "/" ||
@@ -158,7 +167,7 @@ export function getPilotSecrets(): PilotSecrets {
   }
 
   let brokerAuthentication: PilotSecrets["brokerAuthentication"];
-  if (local) {
+  if (hmacBroker) {
     const sharedSecret = config.SUTRA_BROKER_SHARED_SECRET?.trim();
     if (!sharedSecret) {
       throw new PilotServerError(503, "PILOT_NOT_CONFIGURED", "Collector configuration is incomplete");

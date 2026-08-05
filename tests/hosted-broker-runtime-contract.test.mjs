@@ -19,6 +19,7 @@ const brokerServer = await readFile(
   new URL("../services/aws-collector/src/local-server.ts", import.meta.url),
   "utf8",
 );
+const pilotServer = await readFile(new URL("../lib/pilot-server.ts", import.meta.url), "utf8");
 const onboardingRoute = await readFile(
   new URL("../app/api/pilot/connections/route.ts", import.meta.url),
   "utf8",
@@ -64,4 +65,12 @@ test("hosted onboarding and live collection preserve authenticated org scope end
   assert.match(syncRoute, /createSyncRun\(connectionId, \{ orgId: actor\.orgId \}\)/u);
   assert.match(syncRoute, /persistSnapshot\([\s\S]*null, null, actor\.orgId, collected\.rawEvidenceBytes\)/u);
   assert.match(syncRoute, /failSyncRun\(runId, connectionId, actorId, safeReason, orgId\)/u);
+});
+
+test("single-node staging uses loopback HMAC without weakening managed production", () => {
+  assert.match(pilotServer, /config\.SUTRA_DEPLOYMENT_ENV === "staging"/u);
+  assert.match(pilotServer, /brokerUrl === "http:\/\/127\.0\.0\.1:8788"/u);
+  assert.match(pilotServer, /const hmacBroker = localSimulation \|\| embeddedStagingBroker/u);
+  assert.match(pilotServer, /const validHostedUrl =\s*\n\s*parsedBrokerUrl\.protocol === "https:"/u);
+  assert.match(pilotServer, /config\.SUTRA_BROKER_AUTH_MODE !== "asymmetric"/u);
 });
