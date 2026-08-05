@@ -122,6 +122,7 @@ services:
       SUTRA_ALLOW_LIVE_AWS: "true"
       SUTRA_COLLECTOR_PRINCIPAL_ARN: ${SUTRA_COLLECTOR_PRINCIPAL_ARN:?Set the exact EC2 instance-role ARN}
       SUTRA_BROKER_URL: http://127.0.0.1:8788
+      SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL: ${SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL:?Provision the dedicated AWS Support Cases evidence key in the ignored .sutra/docker.env}
       # Exact FinOps plan references are encrypted before persistence. Compose
       # must reject the release before creating any service when either half of
       # this operator-provisioned pair is absent; setup-local-pilot validates
