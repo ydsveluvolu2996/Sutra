@@ -232,6 +232,29 @@ require_indexable_response() {
   fi
 }
 
+# Cloudflare can return a 200 managed robots/sitemap shell for a few seconds
+# while a recreated named tunnel converges, before the origin body is appended.
+# Treat content as part of readiness and retry it with the same bounded public
+# fetch instead of either accepting the incomplete body or rolling back a
+# healthy release on the first transient 200 response.
+require_indexable_body_match() {
+  local path="$1" label="$2" match_mode="$3" expected="$4" failure_message="$5"
+  local content_attempt
+  for ((content_attempt = 1; content_attempt <= 3; content_attempt += 1)); do
+    case "$match_mode" in
+      line) grep -Fqx "$expected" "$PUBLIC_BODY" && return 0 ;;
+      contains) grep -Fq "$expected" "$PUBLIC_BODY" && return 0 ;;
+      *) die "Invalid public-body verification mode." ;;
+    esac
+    if (( content_attempt < 3 )); then
+      sleep 5
+      fetch_public "$path" "$label" 3
+      require_indexable_response "$path"
+    fi
+  done
+  die "$failure_message"
+}
+
 verify_public_release() {
   local apex_headers apex_location apex_status label path security_expected
   local security_well_known_body served_image turnstile_site_key
@@ -267,11 +290,15 @@ verify_public_release() {
     fetch_public "$path" "indexable-$label" 3
     require_indexable_response "$path"
     if [[ "$path" == "/robots.txt" ]]; then
-      grep -Fqx "Sitemap: $PUBLIC_ORIGIN/sitemap.xml" "$PUBLIC_BODY" || \
-        die "The public robots.txt does not advertise the canonical sitemap."
+      require_indexable_body_match \
+        "$path" "indexable-$label" line \
+        "Sitemap: $PUBLIC_ORIGIN/sitemap.xml" \
+        "The public robots.txt does not advertise the canonical sitemap."
     elif [[ "$path" == "/sitemap.xml" ]]; then
-      grep -Fq "<loc>$PUBLIC_ORIGIN/</loc>" "$PUBLIC_BODY" || \
-        die "The public sitemap does not contain the canonical site origin."
+      require_indexable_body_match \
+        "$path" "indexable-$label" contains \
+        "<loc>$PUBLIC_ORIGIN/</loc>" \
+        "The public sitemap does not contain the canonical site origin."
     fi
   done
 
