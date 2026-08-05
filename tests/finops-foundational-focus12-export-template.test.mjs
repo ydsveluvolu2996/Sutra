@@ -38,6 +38,49 @@ const publicDefault = await readFile(
   ),
   "utf8",
 );
+const immutableBaseline = await readFile(
+  new URL(
+    "../infrastructure/customer-onboarding-role-standard-2026-07.4.yaml",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+// The reads this add-on needs must be permitted by the base role's
+// DenyUnimplementedActions ceiling yet never granted by the base role itself.
+// Slicing the ceiling out is what distinguishes "permitted" from "granted".
+const ADD_ON_EXPORT_READS = [
+  "s3:ListBucket",
+  "s3:GetBucketLocation",
+  "s3:GetObject",
+  "s3:GetObjectAttributes",
+  "kms:Decrypt",
+  "bcm-data-exports:ListExports",
+  "bcm-data-exports:GetExport",
+];
+
+function splitDenyCeiling(templateText) {
+  const lines = templateText.split("\n");
+  const sid = lines.findIndex((line) =>
+    /^\s*-\s*Sid:\s*DenyUnimplementedActions\s*$/u.test(line),
+  );
+  assert.ok(sid >= 0, "the base role must carry a DenyUnimplementedActions ceiling");
+  const listStart = lines.findIndex(
+    (line, index) => index > sid && /^\s*NotAction:\s*$/u.test(line),
+  );
+  assert.ok(listStart > sid, "the ceiling must be expressed as a NotAction allowlist");
+  const indent = lines[listStart].search(/\S/u);
+  let end = listStart + 1;
+  while (end < lines.length) {
+    const line = lines[end];
+    if (line.trim() !== "" && line.search(/\S/u) <= indent) break;
+    end += 1;
+  }
+  return {
+    ceiling: lines.slice(listStart, end).join("\n"),
+    rest: [...lines.slice(0, listStart), ...lines.slice(end)].join("\n"),
+  };
+}
 
 const OFFICIAL_FOCUS_12_AWS_COLUMNS = [
   "AvailabilityZone",
@@ -153,8 +196,18 @@ test("the add-on is immutable, native, FOCUS 1.2-specific and source-only", () =
   assert.doesNotMatch(template, /Type: AWS::IAM::Role/u);
   assert.match(runbook, /does not publish the template/u);
   assert.match(runbook, /does not publish[\s\S]*update the default or[\s\S]*public onboarding template/u);
-  assert.match(currentDefault, /Value: standard-2026-07\.4/u);
-  assert.match(publicDefault, /Value: standard-2026-07\.4/u);
+  // Both deployable defaults advanced to standard-2026-08.12 together; the
+  // superseded standard-2026-07.4 bytes survive immutably beside them.
+  assert.match(currentDefault, /Value: standard-2026-08\.12/u);
+  assert.match(publicDefault, /Value: standard-2026-08\.12/u);
+  assert.match(immutableBaseline, /Value: standard-2026-07\.4/u);
+  for (const template of [currentDefault, publicDefault]) {
+    const { ceiling, rest } = splitDenyCeiling(template);
+    for (const action of ADD_ON_EXPORT_READS) {
+      assert.match(ceiling, new RegExp(`^\\s*-\\s*${action}\\s*$`, "mu"));
+      assert.doesNotMatch(rest, new RegExp(action, "u"));
+    }
+  }
 });
 
 test("the created or explicitly attested destination is dedicated, private and retained", () => {
