@@ -13,12 +13,13 @@ const successorPath = resolve(root, "infrastructure/customer-onboarding-role-sta
 const [priorSource, successorSource] = await Promise.all([
   readFile(priorPath, "utf8"), readFile(successorPath, "utf8"),
 ]);
-const [brokerSource, registrySource, localServerSource, hostedServerSource] =
+const [brokerSource, registrySource, localServerSource, hostedServerSource, ec2ComposeSource] =
   await Promise.all([
     readFile(resolve(root, "services/aws-collector/src/role-broker.ts"), "utf8"),
     readFile(resolve(root, "services/aws-collector/src/local-registry.ts"), "utf8"),
     readFile(resolve(root, "services/aws-collector/src/local-server.ts"), "utf8"),
     readFile(resolve(root, "services/aws-collector/src/hosted-server.ts"), "utf8"),
+    readFile(resolve(root, "deploy/ec2/compose.prod.yaml"), "utf8"),
   ]);
 const prior = parseYaml(priorSource, { json: false });
 const successor = parseYaml(successorSource, { json: false });
@@ -90,4 +91,8 @@ test(".8.7 is accepted and attested at every credential-owning collector boundar
   assert.match(localServerSource, /AWS_SUPPORT_CASES_PROVIDER_ROUTE/u);
   assert.match(localServerSource, /AWS_SUPPORT_CASES_RESPONSE_LIMIT/u);
   assert.match(hostedServerSource, /SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL/u);
+  assert.match(
+    ec2ComposeSource,
+    /SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL: \$\{SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL:\?Provision/u,
+  );
 });
