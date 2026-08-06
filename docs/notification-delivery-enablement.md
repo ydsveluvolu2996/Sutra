@@ -73,9 +73,10 @@ workflow implements.
 
 `deploy/ec2/compose.prod.yaml:279` reads
 `${SUTRA_NOTIFICATION_WORKER_IMAGE:-sutra-notification-worker:unavailable}`, and
-**nothing produces that image.** `.github/workflows/ec2-private-beta-release.yml`
+**nothing produces that image.** `.github/workflows/ec2-live-release.yml`
 builds exactly one image, from the root `Dockerfile`, into
-`APP_ECR_REPOSITORY: sutra/app` (`:19`, `:158`). The host is forbidden from
+`APP_ECR_REPOSITORY: sutra/app` (the `env:` block and the
+`Build and push an immutable scan candidate` step). The host is forbidden from
 building (15 GiB root volume; `up --no-build` in `sutra.service`).
 
 Verifiable check: `aws ecr describe-repositories --repository-names
@@ -90,7 +91,8 @@ To match the existing release convention exactly, a worker release must:
   encryption, and the same lifecycle policy as
   `deploy/ec2/ecr-lifecycle-policy.json` (keep 3 × `sha-` releases, expire
   `candidate-` after 1 day, untagged after 14) — the app release job asserts all
-  of these for `sutra/app` at `.github/workflows/ec2-private-beta-release.yml:109-129`;
+  of these for `sutra/app` at the `Verify account and immutable repository boundary` step of
+  `.github/workflows/ec2-live-release.yml`;
 - build from `services/notification-worker/Dockerfile` for `linux/amd64` with
   `--provenance=mode=max --sbom=true`;
 - push as `candidate-<sha40>-run-<runId>-<attempt>`, Trivy-scan the resolved
@@ -101,7 +103,7 @@ To match the existing release convention exactly, a worker release must:
 
 Note that the existing SSM release document (`Sutra-DeployImmutableRelease`)
 cannot deploy this image: the workflow's `ImageRef` is regex-pinned to
-`sutra/app` (`ec2-private-beta-release.yml:274`) and
+`sutra/app` (the `Deploy the exact digest through SSM` step of `ec2-live-release.yml`) and
 `deploy/ec2/release-update.sh:36` rejects any other repository. Therefore
 `SUTRA_NOTIFICATION_WORKER_IMAGE` is set once by hand in
 `deploy/ec2/.env.ec2` on the box. That is durable:
@@ -307,8 +309,8 @@ window.
 
 ### 3.4 `deploy/ec2/validate-ops.sh` — new regression gate
 
-Added an offline check (it runs in the release workflow at
-`ec2-private-beta-release.yml:89`) asserting that the committed template ships
+Added an offline check (it runs in the `Run bounded source and release gates` step of
+`ec2-live-release.yml`) asserting that the committed template ships
 `SUTRA_NOTIFICATIONS_ENABLED=false` and `COMPOSE_PROFILES=`, never their enabled
 forms, leaves `SUTRA_NOTIFICATION_WORKER_IMAGE` unset, keeps the Compose service
 profile-gated with the unpullable fallback image, and that `sutra.service`

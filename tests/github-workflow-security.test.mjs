@@ -329,6 +329,31 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /GITHUB_REF.+refs\/heads\/main/u);
   assert.match(workflow, /ref: \$\{\{ env\.RELEASE_SHA \}\}/u);
   assert.match(workflow, /git rev-parse HEAD.+RELEASE_SHA/u);
+  // Publish-before-ship is enforced, not remembered: an automated release must
+  // refuse to deploy an application whose pinned onboarding template was never
+  // published, because the customer quick-create link would 404.
+  const templateGateStart = workflow.indexOf(
+    "- name: Require the reviewed onboarding template to be published",
+  );
+  const oidcStart = workflow.indexOf(
+    "- name: Configure short-lived AWS credentials through GitHub OIDC",
+  );
+  assert.ok(templateGateStart > 0, "the release must gate on the published onboarding template");
+  assert.ok(
+    templateGateStart < oidcStart,
+    "the template gate must fail before credentials are assumed and any image is built",
+  );
+  const templateGate = workflow.slice(templateGateStart, oidcStart);
+  assert.match(templateGate, /vars\.SUTRA_TEMPLATE_BUCKET/u);
+  assert.match(templateGate, /templates\/\$\{version\}\/\$\{digest\}\.yaml/u);
+  assert.match(templateGate, /AWS_CUSTOMER_ROLE_TEMPLATE_VERSION/u);
+  assert.match(templateGate, /AWS_CUSTOMER_ROLE_TEMPLATE_SHA256/u);
+  // Existence alone is not proof: the published bytes must hash to the reviewed
+  // digest, and that digest must match the template committed at this revision.
+  assert.match(templateGate, /published_digest.+!=.+digest/u);
+  assert.match(templateGate, /committed_digest.+==.+digest/u);
+  assert.match(templateGate, /public\/sutra-customer-onboarding-role\.yaml/u);
+  assert.match(templateGate, /exit 1/u);
   assert.doesNotMatch(workflow, /GITHUB_REF_PROTECTED/u);
   assert.match(workflow, /id-token: write/u);
   assert.match(workflow, /allowed-account-ids:/u);
