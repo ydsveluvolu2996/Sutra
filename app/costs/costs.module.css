@@ -43,7 +43,13 @@
 .dashboardCatalogNavActive::before { width: 3px; align-self: stretch; margin: 0 0 0 -7px; border-radius: 99px; background: #0f766e; content: ""; }
 .dashboardCatalogDetail { min-width: 0; padding: 18px; }
 .capabilityShell { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.dashboardIdentity { display: flex; align-items: flex-start; gap: 13px; padding: 4px 2px 16px; }
+.dashboardIdentityIcon { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; }
+.dashboardIdentityText { display: grid; min-width: 0; gap: 0; }
+.dashboardIdentityText h2 { margin: 4px 0 7px; font-size: clamp(19px, 2vw, 25px); letter-spacing: -.04em; }
+.dashboardIdentityText p:last-child { max-width: 720px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .capabilityShellHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; padding: 22px; }
+.capabilityShellHeading[data-badges-only="true"] { justify-content: flex-end; padding-bottom: 0; }
 .capabilityShellHeading h2 { margin: 4px 0 7px; font-size: clamp(19px, 2vw, 25px); letter-spacing: -.04em; }
 .capabilityShellHeading p:last-child { max-width: 720px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .capabilityShellBadges { flex: 0 0 auto; display: grid; justify-items: end; gap: 7px; }
