@@ -755,9 +755,12 @@ test("AES-GCM encryption hides ExternalId and binds it to tenant scope", async (
     isPilotError("SECRET_UNAVAILABLE"),
   );
 
-  const last = first.ciphertext.at(-1);
-  assert.ok(last);
-  const tampered = `${first.ciphertext.slice(0, -1)}${last === "A" ? "B" : "A"}`;
+  // Tamper an INTERIOR character. Only the final base64url character can encode
+  // padding bits, so flipping the last one can decode to byte-identical output
+  // and tamper nothing at all — that made this assertion fail for ~6% of random
+  // IVs. Every interior character carries six significant bits.
+  const flipAt = Math.floor(first.ciphertext.length / 2);
+  const tampered = `${first.ciphertext.slice(0, flipAt)}${first.ciphertext[flipAt] === "A" ? "B" : "A"}${first.ciphertext.slice(flipAt + 1)}`;
   await assert.rejects(
     keyring.open({ ...first, ciphertext: tampered }, context),
     isPilotError("SECRET_UNAVAILABLE"),

@@ -77,7 +77,9 @@ describe("cursor codec", () => {
     await assert.rejects(() => decodeCursor(alteredPayload, alphaContext), PublicApiError);
     const alteredSignature = Buffer.from(JSON.stringify({
       p: decoded.p,
-      s: `${decoded.s.slice(0, -1)}${decoded.s.endsWith("A") ? "B" : "A"}`,
+      // Interior character: the final base64url character can carry padding
+      // bits, so flipping it may decode to identical bytes and tamper nothing.
+      s: `${decoded.s.slice(0, Math.floor(decoded.s.length / 2))}${decoded.s[Math.floor(decoded.s.length / 2)] === "A" ? "B" : "A"}${decoded.s.slice(Math.floor(decoded.s.length / 2) + 1)}`,
     }), "utf8").toString("base64url");
     await assert.rejects(() => decodeCursor(alteredSignature, alphaContext), PublicApiError);
   });
