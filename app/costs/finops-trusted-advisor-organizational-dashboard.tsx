@@ -11,6 +11,7 @@ import {
   type FinopsCapabilityEvidence,
   type FinopsCapabilityViewState,
 } from "./finops-capability-shell";
+import { RankingBars, TimeSeriesChart } from "../components/charts";
 import styles from "./costs.module.css";
 
 type SourceState = "configuration_required" | "waiting" | "empty" | "partial" | "stale" | "failed" | "complete";
@@ -262,6 +263,12 @@ async function startOrganizationCollection(connectionId: string): Promise<string
   return body.jobId;
 }
 
+/**
+ * Counts are dimensionless, so unlike a monetary total they need no currency
+ * separation and rank directly against each other.
+ */
+const count = (value: number): string => value.toLocaleString("en-US");
+
 function timestamp(value: string | null | undefined): string {
   if (value === null || value === undefined) return "Not reported";
   const epoch = Date.parse(value);
@@ -451,7 +458,6 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
     ...resources.flatMap((entry) => entry.region === null ? [] : [entry.region]),
     ...(filters.region === "" ? [] : [filters.region]),
   ])].sort();
-  const maximumHistoryResources = Math.max(1, ...history.map((entry) => entry.resourceCount));
   const activeSheet = report.officialDefinition.sheets.find((sheet) => sheet.id === activeSheetId)
     ?? report.officialDefinition.sheets[0];
   const categorySummary = [...checks.reduce((summary, check) => {
@@ -475,9 +481,6 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
     .map(([region, count]) => ({ region, count }))
     .sort((left, right) => right.count - left.count || left.region.localeCompare(right.region))
     .slice(0, 12);
-  const maximumCategoryFlagged = Math.max(1, ...categorySummary.map((entry) => entry.flagged));
-  const maximumStatusCount = Math.max(1, ...statusSummary.map((entry) => entry.count));
-  const maximumRegionCount = Math.max(1, ...regionSummary.map((entry) => entry.count));
 
   function selectOfficialSheet(sheetId: string, category: string | null): void {
     setActiveSheetId(sheetId);
@@ -531,29 +534,70 @@ export function FinopsTrustedAdvisorOrganizationalReportView({
       <section className={styles.taoInsightGrid} aria-label="Evidence-backed Trusted Advisor visual summaries">
         <article className={styles.taoPanel}>
           <header><div><p className="eyebrow">Category summary</p><h3>Flagged checks by pillar</h3></div><span>{categorySummary.length} categories</span></header>
-          <div className={styles.taoHorizontalBars}>{categorySummary.length === 0 ? <p>No category evidence is available.</p> : categorySummary.map((entry) => <div key={entry.category}><span>{entry.category.replaceAll("_", " ")}</span><i><b style={{ width: `${Math.max(2, Math.round((entry.flagged / maximumCategoryFlagged) * 100))}%` }} /></i><strong>{entry.flagged.toLocaleString()}</strong><small>{entry.checks} checks · {entry.processed.toLocaleString()} processed</small></div>)}</div>
+          {categorySummary.length === 0 ? <p>No category evidence is available.</p> : (
+            <RankingBars
+              ariaLabel="Flagged Trusted Advisor checks by pillar"
+              formatValue={count}
+              items={categorySummary.map((entry) => ({
+                id: entry.category,
+                label: entry.category.replaceAll("_", " "),
+                value: entry.flagged,
+                detail: `${entry.checks} checks · ${entry.processed.toLocaleString()} processed`,
+              }))}
+              sort
+            />
+          )}
         </article>
         <article className={styles.taoPanel}>
           <header><div><p className="eyebrow">Resource status</p><h3>Accepted rows by status</h3></div><span>Bounded view</span></header>
-          <div className={styles.taoHorizontalBars}>{statusSummary.map((entry) => <div key={entry.status}><span>{entry.status}</span><i><b data-status={entry.status} style={{ width: `${Math.max(entry.count === 0 ? 0 : 2, Math.round((entry.count / maximumStatusCount) * 100))}%` }} /></i><strong>{entry.count.toLocaleString()}</strong></div>)}</div>
+          {statusSummary.length === 0 ? <p>No accepted resource rows are available.</p> : (
+            <RankingBars
+              ariaLabel="Accepted Trusted Advisor resource rows by status"
+              formatValue={count}
+              items={statusSummary.map((entry) => ({
+                id: entry.status,
+                label: entry.status,
+                value: entry.count,
+              }))}
+            />
+          )}
         </article>
         <article className={styles.taoPanel}>
           <header><div><p className="eyebrow">Region distribution</p><h3>Flagged resources by Region</h3></div><span>Top 12</span></header>
-          <div className={styles.taoHorizontalBars}>{regionSummary.length === 0 ? <p>No regional resource evidence is available.</p> : regionSummary.map((entry) => <div key={entry.region}><span>{entry.region}</span><i><b style={{ width: `${Math.max(2, Math.round((entry.count / maximumRegionCount) * 100))}%` }} /></i><strong>{entry.count.toLocaleString()}</strong></div>)}</div>
+          {regionSummary.length === 0 ? <p>No regional resource evidence is available.</p> : (
+            <RankingBars
+              ariaLabel="Flagged Trusted Advisor resources by Region"
+              caption="Top 12 Regions by flagged resource count."
+              formatValue={count}
+              items={regionSummary.map((entry) => ({
+                id: entry.region,
+                label: entry.region,
+                value: entry.count,
+              }))}
+              sort
+            />
+          )}
         </article>
       </section>
 
       <section className={styles.taoSplitGrid}>
         <article className={styles.taoPanel}>
           <header><div><p className="eyebrow">Organization trend</p><h3>Accepted resource coverage by generation</h3></div><span>{history.length} generations</span></header>
-          <div className={styles.taoHistoryChart} role="img" aria-label="Trusted Advisor accepted organization resource history">
-            {history.length === 0 ? <p>No accepted history is available.</p> : history.slice().reverse().map((entry) => (
-              <div key={entry.generationId} title={`${timestamp(entry.collectedAtIso)} · ${entry.resourceCount} resources`}>
-                <i style={{ height: `${Math.max(4, Math.round((entry.resourceCount / maximumHistoryResources) * 100))}%` }} />
-                <small>{new Date(entry.collectedAtIso).toISOString().slice(5, 10)}</small>
-              </div>
-            ))}
-          </div>
+          {history.length === 0 ? <p>No accepted history is available.</p> : (
+            <TimeSeriesChart
+              ariaLabel="Trusted Advisor accepted organization resource history"
+              caption="One point per accepted generation, oldest first. Generations are irregular, so spacing does not represent elapsed time."
+              formatValue={count}
+              series={[{
+                id: "resources",
+                label: "Accepted resources",
+                points: history.slice().reverse().map((entry) => ({
+                  label: new Date(entry.collectedAtIso).toISOString().slice(0, 10),
+                  value: entry.resourceCount,
+                })),
+              }]}
+            />
+          )}
         </article>
         <article className={styles.taoPanel}>
           <header><div><p className="eyebrow">Account drilldown</p><h3>Frozen manifest coverage</h3></div>{report.accountsTruncated === true ? <span>First 200</span> : null}</header>

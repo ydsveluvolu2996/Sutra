@@ -931,27 +931,11 @@
 .taoKpis strong { overflow-wrap: anywhere; font-size: 17px; letter-spacing: -.025em; }
 .taoKpis small { color: var(--muted); font-size: 8.5px; line-height: 1.4; }
 .taoInsightGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.taoHorizontalBars { display: grid; gap: 8px; }
-.taoHorizontalBars > div { display: grid; grid-template-columns: minmax(78px, .7fr) minmax(80px, 1fr) auto; align-items: center; gap: 7px; }
-.taoHorizontalBars span { overflow: hidden; color: var(--muted); font-size: 7.5px; font-weight: 800; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
-.taoHorizontalBars i { height: 7px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
-.taoHorizontalBars b { height: 100%; display: block; border-radius: inherit; background: #0f766e; }
-.taoHorizontalBars b[data-status="error"] { background: #dc2626; }
-.taoHorizontalBars b[data-status="warning"] { background: #d97706; }
-.taoHorizontalBars b[data-status="ok"] { background: #059669; }
-.taoHorizontalBars strong { font-size: 8px; font-variant-numeric: tabular-nums; }
-.taoHorizontalBars small { grid-column: 2 / -1; margin-top: -5px; color: var(--muted); font-size: 7px; }
-.taoHorizontalBars p { margin: 18px 0; color: var(--muted); font-size: 9px; }
 .taoSplitGrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); gap: 11px; }
 .taoPanel { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: white; }
 .taoPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .taoPanel h3 { margin: 3px 0 0; font-size: 13px; }
 .taoPanel > header > span { color: var(--muted); font-size: 8.5px; font-weight: 750; }
-.taoHistoryChart { min-height: 190px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 15px 3px 0; }
-.taoHistoryChart > div { min-width: 48px; height: 175px; flex: 1 0 48px; display: grid; grid-template-rows: 1fr auto; align-items: end; justify-items: center; gap: 5px; }
-.taoHistoryChart i { width: min(32px, 70%); min-height: 4px; max-height: 150px; display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #34d399, #047857); }
-.taoHistoryChart small { color: var(--muted); font-size: 7.5px; }
-.taoHistoryChart p { align-self: center; color: var(--muted); font-size: 10px; }
 .taoAccountList { max-height: 210px; display: grid; gap: 6px; overflow-y: auto; padding: 2px; }
 .taoAccountList button { min-height: 50px; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfdfc; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .taoAccountList button[aria-pressed="true"] { border-color: #0f766e; background: #ecfdf5; }
