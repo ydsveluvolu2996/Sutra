@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { AWS_SUPPORT_CASES_OFFICIAL_DEFINITION, type AwsSupportCasesOfficialDefinition } from "../../lib/finops-aws-support-cases-official-definition";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
+import { TimeSeriesChart } from "../components/charts";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
 import styles from "./finops-aws-support-cases-radar-dashboard.module.css";
 
@@ -57,17 +58,55 @@ function presentation(connectionId: string | null, state: RequestState): { view:
 }
 function Select({ label, value, values, onChange }: { label: string; value: string; values: readonly string[]; onChange(value: string): void }) { return <label>{label}<select value={value} onChange={(event) => onChange(event.target.value)}><option value="">All</option>{values.map((item) => <option key={item}>{item}</option>)}</select></label>; }
 function minutes(value: number | null): string { if (value === null) return "Unavailable"; if (value < 60) return `${value} min`; const hours = Math.floor(value / 60); const remainder = value % 60; return `${hours}h${remainder === 0 ? "" : ` ${remainder}m`}`; }
+/**
+ * Retained and open case counts across accepted generations.
+ *
+ * The previous bars scaled with `Math.max(4, caseCount / maximum * 100)` against
+ * a `maximum` floored at 1, so a generation that genuinely observed zero cases
+ * drew the same 4% stub as a generation with one, and a run of real zeros was
+ * indistinguishable from a run of small counts. Counts are dimensionless and a
+ * measured zero is evidence, so the kit plots it as zero rather than as a stub.
+ *
+ * The x axis is accepted generations in observation order, not calendar time:
+ * snapshots are irregular, so the points are equally spaced and labelled with
+ * the observation date rather than implying a daily cadence.
+ */
+export function CaseHistoryChart({ history }: { readonly history: Report["history"] }) {
+  if (history.length === 0) {
+    return <p className={styles.emptyTrend} role="status">No accepted generation has been observed yet.</p>;
+  }
+  const ordered = history.slice().reverse();
+  return (
+    <TimeSeriesChart
+      ariaLabel="Retained and open Support case count by accepted generation"
+      caption="One point per accepted generation, in observation order. Snapshots are irregular, so spacing does not represent elapsed time."
+      formatValue={(value) => value.toLocaleString("en-US")}
+      series={[
+        {
+          id: "retained",
+          label: "Retained cases",
+          points: ordered.map((point) => ({ label: point.observedAt.slice(0, 10), value: point.caseCount })),
+        },
+        {
+          id: "open",
+          label: "Open cases",
+          points: ordered.map((point) => ({ label: point.observedAt.slice(0, 10), value: point.openCount })),
+        },
+      ]}
+    />
+  );
+}
+
 export function AwsSupportCasesOfficialDefinitionPanel({ definition }: { readonly definition: AwsSupportCasesOfficialDefinition }) { return <section className={styles.official} aria-label="Official AWS Support Cases Radar coverage"><header><div><h3>Official AWS source coverage</h3><p>Managed QuickSight definition not publicly committed · exact object totals unavailable</p></div><small>{definition.source.commit.slice(0, 12)} · {definition.source.manifest.sha256.slice(0, 16)}…</small></header><div className={styles.officialGrid}><article><strong>Documented tabs</strong><ul>{definition.documentedTabs.map((tab) => <li key={tab}>{tab}</li>)}</ul></article><article><strong>Published data contracts</strong><ul>{definition.publishedDatasets.map((dataset) => <li key={dataset.name}><code>{dataset.name}</code><small>{dataset.uniqueInputColumns} unique input columns · {dataset.safePurpose}</small></li>)}</ul></article><article><strong>Preview visual purposes</strong><ul>{definition.documentedPreviewPurposes.map((purpose) => <li key={purpose}>{purpose}</li>)}</ul></article><article><strong>Preview controls</strong><ul>{definition.documentedPreviewControls.map((control) => <li key={control}>{control}</li>)}</ul></article></div><p className={styles.officialNote}>{definition.quickSightDefinition.disclosure} Raw communications and generative summary fields remain excluded from the browser. Frozen source evidence remains visible without a provider report.</p></section>; }
 export function AwsSupportCasesRadarReportView({ report, filters, onFiltersChange }: { report: Report; filters: Filters; onFiltersChange(filters: Filters): void }) {
   const set = (key: keyof Filters, value: string) => onFiltersChange({ ...filters, [key]: value });
-  const maximum = Math.max(1, ...report.history.map((point) => point.caseCount));
   const accounts = report.source.accountCoverage.map((entry) => entry.accountId); const services = report.summary.serviceCounts.map((entry) => entry.code); const categories = report.summary.categoryCounts.map((entry) => entry.code);
   return <section className={styles.workspace} aria-label="AWS Support Cases Radar">
     <div className={styles.privacy}><strong>Privacy-minimized operational evidence.</strong> Subjects, correspondence, names, email addresses, attachments, provider messages, raw pagination tokens, internal case IDs, and evidence hashes are not returned to this browser.</div>
     <AwsSupportCasesOfficialDefinitionPanel definition={report.officialDefinition} />
     <section className={styles.filters} aria-label="Support case filters"><Select label="Account" value={filters.accountId} values={accounts} onChange={(value) => set("accountId", value)} /><Select label="Status" value={filters.status} values={Object.keys(report.summary.statusCounts)} onChange={(value) => set("status", value)} /><Select label="Severity" value={filters.severity} values={Object.keys(report.summary.severityCounts)} onChange={(value) => set("severity", value)} /><Select label="Service" value={filters.serviceCode} values={services} onChange={(value) => set("serviceCode", value)} /><Select label="Category" value={filters.categoryCode} values={categories} onChange={(value) => set("categoryCode", value)} /><button type="button" onClick={() => onFiltersChange(EMPTY)}>Clear filters</button></section>
     <section className={styles.kpis} aria-label="Support case summary"><article><span>Open cases</span><strong>{report.summary.openCount}</strong><small>{report.summary.caseCount} retained cases</small></article><article><span>High / urgent / critical</span><strong>{report.summary.highUrgentCriticalCount}</strong><small>Metadata severity only</small></article><article><span>Pending customer</span><strong>{report.summary.pendingCustomerActionCount}</strong><small>Action-state signal</small></article><article><span>Account coverage</span><strong>{report.summary.completeAccountCount} / {report.summary.intendedAccountCount}</strong><small>Complete linked accounts</small></article><article><span>Communications</span><strong>{report.summary.communicationCount}</strong><small>Count only; text excluded</small></article></section>
-    <section className={styles.two}><article className={styles.panel}><header><h3>Case history</h3><span>Observed snapshots only</span></header><div className={styles.trend} role="img" aria-label="Support case count by accepted generation">{report.history.slice().reverse().map((point) => <div key={point.generationId} title={`${point.observedAt}: ${point.caseCount} cases`}><i style={{ height: `${Math.max(4, point.caseCount / maximum * 100)}%` }} /><small>{point.observedAt.slice(5, 10)}</small></div>)}</div></article><article className={styles.panel}><header><h3>Support-plan readiness</h3><span>Per account</span></header><div className={styles.coverage}>{report.source.accountCoverage.map((account) => <div key={account.accountId} data-state={account.status}><span>{account.accountId}<small>{account.supportPlan.replaceAll("_", " ")} · {account.entitlementState}</small></span><strong>{account.status}</strong></div>)}</div></article></section>
+    <section className={styles.two}><article className={styles.panel}><header><h3>Case history</h3><span>Observed snapshots only</span></header><CaseHistoryChart history={report.history} /></article><article className={styles.panel}><header><h3>Support-plan readiness</h3><span>Per account</span></header><div className={styles.coverage}>{report.source.accountCoverage.map((account) => <div key={account.accountId} data-state={account.status}><span>{account.accountId}<small>{account.supportPlan.replaceAll("_", " ")} · {account.entitlementState}</small></span><strong>{account.status}</strong></div>)}</div></article></section>
     <section className={styles.two}><article className={styles.panel}><header><h3>Open case age</h3><span>Provider creation time</span></header><div className={styles.metrics}><div><span>Under 7 days</span><strong>{report.summary.openAgeBands.under7Days}</strong></div><div><span>7–30 days</span><strong>{report.summary.openAgeBands.days7To30}</strong></div><div><span>31–90 days</span><strong>{report.summary.openAgeBands.days31To90}</strong></div><div><span>Over 90 days</span><strong>{report.summary.openAgeBands.over90Days}</strong></div></div></article><article className={styles.panel}><header><h3>Response cadence</h3><span>Timestamp transitions; correspondence excluded</span></header><div className={styles.metrics}><div><span>Average AWS response</span><strong>{minutes(report.summary.responseCadence.averageAwsResponseMinutes)}</strong><small>{report.summary.responseCadence.awsResponseTransitions} customer-to-AWS transitions</small></div><div><span>Average customer response</span><strong>{minutes(report.summary.responseCadence.averageCustomerResponseMinutes)}</strong><small>{report.summary.responseCadence.customerResponseTransitions} AWS-to-customer transitions</small></div><div><span>AWS communications</span><strong>{report.summary.communicationActorCounts.AWS}</strong></div><div><span>Customer communications</span><strong>{report.summary.communicationActorCounts.CUSTOMER}</strong><small>{report.summary.communicationActorCounts.UNKNOWN} unclassified</small></div></div></article></section>
     <section className={styles.panel}><header><h3>Severity and service signals</h3><span>Selected scope</span></header><div className={styles.distributions}>{Object.entries(report.summary.severityCounts).map(([label, count]) => <button type="button" key={label} onClick={() => set("severity", label)}><span>{label}</span><strong>{count}</strong></button>)}{report.summary.serviceCounts.slice(0, 8).map((item) => <button type="button" key={item.code} onClick={() => set("serviceCode", item.code)}><span>{item.code}</span><strong>{item.count}</strong></button>)}</div></section>
     <section className={styles.panel}><header><h3>Top case topics</h3><span>Provider category codes</span></header><div className={styles.distributions}>{report.summary.categoryCounts.slice(0, 12).map((item) => <button type="button" key={item.code} onClick={() => set("categoryCode", item.code)}><span>{item.code}</span><strong>{item.count}</strong></button>)}</div></section>
