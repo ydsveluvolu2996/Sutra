@@ -1,4 +1,4 @@
-import { isCollectableAwsSourceKind } from "./aws-connection-source";
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /**
  * Durable production boundary for the exact Compute Optimizer materializer.
  *

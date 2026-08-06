@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { isCollectableAwsSourceKind } from "../lib/aws-connection-source";
+import { isCollectableAwsSourceKind } from "../lib/aws-connection-source.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import type {

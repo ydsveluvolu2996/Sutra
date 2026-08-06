@@ -1,4 +1,4 @@
-import { isCollectableAwsSourceKind } from "./aws-connection-source";
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /** Executable, dependency-injected HTTP boundary for the exact dashboard. */
 import type { StoredComputeOptimizerExportPlan } from
   "../db/finops-compute-optimizer-export-plan-repository.ts";

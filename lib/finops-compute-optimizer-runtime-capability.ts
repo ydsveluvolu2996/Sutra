@@ -1,4 +1,4 @@
-import { isCollectableAwsSourceKind } from "./aws-connection-source";
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /** Compose a runtime-only .8.5 view without mutating generic connection state. */
 import type { ComputeOptimizerMaterializationRuntimeConnection } from
   "./finops-compute-optimizer-materialization-runtime.ts";

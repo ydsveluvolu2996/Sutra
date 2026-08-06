@@ -1,4 +1,4 @@
-import { isCollectableAwsSourceKind } from "./aws-connection-source";
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /**
  * Durable app-side orchestration for one server-owned FinOps source contract.
  *

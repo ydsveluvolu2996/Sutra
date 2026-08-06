@@ -1,4 +1,4 @@
-import { isCollectableAwsSourceKind } from "./aws-connection-source";
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /** Authorized control-plane boundary for the separate Compute Optimizer .8.5 capability. */
 import { canonicalJson } from "./canonical-json.ts";
 import {
