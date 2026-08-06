@@ -49,15 +49,16 @@ which satisfies that ceiling requirement exactly: all seven actions appear in it
 `DenyUnimplementedActions` `NotAction` allowlist and none of them is granted by
 any Allow in the base role.
 
-Open conflict, not yet resolved: this add-on's
-`BaseCollectorPermissionPackVersion` still enumerates only `standard-2026-07.4`
-and `standard-2026-08.1`, so a customer role tagged `standard-2026-08.12` cannot
-launch it — CloudFormation refuses the parameter value. The add-on template is an
-immutable, separately reviewed source contract and is deliberately not edited
-here. Accepting `standard-2026-08.12` requires a successor add-on revision with
-its own review, published under the publish-before-application order below.
-Until that successor exists, the CUR 2.0 and FOCUS 1.2 foundational exports
-cannot be launched against the current default role.
+That conflict is resolved by a successor revision, not an edit in place:
+`infrastructure/finops-foundational-cur2-export-v1.1.yaml` is the separately
+reviewed successor revision of this add-on. It carries the v1 grants,
+resources, names, and outputs byte-for-byte and revises only the
+`BaseCollectorPermissionPackVersion` acceptance gate, which now enumerates
+exactly `standard-2026-08.1` and `standard-2026-08.12` and defaults to the
+deployable `standard-2026-08.12`. The v1 template bytes remain immutable
+alongside it and still accept only `standard-2026-08.1`. The revision is
+source only — it is not yet published at an immutable URL, and the
+publish-before-application order below still gates any launch.
 
 The parameter is an acknowledgement, not AWS-side discovery. Before launching
 the add-on, the operator must attest that the existing `/sutra/` role has the
@@ -118,7 +119,8 @@ additional CUR creation permission.
 The order is a release gate, not an optional runbook:
 
 1. Review and contract-test a new version-pinned base onboarding template that
-   carries the `standard-2026-08.1` ceiling described above.
+   carries the `standard-2026-08.1` ceiling described above, or the
+   `standard-2026-08.12` ceiling accepted by the v1.1 successor revision.
 2. Publish that base template at an immutable, digest-verified URL. Update and
    attest the customer role before touching this add-on.
 3. Review this add-on, publish its exact tested bytes at a separate immutable

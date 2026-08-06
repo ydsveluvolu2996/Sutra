@@ -9,6 +9,15 @@ This repository change does not publish the template, update the default or
 public onboarding template, launch a customer stack, change an application
 reference, or make FOCUS 1.2 production-accepted.
 
+`infrastructure/finops-foundational-focus12-export-v1.1.yaml` is the
+separately reviewed successor revision of this contract. It carries the v1
+grants, resources, names, and outputs byte-for-byte and revises only the
+`BaseCollectorPermissionPackVersion` acceptance gate, which now enumerates
+exactly `standard-2026-08.1` and `standard-2026-08.12` and defaults to the
+deployable `standard-2026-08.12` ceiling. The v1 bytes remain immutable and
+accept only `standard-2026-08.1`. The revision is source only and follows the
+same activation and release gate below.
+
 ## Verified AWS contract
 
 The contract was checked against the current AWS documentation on 2026-07-31:
@@ -155,7 +164,8 @@ collector—create and own the export.
 Do not launch or publish this source contract until all of the following pass:
 
 1. Review, publish at an immutable digest-verified URL, deploy, and attest the
-   separate `standard-2026-08.1` base collector role.
+   separate `standard-2026-08.1` base collector role, or the
+   `standard-2026-08.12` role accepted by the v1.1 successor revision.
 2. Contract-test these exact template bytes, publish them at a different
    immutable digest-verified URL, and deploy the add-on in the customer billing
    or management account.

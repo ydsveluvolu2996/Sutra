@@ -1,0 +1,503 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Immutable customer-side Foundational FinOps add-on for the native AWS
+  FOCUS 1.2 with AWS columns table. Creates a dedicated Data Export and grants
+  an existing Sutra collector only exact-prefix reads plus GetExport status.
+  Contract: foundational-focus12-export-v1.
+  Template revision: foundational-focus12-export-v1.1 accepts the deployable
+  standard-2026-08.12 ceiling; every grant, resource, and name is unchanged
+  from the immutable v1 bytes.
+
+Metadata:
+  SutraFinopsExport:
+    Contract: foundational-focus12-export-v1
+    AwsTable: FOCUS_1_2_AWS
+    SourceSchema: FOCUS-1.2-with-AWS-columns
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Existing Sutra role contract
+        Parameters:
+          - CollectorRoleName
+          - BaseCollectorPermissionPackVersion
+      - Label:
+          default: Dedicated billing export destination
+        Parameters:
+          - ExistingBucketName
+          - ExistingBucketContract
+          - ExistingBucketKmsKeyArn
+          - DestinationBucketRegion
+          - ExportPrefix
+          - ExportName
+    ParameterLabels:
+      BaseCollectorPermissionPackVersion:
+        default: Verified base collector permission pack
+      ExistingBucketName:
+        default: Existing dedicated S3 bucket (optional)
+      ExistingBucketContract:
+        default: Existing bucket security and retention attestation
+      ExistingBucketKmsKeyArn:
+        default: Existing bucket customer-managed KMS key ARN
+
+Parameters:
+  CollectorRoleName:
+    Type: String
+    Default: SutraCollectorRole
+    AllowedValues:
+      - SutraCollectorRole
+      - SutraReadOnlyRole
+    Description: >-
+      Existing role under /sutra/. This add-on does not create, replace, or
+      weaken that role or its explicit permission ceiling.
+
+  BaseCollectorPermissionPackVersion:
+    Type: String
+    Default: standard-2026-08.12
+    AllowedValues:
+      - standard-2026-08.1
+      - standard-2026-08.12
+    Description: >-
+      Operator attestation of the permission-pack tag on the existing role.
+      Only the enumerated, separately reviewed standard-2026-08.1 and
+      standard-2026-08.12 ceilings permit this add-on's reads without
+      granting them. This parameter does not discover or modify the role.
+
+  ExistingBucketName:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|(?!.*\.\.)(?!\d+\.\d+\.\d+\.\d+$)[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$'
+    ConstraintDescription: >-
+      Leave empty to create a retained private bucket, or provide one dedicated
+      bucket whose bucket policy this stack is authorized to own.
+
+  ExistingBucketContract:
+    Type: String
+    Default: not-applicable
+    AllowedValues:
+      - not-applicable
+      - dedicated-private-retained-cmk
+    Description: >-
+      In existing-bucket mode, explicitly attest that the bucket is dedicated
+      to this export, private, retained by customer policy, encrypted by the
+      exact customer-managed KMS key supplied below, and has no independently
+      managed bucket-policy statements.
+
+  ExistingBucketKmsKeyArn:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^arn:(aws|aws-us-gov|aws-cn):kms:[a-z0-9-]+:[0-9]{12}:key/[A-Za-z0-9-]{1,128}$'
+    ConstraintDescription: >-
+      Supply the full same-partition, same-account, same-Region ARN of the
+      existing bucket's symmetric customer-managed KMS key, or leave empty
+      when this stack creates the destination and key.
+
+  DestinationBucketRegion:
+    Type: String
+    Default: us-east-1
+    AllowedPattern: '^[a-z]{2}(-gov)?-[a-z]+-[0-9]$'
+    Description: >-
+      Region of the dedicated destination bucket. When this stack creates the
+      bucket, this value must equal the CloudFormation stack Region.
+
+  ExportPrefix:
+    Type: String
+    Default: sutra/focus12
+    MinLength: 3
+    MaxLength: 255
+    AllowedPattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,62}(/[A-Za-z0-9][A-Za-z0-9_-]{0,62}){0,3}$'
+    Description: >-
+      Dedicated S3 key prefix with no leading or trailing slash and no dot
+      segments. Collector access is restricted to this prefix and export name.
+
+  ExportName:
+    Type: String
+    Default: sutra_foundational_focus12_v1
+    MinLength: 1
+    MaxLength: 128
+    AllowedPattern: '^[0-9A-Za-z_-]+$'
+    Description: Immutable AWS Data Export name for this template contract.
+
+Rules:
+  RequireReviewedReadCeiling:
+    Assertions:
+      - Assert:
+          Fn::Or:
+            - Fn::Equals:
+                - Ref: BaseCollectorPermissionPackVersion
+                - standard-2026-08.1
+            - Fn::Equals:
+                - Ref: BaseCollectorPermissionPackVersion
+                - standard-2026-08.12
+        AssertDescription: >-
+          Deploy and attest the separately reviewed standard-2026-08.1 or
+          standard-2026-08.12 base collector role before launching this
+          add-on.
+
+  ExistingBucketMeetsDestinationContract:
+    RuleCondition:
+      Fn::Not:
+        - Fn::Equals:
+            - Ref: ExistingBucketName
+            - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketContract
+            - dedicated-private-retained-cmk
+        AssertDescription: >-
+          Existing-bucket mode requires a dedicated, private, customer-retained,
+          customer-managed KMS encrypted bucket whose policy this stack owns.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: ExistingBucketKmsKeyArn
+                - ''
+        AssertDescription: >-
+          Existing-bucket mode requires the exact customer-managed KMS key ARN.
+
+  CreatedBucketRegionMatchesStack:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: ExistingBucketName
+        - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: DestinationBucketRegion
+            - Ref: AWS::Region
+        AssertDescription: >-
+          A bucket created by this stack is in the stack Region, so its declared
+          Data Exports destination Region must match.
+
+  CreatedBucketOwnsDestinationKey:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: ExistingBucketName
+        - ''
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketContract
+            - not-applicable
+        AssertDescription: >-
+          Created-bucket mode owns its destination controls; do not attest an
+          existing-bucket contract.
+      - Assert:
+          Fn::Equals:
+            - Ref: ExistingBucketKmsKeyArn
+            - ''
+        AssertDescription: >-
+          Created-bucket mode creates and retains its own customer-managed KMS key.
+
+Conditions:
+  CreateDestinationBucket:
+    Fn::Equals:
+      - Ref: ExistingBucketName
+      - ''
+
+Resources:
+  FocusExportKey:
+    Type: AWS::KMS::Key
+    Condition: CreateDestinationBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Customer-managed key for the Sutra native FOCUS 1.2 export.
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: EnableCustomerAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: 'arn:${AWS::Partition}:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowAccountBoundDataExportsEncryption
+            Effect: Allow
+            Principal:
+              Service: bcm-data-exports.amazonaws.com
+            Action:
+              - kms:GenerateDataKey
+              - kms:Decrypt
+            Resource: '*'
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: >-
+                    arn:${AWS::Partition}:bcm-data-exports:${AWS::Region}:${AWS::AccountId}:export/${ExportName}-*
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+                kms:ViaService:
+                  Fn::Sub: 's3.${AWS::Region}.${AWS::URLSuffix}'
+              StringLike:
+                kms:EncryptionContext:aws:s3:arn:
+                  Fn::Sub: 'arn:${AWS::Partition}:s3:::*'
+      Tags:
+        - Key: sutra:component
+          Value: foundational-focus12-export
+        - Key: sutra:contract
+          Value: foundational-focus12-export-v1
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+  FocusExportBucket:
+    Type: AWS::S3::Bucket
+    Condition: CreateDestinationBucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt:
+                  - FocusExportKey
+                  - Arn
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: sutra:component
+          Value: foundational-focus12-export
+        - Key: sutra:contract
+          Value: foundational-focus12-export-v1
+        - Key: sutra:managed-by
+          Value: cloudformation
+
+  FocusExportBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket:
+        Fn::If:
+          - CreateDestinationBucket
+          - Ref: FocusExportBucket
+          - Ref: ExistingBucketName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowOnlyAccountBoundFocusExportDelivery
+            Effect: Allow
+            Principal:
+              Service: bcm-data-exports.amazonaws.com
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: FocusExportBucket
+                      - Ref: ExistingBucketName
+            Condition:
+              ArnLike:
+                aws:SourceArn:
+                  Fn::Sub: >-
+                    arn:${AWS::Partition}:bcm-data-exports:${AWS::Region}:${AWS::AccountId}:export/${ExportName}-*
+              StringEquals:
+                aws:SourceAccount:
+                  Ref: AWS::AccountId
+
+  FoundationalFocus12Export:
+    Type: AWS::BCMDataExports::Export
+    DependsOn:
+      - FocusExportBucketPolicy
+    Properties:
+      Export:
+        Name:
+          Ref: ExportName
+        Description: >-
+          Sutra Foundational native AWS FOCUS 1.2 export with the complete
+          documented AWS column set. Customer-owned and delivered only to this
+          stack's dedicated S3 namespace.
+        DataQuery:
+          QueryStatement: >-
+            SELECT AvailabilityZone, BilledCost, BillingAccountId,
+            BillingAccountName, BillingAccountType, BillingCurrency,
+            BillingPeriodEnd, BillingPeriodStart, CapacityReservationId,
+            CapacityReservationStatus, ChargeCategory, ChargeClass,
+            ChargeDescription, ChargeFrequency, ChargePeriodEnd,
+            ChargePeriodStart, CommitmentDiscountCategory,
+            CommitmentDiscountId, CommitmentDiscountName,
+            CommitmentDiscountQuantity, CommitmentDiscountStatus,
+            CommitmentDiscountType, CommitmentDiscountUnit, ConsumedQuantity,
+            ConsumedUnit, ContractedCost, ContractedUnitPrice, EffectiveCost,
+            InvoiceId, InvoiceIssuerName, ListCost, ListUnitPrice,
+            PricingCategory, PricingCurrency,
+            PricingCurrencyContractedUnitPrice, PricingCurrencyEffectiveCost,
+            PricingCurrencyListUnitPrice, PricingQuantity, PricingUnit,
+            ProviderName, PublisherName, RegionId, RegionName, ResourceId,
+            ResourceName, ResourceType, ServiceCategory, ServiceName,
+            ServiceSubcategory, SkuId, SkuMeter, SkuPriceId, SkuPriceDetails,
+            SubAccountId, SubAccountName, SubAccountType, Tags, x_Discounts,
+            x_Operation, x_ServiceCode FROM FOCUS_1_2_AWS
+          TableConfigurations:
+            FOCUS_1_2_AWS:
+              TIME_GRANULARITY: HOURLY
+        DestinationConfigurations:
+          S3Destination:
+            S3Bucket:
+              Fn::If:
+                - CreateDestinationBucket
+                - Ref: FocusExportBucket
+                - Ref: ExistingBucketName
+            S3Prefix:
+              Ref: ExportPrefix
+            S3Region:
+              Ref: DestinationBucketRegion
+            S3OutputConfigurations:
+              Compression: GZIP
+              Format: TEXT_OR_CSV
+              OutputType: CUSTOM
+              Overwrite: CREATE_NEW_REPORT
+        RefreshCadence:
+          Frequency: SYNCHRONOUS
+      Tags:
+        - Key: sutra:component
+          Value: foundational-focus12-export
+        - Key: sutra:contract
+          Value: foundational-focus12-export-v1
+
+  CollectorFocus12ReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: SutraFoundationalFocus12ReadV1
+      Roles:
+        - Ref: CollectorRoleName
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ListOnlyExactFocus12ExportPrefix
+            Effect: Allow
+            Action: s3:ListBucket
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: FocusExportBucket
+                      - Ref: ExistingBucketName
+            Condition:
+              StringLike:
+                s3:prefix:
+                  - Fn::Sub: '${ExportPrefix}/${ExportName}'
+                  - Fn::Sub: '${ExportPrefix}/${ExportName}/*'
+
+          - Sid: ReadDedicatedFocus12BucketLocation
+            Effect: Allow
+            Action: s3:GetBucketLocation
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: FocusExportBucket
+                      - Ref: ExistingBucketName
+
+          - Sid: ReadOnlyExactFocus12ExportObjects
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectAttributes
+            Resource:
+              Fn::Sub:
+                - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                - DestinationBucket:
+                    Fn::If:
+                      - CreateDestinationBucket
+                      - Ref: FocusExportBucket
+                      - Ref: ExistingBucketName
+
+          - Sid: DecryptOnlyExactFocus12ExportObjects
+            Effect: Allow
+            Action: kms:Decrypt
+            Resource:
+              Fn::If:
+                - CreateDestinationBucket
+                - Fn::GetAtt:
+                    - FocusExportKey
+                    - Arn
+                - Ref: ExistingBucketKmsKeyArn
+            Condition:
+              StringEquals:
+                kms:ViaService:
+                  Fn::Sub: 's3.${DestinationBucketRegion}.${AWS::URLSuffix}'
+              StringLike:
+                kms:EncryptionContext:aws:s3:arn:
+                  Fn::Sub:
+                    - 'arn:${AWS::Partition}:s3:::${DestinationBucket}/${ExportPrefix}/${ExportName}/*'
+                    - DestinationBucket:
+                        Fn::If:
+                          - CreateDestinationBucket
+                          - Ref: FocusExportBucket
+                          - Ref: ExistingBucketName
+
+          - Sid: ReadOnlyThisFocus12ExportStatus
+            Effect: Allow
+            Action: bcm-data-exports:GetExport
+            Resource:
+              Fn::GetAtt:
+                - FoundationalFocus12Export
+                - ExportArn
+
+Outputs:
+  TemplateContractVersion:
+    Description: Version of this separately reviewed add-on contract.
+    Value: foundational-focus12-export-v1
+
+  TemplateRevision:
+    Description: Separately reviewed revision carrying the unchanged v1 grants.
+    Value: foundational-focus12-export-v1.1
+
+  RequiredBasePermissionPackVersion:
+    Description: Exact attested base role ceiling accepted by this revision.
+    Value:
+      Ref: BaseCollectorPermissionPackVersion
+
+  AwsDataExportTable:
+    Description: Exact native AWS Data Exports table queried by this contract.
+    Value: FOCUS_1_2_AWS
+
+  DestinationBucketName:
+    Description: Dedicated bucket containing the AWS Data Export.
+    Value:
+      Fn::If:
+        - CreateDestinationBucket
+        - Ref: FocusExportBucket
+        - Ref: ExistingBucketName
+
+  DestinationObjectPrefix:
+    Description: Exact object namespace readable by the Sutra collector.
+    Value:
+      Fn::Sub: '${ExportPrefix}/${ExportName}/'
+
+  DestinationKmsKeyArn:
+    Description: Exact customer-managed KMS key protecting the export objects.
+    Value:
+      Fn::If:
+        - CreateDestinationBucket
+        - Fn::GetAtt:
+            - FocusExportKey
+            - Arn
+        - Ref: ExistingBucketKmsKeyArn
+
+  DataExportArn:
+    Description: Customer-owned native FOCUS 1.2 Data Export ARN.
+    Value:
+      Fn::GetAtt:
+        - FoundationalFocus12Export
+        - ExportArn
