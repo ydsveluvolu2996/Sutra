@@ -1,0 +1,34 @@
+name: Sutra CodeQL configuration
+
+# Test sources are excluded from analysis; shipped code is not.
+#
+# security-extended is kept at full strength for everything that reaches the
+# release image (app/, lib/, db/, scripts/, services/*/src/). Test files are
+# excluded because every alert this repository has received against them was a
+# false positive produced by assertion code, not by a defect:
+#
+#   js/incomplete-url-substring-sanitization
+#     Leak assertions of the form `assert.equal(serialized.includes(host), false)`.
+#     The rule's threat model is a *positive* allow decision that
+#     `evil.com/app.sutracmdb.com` can slip past. These are absence checks, where
+#     substring matching is strictly more conservative than parsing a host.
+#
+#   js/regex/missing-regexp-anchor
+#     Searches for a host or key *inside* a JSON policy document. Anchoring would
+#     break the assertion, because the match legitimately occurs mid-document.
+#
+#   js/file-system-race
+#     `stat`/`lstat` asserting a 0o600/0o700 mode, followed by reading the same
+#     temp-directory path. The stat is an assertion, not a gate on the read, and
+#     no attacker sits between the two calls in a test's private temp directory.
+#
+# Tests are not part of the release artifact: the Docker image builds the
+# application and never executes this code, so excluding it does not shrink the
+# attack surface under analysis. The trade-off is deliberate and narrow — if a
+# test helper ever grows into shared shipped code, move it out of these paths so
+# it is analyzed again.
+paths-ignore:
+  - tests
+  - services/aws-collector/test
+  - "**/*.test.ts"
+  - "**/*.test.mjs"
