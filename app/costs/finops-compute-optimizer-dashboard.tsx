@@ -16,6 +16,7 @@ import {
   parseComputeOptimizerExactApiPayload,
   type ComputeOptimizerExactApiPayload,
 } from "../../lib/finops-compute-optimizer-exact-client";
+import { RankingBars, type RankingBarsItem } from "../components/charts";
 import styles from "./finops-compute-optimizer-dashboard.module.css";
 
 type Payload = ComputeOptimizerExactApiPayload;
@@ -86,6 +87,39 @@ function groupName(group: { readonly key: { readonly state: string; readonly val
   return group.key.state === "PRESENT" ? group.key.value ?? "" : group.key.state === "MISSING" ? "Missing provider value" : "Tag key not selected";
 }
 
+/**
+ * Ranks provider finding counts for the chart kit.
+ *
+ * The panel previously drew its own bars with `width: count/maxFinding`, which
+ * had two problems the kit fixes. It floored the divisor at 1, so a set of all
+ * zero counts silently rendered as zero-width bars indistinguishable from
+ * absent evidence; and it styled every bucket identically, so the synthetic
+ * "Missing provider value" and "Tag key not selected" buckets looked like
+ * finding categories AWS had reported.
+ *
+ * Those buckets are real counts and stay plotted — they say how many rows
+ * carried no provider value — but they take a distinct tone and are labelled as
+ * absences in the detail text, so hue is never the only cue separating them
+ * from a genuine finding.
+ */
+export function findingCountRanking(
+  findings: readonly {
+    readonly key: { readonly state: string; readonly value: string | null };
+    readonly count: number;
+  }[],
+): readonly RankingBarsItem[] {
+  return findings
+    .filter((item) => Number.isFinite(item.count))
+    .map((item) => ({
+      id: `${item.key.state}:${item.key.value ?? ""}`,
+      label: groupName(item),
+      value: item.count,
+      tone: item.key.state === "PRESENT" ? ("blue" as const) : ("slate" as const),
+      detail: item.key.state === "PRESENT" ? undefined : "absence of a provider value, not a finding",
+    }))
+    .sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+}
+
 function csvCell(value: string): string {
   const guarded = /^[=+\-@\t\r\n]/u.test(value) ? `'${value}` : value;
   return `"${guarded.replaceAll('"', '""')}"`;
@@ -118,7 +152,6 @@ export function ComputeOptimizerReportView({ payload, filters, onFiltersChange }
     page.rowKeys.map((key) => rowByKey.get(key)).filter((row): row is ComputeOptimizerExactDashboardRow => row !== undefined);
   const set = <K extends keyof ComputeOptimizerExactDashboardFilters>(key: K, value: ComputeOptimizerExactDashboardFilters[K]) =>
     onFiltersChange({ ...filters, [key]: value, ...(key === "offset" ? {} : { offset: 0 }) });
-  const maxFinding = Math.max(1, ...report.visuals.findings.map((item) => item.count));
   return <section className={styles.root} aria-label="Compute Optimizer exact organization dashboard">
     <div className={styles.disclosure}><strong>Exact organization export evidence.</strong> No discovery result or direct recommendation API is substituted; money remains integer micros.</div>
     {payload.sourceState === "STALE" ? <div role="status" className={styles.warning}>The accepted all-Region generation is older than 48 hours.</div> : null}
@@ -142,7 +175,14 @@ export function ComputeOptimizerReportView({ payload, filters, onFiltersChange }
       <article><span>Unresolved savings</span><strong>{report.summary.unresolvedSavingsChannelCount}</strong><small>counted, never parsed</small></article>
     </div></section>
     <section className={styles.visualGrid}>
-      <article className={styles.section}><h3>Findings</h3><div className={styles.bars}>{report.visuals.findings.map((item) => <div key={`${item.key.state}:${item.key.value}`}><span>{groupName(item)}</span><b>{item.count}</b><i aria-hidden="true"><em style={{ width: `${item.count * 100 / maxFinding}%` }} /></i></div>)}</div></article>
+      <article className={styles.section}><h3>Findings</h3>
+        <RankingBars
+          ariaLabel="Exact Compute Optimizer recommendation count by provider finding"
+          caption="Recommendation counts from the organization export. Bars scale against the largest count in the set, not against total recommendations. Slate bars count rows carrying no provider value and are labelled as such — they are not finding categories."
+          formatValue={(value) => `${value.toLocaleString("en-US")} recommendations`}
+          items={findingCountRanking(report.visuals.findings)}
+        />
+      </article>
       <article className={styles.section}><h3>Findings by date</h3>{report.visuals.findingsByDate.map((item) => <div className={styles.rank} key={`${item.key.state}:${item.key.value}`}><strong>{groupName(item)}</strong><span>{item.count}</span></div>)}</article>
       <article className={styles.section}><h3>Findings by business unit</h3>{report.visuals.findingsByBusinessUnit.map((item) => <div className={styles.rank} key={`${item.key.state}:${item.key.value}`}><strong>{groupName(item)}</strong><span>{item.count}</span></div>)}</article>
     </section>

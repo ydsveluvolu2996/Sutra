@@ -22,10 +22,6 @@
 .cards article { display: grid; gap: .25rem; padding: .75rem; border: 1px solid #334966; border-radius: .6rem; }
 .cards span { color: #94a8c5; font-size: .72rem; text-transform: uppercase; }
 .visualGrid, .grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
-.bars { display: grid; gap: .65rem; margin-top: .8rem; }
-.bars > div { display: grid; grid-template-columns: 1fr auto; gap: .25rem .6rem; font-size: .75rem; }
-.bars i { grid-column: 1 / -1; height: .45rem; overflow: hidden; border-radius: 99px; background: #253953; }
-.bars em { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #61d1d6, #ee7fbb); }
 .rank { display: grid; grid-template-columns: 1fr auto; gap: .15rem .6rem; padding: .5rem 0; border-bottom: 1px solid #2a3b55; }
 .rank small { grid-column: 1 / 3; color: #91a4c0; }
 .empty { color: #91a4c0; font-size: .78rem; }

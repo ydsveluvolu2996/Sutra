@@ -449,3 +449,15 @@
     grid-template-columns: 1fr;
   }
 }
+
+/*
+ * Caveats printed beside the rule ranking: excluded rules with no collected
+ * contributor count, and truncated rule sets. They qualify what the bars mean,
+ * so they must stay legible rather than decorative.
+ */
+.note {
+  margin: 0.6rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}

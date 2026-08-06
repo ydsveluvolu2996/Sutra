@@ -9,6 +9,7 @@ import {
   FinopsCapabilityShell,
   type FinopsCapabilityViewState,
 } from "./finops-capability-shell";
+import { RankingBars, type RankingBarsItem } from "../components/charts";
 import styles from "./finops-extended-support-projection-dashboard.module.css";
 type Filters = {
   service: string;
@@ -169,6 +170,91 @@ interface Report {
     reason: string;
   };
 }
+/**
+ * Exact micros to a plot coordinate, or null when the value is not a whole
+ * number of micros. A projection that cannot be represented exactly is
+ * unavailable rather than rounded onto an axis — the formatted text beside the
+ * chart remains the authoritative figure either way.
+ */
+export function microsToNumber(micros: string | null): number | null {
+  if (micros === null || !/^-?\d+$/u.test(micros)) return null;
+  // Beyond this a double cannot hold the micro amount exactly, so plotting it
+  // would silently round a monetary figure. Such a row is dropped and counted.
+  if (BigInt(micros) > BigInt(Number.MAX_SAFE_INTEGER) ||
+      BigInt(micros) < -BigInt(Number.MAX_SAFE_INTEGER)) {
+    return null;
+  }
+  const value = Number(micros) / 1_000_000;
+  return Number.isFinite(value) ? value : null;
+}
+
+export interface ProjectedCurrencyGroup {
+  readonly currency: string;
+  readonly items: readonly RankingBarsItem[];
+  /**
+   * Projections in this currency omitted from the plot because the amount was
+   * absent, malformed, or too large for an exact plot coordinate. They remain
+   * exact in the service portfolio text.
+   */
+  readonly omittedCount: number;
+}
+
+/**
+ * Groups projected incremental cost by currency, then ranks services within
+ * each currency.
+ *
+ * Currency is the grouping key rather than a label because a EUR projection and
+ * a USD projection share no scale: plotting them on one axis, or ranking them
+ * against each other, would state a comparison that does not exist. Each
+ * currency therefore gets its own chart with its own axis.
+ *
+ * A service whose projected amount is absent or not exact micros is left out of
+ * the plot instead of being drawn at zero — an uncollected projection is not a
+ * projection of no incremental cost.
+ */
+export function projectedCostsByCurrency(dashboard: {
+  readonly services: readonly {
+    readonly service: string;
+    readonly horizon: {
+      readonly projectedIncrementalCosts: readonly {
+        readonly currency: string;
+        readonly amountMicros: string;
+      }[];
+    };
+  }[];
+}): readonly ProjectedCurrencyGroup[] {
+  const byCurrency = new Map<string, { items: RankingBarsItem[]; omitted: number }>();
+  for (const service of dashboard.services) {
+    for (const amount of service.horizon.projectedIncrementalCosts) {
+      const group = byCurrency.get(amount.currency) ?? { items: [], omitted: 0 };
+      const value = microsToNumber(amount.amountMicros);
+      if (value === null) {
+        group.omitted += 1;
+      } else {
+        group.items.push({
+          id: `${service.service}:${amount.currency}`,
+          label: service.service,
+          value,
+          tone: "amber",
+          // Formatted from the original micros, never from the plot coordinate,
+          // so the figure beside the bar is the exact collected amount.
+          detail: money(amount.amountMicros, amount.currency),
+        });
+      }
+      byCurrency.set(amount.currency, group);
+    }
+  }
+  return [...byCurrency.entries()]
+    .map(([currency, group]) => ({
+      currency,
+      items: [...group.items].sort(
+        (left, right) => right.value - left.value || left.label.localeCompare(right.label),
+      ),
+      omittedCount: group.omitted,
+    }))
+    .sort((left, right) => left.currency.localeCompare(right.currency));
+}
+
 function money(micros: string | null, currency: string | null) {
   if (micros === null || currency === null) return "Unavailable";
   const n = micros.startsWith("-"),
@@ -294,7 +380,8 @@ export function ExtendedSupportProjectionReportView({
         ...x,
         service: s.service,
       })),
-    );
+    ),
+    projectedGroups = projectedCostsByCurrency(d);
   return (
     <section
       className={styles.root}
@@ -393,6 +480,35 @@ export function ExtendedSupportProjectionReportView({
           </article>
         ))}
       </section>
+      {projectedGroups.map((group) => (
+        <section className={styles.panel} key={group.currency}>
+          <header>
+            <h3>Projected incremental cost by service</h3>
+            <span>{group.currency}</span>
+          </header>
+          {group.items.length === 0 ? (
+            <p>
+              No projection in {group.currency} has an exact collected amount, so there is nothing
+              to rank. An absent projection is not a projection of zero.
+            </p>
+          ) : (
+            <RankingBars
+              ariaLabel={`Projected incremental Extended Support cost by service in ${group.currency}`}
+              caption={`${group.currency} only — each currency is charted on its own axis because amounts in different currencies share no scale and are never summed. Bars scale against the largest projection in this currency; the exact amount is printed beside each bar.`}
+              formatValue={(value) => money(String(Math.round(value * 1_000_000)), group.currency)}
+              items={group.items}
+            />
+          )}
+          {group.omittedCount > 0 ? (
+            <p>
+              {group.omittedCount} {group.currency} projection
+              {group.omittedCount === 1 ? " is" : "s are"} omitted from this chart because the
+              amount is absent or too large for an exact plot coordinate. The exact figures remain
+              in the service portfolio below.
+            </p>
+          ) : null}
+        </section>
+      ))}
       <section className={styles.panel}>
         <header>
           <h3>Service projection portfolio</h3>

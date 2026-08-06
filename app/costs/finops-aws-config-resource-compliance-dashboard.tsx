@@ -6,6 +6,7 @@ import {
   type AwsConfigComplianceOfficialDefinition,
 } from "../../lib/finops-aws-config-compliance-official-definition";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
+import { RankingBars, type RankingBarsItem } from "../components/charts";
 import {
   FinopsCapabilityShell,
   type FinopsCapabilityViewState,
@@ -34,6 +35,101 @@ const EMPTY_FILTERS: Filters = {
   complianceType: "",
   resourceType: "",
 };
+
+export interface NonCompliantRuleRanking {
+  readonly items: readonly RankingBarsItem[];
+  /**
+   * Non-compliant rules whose contributor count was never collected. They are
+   * excluded from the ranking rather than plotted as zero — an uncollected
+   * count is not a measurement of no offending resources.
+   */
+  readonly unavailableRuleCount: number;
+  /**
+   * True when at least one plotted total is a lower bound, because AWS capped a
+   * deployment's contributor count or because some deployments of that rule
+   * reported no count at all.
+   */
+  readonly anyLowerBound: boolean;
+  /** True when the rule rows themselves were truncated, so the ranking is partial. */
+  readonly truncated: boolean;
+}
+
+/**
+ * Ranks non-compliant Config rules by how many resources contribute to the
+ * violation, aggregated across every account/region the rule is deployed to.
+ *
+ * The rule list already names which rules are non-compliant; it does not say
+ * which ones are non-compliant *at scale*. That ordering is what makes a chart
+ * worth adding here. Two truth rules shape the aggregation:
+ *
+ * 1. A null contributorCount is unavailable, never zero. A rule with no
+ *    collected count anywhere is left out of the plot and counted separately.
+ * 2. A capped count is a floor, not a value. Any rule whose total absorbs a
+ *    capped deployment — or drops an uncollected one — is marked as a lower
+ *    bound so the bar is never read as an exact census.
+ */
+export function nonCompliantRuleRanking(report: {
+  readonly rules?: readonly {
+    readonly ruleName: string;
+    readonly complianceType: string;
+    readonly contributorCount: number | null;
+    readonly contributorCountCapped: boolean;
+  }[];
+  readonly rulesTruncated?: boolean;
+}): NonCompliantRuleRanking {
+  const grouped = new Map<
+    string,
+    { collected: number[]; deployments: number; capped: boolean }
+  >();
+  for (const rule of report.rules ?? []) {
+    if (rule.complianceType !== "NON_COMPLIANT") continue;
+    const group = grouped.get(rule.ruleName) ?? {
+      collected: [],
+      deployments: 0,
+      capped: false,
+    };
+    group.deployments += 1;
+    if (typeof rule.contributorCount === "number" && Number.isFinite(rule.contributorCount)) {
+      group.collected.push(rule.contributorCount);
+      if (rule.contributorCountCapped) group.capped = true;
+    }
+    grouped.set(rule.ruleName, group);
+  }
+
+  const items: RankingBarsItem[] = [];
+  let unavailableRuleCount = 0;
+  let anyLowerBound = false;
+  for (const [ruleName, group] of grouped) {
+    if (group.collected.length === 0) {
+      unavailableRuleCount += 1;
+      continue;
+    }
+    const total = group.collected.reduce((sum, value) => sum + value, 0);
+    const uncollected = group.deployments - group.collected.length;
+    const lowerBound = group.capped || uncollected > 0;
+    if (lowerBound) anyLowerBound = true;
+    const scope = `${group.deployments} deployment${group.deployments === 1 ? "" : "s"}`;
+    items.push({
+      id: ruleName,
+      label: ruleName,
+      value: total,
+      tone: "red",
+      detail: lowerBound
+        ? `at least — ${scope}${uncollected > 0 ? `, ${uncollected} without a count` : ""}${
+            group.capped ? ", count capped by AWS" : ""
+          }`
+        : scope,
+    });
+  }
+
+  items.sort((left, right) => right.value - left.value || left.label.localeCompare(right.label));
+  return {
+    items,
+    unavailableRuleCount,
+    anyLowerBound,
+    truncated: report.rulesTruncated === true,
+  };
+}
 
 interface ConfigComplianceReport {
   readonly schema: "sutra.finops-aws-config-resource-compliance.v1";
@@ -459,6 +555,7 @@ export function FinopsAwsConfigResourceComplianceReportView({
   readonly onFiltersChange: (filters: Filters) => void;
 }) {
   const rules = report.rules ?? [];
+  const ruleRanking = nonCompliantRuleRanking(report);
   const evaluations = report.evaluations ?? [];
   const inventory = report.inventory ?? [];
   const counts = report.counts;
@@ -677,6 +774,49 @@ export function FinopsAwsConfigResourceComplianceReportView({
             ))}
           </div>
         </article>
+      </section>
+
+      <section className={styles.panel}>
+        <header>
+          <div>
+            <p>Rule compliance</p>
+            <h3>Non-compliant rules by contributing resources</h3>
+          </div>
+          <span>
+            {ruleRanking.items.length} ranked
+          </span>
+        </header>
+        {ruleRanking.items.length === 0 ? (
+          <p className={styles.note}>
+            No non-compliant rule reports a collected contributor count, so there is nothing to
+            rank. An absent count is not a count of zero.
+          </p>
+        ) : (
+          <RankingBars
+            ariaLabel="Non-compliant Config rules by contributing resource count"
+            caption={`Resource counts, summed across every account and Region the rule is deployed to. Bars scale against the largest count in the set, not against total resources.${
+              ruleRanking.anyLowerBound
+                ? " Rows marked “at least” are lower bounds: AWS capped a deployment's contributor count, or some deployments reported none."
+                : ""
+            }`}
+            formatValue={(value) => `${value.toLocaleString("en-US")} resources`}
+            items={ruleRanking.items}
+          />
+        )}
+        {ruleRanking.unavailableRuleCount > 0 ? (
+          <p className={styles.note}>
+            {ruleRanking.unavailableRuleCount} non-compliant rule
+            {ruleRanking.unavailableRuleCount === 1 ? "" : "s"} report no contributor count and{" "}
+            {ruleRanking.unavailableRuleCount === 1 ? "is" : "are"} excluded from the ranking rather
+            than drawn as zero.
+          </p>
+        ) : null}
+        {ruleRanking.truncated ? (
+          <p className={styles.note}>
+            The rule rows behind this ranking were truncated by the collector, so a rule outside the
+            returned set could outrank everything shown.
+          </p>
+        ) : null}
       </section>
 
       <section className={styles.panel}>
