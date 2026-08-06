@@ -512,10 +512,14 @@ test("fsev1 references authenticate all AAD dimensions and never contain raw obj
   assert.equal(sealed.ciphertext.includes(objectId), false);
   assert.equal(sealed.ciphertext.includes("s3://"), false);
   assert.equal(await sealer.open(sealed, context), objectId);
-  const final = sealed.ciphertext.at(-1);
+  // Tamper an INTERIOR character. Only the final base64url character can encode
+  // padding bits, so flipping the last one can decode to byte-identical output
+  // and tamper nothing at all — that made this assertion fail for ~6% of random
+  // IVs. Every interior character carries six significant bits.
+  const flipAt = Math.floor(sealed.ciphertext.length / 2);
   const tampered = {
     ...sealed,
-    ciphertext: `${sealed.ciphertext.slice(0, -1)}${final === "A" ? "B" : "A"}`,
+    ciphertext: `${sealed.ciphertext.slice(0, flipAt)}${sealed.ciphertext[flipAt] === "A" ? "B" : "A"}${sealed.ciphertext.slice(flipAt + 1)}`,
   };
   await assert.rejects(
     sealer.open(tampered, context),
