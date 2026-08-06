@@ -71,3 +71,29 @@ remain; terminal replay repairs a crash between persistence and enqueue.
 Finalization rejects any manifest with a pending or running member. Complete organization heads remain possible only when every
 frozen account has complete accepted standard-check evidence; partial and
 failed generations remain history-only under the existing repository guards.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **New `aws_static_credentials` onboarding method — `6298f03` (PR #39).**
+  Onboarding now offers an access key ID plus secret access key (with a session
+  token required for temporary `ASIA` keys) as an alternative to the
+  CloudFormation trust-role flow, which stays the recommended default. The
+  credential material lives only in the collector's AES-GCM-encrypted registry
+  document; the app database stores the `aws_static_credentials` source kind and
+  nothing else. Static sessions carry **no STS inline session-policy ceiling and
+  no role-contract attestation** — both are impossible without `AssumeRole`.
+  **This row's connection prerequisite is unchanged: the FinOps per-source
+  verticals still require the trust-role method.** The FinOps source guards were
+  deliberately left trust-role-only, so an `aws_static_credentials` connection
+  cannot satisfy the prerequisite recorded above. No permission ceiling,
+  attestation, or role contract in this record is relaxed by it.

@@ -158,3 +158,26 @@ git diff --check
 ```
 
 Result: **all passed**.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's view was already on the native chart kit before these
+  merges (its monthly Graviton savings trend was charted at `8542be3`, an ancestor of `4ac72bd`), and neither its view module nor a shared panel it renders was
+  modified. Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.

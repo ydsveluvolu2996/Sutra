@@ -85,3 +85,58 @@ npx tsx --test \
 ```
 
 Result: **23 passed, 0 failed, 0 skipped**.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`LOCAL_VERTICAL_CANDIDATE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's own view module was not modified; it was already on
+  the native chart kit before these merges. What reached it is shared:
+  `app/costs/finops-foundational-panels.tsx` and
+  `app/costs/finops-cur-intelligence-panels.tsx` stopped drawing an absent
+  series as a floored zero (`tests/finops-shared-panel-floors.test.mjs`), which
+  preserves the absent-is-not-zero release invariant in the panels this row
+  renders. Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.
+
+- **Foundational export successor revisions — `dcbc08f` (PR #38).**
+  `infrastructure/finops-foundational-cur2-export-v1.1.yaml` and
+  `infrastructure/finops-foundational-focus12-export-v1.1.yaml` were authored to
+  accept the deployable `standard-2026-08.12` base-collector ceiling. Grants,
+  resources, logical names and outputs are byte-identical to the v1 templates;
+  only the `BaseCollectorPermissionPackVersion` acceptance gate changed. Its
+  `AllowedValues` is now exactly `standard-2026-08.1` and `standard-2026-08.12`,
+  defaulting to `.12`, and the launch assertion is an exact `Fn::Or` over those
+  two enumerated values — no lexical comparison and no permissive regex. The v1
+  files were not touched and their bytes remain immutable. Source only: neither
+  revision has been published or launched, and the add-on stays gated by
+  publish-before-application — a separately reviewed base collector role must be
+  deployed and attested before the stack may launch. G1 status is unchanged.
+
+- **New `aws_static_credentials` onboarding method — `6298f03` (PR #39).**
+  Onboarding now offers an access key ID plus secret access key (with a session
+  token required for temporary `ASIA` keys) as an alternative to the
+  CloudFormation trust-role flow, which stays the recommended default. The
+  credential material lives only in the collector's AES-GCM-encrypted registry
+  document; the app database stores the `aws_static_credentials` source kind and
+  nothing else. Static sessions carry **no STS inline session-policy ceiling and
+  no role-contract attestation** — both are impossible without `AssumeRole`.
+  **This row's connection prerequisite is unchanged: the FinOps per-source
+  verticals still require the trust-role method.** The FinOps source guards were
+  deliberately left trust-role-only, so an `aws_static_credentials` connection
+  cannot satisfy the prerequisite recorded above. No permission ceiling,
+  attestation, or role contract in this record is relaxed by it.

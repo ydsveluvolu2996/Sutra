@@ -182,3 +182,30 @@ connection, and `connection:read` capability for the same customer.
 
 Until these gates pass, this vertical must not be marked `LOCAL_VERIFIED` or
 `LIVE_VERIFIED`.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's own view module was not modified; it was already on
+  the native chart kit before these merges. What reached it is shared:
+  `app/costs/finops-foundational-panels.tsx` and
+  `app/costs/finops-cur-intelligence-panels.tsx` stopped drawing an absent
+  series as a floored zero (`tests/finops-shared-panel-floors.test.mjs`), which
+  preserves the absent-is-not-zero release invariant in the panels this row
+  renders. Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.
