@@ -209,6 +209,17 @@ jobs:
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
 
+      # tests/pipeline-scan.test.mjs drives scripts/pipeline-scan.mjs, which
+      # requires Trivy on PATH and correctly fails closed without it. That
+      # binary used to be installed by `quality` before the tests ran; once the
+      # run moved into shards, whichever shard held that file lost it. Every
+      # shard installs it so the shard environment matches what the serial run
+      # provided — a file must not pass or fail based on which shard drew it.
+      - name: Install pinned Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
       - name: Run offline PR-gate test shard
         run: node scripts/ci-test-shard.mjs --shard ${{ matrix.shard }}/6
 
