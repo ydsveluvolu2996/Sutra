@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { ResilienceVueRepository } from "../../../../../db/finops-resilience-vue-repository";
 import { ResilienceVueRuntimeRepository } from "../../../../../db/finops-resilience-vue-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
@@ -50,7 +51,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const query = parse(request); const authenticated = await requireApiSession(request);
     const connection = await getConnectionForOrg(authenticated.subject.orgId, query.connectionId);
-    if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") missing();
+    if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") missing();
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     if (!isResilienceVueRuntimePermissionPack(connection.permissionPackVersion)) {
       return jsonResponse({

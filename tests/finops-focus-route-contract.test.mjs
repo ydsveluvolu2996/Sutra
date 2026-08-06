@@ -16,7 +16,7 @@ test("FOCUS GET is authenticated, same-tenant, and read-only", () => {
     route,
     /getConnectionForOrg\(\s*authenticated\.subject\.orgId,\s*query\.connectionId,\s*\)/u,
   );
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.match(
     route,

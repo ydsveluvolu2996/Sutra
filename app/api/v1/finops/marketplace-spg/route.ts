@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { AwsMarketplaceSpgRepository } from "../../../../../db/finops-marketplace-spg-repository";
 import { MarketplaceSpgRuntimeRepository } from "../../../../../db/finops-marketplace-spg-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
@@ -29,7 +30,7 @@ function parse(request: Request): { connectionId: string; filters: MarketplaceSp
 export async function GET(request: Request): Promise<Response> {
   try { const query = parse(request); const authenticated = await requireApiSession(request);
     const connection = await getConnectionForOrg(authenticated.subject.orgId, query.connectionId);
-    if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active" || connection.partition !== "aws")
+    if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active" || connection.partition !== "aws")
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     assertSessionCapability(authenticated, "connection:read", connection.customerId);
     const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };

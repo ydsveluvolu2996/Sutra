@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source";
 /** Authorized control-plane boundary for the separate Compute Optimizer .8.5 capability. */
 import { canonicalJson } from "./canonical-json.ts";
 import {
@@ -145,7 +146,7 @@ export function createComputeOptimizerCapabilityPostHandler<TAuth extends Capabi
       const auth = await dependencies.requireSession(request);
       const connection = await dependencies.getConnection(auth.subject.orgId, input.connectionId);
       if (connection === null || connection.id !== input.connectionId
-        || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") {
+        || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") {
         fail("NOT_FOUND", 404);
       }
       dependencies.assertManage(auth, connection.customerId);

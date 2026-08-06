@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 "use client";
 
 import { useMemo, useState } from "react";
@@ -74,7 +75,7 @@ function LiveOperationsBrowser() {
           {connection !== null ? (
             <button
               className="button button-primary"
-              disabled={syncing || refreshing || connection.status !== "active" || connection.sourceKind !== "aws_trust_role"}
+              disabled={syncing || refreshing || connection.status !== "active" || !isCollectableAwsSourceKind(connection.sourceKind)}
               onClick={() => void runCollection()}
               type="button"
             >

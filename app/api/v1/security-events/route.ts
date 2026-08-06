@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../lib/aws-connection-source";
 import {
   getSecurityEventsWorkspace,
   persistSecurityEventCollection,
@@ -83,7 +84,7 @@ export async function POST(request: Request): Promise<Response> {
     const connection = await getConnectionForOrg(authenticated.subject.orgId, selectedConnectionId);
     if (connection === null) throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND" });
     assertSessionCapability(authenticated, "sync:run", connection.customerId);
-    if (connection.sourceKind !== "aws_trust_role" || connection.status !== "active") {
+    if (!isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") {
       throw Object.assign(new Error("Activate a live AWS trust connection before collecting security events"), { code: "INVALID_STATE" });
     }
     if (connection.permissionPackVersion !== CURRENT_PILOT_PERMISSION_PACK) {

@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -213,7 +214,7 @@ export function CostsBrowser() {
         <div className="heading-actions">
           <button
             className="button button-primary"
-            disabled={connection?.sourceKind !== "aws_trust_role" || connection.status !== "active" || collecting}
+            disabled={connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active" || collecting}
             onClick={() => void collect()}
             type="button"
           >
@@ -278,10 +279,10 @@ export function CostsBrowser() {
         </section>
       ) : null}
 
-      {!stateLoading && connection !== null && connection.sourceKind !== "aws_trust_role" ? (
+      {!stateLoading && connection !== null && !isCollectableAwsSourceKind(connection.sourceKind) ? (
         <section className="panel empty-workspace">
           <span className="empty-workspace-icon">AWS</span><h2>Live AWS evidence is required</h2>
-          <p>Cost results are never generated from the simulated CMDB fixture. Connect a customer-owned trust role to use FinOps.</p>
+          <p>Cost results are never generated from the simulated CMDB fixture. Connect a live AWS account &mdash; a customer-owned trust role or access keys &mdash; to use FinOps.</p>
           <a className="button button-primary" href="/onboard">Connect live account</a>
         </section>
       ) : null}

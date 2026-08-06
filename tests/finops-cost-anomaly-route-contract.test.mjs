@@ -16,7 +16,7 @@ test("Cost Anomaly route is dynamic, authenticated, and connection-derived", () 
   assert.match(route, /const ALLOWED_QUERY_PARAMETERS = new Set\(\["connectionId"\]\)/u);
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /getConnectionForOrg\([\s\S]*authenticated\.subject\.orgId[\s\S]*connectionId/u);
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.match(route, /assertSessionCapability\([\s\S]*"connection:read"[\s\S]*connection\.customerId/u);
   assert.match(route, /assertSessionCapability\(authenticated, "sync:run", connection\.customerId\)/u);

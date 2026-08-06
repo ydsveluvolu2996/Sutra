@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { AwsSupportCasesRepository } from "../../../../../db/finops-aws-support-cases-repository";
 import {
   AwsSupportCasesRuntimeRepository,
@@ -79,7 +80,7 @@ export async function GET(request: Request): Promise<Response> {
     const query = parse(request);
     const authenticated = await requireApiSession(request);
     const connection = await getConnectionForOrg(authenticated.subject.orgId, query.connectionId);
-    if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active" || connection.partition === "aws-cn") {
+    if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active" || connection.partition === "aws-cn") {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     }
     assertSessionCapability(authenticated, "connection:read", connection.customerId);

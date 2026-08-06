@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import {
   FinopsFoundationalConfigRepository,
   type FinopsFoundationalTenantScope,
@@ -75,7 +76,7 @@ async function authorizedScope(
   );
   if (
     connection === null
-    || connection.sourceKind !== "aws_trust_role"
+    || !isCollectableAwsSourceKind(connection.sourceKind)
     || connection.status !== "active"
   ) {
     throw Object.assign(

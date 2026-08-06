@@ -29,7 +29,7 @@ test("CUDOS GET has an exact query allowlist and server-resolved tenant authoriz
     route,
     /assertSessionCapability\(\s*authenticated,\s*"connection:read",\s*connection\.customerId,\s*\)/u,
   );
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.doesNotMatch(route, /export async function (?:POST|PUT|PATCH|DELETE)/u);
 });

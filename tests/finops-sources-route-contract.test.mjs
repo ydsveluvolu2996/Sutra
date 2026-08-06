@@ -24,7 +24,7 @@ test("source-readiness route is dynamic, authenticated, and customer scoped thro
     route,
     /getConnectionForOrg\(authenticated\.subject\.orgId, connectionId\)/u,
   );
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.match(route, /assertSessionCapability\(authenticated, "connection:read", connection\.customerId\)/u);
   assert.match(route, /orgId: authenticated\.subject\.orgId/u);

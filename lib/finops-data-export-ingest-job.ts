@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source";
 /**
  * Durable tenant-scoped AWS Data Exports ingestion job.
  *
@@ -361,7 +362,7 @@ export async function runFinopsDataExportIngestJob(
     connection === null
     || connection.id !== scope.connectionId
     || connection.customerId !== scope.customerId
-    || connection.sourceKind !== "aws_trust_role"
+    || !isCollectableAwsSourceKind(connection.sourceKind)
     || connection.status !== "active"
     || connection.permissionPackVersion !== FOUNDATIONAL_FINOPS_PERMISSION_PACK
     || !regionMatchesPartition(payload.region, connection.partition)

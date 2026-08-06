@@ -17,7 +17,7 @@ for (const [name, route] of [["KPI goals", goals], ["taxonomy", taxonomy]]) {
     assert.match(route, /requireApiSession\(request\)/u);
     assert.match(route, /readBoundedJson\(request, BODY_BYTES\)/u);
     assert.match(route, /getConnectionForOrg\(\s*authenticated\.subject\.orgId/u);
-    assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+    assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
     assert.match(route, /connection\.status !== "active"/u);
     assert.match(route, /assertSessionCapability\(authenticated, capability, connection\.customerId\)/u);
     assert.ok(

@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../../lib/aws-connection-source";
 import { JobQueueRepository } from "../../../../../../db/job-queue-repository";
 import { FinopsDataExportObservationRepository } from "../../../../../../db/finops-data-export-observation-repository";
 import { getConnectionForOrg } from "../../../../../../db/pilot-repository";
@@ -55,7 +56,7 @@ export async function POST(request: Request): Promise<Response> {
     );
     if (
       connection === null
-      || connection.sourceKind !== "aws_trust_role"
+      || !isCollectableAwsSourceKind(connection.sourceKind)
       || connection.status !== "active"
     ) {
       throw Object.assign(
