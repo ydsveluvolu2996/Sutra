@@ -137,6 +137,12 @@ importers:
       '@aws-sdk/client-compute-optimizer':
         specifier: 3.1087.0
         version: 3.1087.0
+      '@aws-sdk/client-config-service':
+        specifier: 3.1087.0
+        version: 3.1087.0
+      '@aws-sdk/client-connect':
+        specifier: 3.1087.0
+        version: 3.1087.0
       '@aws-sdk/client-cost-explorer':
         specifier: 3.1087.0
         version: 3.1087.0
@@ -281,6 +287,14 @@ packages:
 
   '@aws-sdk/client-compute-optimizer@3.1087.0':
     resolution: {integrity: sha512-EMT6AcpdOER5vVMzVPh4iL4TjSHwxKDE7MQ9f3w8MJ0R76Q1tF+O8nwWF0AhQb2UoiVlS1QvbNeKmRl3QAcNdA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-config-service@3.1087.0':
+    resolution: {integrity: sha512-8cnWeoiJmK8g4NhDArwpyvRovjOTfjTzBsMjOi5q0WdfZPU+jKrDqzhezRXQbCx0NjR0zYtHfsG0GS+G30zMWw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-connect@3.1087.0':
+    resolution: {integrity: sha512-NqYz1UxuYi15ApfdXNoJbcXAR0ZThwjXoQPPolerEf5LatrqCDi6Kcbxs2IXVboeHg714TI4vW4mQZIpGdT5Rg==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-cost-explorer@3.1087.0':
@@ -3784,6 +3798,28 @@ snapshots:
       tslib: 2.8.1
 
   '@aws-sdk/client-compute-optimizer@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-config-service@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-connect@3.1087.0':
     dependencies:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/credential-provider-node': 3.972.68
