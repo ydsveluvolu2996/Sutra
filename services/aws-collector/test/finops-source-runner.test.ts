@@ -127,6 +127,10 @@ class Registry implements ScopedConnectionRegistry {
   public async resolve(): Promise<StoredAwsConnection | null> {
     return this.stored;
   }
+  public async markStaticCredentialVerified(): Promise<void> {
+    throw new Error("unexpected static-credential verification");
+  }
+
   public async markOnboardingVerified(
     _scope: { readonly tenantId: string },
     _connectionId: string,

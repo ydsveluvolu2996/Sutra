@@ -277,6 +277,26 @@ describe("tenant-global AWS ownership", () => {
         1,
       );
 
+      // The rebuilt live-account index binds BOTH live kinds: a static-credential
+      // row claims the account against any later trust-role (or static) claim.
+      const staticAccount = "222233334444";
+      await insertConnection(database, {
+        id: "conn_static_owner_0000000000000001",
+        orgId: ORG_A,
+        customerId: customerA,
+        sourceKind: "aws_static_credentials",
+        accountId: staticAccount,
+        roleArn: "",
+      }).run();
+      await assert.rejects(insertConnection(database, {
+        id: "conn_static_challenger_000000000002",
+        orgId: ORG_B,
+        customerId: customerB,
+        sourceKind: "aws_trust_role",
+        accountId: staticAccount,
+        roleArn: `arn:aws:iam::${staticAccount}:role/sutra/SutraChallenger`,
+      }).run());
+
       const duplicateFixtureAccount = "999900001111";
       await database.batch([
         insertConnection(database, {

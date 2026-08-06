@@ -439,3 +439,48 @@ export function parseVerificationResponse(
     capabilityAssessment: { grantedActions, missingActions },
   };
 }
+
+/**
+ * Exact-shape verification proof for a static-credential connection. The
+ * collector never returns the credentials themselves; the only credential
+ * derivative accepted here is the last four characters of the access key ID.
+ */
+export function parseStaticCredentialVerificationResponse(
+  value: unknown,
+  expected: {
+    readonly accountId: string;
+    readonly partition: AwsPartition;
+  },
+): {
+  readonly verified: true;
+  readonly credentialKind: "static_credentials";
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly callerIdentityArn: string;
+  readonly accessKeyLast4: string;
+} {
+  const record = exactRecord(value, [
+    "verified", "credentialKind", "accountId", "partition", "callerIdentityArn", "accessKeyLast4",
+  ]);
+  if (record.verified !== true || record.credentialKind !== "static_credentials") invalid();
+  const accountId = awsAccountId(record.accountId);
+  const partition = awsPartition(record.partition);
+  const callerIdentityArn = string(record.callerIdentityArn, 2_048);
+  const accessKeyLast4 = string(record.accessKeyLast4, 4, /^[A-Z0-9]{4}$/u);
+  if (
+    accountId !== expected.accountId ||
+    partition !== expected.partition ||
+    !new RegExp(
+      `^arn:${partition}:(?:iam|sts)::${accountId}:[A-Za-z0-9_+=,.@/-]{1,512}$`,
+      "u",
+    ).test(callerIdentityArn)
+  ) invalid();
+  return {
+    verified: true,
+    credentialKind: "static_credentials",
+    accountId,
+    partition,
+    callerIdentityArn,
+    accessKeyLast4,
+  };
+}

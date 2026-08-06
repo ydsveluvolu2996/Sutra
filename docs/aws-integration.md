@@ -140,6 +140,50 @@ resource-policy grants, and restricts role-policy attestation reads to the regis
 role ARN. Sutra rejects broader or attached permission policies instead of treating
 the session policy as a substitute for a dedicated least-privilege role.
 
+### 2.4 Static-credential path (alternative onboarding method)
+
+Some customers cannot deploy a cross-account IAM role (no CloudFormation or
+Terraform change process, restrictive change windows, sandbox accounts). For
+them the onboarding UI offers a second first-class method: the customer
+supplies a dedicated read-only IAM user's access key ID and secret access key
+(plus a session token when the key ID starts with `ASIA`, i.e. temporary
+credentials), submitted once through the authenticated onboarding session to
+`POST /api/pilot/connections/credentials`.
+
+Properties of this path:
+
+- **Collector-owned encrypted storage.** The keys are stored encrypted by the
+  collector only. The control plane, browser, logs, queues, and API responses
+  never carry or echo the secret; success responses return only the last four
+  characters of the access key ID for display.
+- **GetCallerIdentity account binding on every session.** Registration commits
+  only after `sts:GetCallerIdentity` proves the keys resolve to the expected
+  onboarding account, and the same binding is re-proven at the start of every
+  collector session. A mismatch fails closed and quarantines the connection.
+- **900-second in-memory session cap.** Decrypted credentials live in worker
+  memory for at most 900 seconds per session before they are dropped and
+  re-derived; they are never persisted outside the encrypted store.
+
+Inherent limitations versus the role method — state these plainly to customers:
+
+- **No STS session policy ceiling.** With AssumeRole every session is
+  intersected with Sutra's fixed read-only session policy; static keys carry
+  whatever the IAM user's policies grant, so the least-privilege ceiling
+  depends entirely on the customer-side user policy. This is why the method
+  requires a dedicated read-only IAM user, never root or administrator keys.
+- **No trust-policy attestation.** There is no trust policy, ExternalId
+  condition, or session-name binding to attest, so the confused-deputy and
+  drift proofs from §2.1-2.2 do not apply. Account binding via
+  GetCallerIdentity is the only cryptographic-adjacent check available.
+- **Customer-owned rotation.** AKIA keys do not expire; the customer must
+  rotate them and re-submit through the same onboarding step. ASIA keys expire
+  on AWS's schedule and stop collection until re-submitted. The role method's
+  temporary STS credentials rotate automatically.
+
+The IAM role method remains the recommended default, and FinOps per-source
+verticals currently require it. See
+`docs/aws-static-credential-onboarding.md` for the customer-facing runbook.
+
 ### Permission-pack upgrade order
 
 `standard-2026-07.3` adds live attached-policy attestation. It is intentionally

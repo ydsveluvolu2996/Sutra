@@ -102,6 +102,7 @@ import {
   type NormalizedAwsEvidence,
   type NormalizedAwsResource,
   type OnboardingTrustVerification,
+  type StaticCredentialVerification,
   type ConnectionScope,
   type ScopedConnectionRegistry,
   type SafeJsonObject,
@@ -264,6 +265,9 @@ const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
+const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
+const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
   /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|compute-optimizer-materialization-activation-manifest|finops-source|organizations-taxonomy|disable|offboard)$/;
@@ -523,6 +527,11 @@ export interface LocalCollectorServerOptions {
 export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
   getRegistered(scope: ConnectionScope, connectionId: string): Promise<RegisteredAwsConnection | null>;
   upsert(input: RegisterAwsConnectionInput): Promise<void>;
+  markStaticCredentialVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    verification: StaticCredentialVerification,
+  ): Promise<void>;
   disable(scope: ConnectionScope, connectionId: string): Promise<void>;
   offboard(scope: ConnectionScope, connectionId: string): Promise<void>;
   activateOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
@@ -3101,6 +3110,10 @@ async function attestOnboardingTrust(context: ServerContext, job: ScopedJob): Pr
   const lease = await claimConnectionOperation(context, operationKey, true);
   try {
     const scope = { tenantId: job.tenantId };
+    const registered = await context.registry.getRegistered(scope, job.connectionId);
+    if (registered !== null && registered.credentialKind === "static_credentials") {
+      return await attestStaticCredentialIdentity(context, job, registered);
+    }
     if (context.mode === "fixture") {
       const connection = await activeCandidate(context.registry, job);
       const callerIdentityArn = fixtureCallerIdentityArn(connection, job.jobId);
@@ -3138,6 +3151,44 @@ async function attestOnboardingTrust(context: ServerContext, job: ScopedJob): Pr
   } finally {
     await context.operationCoordinator.release(lease);
   }
+}
+
+/**
+ * Verify a static-credential candidate. Runs under the caller's connection
+ * operation lease. The response mirrors verificationResponse but describes
+ * the credential contract instead of a role trust attestation, and it never
+ * contains any secret material.
+ */
+async function attestStaticCredentialIdentity(
+  context: ServerContext,
+  job: ScopedJob,
+  registered: RegisteredAwsConnection,
+): Promise<unknown> {
+  const scope = { tenantId: job.tenantId };
+  const staticCredentials = registered.staticCredentials;
+  if (staticCredentials === undefined) throw new RegistryStateError();
+  const verification: StaticCredentialVerification = context.mode === "fixture"
+    ? {
+        connectionId: registered.connectionId,
+        accountId: registered.expectedAccountId,
+        partition: registered.partition,
+        callerIdentityArn: `arn:${registered.partition}:iam::${registered.expectedAccountId}:user/sutra-fixture-static`,
+        accessKeyLast4: staticCredentials.accessKeyId.slice(-4),
+      }
+    : await createWorkloadIdentityRoleBroker({
+        registry: context.registry,
+        principalArn: context.principalArn,
+        region: partitionControlRegion(registered.partition),
+      }).verifyStaticCredentialIdentity(scope, job.connectionId, job.jobId);
+  await context.registry.markStaticCredentialVerified(scope, job.connectionId, verification);
+  return {
+    verified: true,
+    credentialKind: "static_credentials",
+    accountId: verification.accountId,
+    partition: verification.partition,
+    callerIdentityArn: verification.callerIdentityArn,
+    accessKeyLast4: verification.accessKeyLast4,
+  };
 }
 
 async function syncConnection(context: ServerContext, job: ScopedJob): Promise<PilotSnapshot> {
@@ -3983,6 +4034,12 @@ function parseRegistration(body: string, pathConnectionId: string) {
   } catch {
     throw invalidRequest();
   }
+  if (
+    typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) &&
+    Object.hasOwn(candidate, "credentialKind")
+  ) {
+    return parseStaticCredentialRegistration(body, pathConnectionId);
+  }
   const hasRoleContract =
     typeof candidate === "object" && candidate !== null && !Array.isArray(candidate) &&
     Object.hasOwn(candidate, "roleProvisioningMode");
@@ -4046,6 +4103,73 @@ function parseRegistration(body: string, pathConnectionId: string) {
           expectedRoleName: record.expectedRoleName as string,
         }
       : {}),
+  };
+}
+
+/**
+ * Registration shape for customer-supplied static credentials. Role trust
+ * material and role-contract fields are structurally impossible here; the
+ * registry pins roleArn and externalId to empty strings so no AssumeRole path
+ * can ever resolve this connection. The key material only transits into the
+ * encrypted registry document and is never echoed or logged.
+ */
+function parseStaticCredentialRegistration(body: string, pathConnectionId: string) {
+  const record = exactJson(body, [
+    "tenantId", "connectionId", "accountId", "partition", "enabledRegions",
+    "credentialKind", "staticCredentials",
+  ]);
+  if (
+    typeof record.tenantId !== "string" || !IDENTIFIER.test(record.tenantId) ||
+    typeof record.connectionId !== "string" || record.connectionId !== pathConnectionId ||
+    !IDENTIFIER.test(record.connectionId) ||
+    typeof record.accountId !== "string" || !ACCOUNT_ID.test(record.accountId) ||
+    (record.partition !== "aws" && record.partition !== "aws-us-gov" && record.partition !== "aws-cn") ||
+    record.credentialKind !== "static_credentials" ||
+    !isValidAwsRegionSelection(record.enabledRegions, record.partition)
+  ) {
+    throw invalidRequest();
+  }
+  const credentials = record.staticCredentials;
+  if (typeof credentials !== "object" || credentials === null || Array.isArray(credentials)) {
+    throw invalidRequest();
+  }
+  const credentialRecord = credentials as Record<string, unknown>;
+  const credentialKeys = Object.keys(credentialRecord);
+  const hasSessionToken = Object.hasOwn(credentialRecord, "sessionToken");
+  if (
+    credentialKeys.length !== (hasSessionToken ? 3 : 2) ||
+    typeof credentialRecord.accessKeyId !== "string" ||
+    !STATIC_ACCESS_KEY_ID.test(credentialRecord.accessKeyId) ||
+    typeof credentialRecord.secretAccessKey !== "string" ||
+    !STATIC_SECRET_ACCESS_KEY.test(credentialRecord.secretAccessKey) ||
+    (hasSessionToken &&
+      (typeof credentialRecord.sessionToken !== "string" ||
+        !STATIC_SESSION_TOKEN.test(credentialRecord.sessionToken)))
+  ) {
+    throw invalidRequest();
+  }
+  // Temporary (ASIA) keys are unusable without their session token; long-term
+  // (AKIA) keys must not carry one.
+  if (credentialRecord.accessKeyId.startsWith("ASIA") !== hasSessionToken) {
+    throw invalidRequest();
+  }
+  return {
+    tenantId: record.tenantId,
+    connectionId: record.connectionId,
+    expectedAccountId: record.accountId,
+    partition: record.partition as LocalAwsPartition,
+    roleArn: "",
+    externalId: "",
+    enabledRegions: record.enabledRegions as string[],
+    sessionNamePrefix: "sutra-",
+    credentialKind: "static_credentials" as const,
+    staticCredentials: {
+      accessKeyId: credentialRecord.accessKeyId,
+      secretAccessKey: credentialRecord.secretAccessKey,
+      ...(hasSessionToken
+        ? { sessionToken: credentialRecord.sessionToken as string }
+        : {}),
+    },
   };
 }
 
@@ -4129,10 +4253,14 @@ function parseStagedRegistrationMutation(
   ) {
     throw invalidRequest();
   }
-  try {
-    parseIamRoleArn(record.roleArn);
-  } catch {
-    throw invalidRequest();
+  // Static-credential candidates have no role: their lifecycle actions carry
+  // an empty roleArn that must match the record's pinned empty string.
+  if (record.roleArn !== "") {
+    try {
+      parseIamRoleArn(record.roleArn);
+    } catch {
+      throw invalidRequest();
+    }
   }
   return {
     tenantId: record.tenantId,

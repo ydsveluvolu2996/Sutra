@@ -82,6 +82,10 @@ class Registry {
   public async getRegistered(scope: ConnectionScope, id: string): Promise<RegisteredAwsConnection | null> {
     return this.resolve(scope, id) as Promise<RegisteredAwsConnection | null>;
   }
+  public async markStaticCredentialVerified(): Promise<void> {
+    throw new Error("unexpected static-credential verification");
+  }
+
   public async markOnboardingVerified(_a: ConnectionScope, _b: string, _c: OnboardingTrustVerification): Promise<void> { void _a; void _b; void _c; }
   public async upsert(): Promise<void> {} public async disable(): Promise<void> {}
   public async offboard(): Promise<void> {} public async activateOnboarding(): Promise<void> {}

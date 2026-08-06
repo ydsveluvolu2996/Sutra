@@ -330,6 +330,24 @@ export interface ConnectionScope {
   readonly subjectId?: string;
 }
 
+/**
+ * How a connection authenticates to AWS. Absent on records written before
+ * static credentials existed; absence always means "trust_role".
+ */
+export type AwsConnectionCredentialKind = "trust_role" | "static_credentials";
+
+/**
+ * Customer-supplied static credential material. It exists only inside the
+ * encrypted registry document and in-memory session construction; it is never
+ * logged, never echoed by any route, and never persisted anywhere else.
+ * A missing sessionToken means a long-term (AKIA) key; ASIA keys require one.
+ */
+export interface AwsStaticCredentialMaterial {
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly sessionToken?: string;
+}
+
 /** Server-side connection material. It must never be accepted from a job body. */
 export interface StoredAwsConnection {
   readonly tenantId: string;
@@ -364,6 +382,16 @@ export interface StoredAwsConnection {
   /** Exact regional launch/destination attestations for the .8.5 broker. */
   readonly computeOptimizerExportLaunchContracts?:
     readonly ComputeOptimizerExportLaunchContract[];
+  /**
+   * Absent for every record written before static credentials existed and for
+   * all trust-role connections. When "static_credentials", roleArn and
+   * externalId are empty strings, staticCredentials is present, and partition
+   * pins the expected identity partition (a trust-role session derives it
+   * from the role ARN instead).
+   */
+  readonly credentialKind?: AwsConnectionCredentialKind;
+  readonly staticCredentials?: AwsStaticCredentialMaterial;
+  readonly partition?: AwsPartition;
 }
 
 export interface ScopedConnectionRegistry {
@@ -474,6 +502,19 @@ export interface OnboardingTrustVerification {
   readonly sessionPolicyApplied: true;
   readonly permissionPackVersion: typeof CURRENT_PERMISSION_PACK_VERSION;
   readonly capabilityAssessment: PermissionCapabilityAssessment;
+}
+
+/**
+ * Safe static-credential verification result: proves the supplied key pair
+ * authenticates as the expected account. Contains no secret material — only
+ * the last four characters of the (non-secret) access key ID for display.
+ */
+export interface StaticCredentialVerification {
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly callerIdentityArn: string;
+  readonly accessKeyLast4: string;
 }
 
 export interface InventoryJobRequest {

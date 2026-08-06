@@ -14,6 +14,7 @@ import { effectiveRequestOrigin } from "./request-origin.ts";
 
 export type AwsPartition = "aws" | "aws-us-gov" | "aws-cn";
 export type AwsRoleProvisioningMode = "sutra_template" | "customer_managed";
+export type AwsConnectionMethod = "trust_role" | "static_credentials";
 
 export const SUTRA_ROLE_PATH = "/sutra/" as const;
 export const SUTRA_TEMPLATE_ROLE_NAME = "SutraCollectorRole" as const;
@@ -112,6 +113,19 @@ export interface AwsConnectionDraftRequest {
   readonly roleProvisioningMode: AwsRoleProvisioningMode;
   readonly rolePath: string;
   readonly roleName: string;
+  readonly connectionMethod: AwsConnectionMethod;
+}
+
+/**
+ * Browser input for the one-request static credential submission. Credentials
+ * are validated for shape only and are NEVER stored, logged, or echoed back;
+ * they pass through a single request to the collector broker.
+ */
+export interface AwsStaticCredentialsSubmission {
+  readonly connectionId: string;
+  readonly accessKeyId: string;
+  readonly secretAccessKey: string;
+  readonly sessionToken: string | null;
 }
 
 export interface LocalAwsConnectionIdentity {
@@ -258,6 +272,7 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
     : null;
   const hasRoleContract = candidate !== null && ["roleProvisioningMode", "rolePath", "roleName"]
     .some((key) => Object.hasOwn(candidate, key));
+  const hasConnectionMethod = candidate !== null && Object.hasOwn(candidate, "connectionMethod");
   const record = exactRecord(value, [
     "operationId",
     "customerName",
@@ -265,7 +280,19 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
     "partition",
     "enabledRegions",
     ...(hasRoleContract ? ["roleProvisioningMode", "rolePath", "roleName"] : []),
+    ...(hasConnectionMethod ? ["connectionMethod"] : []),
   ]);
+  const connectionMethod = record.connectionMethod === undefined
+    ? "trust_role"
+    : record.connectionMethod;
+  if (connectionMethod !== "trust_role" && connectionMethod !== "static_credentials") {
+    invalidInput("Choose a supported AWS connection method");
+  }
+  if (connectionMethod === "static_credentials" && hasRoleContract) {
+    // Static-credential connections have no IAM role contract; accepting role
+    // keys here would silently persist an unusable trust configuration.
+    invalidInput("Static credential connections do not accept an IAM role contract");
+  }
   if (
     typeof record.operationId !== "string" ||
     !ONBOARDING_OPERATION_ID.test(record.operationId)
@@ -331,6 +358,60 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
     roleProvisioningMode,
     rolePath,
     roleName,
+    connectionMethod,
+  };
+}
+
+const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/u;
+const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/u;
+const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
+
+/**
+ * Strict boundary for the one-request static credential submission. Exact keys
+ * only; a session token is required for temporary (ASIA) keys and forbidden
+ * for long-lived (AKIA) keys. Error messages deliberately never echo any part
+ * of the submitted material.
+ */
+export function parseAwsStaticCredentialsSubmission(
+  value: unknown,
+): AwsStaticCredentialsSubmission {
+  const candidate = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const hasSessionToken = candidate !== null && Object.hasOwn(candidate, "sessionToken");
+  const record = exactRecord(value, [
+    "connectionId",
+    "accessKeyId",
+    "secretAccessKey",
+    ...(hasSessionToken ? ["sessionToken"] : []),
+  ]);
+  if (typeof record.connectionId !== "string" || !/^conn_[a-f0-9]{32}$/u.test(record.connectionId)) {
+    invalidInput("The connection identifier is invalid");
+  }
+  if (typeof record.accessKeyId !== "string" || !STATIC_ACCESS_KEY_ID.test(record.accessKeyId)) {
+    invalidInput("Enter a valid AWS access key ID");
+  }
+  if (typeof record.secretAccessKey !== "string" || !STATIC_SECRET_ACCESS_KEY.test(record.secretAccessKey)) {
+    invalidInput("Enter a valid AWS secret access key");
+  }
+  const temporaryKey = record.accessKeyId.startsWith("ASIA");
+  if (temporaryKey && !hasSessionToken) {
+    invalidInput("Temporary AWS access keys require a session token");
+  }
+  if (!temporaryKey && hasSessionToken) {
+    invalidInput("Long-lived AWS access keys must not include a session token");
+  }
+  if (
+    hasSessionToken &&
+    (typeof record.sessionToken !== "string" || !STATIC_SESSION_TOKEN.test(record.sessionToken))
+  ) {
+    invalidInput("Enter a valid AWS session token");
+  }
+  return {
+    connectionId: record.connectionId,
+    accessKeyId: record.accessKeyId,
+    secretAccessKey: record.secretAccessKey,
+    sessionToken: hasSessionToken ? record.sessionToken as string : null,
   };
 }
 

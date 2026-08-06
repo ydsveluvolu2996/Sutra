@@ -222,7 +222,7 @@ export const awsConnections = sqliteTable("aws_connections", {
   id: text("id").primaryKey(),
   orgId: text("org_id").notNull().references(() => organizations.id),
   customerId: text("customer_id").notNull().references(() => customers.id),
-  sourceKind: text("source_kind", { enum: ["aws_trust_role", "simulated_fixture"] }).notNull().default("aws_trust_role"),
+  sourceKind: text("source_kind", { enum: ["aws_trust_role", "aws_static_credentials", "simulated_fixture"] }).notNull().default("aws_trust_role"),
   fixtureId: text("fixture_id"),
   fixtureVersion: text("fixture_version"),
   partition: text("partition", { enum: ["aws", "aws-us-gov", "aws-cn"] }).notNull().default("aws"),
@@ -245,10 +245,10 @@ export const awsConnections = sqliteTable("aws_connections", {
   uniqueIndex("aws_connections_customer_account_uq").on(table.orgId, table.customerId, table.partition, table.awsAccountId),
   uniqueIndex("aws_connections_global_live_account_uq")
     .on(table.partition, table.awsAccountId)
-    .where(sql`${table.sourceKind} = 'aws_trust_role'`),
+    .where(sql`${table.sourceKind} IN ('aws_trust_role','aws_static_credentials')`),
   uniqueIndex("aws_connections_global_live_role_uq")
     .on(table.roleArn)
-    .where(sql`${table.sourceKind} = 'aws_trust_role' AND ${table.roleArn} <> ''`),
+    .where(sql`${table.sourceKind} IN ('aws_trust_role','aws_static_credentials') AND ${table.roleArn} <> ''`),
   index("aws_connections_scope_status_idx").on(table.orgId, table.customerId, table.status),
 ]);
 
