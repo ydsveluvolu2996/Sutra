@@ -14,6 +14,7 @@ import {
   type FinopsCapabilityEvidence,
   type FinopsCapabilityViewState,
 } from "./finops-capability-shell";
+import { RankingBars, TimeSeriesChart } from "../components/charts";
 import styles from "./costs.module.css";
 
 type FocusReport = Extract<FinopsFocusDashboardResult, { ok: true }>;
@@ -235,14 +236,131 @@ async function readFocusEnvelope(
   return parseFocusEnvelope(body, connectionId);
 }
 
-function absoluteMicros(value: string): bigint {
-  const parsed = BigInt(value);
-  return parsed < BigInt(0) ? -parsed : parsed;
+/**
+ * A FOCUS cost as a plottable amount, or null when there is nothing to plot.
+ *
+ * The bars this replaces read `focusCostMicros(entry, basis) ?? "0"`, so a
+ * period or dimension value for which the selected basis supplies **no** cost
+ * was plotted as zero and then floored to a visible stub by `Math.max(4, ...)`
+ * or `Math.max(1, ...)`. Absence and a measured zero drew identically, and both
+ * drew as a bar. Null here means "not supplied"; the caller excludes and counts
+ * it rather than drawing it.
+ *
+ * Sign is preserved. The old `absoluteMicros` divisor drew a credit with the
+ * same length as an equal charge, so a -500 refund and a +500 charge were
+ * indistinguishable bars.
+ *
+ * Micros beyond exact double range are dropped rather than silently rounded
+ * into a coordinate, matching how the data-transfer and extended-support
+ * dashboards already handle unplottable monetary totals. The exact figure is
+ * still printed beside each bar from the original micros string.
+ */
+/**
+ * Axis and legend formatting for a plotted amount. The exact figure always
+ * comes from `formatFocusMicrosExact` against the original micros; this is only
+ * for the coordinate scale, where a rounded tick is expected and correct.
+ */
+function formatFocusPlotValue(value: number, currency: string): string {
+  return `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function relativeHeight(value: string, maximum: bigint): number {
-  if (!INTEGER_MICROS.test(value) || maximum <= BigInt(0)) return 0;
-  return Number((absoluteMicros(value) * BigInt(100)) / maximum);
+function focusPlotAmount(micros: string | null): number | null {
+  if (micros === null || !INTEGER_MICROS.test(micros)) return null;
+  const parsed = Number(micros);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed / 1_000_000;
+}
+
+/**
+ * Excluded-row disclosure shared by all four FOCUS charts. A row the selected
+ * basis does not supply is absence, and saying so is the whole point of
+ * excluding it -- silently dropping rows would understate the set as much as
+ * plotting them as zero would misstate it.
+ */
+function FocusExcluded({ excluded, total, noun }: {
+  readonly excluded: number;
+  readonly total: number;
+  readonly noun: string;
+}) {
+  if (excluded === 0) return null;
+  return (
+    <p className={styles.focusFootnote}>
+      {excluded} of {total} {total === 1 ? noun : `${noun}s`} {excluded === 1 ? "supplies" : "supply"} no
+      cost for this basis, or an amount too large to plot exactly, and {excluded === 1 ? "is" : "are"} excluded
+      from the chart rather than drawn as zero.
+    </p>
+  );
+}
+
+/**
+ * A FOCUS cost trend over ordered periods.
+ *
+ * Currency is fixed by the currency selector above, so every point already
+ * shares one axis; the label states it so a screenshot cannot lose that context.
+ */
+function FocusCostTrend({ ariaLabel, currency, points }: {
+  readonly ariaLabel: string;
+  readonly currency: string;
+  readonly points: readonly { readonly label: string; readonly micros: string | null; readonly detail?: string }[];
+}) {
+  const plottable = points
+    .map((point) => ({ label: point.label, value: focusPlotAmount(point.micros) }))
+    .filter((point): point is { label: string; value: number } => point.value !== null);
+  return (
+    <>
+      {plottable.length === 0 ? null : (
+        <TimeSeriesChart
+          ariaLabel={ariaLabel}
+          caption={`${currency} only. Periods with no supplied cost for the selected basis are excluded, not plotted as zero.`}
+          formatValue={(value) => formatFocusPlotValue(value, currency)}
+          series={[{ id: "cost", label: `${currency} cost`, points: plottable }]}
+        />
+      )}
+      {points.every((point) => point.detail === undefined) ? null : (
+        // The kit's data table carries the exact amounts, but not line counts or
+        // basis coverage. Coverage of "unavailable" is a truth signal about the
+        // selected basis, so it stays visible rather than being lost with the
+        // markup the chart replaced.
+        <dl className={styles.focusCoverageList}>
+          {points.map((point) => (
+            <div key={point.label}><dt>{point.label}</dt><dd>{point.detail}</dd></div>
+          ))}
+        </dl>
+      )}
+      <FocusExcluded excluded={points.length - plottable.length} total={points.length} noun="period" />
+    </>
+  );
+}
+
+/** A FOCUS cost ranking across one dimension's values, within one currency. */
+function FocusDimensionRanking({ ariaLabel, currency, entries }: {
+  readonly ariaLabel: string;
+  readonly currency: string;
+  readonly entries: readonly { readonly value: string | null; readonly micros: string | null; readonly lineCount: number }[];
+}) {
+  const plottable = entries
+    .map((entry) => ({ entry, value: focusPlotAmount(entry.micros) }))
+    .filter((row): row is { entry: typeof entries[number]; value: number } => row.value !== null)
+    .map(({ entry, value }) => ({
+      id: entry.value ?? "__missing__",
+      label: entry.value ?? "Not provided",
+      value,
+      detail: `${entry.lineCount.toLocaleString("en-US")} lines · ${formatFocusMicrosExact(entry.micros, currency)}`,
+    }));
+  return (
+    <>
+      {plottable.length === 0 ? null : (
+        <RankingBars
+          ariaLabel={ariaLabel}
+          caption={`${currency} only. Values with no supplied cost for the selected basis are excluded, not ranked as zero.`}
+          formatValue={(value) => formatFocusPlotValue(value, currency)}
+          items={plottable}
+          sort
+        />
+      )}
+      <FocusExcluded excluded={entries.length - plottable.length} total={entries.length} noun="value" />
+    </>
+  );
 }
 
 function statePresentation(
@@ -434,34 +552,12 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
   const selectedDimension = selectedCurrency?.dimensions.find((entry) =>
     entry.dimension === dimension) ?? null;
   const selectedSecondaryDimension = selectedCurrency?.dimensions.find((entry) => entry.dimension === secondaryDimension) ?? null;
-  const maximumDimensionCost = selectedDimension?.entries.reduce(
-    (maximum, entry) => {
-      const selected = focusCostMicros(entry, costBasis);
-      if (selected === null) return maximum;
-      const selectedAbsolute = absoluteMicros(selected);
-      return selectedAbsolute > maximum ? selectedAbsolute : maximum;
-    },
-    BigInt(1),
-  ) ?? BigInt(1);
-  const maximumSecondaryCost = selectedSecondaryDimension?.entries.reduce((maximum, entry) => {
-    const selected = focusCostMicros(entry, costBasis); if (selected === null) return maximum;
-    const value = absoluteMicros(selected); return value > maximum ? value : maximum;
-  }, BigInt(1)) ?? BigInt(1);
   const trend = report.trends.filter(({ currency }) => currency === selectedCurrency?.currency);
-  const maximumTrendCost = trend.reduce((maximum, entry) => {
-    const selected = focusCostMicros(entry, costBasis);
-    const value = selected === null ? BigInt(0) : absoluteMicros(selected);
-    return value > maximum ? value : maximum;
-  }, BigInt(1));
   const drilldowns = report.drilldowns.rows.filter(({ currency }) =>
     currency === selectedCurrency?.currency);
   const neutralCurrency = report.neutral.currencies.find(({ currency }) => currency === selectedCurrency?.currency) ?? null;
   const periods = [...new Set(trend.map(({ period }) => period))].sort();
   const dailyTrend = (report.dailyTrends ?? []).filter(({ currency }) => currency === selectedCurrency?.currency).slice(-31);
-  const maximumDailyCost = dailyTrend.reduce((maximum, entry) => {
-    const selected = focusCostMicros(entry, costBasis); const value = selected === null ? BigInt(0) : absoluteMicros(selected);
-    return value > maximum ? value : maximum;
-  }, BigInt(1));
   const latestPeriod = periods.at(-1) ?? null; const previousPeriod = periods.at(-2) ?? null;
   const monthlyBucket = (period: string | null) => period === null ? null : report.monthlyDimensions?.find((item) =>
     item.currency === selectedCurrency?.currency && item.dimension === dimension && item.period === period) ?? null;
@@ -500,16 +596,11 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
             <section className={styles.focusPanel} aria-labelledby="focus-trend-heading">
               <header><div><small>Monthly evidence</small><h4 id="focus-trend-heading">{selectedCurrency.currency} {FOCUS_COST_LABELS[costBasis]} trend</h4></div><span>{trend.length} periods</span></header>
               {trend.length === 0 ? <p className={styles.focusEmpty}>No trend buckets are available.</p> : (
-                <div className={styles.focusTrendChart} role="img" aria-label={`${selectedCurrency.currency} exact ${FOCUS_COST_LABELS[costBasis]} trend`}>
-                  {trend.map((entry) => (
-                    <div key={`${entry.period}-${entry.currency}`}>
-                      <span>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), entry.currency)}</span>
-                      <i style={{ height: `${Math.max(4, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumTrendCost))}%` }} />
-                      <b>{entry.period}</b>
-                      <small>{entry.lineCount.toLocaleString("en-US")} lines · {focusCostCoverage(entry, costBasis)}</small>
-                    </div>
-                  ))}
-                </div>
+                <FocusCostTrend
+                  ariaLabel={`${selectedCurrency.currency} exact ${FOCUS_COST_LABELS[costBasis]} trend`}
+                  currency={selectedCurrency.currency}
+                  points={trend.map((entry) => ({ label: entry.period, micros: focusCostMicros(entry, costBasis), detail: `${entry.lineCount.toLocaleString("en-US")} lines · ${focusCostCoverage(entry, costBasis)}` }))}
+                />
               )}
             </section>
 
@@ -527,15 +618,11 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
               </header>
               {selectedDimension === null ? <p className={styles.focusEmpty}>No dimension evidence is available.</p> : (
                 <>
-                  <div className={styles.focusDimensionBars} aria-label={`${FOCUS_DIMENSION_LABELS[dimension]} ${FOCUS_COST_LABELS[costBasis]} ranking`}>
-                    {selectedDimension.entries.map((entry) => (
-                      <article key={entry.value ?? "missing"}>
-                        <div><strong>{entry.value ?? "Not provided"}</strong><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div>
-                        <span><i style={{ width: `${Math.max(1, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumDimensionCost))}%` }} /></span>
-                        <b>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), selectedCurrency.currency)}</b>
-                      </article>
-                    ))}
-                  </div>
+                  <FocusDimensionRanking
+                    ariaLabel={`${FOCUS_DIMENSION_LABELS[dimension]} ${FOCUS_COST_LABELS[costBasis]} ranking`}
+                    currency={selectedCurrency.currency}
+                    entries={selectedDimension.entries.map((entry) => ({ value: entry.value, micros: focusCostMicros(entry, costBasis), lineCount: entry.lineCount }))}
+                  />
                   <p className={styles.focusFootnote}>{selectedDimension.distinctValueCount} supplied values · {selectedDimension.missingLineCount} missing lines{selectedDimension.truncated ? " · ranking truncated at the server bound" : ""}</p>
                 </>
               )}
@@ -544,11 +631,11 @@ export function FinopsFocusReportView({ report }: { readonly report: FocusReport
 
           <section className={styles.focusPanel} aria-labelledby="focus-daily-heading">
             <header><div><small>Daily billing summary</small><h4 id="focus-daily-heading">Daily {FOCUS_COST_LABELS[costBasis]} in {selectedCurrency.currency}</h4></div><span>Latest {dailyTrend.length} retained days</span></header>
-            {dailyTrend.length === 0 ? <p className={styles.focusEmpty}>No daily charge-period evidence is available.</p> : <div className={styles.focusTrendChart} role="img" aria-label={`${selectedCurrency.currency} exact daily ${FOCUS_COST_LABELS[costBasis]} trend`}>{dailyTrend.map((entry) => <div key={`${entry.day}-${entry.currency}`}><span>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), entry.currency)}</span><i style={{ height: `${Math.max(4, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumDailyCost))}%` }} /><b>{entry.day.slice(5)}</b><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div>)}</div>}
+            {dailyTrend.length === 0 ? <p className={styles.focusEmpty}>No daily charge-period evidence is available.</p> : <FocusCostTrend ariaLabel={`${selectedCurrency.currency} exact daily ${FOCUS_COST_LABELS[costBasis]} trend`} currency={selectedCurrency.currency} points={dailyTrend.map((entry) => ({ label: entry.day, micros: focusCostMicros(entry, costBasis), detail: `${entry.lineCount.toLocaleString("en-US")} lines` }))} />}
           </section>
 
           <section className={styles.focusPanel} aria-labelledby="focus-secondary-heading"><header><div><small>Second Group By</small><h4 id="focus-secondary-heading">Secondary dimension analysis</h4></div><label><span className={styles.focusVisuallyHidden}>Second dimension</span><select value={secondaryDimension} onChange={(event) => setSecondaryDimension(event.target.value as FinopsFocusDimension)}>{selectedCurrency.dimensions.map(({ dimension: item }) => <option key={item} value={item}>{FOCUS_DIMENSION_LABELS[item]}</option>)}</select></label></header>
-            {selectedSecondaryDimension === null ? <p className={styles.focusEmpty}>No secondary dimension evidence is available.</p> : <div className={styles.focusDimensionBars} aria-label={`${FOCUS_DIMENSION_LABELS[secondaryDimension]} secondary ${FOCUS_COST_LABELS[costBasis]} ranking`}>{selectedSecondaryDimension.entries.map((entry) => <article key={entry.value ?? "missing"}><div><strong>{entry.value ?? "Not provided"}</strong><small>{entry.lineCount.toLocaleString("en-US")} lines</small></div><span><i style={{ width: `${Math.max(1, relativeHeight(focusCostMicros(entry, costBasis) ?? "0", maximumSecondaryCost))}%` }} /></span><b>{formatFocusMicrosExact(focusCostMicros(entry, costBasis), selectedCurrency.currency)}</b></article>)}</div>}
+            {selectedSecondaryDimension === null ? <p className={styles.focusEmpty}>No secondary dimension evidence is available.</p> : <FocusDimensionRanking ariaLabel={`${FOCUS_DIMENSION_LABELS[secondaryDimension]} secondary ${FOCUS_COST_LABELS[costBasis]} ranking`} currency={selectedCurrency.currency} entries={selectedSecondaryDimension.entries.map((entry) => ({ value: entry.value, micros: focusCostMicros(entry, costBasis), lineCount: entry.lineCount }))} />}
           </section>
 
           <section className={styles.focusPanel} aria-labelledby="focus-mom-heading">

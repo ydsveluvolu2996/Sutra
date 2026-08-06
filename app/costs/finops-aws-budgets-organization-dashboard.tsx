@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AWS_BUDGETS_OFFICIAL_DEFINITION, type AwsBudgetsOfficialDefinition } from "../../lib/finops-aws-budgets-official-definition";
 import type { AwsBudgetsDashboard } from "../../lib/finops-aws-budgets-organization";
+import { BarChart } from "../components/charts";
 import styles from "./finops-aws-budgets-organization-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -163,6 +164,90 @@ function groupedBudgetEvidence(
   }).sort((left, right) => left.label.localeCompare(right.label) || left.currency.localeCompare(right.currency));
 }
 
+
+/**
+ * Budgeted, actual and forecast per group, one chart per currency.
+ *
+ * The per-group bars beneath this already scale against a maximum held per
+ * currency, so groups within a currency were comparable and currencies were
+ * never mixed. That property is preserved by giving each currency one chart
+ * containing all of its groups, rather than one chart per group, which would
+ * have rescaled every group to itself and destroyed the comparison the panel
+ * exists to support.
+ *
+ * The layout is grouped, never stacked. Budgeted, actual and forecast are three
+ * measurements of the same money, not three parts of it; stacking them would
+ * produce a total that means nothing.
+ *
+ * Groups whose `monetaryAllocation` is relationship_only are excluded and
+ * counted. Organization-wide budget money is deliberately not duplicated across
+ * accounts, so those groups have a budget count but no amount, and plotting
+ * them at zero would read as a group that budgeted nothing.
+ *
+ * Sign is preserved, unlike `ratioWidth`, which takes an absolute value and so
+ * drew a negative amount with the same length as an equal positive one.
+ */
+function GroupedBudgetCharts({ groups }: {
+  readonly groups: readonly {
+    readonly label: string;
+    readonly currency: string;
+    readonly monetaryAllocation: string;
+    readonly budgeted: bigint;
+    readonly actual: bigint;
+    readonly forecast: bigint;
+  }[];
+}) {
+  const plot = (value: bigint): number | null => {
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed)) return null;
+    return parsed / 1_000_000;
+  };
+  const currencies = [...new Set(groups.map((group) => group.currency))].sort();
+  const charts = currencies.map((currency) => {
+    const monetary = groups.filter((group) =>
+      group.currency === currency && group.monetaryAllocation !== "relationship_only");
+    const excluded = groups.filter((group) =>
+      group.currency === currency && group.monetaryAllocation === "relationship_only").length;
+    return {
+      currency,
+      excluded,
+      categories: monetary.map((group) => group.label),
+      series: [
+        { id: "budgeted", label: "Budgeted", values: monetary.map((group) => plot(group.budgeted)) },
+        { id: "actual", label: "Actual", values: monetary.map((group) => plot(group.actual)) },
+        { id: "forecast", label: "Forecast", values: monetary.map((group) => plot(group.forecast)) },
+      ],
+    };
+  }).filter((chart) => chart.categories.length > 0 || chart.excluded > 0);
+  if (charts.length === 0) return null;
+  return (
+    <>
+      {charts.map(({ currency, categories, series, excluded }) => (
+        <div key={currency}>
+          {categories.length === 0 ? null : (
+            <BarChart
+              ariaLabel={`Budgeted, actual and forecast by group in ${currency}`}
+              caption={`${currency} only. This scale is not comparable with another currency's chart. Budgeted, actual and forecast are three measurements of the same money, so they are shown side by side and never summed.`}
+              categories={categories}
+              formatValue={(value) => `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              layout="grouped"
+              series={series}
+            />
+          )}
+          {excluded === 0 ? null : (
+            <p>
+              {excluded} {excluded === 1 ? "group carries" : "groups carry"} a relationship count
+              only and {excluded === 1 ? "is" : "are"} excluded: organization-wide budget money is
+              not duplicated across accounts, so {excluded === 1 ? "it has" : "they have"} no amount
+              to plot.
+            </p>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function ratioWidth(value: bigint, maximum: bigint): string {
   if (maximum <= BigInt(0)) return "0%";
   const absolute = value < BigInt(0) ? -value : value;
@@ -279,6 +364,7 @@ export function FinopsAwsBudgetsOrganizationReportView({ report, filters, onFilt
     </section>
     <section className={styles.panel} aria-label="AWS Budget Summary by Group By This Month">
       <header className={styles.panelHead}><div><h3>Budget Summary by Group By This Month</h3><p>Native bar and pivot evidence grouped by {groupBy.replace(/([A-Z])/gu, " $1").toLowerCase()}; currencies are never combined.</p></div></header>
+      <GroupedBudgetCharts groups={groups} />
       <div className={styles.groupChart}>{groups.map((item) => <article key={`${item.label}:${item.currency}`}>
         <header><strong>{item.label}</strong><span>{item.budgetCount} budget{item.budgetCount === 1 ? "" : "s"} · {item.currency}</span></header>
         {item.monetaryAllocation === "relationship_only" ? <p>Relationship count only. Organization-wide budget money is not duplicated across accounts.</p> : <div className={styles.bars} aria-label={`${item.label} exact grouped amounts`}>

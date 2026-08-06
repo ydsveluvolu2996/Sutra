@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
+import { createHash, scryptSync } from "node:crypto";
 import { spawn } from "node:child_process";
-import { createReadStream } from "node:fs";
-import { mkdir, open, readFile, realpath, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { mkdir, open, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, resolve, sep } from "node:path";
 import { ensureDockerLocalEnvironment } from "./docker-local-env.mjs";
 
@@ -19,19 +19,47 @@ if (source !== backupRootReal && !source.startsWith(`${backupRootReal}${sep}`)) 
   throw new Error("Restore files must be under .sutra/postgres-backups");
 }
 
-async function sha256File(path) {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return hash.digest("hex");
+/**
+ * Stat, hash and (for the dump) header-check one file through a single open
+ * handle. Reading the path separately for each step let the file change
+ * between the checksum and the later reads; every check here describes the
+ * same opened file.
+ */
+async function inspectBackupFile(path, { readHeader = false } = {}) {
+  const handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const status = await handle.stat();
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({ autoClose: false })) hash.update(chunk);
+    let header = null;
+    if (readHeader) {
+      const headerBuffer = Buffer.alloc(5);
+      await handle.read(headerBuffer, 0, 5, 0);
+      header = headerBuffer.toString("ascii");
+    }
+    return { status, sha256: hash.digest("hex"), header };
+  } finally {
+    await handle.close();
+  }
 }
 
-function sha256Text(value) {
-  return createHash("sha256").update(value, "utf8").digest("hex");
+/** Matches the salted scrypt fingerprint the v3 backup script writes. */
+function credentialFingerprint(value, saltHex) {
+  return scryptSync(value, Buffer.from(saltHex, "hex"), 32).toString("hex");
 }
 
 const manifest = JSON.parse(await readFile(`${source}.manifest.json`, "utf8"));
+if (manifest?.schema === "sutra.local-stack-backup.v2") {
+  // v2 manifests carry bare sha256(password) fingerprints, which v3 stopped
+  // writing because they are offline-crackable. Recomputing them here would
+  // keep that digest construction alive, so v2 restore is retired instead.
+  throw new Error(
+    "This backup uses the retired v2 manifest. Restore it with the postgres-restore.mjs from the commit that created it, then take a fresh backup with the current script.",
+  );
+}
 if (
-  manifest?.schema !== "sutra.local-stack-backup.v2" ||
+  manifest?.schema !== "sutra.local-stack-backup.v3" ||
+  !/^[a-f0-9]{32}$/u.test(manifest?.credentialFingerprintSalt ?? "") ||
   manifest?.database !== "sutra" ||
   manifest?.files?.database?.format !== "postgres-custom" ||
   manifest?.files?.database?.name !== basename(source) ||
@@ -42,30 +70,21 @@ if (
 }
 const statePath = await realpath(resolve(dirname(source), manifest.files.applicationState.name));
 if (!statePath.startsWith(`${backupRootReal}${sep}`)) throw new Error("Application-state backup path is invalid");
-const [sourceStat, stateStat, sourceSha256, stateSha256] = await Promise.all([
-  stat(source),
-  stat(statePath),
-  sha256File(source),
-  sha256File(statePath),
+const [sourceInfo, stateInfo] = await Promise.all([
+  inspectBackupFile(source, { readHeader: true }),
+  inspectBackupFile(statePath),
 ]);
 if (
-  !sourceStat.isFile() ||
-  !stateStat.isFile() ||
-  manifest.files.database.bytes !== sourceStat.size ||
-  manifest.files.applicationState.bytes !== stateStat.size ||
-  manifest.files.database.sha256 !== sourceSha256 ||
-  manifest.files.applicationState.sha256 !== stateSha256
+  !sourceInfo.status.isFile() ||
+  !stateInfo.status.isFile() ||
+  manifest.files.database.bytes !== sourceInfo.status.size ||
+  manifest.files.applicationState.bytes !== stateInfo.status.size ||
+  manifest.files.database.sha256 !== sourceInfo.sha256 ||
+  manifest.files.applicationState.sha256 !== stateInfo.sha256
 ) {
   throw new Error("Local-stack backup size or checksum is invalid");
 }
-const sourceHandle = await open(source, "r");
-const headerBuffer = Buffer.alloc(5);
-try {
-  await sourceHandle.read(headerBuffer, 0, 5, 0);
-} finally {
-  await sourceHandle.close();
-}
-if (headerBuffer.toString("ascii") !== "PGDMP") throw new Error("Restore source is not a PostgreSQL custom dump");
+if (sourceInfo.header !== "PGDMP") throw new Error("Restore source is not a PostgreSQL custom dump");
 
 const { environmentPath, ownerPassword, appPassword } = await ensureDockerLocalEnvironment(root);
 const composePrefix = ["compose", "--env-file", environmentPath];
@@ -148,8 +167,8 @@ const runtimeFingerprintOutput = await runDocker([
 ], { capture: true });
 const currentFingerprints = {
   ...JSON.parse(runtimeFingerprintOutput),
-  postgresOwnerPassword: sha256Text(ownerPassword),
-  postgresRuntimePassword: sha256Text(appPassword),
+  postgresOwnerPassword: credentialFingerprint(ownerPassword, manifest.credentialFingerprintSalt),
+  postgresRuntimePassword: credentialFingerprint(appPassword, manifest.credentialFingerprintSalt),
 };
 if (JSON.stringify(currentFingerprints) !== JSON.stringify(manifest.keyFingerprints)) {
   throw new Error("Local runtime/database key fingerprints do not match this backup");

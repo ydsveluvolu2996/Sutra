@@ -7,6 +7,7 @@ import type {
   CoraDashboardRow,
 } from "../../lib/finops-cora-dashboard";
 import type { CoraOfficialDefinition } from "../../lib/finops-cora-official-definition";
+import { TimeSeriesChart } from "../components/charts";
 import styles from "./finops-cora-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -35,6 +36,105 @@ const EMPTY_FILTERS: CoraDashboardFilters = {
   tagKey: null, tagValue: null, resourceId: null, restartNeeded: null,
   rollbackPossible: null, excludeFinopsExceptions: false,
 };
+
+/**
+ * A savings total as a plottable amount, or null when there is nothing exact
+ * to plot. Micros beyond exact double range are refused rather than rounded
+ * into a coordinate; the table beside this chart still shows exact figures.
+ */
+function coraPlotAmount(micros: string): number | null {
+  if (!/^-?\d+$/u.test(micros)) return null;
+  const parsed = Number(micros);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed / 1_000_000;
+}
+
+/**
+ * Estimated monthly savings across accepted generations, one chart per
+ * currency.
+ *
+ * Two things this panel's table does are safe in a cell and unsafe in a line.
+ *
+ * The table renders `after ?? before` discount per row. Those are different
+ * measures, and a cell can be read alongside its own row; a single line cannot,
+ * so a series that silently switched basis between generations would look like
+ * a savings change that never happened. This charts after-discount only, and a
+ * generation is plotted for a currency only when every one of that currency's
+ * summaries supplies it -- a partial sum would understate the total while
+ * looking complete.
+ *
+ * The table also lists currencies side by side. Charting them on one axis would
+ * invite exactly the cross-currency comparison the rest of this codebase is
+ * careful to prevent, so each currency gets its own chart and its own axis.
+ */
+function CoraSavingsTrend({ history }: {
+  readonly history: readonly {
+    readonly generationId: string;
+    readonly collectedAtIso: string;
+    readonly summaries: readonly {
+      readonly currencyCode: string;
+      readonly estimatedMonthlySavingsAfterDiscountMicros: string | null;
+    }[];
+  }[];
+}) {
+  const ordered = history.slice().reverse();
+  const currencies = [...new Set(ordered.flatMap((point) =>
+    point.summaries.map((summary) => summary.currencyCode)))].sort();
+  const charts = currencies.map((currency) => {
+    let excluded = 0;
+    const points = [];
+    for (const point of ordered) {
+      const relevant = point.summaries.filter((summary) => summary.currencyCode === currency);
+      if (relevant.length === 0) continue;
+      const amounts = relevant.map((summary) =>
+        summary.estimatedMonthlySavingsAfterDiscountMicros === null
+          ? null
+          : coraPlotAmount(summary.estimatedMonthlySavingsAfterDiscountMicros));
+      // Every summary for this currency must supply an exact after-discount
+      // amount. A partial sum would understate the total while looking whole.
+      const exact: number[] = [];
+      for (const amount of amounts) {
+        if (amount === null) break;
+        exact.push(amount);
+      }
+      if (exact.length !== amounts.length) {
+        excluded += 1;
+        continue;
+      }
+      points.push({
+        label: point.collectedAtIso.slice(0, 10),
+        value: exact.reduce((total, amount) => total + amount, 0),
+      });
+    }
+    return { currency, points, excluded };
+  }).filter((chart) => chart.points.length > 0 || chart.excluded > 0);
+
+  if (charts.length === 0) return null;
+  return (
+    <div className={styles.scroll}>
+      {charts.map(({ currency, points, excluded }) => (
+        <div key={currency}>
+          {points.length === 0 ? null : (
+            <TimeSeriesChart
+              ariaLabel={`${currency} estimated monthly savings after discount across accepted generations`}
+              caption={`${currency} after-discount only. Generations are irregular, so spacing does not represent elapsed time; this scale is not comparable with another currency's chart.`}
+              formatValue={(value) => `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              series={[{ id: currency, label: `${currency} after discount`, points }]}
+            />
+          )}
+          {excluded === 0 ? null : (
+            <p className={styles.footnote}>
+              {excluded} {excluded === 1 ? "generation does" : "generations do"} not supply an
+              after-discount figure for every {currency} summary, or supply an amount too large to
+              plot exactly, and {excluded === 1 ? "is" : "are"} excluded rather than summed
+              partially. The table below still shows every accepted figure.
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function money(micros: string | null, currency: string): string {
   if (micros === null) return "Not supplied";
@@ -210,7 +310,7 @@ export function CoraDashboardReportView({ report, filters, onFiltersChange }: {
       <RecommendationTable rows={reservedInstanceRows} emptyMessage="No Reserved Instance recommendations match the current filters." />
       {report.rowsTruncated ? <p className={styles.evidence}>Only the first 500 sorted rows are rendered. Refine filters before exporting.</p> : null}
     </section>
-    <section className={styles.section} aria-label="Top Potential Savings Over Time"><header className={styles.sectionHead}><h3>Top Potential Savings Over Time · Daily evidence history</h3></header><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Collected</th><th>Data through</th><th>State</th><th>Recommendations</th><th>Raw per-currency opportunity evidence</th></tr></thead><tbody>{report.history.map((point) => <tr key={point.generationId}><td>{point.collectedAtIso}</td><td>{point.dataThroughAtIso ?? "Unavailable"}</td><td>{point.sourceState}</td><td>{point.recommendationCount}</td><td>{point.summaries.map((summary) => `${summary.optimizationClass}: ${money(summary.estimatedMonthlySavingsAfterDiscountMicros ?? summary.estimatedMonthlySavingsBeforeDiscountMicros, summary.currencyCode)}`).join(" · ") || "No accepted recommendations"}</td></tr>)}</tbody></table></div></section>
+    <section className={styles.section} aria-label="Top Potential Savings Over Time"><header className={styles.sectionHead}><h3>Top Potential Savings Over Time · Daily evidence history</h3></header><CoraSavingsTrend history={report.history} /><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Collected</th><th>Data through</th><th>State</th><th>Recommendations</th><th>Raw per-currency opportunity evidence</th></tr></thead><tbody>{report.history.map((point) => <tr key={point.generationId}><td>{point.collectedAtIso}</td><td>{point.dataThroughAtIso ?? "Unavailable"}</td><td>{point.sourceState}</td><td>{point.recommendationCount}</td><td>{point.summaries.map((summary) => `${summary.optimizationClass}: ${money(summary.estimatedMonthlySavingsAfterDiscountMicros ?? summary.estimatedMonthlySavingsBeforeDiscountMicros, summary.currencyCode)}`).join(" · ") || "No accepted recommendations"}</td></tr>)}</tbody></table></div></section>
     <details className={`${styles.section} ${styles.evidence}`}><summary>About · Evidence and coverage</summary><pre>{JSON.stringify({ freshness: report.freshness, evidence: report.evidence, collection: report.collection, disclosures: report.disclosures, officialSheetCoverage: report.officialSheetCoverage }, null, 2)}</pre></details>
     <p className={styles.footnote}>Savings Plans and Reserved Instance estimates exported by CORA do not account for the effect of first implementing usage optimization recommendations.</p>
   </section>;

@@ -115,12 +115,13 @@ export function FinopsCapabilityShell({
 
   return (
     <article className={styles.capabilityShell} aria-labelledby={`finops-dashboard-${dashboard.slug}`}>
-      <header className={styles.capabilityShellHeading}>
-        <div>
-          <p className="eyebrow">{dashboard.level} · {dashboard.provider}</p>
-          <h2 id={`finops-dashboard-${dashboard.slug}`}>{dashboard.name}</h2>
-          <p>{dashboard.summary}</p>
-        </div>
+      {/*
+        The name, glyph and summary are rendered once by `FinopsDashboardIdentity`
+        above every dashboard, so this header carries only the badges. The
+        `aria-labelledby` above still resolves: the identity heading owns that id
+        and id references are document-wide.
+      */}
+      <header className={styles.capabilityShellHeading} data-badges-only="true">
         <div className={styles.capabilityShellBadges}>
           <span data-maturity={dashboard.currentMaturity.toLowerCase()}>{maturity.label}</span>
           <span data-state={state}>{STATE_LABELS[state]}</span>

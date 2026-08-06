@@ -34,7 +34,7 @@ test("crawl-control routes return the expected media types", async () => {
 
 test("robots advertises the canonical sitemap without hiding pages from their noindex directive", () => {
   const policy = robotsText();
-  assert.match(policy, new RegExp(`Sitemap: ${SITE_ORIGIN}/sitemap\\.xml`, "u"));
+  assert.ok(policy.includes(`Sitemap: ${SITE_ORIGIN}/sitemap.xml`), "robots policy cites the sitemap");
   assert.match(policy, /Host: www\.sutracmdb\.com/u);
   for (const path of ["/api/", "/accept-invite", "/mfa/"]) {
     assert.match(policy, new RegExp(`Disallow: ${path.replaceAll("/", "\\/")}`, "u"));

@@ -10,6 +10,7 @@ import {
   MEDIA_SERVICES_OFFICIAL_DEFINITION,
   type MediaServicesOfficialDefinition,
 } from "../../lib/finops-media-services-official-definition";
+import { TimeSeriesChart } from "../components/charts";
 import styles from "./finops-media-services-insights-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -44,6 +45,75 @@ function hasPinnedOfficialDefinition(value: unknown): value is MediaServicesOffi
     || value.artifacts[2].sha256 !== MEDIA_SERVICES_OFFICIAL_DEFINITION.artifacts[2].sha256
     || !isRecord(value.totals) || value.totals.sheets !== 9 || value.totals.visuals !== 144) return false;
   return true;
+}
+
+
+/**
+ * Observed monthly cost by service, one chart per (currency, cost basis).
+ *
+ * A trend point is keyed by period, service, currency and cost basis, and the
+ * cards render every combination in one flow. On a single axis that would put
+ * an amortized figure beside an unblended one and a EUR figure beside a USD
+ * one, so the grouping key here is the pair, not the period.
+ *
+ * The forecast is deliberately excluded. It is a trailing mean Sutra computes
+ * and labels "not an AWS forecast or commitment"; joining it to the observed
+ * line would make a projection look like evidence at exactly the point a reader
+ * stops distinguishing them. It remains in its own labelled block below.
+ *
+ * A service missing from a period is a gap in that service's line, not a zero:
+ * no accepted row for a service in a month is absence, not a month it cost
+ * nothing.
+ */
+function MediaCostTrends({ trends }: {
+  readonly trends: readonly {
+    readonly period: string;
+    readonly service: string;
+    readonly currency: string;
+    readonly costBasis: string;
+    readonly costMicros: string | null;
+  }[];
+}) {
+  const groups = new Map<string, { currency: string; basis: string; rows: typeof trends }>();
+  for (const point of trends) {
+    const key = `${point.currency}|${point.costBasis}`;
+    const existing = groups.get(key);
+    if (existing === undefined) {
+      groups.set(key, { currency: point.currency, basis: point.costBasis, rows: [point] });
+    } else {
+      groups.set(key, { ...existing, rows: [...existing.rows, point] });
+    }
+  }
+  const charts = [...groups.values()].map(({ currency, basis, rows }) => {
+    const periods = [...new Set(rows.map((row) => row.period))].sort();
+    const services = [...new Set(rows.map((row) => row.service))].sort();
+    const series = services.map((service) => ({
+      id: service,
+      label: service,
+      points: periods.flatMap((period) => {
+        const row = rows.find((candidate) => candidate.service === service && candidate.period === period);
+        if (row === undefined || row.costMicros === null) return [];
+        const parsed = Number(row.costMicros);
+        if (!Number.isSafeInteger(parsed)) return [];
+        return [{ label: period, value: parsed / 1_000_000 }];
+      }),
+    })).filter((entry) => entry.points.length > 0);
+    return { currency, basis, series };
+  }).filter((chart) => chart.series.length > 0);
+  if (charts.length === 0) return null;
+  return (
+    <>
+      {charts.map(({ currency, basis, series }) => (
+        <TimeSeriesChart
+          ariaLabel={`Observed ${currency} ${basis.replaceAll("_", " ")} monthly cost by media service`}
+          caption={`${currency}, ${basis.replaceAll("_", " ")} only. This scale is not comparable with another currency or cost basis. Observed evidence only; the Sutra projection below is not plotted here.`}
+          formatValue={(value) => `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          key={`${currency}|${basis}`}
+          series={series}
+        />
+      ))}
+    </>
+  );
 }
 
 export function MediaServicesOfficialDefinitionPanel({
@@ -118,7 +188,7 @@ export function MediaServicesInsightsReportView({ report,filters,onFiltersChange
     <div className={styles.filters} aria-label="Media Services filters"><Select label="Account / payer scope" value={filters.accountId} options={report.filterOptions.accounts} onChange={(value) => set("accountId",value)} /><Select label="Region" value={filters.region} options={report.filterOptions.regions} onChange={(value) => set("region",value)} /><Select label="Media service" value={filters.service} options={report.filterOptions.services} onChange={(value) => set("service",value as MediaServicesDashboardFilters["service"])} /><Select label="Provider API" value={filters.provider} options={report.filterOptions.providers} onChange={(value) => set("provider",value as MediaServicesDashboardFilters["provider"])} /><Select label="Resource type" value={filters.resourceType} options={report.filterOptions.resourceTypes} onChange={(value) => set("resourceType",value as MediaServicesDashboardFilters["resourceType"])} /><label>Workflow search<input value={filters.search ?? ""} maxLength={100} placeholder="Name, ARN, operation, usage" onChange={(event) => set("search",event.target.value || null)} /></label></div>
     <section className={styles.section} aria-label="Executive summary"><header><div><small>CUR2-backed</small><h3>Executive summary</h3></div><button type="button" onClick={() => exportResources(report)}>Export visible rows</button></header><div className={styles.cards}><article><span>Accounts</span><strong>{report.executiveSummary.accountCount}</strong><small>{report.executiveSummary.regionCount} Regions</small></article><article><span>Accepted targets</span><strong>{report.executiveSummary.targetCount}</strong><small>complete immutable heads</small></article><article><span>Resources</span><strong>{report.executiveSummary.resourceCount}</strong><small>{report.executiveSummary.costRowCount} CUR2 rows</small></article>{report.executiveSummary.costGroups.map((group) => <article key={`${group.currency}:${group.costBasis}`}><span>{group.currency} · {group.costBasis.replaceAll("_"," ")}</span><strong>{money(group.costMicros,group.currency)}</strong><small>signed CUR2 cost</small></article>)}</div></section>
     <section className={styles.section} aria-label="Media workflow summary"><header><div><small>Operational lenses</small><h3>Media workflows</h3></div></header><div className={styles.workflows}>{report.workflows.map((workflow) => <article key={workflow.id}><span>{workflow.id.replaceAll("_"," ")}</span><h4>{workflow.label}</h4><strong>{workflow.resourceCount} resources</strong>{workflow.costGroups.map((group) => <p key={`${group.currency}:${group.costBasis}`}>{money(group.costMicros,group.currency)} · {group.costBasis.replaceAll("_"," ")}</p>)}<small>{workflow.signals.length ? `Accepted signals: ${workflow.signals.join(", ")}` : "No accepted inventory signals in this selection"}</small></article>)}</div></section>
-    <section className={styles.section} aria-label="Cost trends and forecast"><header><div><small>Monthly evidence</small><h3>Trends &amp; visibly labeled forecast</h3></div><span>Data through {report.freshness.dataThroughAt ?? "unavailable"} · {report.freshness.ageHours ?? "unknown"}h old</span></header><div className={styles.trends}>{report.trends.map((point) => <div className={styles.trend} key={`${point.period}:${point.service}:${point.currency}:${point.costBasis}`}><time>{point.period}</time><strong>{point.service}</strong><span>{money(point.costMicros,point.currency)}</span><small>{point.costBasis.replaceAll("_"," ")} · {point.rowCount} rows</small></div>)}</div><div className={styles.forecasts}>{report.forecast.length ? report.forecast.map((point) => <article key={`${point.period}:${point.service}:${point.currency}:${point.costBasis}`}><span>SUTRA projection · {point.period}</span><strong>{point.service} · {money(point.costMicros,point.currency)}</strong><small>Trailing mean of {point.observedPeriodCount} accepted monthly periods; not an AWS forecast or commitment.</small></article>) : <p>At least two accepted monthly periods are required before a forecast is shown.</p>}</div></section>
+    <section className={styles.section} aria-label="Cost trends and forecast"><header><div><small>Monthly evidence</small><h3>Trends &amp; visibly labeled forecast</h3></div><span>Data through {report.freshness.dataThroughAt ?? "unavailable"} · {report.freshness.ageHours ?? "unknown"}h old</span></header><MediaCostTrends trends={report.trends} /><div className={styles.trends}>{report.trends.map((point) => <div className={styles.trend} key={`${point.period}:${point.service}:${point.currency}:${point.costBasis}`}><time>{point.period}</time><strong>{point.service}</strong><span>{money(point.costMicros,point.currency)}</span><small>{point.costBasis.replaceAll("_"," ")} · {point.rowCount} rows</small></div>)}</div><div className={styles.forecasts}>{report.forecast.length ? report.forecast.map((point) => <article key={`${point.period}:${point.service}:${point.currency}:${point.costBasis}`}><span>SUTRA projection · {point.period}</span><strong>{point.service} · {money(point.costMicros,point.currency)}</strong><small>Trailing mean of {point.observedPeriodCount} accepted monthly periods; not an AWS forecast or commitment.</small></article>) : <p>At least two accepted monthly periods are required before a forecast is shown.</p>}</div></section>
     <section className={styles.twoColumn}><article className={styles.section}><header><h3>MediaLive reservations &amp; savings</h3></header><div className={styles.miniCards}><span><strong>{report.reservations.channelCount}</strong> channels</span><span><strong>{report.reservations.reservationCount}</strong> reservations</span><span><strong>{report.reservations.offeringCount}</strong> offerings</span></div><p><strong>Savings unavailable:</strong> {report.reservations.reason}</p></article><article className={styles.section}><header><h3>Budget guardrail</h3></header><p><strong>Not configured from this evidence:</strong> {report.budget.reason}</p></article></section>
     <section className={styles.section} aria-label="Account Region workflow drilldowns"><header><div><small>Accepted heads</small><h3>Account / Region drilldowns</h3></div></header>{report.targets.map((target) => <TargetDrilldown target={target} key={target.generationId} />)}</section>
     <section className={styles.section} aria-label="Immutable collection history"><header><h3>Collection history</h3></header><div className={styles.scroll}><table><thead><tr><th>Completed</th><th>Account / Region</th><th>State</th><th>Inventory</th><th>CUR2 rows</th><th>Billing generation</th></tr></thead><tbody>{report.history.map((item) => <tr key={item.generationId}><td>{item.completedAtIso}</td><td>{item.accountId} · {item.region}</td><td>{item.state} · {item.complete ? "accepted eligible" : "not promoted"}</td><td>{item.resourceCount}</td><td>{item.costRowCount}</td><td>{item.billingGenerationId}</td></tr>)}</tbody></table></div></section>

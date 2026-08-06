@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import {
   chmod,
   lstat,
   mkdir,
   open,
-  readFile,
   rename,
   rm,
 } from "node:fs/promises";
@@ -204,15 +204,24 @@ export class JsonFileLocalJobStateStore implements LocalJobStateStore {
 
   private async readState(): Promise<LocalJobState> {
     try {
-      const metadata = await lstat(this.filePath);
-      if (
-        !metadata.isFile() ||
-        metadata.isSymbolicLink() ||
-        metadata.size > this.stateFileLimitBytes
-      ) {
-        throw new LocalJobStateIntegrityError();
+      // Check and read through one handle: an lstat on the path followed by a
+      // readFile of the same path lets the file be swapped between the two.
+      // O_NOFOLLOW makes open itself refuse a symlink, and fstat on the handle
+      // describes exactly the file the read below will see.
+      const handle = await open(
+        this.filePath,
+        fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW,
+      );
+      let raw: string;
+      try {
+        const metadata = await handle.stat();
+        if (!metadata.isFile() || metadata.size > this.stateFileLimitBytes) {
+          throw new LocalJobStateIntegrityError();
+        }
+        raw = await handle.readFile("utf8");
+      } finally {
+        await handle.close();
       }
-      const raw = await readFile(this.filePath, "utf8");
       if (Buffer.byteLength(raw, "utf8") > this.stateFileLimitBytes) {
         throw new LocalJobStateIntegrityError();
       }

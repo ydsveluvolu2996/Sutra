@@ -10,6 +10,7 @@ import {
   type FinopsSharedAnalysisSection,
 } from "../../lib/finops-dashboard-catalog";
 import { FinopsCapabilityShell, type FinopsCapabilityViewState } from "./finops-capability-shell";
+import { FinopsDashboardIdentity } from "./finops-dashboard-identity";
 import { getFinopsDashboardView } from "./finops-dashboard-views";
 import { GlyphIcon } from "../components/nav-icon";
 import styles from "./costs.module.css";
@@ -173,6 +174,7 @@ export function FinopsDashboardCatalogNav({
         </nav>
 
         <div className={styles.dashboardCatalogDetail}>
+          <FinopsDashboardIdentity dashboard={selected} />
           {selectedView === null ? (
             <FinopsCapabilityShell
               dashboard={selected}

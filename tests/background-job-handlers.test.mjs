@@ -72,12 +72,12 @@ test("AWS News Feeds production tick is registered and drains through the shared
       assert.equal(init?.redirect, "manual");
       assert.equal(init?.credentials, "omit");
       const url = String(input);
-      const body = url.includes("youtube.com")
+      const body = new URL(url).hostname === "www.youtube.com"
         ? "<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>"
         : "<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>AWS</title></channel></rss>";
       return new Response(body, {
         status: 200,
-        headers: { "content-type": url.includes("youtube.com")
+        headers: { "content-type": new URL(url).hostname === "www.youtube.com"
           ? "application/atom+xml"
           : "application/rss+xml" },
       });

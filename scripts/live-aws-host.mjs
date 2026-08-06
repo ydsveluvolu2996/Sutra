@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { constants as fileConstants } from "node:fs";
-import { chmod, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -590,12 +590,23 @@ export async function ensureLiveRuntimeConfiguration({
 
   let existingContents = "";
   try {
-    const configStatus = await lstat(configPath);
-    if (!configStatus.isFile() || configStatus.isSymbolicLink()) {
-      throw new Error("The live runtime configuration must be a regular file");
+    // Check, chmod and read through one handle so the file cannot be swapped
+    // between the validation and the read. O_NOFOLLOW refuses a symlink at
+    // open time, replacing the lstat-then-readFile pattern that raced.
+    const configHandle = await open(
+      configPath,
+      fileConstants.O_RDONLY | fileConstants.O_NOFOLLOW,
+    );
+    try {
+      const configStatus = await configHandle.stat();
+      if (!configStatus.isFile()) {
+        throw new Error("The live runtime configuration must be a regular file");
+      }
+      await configHandle.chmod(0o600);
+      existingContents = await configHandle.readFile("utf8");
+    } finally {
+      await configHandle.close();
     }
-    await chmod(configPath, 0o600);
-    existingContents = await readFile(configPath, "utf8");
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }

@@ -43,7 +43,13 @@
 .dashboardCatalogNavActive::before { width: 3px; align-self: stretch; margin: 0 0 0 -7px; border-radius: 99px; background: #0f766e; content: ""; }
 .dashboardCatalogDetail { min-width: 0; padding: 18px; }
 .capabilityShell { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: white; }
+.dashboardIdentity { display: flex; align-items: flex-start; gap: 13px; padding: 4px 2px 16px; }
+.dashboardIdentityIcon { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 10px; }
+.dashboardIdentityText { display: grid; min-width: 0; gap: 0; }
+.dashboardIdentityText h2 { margin: 4px 0 7px; font-size: clamp(19px, 2vw, 25px); letter-spacing: -.04em; }
+.dashboardIdentityText p:last-child { max-width: 720px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .capabilityShellHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; padding: 22px; }
+.capabilityShellHeading[data-badges-only="true"] { justify-content: flex-end; padding-bottom: 0; }
 .capabilityShellHeading h2 { margin: 4px 0 7px; font-size: clamp(19px, 2vw, 25px); letter-spacing: -.04em; }
 .capabilityShellHeading p:last-child { max-width: 720px; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
 .capabilityShellBadges { flex: 0 0 auto; display: grid; justify-items: end; gap: 7px; }
@@ -562,7 +568,7 @@
 .foundationalTrend { height: 235px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 30px 5px 0; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(to top, transparent 0, transparent 51px, rgba(148, 163, 184, .11) 52px); }
 .foundationalTrendColumn { min-width: 58px; flex: 1 0 58px; height: 100%; display: grid; grid-template-rows: 26px minmax(4px, 1fr) 38px; align-items: end; justify-items: center; gap: 4px; }
 .foundationalTrendColumn > span { max-width: 92px; overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.foundationalTrendColumn > i { width: min(34px, 70%); min-height: 4px; display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #2dd4bf, #0f766e); box-shadow: 0 7px 16px rgba(15, 118, 110, .14); }
+.foundationalTrendColumn > i { width: min(34px, 70%); display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #2dd4bf, #0f766e); box-shadow: 0 7px 16px rgba(15, 118, 110, .14); }
 .foundationalTrendColumn > small { display: grid; justify-items: center; color: var(--muted); font-size: 8.5px; white-space: nowrap; }
 .foundationalTrendColumn > small b { color: #0f766e; font-size: 8px; }
 .foundationalRankings { display: grid; gap: 5px; }
@@ -573,6 +579,14 @@
 .foundationalRankings strong { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .foundationalRankings article > small { color: var(--muted); font-size: 9px; white-space: nowrap; }
 .foundationalBar { height: 5px; overflow: hidden; border-radius: 999px; background: #e8eeeb; }
+/*
+ * Absence, not zero. A period AWS supplied no cost for draws an outlined,
+ * hatched placeholder at full height rather than a zero-length bar, so it can
+ * never be read as a measurement. The dashed outline and the hatch both carry
+ * the meaning, so hue is not the only cue.
+ */
+.foundationalTrendColumn > i[data-absent="true"], .curColumn > i[data-absent="true"] { height: 100%; border: 1px dashed #94a3b8; background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(148, 163, 184, .28) 3px, rgba(148, 163, 184, .28) 6px); box-shadow: none; }
+.foundationalBar i[data-absent="true"] { width: 100%; border: 1px dashed #94a3b8; background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(148, 163, 184, .28) 3px, rgba(148, 163, 184, .28) 6px); }
 .foundationalBar i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #34d399, #0f766e); }
 .foundationalTableScroll { max-width: 100%; overflow-x: auto; }
 .foundationalTable { width: 100%; border-collapse: collapse; font-size: 10.5px; }
@@ -729,7 +743,7 @@
 .curColumn { min-width: 54px; flex: 1 0 54px; height: 208px; display: grid; grid-template-rows: 32px 1fr auto auto; gap: 4px; align-items: end; padding: 0 2px 3px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: center; cursor: pointer; }
 .curColumn:hover, .curColumn[aria-pressed="true"] { border-color: rgba(15, 118, 110, .35); background: #f0fdfa; }
 .curColumn > span { overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.curColumn > i { width: min(34px, 76%); min-height: 3px; max-height: 150px; justify-self: center; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #0f766e, #2dd4bf); }
+.curColumn > i { width: min(34px, 76%); max-height: 150px; justify-self: center; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #0f766e, #2dd4bf); }
 .curColumn > i[data-state="partial"], .curColumn > i[data-state="current_partial"] { background: #d97706; }
 .curColumn > i[data-state="stale"] { background: #94a3b8; }
 .curColumn b { font-size: 10px; }
@@ -825,20 +839,10 @@
 .focusPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .focusPanel > header h4 { margin: 3px 0 0; font-size: 13px; }
 .focusPanel > header > span { color: var(--muted); font-size: 8.5px; text-align: right; }
-.focusTrendChart { min-height: 215px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 12px 3px 0; }
-.focusTrendChart > div { min-width: 64px; height: 200px; flex: 1 0 64px; display: grid; grid-template-rows: 32px minmax(5px, 1fr) auto auto; align-items: end; justify-items: center; gap: 4px; text-align: center; }
-.focusTrendChart span { max-width: 72px; overflow: hidden; color: var(--muted); font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
-.focusTrendChart i { width: min(34px, 72%); min-height: 4px; max-height: 142px; display: block; align-self: end; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #14b8a6, #0f766e); box-shadow: 0 6px 16px rgba(15, 118, 110, .14); }
-.focusTrendChart b { font-size: 8.5px; }
-.focusTrendChart small { color: var(--muted); font-size: 7.5px; }
-.focusDimensionBars { max-height: 250px; display: grid; gap: 8px; overflow-y: auto; padding-right: 4px; }
-.focusDimensionBars article { display: grid; grid-template-columns: minmax(88px, .7fr) minmax(75px, 1fr) auto; align-items: center; gap: 8px; }
-.focusDimensionBars article > div { min-width: 0; display: grid; gap: 2px; }
-.focusDimensionBars strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.focusDimensionBars small { color: var(--muted); font-size: 7.5px; }
-.focusDimensionBars article > span { height: 6px; overflow: hidden; border-radius: 999px; background: #e8eeeb; }
-.focusDimensionBars article > span i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #2dd4bf, #0f766e); }
-.focusDimensionBars article > b { max-width: 115px; overflow: hidden; font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
+.focusCoverageList { display: grid; gap: 2px; margin: 8px 0 0; padding: 0; }
+.focusCoverageList > div { display: flex; gap: 6px; justify-content: space-between; }
+.focusCoverageList dt { color: var(--muted); font-size: 9px; }
+.focusCoverageList dd { margin: 0; color: var(--muted); font-size: 9px; }
 .focusFootnote { margin: 12px 0 0; color: var(--muted); font-size: 8.5px; line-height: 1.45; }
 .focusTableWrap { width: 100%; overflow-x: auto; }
 .focusTable { width: 100%; min-width: 780px; border-collapse: collapse; font-size: 9px; }
@@ -881,8 +885,6 @@
   .focusPanel { padding: 14px 11px; }
   .focusPanel > header { display: grid; }
   .focusPanel > header label { width: 100%; }
-  .focusDimensionBars article { grid-template-columns: minmax(90px, .8fr) minmax(60px, 1fr); }
-  .focusDimensionBars article > b { grid-column: 2; }
   .focusTableWrap { scroll-snap-type: x proximity; }
 }
 
@@ -925,27 +927,11 @@
 .taoKpis strong { overflow-wrap: anywhere; font-size: 17px; letter-spacing: -.025em; }
 .taoKpis small { color: var(--muted); font-size: 8.5px; line-height: 1.4; }
 .taoInsightGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.taoHorizontalBars { display: grid; gap: 8px; }
-.taoHorizontalBars > div { display: grid; grid-template-columns: minmax(78px, .7fr) minmax(80px, 1fr) auto; align-items: center; gap: 7px; }
-.taoHorizontalBars span { overflow: hidden; color: var(--muted); font-size: 7.5px; font-weight: 800; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
-.taoHorizontalBars i { height: 7px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
-.taoHorizontalBars b { height: 100%; display: block; border-radius: inherit; background: #0f766e; }
-.taoHorizontalBars b[data-status="error"] { background: #dc2626; }
-.taoHorizontalBars b[data-status="warning"] { background: #d97706; }
-.taoHorizontalBars b[data-status="ok"] { background: #059669; }
-.taoHorizontalBars strong { font-size: 8px; font-variant-numeric: tabular-nums; }
-.taoHorizontalBars small { grid-column: 2 / -1; margin-top: -5px; color: var(--muted); font-size: 7px; }
-.taoHorizontalBars p { margin: 18px 0; color: var(--muted); font-size: 9px; }
 .taoSplitGrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(290px, .8fr); gap: 11px; }
 .taoPanel { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 13px; background: white; }
 .taoPanel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .taoPanel h3 { margin: 3px 0 0; font-size: 13px; }
 .taoPanel > header > span { color: var(--muted); font-size: 8.5px; font-weight: 750; }
-.taoHistoryChart { min-height: 190px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 15px 3px 0; }
-.taoHistoryChart > div { min-width: 48px; height: 175px; flex: 1 0 48px; display: grid; grid-template-rows: 1fr auto; align-items: end; justify-items: center; gap: 5px; }
-.taoHistoryChart i { width: min(32px, 70%); min-height: 4px; max-height: 150px; display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #34d399, #047857); }
-.taoHistoryChart small { color: var(--muted); font-size: 7.5px; }
-.taoHistoryChart p { align-self: center; color: var(--muted); font-size: 10px; }
 .taoAccountList { max-height: 210px; display: grid; gap: 6px; overflow-y: auto; padding: 2px; }
 .taoAccountList button { min-height: 50px; display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: #fbfdfc; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .taoAccountList button[aria-pressed="true"] { border-color: #0f766e; background: #ecfdf5; }
