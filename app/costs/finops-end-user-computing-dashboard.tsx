@@ -9,6 +9,7 @@ import type {
 } from "../../lib/finops-end-user-computing";
 import { END_USER_COMPUTING_OFFICIAL_DEFINITION } from "../../lib/finops-end-user-computing-official-definition";
 import type { END_USER_COMPUTING_RUNTIME_BINDING } from "../../lib/finops-end-user-computing-runtime-binding";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-end-user-computing-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -50,17 +51,110 @@ function integerMoney(micros: string | null, currency: string): string {
   return `${negative ? "-" : ""}${currency} ${padded.slice(0, -6).replace(/\B(?=(\d{3})+(?!\d))/gu, ",")}.${padded.slice(-6, -4)}`;
 }
 
-function DimensionBars({ title, rows, empty }: {
+const count = (value: number): string => value.toLocaleString("en-US");
+
+/**
+ * A counted dimension, ranked.
+ *
+ * The previous hand-drawn bars scaled with `Math.max(4, count / maximum * 100)`.
+ * That floor meant a dimension AWS reported as zero drew the same 4% sliver as a
+ * small non-zero count, so a measured zero and a barely-present value were
+ * indistinguishable; and when every count was zero the `maximum === 0` branch
+ * collapsed the whole panel to zero-width bars that read as absent evidence
+ * rather than as the measured zeros they are. The kit scales honestly against
+ * the largest magnitude with no floor, so a zero is drawn as zero and still
+ * carries its label and exact value.
+ *
+ * Counts are dimensionless, so unlike the cost breakdowns below there is no
+ * currency to separate. An empty `rows` is absence and stays a worded state.
+ */
+export function DimensionBars({ title, rows, empty }: {
   readonly title: string;
   readonly rows: readonly EndUserComputingDimensionCount[];
   readonly empty: string;
 }) {
-  const maximum = Math.max(0, ...rows.map((item) => item.count));
-  return <article className={styles.breakdown}><h4>{title}</h4>{rows.length === 0 ? <p className={styles.muted}>{empty}</p> : <ol>{rows.map((item) => <li key={item.value}><span title={item.value}>{item.value.replaceAll("_", " ")}</span><div className={styles.barTrack} aria-hidden="true"><i style={{ width: `${maximum === 0 ? 0 : Math.max(4, (item.count / maximum) * 100)}%` }} /></div><strong>{item.count}</strong></li>)}</ol>}</article>;
+  return (
+    <article className={styles.breakdown}>
+      <h4>{title}</h4>
+      {rows.length === 0 ? <p className={styles.muted}>{empty}</p> : (
+        <RankingBars
+          ariaLabel={title}
+          formatValue={count}
+          items={rows.map((item) => ({
+            id: item.value,
+            label: item.value.replaceAll("_", " "),
+            value: item.count,
+          }))}
+          sort
+        />
+      )}
+    </article>
+  );
+}
+
+/**
+ * Canonical cost for one breakdown, ranked within a single currency.
+ *
+ * Currency is the grouping key rather than a label: amounts in different
+ * currencies share no axis, so each currency is charted separately and rows
+ * rank only against their own. A row whose `displayTotal` is null is
+ * unavailable, not zero — it is excluded from the plot and counted, so a
+ * missing canonical total can never be read as a measured zero. The exact
+ * figures stay in the table below, formatted from the original micros.
+ */
+export function CostBreakdownChart({ title, rows }: {
+  readonly title: string;
+  readonly rows: readonly EndUserComputingCostBreakdown[];
+}) {
+  const currencies = [...new Set(rows.map((row) => row.currency))].sort();
+  const unavailable = rows.filter((row) => row.displayTotal === null).length;
+  const plottable = currencies
+    .map((currency) => ({
+      currency,
+      items: rows
+        .filter((row) => row.currency === currency && row.displayTotal !== null)
+        .map((row) => {
+          const micros = Number(row.displayTotal?.totalMicros ?? "");
+          return { row, micros };
+        })
+        // A total beyond exact double range would be silently rounded by the
+        // plot geometry; drop it rather than draw a figure we cannot place.
+        .filter((entry) => Number.isSafeInteger(entry.micros))
+        .map(({ row, micros }) => ({
+          id: `${row.service}:${row.value}`,
+          label: `${row.value} · ${row.service}`,
+          value: micros / 1_000_000,
+          detail: integerMoney(row.displayTotal?.totalMicros ?? null, row.currency),
+        })),
+    }))
+    .filter((group) => group.items.length > 0);
+
+  if (plottable.length === 0) return null;
+  return (
+    <>
+      {plottable.map((group) => (
+        <RankingBars
+          ariaLabel={`${title} in ${group.currency}`}
+          caption={`${group.currency} only. Amounts in other currencies are charted separately and are never combined.`}
+          formatValue={(value) => `${group.currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          items={group.items}
+          key={group.currency}
+          sort
+        />
+      ))}
+      {unavailable === 0 ? null : (
+        <p className={styles.muted}>
+          {unavailable} {unavailable === 1 ? "row has" : "rows have"} no canonical
+          total and {unavailable === 1 ? "is" : "are"} excluded from the charts
+          above rather than drawn as zero.
+        </p>
+      )}
+    </>
+  );
 }
 
 function CostBreakdownTable({ title, rows }: { readonly title: string; readonly rows: readonly EndUserComputingCostBreakdown[] }) {
-  return <article className={styles.breakdown}><h4>{title}</h4>{rows.length === 0 ? <p className={styles.muted}>Canonical CUR2 cost evidence is unavailable for this selection.</p> : <div className={styles.scroll}><table className={styles.table}><thead><tr><th>Service</th><th>Dimension</th><th>Canonical cost</th><th>Basis / coverage</th><th>Lines</th></tr></thead><tbody>{rows.map((item) => <tr key={`${item.service}:${item.currency}:${item.value}`}><td>{item.service}</td><td>{item.value}</td><td>{integerMoney(item.displayTotal?.totalMicros ?? null, item.currency)}</td><td>{item.displayTotal === null ? "UNAVAILABLE" : `${item.displayTotal.basis} · ${item.displayTotal.coverage}`}</td><td>{item.lineCount}</td></tr>)}</tbody></table></div>}</article>;
+  return <article className={styles.breakdown}><h4>{title}</h4>{rows.length === 0 ? <p className={styles.muted}>Canonical CUR2 cost evidence is unavailable for this selection.</p> : <><CostBreakdownChart title={title} rows={rows} /><div className={styles.scroll}><table className={styles.table}><thead><tr><th>Service</th><th>Dimension</th><th>Canonical cost</th><th>Basis / coverage</th><th>Lines</th></tr></thead><tbody>{rows.map((item) => <tr key={`${item.service}:${item.currency}:${item.value}`}><td>{item.service}</td><td>{item.value}</td><td>{integerMoney(item.displayTotal?.totalMicros ?? null, item.currency)}</td><td>{item.displayTotal === null ? "UNAVAILABLE" : `${item.displayTotal.basis} · ${item.displayTotal.coverage}`}</td><td>{item.lineCount}</td></tr>)}</tbody></table></div></>}</article>;
 }
 
 function stateText(state: SourceState): string | null {
