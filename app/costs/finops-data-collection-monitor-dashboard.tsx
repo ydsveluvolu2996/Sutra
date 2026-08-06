@@ -5,6 +5,7 @@ import {
   DATA_COLLECTION_MONITOR_OFFICIAL_DEFINITION,
   type DataCollectionMonitorOfficialDefinition,
 } from "../../lib/finops-data-collection-monitor-official-definition";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-data-collection-monitor-dashboard.module.css";
 
 type DcfDashboard = ReturnType<
@@ -73,6 +74,58 @@ function matchesStatusCategory(status: string, category: string): boolean {
     && ["FAILED", "TIMED_OUT", "ABORTED"].includes(status);
 }
 
+
+/**
+ * Failed executions by Data Collection Framework module.
+ *
+ * The table lists every module with its own counts, which answers "how is this
+ * module doing" but not "which module is failing most" -- the question this
+ * dashboard exists to answer, and the one a reader would otherwise resolve by
+ * scanning a column.
+ *
+ * A module with no failures is a measured zero, not absence: the framework ran
+ * it and nothing failed. It stays in the chart at zero length rather than being
+ * filtered out, because "ran cleanly" is the result the operator most wants to
+ * confirm, and dropping it would make a healthy module indistinguishable from
+ * one that never reported.
+ *
+ * Retries and executions ride along as detail text rather than as stacked
+ * series. A retry is not a failed execution and the two do not sum to a
+ * meaningful whole, so stacking them would invent a total that does not exist.
+ *
+ * Coverage is deliberately left to the table. `coverage.expected` is nullable,
+ * and an accepted-over-expected ratio computed against an unknown denominator
+ * would state a completeness the framework never reported.
+ */
+function ModuleFailureRanking({ modules }: {
+  readonly modules: readonly {
+    readonly moduleId: string;
+    readonly moduleName: string;
+    readonly executionCount: number;
+    readonly failureCount: number;
+    readonly retryCount: number;
+  }[];
+}) {
+  if (modules.length === 0) return null;
+  return (
+    <>
+      <h3>Failed executions by module</h3>
+      <RankingBars
+        ariaLabel="Failed Data Collection Framework executions by module"
+        caption="Counts across the selected execution history. A module that ran without failing stays plotted at zero."
+        formatValue={(value) => value.toLocaleString("en-US")}
+        items={modules.map((moduleEntry) => ({
+          id: moduleEntry.moduleId,
+          label: moduleEntry.moduleName,
+          value: moduleEntry.failureCount,
+          detail: `${moduleEntry.executionCount.toLocaleString("en-US")} executions · ${moduleEntry.retryCount.toLocaleString("en-US")} retries`,
+        }))}
+        sort
+      />
+    </>
+  );
+}
+
 export function DataCollectionMonitorView({
   report,
 }: {
@@ -119,6 +172,7 @@ export function DataCollectionMonitorView({
           </article>
         ))}
       </div>
+      <ModuleFailureRanking modules={visibleModules} />
       <h3>Modules, retries, latency &amp; coverage</h3>
       <div className={styles.tableWrap}><table>
         <thead>
