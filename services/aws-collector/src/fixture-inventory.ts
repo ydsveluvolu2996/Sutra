@@ -754,6 +754,19 @@ function collectorResourceType(collectorKey: string): string {
   return types[collectorKey] ?? `unknown.${collectorKey}`;
 }
 
+/**
+ * Content-addressing digest for snapshots, findings and fixture names. It never
+ * hashes a credential.
+ *
+ * CodeQL reports js/insufficient-password-hash here because the fixture
+ * snapshot contains an IAM account password-*policy* finding
+ * (SUTRA.AWS.IAM.PASSWORD_POLICY, with fields like minimumPasswordLength and
+ * passwordReusePrevention), so password-named values reach this function. Those
+ * are policy settings describing an AWS account, not secrets, and the digest
+ * content-addresses an entire snapshot payload. A deliberately slow salted KDF
+ * would be wrong for that: content addressing requires the same input to yield
+ * the same digest, which is exactly what a password hash is designed to prevent.
+ */
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
