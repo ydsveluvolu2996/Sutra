@@ -1,7 +1,7 @@
 # Publish, but never deploy, the notification delivery worker image.
 #
 # This is deliberately a SEPARATE workflow from
-# .github/workflows/ec2-private-beta-release.yml, for four reasons:
+# .github/workflows/ec2-live-release.yml, for four reasons:
 #
 #   1. It has no deployment half. The SSM release document
 #      (Sutra-DeployImmutableRelease) is regex-pinned to sutra/app and stays

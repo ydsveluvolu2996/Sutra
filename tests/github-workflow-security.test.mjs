@@ -254,7 +254,7 @@ test("the in-cluster security gate runs with an immutable root filesystem", () =
 
 test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host SSM and public verification", () => {
   const workflow = readFileSync(
-    new URL("../.github/workflows/ec2-private-beta-release.yml", import.meta.url),
+    new URL("../.github/workflows/ec2-live-release.yml", import.meta.url),
     "utf8",
   );
   const role = readFileSync(
@@ -283,7 +283,7 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/u);
   assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/u);
   assert.doesNotMatch(workflow, /^\s{2}(push|pull_request):\s*$/mu);
-  assert.match(workflow, /^\s{4}environment: ec2-private-beta-release\s*$/mu);
+  assert.match(workflow, /^\s{4}environment: ec2-live-release\s*$/mu);
   for (const variable of ["AWS_ACCOUNT_ID", "AWS_REGION", "AWS_ROLE_ARN", "EC2_INSTANCE_ID"]) {
     assert.match(workflow, new RegExp(`\\$\\{\\{ vars\\.${variable} \\}\\}`));
   }
@@ -405,7 +405,7 @@ test("ECR lifecycle keeps three validated releases and expires only lower-priori
   assert.match(delivery, /failed scans never consume the three-release retention window/u);
 });
 
-test("private-beta host start and stop remain explicit, SSO-only, and exact-instance bounded", () => {
+test("live EC2 host start and stop remain explicit, SSO-only, and exact-instance bounded", () => {
   const control = readFileSync(
     new URL("../deploy/ec2/manual-host-control.sh", import.meta.url),
     "utf8",
