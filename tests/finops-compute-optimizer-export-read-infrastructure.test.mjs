@@ -232,7 +232,7 @@ test("the contract pins primary AWS evidence and the one-stack-per-Region rule",
     "https://docs.aws.amazon.com/kms/latest/developerguide/conditions-kms.html#conditions-kms-via-service",
     "https://docs.aws.amazon.com/compute-optimizer/latest/ug/exporting-your-recommendations.html",
   ]) {
-    assert.match(contract, new RegExp(source.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+    assert.ok(contract.includes(source), `contract cites ${source}`);
   }
   assert.match(contract, /intersection of the role's identity policy and the session policy/u);
   assert.match(contract, /one add-on is required per Region/u);

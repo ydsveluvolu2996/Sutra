@@ -122,8 +122,12 @@ export class SutraClient {
   private readonly fetchImpl: typeof fetch;
 
   public constructor(options: SutraClientOptions) {
-    // Normalize away a trailing slash so path joins are unambiguous.
-    this.baseUrl = options.baseUrl.replace(/\/+$/u, "");
+    // Normalize away trailing slashes so path joins are unambiguous. A loop
+    // rather than /\/+$/: that regex backtracks quadratically on a baseUrl
+    // that is mostly slashes, and baseUrl is caller-controlled library input.
+    let baseUrl = options.baseUrl;
+    while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
+    this.baseUrl = baseUrl;
     this.token = options.token;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }

@@ -79,7 +79,7 @@ function clock() {
 
 function xmlResponse(url, partialUrl = null) {
   if (url === partialUrl) return new Response("", { status: 503 });
-  if (url.includes("youtube.com")) {
+  if (new URL(url).hostname === "www.youtube.com") {
     return new Response("<?xml version=\"1.0\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"></feed>", {
       status: 200,
       headers: { "content-type": "application/atom+xml" },

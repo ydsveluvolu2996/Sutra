@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes, scryptSync } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { chmod, mkdir, open, rm, stat, writeFile } from "node:fs/promises";
@@ -22,8 +22,15 @@ async function sha256File(path) {
   return hash.digest("hex");
 }
 
-function sha256Text(value) {
-  return createHash("sha256").update(value, "utf8").digest("hex");
+/**
+ * Fingerprint a credential for later equality comparison without persisting a
+ * crackable digest. A bare sha256(password) written into the manifest is an
+ * offline-crackable oracle for anyone who reads the backup directory; scrypt
+ * with a per-backup random salt supports the same "same credentials?" check on
+ * restore while making brute force of the underlying password impractical.
+ */
+function credentialFingerprint(value, saltHex) {
+  return scryptSync(value, Buffer.from(saltHex, "hex"), 32).toString("hex");
 }
 
 async function runDocker(args, { outputPath, capture = false } = {}) {
@@ -76,8 +83,9 @@ try {
     sha256File(dumpPath),
     sha256File(statePath),
   ]);
+  const fingerprintSalt = randomBytes(16).toString("hex");
   const manifest = {
-    schema: "sutra.local-stack-backup.v2",
+    schema: "sutra.local-stack-backup.v3",
     createdAt: new Date().toISOString(),
     database: "sutra",
     files: {
@@ -94,10 +102,11 @@ try {
         sha256: stateSha256,
       },
     },
+    credentialFingerprintSalt: fingerprintSalt,
     keyFingerprints: {
       ...runtimeFingerprints,
-      postgresOwnerPassword: sha256Text(ownerPassword),
-      postgresRuntimePassword: sha256Text(appPassword),
+      postgresOwnerPassword: credentialFingerprint(ownerPassword, fingerprintSalt),
+      postgresRuntimePassword: credentialFingerprint(appPassword, fingerprintSalt),
     },
   };
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {

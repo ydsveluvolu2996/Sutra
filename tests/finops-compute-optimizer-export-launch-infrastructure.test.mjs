@@ -334,7 +334,7 @@ test("the contract pins current primary AWS authorization and destination eviden
     "https://docs.aws.amazon.com/compute-optimizer/latest/ug/create-s3-bucket-policy-for-compute-optimizer.html",
     "https://docs.aws.amazon.com/compute-optimizer/latest/ug/using-encrypted-s3-buckets.html",
     "https://docs.aws.amazon.com/compute-optimizer/latest/ug/exporting-your-recommendations.html",
-  ]) assert.match(contract, new RegExp(source.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
+  ]) assert.ok(contract.includes(source), `contract cites ${source}`);
   assert.match(contract, /Allow in a separate[\s\S]*cannot override that explicit Deny/u);
   assert.match(contract, /has not been published, deployed/u);
   assert.match(contract, /must never accept a browser-supplied destination/u);
