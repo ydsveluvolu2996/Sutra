@@ -103,3 +103,19 @@ pnpm exec eslint app/costs/finops-azure-cloud-intelligence-dashboard.tsx app/api
 pnpm typecheck
 git diff --check
 ```
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01).
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.**
+Exclusion is not completion.
+
+- **ADD-02 Cloud Intelligence Dashboard for Azure remains excluded from the 27-dashboard release build.** None of the
+  workstreams merged since 2026-08-05 — the native chart-kit migration
+  (`4ac72bd`, `f107cdf`), the foundational export successor revisions
+  (`dcbc08f`), the `aws_static_credentials` onboarding method (`6298f03`), or
+  the AWS SDK client declarations (`92a0084`) — produced any Azure-specific
+  work. **No chart-kit migration is claimed for this row.** `app/costs/finops-azure-cloud-intelligence-dashboard.tsx` was not modified and imports no chart-kit module. The Azure
+  identity, adapter, provider-generation and reconciliation gaps recorded above
+  are outstanding exactly as written.

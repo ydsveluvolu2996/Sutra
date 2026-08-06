@@ -220,3 +220,46 @@ Until these gates pass, activation is deliberately returned as
 `available: false` with
 `AWS_HISTORICAL_PRICE_LIST_MATERIALIZER_NOT_REGISTERED`, and ADD-13 must not be
 marked live-accepted or production-ready.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's view moved onto the shared native chart kit at
+  `app/components/charts`:
+  - `app/costs/finops-pricing-change-dashboard.tsx`
+  - `app/costs/finops-pricing-change-dashboard.module.css`
+
+  Focused rendering proof added with it:
+  - `tests/finops-pricing-change-charts.test.mjs`
+
+  Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.
+
+- **New `aws_static_credentials` onboarding method — `6298f03` (PR #39).**
+  Onboarding now offers an access key ID plus secret access key (with a session
+  token required for temporary `ASIA` keys) as an alternative to the
+  CloudFormation trust-role flow, which stays the recommended default. The
+  credential material lives only in the collector's AES-GCM-encrypted registry
+  document; the app database stores the `aws_static_credentials` source kind and
+  nothing else. Static sessions carry **no STS inline session-policy ceiling and
+  no role-contract attestation** — both are impossible without `AssumeRole`.
+  **This row's connection prerequisite is unchanged: the FinOps per-source
+  verticals still require the trust-role method.** The FinOps source guards were
+  deliberately left trust-role-only, so an `aws_static_credentials` connection
+  cannot satisfy the prerequisite recorded above. No permission ceiling,
+  attestation, or role contract in this record is relaxed by it.

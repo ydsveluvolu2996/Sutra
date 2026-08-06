@@ -4,6 +4,10 @@ Status: **ACTIVE — implementation incomplete; release prohibited until every a
 
 Catalog reviewed: **2026-08-01**
 
+Tracker last reconciled against `main`: **2026-08-06 at `92a0084`** — see
+[Implementation record — 2026-08-06](#implementation-record--2026-08-06). No row
+changed maturity at that reconciliation.
+
 Current release scope confirmed: **2026-08-02 — build and acceptance target is
 the 27 AWS-backed dashboards. ADD-02 Azure CID and ADD-03 GCP CID remain in the
 official product catalog but are explicitly excluded from this release build at
@@ -117,8 +121,8 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 | ADD-08 | Sustainability Proxy Metrics and Carbon Emissions Dashboard | `sustainability_proxy` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-08-sustainability-carbon.md): the pinned 6-sheet/25-visual/17-control definition is returned in every successful API state and rendered independently of report availability. Tenant-bound dual-plane materialization, immutable separated CUR2-proxy/provider-carbon history and native coverage/proxy/carbon/target/plan UI exist; regional renewable/map, processor/family, storage-class, transfer-path and idle-network dimensions require versioned evidence, while shared registration, governed targets, provider reconciliation and live acceptance remain. |
 | ADD-09 | Trends Dashboard | `trends` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-09-trends.md): 9 public artifacts and 3 dataset/view contracts are hash-pinned, and all 9 documented feature areas plus 7 provable control names are mapped. AWS does not publish the service-hosted QuickSight definition, so exact object totals remain explicitly unavailable. Native exact comparisons, contributors, deterministic estimates, CUR2 taxonomy/usage/account/Region evidence, automation status, CSV and lineage exist; QuickSight ML/automation, Organizations identity, map coordinates, provider reconciliation and live acceptance remain. |
 | ADD-10 | Data Transfer Dashboard | `data_transfer` | `LOCAL_VERTICAL_CANDIDATE` | [Current evidence](finops-cid-evidence/ADD-10-data-transfer.md): the manifest and embedded Athena query are hash-pinned and all 5 AWS-documented purposes are mapped. AWS does not publish the QuickSight definition/template body/changelog, so exact object totals remain explicitly unavailable. Canonical CUR2 retains exact provider path/service/product/operation/transfer-type evidence with native filters, drilldowns and safe export; historical rematerialization, provider/two-tenant reconciliation, release gates and live acceptance remain. |
-| ADD-11 | Amazon Connect Cost Insights Dashboard | `amazon_connect_cost_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-11-amazon-connect.md): the pinned complete definition maps exactly 8 sheets, 121 visuals and 61 controls; 5 public artifacts are hash-verified while the unpublished `resource_connect_view` dataset/query remain explicitly null. Tenant-bound signed runtime, exact instance/pagination/privacy/CUR2 boundary, immutable aggregate history, same-tenant API and native seven-area UI exist; provider/handoff registration, supporting-service evidence, governed exact lookup, exact geometry and live acceptance remain. |
-| ADD-12 | Config Resource Compliance Dashboard | `config_resource_compliance` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-12-config-resource-compliance.md): the separately linked official v5.0.0 repository is pinned with 5 raw artifacts, 13 dataset definitions and 14 Athena views; its complete definition maps exactly 7 sheets, 124 visuals and 64 controls. Bounded collection/runtime, immutable complete-head persistence, same-tenant API and native compliance/inventory/usage evidence exist; credential-owning adapter/replay/shared-handler registration, tag/resource-specific/threat/event projections, exact geometry and provider acceptance remain. |
+| ADD-11 | Amazon Connect Cost Insights Dashboard | `amazon_connect_cost_insights` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-11-amazon-connect.md): the pinned complete definition maps exactly 8 sheets, 121 visuals and 61 controls; 5 public artifacts are hash-verified while the unpublished `resource_connect_view` dataset/query remain explicitly null. Tenant-bound signed runtime, exact instance/pagination/privacy/CUR2 boundary, immutable aggregate history, same-tenant API and native seven-area UI exist; provider/handoff registration, supporting-service evidence, governed exact lookup, exact geometry and live acceptance remain. **Corrected 2026-08-06:** the provider adapter loads `@aws-sdk/client-connect` through a string-variable dynamic import that was declared in no manifest and absent from `node_modules`, so it could not have executed — any real run would have raised `ERR_MODULE_NOT_FOUND`. Fixed in `92a0084`; no prior local claim on this row is provider-executable evidence. |
+| ADD-12 | Config Resource Compliance Dashboard | `config_resource_compliance` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-12-config-resource-compliance.md): the separately linked official v5.0.0 repository is pinned with 5 raw artifacts, 13 dataset definitions and 14 Athena views; its complete definition maps exactly 7 sheets, 124 visuals and 64 controls. Bounded collection/runtime, immutable complete-head persistence, same-tenant API and native compliance/inventory/usage evidence exist; credential-owning adapter/replay/shared-handler registration, tag/resource-specific/threat/event projections, exact geometry and provider acceptance remain. **Corrected 2026-08-06:** the provider adapter loads `@aws-sdk/client-config-service` through a string-variable dynamic import that was declared in no manifest and absent from `node_modules`, so it could not have executed — any real run would have raised `ERR_MODULE_NOT_FOUND`. Fixed in `92a0084`; no prior local claim on this row is provider-executable evidence. |
 | ADD-13 | Pricing Change Analysis Dashboard | `pricing_change` | `PARTIAL_PIPELINE` | [Current evidence](finops-cid-evidence/ADD-13-pricing-change.md): the pinned complete definition maps exactly 2 sheets, 11 visuals and 10 control placements, with 6 hash-verified public artifacts; the current Guidance/manifest category and manifest/changelog version discrepancies remain explicit. Tenant-complete scheduling, sealed evidence, immutable replay-safe metadata, same-tenant API and native purpose mapping exist; historical Price List provider/shared-handler/full-CUR2 reader registration, semantic reconciliation, exact geometry and live acceptance remain. |
 
 ## Child-stage gates for every parent row
@@ -185,6 +189,34 @@ not sufficient proof.
 6. Audit and close all gates for the fifteen local candidates.
 7. Build Azure CID and GCP CID with provider-specific connection/runtime contracts.
 8. Run exact-tree local, controlled-provider, GitHub, image, deployment, rollback, and live-site gates.
+
+## Implementation record — 2026-08-06
+
+Five pull requests merged to `main` after the 2026-08-05 15:01 tracker revision.
+**No row changed maturity and no new gate passed.** Each item below is source
+work with green pull-request CI at its own head; G7 fixed-tree, G8 controlled
+provider, G9 release and G10 deployment acceptance remain outstanding for every
+row exactly as recorded above. The release prohibition is unchanged.
+
+| Merge | Change | Gate touched | Maturity effect |
+|---|---|---|---|
+| `4ac72bd` (#36), `f107cdf` (#37) | In-scope dashboards migrated onto the native chart kit (`app/components/charts`); catalog icon chip rendered in dashboard headers. 28 files under `app/costs/` import the kit; `tests/chart-kit-rendering.test.mjs` holds 12 tests. | G5 work only | None. G5 remains unverified for every row; a rendering change is not visual acceptance. |
+| `dcbc08f` (#38) | Successor add-on revisions `finops-foundational-cur2-export-v1.1.yaml` and `finops-foundational-focus12-export-v1.1.yaml` accept the deployable `standard-2026-08.12` ceiling. Grants, resources, names and outputs are byte-identical to v1; only the `BaseCollectorPermissionPackVersion` gate changed, to exactly `standard-2026-08.1` and `standard-2026-08.12`. The v1 bytes remain immutable. | G1 contract | None. **Source only** — not published, not launched. The publish-before-application order in `docs/finops-foundational-cur2-export.md` still gates activation. |
+| `6298f03` (#39) | New `aws_static_credentials` onboarding method (access key + secret + optional session token) alongside the CloudFormation role flow. Credentials exist only in the collector's AES-GCM-encrypted registry, never in the application database. | Onboarding, not a dashboard row | None. Static sessions carry **no STS inline session-policy ceiling and no role-contract attestation** — impossible without AssumeRole. **FinOps per-source verticals continue to require the trust-role method**; their source guards were deliberately left trust-role-only. |
+| `b2d1c50` (#40) | `.github/codeql-config.yml` excludes test paths from CodeQL; `security-extended` stays at full strength on shipped code. | G9 input | None. Narrows static-analysis coverage on test code; a defect in a test helper is no longer flagged. |
+| `92a0084` (#41) | `@aws-sdk/client-config-service` and `@aws-sdk/client-connect` were reachable from shipped collector code through `import(<string variable>)` but declared in no manifest and absent from `node_modules`. Both pinned at `3.1087.0` with the lockfile updated; a collector test now fails when a referenced `@aws-sdk` module is undeclared. | G2 collector defect | None, but it **corrects an overstatement**: the ADD-12 and ADD-11 provider adapters recorded below as "wired and locally tested" could not have executed at all before this merge. See the corrected rows. |
+
+### Correction carried into the rows above
+
+The `92a0084` finding is a documentation-integrity matter, not only a build fix.
+ADD-12 Config Resource Compliance and ADD-11 Amazon Connect Cost Insights each
+load their AWS SDK client lazily through a string variable so a bundler cannot
+hoist it. That indirection also hides the dependency from TypeScript, so
+`pnpm typecheck` passed, every test passed — because the tests inject fake SDKs
+and never load the real module — and the first real provider run of either
+vertical would have failed with `ERR_MODULE_NOT_FOUND`. Their rows are amended
+to record that the adapter was unrunnable until `92a0084`, so no prior local
+claim for those two rows should be read as provider-executable evidence.
 
 ## Checkpoint template
 

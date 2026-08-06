@@ -122,3 +122,19 @@ Result: **10 passed, 0 failed, 0 skipped**. Scoped ESLint, full
 Provider adapter registration, live same-tenant reconciliation, exact-tree
 browser validation, reviewed release, immutable image deployment, and live
 acceptance remain open. Maturity therefore remains `PARTIAL_PIPELINE`.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01).
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.**
+Exclusion is not completion.
+
+- **ADD-03 Cloud Intelligence Dashboard for GCP remains excluded from the 27-dashboard release build.** None of the
+  workstreams merged since 2026-08-05 — the native chart-kit migration
+  (`4ac72bd`, `f107cdf`), the foundational export successor revisions
+  (`dcbc08f`), the `aws_static_credentials` onboarding method (`6298f03`), or
+  the AWS SDK client declarations (`92a0084`) — produced any GCP-specific
+  work. **No chart-kit migration is claimed for this row.** `app/costs/finops-gcp-cloud-intelligence-dashboard.tsx` was not modified. The only change reaching this view is repository-wide and shared: `app/costs/finops-foundational-panels.tsx` stopped drawing an absent series as a floored zero (`tests/finops-shared-panel-floors.test.mjs`), which tightens the absent-is-not-zero invariant rather than adding capability. The GCP
+  identity, adapter, provider-generation and reconciliation gaps recorded above
+  are outstanding exactly as written.

@@ -134,3 +134,47 @@ Remaining gates:
 Current focused result: **27/27 tests passed** with zero failures, skips, or
 cancellations. Targeted ESLint, whole-tree TypeScript, and `git diff --check`
 pass on the integrated tree.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's view moved onto the shared native chart kit at
+  `app/components/charts`:
+  - `app/costs/finops-aws-config-resource-compliance-dashboard.tsx`
+  - `app/costs/finops-aws-config-resource-compliance-dashboard.module.css`
+
+  Focused rendering proof added with it:
+  - `tests/finops-config-compliance-rule-ranking.test.mjs`
+  - `tests/finops-config-compliance-trend.test.mjs`
+
+  Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.
+
+- **Corrected defect: undeclared lazily loaded AWS SDK client — `92a0084`
+  (PR #41).** `services/aws-collector/src/aws-config-compliance-provider-client.ts` resolves
+  `@aws-sdk/client-config-service` through `import(<string variable>)`, so the
+  dependency was invisible to static resolution: it was declared in no manifest
+  and absent from `node_modules`. **The provider adapter for ADD-12 Config Resource Compliance could not have
+  executed before `92a0084` — the first real run would have failed with
+  `ERR_MODULE_NOT_FOUND`.** The client is now pinned at `3.1087.0` in
+  `services/aws-collector/package.json` with `pnpm-lock.yaml` updated, and
+  `services/aws-collector/test/lazy-sdk-dependencies.test.ts` scans shipped
+  collector source for `@aws-sdk` literals and fails when one is undeclared.
+  This corrects a latent defect in previously recorded work. It adds no
+  capability and is not provider evidence: the adapter still has never been run
+  against AWS, so G1/G2 remain exactly as stated above.

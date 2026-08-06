@@ -106,3 +106,31 @@ mapping and remaining gap.
 - Normalize Savings Plans level/term/upfront and Reserved Instance service/level/term/upfront dimensions before claiming exact option-matrix parity.
 - Run the collector against an enabled organization-level Cost Optimization Hub Data Export and retain accepted provider evidence.
 - Complete release-SHA review, browser visual/accessibility acceptance, immutable image and production deployment gates; no pixel/layout parity claim is implied by the exact public-definition inventory.
+
+## Merge record — 2026-08-06
+
+Merged to `main` since this record was last updated (2026-08-05 15:01). Every
+item below is source-only work that landed through review with CI green on the
+merge commit — nothing more. No provider, live, two-tenant, or release evidence
+is created by any of it.
+
+**Maturity is unchanged (`PARTIAL_PIPELINE`) and no child-stage gate passed.** G7
+fixed-tree, G8 controlled provider acceptance, G9 release and G10 deployment
+remain unpassed for this row; no live acceptance, provider reconciliation, or
+two-tenant acceptance is claimed.
+
+- **Native chart kit and catalog identity — `4ac72bd` (PR #36) and `f107cdf`
+  (PR #37).** This row's view moved onto the shared native chart kit at
+  `app/components/charts`:
+  - `app/costs/finops-cora-dashboard.tsx`
+
+  Focused rendering proof added with it:
+  - `tests/finops-cora-savings-trend.test.mjs`
+
+  Across `app/costs/`, 28 view modules plus the catalog page now import the kit,
+  and the kit's own rendering suite `tests/chart-kit-rendering.test.mjs` holds
+  12 tests. `app/costs/finops-dashboard-identity.tsx` renders each dashboard's
+  catalog glyph, name and ID above every opened view
+  (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
+  no source contract, collector operation, migration, API shape, or evidence
+  semantic changed, and no G5 or G6 stage status is promoted by it.
