@@ -95,7 +95,8 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /^\s{2}scanner-image:\s*$/mu);
   assert.match(ci, /^\s{2}release-gate:\s*$/mu);
   assert.doesNotMatch(ci, /^\s{2}(test|build):\s*$/mu);
-  assert.match(ci, /needs: \[reuse-pr-gate, quality, integration, scanner-image\]/u);
+  assert.match(ci, /^\s{2}tests:\s*$/mu);
+  assert.match(ci, /needs: \[reuse-pr-gate, quality, tests, integration, scanner-image\]/u);
   assert.match(ci, /repos\/\$\{REPOSITORY\}\/commits\/\$\{COMMIT_SHA\}\/pulls/u);
   assert.match(ci, /actions\/workflows\/ci\.yml\/runs\?event=pull_request&head_sha=/u);
   assert.match(ci, /\.merge_commit_sha == \$commit_sha/u);
@@ -108,8 +109,44 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /\.created_at >= \$pr_created_at/u);
   assert.match(ci, /\.updated_at <= \$merged_at/u);
   assert.match(ci, /lookup unavailable; full gate required/u);
-  assert.match(ci, /node scripts\/ci-test-shard\.mjs\s*$/mu);
-  assert.doesNotMatch(ci, /node scripts\/ci-test-shard\.mjs --shard/u);
+  // The offline PR-gate suite must run as six balanced shards on separate
+  // runners; the unsharded single-runner invocation must never come back.
+  assert.match(
+    ci,
+    /node scripts\/ci-test-shard\.mjs --shard \$\{\{ matrix\.shard \}\}\/6\s*$/mu,
+    "CI must run the offline PR-gate suite as sharded matrix jobs",
+  );
+  assert.doesNotMatch(
+    ci,
+    /node scripts\/ci-test-shard\.mjs\s*$/mu,
+    "CI must not run the whole PR-gate suite on one runner",
+  );
+  assert.match(ci, /shard: \[1, 2, 3, 4, 5, 6\]/u);
+  assert.equal(
+    ci.match(/node scripts\/ci-test-shard\.mjs --shard/gu)?.length,
+    1,
+    "the sharded PR-gate suite must be invoked from exactly one job",
+  );
+  const shardMatrix = /matrix:\s*\n\s*shard: \[([^\]]+)\]/u.exec(ci);
+  assert.ok(shardMatrix, "the tests job must declare a shard matrix");
+  assert.deepEqual(
+    shardMatrix[1].split(",").map((value) => value.trim()),
+    ["1", "2", "3", "4", "5", "6"],
+    "the shard matrix must cover exactly six shards, matching --shard N/6",
+  );
+  assert.match(ci, /fail-fast: false/u);
+  // Files inside a shard share process/global state, so the runner must never
+  // execute them concurrently. Parallelism comes only from separate runners.
+  const shardScript = readFileSync(
+    new URL("../scripts/ci-test-shard.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    shardScript,
+    /"--test", "--test-concurrency=1"/u,
+    "each shard must still run its own files serially",
+  );
+  assert.doesNotMatch(shardScript, /--test-concurrency=(?!1\b)\d+/u);
   assert.match(ci, /node scripts\/pipeline-scan\.mjs --fail-on high/u);
   const pipelineScan = readFileSync(
     new URL("../scripts/pipeline-scan.mjs", import.meta.url),
@@ -146,10 +183,12 @@ test("CI reuses only exact successful PR verification and otherwise runs consoli
   assert.match(ci, /PROVENANCE_RESULT: \$\{\{ needs\.reuse-pr-gate\.result \}\}/u);
   assert.match(ci, /REUSE: \$\{\{ needs\.reuse-pr-gate\.outputs\.reuse \}\}/u);
   assert.match(ci, /QUALITY_RESULT: \$\{\{ needs\.quality\.result \}\}/u);
+  assert.match(ci, /TESTS_RESULT: \$\{\{ needs\.tests\.result \}\}/u);
   assert.match(ci, /INTEGRATION_RESULT: \$\{\{ needs\.integration\.result \}\}/u);
   assert.match(ci, /test "\$PROVENANCE_RESULT" = success/u);
   assert.match(ci, /if \[\[ "\$REUSE" == "true" \]\]/u);
   assert.equal(ci.match(/test "\$QUALITY_RESULT" = (?:skipped|success)/gu)?.length, 2);
+  assert.equal(ci.match(/test "\$TESTS_RESULT" = (?:skipped|success)/gu)?.length, 2);
   assert.equal(ci.match(/test "\$INTEGRATION_RESULT" = (?:skipped|success)/gu)?.length, 2);
 });
 

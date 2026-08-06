@@ -162,14 +162,66 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Run every offline PR-gate test serially
-        run: node scripts/ci-test-shard.mjs
-
       - name: Build
         run: pnpm build
 
       - name: Test rendered routes
         run: pnpm test:rendered
+
+  tests:
+    # The offline PR-gate suite is split across six runners by measured
+    # duration. Each runner still executes its own files serially
+    # (`--test-concurrency=1` inside scripts/ci-test-shard.mjs): the
+    # tenant-isolation and runtime-config suites mutate shared process state, so
+    # parallelism may only come from separate runners, never from in-process
+    # concurrency.
+    name: Offline PR-gate tests
+    needs: reuse-pr-gate
+    if: ${{ needs.reuse-pr-gate.outputs.reuse != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      CI: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.0
+        with:
+          version: 11.13.1
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.3.0
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      # tests/pipeline-scan.test.mjs drives scripts/pipeline-scan.mjs, which
+      # requires Trivy on PATH and correctly fails closed without it. That
+      # binary used to be installed by `quality` before the tests ran; once the
+      # run moved into shards, whichever shard held that file lost it. Every
+      # shard installs it so the shard environment matches what the serial run
+      # provided — a file must not pass or fail based on which shard drew it.
+      - name: Install pinned Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
+      - name: Run offline PR-gate test shard
+        run: node scripts/ci-test-shard.mjs --shard ${{ matrix.shard }}/6
 
   integration:
     name: Collector, CloudFormation, and PostgreSQL
@@ -292,7 +344,7 @@ jobs:
     # fail closed into a complete rerun.
     name: Typecheck, lint, test, and build
     if: ${{ always() }}
-    needs: [reuse-pr-gate, quality, integration, scanner-image]
+    needs: [reuse-pr-gate, quality, tests, integration, scanner-image]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -302,6 +354,7 @@ jobs:
           REUSE: ${{ needs.reuse-pr-gate.outputs.reuse }}
           REUSE_REASON: ${{ needs.reuse-pr-gate.outputs.reason }}
           QUALITY_RESULT: ${{ needs.quality.result }}
+          TESTS_RESULT: ${{ needs.tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration.result }}
           SCANNER_IMAGE_RESULT: ${{ needs.scanner-image.result }}
         run: |
@@ -309,11 +362,13 @@ jobs:
           test "$PROVENANCE_RESULT" = success
           if [[ "$REUSE" == "true" ]]; then
             test "$QUALITY_RESULT" = skipped
+            test "$TESTS_RESULT" = skipped
             test "$INTEGRATION_RESULT" = skipped
             test "$SCANNER_IMAGE_RESULT" = skipped
             echo "Reused prior verification: $REUSE_REASON"
           else
             test "$QUALITY_RESULT" = success
+            test "$TESTS_RESULT" = success
             test "$INTEGRATION_RESULT" = success
             test "$SCANNER_IMAGE_RESULT" = success
           fi
