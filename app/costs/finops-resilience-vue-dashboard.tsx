@@ -8,6 +8,7 @@ import {
 import type { ResilienceAssessment, ResilienceComponentCompliance, ResilienceDrift,
   ResilienceObjectivePosture, ResiliencePolicyObjective, ResilienceRecommendation,
   ResilienceResource, ResilienceVueInferredPriority } from "../../lib/finops-resilience-vue";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-resilience-vue-dashboard.module.css";
 
 type Filters = { accountId: string | null; region: string | null; application: string | null;
@@ -121,6 +122,87 @@ function hasPinnedOfficialDefinition(definition: ResilienceVueOfficialDefinition
     && definition.totals.visuals === 47;
 }
 
+/**
+ * Open recommendations per retained generation, in recency order.
+ *
+ * The previous bars scaled with `Math.max(2, recommendationCount / maximum * 100)`
+ * against a `maximum` floored at 1. A generation with zero open recommendations
+ * -- a good outcome, and a real measurement -- drew the same 2% stub as one with
+ * a single recommendation, so "nothing outstanding" and "one outstanding" looked
+ * alike. The kit draws a measured zero as zero.
+ *
+ * `sort` is deliberately off: these rows are ordered by generation recency, and
+ * re-ranking them by magnitude would destroy the sequence the panel is about.
+ */
+export function RecommendationTrend({ history }: { readonly history: ResilienceVueReport["history"] }) {
+  if (history.length === 0) {
+    return <p className={styles.muted} role="status">No retained generation has been accepted yet.</p>;
+  }
+  return (
+    <RankingBars
+      ariaLabel="Open recommendations per retained generation"
+      caption="One row per retained generation, newest last. Bars scale against the largest count in the window; rows are in recency order, not ranked by size."
+      formatValue={(value) => value.toLocaleString("en-US")}
+      items={history.slice(0, 36).reverse().map((point) => ({
+        id: point.generationId,
+        label: `${point.completedAtIso.slice(0, 10)} · ${point.accountId} · ${point.region}`,
+        value: point.recommendationCount,
+        detail: `${point.assessmentCount} assessments`,
+      }))}
+    />
+  );
+}
+
+/**
+ * Resiliency score for the latest assessments.
+ *
+ * The previous bar used `assessment.resiliencyScore ?? 0`, so an assessment AWS
+ * supplied no score for drew a zero-width bar -- asserting a score of zero where
+ * none was measured. A score of 0 and no score at all are different findings,
+ * and the widths were identical. Unscored assessments are excluded from the plot
+ * and counted beneath it, so absence is never rendered as a floor value. The
+ * per-assessment status text below the chart still lists every assessment,
+ * scored or not.
+ *
+ * Scores are a provider 0-100 index, so they share one axis and need no currency
+ * separation. Order is assessment recency, so `sort` stays off.
+ */
+export function ResiliencyScoreTrend({ rows }: {
+  readonly rows: readonly { readonly assessment: ResilienceAssessment; readonly target: Target;
+    readonly application: { readonly name: string } | null }[];
+}) {
+  const scored = rows.filter((row) => row.assessment.resiliencyScore !== null);
+  const unscored = rows.length - scored.length;
+  return (
+    <>
+      {scored.length === 0 ? (
+        <p className={styles.muted} role="status">
+          No assessment in this window carries a provider resiliency score.
+        </p>
+      ) : (
+        <RankingBars
+          ariaLabel="Resiliency score for the latest assessments"
+          caption="Provider 0-100 resiliency index, newest last. Assessments with no supplied score are excluded rather than drawn as zero."
+          formatValue={(value) => value.toLocaleString("en-US")}
+          items={scored.map((row) => ({
+            id: `${row.target.generationId}:${row.assessment.assessmentArn}`,
+            label: `${row.assessment.startTime.slice(0, 10)} · ${row.application?.name ?? "Application not in current filter"} · ${row.target.region}`,
+            value: row.assessment.resiliencyScore ?? 0,
+            detail: row.assessment.complianceStatus ?? "Compliance unknown",
+          }))}
+        />
+      )}
+      {unscored === 0 ? null : (
+        <p className={styles.muted}>
+          {unscored} of {rows.length} {rows.length === 1 ? "assessment" : "assessments"} carry
+          no provider resiliency score and {unscored === 1 ? "is" : "are"} excluded from the
+          chart rather than plotted as zero.
+        </p>
+      )}
+    </>
+  );
+}
+
 export function ResilienceVueReportView({ report, filters, onFiltersChange }: { readonly report: ResilienceVueReport;
   readonly filters: Filters; readonly onFiltersChange: (filters: Filters) => void }) {
   const set = <K extends keyof Filters>(key: K, value: Filters[K]) => onFiltersChange({ ...filters, [key]: value });
@@ -132,7 +214,6 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
   const assessmentRows = report.targets.flatMap((target) => target.assessmentHistory.map((assessment) => ({ assessment, target,
     application: target.applications.find((app) => app.appArn === assessment.appArn) ?? null })))
     .sort((left, right) => right.assessment.startTime.localeCompare(left.assessment.startTime));
-  const maximum = Math.max(1, ...report.history.map((point) => point.recommendationCount));
   return <section className={styles.root} aria-label="ResilienceVue AWS Resilience Hub dashboard">
     <OfficialDefinitionPanel definition={report.officialDefinition} />
     <div className={styles.notice}><strong>Observed AWS Resilience Hub evidence.</strong> RTO/RPO, posture, breaches, drift, and operational recommendations come from retained assessments. Any Sutra priority is labeled inference, not an AWS finding.</div>
@@ -158,18 +239,10 @@ export function ResilienceVueReportView({ report, filters, onFiltersChange }: { 
       <article><small>Operational backlog</small><strong>{report.summary.openRecommendationCount}</strong><span>Unimplemented, non-excluded recommendations</span></article>
     </div>
     <section className={styles.section} aria-label="Assessment and recommendation trends"><header><h3>Daily assessment evidence trend</h3><span>Incremental retained generations</span></header>
-      <div className={styles.trend}>{report.history.slice(0, 36).reverse().map((point) => <div className={styles.trendRow} key={point.generationId}>
-        <time dateTime={point.completedAtIso}>{point.completedAtIso.slice(0, 10)}</time><span>{point.accountId} · {point.region}</span>
-        <div className={styles.track} title={`${point.recommendationCount} recommendations`}><i style={{ width: `${Math.max(2, point.recommendationCount / maximum * 100)}%` }} /></div>
-        <b>{point.assessmentCount} assessments / {point.recommendationCount} open</b>
-      </div>)}</div>
+      <RecommendationTrend history={report.history} />
     </section>
     <section className={styles.section} aria-label="Latest assessment score trend"><header><h3>Summary of 10 latest assessments</h3><span>Provider assessment evidence · Resiliency score trend</span></header>
-      <div className={styles.trend}>{assessmentRows.slice(0, 10).map(({ assessment, target, application }) => <div className={styles.trendRow} key={`${target.generationId}:${assessment.assessmentArn}`}>
-        <time dateTime={assessment.startTime}>{assessment.startTime.slice(0, 10)}</time><span>{application?.name ?? "Application not in current filter"} · {target.region}</span>
-        <div className={styles.track} title={assessment.resiliencyScore === null ? "Score not supplied" : `Resiliency score ${assessment.resiliencyScore}`}><i style={{ width: `${assessment.resiliencyScore ?? 0}%` }} /></div>
-        <b>{assessment.resiliencyScore ?? "No score"} · {assessment.assessmentStatus} · {assessment.complianceStatus ?? "Unknown"}</b>
-      </div>)}</div>
+      <ResiliencyScoreTrend rows={assessmentRows.slice(0, 10)} />
     </section>
     <section className={styles.section} aria-label="Application resilience posture"><header><h3>Application posture · {applications.length}</h3></header><div className={styles.scroll}><table><thead><tr><th>Account / Region</th><th>Application / policy</th><th>Posture</th><th>Resiliency score</th><th>RPO target</th><th>RTO target</th><th>Assessment evidence</th></tr></thead><tbody>
       {applications.map((app) => <tr key={`${app.accountId}:${app.region}:${app.appArn}`}><td>{app.accountId}<br />{app.region}</td><td><strong>{app.name}</strong><br />{app.policyName ?? "No policy observed"}<br />Tier: {app.policyTier ?? "Not supplied"}</td><td><span className={`${styles.pill} ${app.complianceStatus === "PolicyBreached" ? styles.breach : ""}`}>{app.complianceStatus ?? "Unknown"}</span><br />Drift: {app.driftStatus ?? "Unknown"}</td><td>{app.resiliencyScore ?? "Not supplied"}</td><td>{duration(app.rpoInSecs)}</td><td>{duration(app.rtoInSecs)}</td><td><details><summary>RPO/RTO dimensions</summary><div className={styles.objectives}>{["AZ", "Software", "Hardware", "Region"].map((dimension) => {
