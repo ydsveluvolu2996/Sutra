@@ -6,6 +6,7 @@ import type {
   ScadDashboardProjection,
 } from "../../lib/finops-scad-dashboard";
 import { SCAD_OFFICIAL_DEFINITION, type ScadOfficialDefinition } from "../../lib/finops-scad-official-definition";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-scad-allocation-dashboard.module.css";
 interface Envelope extends ScadDashboardProjection {
   readonly connectionId: string;
@@ -70,6 +71,91 @@ function amounts(values: readonly ScadAmount[]): string {
         .join(" · ")
     : "No cost";
 }
+/**
+ * An exact SCAD rational as a plottable amount, or null when it cannot be
+ * plotted exactly.
+ *
+ * SCAD carries costs as numerator/denominator so no allocation is ever rounded
+ * in storage. A chart coordinate is necessarily a double, so anything outside
+ * exact double range is refused rather than silently rounded into a bar. The
+ * figure beside each bar still comes from `decimal()` against the original
+ * rational, so no displayed amount is rounded.
+ */
+function scadPlotAmount(exact: { readonly numerator: string; readonly denominator: string }): number | null {
+  const numerator = Number(exact.numerator);
+  const denominator = Number(exact.denominator);
+  if (!Number.isSafeInteger(numerator) || !Number.isSafeInteger(denominator)) return null;
+  if (denominator === 0) return null;
+  return numerator / denominator;
+}
+
+/**
+ * A SCAD cost ranking, one chart per currency.
+ *
+ * The panels this supplements already say "Ranked within one currency; mixed
+ * currencies remain separate", but rendered every currency for an entry joined
+ * into a single string, so the ranking a reader actually saw was ordered by
+ * whatever the list order happened to be. Splitting by currency is what makes
+ * that stated rule true of the picture and not only of the prose.
+ *
+ * An entry that reports no cost in a currency is absent from that currency's
+ * chart rather than ranked at zero: SCAD emitting no amount for a currency is
+ * not a measurement that the cost was nothing.
+ */
+function ScadCurrencyRankings({ ariaPrefix, entries, unit }: {
+  readonly ariaPrefix: string;
+  readonly entries: readonly { readonly key: string; readonly costs: readonly ScadAmount[]; readonly detail: string }[];
+  readonly unit: string;
+}) {
+  const currencies = [...new Set(entries.flatMap((entry) =>
+    entry.costs.map((cost) => cost.currency)))].sort();
+  const charts = currencies.map((currency) => {
+    let excluded = 0;
+    const items = [];
+    for (const entry of entries) {
+      const cost = entry.costs.find((candidate) => candidate.currency === currency);
+      if (cost === undefined) continue;
+      const value = scadPlotAmount(cost.exact);
+      if (value === null) {
+        excluded += 1;
+        continue;
+      }
+      items.push({
+        id: entry.key,
+        label: entry.key,
+        value,
+        detail: `${decimal(cost.exact)} ${currency} · ${entry.detail}`,
+      });
+    }
+    return { currency, items, excluded };
+  }).filter((chart) => chart.items.length > 0 || chart.excluded > 0);
+  if (charts.length === 0) return null;
+  return (
+    <>
+      {charts.map(({ currency, items, excluded }) => (
+        <div key={currency}>
+          {items.length === 0 ? null : (
+            <RankingBars
+              ariaLabel={`${ariaPrefix} by ${currency} cost`}
+              caption={`${currency} only. This scale is not comparable with another currency's chart. Entries reporting no ${currency} cost are absent rather than ranked at zero.`}
+              formatValue={(value) => `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              items={items}
+              sort
+            />
+          )}
+          {excluded === 0 ? null : (
+            <p>
+              {excluded} {excluded === 1 ? `${unit} reports` : `${unit}s report`} a {currency} amount
+              outside exact plotting range and {excluded === 1 ? "is" : "are"} excluded from this
+              chart. Every exact figure remains listed below.
+            </p>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function csvCell(value: string): string {
   const safe = /^[=+\-@\t\r]/u.test(value) ? `'${value}` : value;
   return `"${safe.replaceAll('"', '""')}"`;
@@ -324,6 +410,15 @@ export function ScadAllocationReportView({
           <header>
             <h3>Account allocation</h3>
           </header>
+          <ScadCurrencyRankings
+            ariaPrefix="Account allocation"
+            entries={report.accountSummary.map((item) => ({
+              key: item.key,
+              costs: item.costs,
+              detail: `${item.podOrTaskCount} pods/tasks`,
+            }))}
+            unit="account"
+          />
           {report.accountSummary.map((item) => (
             <div className={styles.rank} key={item.key}>
               <strong>{item.key}</strong>
@@ -339,6 +434,15 @@ export function ScadAllocationReportView({
               Ranked within one currency; mixed currencies remain separate
             </small>
           </header>
+          <ScadCurrencyRankings
+            ariaPrefix="Top clusters"
+            entries={report.clusterSummary.map((item) => ({
+              key: item.key,
+              costs: item.costs,
+              detail: `${item.groupCount} metric groups`,
+            }))}
+            unit="cluster"
+          />
           {report.clusterSummary.map((item) => (
             <div className={styles.rank} key={item.key}>
               <strong>{item.key}</strong>

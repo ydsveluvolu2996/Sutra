@@ -5,6 +5,7 @@ import type { AwsNewsDashboardFilters, AwsNewsDashboardProjection } from "../../
 import type { AwsNewsSourceEvidence } from "../../lib/finops-aws-news-feeds";
 import type { AWS_NEWS_FEEDS_RUNTIME_CAPABILITY } from "../../lib/finops-aws-news-feeds-runtime-binding";
 import type { AwsNewsOfficialDefinition } from "../../lib/finops-aws-news-official-definition";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-aws-news-feeds-dashboard.module.css";
 
 type SourceState = "complete" | "partial" | "stale" | "empty" | "failed" | "configuration_required";
@@ -63,6 +64,56 @@ function AwsNewsOfficialDefinitionPanel({ definition }: { readonly definition: A
   </section>;
 }
 
+
+/**
+ * Accepted items by official source.
+ *
+ * The provenance cards state each source's count on its own card, so comparing
+ * contribution across sources meant reading a dozen cards. This ranks them.
+ *
+ * The distinction that matters here is between a source that was fetched and
+ * yielded nothing, and a source whose fetch failed. The first is a measured
+ * zero and stays plotted at zero, because "this feed published nothing" is a
+ * real answer. The second is absence: the count is not evidence of anything,
+ * so it takes the slate tone and names its failure code in the detail text
+ * rather than sitting at zero beside genuine zeroes.
+ *
+ * Nothing here is ranked by importance. This dashboard opens by saying it is
+ * "context, not impact evidence", so the caption repeats that a higher count is
+ * volume published, not relevance.
+ */
+function SourceContributionRanking({ sources }: {
+  readonly sources: readonly {
+    readonly sourceId: string;
+    readonly label: string;
+    readonly status: string;
+    readonly acceptedItems: number;
+    readonly failureCode?: string | null;
+  }[];
+}) {
+  if (sources.length === 0) return null;
+  return (
+    <RankingBars
+      ariaLabel="Accepted official items by source"
+      caption="Volume published in the collected window, not relevance or impact. A source that was fetched and published nothing stays plotted at zero; a source whose fetch failed is marked as unavailable, because its count is not a measurement."
+      formatValue={(value) => value.toLocaleString("en-US")}
+      items={sources.map((source) => {
+        const failed = source.failureCode !== null && source.failureCode !== undefined;
+        return {
+          id: source.sourceId,
+          label: source.label,
+          value: source.acceptedItems,
+          detail: failed
+            ? `${source.status} · fetch failed (${source.failureCode}) — count is not a measurement`
+            : source.status,
+          tone: failed ? ("slate" as const) : ("blue" as const),
+        };
+      })}
+      sort
+    />
+  );
+}
+
 export function AwsNewsFeedsReportView({ report, filters, onFiltersChange }: { readonly report: AwsNewsDashboardEnvelope; readonly filters: AwsNewsDashboardFilters; readonly onFiltersChange: (filters: AwsNewsDashboardFilters) => void }) {
   const message = status(report.sourceState);
   const set = <K extends keyof AwsNewsDashboardFilters>(key: K, value: AwsNewsDashboardFilters[K]) => onFiltersChange({ ...filters, [key]: value });
@@ -82,7 +133,7 @@ export function AwsNewsFeedsReportView({ report, filters, onFiltersChange }: { r
       {report.familyCounts.map((family) => <article className={styles.card} key={family.kind}><small>{family.kind.replaceAll("_", " ")}</small><strong>{family.count}</strong><span>accepted official items</span></article>)}
     </div>
     <section className={styles.section} aria-label="Scheduled collection runtime"><header><h3>Scheduled collection runtime</h3><span>Every {report.collection.intervalMs / 3_600_000} hours</span></header><div className={styles.sourceGrid}><article className={styles.source}><strong>Scheduler</strong><span>{report.collection.schedulerImplemented ? "Implemented" : "Not implemented"}</span><span>Shared worker {report.collection.sharedWorkerRegistered ? "registered" : "not registered"}</span></article><article className={styles.source}><strong>Replay safety</strong><span>{report.collection.replayContractImplemented ? "Implemented" : "Not implemented"}</span><span>Durable adapter {report.collection.durableReplayAdapterRegistered ? "registered" : "not registered"}</span></article><article className={styles.source}><strong>Outbound collection</strong><span>{report.collection.handlerImplemented ? "Handler implemented" : "Handler not implemented"}</span><span>Gateway {report.collection.outboundGatewayRegistered ? "registered" : "not registered"}</span></article></div><small>{report.collection.reason}</small></section>
-    <section className={styles.section} aria-label="Collection provenance and freshness"><header><h3>Source provenance &amp; freshness</h3><span>Observed {report.freshness.observedAt} · {report.freshness.ageHours ?? "unknown"} hours ago</span></header><div className={styles.sourceGrid}>{report.sourceEvidence.map((source) => <article key={source.sourceId} className={styles.source}><strong>{source.label}</strong><span>{source.authority.replaceAll("_", " ")} · {source.kind.replaceAll("_", " ")}</span><span>{source.status} · {source.acceptedItems} items</span><span>Fetched {source.fetchedAt}</span><span>Latest publication {source.lastPublishedAt ?? "None"}</span>{source.failureCode ? <span className={styles.errorText}>{source.failureCode}</span> : null}</article>)}</div></section>
+    <section className={styles.section} aria-label="Collection provenance and freshness"><header><h3>Source provenance &amp; freshness</h3><span>Observed {report.freshness.observedAt} · {report.freshness.ageHours ?? "unknown"} hours ago</span></header><SourceContributionRanking sources={report.sourceEvidence} /><div className={styles.sourceGrid}>{report.sourceEvidence.map((source) => <article key={source.sourceId} className={styles.source}><strong>{source.label}</strong><span>{source.authority.replaceAll("_", " ")} · {source.kind.replaceAll("_", " ")}</span><span>{source.status} · {source.acceptedItems} items</span><span>Fetched {source.fetchedAt}</span><span>Latest publication {source.lastPublishedAt ?? "None"}</span>{source.failureCode ? <span className={styles.errorText}>{source.failureCode}</span> : null}</article>)}</div></section>
     <section className={styles.section} aria-label="AWS announcements"><header><h3>Official announcements · {report.resultCount}</h3><button type="button" onClick={() => exportCsv(report)}>Export visible rows</button></header><div className={styles.newsGrid}>{report.items.map((item) => <article className={styles.item} key={`${item.sourceId}:${item.externalId}`}><div className={styles.itemMeta}><span>{item.feedKind.replaceAll("_", " ")}</span><time dateTime={item.publishedAt}>{item.publishedAt}</time></div><h4>{item.title}</h4><p>{item.summary || "No plain-text summary supplied by the official feed."}</p><div className={styles.chips}>{item.matchedServices.map((service) => <span key={service.serviceId}>{service.displayName} · {service.usageBasis}</span>)}{item.categories.map((category) => <span key={category}>{category}</span>)}</div><details><summary>Relevance and provenance</summary><p>Source: {item.sourceLabel}. Impact assessment: {item.impactAssessment.replaceAll("_", " ")}.</p>{item.matchedServices.length ? <ul>{item.matchedServices.map((service) => <li key={service.serviceId}>{service.displayName}: {service.reason.kind.replaceAll("_", " ")} “{service.reason.matchedAlias}” · {service.observationBasis ?? "explicitly enabled"}</li>)}</ul> : <p>No exact enabled/observed tenant-service match.</p>}</details><a href={item.canonicalUrl} target="_blank" rel="noopener noreferrer">{item.feedKind === "VIDEO" ? "Watch on the official AWS YouTube channel" : "Open the official AWS publication"}<span className={styles.srOnly}> (opens in a new tab)</span></a></article>)}</div>{report.rowsTruncated ? <p>Only the first 250 sorted items are shown. Refine filters before exporting.</p> : null}</section>
     <section className={styles.section} aria-label="Collection history"><header><h3>Immutable collection history</h3></header><div className={styles.scroll}><table><thead><tr><th>Observed</th><th>State</th><th>Coverage</th><th>Sources</th><th>Items</th><th>Tenant relevant</th></tr></thead><tbody>{report.history.map((point) => <tr key={point.generationId}><td>{point.observedAt}</td><td>{point.state}</td><td>{point.coverage}</td><td>{point.counts.sourcesSucceeded} succeeded / {point.counts.sourcesFailed} failed</td><td>{point.counts.deduplicatedItems}</td><td>{point.counts.tenantRelevantItems}</td></tr>)}</tbody></table></div></section>
     <details className={`${styles.section} ${styles.evidence}`}><summary>Evidence identifiers and limitations</summary><pre>{JSON.stringify({ freshness: report.freshness, evidence: report.evidence, collection: report.collection }, null, 2)}</pre></details>
