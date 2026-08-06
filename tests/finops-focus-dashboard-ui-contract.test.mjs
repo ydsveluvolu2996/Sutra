@@ -70,7 +70,11 @@ test("FOCUS visuals use exact money, bounded API output, and accessible controls
   assert.match(formatter, /BigInt\(micros\)/u);
   assert.match(formatter, /BigInt\(1_000_000\)/u);
   assert.doesNotMatch(formatter, /Number\s*\(/u);
-  assert.match(component, /role="img" aria-label=\{`\$\{selectedCurrency\.currency\} exact \$\{FOCUS_COST_LABELS\[costBasis\]\} trend`\}/u);
+  // The trend is drawn by the shared chart kit; the accessible name is passed
+  // to it rather than set on hand-rolled markup, and the kit renders it as the
+  // chart's role="img" label plus an exact-values table.
+  assert.match(component, /ariaLabel=\{`\$\{selectedCurrency\.currency\} exact \$\{FOCUS_COST_LABELS\[costBasis\]\} trend`\}/u);
+  assert.match(component, /import \{ RankingBars, TimeSeriesChart \} from "\.\.\/components\/charts"/u);
   assert.match(component, /Dimension analysis/u);
   assert.match(component, /Secondary dimension analysis/u);
   assert.match(component, /Second Group By/u);
@@ -105,8 +109,7 @@ test("FOCUS layout is responsive and exposes keyboard focus", () => {
   for (const selector of [
     ".focusWorkspace",
     ".focusKpis",
-    ".focusTrendChart",
-    ".focusDimensionBars",
+    ".focusCoverageList",
     ".focusTableWrap",
     ".focusQualityGrid",
     ".focusEvidenceDrawer",
