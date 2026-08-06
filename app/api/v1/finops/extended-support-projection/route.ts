@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { ExtendedSupportRepository } from "../../../../../db/finops-extended-support-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import {
@@ -88,7 +89,7 @@ export async function GET(request: Request): Promise<Response> {
       );
     if (
       connection === null ||
-      connection.sourceKind !== "aws_trust_role" ||
+      !isCollectableAwsSourceKind(connection.sourceKind) ||
       connection.status !== "active"
     )
       throw Object.assign(new Error("Cloud connection not found"), {

@@ -38,7 +38,7 @@ function assertTenantResolvedReadOnlyRoute(route) {
     route,
     /assertSessionCapability\(\s*authenticated,\s*"connection:read",\s*connection\.customerId,\s*\)/u,
   );
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.match(route, /repository\.listActivePartitions\(owner\)/u);
   assert.match(route, /repository\.loadActivePartition\(owner,/u);

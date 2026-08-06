@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../../lib/aws-connection-source";
 import {
   SustainabilityTargetRepository,
   type SustainabilityTargetInput,
@@ -21,7 +22,7 @@ function invalid(): never {
 
 async function resolve(request: Request, capability: "connection:read" | "connection:manage") {
   const value = await requireConnectionScope(request, capability);
-  if (value.connection.sourceKind !== "aws_trust_role" || value.connection.status !== "active") {
+  if (!isCollectableAwsSourceKind(value.connection.sourceKind) || value.connection.status !== "active") {
     throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
   }
   return {

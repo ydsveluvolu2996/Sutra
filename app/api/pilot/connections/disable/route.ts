@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import {
   disableAwsConnection,
   getConnectionForOrg,
@@ -36,7 +37,7 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }
     assertSessionCapability(actor.authenticated, "connection:manage", current.customerId);
-    if (current.sourceKind !== "aws_trust_role") {
+    if (!isCollectableAwsSourceKind(current.sourceKind)) {
       throw Object.assign(new Error("Simulation connections use the simulation controls"), { code: "INVALID_STATE" });
     }
     const result = await applyControlPlaneLifecycleThenReconcileCollector({

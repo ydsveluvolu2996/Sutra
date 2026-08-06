@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { requireRecentMfa } from "../../../../../db/auth-repository";
 import {
   getConnectionForOrg,
@@ -32,10 +33,15 @@ export async function POST(request: Request): Promise<Response> {
     }
     assertSessionCapability(actor.authenticated, "connection:manage", current.customerId);
     assertOffboardAccountConfirmation(body.awsAccountId, current.awsAccountId);
-    if (current.sourceKind !== "aws_trust_role") {
+    if (!isCollectableAwsSourceKind(current.sourceKind)) {
       throw Object.assign(new Error("Simulation connections use the simulation controls"), { code: "INVALID_STATE" });
     }
-    const alreadyOffboarded = current.status === "disabled" && current.roleArn === null;
+    // A static-credential connection pins roleArn to the empty string for its
+    // whole life, so an absent role ARN is not evidence that it was offboarded;
+    // only the disabled status is. Trust-role connections keep the original
+    // test, where offboarding is what clears the role ARN.
+    const alreadyOffboarded = current.status === "disabled"
+      && (current.sourceKind === "aws_static_credentials" || current.roleArn === null);
     if (!alreadyOffboarded) requireRecentMfa(actor.authenticated);
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
       transitionControlPlane: () => offboardAwsConnection(connectionId, actor.id, actor.orgId),

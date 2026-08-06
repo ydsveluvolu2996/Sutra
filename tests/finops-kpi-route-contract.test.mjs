@@ -18,7 +18,7 @@ test("Foundational KPI GET is tenant-resolved, read-only, and query-allowlisted"
   assert.match(route, /requireApiSession\(request\)/u);
   assert.match(route, /getConnectionForOrg\(/u);
   assert.match(route, /"connection:read"/u);
-  assert.match(route, /connection\.sourceKind !== "aws_trust_role"/u);
+  assert.match(route, /!isCollectableAwsSourceKind\(connection\.sourceKind\)/u);
   assert.match(route, /connection\.status !== "active"/u);
   assert.doesNotMatch(route, /export async function (?:POST|PUT|PATCH|DELETE)/u);
   assert.match(route, /ACCOUNT_ID\.test\(accountId\)/u);

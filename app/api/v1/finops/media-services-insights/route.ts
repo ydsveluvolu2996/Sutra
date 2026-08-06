@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { MediaServicesRepository } from "../../../../../db/finops-media-services-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
@@ -45,7 +46,7 @@ export async function GET(request: Request): Promise<Response> {
   try {
     const query = parse(request); const authenticated = await requireApiSession(request);
     const connection = await getConnectionForOrg(authenticated.subject.orgId,query.connectionId);
-    if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") missing();
+    if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") missing();
     assertSessionCapability(authenticated,"connection:read",connection.customerId);
     const scope = { organizationId: authenticated.subject.orgId, customerId: connection.customerId, connectionId: connection.id };
     const repository = new MediaServicesRepository();

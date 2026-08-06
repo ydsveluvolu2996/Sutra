@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /** Compose a runtime-only .8.5 view without mutating generic connection state. */
 import type { ComputeOptimizerMaterializationRuntimeConnection } from
   "./finops-compute-optimizer-materialization-runtime.ts";
@@ -33,7 +34,7 @@ export async function resolveComputeOptimizerMaterializationConnection(
 ): Promise<ComputeOptimizerMaterializationRuntimeConnection | null> {
   const connection = await dependencies.getGenericConnection(organizationId, connectionId);
   if (connection === null || connection.id !== connectionId
-    || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") return null;
+    || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") return null;
   const scope = Object.freeze({
     organizationId,
     customerId: connection.customerId,

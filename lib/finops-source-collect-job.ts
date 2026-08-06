@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /**
  * Durable app-side orchestration for one server-owned FinOps source contract.
  *
@@ -289,7 +290,7 @@ export async function runFinopsSourceCollectJob(
     connection === null ||
     connection.id !== scope.connectionId ||
     connection.customerId !== scope.customerId ||
-    connection.sourceKind !== "aws_trust_role" ||
+    !isCollectableAwsSourceKind(connection.sourceKind) ||
     connection.status !== "active" ||
     connection.roleArn === null
   ) reject("CONNECTION_NOT_RUNNABLE");

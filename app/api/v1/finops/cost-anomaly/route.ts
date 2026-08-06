@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { env } from "cloudflare:workers";
 import { EvidenceRepository } from "../../../../../db/evidence-repository";
 import { FinopsSourceJobLedgerRepository } from "../../../../../db/finops-source-job-ledger-repository";
@@ -123,7 +124,7 @@ export async function GET(request: Request): Promise<Response> {
     );
     if (
       connection === null
-      || connection.sourceKind !== "aws_trust_role"
+      || !isCollectableAwsSourceKind(connection.sourceKind)
       || connection.status !== "active"
     ) notFound();
     assertSessionCapability(
@@ -313,7 +314,7 @@ export async function POST(request: Request): Promise<Response> {
     );
     if (
       connection === null
-      || connection.sourceKind !== "aws_trust_role"
+      || !isCollectableAwsSourceKind(connection.sourceKind)
       || connection.status !== "active"
     ) notFound();
     assertSessionCapability(authenticated, "sync:run", connection.customerId);

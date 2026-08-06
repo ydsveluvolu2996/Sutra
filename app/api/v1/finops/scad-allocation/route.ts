@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { ScadAllocationRepository } from "../../../../../db/finops-scad-allocation-repository";
 import { ScadCur2RuntimeAttemptRepository } from "../../../../../db/finops-scad-runtime-attempt-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
@@ -149,7 +150,7 @@ export async function GET(request: Request): Promise<Response> {
     );
     if (
       connection === null ||
-      connection.sourceKind !== "aws_trust_role" ||
+      !isCollectableAwsSourceKind(connection.sourceKind) ||
       connection.status !== "active"
     )
       missing();

@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /** Executable, dependency-injected HTTP boundary for the exact dashboard. */
 import type { StoredComputeOptimizerExportPlan } from
   "../db/finops-compute-optimizer-export-plan-repository.ts";
@@ -121,7 +122,7 @@ export function createComputeOptimizerExactGetHandler<TAuth extends ExactRouteAu
       const query = parseComputeOptimizerExactRouteQuery(request);
       const auth = await dependencies.requireSession(request);
       const connection = await dependencies.getConnection(auth.subject.orgId, query.connectionId);
-      if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") fail("NOT_FOUND", 404);
+      if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") fail("NOT_FOUND", 404);
       dependencies.assertRead(auth, connection.customerId);
       const scope = Object.freeze({ organizationId: auth.subject.orgId, customerId: connection.customerId, connectionId: connection.id });
       const head = await dependencies.getHeadReference(scope);

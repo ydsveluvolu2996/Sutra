@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { isCollectableAwsSourceKind } from "../lib/aws-connection-source.ts";
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import type {
@@ -1125,7 +1126,7 @@ async function disableAwsConnectionWithAtomicAudit(
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
-  if (current.sourceKind !== "aws_trust_role") {
+  if (!isCollectableAwsSourceKind(current.sourceKind)) {
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
   }
   if (current.status === "disabled" && current.roleArn === null) return current;
@@ -1187,7 +1188,7 @@ async function offboardAwsConnectionWithAtomicAudit(
   if (current === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
-  if (current.sourceKind !== "aws_trust_role") {
+  if (!isCollectableAwsSourceKind(current.sourceKind)) {
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
   }
   const lifecycle = await db.prepare(

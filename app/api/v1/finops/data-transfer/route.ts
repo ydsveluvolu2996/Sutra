@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import {
   FinopsActiveBillingQueryRepository,
   type FinopsActiveBillingPartition,
@@ -84,7 +85,7 @@ export async function GET(request: Request): Promise<Response> {
     );
     if (
       connection === null
-      || connection.sourceKind !== "aws_trust_role"
+      || !isCollectableAwsSourceKind(connection.sourceKind)
       || connection.status !== "active"
     ) {
       throw Object.assign(new Error("Cloud connection not found"), {

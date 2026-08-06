@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { FinopsActiveBillingQueryRepository } from "../../../../../db/finops-active-billing-query-repository";
 import { FinopsSourceJobLedgerRepository } from "../../../../../db/finops-source-job-ledger-repository";
 import { FinopsSourceSnapshotRepository } from "../../../../../db/finops-source-snapshot-repository";
@@ -34,7 +35,7 @@ export async function GET(request: Request): Promise<Response> {
     const connection = await getConnectionForOrg(authenticated.subject.orgId, connectionId);
     if (
       connection === null
-      || connection.sourceKind !== "aws_trust_role"
+      || !isCollectableAwsSourceKind(connection.sourceKind)
       || connection.status !== "active"
     ) {
       throw Object.assign(

@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { AwsBudgetsOrganizationRepository } from "../../../../../db/finops-aws-budgets-organization-repository";
 import { FinopsFoundationalConfigRepository } from "../../../../../db/finops-foundational-config-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
@@ -94,7 +95,7 @@ export async function GET(request: Request): Promise<Response> {
     const parsed = parse(request);
     const authenticated = await requireApiSession(request);
     const connection = await getConnectionForOrg(authenticated.subject.orgId, parsed.connectionId);
-    if (connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active") {
+    if (connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active") {
       throw Object.assign(new Error("Cloud connection not found"), { code: "NOT_FOUND", status: 404 });
     }
     assertSessionCapability(authenticated, "connection:read", connection.customerId);

@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "./aws-connection-source.ts";
 /**
  * Durable production boundary for the exact Compute Optimizer materializer.
  *
@@ -381,7 +382,7 @@ function assertCapability(
 ): void {
   if (connection === null || connection.id !== scope.connectionId
     || connection.customerId !== scope.customerId
-    || connection.sourceKind !== "aws_trust_role" || connection.status !== "active"
+    || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active"
     || connection.permissionPackVersion !== "standard-2026-08.5"
     || connection.awsAccountId !== payload.requesterAccountId
     || connection.partition !== payload.partition) reject("CAPABILITY_UNAVAILABLE");

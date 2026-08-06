@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -146,7 +147,7 @@ export function SecurityEventsBrowser() {
           <button
             className="button button-primary"
             type="button"
-            disabled={connection === null || connection.sourceKind !== "aws_trust_role" || connection.status !== "active" || collecting}
+            disabled={connection === null || !isCollectableAwsSourceKind(connection.sourceKind) || connection.status !== "active" || collecting}
             onClick={() => void collect()}
           >{collecting ? "Collecting…" : "Collect live events"}</button>
         </div>
@@ -166,7 +167,7 @@ export function SecurityEventsBrowser() {
       {connection !== null && workspace?.source === null && !loading ? <section className={`panel ${styles.firstRun}`}>
         <div className={styles.firstRunIcon}>CT</div>
         <div><p className="eyebrow">No event source collected</p><h2>Start a real, bounded CloudTrail lookup</h2><p>The first run examines the preceding hour in each selected Region. Later runs overlap the prior checkpoint by five minutes and deduplicate by the provider event ID.</p></div>
-        <button className="button button-primary" type="button" disabled={connection.sourceKind !== "aws_trust_role" || collecting} onClick={() => void collect()}>Collect live evidence</button>
+        <button className="button button-primary" type="button" disabled={!isCollectableAwsSourceKind(connection.sourceKind) || collecting} onClick={() => void collect()}>Collect live evidence</button>
       </section> : null}
 
       {connection !== null && workspace !== null && workspace.source !== null ? (

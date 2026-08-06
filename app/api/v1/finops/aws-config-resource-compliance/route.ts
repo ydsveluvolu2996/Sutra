@@ -1,3 +1,4 @@
+import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import { AwsConfigComplianceRepository } from "../../../../../db/finops-aws-config-compliance-repository";
 import { AwsConfigComplianceRuntimeRepository } from "../../../../../db/finops-aws-config-compliance-runtime-repository";
 import { getConnectionForOrg } from "../../../../../db/pilot-repository";
@@ -87,7 +88,7 @@ export async function GET(request: Request): Promise<Response> {
     );
     if (
       connection === null ||
-      connection.sourceKind !== "aws_trust_role" ||
+      !isCollectableAwsSourceKind(connection.sourceKind) ||
       connection.status !== "active"
     )
       notFound();
