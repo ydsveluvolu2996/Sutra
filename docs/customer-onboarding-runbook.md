@@ -16,13 +16,22 @@ synthesized into findings.
 Sutra never collects or stores Kubernetes Secret values, ConfigMap values,
 service-account tokens, pod logs, exec sessions, packet payloads, DNS query
 contents, HTTP headers, raw Falco output, registry credentials, signing private
-keys, kubeconfigs, or long-lived AWS credentials.
+keys, or kubeconfigs. With the recommended IAM role method Sutra also stores no
+long-lived AWS credentials; only the optional access-key onboarding method
+stores the customer-supplied access keys, encrypted and owned by Sutra's
+collector (see `docs/aws-static-credential-onboarding.md`).
 
 ## Prerequisites
 
 1. An AWS account containing the EKS cluster you want to onboard.
-2. Administrator access to that account through your own SSO — Sutra never asks
-   for AWS access keys.
+2. Administrator access to that account through your own SSO. Sutra supports
+   two AWS onboarding methods: the recommended **IAM role** method never asks
+   for AWS access keys, while the optional **Access keys** method asks for the
+   access key ID and secret of a dedicated read-only IAM user (never root or
+   administrator keys) and stores them encrypted in Sutra's collector. Prefer
+   the IAM role method whenever your organization can deploy CloudFormation or
+   Terraform; see `docs/aws-static-credential-onboarding.md` before choosing
+   the access-key method.
 3. `kubectl` and Helm 3 on the administrator workstation for the optional
    in-cluster security modules.
 4. The ability to create one read-only IAM role and one read-only Kubernetes
@@ -34,7 +43,16 @@ Everything Sutra uses is read-only and reviewable before you apply it.
 
 ### AWS trust role
 
-Start at `/onboard` and choose one of the two reviewed deployment modes:
+Start at `/onboard`. Step 1 offers a **Connection method** selector: the
+default, recommended **IAM role (CloudFormation)** method described in the rest
+of this section, or the alternative **Access keys** method, which skips role
+deployment entirely and registers a dedicated read-only IAM user's access keys
+that the collector stores encrypted. The access-key method has real trade-offs
+(no STS session-policy ceiling, no trust-policy attestation, customer-owned key
+rotation) and is documented in `docs/aws-static-credential-onboarding.md`.
+
+For the recommended IAM role method, choose one of the two reviewed deployment
+modes:
 
 - **Use Sutra template** — open the one-time CloudFormation quick-create link
   or download `infrastructure/customer-onboarding-role.yaml` (the same current

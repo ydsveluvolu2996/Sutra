@@ -19,6 +19,7 @@ import {
   parseAwsConnectionDraftRequest,
   parseAwsOnboardingInput,
   parseAwsPartition,
+  parseAwsStaticCredentialsSubmission,
   parseIamRoleArn,
   parseOffboardConnectionRequest,
   parsePilotScope,
@@ -104,6 +105,7 @@ test("onboarding accepts only the sole all-enabled Region selection marker", () 
       roleProvisioningMode: "sutra_template",
       rolePath: "/sutra/",
       roleName: "SutraCollectorRole",
+      connectionMethod: "trust_role",
     },
   );
   assert.throws(
@@ -168,6 +170,7 @@ test("initial connection route boundary requires an opaque retry operation and c
     roleProvisioningMode: "sutra_template",
     rolePath: "/sutra/",
     roleName: "SutraCollectorRole",
+    connectionMethod: "trust_role",
   });
 
   for (const invalid of [
@@ -197,7 +200,10 @@ test("customer-managed onboarding accepts only a dedicated safe /sutra role cont
     rolePath: "/sutra/customer-a/security/",
     roleName: "SutraMetadataReader",
   } as const;
-  assert.deepEqual(parseAwsConnectionDraftRequest(request), request);
+  assert.deepEqual(parseAwsConnectionDraftRequest(request), {
+    ...request,
+    connectionMethod: "trust_role",
+  });
 
   for (const unsafe of [
     { rolePath: "/sutra/", roleName: "AdministratorAccess" },
@@ -211,6 +217,115 @@ test("customer-managed onboarding accepts only a dedicated safe /sutra role cont
       () => parseAwsConnectionDraftRequest({ ...request, ...unsafe }),
       isPilotError("INVALID_INPUT"),
     );
+  }
+});
+
+test("connection drafts accept an explicit method and reject role keys for static credentials", () => {
+  const base = {
+    operationId: `onb_${"e".repeat(32)}`,
+    customerName: "Static Customer",
+    awsAccountId: "123456789012",
+    partition: "aws",
+    enabledRegions: ["us-east-1"],
+  } as const;
+
+  // Absent key: byte-for-byte the historical trust-role draft.
+  assert.deepEqual(parseAwsConnectionDraftRequest(base), {
+    ...base,
+    roleProvisioningMode: "sutra_template",
+    rolePath: "/sutra/",
+    roleName: "SutraCollectorRole",
+    connectionMethod: "trust_role",
+  });
+  assert.equal(
+    parseAwsConnectionDraftRequest({ ...base, connectionMethod: "trust_role" }).connectionMethod,
+    "trust_role",
+  );
+  assert.equal(
+    parseAwsConnectionDraftRequest({ ...base, connectionMethod: "static_credentials" }).connectionMethod,
+    "static_credentials",
+  );
+
+  for (const invalid of [
+    { ...base, connectionMethod: "STATIC_CREDENTIALS" },
+    { ...base, connectionMethod: "" },
+    { ...base, connectionMethod: null },
+    { ...base, connectionMethod: "static_credentials", roleProvisioningMode: "sutra_template" },
+    { ...base, connectionMethod: "static_credentials", rolePath: "/sutra/" },
+    { ...base, connectionMethod: "static_credentials", roleName: "SutraCollectorRole" },
+    {
+      ...base,
+      connectionMethod: "static_credentials",
+      roleProvisioningMode: "customer_managed",
+      rolePath: "/sutra/customer/",
+      roleName: "SutraMetadataReader",
+    },
+  ]) {
+    assert.throws(() => parseAwsConnectionDraftRequest(invalid), isPilotError("INVALID_INPUT"));
+  }
+});
+
+test("static credential submissions accept exactly one well-formed key pair", () => {
+  const connectionId = `conn_${"a".repeat(32)}`;
+  const akiaKey = `AKIA${"J".repeat(16)}`;
+  const asiaKey = `ASIA${"7".repeat(16)}`;
+  const secret = "A".repeat(40);
+  const token = `${"t".repeat(60)}==`;
+
+  assert.deepEqual(
+    parseAwsStaticCredentialsSubmission({ connectionId, accessKeyId: akiaKey, secretAccessKey: secret }),
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, sessionToken: null },
+  );
+  assert.deepEqual(
+    parseAwsStaticCredentialsSubmission({
+      connectionId,
+      accessKeyId: asiaKey,
+      secretAccessKey: secret,
+      sessionToken: token,
+    }),
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: token },
+  );
+
+  const invalidSubmissions: unknown[] = [
+    // ASIA without token / AKIA with token.
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret },
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, sessionToken: token },
+    // Malformed connection id.
+    { connectionId: "conn_short", accessKeyId: akiaKey, secretAccessKey: secret },
+    // Malformed access key ids.
+    { connectionId, accessKeyId: `BKIA${"J".repeat(16)}`, secretAccessKey: secret },
+    { connectionId, accessKeyId: `AKIA${"j".repeat(16)}`, secretAccessKey: secret },
+    { connectionId, accessKeyId: `AKIA${"J".repeat(15)}`, secretAccessKey: secret },
+    { connectionId, accessKeyId: `AKIA${"J".repeat(17)}`, secretAccessKey: secret },
+    // Malformed secrets.
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: "A".repeat(39) },
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: "A".repeat(41) },
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: `${"A".repeat(39)}!` },
+    // Malformed tokens.
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: "short" },
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: `${"t".repeat(20)} ` },
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: "t".repeat(4097) },
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: null },
+    // Extra, missing, or non-object shapes.
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, externalId: "extra" },
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, roleArn: "arn:aws:iam::123456789012:role/x" },
+    { connectionId, accessKeyId: akiaKey },
+    { accessKeyId: akiaKey, secretAccessKey: secret },
+    [],
+    null,
+    "credentials",
+  ];
+  for (const invalid of invalidSubmissions) {
+    let observed = null;
+    assert.throws(() => parseAwsStaticCredentialsSubmission(invalid), (error) => {
+      observed = error;
+      return isPilotError("INVALID_INPUT")(error);
+    });
+    // Error messages must never echo the submitted material.
+    assert.equal(String(observed).includes(secret), false);
+    assert.equal(String(observed).includes(token), false);
+    assert.equal(String(observed).includes(akiaKey), false);
+    assert.equal(String(observed).includes(asiaKey), false);
   }
 });
 

@@ -15,11 +15,14 @@ import { constants as fsConstants } from "node:fs";
 import { dirname } from "node:path";
 
 import type {
+  AwsConnectionCredentialKind,
   AwsRoleProvisioningMode,
+  AwsStaticCredentialMaterial,
   ComputeOptimizerExportLaunchProvisioningVerification,
   ConnectionScope,
   OnboardingTrustVerification,
   ScopedConnectionRegistry,
+  StaticCredentialVerification,
   StoredAwsConnection,
 } from "./types.js";
 import {
@@ -69,6 +72,9 @@ const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
+const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
+const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 const MAX_CONNECTIONS = 10_000;
 
 export type { LocalAwsPartition } from "./aws-region-selection.js";
@@ -92,6 +98,13 @@ export interface RegisterAwsConnectionInput {
   readonly roleProvisioningMode?: AwsRoleProvisioningMode;
   readonly expectedRolePath?: string;
   readonly expectedRoleName?: string;
+  /**
+   * "static_credentials" registrations carry customer key material instead of
+   * a role: roleArn and externalId must be empty strings, no role contract may
+   * be supplied, and staticCredentials is required. Absent means trust_role.
+   */
+  readonly credentialKind?: AwsConnectionCredentialKind;
+  readonly staticCredentials?: AwsStaticCredentialMaterial;
 }
 
 interface RegistryTombstone {
@@ -165,6 +178,12 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ...(connection.sessionNamePrefix === undefined
         ? {}
         : { sessionNamePrefix: connection.sessionNamePrefix }),
+      ...(connection.credentialKind === undefined
+        ? {}
+        : { credentialKind: connection.credentialKind, partition: connection.partition }),
+      ...(connection.staticCredentials === undefined
+        ? {}
+        : { staticCredentials: structuredClone(connection.staticCredentials) }),
       ...(connection.foundationalFinopsContracts === undefined
         ? {}
         : { foundationalFinopsContracts: structuredClone(connection.foundationalFinopsContracts) }),
@@ -228,6 +247,8 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         previous.roleProvisioningMode === parsed.roleProvisioningMode &&
         previous.expectedRolePath === parsed.expectedRolePath &&
         previous.expectedRoleName === parsed.expectedRoleName &&
+        previous.credentialKind === parsed.credentialKind &&
+        staticCredentialsEqual(previous.staticCredentials, parsed.staticCredentials) &&
         arraysEqual(previous.enabledRegions, parsed.enabledRegions);
 
       return {
@@ -387,6 +408,61 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
             // An already-active, unchanged role can remain runnable. Every new
             // or changed candidate remains fail-closed until the control plane
             // commits and calls activateOnboarding with the exact role ARN.
+            status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
+            permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
+            updatedAt: this.now().toISOString(),
+          },
+        },
+        tombstones: document.tombstones,
+      };
+    });
+  }
+
+  /**
+   * Record a proven static-credential identity. Mirrors
+   * markOnboardingVerified's transitions: a new or changed candidate becomes
+   * VERIFIED (still fail-closed) until the control plane commits and
+   * activates it with the pinned empty role ARN.
+   */
+  public async markStaticCredentialVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+    verification: StaticCredentialVerification,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    await this.mutate((document) => {
+      const key = connectionKey(scope.tenantId, connectionId);
+      const connection = document.connections[key];
+      if (connection === undefined) throw new RegistryConnectionNotFoundError();
+      if (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId) {
+        throw new RegistryConnectionNotFoundError();
+      }
+      if (connection.credentialKind !== "static_credentials") {
+        throw new RegistryStateError();
+      }
+      if (
+        connection.status !== "PENDING" &&
+        connection.status !== "VERIFIED" &&
+        connection.status !== "DEGRADED" &&
+        connection.status !== "ACTIVE"
+      ) {
+        throw new RegistryStateError();
+      }
+      if (
+        verification.connectionId !== connection.connectionId ||
+        verification.accountId !== connection.expectedAccountId ||
+        verification.partition !== connection.partition ||
+        connection.staticCredentials === undefined ||
+        verification.accessKeyLast4 !== connection.staticCredentials.accessKeyId.slice(-4)
+      ) {
+        throw new RegistryIntegrityError();
+      }
+      return {
+        version: 3,
+        connections: {
+          ...document.connections,
+          [key]: {
+            ...connection,
             status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
             permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
             updatedAt: this.now().toISOString(),
@@ -725,6 +801,13 @@ export function parseConnectionInput(input: RegisterAwsConnectionInput): Registe
   if (!ACCOUNT_ID.test(input.expectedAccountId) || !PARTITIONS.has(input.partition)) {
     throw new RegistryIntegrityError();
   }
+  if (input.credentialKind !== undefined && input.credentialKind !== "trust_role" && input.credentialKind !== "static_credentials") {
+    throw new RegistryIntegrityError();
+  }
+  if (input.credentialKind === "static_credentials") {
+    return parseStaticCredentialConnectionInput(input);
+  }
+  if (input.staticCredentials !== undefined) throw new RegistryIntegrityError();
   const role = IAM_ROLE_ARN.exec(input.roleArn);
   if (
     role === null ||
@@ -781,6 +864,72 @@ export function parseConnectionInput(input: RegisterAwsConnectionInput): Registe
     roleProvisioningMode,
     expectedRolePath,
     expectedRoleName,
+    enabledRegions: [...input.enabledRegions],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+}
+
+/**
+ * Static-credential records carry no role trust material: roleArn and
+ * externalId are pinned to empty strings so no AssumeRole path can ever
+ * resolve them, and no role contract may be attached. ASIA (temporary) keys
+ * require their session token; AKIA (long-term) keys must not carry one.
+ */
+function parseStaticCredentialConnectionInput(
+  input: RegisterAwsConnectionInput,
+): RegisteredAwsConnection {
+  if (
+    input.roleArn !== "" ||
+    input.externalId !== "" ||
+    input.roleProvisioningMode !== undefined ||
+    input.expectedRolePath !== undefined ||
+    input.expectedRoleName !== undefined
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  const credentials = input.staticCredentials;
+  if (
+    credentials === undefined ||
+    !STATIC_ACCESS_KEY_ID.test(credentials.accessKeyId) ||
+    !STATIC_SECRET_ACCESS_KEY.test(credentials.secretAccessKey)
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  if (credentials.accessKeyId.startsWith("ASIA")) {
+    if (
+      credentials.sessionToken === undefined ||
+      !STATIC_SESSION_TOKEN.test(credentials.sessionToken)
+    ) {
+      throw new RegistryIntegrityError();
+    }
+  } else if (credentials.sessionToken !== undefined) {
+    throw new RegistryIntegrityError();
+  }
+  if (!isValidAwsRegionSelection(input.enabledRegions, input.partition)) {
+    throw new RegistryIntegrityError();
+  }
+  const prefix = input.sessionNamePrefix ?? "sutra-";
+  if (!/^[A-Za-z0-9_+=,.@-]{3,32}$/u.test(prefix)) throw new RegistryIntegrityError();
+  const timestamp = new Date(0).toISOString();
+  return {
+    tenantId: input.tenantId,
+    connectionId: input.connectionId,
+    expectedAccountId: input.expectedAccountId,
+    partition: input.partition,
+    roleArn: "",
+    externalId: "",
+    status: "PENDING",
+    permissionPackVersion: LEGACY_PERMISSION_PACK_VERSION,
+    sessionNamePrefix: prefix,
+    credentialKind: "static_credentials",
+    staticCredentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken === undefined
+        ? {}
+        : { sessionToken: credentials.sessionToken }),
+    },
     enabledRegions: [...input.enabledRegions],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -889,6 +1038,9 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
         ? currentKeys
         : legacyKeys;
   const optionalContractKeys = [
+    ...(Object.hasOwn(value, "credentialKind")
+      ? ["credentialKind", "staticCredentials"]
+      : []),
     ...(Object.hasOwn(value, "foundationalFinopsContracts")
       ? ["foundationalFinopsContracts"]
       : []),
@@ -934,6 +1086,12 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
           roleProvisioningMode: record.roleProvisioningMode as AwsRoleProvisioningMode,
           expectedRolePath: record.expectedRolePath as string,
           expectedRoleName: record.expectedRoleName as string,
+        }),
+    ...(record.credentialKind === undefined
+      ? {}
+      : {
+          credentialKind: record.credentialKind as AwsConnectionCredentialKind,
+          staticCredentials: parsePersistedStaticCredentials(record.staticCredentials),
         }),
   });
   if (
@@ -1120,6 +1278,43 @@ function validIsoDate(value: unknown): value is string {
     typeof value === "string" &&
     Number.isFinite(Date.parse(value)) &&
     new Date(Date.parse(value)).toISOString() === value
+  );
+}
+
+/**
+ * Persisted static credentials are re-validated on every document read so a
+ * corrupted or hand-edited registry fails closed instead of yielding a
+ * partially formed credential to a session.
+ */
+function parsePersistedStaticCredentials(value: unknown): AwsStaticCredentialMaterial {
+  if (!isRecord(value)) throw new RegistryIntegrityError();
+  const keys = Object.hasOwn(value, "sessionToken")
+    ? ["accessKeyId", "secretAccessKey", "sessionToken"]
+    : ["accessKeyId", "secretAccessKey"];
+  const record = exactRecord(value, keys);
+  if (
+    typeof record.accessKeyId !== "string" ||
+    typeof record.secretAccessKey !== "string" ||
+    (Object.hasOwn(record, "sessionToken") && typeof record.sessionToken !== "string")
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    accessKeyId: record.accessKeyId,
+    secretAccessKey: record.secretAccessKey,
+    ...(typeof record.sessionToken === "string" ? { sessionToken: record.sessionToken } : {}),
+  };
+}
+
+function staticCredentialsEqual(
+  left: AwsStaticCredentialMaterial | undefined,
+  right: AwsStaticCredentialMaterial | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.accessKeyId === right.accessKeyId &&
+    secretsEqual(left.secretAccessKey, right.secretAccessKey) &&
+    secretsEqual(left.sessionToken ?? "", right.sessionToken ?? "")
   );
 }
 

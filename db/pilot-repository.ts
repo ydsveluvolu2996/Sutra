@@ -60,6 +60,8 @@ export class PilotRepositoryError extends Error {
 
 export interface CreateConnectionDraftInput {
   readonly orgId?: string;
+  /** Live connection kind. Defaults to the CloudFormation trust-role flow. */
+  readonly sourceKind?: "aws_trust_role" | "aws_static_credentials";
   readonly actorId: string;
   readonly operationId: string;
   readonly customerId: string;
@@ -86,6 +88,8 @@ export interface PendingConnectionHandoff {
 export interface StoredConnectionSecret {
   readonly connectionId: string;
   readonly customerId: string;
+  /** Simulated fixtures are rejected before this shape is produced. */
+  readonly sourceKind: "aws_trust_role" | "aws_static_credentials";
   readonly accountId: string;
   readonly partition: AwsPartition;
   readonly roleArn: string;
@@ -122,6 +126,26 @@ export interface CommitVerifiedConnectionRoleInput {
   readonly roleArn: string;
   readonly actorId: string;
   readonly verification: VerifiedRoleEvidence;
+}
+
+/**
+ * Collector proof for a static-credential connection. Contains only credential
+ * derivatives (accessKeyLast4, caller identity) — never the secret material.
+ */
+export interface VerifiedStaticCredentialsEvidence {
+  readonly verified: true;
+  readonly credentialKind: "static_credentials";
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly callerIdentityArn: string;
+  readonly accessKeyLast4: string;
+}
+
+export interface CommitVerifiedConnectionCredentialsInput {
+  readonly orgId?: string;
+  readonly connectionId: string;
+  readonly actorId: string;
+  readonly verification: VerifiedStaticCredentialsEvidence;
 }
 
 interface ConnectionRow {
@@ -334,6 +358,10 @@ async function createConnectionDraftWithAtomicAudit(
   const customerId = input.customerId;
   const connectionId = input.connectionId;
   const orgId = input.orgId ?? LOCAL_ORG_ID;
+  const sourceKind = input.sourceKind ?? "aws_trust_role";
+  if (sourceKind !== "aws_trust_role" && sourceKind !== "aws_static_credentials") {
+    throw new PilotRepositoryError("INVALID_STATE", "The onboarding connection kind is invalid");
+  }
   const roleProvisioningMode = input.roleProvisioningMode ?? "sutra_template";
   const expectedRolePath = input.expectedRolePath ?? "/sutra/";
   const expectedRoleName = input.expectedRoleName ?? "SutraCollectorRole";
@@ -391,6 +419,10 @@ async function createConnectionDraftWithAtomicAudit(
       roleProvisioningMode,
       expectedRolePath,
       expectedRoleName,
+      // Trust-role drafts keep their pre-existing byte-identical audit payload
+      // so committed handoffs remain recoverable across this change; only the
+      // new static-credential kind is recorded explicitly.
+      ...(sourceKind === "aws_static_credentials" ? { sourceKind } : {}),
     },
     requestId: connectionCreationAuditRequestId(input.operationId),
   });
@@ -437,15 +469,16 @@ async function createConnectionDraftWithAtomicAudit(
       ).bind(customerId, orgId, input.customerSlug, input.customerName, now, now),
       db.prepare(
         `INSERT INTO aws_connections
-          (id, org_id, customer_id, partition, aws_account_id, role_arn,
+          (id, org_id, customer_id, source_kind, partition, aws_account_id, role_arn,
            external_id_ciphertext, external_id_key_version, permission_pack_version,
            role_provisioning_mode, expected_role_path, expected_role_name,
            status, enabled_regions_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
       ).bind(
         connectionId,
         orgId,
         customerId,
+        sourceKind,
         input.partition,
         input.accountId,
         input.externalIdCiphertext,
@@ -567,7 +600,7 @@ async function recoverPendingConnectionHandoff(
   }
   const enabledRegions = parseJson<string[]>(row.enabled_regions_json, []);
   if (
-    row.source_kind !== "aws_trust_role" ||
+    row.source_kind !== (input.sourceKind ?? "aws_trust_role") ||
     row.partition !== input.partition ||
     row.aws_account_id !== input.accountId ||
     row.customer_name !== input.customerName ||
@@ -945,6 +978,135 @@ async function commitVerifiedConnectionRoleWithAtomicAudit(
   }
 }
 
+export function commitVerifiedConnectionCredentials(
+  input: CommitVerifiedConnectionCredentialsInput,
+): Promise<PilotConnection> {
+  return serializeAuditOperation(() => commitVerifiedConnectionCredentialsWithAtomicAudit(input));
+}
+
+/**
+ * Durable activation commit for a verified static-credential connection.
+ * Mirrors {@link commitVerifiedConnectionRoleWithAtomicAudit}: the connection
+ * mutation and its audit evidence land in one atomic batch, replays recover
+ * through the audit idempotency key, and no credential value — access key,
+ * secret, or session token — is EVER written to any database column. The only
+ * credential derivative persisted is accessKeyLast4 inside audit metadata.
+ */
+async function commitVerifiedConnectionCredentialsWithAtomicAudit(
+  input: CommitVerifiedConnectionCredentialsInput,
+): Promise<PilotConnection> {
+  const db = await readyDatabase();
+  const orgId = input.orgId ?? LOCAL_ORG_ID;
+  const current = await getConnectionForOrg(orgId, input.connectionId);
+  if (current === null) {
+    throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+  }
+  if (current.status === "disabled") {
+    throw new PilotRepositoryError("INVALID_STATE", "A disabled AWS connection cannot be changed");
+  }
+  if (current.status === "validating") {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The AWS connection changed or has active work; retry credential registration after it settles",
+    );
+  }
+  if (current.sourceKind !== "aws_static_credentials") {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "Only static-credential AWS connections accept static credentials",
+    );
+  }
+  if (
+    input.verification.verified !== true ||
+    input.verification.credentialKind !== "static_credentials" ||
+    input.verification.accountId !== current.awsAccountId ||
+    input.verification.partition !== current.partition ||
+    !/^[A-Z0-9]{4}$/u.test(input.verification.accessKeyLast4) ||
+    typeof input.verification.callerIdentityArn !== "string" ||
+    input.verification.callerIdentityArn.length > 2_048 ||
+    !new RegExp(
+      `^arn:${current.partition}:(?:iam|sts)::${current.awsAccountId}:[A-Za-z0-9_+=,.@/-]{1,512}$`,
+      "u",
+    ).test(input.verification.callerIdentityArn)
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The collector credential proof is incomplete or does not match this AWS connection",
+    );
+  }
+  const now = nextMutationTimestamp(current);
+  // The same credentials can be re-attested, and rotated keys arrive with a
+  // different accessKeyLast4/caller identity. Bind the audit idempotency key
+  // to the complete actor-scoped proof so an exact replay stays stable while
+  // a real credential change receives a new key.
+  const credentialRegistrationRevision = await sha256Hex(canonicalJson({
+    actorId: input.actorId,
+    accessKeyLast4: input.verification.accessKeyLast4,
+    callerIdentityArn: input.verification.callerIdentityArn,
+  }));
+  const audit = resolveAuditInput({
+    orgId,
+    actorId: input.actorId,
+    action: "aws.connection.credentials_registered",
+    targetType: "aws_connection",
+    targetId: input.connectionId,
+    customerId: current.customerId,
+    outcome: "allowed",
+    metadata: {
+      credentialKind: "static_credentials",
+      accessKeyLast4: input.verification.accessKeyLast4,
+      callerIdentityArn: input.verification.callerIdentityArn,
+      credentialsStoredInControlPlane: false,
+    },
+    requestId: `aws.connection.credentials_verified:${input.connectionId}:${credentialRegistrationRevision.slice(0, 32)}`,
+  });
+  if (await connectionHasActiveWork(db, input.connectionId, orgId)) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The AWS connection changed or has active work; retry credential registration after it settles",
+    );
+  }
+  const mutation = db.prepare(
+    `UPDATE aws_connections
+        SET status = 'active', last_validated_at = ?, updated_at = ?
+      WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+        AND status IN ('pending', 'active', 'needs_attention')
+        AND role_arn = ''
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_runs
+           WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+        )`,
+  ).bind(
+    now,
+    now,
+    orgId,
+    input.connectionId,
+    orgId,
+    input.connectionId,
+  );
+  return commitAuditedConnectionMutation({
+    db,
+    connectionId: input.connectionId,
+    mutation,
+    audit,
+    mutationGuard: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+               AND role_arn = '' AND status = 'active'
+               AND last_validated_at = ? AND updated_at = ?`,
+      values: [orgId, input.connectionId, now, now],
+    },
+    committedState: {
+      sql: `SELECT 1 FROM aws_connections
+             WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+               AND role_arn = '' AND status = 'active'
+               AND last_validated_at IS NOT NULL`,
+      values: [orgId, input.connectionId],
+    },
+    persistenceMessage: "The verified static credentials and their audit evidence could not be committed atomically",
+  });
+}
+
 export function disableAwsConnection(
   connectionId: string,
   actorId: string,
@@ -1296,6 +1458,7 @@ export async function getStoredConnectionSecretForOrg(
   return {
     connectionId: row.id,
     customerId: row.customer_id,
+    sourceKind: row.source_kind,
     accountId: row.aws_account_id,
     partition: row.partition,
     roleArn: row.role_arn,
@@ -2744,9 +2907,12 @@ async function liveAccountOwnershipExists(
   partition: AwsPartition,
   accountId: string,
 ): Promise<boolean> {
+  // One live owner per AWS account across BOTH live kinds: a trust-role
+  // connection and a static-credential connection must never share an account.
   return await db.prepare(
     `SELECT 1 FROM aws_connections
-      WHERE source_kind = 'aws_trust_role' AND partition = ? AND aws_account_id = ?
+      WHERE source_kind IN ('aws_trust_role', 'aws_static_credentials')
+        AND partition = ? AND aws_account_id = ?
       LIMIT 1`,
   ).bind(partition, accountId).first() !== null;
 }

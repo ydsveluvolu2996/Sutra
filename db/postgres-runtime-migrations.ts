@@ -122,6 +122,7 @@ import postgresFinopsSustainabilityTargetsSql from "../postgres/migrations/0122_
 import postgresFinopsAmazonConnectRuntimeSql from "../postgres/migrations/0123_finops_amazon_connect_runtime.sql?raw";
 import postgresFinopsPricingChangeRuntimeSql from "../postgres/migrations/0124_finops_pricing_change_runtime.sql?raw";
 import postgresFinopsAwsConfigComplianceRuntimeSql from "../postgres/migrations/0125_finops_aws_config_compliance_runtime.sql?raw";
+import postgresStaticCredentialConnectionsSql from "../postgres/migrations/0126_static_credential_connections.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -248,6 +249,7 @@ const migrations = [
   { id: "0123_finops_amazon_connect_runtime", source: postgresFinopsAmazonConnectRuntimeSql },
   { id: "0124_finops_pricing_change_runtime", source: postgresFinopsPricingChangeRuntimeSql },
   { id: "0125_finops_aws_config_compliance_runtime", source: postgresFinopsAwsConfigComplianceRuntimeSql },
+  { id: "0126_static_credential_connections", source: postgresStaticCredentialConnectionsSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

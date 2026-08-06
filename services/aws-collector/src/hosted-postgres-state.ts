@@ -309,6 +309,13 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
   }
 
   public async upsert(input: RegisterAwsConnectionInput): Promise<void> {
+    // Static-credential connections are a local-collector capability: customer
+    // key material has a reviewed at-rest contract only in the encrypted local
+    // registry file. The hosted broker fails closed until a hosted storage
+    // contract for that material is separately reviewed.
+    if (input.credentialKind === "static_credentials") {
+      throw new RegistryStateError();
+    }
     const candidate = parseConnectionInput(input);
     await this.mutate(candidate.tenantId, candidate.connectionId, (previous, tombstoned) => {
       if (tombstoned || previous?.status === "DISABLED") throw new RegistryStateError();
@@ -389,6 +396,15 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     } finally {
       client.release();
     }
+  }
+
+  /** See upsert: static credentials never reach hosted storage, so this fails closed. */
+  public async markStaticCredentialVerified(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<void> {
+    assertScope(scope, connectionId);
+    throw new RegistryStateError();
   }
 
   public async markOnboardingVerified(

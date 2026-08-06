@@ -56,6 +56,9 @@ export async function POST(request: Request): Promise<Response> {
           );
           const handoff = await createConnectionDraft({
             orgId: actor.orgId,
+            sourceKind: body.connectionMethod === "static_credentials"
+              ? "aws_static_credentials"
+              : "aws_trust_role",
             actorId: actor.id,
             operationId: body.operationId,
             customerId,
@@ -102,6 +105,13 @@ export async function POST(request: Request): Promise<Response> {
           }, { status: handoff.recovered ? 200 : 201 });
         },
       );
+    // Static-credential connections have no CloudFormation deployment at all:
+    // the customer submits keys directly, so no public template URL is fetched
+    // or returned. The server-held ExternalId is still generated and stored by
+    // the shared draft path; it is simply unused for this kind.
+    if (body.connectionMethod === "static_credentials") {
+      return await createHandoff(null);
+    }
     // The canonical Sutra template is fetched and authenticated before its
     // quick-launch URL is returned. Customer-managed artifacts are generated
     // from the one-time browser handoff and do not depend on that public object.

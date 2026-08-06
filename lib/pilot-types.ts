@@ -15,11 +15,24 @@ export type ResourceLifecycleState = "active" | "retirement_pending" | "retired"
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
 
+/**
+ * Source kinds whose rows represent a live customer AWS account (as opposed to
+ * simulated fixtures). Both kinds share the global one-live-owner-per-account
+ * boundary and are runnable by the hosted collector.
+ */
+export type LiveAwsSourceKind = "aws_trust_role" | "aws_static_credentials";
+
+export function isLiveAwsSourceKind(
+  value: PilotConnection["sourceKind"],
+): value is LiveAwsSourceKind {
+  return value === "aws_trust_role" || value === "aws_static_credentials";
+}
+
 export interface PilotConnection {
   readonly id: string;
   readonly customerId: string;
   readonly customerName: string;
-  readonly sourceKind: "aws_trust_role" | "simulated_fixture";
+  readonly sourceKind: "aws_trust_role" | "aws_static_credentials" | "simulated_fixture";
   readonly fixtureId: string | null;
   readonly fixtureVersion: string | null;
   readonly partition: AwsPartition;

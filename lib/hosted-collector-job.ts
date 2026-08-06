@@ -19,6 +19,7 @@
  */
 
 import type { RunnableJob } from "./background-job-runner.ts";
+import { isLiveAwsSourceKind } from "./pilot-types.ts";
 import type { PilotConnection, PilotSnapshotPayload, SnapshotOrigin, SyncStatus } from "./pilot-types.ts";
 
 export const HOSTED_COLLECTOR_COLLECT_JOB_KIND = "hosted.collector.collect";
@@ -208,7 +209,7 @@ export async function runHostedCollectorJob(
     throw new HostedCollectorJobError("hosted-collector-connection-scope-mismatch");
   }
   if (
-    connection.sourceKind !== "aws_trust_role" ||
+    !isLiveAwsSourceKind(connection.sourceKind) ||
     connection.status !== "active" ||
     connection.permissionPackVersion !== CURRENT_PERMISSION_PACK
   ) {

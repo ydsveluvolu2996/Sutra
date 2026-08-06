@@ -30,7 +30,7 @@ export interface ComplianceAssessmentProvenance {
   readonly connectionId: string | null;
   readonly customerId: string | null;
   readonly awsAccountId: string | null;
-  readonly sourceKind: "aws_trust_role" | "simulated_fixture" | null;
+  readonly sourceKind: "aws_trust_role" | "aws_static_credentials" | "simulated_fixture" | null;
   readonly snapshotId: string | null;
   readonly snapshotSha256: string | null;
   readonly snapshotCollectedAt: string | null;

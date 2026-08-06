@@ -102,6 +102,10 @@ class Registry {
   Promise<RegisteredAwsConnection | null> {
     return this.resolve(scope, connectionId) as Promise<RegisteredAwsConnection | null>;
   }
+  public async markStaticCredentialVerified(): Promise<void> {
+    throw new Error("unexpected static-credential verification");
+  }
+
   public async markOnboardingVerified(
     _scope: ConnectionScope, _connectionId: string,
     _verification: OnboardingTrustVerification,

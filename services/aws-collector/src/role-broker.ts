@@ -45,6 +45,8 @@ import {
   type RoleContractClient,
   type RoleContractClientFactory,
   type ScopedConnectionRegistry,
+  type StaticCredentialVerification,
+  type AwsStaticCredentialMaterial,
   type StoredAwsConnection,
   type ValidatedRoleSession,
   CURRENT_PERMISSION_PACK_VERSION,
@@ -441,6 +443,17 @@ interface ResolvedConnection {
   readonly expectedRolePath: string;
   readonly expectedRoleName: string;
 }
+
+interface ResolvedStaticConnection {
+  readonly connection: StoredAwsConnection;
+  readonly credentials: AwsStaticCredentialMaterial;
+  readonly sessionNamePrefix: string;
+  readonly partition: AwsPartition;
+}
+
+const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
+const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 
 export interface AwsRoleBrokerDependencies {
   readonly registry: ScopedConnectionRegistry;
@@ -1617,6 +1630,17 @@ export class AwsRoleBroker {
     connectionId: string,
     jobId: string,
   ): Promise<ValidatedRoleSession> {
+    const staticResolved = await this.resolveStaticConnection(scope, connectionId, ["ACTIVE"]);
+    if (staticResolved !== null) {
+      if (staticResolved.connection.permissionPackVersion !== PERMISSION_PACK_VERSION) {
+        throw new ConnectionStateError();
+      }
+      // A static-credential session has no AssumeRole step, so neither the STS
+      // inline session ceiling nor the role-contract attestation can apply —
+      // this is an inherent limitation of customer-supplied keys. The caller
+      // identity is re-validated against the expected account on every session.
+      return this.staticCredentialSession(staticResolved, jobId);
+    }
     const resolved = await this.resolveConnection(scope, connectionId, ["ACTIVE"]);
     if (resolved.connection.permissionPackVersion !== PERMISSION_PACK_VERSION) {
       throw new ConnectionStateError();
@@ -1626,6 +1650,35 @@ export class AwsRoleBroker {
     // expand the compact read-family session cap.
     await this.attestRoleContract(resolved, validated.credentials);
     return validated;
+  }
+
+  /**
+   * Prove customer-supplied static credentials authenticate as exactly the
+   * expected account. The result carries no secret material; only the last
+   * four characters of the non-secret access key ID are disclosed for display.
+   */
+  public async verifyStaticCredentialIdentity(
+    scope: ConnectionScope,
+    connectionId: string,
+    jobId: string,
+  ): Promise<StaticCredentialVerification> {
+    const resolved = await this.resolveStaticConnection(
+      scope,
+      connectionId,
+      ["PENDING", "VERIFIED", "DEGRADED", "ACTIVE"],
+    );
+    if (resolved === null) {
+      // A trust-role connection can never be verified through the static path.
+      throw new ConnectionStateError();
+    }
+    const session = await this.staticCredentialSession(resolved, jobId);
+    return {
+      connectionId: resolved.connection.connectionId,
+      accountId: resolved.connection.expectedAccountId,
+      partition: resolved.partition,
+      callerIdentityArn: session.callerIdentityArn,
+      accessKeyLast4: resolved.credentials.accessKeyId.slice(-4),
+    };
   }
 
   /**
@@ -3315,6 +3368,111 @@ export class AwsRoleBroker {
     };
   }
 
+  /**
+   * Resolve a connection through the static-credential contract. Returns null
+   * for trust-role records so callers fall through to the AssumeRole path;
+   * every stored field of a static record is re-validated fail-closed here on
+   * every use, exactly as resolveConnection does for role records.
+   */
+  private async resolveStaticConnection(
+    scope: ConnectionScope,
+    connectionId: string,
+    allowedStatuses: readonly AwsConnectionStatus[],
+  ): Promise<ResolvedStaticConnection | null> {
+    if (scope.tenantId.length === 0 || connectionId.length === 0) {
+      throw new ConnectionNotFoundError();
+    }
+    const connection = await this.dependencies.registry.resolve(scope, connectionId);
+    if (connection === null) {
+      throw new ConnectionNotFoundError();
+    }
+    if (connection.credentialKind !== "static_credentials") {
+      return null;
+    }
+    if (connection.tenantId !== scope.tenantId) {
+      throw new ConnectionScopeViolationError();
+    }
+    if (connection.connectionId !== connectionId) {
+      throw new ConnectionIntegrityError("Scoped registry returned the wrong connection ID");
+    }
+    if (!allowedStatuses.includes(connection.status)) {
+      throw new ConnectionStateError();
+    }
+    if (!ACCOUNT_ID.test(connection.expectedAccountId)) {
+      throw new ConnectionIntegrityError("Stored expected AWS account ID is invalid");
+    }
+    if (connection.roleArn !== "" || connection.externalId !== "") {
+      throw new ConnectionIntegrityError(
+        "A static-credential connection must not carry role trust material",
+      );
+    }
+    const partition = connection.partition;
+    if (partition !== "aws" && partition !== "aws-us-gov" && partition !== "aws-cn") {
+      throw new ConnectionIntegrityError("Stored static-credential partition is invalid");
+    }
+    const credentials = connection.staticCredentials;
+    if (
+      credentials === undefined ||
+      !STATIC_ACCESS_KEY_ID.test(credentials.accessKeyId) ||
+      !STATIC_SECRET_ACCESS_KEY.test(credentials.secretAccessKey) ||
+      credentials.accessKeyId.startsWith("ASIA") !== (credentials.sessionToken !== undefined) ||
+      (credentials.sessionToken !== undefined &&
+        !STATIC_SESSION_TOKEN.test(credentials.sessionToken))
+    ) {
+      throw new ConnectionIntegrityError("Stored static credential material is invalid");
+    }
+    const sessionNamePrefix = connection.sessionNamePrefix ?? "sutra-";
+    if (!SESSION_PREFIX.test(sessionNamePrefix)) {
+      throw new ConnectionIntegrityError("Stored STS session-name prefix is invalid");
+    }
+    return { connection, credentials, sessionNamePrefix, partition };
+  }
+
+  /**
+   * Build an in-memory session directly from stored static credentials and
+   * prove the identity before returning it. There is no AssumeRole here, so no
+   * session ceiling can be applied and no role contract exists to attest; the
+   * expiry is capped at the same 900 seconds an STS session would receive so
+   * runners hold the material no longer than a role session.
+   */
+  private async staticCredentialSession(
+    resolved: ResolvedStaticConnection,
+    jobId: string,
+  ): Promise<ValidatedRoleSession> {
+    const roleSessionName = sanitizeRoleSessionName(jobId, resolved.sessionNamePrefix);
+    const credentials = {
+      accessKeyId: resolved.credentials.accessKeyId,
+      secretAccessKey: resolved.credentials.secretAccessKey,
+      sessionToken: resolved.credentials.sessionToken ?? "",
+      expiration: new Date(this.now().getTime() + 900_000),
+    };
+    const identityClient = this.dependencies.callerIdentityClientFactory(credentials);
+    let identity;
+    try {
+      identity = await identityClient.send(new GetCallerIdentityCommand({}));
+    } catch (error: unknown) {
+      throw new CallerIdentityFailedError(errorName(error));
+    }
+    const callerIdentityArn = identity.Arn;
+    if (
+      identity.Account !== resolved.connection.expectedAccountId ||
+      callerIdentityArn === undefined ||
+      callerIdentityArn.split(":")[1] !== resolved.partition
+    ) {
+      throw new IdentityMismatchError();
+    }
+    return {
+      connectionId: resolved.connection.connectionId,
+      accountId: resolved.connection.expectedAccountId,
+      partition: resolved.partition,
+      roleArn: callerIdentityArn,
+      roleSessionName,
+      callerIdentityArn,
+      expiresAt: credentials.expiration,
+      credentials,
+    };
+  }
+
   private async runNegativeProbe(
     resolved: ResolvedConnection,
     roleSessionName: string,
@@ -3365,7 +3523,17 @@ export function createWorkloadIdentityRoleBroker(
     assumeRoleClient,
     expectedPrincipalArn: options.principalArn,
     callerIdentityClientFactory: (credentials) =>
-      new STSClient({ ...clientConfig, credentials }),
+      new STSClient({
+        ...clientConfig,
+        // A static long-term (AKIA) session has no token; an empty
+        // X-Amz-Security-Token would break SigV4, so omit it entirely.
+        credentials: credentials.sessionToken === ""
+          ? {
+              accessKeyId: credentials.accessKeyId,
+              secretAccessKey: credentials.secretAccessKey,
+            }
+          : credentials,
+      }),
     roleContractClientFactory: (credentials) => {
       const client = new IAMClient({
         ...workloadIdentityAwsClientConfig(

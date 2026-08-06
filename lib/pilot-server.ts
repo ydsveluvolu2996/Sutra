@@ -3,6 +3,7 @@ import {
   parseCollectorHealth,
   parsePilotSnapshot,
   parseRegisteredResponse,
+  parseStaticCredentialVerificationResponse,
   parseVerificationResponse,
 } from "./pilot-boundary";
 import type {
@@ -780,6 +781,45 @@ export async function registerCollectorConnection(input: {
   );
 }
 
+/**
+ * Register a static-credential connection with the collector broker. The
+ * credentials transit this single request and are stored (encrypted) only by
+ * the broker; this process never persists or logs them.
+ */
+export async function registerCollectorStaticCredentialConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly accountId: string;
+  readonly partition: string;
+  readonly enabledRegions: readonly string[];
+  readonly staticCredentials: {
+    readonly accessKeyId: string;
+    readonly secretAccessKey: string;
+    readonly sessionToken: string | null;
+  };
+}): Promise<{ registered: true }> {
+  return parseRegisteredResponse(
+    await brokerFetch<unknown>(`/v1/connections/${input.connectionId}`, "PUT", {
+      tenantId: input.tenantId,
+      connectionId: input.connectionId,
+      accountId: input.accountId,
+      partition: input.partition,
+      enabledRegions: input.enabledRegions,
+      credentialKind: "static_credentials",
+      staticCredentials: input.staticCredentials.sessionToken === null
+        ? {
+          accessKeyId: input.staticCredentials.accessKeyId,
+          secretAccessKey: input.staticCredentials.secretAccessKey,
+        }
+        : {
+          accessKeyId: input.staticCredentials.accessKeyId,
+          secretAccessKey: input.staticCredentials.secretAccessKey,
+          sessionToken: input.staticCredentials.sessionToken,
+        },
+    }),
+  );
+}
+
 export async function activateCollectorConnection(input: {
   readonly tenantId: string;
   readonly connectionId: string;
@@ -881,6 +921,32 @@ export async function verifyCollectorConnection(input: {
       roleArn: input.roleArn,
       sessionNamePrefix: input.sessionNamePrefix,
     },
+  );
+}
+
+/**
+ * Verify a staged static-credential connection. The verify request payload is
+ * identical to the trust-role flow; only the response shape differs and it is
+ * cross-checked against the caller's expected account and partition.
+ */
+export async function verifyCollectorCredentialConnection(input: {
+  readonly tenantId: string;
+  readonly connectionId: string;
+  readonly jobId: string;
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+}): Promise<{
+  readonly verified: true;
+  readonly credentialKind: "static_credentials";
+  readonly accountId: string;
+  readonly partition: AwsPartition;
+  readonly callerIdentityArn: string;
+  readonly accessKeyLast4: string;
+}> {
+  const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
+  return parseStaticCredentialVerificationResponse(
+    await brokerFetch(`/v1/connections/${input.connectionId}/verify`, "POST", payload, 45_000),
+    { accountId: input.accountId, partition: input.partition },
   );
 }
 
