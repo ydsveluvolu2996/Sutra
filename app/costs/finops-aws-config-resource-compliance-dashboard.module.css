@@ -92,33 +92,6 @@
   margin: 0.2rem 0 0;
   font-size: 1rem;
 }
-.trend {
-  display: flex;
-  align-items: end;
-  gap: 0.45rem;
-  height: 150px;
-  overflow-x: auto;
-  padding-top: 0.5rem;
-}
-.trend > div {
-  display: grid;
-  grid-template-rows: 1fr auto;
-  align-items: end;
-  gap: 0.3rem;
-  min-width: 32px;
-  height: 100%;
-}
-.trend i {
-  display: block;
-  min-height: 4px;
-  border-radius: 6px 6px 2px 2px;
-  background: linear-gradient(180deg, #f87171, #dc2626);
-}
-.trend small {
-  font-size: 0.63rem;
-  transform: rotate(-35deg);
-  transform-origin: center;
-}
 .channels {
   display: grid;
   gap: 0.55rem;

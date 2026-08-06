@@ -6,7 +6,7 @@ import {
   type AwsConfigComplianceOfficialDefinition,
 } from "../../lib/finops-aws-config-compliance-official-definition";
 import type { FinopsDashboardCatalogEntry } from "../../lib/finops-dashboard-catalog";
-import { RankingBars, type RankingBarsItem } from "../components/charts";
+import { RankingBars, TimeSeriesChart, type RankingBarsItem } from "../components/charts";
 import {
   FinopsCapabilityShell,
   type FinopsCapabilityViewState,
@@ -561,10 +561,6 @@ export function FinopsAwsConfigResourceComplianceReportView({
   const counts = report.counts;
   const coverage = report.coverage;
   const history = report.history ?? [];
-  const maximumTrend = Math.max(
-    1,
-    ...history.map((entry) => entry.nonCompliantResources),
-  );
   const accounts = [
     ...new Set([
       ...rules.map((entry) => entry.accountId),
@@ -731,32 +727,23 @@ export function FinopsAwsConfigResourceComplianceReportView({
             </div>
             <span>{history.length} generations</span>
           </header>
-          <div
-            className={styles.trend}
-            role="img"
-            aria-label="AWS Config non-compliant resource history"
-          >
-            {history.length === 0 ? (
-              <p>No accepted history yet.</p>
-            ) : (
-              history
-                .slice()
-                .reverse()
-                .map((entry) => (
-                  <div
-                    key={entry.snapshotId}
-                    title={`${entry.capturedAt}: ${entry.nonCompliantResources}`}
-                  >
-                    <i
-                      style={{
-                        height: `${Math.max(4, Math.round((entry.nonCompliantResources / maximumTrend) * 100))}%`,
-                      }}
-                    />
-                    <small>{entry.capturedAt.slice(5, 10)}</small>
-                  </div>
-                ))
-            )}
-          </div>
+          {history.length === 0 ? (
+            <p>No accepted history yet.</p>
+          ) : (
+            <TimeSeriesChart
+              ariaLabel="AWS Config non-compliant resource history"
+              caption="One point per accepted generation, oldest first. Generations are irregular, so spacing does not represent elapsed time."
+              formatValue={(value) => value.toLocaleString("en-US")}
+              series={[{
+                id: "non-compliant",
+                label: "Non-compliant resources",
+                points: history.slice().reverse().map((entry) => ({
+                  label: entry.capturedAt.slice(0, 10),
+                  value: entry.nonCompliantResources,
+                })),
+              }]}
+            />
+          )}
         </article>
         <article className={styles.panel}>
           <header>
