@@ -117,6 +117,55 @@ jobs:
             tests/docker-runtime-isolation.test.mjs
           bash deploy/ec2/validate-ops.sh
 
+      # PUBLISH BEFORE YOU SHIP. The customer quick-create link the application
+      # hands out embeds the reviewed template's hash in its S3 key
+      # (templates/${VERSION}/${SHA256}.yaml), so shipping an application whose
+      # pinned template was never published leaves every new customer's
+      # onboarding link pointing at an object that does not exist. Automated
+      # releases make that ordering easy to forget, so it is enforced here
+      # rather than remembered: the published bytes must exist AND hash to the
+      # exact reviewed digest before any image is built or deployed.
+      - name: Require the reviewed onboarding template to be published
+        env:
+          TEMPLATE_BUCKET: ${{ vars.SUTRA_TEMPLATE_BUCKET }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${TEMPLATE_BUCKET}" ]]; then
+            echo "SUTRA_TEMPLATE_BUCKET is not configured." >&2
+            echo "Set it to the bucket that 'pnpm live:aws:publish-template' publishes to." >&2
+            exit 1
+          fi
+          [[ "${TEMPLATE_BUCKET}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
+          contract="lib/aws-template-contract.ts"
+          version="$(node -e "const s=require('fs').readFileSync('${contract}','utf8');const m=/AWS_CUSTOMER_ROLE_TEMPLATE_VERSION\s*=\s*\"([^\"]+)\"/.exec(s);if(!m)process.exit(1);process.stdout.write(m[1])")"
+          digest="$(node -e "const s=require('fs').readFileSync('${contract}','utf8');const m=/AWS_CUSTOMER_ROLE_TEMPLATE_SHA256\s*=\s*\n?\s*\"([a-f0-9]{64})\"/.exec(s);if(!m)process.exit(1);process.stdout.write(m[1])")"
+          [[ "${version}" =~ ^standard-[0-9]{4}-[0-9]{2}\.[0-9]+$ ]]
+          [[ "${digest}" =~ ^[a-f0-9]{64}$ ]]
+          # The published object is public and read-only by contract, so this
+          # needs no credentials and runs before the OIDC role is assumed.
+          url="https://${TEMPLATE_BUCKET}.s3.${AWS_REGION}.amazonaws.com/templates/${version}/${digest}.yaml"
+          if ! curl -fsSL --max-time 30 --retry 2 --retry-delay 5 -o published-template.yaml "${url}"; then
+            echo "The reviewed onboarding template ${version} is NOT published." >&2
+            echo "Expected object: ${url}" >&2
+            echo "Run 'pnpm live:aws:publish-template' from a credentialed machine, then re-run this release." >&2
+            echo "Deploying now would leave every new customer quick-create link returning 404." >&2
+            exit 1
+          fi
+          published_digest="$(sha256sum published-template.yaml | cut -d' ' -f1)"
+          if [[ "${published_digest}" != "${digest}" ]]; then
+            echo "The published object does not match the reviewed template bytes." >&2
+            echo "Expected sha256 ${digest}, published object hashes to ${published_digest}." >&2
+            exit 1
+          fi
+          # Prove the published bytes are also the bytes committed in this
+          # release revision, so a stale publish of a different template that
+          # happens to sit at this key cannot satisfy the gate.
+          committed_digest="$(sha256sum public/sutra-customer-onboarding-role.yaml | cut -d' ' -f1)"
+          [[ "${committed_digest}" == "${digest}" ]]
+          rm -f published-template.yaml
+          echo "Onboarding template ${version} is published and byte-exact (${digest})."
+
       - name: Configure short-lived AWS credentials through GitHub OIDC
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5.1.0
         with:

@@ -25,7 +25,7 @@ The release workflows reject a feature-branch deployment. This checkpoint must
 pass exact-SHA CI, receive independent approval, be merged to protected `main`,
 pass the release-SHA CodeQL and environment gates, and then be deployed through
 the reviewed immutable-image workflow. Do not weaken or bypass those controls.
-The repository's `ec2-private-beta-release.yml` workflow is a legacy single-host
+The repository's `ec2-live-release.yml` workflow is a legacy single-host
 path and is not the requested final enterprise target. Use the protected
 `production-ha-release.yml` path for the enterprise release after its HA network,
 runtime secrets, database migration, image and rollback prerequisites are live.
