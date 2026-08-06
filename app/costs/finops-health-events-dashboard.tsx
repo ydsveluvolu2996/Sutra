@@ -7,6 +7,7 @@ import {
   FINOPS_AWS_HEALTH_OFFICIAL_DEFINITION,
   type FinopsAwsHealthOfficialDefinition,
 } from "../../lib/finops-aws-health-official-definition";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-health-events-dashboard.module.css";
 
 type Report = ReturnType<typeof import(
@@ -169,6 +170,10 @@ export function HealthEventsReportView({ report, filters, onFiltersChange }: {
       </section>
       <section className={styles.section}>
         <header><h3>Upcoming impact timeline</h3><span>{report.upcomingTimelineTruncated ? "First 500 dated events" : "Complete selected dated view"}</span></header>
+        <UpcomingAccountsByService
+          timeline={report.upcomingTimeline}
+          truncated={report.upcomingTimelineTruncated === true}
+        />
         {report.upcomingTimeline.length === 0 ? <p>No open or upcoming event with an explicit provider start date is available.</p> : <div className={styles.scroll} tabIndex={0} role="region" aria-label="Scrollable upcoming impact timeline"><table><caption>Upcoming AWS Health impact timeline</caption><thead><tr><th>Start</th><th>Event</th><th>Service / Region</th><th>Status</th><th>Affected</th></tr></thead><tbody>{report.upcomingTimeline.map((item) => <tr key={item.arn}><td>{item.startAt}</td><th>{item.eventTypeCode}</th><td>{item.service ?? "Unknown service"} · {item.region ?? "Global"}</td><td>{item.status}</td><td>{item.affectedAccountCount} accounts · {item.affectedEntityCount} resources</td></tr>)}</tbody></table></div>}
       </section>
       <section className={styles.section}>
@@ -182,6 +187,60 @@ export function HealthEventsReportView({ report, filters, onFiltersChange }: {
       <section className={styles.section}><header><h3>Immutable event history</h3><span>{report.summary.historyGenerationCount} accepted snapshots</span></header>{report.eventHistory.map((item) => <article className={styles.timeline} key={item.arn}><strong>{item.eventTypeCode}</strong><div>{item.points.map((point) => <span key={`${point.observedAt}:${point.status}`}>{point.observedAt.slice(0, 10)} · {point.status}</span>)}</div></article>)}</section>
       <details className={`${styles.section} ${styles.evidence}`}><summary>Capture hashes, coverage and limitations</summary><pre>{JSON.stringify({ officialDefinition: report.officialDefinition, planningSemantics: report.planningSemantics, freshness: report.freshness, lineage: report.lineage, evidence: report.evidence, collection: report.collection, limitations: report.limitations }, null, 2)}</pre></details>
     </section>
+  );
+}
+
+/**
+ * Affected accounts by service across the dated upcoming timeline.
+ *
+ * The timeline table answers "what is coming and when" one row at a time, but
+ * not "where is the blast radius concentrated" -- that needs the rows summed
+ * per service, which is exactly what a reader would otherwise do by eye.
+ *
+ * A service is ranked by accounts, not by event count: ten advisories against
+ * one account is a smaller planning problem than one advisory against ten.
+ *
+ * Events whose service AWS did not supply are counted under an explicit
+ * absence bucket rather than dropped or folded into a named service, and that
+ * bucket carries detail text naming it as absence so colour is never the only
+ * cue, and takes the slate tone ADV-01 already uses for absence buckets. Truncation is disclosed because a service outside the returned rows
+ * could outrank everything shown.
+ */
+function UpcomingAccountsByService({ timeline, truncated }: {
+  readonly timeline: readonly {
+    readonly service: string | null;
+    readonly affectedAccountCount: number;
+  }[];
+  readonly truncated: boolean;
+}) {
+  const totals = new Map<string | null, { accounts: number; events: number }>();
+  for (const item of timeline) {
+    const current = totals.get(item.service) ?? { accounts: 0, events: 0 };
+    totals.set(item.service, {
+      accounts: current.accounts + item.affectedAccountCount,
+      events: current.events + 1,
+    });
+  }
+  if (totals.size === 0) return null;
+  const items = [...totals.entries()].map(([service, total]) => ({
+    id: service ?? "__service_not_supplied__",
+    label: service ?? "Service not supplied",
+    value: total.accounts,
+    detail: service === null
+      ? `${total.events} ${total.events === 1 ? "event" : "events"} · AWS supplied no service for these`
+      : `${total.events} ${total.events === 1 ? "event" : "events"}`,
+    tone: service === null ? ("slate" as const) : ("blue" as const),
+  }));
+  return (
+    <RankingBars
+      ariaLabel="Affected accounts by service across the upcoming impact timeline"
+      caption={truncated
+        ? "Summed over the first 500 dated events only. A service outside those rows could outrank everything shown."
+        : "Summed over the complete selected dated view."}
+      formatValue={(value) => `${value.toLocaleString("en-US")} accounts`}
+      items={items}
+      sort
+    />
   );
 }
 
