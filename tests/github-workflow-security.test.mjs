@@ -254,7 +254,7 @@ test("the in-cluster security gate runs with an immutable root filesystem", () =
 
 test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host SSM and public verification", () => {
   const workflow = readFileSync(
-    new URL("../.github/workflows/ec2-private-beta-release.yml", import.meta.url),
+    new URL("../.github/workflows/ec2-live-release.yml", import.meta.url),
     "utf8",
   );
   const role = readFileSync(
@@ -276,16 +276,20 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   const promotion = workflow.slice(promotionStart, ssmStart);
 
   assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/mu);
+  assert.match(workflow, /^\s{2}workflow_run:\s*$/mu);
+  assert.match(workflow, /workflows:\s*\n\s+- CI/u);
+  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/u);
+  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/u);
+  assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/u);
+  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/u);
   assert.doesNotMatch(workflow, /^\s{2}(push|pull_request):\s*$/mu);
-  assert.doesNotMatch(
-    workflow,
-    /^\s{4}environment:\s*$/mu,
-    "GitHub Free private repositories cannot use deployment environments",
-  );
+  assert.match(workflow, /^\s{4}environment: ec2-live-release\s*$/mu);
   for (const variable of ["AWS_ACCOUNT_ID", "AWS_REGION", "AWS_ROLE_ARN", "EC2_INSTANCE_ID"]) {
     assert.match(workflow, new RegExp(`\\$\\{\\{ vars\\.${variable} \\}\\}`));
   }
   assert.match(workflow, /GITHUB_REF.+refs\/heads\/main/u);
+  assert.match(workflow, /ref: \$\{\{ env\.RELEASE_SHA \}\}/u);
+  assert.match(workflow, /git rev-parse HEAD.+RELEASE_SHA/u);
   assert.doesNotMatch(workflow, /GITHUB_REF_PROTECTED/u);
   assert.match(workflow, /id-token: write/u);
   assert.match(workflow, /allowed-account-ids:/u);
@@ -307,8 +311,8 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /actual_lifecycle.+expected_lifecycle/u);
   assert.match(workflow, /--provenance=mode=max/u);
   assert.match(workflow, /--sbom=true/u);
-  assert.match(candidateBuild, /candidate_tag="candidate-\$\{GITHUB_SHA\}-run-/u);
-  assert.match(candidateBuild, /release_tag="sha-\$\{GITHUB_SHA\}-run-/u);
+  assert.match(candidateBuild, /candidate_tag="candidate-\$\{RELEASE_SHA\}-run-/u);
+  assert.match(candidateBuild, /release_tag="sha-\$\{RELEASE_SHA\}-run-/u);
   assert.match(candidateBuild, /--tag "\$\{candidate_image\}"/u);
   assert.doesNotMatch(candidateBuild, /--tag "\$\{release_tag\}"/u);
   assert.match(workflow, /aquasecurity\/trivy-action@[a-f0-9]{40}/u);
@@ -401,7 +405,7 @@ test("ECR lifecycle keeps three validated releases and expires only lower-priori
   assert.match(delivery, /failed scans never consume the three-release retention window/u);
 });
 
-test("private-beta host start and stop remain explicit, SSO-only, and exact-instance bounded", () => {
+test("live EC2 host start and stop remain explicit, SSO-only, and exact-instance bounded", () => {
   const control = readFileSync(
     new URL("../deploy/ec2/manual-host-control.sh", import.meta.url),
     "utf8",

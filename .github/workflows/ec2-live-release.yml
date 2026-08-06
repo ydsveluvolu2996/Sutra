@@ -1,30 +1,46 @@
-name: Release Sutra private beta to EC2
+name: Release Sutra live application to EC2
 
 on:
   workflow_dispatch:
     inputs:
       releaseReason:
-        description: Approved reason for this production-like private-beta release
+        description: Approved reason for this live EC2 release
         required: true
         type: string
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
 
 permissions:
   contents: read
 
 concurrency:
-  group: sutra-ec2-private-beta-release
+  group: sutra-ec2-live-release
   cancel-in-progress: false
 
 env:
   APP_ECR_REPOSITORY: sutra/app
   PUBLIC_ORIGIN: https://www.sutracmdb.com
   RELEASE_DOCUMENT_NAME: Sutra-DeployImmutableRelease
+  RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+  RELEASE_REASON: ${{ github.event_name == 'workflow_run' && format('Automated release after successful CI for {0}', github.event.workflow_run.head_sha) || inputs.releaseReason }}
 
 jobs:
   release:
     name: Build, scan, deploy, and verify
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    environment: ec2-live-release
     permissions:
       contents: read
       id-token: write
@@ -32,6 +48,7 @@ jobs:
       - name: Check out the exact release revision
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
 
       - name: Validate release configuration
@@ -40,12 +57,24 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
-          RELEASE_REASON: ${{ inputs.releaseReason }}
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          TRIGGER_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          TRIGGER_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           set -euo pipefail
-          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
           [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
-          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          [[ "${RELEASE_SHA}" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "${RELEASE_SHA}" ]]
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            [[ "${GITHUB_REF}" == "refs/heads/main" ]]
+          else
+            [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]
+            [[ "${TRIGGER_EVENT}" == "push" ]]
+            [[ "${TRIGGER_CONCLUSION}" == "success" ]]
+            [[ "${TRIGGER_HEAD_BRANCH}" == "main" ]]
+            [[ "${TRIGGER_HEAD_REPOSITORY}" == "${GITHUB_REPOSITORY}" ]]
+          fi
           [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
           [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]
@@ -149,8 +178,8 @@ jobs:
         run: |
           set -euo pipefail
           registry="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-          candidate_tag="candidate-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          release_tag="sha-${GITHUB_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          candidate_tag="candidate-${RELEASE_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          release_tag="sha-${RELEASE_SHA}-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           [[ "${candidate_tag}" =~ ^candidate-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
           [[ "${release_tag}" =~ ^sha-[a-f0-9]{40}-run-[0-9]+-[0-9]+$ ]]
           candidate_image="${registry}/${APP_ECR_REPOSITORY}:${candidate_tag}"
@@ -268,7 +297,6 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
           IMAGE_REF: ${{ steps.image.outputs.ref }}
-          RELEASE_REASON: ${{ inputs.releaseReason }}
         run: |
           set -euo pipefail
           [[ "${IMAGE_REF}" =~ ^[0-9]{12}\.dkr\.ecr\.${AWS_REGION}\.amazonaws\.com/sutra/app@sha256:[a-f0-9]{64}$ ]]
