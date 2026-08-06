@@ -15,6 +15,7 @@ import {
   type FinopsCapabilityEvidence,
   type FinopsCapabilityViewState,
 } from "./finops-capability-shell";
+import { RankingBars } from "../components/charts";
 import styles from "./finops-pricing-change-dashboard.module.css";
 
 type SourceState = "configuration_required" | "waiting" | "partial" | "stale" | "failed" | "empty" | "complete";
@@ -116,11 +117,72 @@ function options(groups: readonly PricingChangeGroup[], field: keyof Pick<Pricin
   return [...new Set(groups.map((group) => group[field]))].sort();
 }
 
-function percentage(value: string, maximum: bigint): string {
-  if (!INTEGER.test(value) || maximum <= BigInt(0)) return "0%";
-  const amount = BigInt(value);
-  const absolute = amount < BigInt(0) ? -amount : amount;
-  return `${(absolute * BigInt(100)) / maximum}%`;
+/**
+ * A modeled catalog total as a plottable amount, or null when there is nothing
+ * exact to plot.
+ *
+ * Micros beyond exact double range are refused rather than rounded into a
+ * coordinate; the figure beside each bar still comes from the original micros
+ * string via `formatMicros`, so no monetary amount is displayed rounded.
+ */
+function plotAmount(micros: string): number | null {
+  if (!INTEGER.test(micros)) return null;
+  const parsed = Number(micros);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed / 1_000_000;
+}
+
+/** Axis formatting for a plotted amount, within a single currency. */
+function formatPlotValue(value: number, currency: string): string {
+  return `${currency} ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
+ * Baseline against comparison for one currency.
+ *
+ * The bars this replaces were scaled by a single `maximum` taken across every
+ * currency at once, so a currency with a large nominal unit dwarfed the others
+ * and two cards' bars read as directly comparable magnitudes. The section
+ * heading immediately above promises totals stay separate by currency; the
+ * shared divisor silently broke that promise. Each card now scales only within
+ * its own currency, which is also why this is a component rather than a shared
+ * maximum computed in the parent.
+ *
+ * The old `percentage` helper also took an absolute value, so a negative
+ * modeled total drew with the same length as an equal positive one. Sign is
+ * preserved here.
+ */
+function CurrencyCatalogImpact({ total }: {
+  readonly total: {
+    readonly currency: string;
+    readonly baselineModeledCost: { readonly roundedMicros: string };
+    readonly comparisonModeledCost: { readonly roundedMicros: string };
+  };
+}) {
+  const rows = [
+    { id: "baseline", label: "Baseline", micros: total.baselineModeledCost.roundedMicros },
+    { id: "comparison", label: "Comparison", micros: total.comparisonModeledCost.roundedMicros },
+  ];
+  const items = rows
+    .map((row) => ({ row, value: plotAmount(row.micros) }))
+    .filter((entry): entry is { row: typeof rows[number]; value: number } => entry.value !== null)
+    .map(({ row, value }) => ({
+      id: row.id,
+      label: row.label,
+      value,
+      detail: formatMicros(row.micros, total.currency),
+    }));
+  if (items.length === 0) {
+    return <p className={styles.emptyFilter}>Neither total is exactly plottable in {total.currency}.</p>;
+  }
+  return (
+    <RankingBars
+      ariaLabel={`${total.currency} baseline against comparison modeled catalog cost`}
+      caption={`${total.currency} only. This scale is not comparable with another currency's card.`}
+      formatValue={(value) => formatPlotValue(value, total.currency)}
+      items={items}
+    />
+  );
 }
 
 export function PricingChangeOfficialDefinitionPanel({
@@ -179,13 +241,6 @@ export function FinopsPricingChangeReportView({ report }: { readonly report: Pri
     && (filters.region === "" || group.region === filters.region)
     && (filters.currency === "" || group.currency === filters.currency)
     && (filters.direction === "" || direction(group) === filters.direction)), [filters, report.groups]);
-  const maximum = report.summary.modeledTotalsByCurrency.flatMap((total) => [
-    BigInt(total.baselineModeledCost.roundedMicros),
-    BigInt(total.comparisonModeledCost.roundedMicros),
-  ]).reduce((largest, value) => {
-    const absolute = value < BigInt(0) ? -value : value;
-    return absolute > largest ? absolute : largest;
-  }, BigInt(0));
   const update = (field: keyof Filters, value: string) => setFilters((current) => ({ ...current, [field]: value }));
   return (
     <div className={styles.workspace}>
@@ -213,8 +268,7 @@ export function FinopsPricingChangeReportView({ report }: { readonly report: Pri
         <div className={styles.currencyGrid}>{report.summary.modeledTotalsByCurrency.map((total) => {
           const changeClass = BigInt(total.modeledChange.roundedMicros) > BigInt(0) ? styles.changePositive : BigInt(total.modeledChange.roundedMicros) < BigInt(0) ? styles.changeNegative : styles.changeNeutral;
           return <article className={styles.currencyCard} key={total.currency}><h4>{total.currency}</h4>
-            <div className={styles.barRow}><span>Baseline</span><div className={styles.barTrack}><div className={styles.bar} style={{ width: percentage(total.baselineModeledCost.roundedMicros, maximum) }} /></div><strong>{formatMicros(total.baselineModeledCost.roundedMicros, total.currency)}</strong></div>
-            <div className={styles.barRow}><span>Comparison</span><div className={styles.barTrack}><div className={`${styles.bar} ${styles.barComparison}`} style={{ width: percentage(total.comparisonModeledCost.roundedMicros, maximum) }} /></div><strong>{formatMicros(total.comparisonModeledCost.roundedMicros, total.currency)}</strong></div>
+            <CurrencyCatalogImpact total={total} />
             <p className={changeClass}>Modeled change: <strong>{formatMicros(total.modeledChange.roundedMicros, total.currency)}</strong></p>
           </article>;
         })}</div>
