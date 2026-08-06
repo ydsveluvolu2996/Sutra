@@ -140,8 +140,18 @@ export function formatCurRationalPercentExact(
   return `${negative ? "−" : ""}${whole.toString()}.${fraction}% · exact ${value.numerator}/${value.denominator}%`;
 }
 
-function relativeBasisPoints(value: string | null, maximum: bigint): number {
-  if (value === null || !INTEGER.test(value) || maximum <= BigInt(0)) return 0;
+/**
+ * A cost's share of the largest bar, in basis points, or null when there is
+ * nothing measured to draw.
+ *
+ * Absence used to return zero, which the caller's `Math.max(3, ...)` floor then
+ * drew as a visible stub -- so "no cost supplied for this period", "measured at
+ * zero" and "a real but small amount" were three different facts drawn as one
+ * picture. Null now means not supplied and the caller draws an explicit gap.
+ */
+function relativeBasisPoints(value: string | null, maximum: bigint): number | null {
+  if (value === null || !INTEGER.test(value)) return null;
+  if (maximum <= BigInt(0)) return null;
   const amount = BigInt(value);
   const absolute = amount < BigInt(0) ? -amount : amount;
   return Number((absolute * BigInt(10_000)) / maximum);
@@ -434,7 +444,14 @@ export function TrendsReport({
               {selected.points.map((point) => (
                 <button className={styles.curColumn} type="button" key={point.period} aria-pressed={current?.period === point.period} onClick={() => setSelectedPeriod(point.period)} title={`${point.period}: ${formatCurMicrosExact(point.totalMicros, selected.currency)}; ${point.periodState.replaceAll("_", " ")}`}>
                   <span>{formatCurMicrosExact(point.totalMicros, selected.currency)}</span>
-                  <i style={{ height: `${Math.max(3, relativeBasisPoints(point.totalMicros, maximum) / 100)}%` }} data-state={point.periodState.toLowerCase()} />
+                  <i
+                    data-absent={relativeBasisPoints(point.totalMicros, maximum) === null ? "true" : undefined}
+                    data-state={point.periodState.toLowerCase()}
+                    style={(() => {
+                      const basisPoints = relativeBasisPoints(point.totalMicros, maximum);
+                      return basisPoints === null ? undefined : { height: `${basisPoints / 100}%` };
+                    })()}
+                  />
                   <b>{point.period.slice(5)}</b><small>{point.periodState.replaceAll("_", " ")}</small>
                 </button>
               ))}

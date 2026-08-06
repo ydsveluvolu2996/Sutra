@@ -217,12 +217,23 @@ function percentageWidth(basisPoints: bigint): string {
   return `${whole.toString()}.${fraction}%`;
 }
 
-function relativeBasisPoints(value: string | null, maximum: bigint): bigint {
-  if (
-    value === null
-    || !INTEGER_MICROS.test(value)
-    || maximum <= BigInt(0)
-  ) return BigInt(0);
+/**
+ * A cost's share of the largest bar, in basis points, or null when there is
+ * nothing measured to draw.
+ *
+ * This used to return zero for a value that was absent, malformed, or had no
+ * comparable maximum, which made "AWS supplied no cost for this period" and "we
+ * measured this period at zero" the same zero-length bar. The CSS then floored
+ * both to a visible stub, so a third case -- a real, small, non-zero amount --
+ * drew identically as well.
+ *
+ * Null now means not supplied and the caller draws an explicit gap. A measured
+ * zero returns zero and draws as zero, which is the honest picture of a period
+ * that cost nothing.
+ */
+function relativeBasisPoints(value: string | null, maximum: bigint): bigint | null {
+  if (value === null || !INTEGER_MICROS.test(value)) return null;
+  if (maximum <= BigInt(0)) return null;
   const parsed = BigInt(value);
   if (parsed <= BigInt(0)) return BigInt(0);
   return (parsed * BigInt(10_000)) / maximum;
@@ -854,10 +865,10 @@ function TrendChart({
     >
       {points.map((point) => {
         const selected = costFor(point.costs, basis);
-        const height = percentageWidth(relativeBasisPoints(
+        const basisPoints = relativeBasisPoints(
           selected?.totalMicros ?? null,
           maximum,
-        ));
+        );
         return (
           <div
             className={styles.foundationalTrendColumn}
@@ -865,7 +876,11 @@ function TrendChart({
             aria-label={`${point.period}, ${formatMicrosExact(selected?.totalMicros ?? null, point.currency)}`}
           >
             <span>{formatMicrosExact(selected?.totalMicros ?? null, point.currency)}</span>
-            <i style={{ height }} aria-hidden="true" />
+            <i
+              aria-hidden="true"
+              data-absent={basisPoints === null ? "true" : undefined}
+              style={basisPoints === null ? undefined : { height: percentageWidth(basisPoints) }}
+            />
             <small>{point.period}<b>{point.currency}</b></small>
           </div>
         );
@@ -907,12 +922,11 @@ function RankingBars({
             >
               <i
                 aria-hidden="true"
-                style={{
-                  width: percentageWidth(relativeBasisPoints(
-                    entry.selectedTotalMicros,
-                    maximum,
-                  )),
-                }}
+                data-absent={relativeBasisPoints(entry.selectedTotalMicros, maximum) === null ? "true" : undefined}
+                style={(() => {
+                  const basisPoints = relativeBasisPoints(entry.selectedTotalMicros, maximum);
+                  return basisPoints === null ? undefined : { width: percentageWidth(basisPoints) };
+                })()}
               />
             </span>
           </div>
@@ -1487,12 +1501,11 @@ export function CostIntelligenceExplorer({
                       <span>{formatMicrosExact(point.includedMicros, currency)}</span>
                       <i
                         aria-hidden="true"
-                        style={{
-                          height: percentageWidth(relativeBasisPoints(
-                            magnitude.toString(),
-                            maximumMagnitude,
-                          )),
-                        }}
+                        data-absent={relativeBasisPoints(magnitude.toString(), maximumMagnitude) === null ? "true" : undefined}
+                        style={(() => {
+                          const basisPoints = relativeBasisPoints(magnitude.toString(), maximumMagnitude);
+                          return basisPoints === null ? undefined : { height: percentageWidth(basisPoints) };
+                        })()}
                       />
                       <small>{point.period}<b>{currency}</b></small>
                     </div>

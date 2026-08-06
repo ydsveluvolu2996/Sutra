@@ -568,7 +568,7 @@
 .foundationalTrend { height: 235px; display: flex; align-items: end; gap: 7px; overflow-x: auto; padding: 30px 5px 0; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(to top, transparent 0, transparent 51px, rgba(148, 163, 184, .11) 52px); }
 .foundationalTrendColumn { min-width: 58px; flex: 1 0 58px; height: 100%; display: grid; grid-template-rows: 26px minmax(4px, 1fr) 38px; align-items: end; justify-items: center; gap: 4px; }
 .foundationalTrendColumn > span { max-width: 92px; overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.foundationalTrendColumn > i { width: min(34px, 70%); min-height: 4px; display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #2dd4bf, #0f766e); box-shadow: 0 7px 16px rgba(15, 118, 110, .14); }
+.foundationalTrendColumn > i { width: min(34px, 70%); display: block; border-radius: 7px 7px 2px 2px; background: linear-gradient(180deg, #2dd4bf, #0f766e); box-shadow: 0 7px 16px rgba(15, 118, 110, .14); }
 .foundationalTrendColumn > small { display: grid; justify-items: center; color: var(--muted); font-size: 8.5px; white-space: nowrap; }
 .foundationalTrendColumn > small b { color: #0f766e; font-size: 8px; }
 .foundationalRankings { display: grid; gap: 5px; }
@@ -579,6 +579,14 @@
 .foundationalRankings strong { overflow: hidden; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .foundationalRankings article > small { color: var(--muted); font-size: 9px; white-space: nowrap; }
 .foundationalBar { height: 5px; overflow: hidden; border-radius: 999px; background: #e8eeeb; }
+/*
+ * Absence, not zero. A period AWS supplied no cost for draws an outlined,
+ * hatched placeholder at full height rather than a zero-length bar, so it can
+ * never be read as a measurement. The dashed outline and the hatch both carry
+ * the meaning, so hue is not the only cue.
+ */
+.foundationalTrendColumn > i[data-absent="true"], .curColumn > i[data-absent="true"] { height: 100%; border: 1px dashed #94a3b8; background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(148, 163, 184, .28) 3px, rgba(148, 163, 184, .28) 6px); box-shadow: none; }
+.foundationalBar i[data-absent="true"] { width: 100%; border: 1px dashed #94a3b8; background: repeating-linear-gradient(45deg, transparent, transparent 3px, rgba(148, 163, 184, .28) 3px, rgba(148, 163, 184, .28) 6px); }
 .foundationalBar i { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #34d399, #0f766e); }
 .foundationalTableScroll { max-width: 100%; overflow-x: auto; }
 .foundationalTable { width: 100%; border-collapse: collapse; font-size: 10.5px; }
@@ -735,7 +743,7 @@
 .curColumn { min-width: 54px; flex: 1 0 54px; height: 208px; display: grid; grid-template-rows: 32px 1fr auto auto; gap: 4px; align-items: end; padding: 0 2px 3px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: center; cursor: pointer; }
 .curColumn:hover, .curColumn[aria-pressed="true"] { border-color: rgba(15, 118, 110, .35); background: #f0fdfa; }
 .curColumn > span { overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap; }
-.curColumn > i { width: min(34px, 76%); min-height: 3px; max-height: 150px; justify-self: center; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #0f766e, #2dd4bf); }
+.curColumn > i { width: min(34px, 76%); max-height: 150px; justify-self: center; border-radius: 6px 6px 2px 2px; background: linear-gradient(180deg, #0f766e, #2dd4bf); }
 .curColumn > i[data-state="partial"], .curColumn > i[data-state="current_partial"] { background: #d97706; }
 .curColumn > i[data-state="stale"] { background: #94a3b8; }
 .curColumn b { font-size: 10px; }
