@@ -6,8 +6,12 @@ Merging and deploying are separate decisions. This policy governs both and
 overrides the merge half of the release constraint in the anti-rework protocol
 below.
 
-- Merge a pull request into `main` as soon as its required checks are green.
-  No deployment authorization is needed to merge.
+- Merging into `main` requires the user to have said "commit to main" (or
+  equivalent) in that turn. Green checks are a precondition for merging, never
+  an instruction to merge. Nothing else authorizes it: not finishing the work,
+  not the user approving the work itself, not a reviewer signing off.
+- Merging does not require deployment authorization. "Commit to main"
+  authorizes the merge and nothing further.
 - Never approve a release run. Deployment to https://www.sutracmdb.com happens
   only when the user says "deploy" in that turn. A merge is not a deploy
   instruction, an approval given for an earlier release does not carry forward,
@@ -64,7 +68,7 @@ Before editing this repository, read these files completely in order:
 3. The matching `docs/finops-cid-evidence/<ID>-*.md` record for the dashboard being closed
 4. `docs/FINOPS_VERTICAL_CLOSURE_TEMPLATE.md`
 
-The active continuation branch is `agent/mac-mini-finops-continuation`. Confirm the branch is current, the worktree is clean, and commit `4a2aa98` is an ancestor before making changes.
+`agent/mac-mini-finops-continuation` and commit `4a2aa98` are the historical origin of this work, recorded so the handover documents can be read in context. They are no longer a precondition for editing: work happens on `develop` per the branching policy above, and that policy wins. Confirm only that `develop` is current and the worktree is clean before making changes.
 
 ## Non-negotiable anti-rework protocol
 

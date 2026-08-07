@@ -8,8 +8,12 @@ rather than following it.
 
 Merging and deploying are separate decisions.
 
-- Merge a pull request into `main` as soon as its required checks are green. No
-  deployment authorization is needed to merge.
+- Merging into `main` requires the user to have said "commit to main" (or
+  equivalent) in that turn. Green checks are a precondition for merging, never
+  an instruction to merge. Nothing else authorizes it: not finishing the work,
+  not the user approving the work itself, not a reviewer signing off.
+- Merging does not require deployment authorization. "Commit to main"
+  authorizes the merge and nothing further.
 - Never approve a release run. Deployment to https://www.sutracmdb.com happens
   only when the user says "deploy" in that turn. A merge is not a deploy
   instruction, an approval given for an earlier release does not carry forward,
@@ -71,7 +75,7 @@ main" authorizes the merge, not the deployment.
 - When the user asks to publish or complete work, carry the workflow through commit and push in the same task.
 - Do not create a pull request unless the user asks for one; see the pull-request policy above. When one is asked for, create it ready for review. Use a draft only when the work is knowingly incomplete, checks are still running, or the user explicitly asks for a draft.
 - Keep the PR description concise: outcome, risk, verification, and any remaining blocker.
-- If the user explicitly asks to merge, verify that required checks and reviews pass, then merge immediately or enable auto-merge. Do not leave a mergeable PR waiting without explaining why.
+- If the user explicitly asks to merge, verify that required checks and reviews pass, then merge immediately or enable auto-merge. A mergeable pull request left open because the user has not asked to merge is the expected state under the branching policy above, not something to explain away or resolve by merging.
 - Never bypass branch protection, required review, security gates, or production approval controls for speed.
 
 ## Deployment completion
