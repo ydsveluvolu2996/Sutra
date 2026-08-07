@@ -30,11 +30,18 @@ There is exactly one development branch: **`develop`**. All work goes there.
 - Commit and push new functionality to `develop`. Do not create a branch per
   change, per feature or per fix -- a second working branch is the thing this
   rule exists to prevent.
-- Do not open a pull request unless the user asks for one. The round trip costs
-  more time than it returns on work the user is waiting on.
+- Keep exactly one standing pull request open, `develop` -> `main`, titled
+  `develop → main`. It updates itself with every push, so no pull request is
+  ever opened per change. If none is open, open one; never open a second.
+- The standing pull request is not ceremony. CI triggers on `pull_request` and
+  on `push` to `main`, and not on branch pushes, so without it `develop` would
+  carry no verification at all and the first CI run would happen on `main` --
+  where a green run is what fires a release. It is the only thing keeping
+  unverified code off `main`.
 - `develop` is only promoted to `main` when the user says "commit to main" (or
   equivalent). Merging is never implied by finishing work, by green checks, or
-  by the user approving the work itself.
+  by the user approving the work itself. Promotion merges the standing pull
+  request; open a fresh one for the next cycle immediately afterwards.
 - Promotion is a fast-forward or merge of `develop` into `main`, never a
   force-push and never a rewrite of `main`.
 - Push only what local verification already covers: the relevant tests, `tsc`,
