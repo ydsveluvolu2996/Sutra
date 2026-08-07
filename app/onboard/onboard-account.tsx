@@ -59,6 +59,47 @@ interface CreateConnectionResponse {
 
 type OnboardConnectionMethod = "iam_role" | "static_credentials";
 
+// One visible choice instead of two nested selects. The old form only revealed
+// the customer-managed option AFTER picking "IAM role", so the path that
+// answers the most common customer objection -- a Sutra CloudFormation stack
+// raising drift alerts in their account -- read as absent. It is not a
+// different capability; it is the same role contract, provisioned by the
+// customer's own tooling.
+type OnboardPath = "customer_managed_role" | "sutra_template_role" | "static_credentials";
+
+interface OnboardPathOption {
+  readonly id: OnboardPath;
+  readonly title: string;
+  readonly summary: string;
+  readonly traits: readonly string[];
+  readonly recommended?: true;
+}
+
+const ONBOARD_PATHS: readonly OnboardPathOption[] = Object.freeze([
+  {
+    id: "customer_managed_role",
+    title: "Terraform or their own tooling",
+    summary:
+      "Sutra generates Terraform, CloudFormation and JSON trust-policy artifacts for a dedicated role. The customer applies them with whatever already manages their IAM, so Sutra deploys nothing in their account.",
+    traits: ["No stack in their account", "No drift alert", "No stored secret"],
+    recommended: true,
+  },
+  {
+    id: "sutra_template_role",
+    title: "Sutra CloudFormation template",
+    summary:
+      "One-click quick-create of Sutra's reviewed, fixed role template. Fastest to complete, but it does create a CloudFormation stack in the customer's account.",
+    traits: ["Fastest to complete", "Creates a stack", "No stored secret"],
+  },
+  {
+    id: "static_credentials",
+    title: "Access keys",
+    summary:
+      "The customer supplies access key, secret key and optional session token for a dedicated read-only IAM user. The collector stores them encrypted. Use when the customer cannot create a role at all.",
+    traits: ["No role required", "Stored encrypted", "Customer must rotate"],
+  },
+] as const);
+
 interface RegisterCredentialsResponse {
   readonly connection: PilotConnection;
   readonly registered: true;
@@ -270,6 +311,27 @@ export function OnboardAccount() {
     ? `arn:${arnPartition(connection.partition)}:iam::${connection.awsAccountId}:role/${connection.expectedRolePath.slice(1)}${connection.expectedRoleName}`
     : null;
   const accountValid = /^\d{12}$/u.test(accountId);
+  const onboardPath: OnboardPath = connectionMethod === "static_credentials"
+    ? "static_credentials"
+    : roleProvisioningMode === "customer_managed"
+      ? "customer_managed_role"
+      : "sutra_template_role";
+
+  // The card writes both underlying values, so every downstream branch, request
+  // body and validation rule keeps reading exactly what it read before.
+  function selectOnboardPath(next: OnboardPath): void {
+    if (next === "static_credentials") {
+      setConnectionMethod("static_credentials");
+      return;
+    }
+    setConnectionMethod("iam_role");
+    const mode: AwsRoleProvisioningMode =
+      next === "customer_managed_role" ? "customer_managed" : "sutra_template";
+    setRoleProvisioningMode(mode);
+    setRolePath(SUTRA_ROLE_NAMESPACE);
+    setRoleName(mode === "sutra_template" ? SUTRA_TEMPLATE_ROLE_NAME : SUTRA_CUSTOM_ROLE_DEFAULT_NAME);
+  }
+
   const customerManagedRoleError = connectionMethod === "iam_role" && roleProvisioningMode === "customer_managed"
     ? validateCustomerManagedRoleSelection(rolePath, roleName)
     : null;
@@ -774,14 +836,35 @@ export function OnboardAccount() {
                   <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                   <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
                 </div>
-                <label><span>Connection method</span><select value={connectionMethod} onChange={(event) => setConnectionMethod(event.target.value as OnboardConnectionMethod)}><option value="iam_role">IAM role (CloudFormation)</option><option value="static_credentials">Access keys</option></select><small>{connectionMethod === "iam_role" ? "Recommended: a least-privilege customer-owned role assumed through auto-rotating temporary STS sessions; Sutra never holds a long-lived customer secret." : "The collector stores customer-supplied access keys encrypted. Use a dedicated read-only IAM user and plan key rotation; the IAM role method remains the recommended default."}</small></label>
+                <fieldset className="onboard-paths">
+                  <legend>How will the customer grant access?</legend>
+                  {ONBOARD_PATHS.map((path) => (
+                    <label
+                      key={path.id}
+                      className="onboard-path"
+                      data-selected={onboardPath === path.id ? "true" : undefined}
+                    >
+                      <input
+                        type="radio"
+                        name="onboard-path"
+                        value={path.id}
+                        checked={onboardPath === path.id}
+                        onChange={() => selectOnboardPath(path.id)}
+                      />
+                      <span className="onboard-path-body">
+                        <b>
+                          {path.title}
+                          {path.recommended ? <em>Recommended</em> : null}
+                        </b>
+                        <span className="onboard-path-summary">{path.summary}</span>
+                        <span className="onboard-path-traits">
+                          {path.traits.map((trait) => <span key={trait}>{trait}</span>)}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </fieldset>
                 {connectionMethod === "iam_role" ? <>
-                <label><span>Role provisioning</span><select value={roleProvisioningMode} onChange={(event) => {
-                  const next = event.target.value as AwsRoleProvisioningMode;
-                  setRoleProvisioningMode(next);
-                  setRolePath(SUTRA_ROLE_NAMESPACE);
-                  setRoleName(next === "sutra_template" ? SUTRA_TEMPLATE_ROLE_NAME : SUTRA_CUSTOM_ROLE_DEFAULT_NAME);
-                }}><option value="sutra_template">Use Sutra template</option><option value="customer_managed">Use customer-managed role</option></select><small>{roleProvisioningMode === "sutra_template" ? "Fastest path: deploy Sutra's reviewed, fixed CloudFormation role." : "Sutra generates Terraform, CloudFormation, and JSON trust-policy downloads for a dedicated customer-named role."}</small></label>
                 {roleProvisioningMode === "customer_managed" ? <>
                   <div className="form-grid">
                     <label><span>Dedicated role path</span><input value={rolePath} maxLength={512} onChange={(event) => setRolePath(event.target.value.trim())} aria-invalid={Boolean(customerManagedRoleError)} placeholder="/sutra/acme/" required /><small>Must remain inside the reserved <code>/sutra/</code> namespace and end with <code>/</code>.</small></label>
@@ -945,9 +1028,11 @@ export function OnboardAccount() {
         </section>
 
         <aside className="onboard-aside">
-          <section className="panel"><p className="eyebrow">Trust checklist</p><h2>Customer stays in control</h2><ul className="check-list compact"><li><span>✓</span>Exact collector workload-role principal</li><li><span>✓</span>Unique ExternalId condition</li><li><span>✓</span>Metadata-only permissions</li><li><span>✓</span>Maximum one-hour STS session</li><li><span>✓</span>No S3 objects, secrets, KMS decrypt, or mutations</li></ul></section>
+          {/* The trust-checklist and credential-path explainers were removed. They
+              described the isolation model to an operator who has already bought it,
+              and pushed the live collector state below the fold. Isolation is enforced
+              in db/pilot-repository.ts, not asserted in the sidebar. */}
           <section className="panel aside-warning"><p className="eyebrow">Collector mode</p><h2>{collectorMode === "live" ? "Connected to AWS" : collectorMode === "fixture" ? "Development fixture environment" : "Collector unavailable"}</h2><p>{collectorMode === "live" ? "Validation and inventory use the configured AWS workload identity. AWS permissions and service availability determine coverage." : collectorMode === "fixture" ? "Development fixture mode cannot create or synchronize AWS trust connections. Every resulting snapshot is labelled as simulated evidence." : "Restore the collector service before creating, validating, or synchronizing an AWS connection. Stored complete snapshots remain readable while it is offline."}</p></section>
-          <section className="panel data-path-card"><p className="eyebrow">Credential path</p><ol><li><b>1</b>Signed scoped job</li><li><b>2</b>Collector workload identity</li><li><b>3</b>STS AssumeRole (role method) or decrypt of collector-stored customer keys (access-key method)</li><li><b>4</b>Temporary in-memory credentials; access-key sessions are GetCallerIdentity-bound and capped at 900 seconds</li><li><b>5</b>Validated normalized evidence</li></ol><p>The role method is recommended: Sutra never creates customer access keys, and only the access-key method stores customer-supplied keys, encrypted and collector-owned.</p></section>
         </aside>
       </div>
     </>

@@ -12,8 +12,10 @@ const roleRoute = await readFile(
 );
 
 test("onboarding offers template and customer-managed role contracts", () => {
-  assert.match(source, /Use Sutra template/u);
-  assert.match(source, /Use customer-managed role/u);
+  // Both role contracts are still offered; they are now cards rather than the
+  // second of two nested selects.
+  assert.match(source, /id: "sutra_template_role"/u);
+  assert.match(source, /id: "customer_managed_role"/u);
   assert.match(source, /roleProvisioningMode/u);
   assert.match(source, /rolePath/u);
   assert.match(source, /roleName/u);
@@ -39,14 +41,50 @@ test("onboarding surfaces capability gaps and per-scan trust drift behavior", ()
   assert.match(source, /restrictive STS session policy/u);
 });
 
-test("onboarding offers both connection methods with the role method recommended", () => {
-  assert.match(source, /Connection method/u);
-  assert.match(source, /<option value="iam_role">IAM role \(CloudFormation\)<\/option>/u);
-  assert.match(source, /<option value="static_credentials">Access keys<\/option>/u);
-  // The role flow stays the wire default: connectionMethod is sent only for
-  // the static-credential branch of the create call.
+test("all three access-grant paths are visible in one step, customer-managed first", () => {
+  // The customer-managed role answers the objection that actually blocks
+  // onboarding -- a Sutra CloudFormation stack raising drift alerts in the
+  // customer's account -- but it used to appear only after choosing "IAM
+  // role", so it read as missing. All three are now one choice.
+  const start = source.indexOf("const ONBOARD_PATHS");
+  assert.ok(start > 0, "the paths must be declared as data, not inline markup");
+  const paths = source.slice(start, source.indexOf("] as const)", start));
+  const order = [...paths.matchAll(/id: "([a-z_]+)"/gu)].map((match) => match[1]);
+  assert.deepEqual(order, ["customer_managed_role", "sutra_template_role", "static_credentials"]);
+  // Exactly one path is recommended, and it is the one that deploys nothing in
+  // the customer's account.
+  assert.equal([...paths.matchAll(/recommended: true/gu)].length, 1);
+  const recommended = paths.slice(0, paths.indexOf("recommended: true"));
+  assert.equal(recommended.lastIndexOf('id: "customer_managed_role"') > -1, true);
+  assert.ok(
+    !recommended.includes('id: "sutra_template_role"'),
+    "the recommendation must sit on the customer-managed path",
+  );
+  // The trade-off each path carries is stated rather than left to be discovered.
+  assert.match(paths, /No stack in their account/u);
+  assert.match(paths, /Creates a stack/u);
+  assert.match(paths, /Customer must rotate/u);
+
+  // Selecting a card writes both underlying values, so the wire contract is
+  // unchanged: connectionMethod is sent only for the static-credential branch.
+  assert.match(source, /function selectOnboardPath\(next: OnboardPath\): void/u);
   assert.match(source, /connectionMethod: "static_credentials"/u);
-  assert.match(source, /IAM role method remains the recommended default/u);
+
+  assert.match(source, /How will the customer grant access\?/u);
+  // Native radios keep keyboard and assistive-technology behaviour.
+  assert.match(source, /type="radio"/u);
+  assert.match(source, /name="onboard-path"/u);
+});
+
+test("the onboarding sidebar no longer explains the isolation model", () => {
+  // Isolation is enforced in the repository layer and asserted by
+  // tests/explicit-org-scope.test.mjs. Restating it beside the form spent the
+  // reader's attention and pushed the live collector state below the fold.
+  assert.doesNotMatch(source, /Trust checklist/u);
+  assert.doesNotMatch(source, /Customer stays in control/u);
+  assert.doesNotMatch(source, /Credential path/u);
+  // The operational state stays: it changes what the operator can do next.
+  assert.match(source, /Collector mode/u);
 });
 
 test("credentials form posts to the fixed credentials route with masked, non-autofilled inputs", () => {
