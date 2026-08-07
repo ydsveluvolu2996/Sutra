@@ -438,33 +438,50 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   );
 
   assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
-  // The subject must be the claim GitHub actually mints. This previously read
-  // `repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main`,
-  // which is unmatchable twice over: `sub` carries no numeric ids, and a job
-  // declaring `environment:` gets the environment form rather than the ref
-  // form. The role was therefore unassumable, and a release died on
-  // "Not authorized to perform sts:AssumeRoleWithWebIdentity" the first time
-  // the pipeline ever reached the OIDC step.
+  // The trusted subject must name the environment the release job actually
+  // declares. This repository's tokens carry the repo component with immutable
+  // ids -- observed, not assumed: run 31004938955 assumed this role on
+  // 2026-08-05 against a policy pinning that exact repo component with a
+  // `:ref:refs/heads/main` selector. Adding `environment: ec2-live-release` to
+  // the job in 23c8236 swapped the selector for the environment form and broke
+  // the match, which STS reports only as "Not authorized to perform
+  // sts:AssumeRoleWithWebIdentity".
   const releaseEnvironment = /^\s{4}environment: (\S+)$/mu.exec(workflow);
   assert.ok(releaseEnvironment !== null, "the release job must run in an environment");
-  assert.match(
-    role,
-    new RegExp(
-      `token\\.actions\\.githubusercontent\\.com:sub: repo:ydsveluvolu2996/Sutra:environment:${releaseEnvironment[1]}$`,
-      "mu",
-    ),
+  const trustedSubject =
+    `repo:ydsveluvolu2996@229068958/Sutra@1301833628:environment:${releaseEnvironment[1]}`;
+  assert.ok(
+    role.includes(`token.actions.githubusercontent.com:sub: ${trustedSubject}`),
     "the trusted subject must name the environment the release job actually runs in",
   );
   assert.doesNotMatch(role, /token\.actions\.githubusercontent\.com:sub:.*\*/u);
+  // Keeping the ref form alongside the environment form would let any workflow
+  // on main assume the role without the environment's reviewer approval.
   assert.doesNotMatch(
     role,
-    /token\.actions\.githubusercontent\.com:sub:.*@[0-9]/u,
-    "sub carries no numeric identity; use the repository_id claims for that",
+    /token\.actions\.githubusercontent\.com:sub:.*:ref:/u,
+    "the ref-form subject bypasses the environment approval and must not be trusted",
   );
-  // The immutable identity the subject cannot express is pinned separately, so
-  // an owner rename or a re-registered login still cannot assume this role.
-  assert.match(role, /token\.actions\.githubusercontent\.com:repository_owner_id: "229068958"/u);
-  assert.match(role, /token\.actions\.githubusercontent\.com:repository_id: "1301833628"/u);
+  // The workflow proves the presented subject matches before STS is called, so
+  // a mismatch reports both values instead of one opaque authorization error.
+  assert.match(workflow, /- name: Report the OIDC subject before assuming the release role/u);
+  assert.ok(
+    workflow.includes(`EXPECTED_SUB: ${trustedSubject}`),
+    "the pre-flight check must expect exactly the subject the trust policy pins",
+  );
+  const subjectCheckStart = workflow.indexOf(
+    "- name: Report the OIDC subject before assuming the release role",
+  );
+  assert.ok(
+    subjectCheckStart < oidcStart,
+    "the subject must be checked before credentials are assumed",
+  );
+  const subjectCheck = workflow.slice(subjectCheckStart, oidcStart);
+  assert.match(subjectCheck, /token presents: \$\{actual_sub\}/u);
+  assert.match(subjectCheck, /policy expects: \$\{EXPECTED_SUB\}/u);
+  // The identity token is a credential. It may be inspected but never printed,
+  // and never placed in argv where the process list would expose it.
+  assert.doesNotMatch(subjectCheck, /echo .*\$\{token\}|node -e .*"\$\{token\}"/u);
   assert.match(role, /Action: ssm:GetConnectionStatus/u);
   assert.match(role, /Action: ssm:SendCommand/u);
   assert.match(role, /Sutra-DeployImmutableRelease/u);
