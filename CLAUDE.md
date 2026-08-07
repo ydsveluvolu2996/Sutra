@@ -1,5 +1,44 @@
 # Claude Code repository instructions
 
+## Release and deployment policy
+
+Merging and deploying are separate decisions. This policy governs both and
+overrides the merge half of the release constraint in the anti-rework protocol
+below.
+
+- Merge a pull request into `main` as soon as its required checks are green.
+  No deployment authorization is needed to merge.
+- Never approve a release run. Deployment to https://www.sutracmdb.com happens
+  only when the user says "deploy" in that turn. A merge is not a deploy
+  instruction, an approval given for an earlier release does not carry forward,
+  and neither does a green pipeline.
+- Every merge to `main` automatically fires `ec2-live-release.yml`, which parks
+  on the `ec2-live-release` environment approval. Parked runs are expected to
+  accumulate; leave them parked.
+- Each parked run is pinned to the SHA it was created from. When the user says
+  "deploy", approve the newest parked run, or dispatch a fresh one at current
+  `main` if the newest parked run is not the current head. Never approve an
+  older parked run -- doing so deploys superseded code over newer code.
+  State which SHA is going live before approving.
+- Parked runs expire after 30 days. After a long gap, dispatch fresh rather
+  than approving a stale run.
+- Superseded parked runs are left to expire. Do not approve them to clear the
+  queue.
+
+Do not open a pull request unless the user asks for one. The round trip costs
+more time than it returns on work the user is waiting on.
+
+- Commit and push completed work directly to `main`. No branch, no pull
+  request, no waiting to be told to merge.
+- Open a pull request only when the user says to, or when the change cannot be
+  verified locally and needs CI to prove it.
+- Push only what local verification already covers: the relevant tests,
+  `tsc`, `eslint` and the repository secret scan for the changed area. CI on
+  `main` is then a confirmation, not the first time the change is checked.
+- If a direct push does turn `main` red, fixing it is the immediate next task,
+  ahead of whatever came next. A red `main` blocks every later release, because
+  the release run only fires on a successful CI run.
+
 ## Mandatory read order
 
 Before editing this repository, read these files completely in order:
@@ -22,7 +61,7 @@ The active continuation branch is `agent/mac-mini-finops-continuation`. Confirm 
 - Update evidence and tracker maturity only after the final feature SHA passes all required candidate gates.
 - Commit and push the feature first; commit and push evidence/tracker changes second. Never force-push or rewrite handoff history.
 - ADD-02 Azure and ADD-03 GCP remain excluded from the 27-dashboard release.
-- Do not merge, publish an image or deploy until all 27 in-scope dashboards and G7 release acceptance pass and the user explicitly authorizes deployment.
+- Do not publish an image or deploy until all 27 in-scope dashboards and G7 release acceptance pass and the user explicitly authorizes deployment. Merging is governed by the release and deployment policy at the top of this file: green pull requests merge into `main` without deployment authorization.
 
 ## Parallel-agent ownership rule
 
