@@ -133,6 +133,26 @@ test("a FOCUS 1.2 export maps to its own contract, and other tables are ignored"
   assert.equal(exports[0]?.contractId, FOUNDATIONAL_EXPORT_TABLES.FOCUS_1_2_AWS);
 });
 
+test("an inherited Object.prototype key is not a valid table name", async () => {
+  // `tableName in FOUNDATIONAL_EXPORT_TABLES` walked the prototype chain, so a
+  // TableConfigurations key of `constructor` or `toString` passed validation and
+  // indexed the frozen map to an inherited function. Object.hasOwn closes it.
+  for (const table of ["constructor", "toString", "hasOwnProperty", "__proto__"]) {
+    const outcome = await discoverFoundationalDataExports(
+      {
+        region: REGION,
+        credentials: CREDENTIALS,
+        clientFactory: stubClient({
+          list: () => ({ Exports: [{ ExportArn: ARN("acme-cur2") }] }),
+          get: () => detailFor({ name: "acme-cur2", table }),
+        }).factory,
+      },
+      new AbortController().signal,
+    );
+    assert.equal(outcome.kind, "none", table);
+  }
+});
+
 test("no exports is 'none', and a denial is 'unavailable' — never the same fact", async () => {
   // This distinction is the whole point of the outcome union. A customer who has
   // not created an export and a customer whose role was denied ListExports need

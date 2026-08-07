@@ -1,5 +1,64 @@
 # Claude Code repository instructions
 
+## Release and deployment policy
+
+Merging and deploying are separate decisions. This policy governs both and
+overrides the merge half of the release constraint in the anti-rework protocol
+below.
+
+- Merging into `main` requires the user to have said "commit to main" (or
+  equivalent) in that turn. Green checks are a precondition for merging, never
+  an instruction to merge. Nothing else authorizes it: not finishing the work,
+  not the user approving the work itself, not a reviewer signing off.
+- Merging does not require deployment authorization. "Commit to main"
+  authorizes the merge and nothing further.
+- Never approve a release run. Deployment to https://www.sutracmdb.com happens
+  only when the user says "deploy" in that turn. A merge is not a deploy
+  instruction, an approval given for an earlier release does not carry forward,
+  and neither does a green pipeline.
+- Every merge to `main` automatically fires `ec2-live-release.yml`, which parks
+  on the `ec2-live-release` environment approval. Parked runs are expected to
+  accumulate; leave them parked.
+- Each parked run is pinned to the SHA it was created from. When the user says
+  "deploy", approve the newest parked run, or dispatch a fresh one at current
+  `main` if the newest parked run is not the current head. Never approve an
+  older parked run -- doing so deploys superseded code over newer code.
+  State which SHA is going live before approving.
+- Parked runs expire after 30 days. After a long gap, dispatch fresh rather
+  than approving a stale run.
+- Superseded parked runs are left to expire. Do not approve them to clear the
+  queue.
+
+There is exactly one development branch: **`develop`**. All work goes there.
+
+- Commit and push new functionality to `develop`. Do not create a branch per
+  change, per feature or per fix -- a second working branch is the thing this
+  rule exists to prevent.
+- Keep exactly one standing pull request open, `develop` -> `main`, titled
+  `develop → main`. It updates itself with every push, so no pull request is
+  ever opened per change. If none is open, open one; never open a second.
+- The standing pull request is not ceremony. CI triggers on `pull_request` and
+  on `push` to `main`, and not on branch pushes, so without it `develop` would
+  carry no verification at all and the first CI run would happen on `main` --
+  where a green run is what fires a release. It is the only thing keeping
+  unverified code off `main`.
+- `develop` is only promoted to `main` when the user says "commit to main" (or
+  equivalent). Merging is never implied by finishing work, by green checks, or
+  by the user approving the work itself. Promotion merges the standing pull
+  request; open a fresh one for the next cycle immediately afterwards.
+- Promotion is a fast-forward or merge of `develop` into `main`, never a
+  force-push and never a rewrite of `main`.
+- Push only what local verification already covers: the relevant tests, `tsc`,
+  `eslint` and the repository secret scan for the changed area.
+- If a push turns `main` red, fixing it is the immediate next task, ahead of
+  whatever came next. A red `main` blocks every later release, because the
+  release run only fires on a successful CI run.
+
+Promoting to `main` fires a release run, which then waits for the
+`ec2-live-release` environment approval. That approval is the deployment
+permission prompt: it is answered by the user, never by an agent. "Commit to
+main" authorizes the merge, not the deployment.
+
 ## Mandatory read order
 
 Before editing this repository, read these files completely in order:
@@ -9,7 +68,7 @@ Before editing this repository, read these files completely in order:
 3. The matching `docs/finops-cid-evidence/<ID>-*.md` record for the dashboard being closed
 4. `docs/FINOPS_VERTICAL_CLOSURE_TEMPLATE.md`
 
-The active continuation branch is `agent/mac-mini-finops-continuation`. Confirm the branch is current, the worktree is clean, and commit `4a2aa98` is an ancestor before making changes.
+`agent/mac-mini-finops-continuation` and commit `4a2aa98` are the historical origin of this work, recorded so the handover documents can be read in context. They are no longer a precondition for editing: work happens on `develop` per the branching policy above, and that policy wins. Confirm only that `develop` is current and the worktree is clean before making changes.
 
 ## Non-negotiable anti-rework protocol
 
@@ -22,7 +81,7 @@ The active continuation branch is `agent/mac-mini-finops-continuation`. Confirm 
 - Update evidence and tracker maturity only after the final feature SHA passes all required candidate gates.
 - Commit and push the feature first; commit and push evidence/tracker changes second. Never force-push or rewrite handoff history.
 - ADD-02 Azure and ADD-03 GCP remain excluded from the 27-dashboard release.
-- Do not merge, publish an image or deploy until all 27 in-scope dashboards and G7 release acceptance pass and the user explicitly authorizes deployment.
+- Do not publish an image or deploy until all 27 in-scope dashboards and G7 release acceptance pass and the user explicitly authorizes deployment. Merging is governed by the release and deployment policy at the top of this file: green pull requests merge into `main` without deployment authorization.
 
 ## Parallel-agent ownership rule
 
