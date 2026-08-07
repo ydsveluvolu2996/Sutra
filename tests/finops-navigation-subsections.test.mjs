@@ -126,7 +126,14 @@ test("the open dashboard is the item marked aria-current, gating untouched", () 
 
 test("dashboard destinations are gated no more permissively than /costs", () => {
   const costs = finops.items.find((item) => item.key === "costs");
-  for (const item of [...dashboardItems, finops.items.find((entry) => entry.key === "finops_dashboards")]) {
+  for (const item of [
+    ...dashboardItems,
+    finops.items.find((entry) => entry.key === "finops_dashboards"),
+    // The source contract moved here from /onboard, where it was visible to
+    // anyone who could reach the onboarding screen. It must be gated exactly
+    // like the dashboards it describes, not more loosely.
+    finops.items.find((entry) => entry.key === "finops_sources"),
+  ]) {
     assert.deepEqual([...item.capabilities], [...costs.capabilities]);
   }
 
@@ -135,7 +142,9 @@ test("dashboard destinations are gated no more permissively than /costs", () => 
 
   const reader = visibleNavigation(new Set(["workspace:read", "connection:read"]))
     .find((group) => group.key === "finops");
-  assert.equal(reader.items.length, 32);
+  // 29 dashboards plus AWS costs, Customer showback, All dashboards and Data
+  // sources. Pinned so a nav item cannot appear without a decision.
+  assert.equal(reader.items.length, 33);
 });
 
 test("the rail does not present delivery maturity as production readiness", () => {

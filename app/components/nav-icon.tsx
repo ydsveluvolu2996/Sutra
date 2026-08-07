@@ -83,6 +83,7 @@ const DASHBOARD_ICONS = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) 
 const KEY_ICON: Record<NavKey, IconName> = {
   ...DASHBOARD_ICONS,
   finops_dashboards: "grid",
+  finops_sources: "layers",
   overview: "dashboard",
   customers: "users",
   onboard: "plus",
@@ -164,6 +165,7 @@ const DASHBOARD_TONES = Object.fromEntries(FINOPS_DASHBOARD_CATALOG.map((entry) 
 const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
   ...DASHBOARD_TONES,
   finops_dashboards: "amber",
+  finops_sources: "amber",
   overview: "cyan",
   customers: "blue",
   onboard: "green",

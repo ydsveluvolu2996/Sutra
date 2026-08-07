@@ -24,23 +24,23 @@
  * export. Live per-tenant source health is computed only by
  * `buildFinopsSourceReadiness` from persisted evidence.
  */
-import { AWS_CUSTOMER_ROLE_TEMPLATE_VERSION } from "../../lib/aws-template-contract";
+import { AWS_CUSTOMER_ROLE_TEMPLATE_VERSION } from "../../../lib/aws-template-contract";
 import {
   FINOPS_DASHBOARD_CATALOG,
   type FinopsDashboardCatalogEntry,
   type FinopsDashboardLevel,
-} from "../../lib/finops-dashboard-catalog";
+} from "../../../lib/finops-dashboard-catalog";
 import {
   FINOPS_CAPABILITY_DEFINITIONS,
   FINOPS_SOURCE_DEFINITIONS,
   type FinopsCapabilityId,
   type FinopsSourceId,
-} from "../../lib/finops-source-health";
+} from "../../../lib/finops-source-health";
 import {
   getFinopsCapabilityRuntime,
   getFinopsSourceRuntimeBinding,
   type FinopsRuntimeTransport,
-} from "../../lib/finops-source-runtime-registry";
+} from "../../../lib/finops-source-runtime-registry";
 import {
   ADVANCED_FINOPS_PERMISSION_PACK_VERSION,
   AMAZON_CONNECT_PERMISSION_PACK_VERSION,
@@ -60,7 +60,7 @@ import {
   ORGANIZATION_FINOPS_PERMISSION_PACK_VERSION,
   RESILIENCE_VUE_PERMISSION_PACK_VERSION,
   SUSTAINABILITY_CARBON_PERMISSION_PACK_VERSION,
-} from "../../services/aws-collector/src/types";
+} from "../../../services/aws-collector/src/types";
 
 /** Pack version the CloudFormation role this screen deploys actually pins. */
 export const ONBOARDING_TEMPLATE_PACK_VERSION = AWS_CUSTOMER_ROLE_TEMPLATE_VERSION;

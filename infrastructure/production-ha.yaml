@@ -350,6 +350,37 @@ Conditions:
   AgentlessExecutionApproved: !Equals [!Ref AgentlessLiveValidationApproval, approved-after-live-end-to-end-agentless-validation]
 
 Resources:
+  # Wraps the data keys that encrypt customer-supplied AWS access keys. A
+  # separate key from the taxonomy signer on purpose: that one signs Sutra's own
+  # attestations, and sharing one key would put two unrelated blast radiuses
+  # behind a single grant and a single rotation schedule.
+  #
+  # Retained on delete. Losing it would make every stored customer credential
+  # permanently unreadable, which is a data-loss event, not a cleanup.
+  CustomerCredentialKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Retained symmetric key wrapping hosted customer-credential data keys.
+      Enabled: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      EnableKeyRotation: true
+      MultiRegion: false
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountIamPolicies
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - { Key: "sutra:component", Value: hosted-customer-credentials }
+        - { Key: "sutra:environment", Value: production }
+
   TrustedAdvisorTaxonomySigningKey:
     Type: AWS::KMS::Key
     DeletionPolicy: Retain
@@ -1507,6 +1538,46 @@ Resources:
                     aws:RequestedRegion: !Ref "AWS::Region"
                     kms:MessageType: DIGEST
                     kms:SigningAlgorithm: RSASSA_PSS_SHA_256
+        # The two calls hosted-credential-envelope.ts makes, on one exact key.
+        # The encryption-context conditions matter more than the resource:
+        # without them any ciphertext this role can reach decrypts, and one
+        # tenant's stored keys could be unwrapped under another tenant's scope.
+        #
+        # Null enforces PRESENCE. ForAllValues alone is a subset check -- it
+        # constrains which keys may appear, not which must -- so a request
+        # carrying only tenant and purpose would otherwise satisfy the policy
+        # and escape the per-connection boundary this grant claims to draw.
+        - PolicyName: WrapOnlyCustomerCredentialDataKeys
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WrapAndUnwrapScopedCustomerCredentialDataKeys
+                Effect: Allow
+                Action: ["kms:GenerateDataKey", "kms:Decrypt"]
+                Resource: !GetAtt CustomerCredentialKey.Arn
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref "AWS::Region"
+                    kms:EncryptionContext:sutra:purpose: hosted-static-credentials-v1
+                  "Null":
+                    kms:EncryptionContext:sutra:tenant-id: "false"
+                    kms:EncryptionContext:sutra:connection-id: "false"
+                  "ForAllValues:StringEquals":
+                    kms:EncryptionContextKeys:
+                      - sutra:tenant-id
+                      - sutra:connection-id
+                      - sutra:purpose
+              - Sid: DenyKeyAdministrationFromTheWorkloadRole
+                Effect: Deny
+                Action:
+                  - kms:CreateGrant
+                  - kms:RetireGrant
+                  - kms:RevokeGrant
+                  - kms:PutKeyPolicy
+                  - kms:ScheduleKeyDeletion
+                  - kms:DisableKey
+                  - kms:DisableKeyRotation
+                Resource: "*"
         - PolicyName: AssumeOnlyDedicatedCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"
@@ -1879,6 +1950,9 @@ Resources:
             - { Name: SUTRA_DB_NAME, Value: sutra }
             - { Name: SUTRA_DB_APP_USER, Value: sutra_app }
             - { Name: SUTRA_COLLECTOR_PRINCIPAL_ARN, Value: !GetAtt BrokerTaskRole.Arn }
+            # Read by hosted-server.ts. This is the process that actually
+            # constructs the envelope; the application worker never does.
+            - { Name: SUTRA_HOSTED_CREDENTIAL_KMS_KEY_ARN, Value: !GetAtt CustomerCredentialKey.Arn }
             - { Name: AWS_REGION, Value: !Ref "AWS::Region" }
             - { Name: AWS_DEFAULT_REGION, Value: !Ref "AWS::Region" }
             - { Name: SUTRA_AGENTLESS_SCAN_ACCOUNT_ID, Value: !Ref "AWS::AccountId" }

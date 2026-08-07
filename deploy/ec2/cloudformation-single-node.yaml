@@ -107,18 +107,6 @@ Parameters:
       endpoint from each destination's ses_region, which need not be the stack
       region. Never a wildcard.
 
-  HostedCredentialKmsKeyArn:
-    Type: String
-    Default: ""
-    AllowedPattern: "^$|^arn:aws:kms:[a-z0-9-]{1,32}:[0-9]{12}:key/[a-f0-9-]{36}$"
-    Description: >-
-      Exactly one customer-managed KMS key used to wrap the data keys that
-      encrypt customer-supplied AWS access keys. The default empty string grants
-      the instance role no kms permission at all, and the collector then refuses
-      access-key onboarding outright rather than sealing customer key material
-      under the shared application registry key. Must be a key ARN, never an
-      alias and never a wildcard: an alias can be repointed at another key
-      without the role's grant changing.
 Conditions:
   CreateDailyStop:
     Fn::Equals:
@@ -130,14 +118,6 @@ Conditions:
     Fn::Not:
       - Fn::Equals:
           - Ref: NotificationSesIdentityArn
-          - ""
-  # Same shape, same reason: until an operator names one exact CMK, the role
-  # carries no kms statement, and the collector refuses static-credential
-  # onboarding rather than sealing customer keys under the registry key.
-  GrantCustomerCredentialEnvelope:
-    Fn::Not:
-      - Fn::Equals:
-          - Ref: HostedCredentialKmsKeyArn
           - ""
 
 Resources:
@@ -313,53 +293,6 @@ Resources:
             Effect: Allow
             Action: ["ses:SendEmail", "ses:SendRawEmail"]
             Resource: { Ref: NotificationSesIdentityArn }
-
-  # The two calls the envelope makes, on one exact key, and only for envelopes
-  # this collector created. The encryption-context conditions matter more than
-  # the resource: without them, any ciphertext the role can reach decrypts, and
-  # a customer's stored keys could be unwrapped under another tenant's scope.
-  # `kms:EncryptionContextKeys` requires the tenant and connection keys to be
-  # present at all; `sutra:purpose` pins the envelope's purpose so a data key
-  # minted for some other feature cannot be reused here.
-  CustomerCredentialEnvelopePolicy:
-    Type: AWS::IAM::Policy
-    Condition: GrantCustomerCredentialEnvelope
-    Properties:
-      PolicyName: WrapOnlyCustomerCredentialDataKeys
-      Roles: [{ Ref: InstanceRole }]
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: WrapAndUnwrapScopedCustomerCredentialDataKeys
-            Effect: Allow
-            Action: ["kms:GenerateDataKey", "kms:Decrypt"]
-            Resource: { Ref: HostedCredentialKmsKeyArn }
-            Condition:
-              StringEquals:
-                kms:EncryptionContext:sutra:purpose: hosted-static-credentials-v1
-              "ForAllValues:StringEquals":
-                kms:EncryptionContextKeys:
-                  - sutra:tenant-id
-                  - sutra:connection-id
-                  - sutra:purpose
-              "ForAnyValue:StringEquals":
-                kms:EncryptionContextKeys:
-                  - sutra:tenant-id
-          # The role must never be able to change who else can use the key, and
-          # never to schedule its deletion. Both are denied outright rather than
-          # merely left ungranted, so a future broadening of an Allow elsewhere
-          # cannot reach them.
-          - Sid: DenyKeyAdministrationFromTheWorkloadRole
-            Effect: Deny
-            Action:
-              - kms:CreateGrant
-              - kms:RetireGrant
-              - kms:RevokeGrant
-              - kms:PutKeyPolicy
-              - kms:ScheduleKeyDeletion
-              - kms:DisableKey
-              - kms:DisableKeyRotation
-            Resource: "*"
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile

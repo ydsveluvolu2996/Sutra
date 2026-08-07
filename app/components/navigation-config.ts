@@ -20,6 +20,7 @@ export function finopsDashboardNavKey(catalogId: FinopsDashboardCatalogId): Fino
 
 export type NavKey =
   | "finops_dashboards"
+  | "finops_sources"
   | FinopsDashboardNavKey
   | "overview"
   | "customers"
@@ -252,10 +253,14 @@ export const navGroups: readonly NavGroup[] = [
       { key: "costs", label: "AWS costs", href: "/costs", capabilities: readConnection },
       { key: "showback", label: "Customer showback", href: "/costs/showback", capabilities: readConnection },
       { key: "finops_dashboards", label: "All dashboards", href: "/costs/dashboards", capabilities: readConnection },
+      // The source contract belongs beside the dashboards it describes. It used
+      // to render on /onboard, so registering one AWS role also displayed the
+      // whole catalog.
+      { key: "finops_sources", label: "Data sources", href: "/costs/sources", capabilities: readConnection },
       ...finopsDashboardItems,
     ],
     sections: [
-      { label: "Cost workspace", keys: ["costs", "showback", "finops_dashboards"] },
+      { label: "Cost workspace", keys: ["costs", "showback", "finops_dashboards", "finops_sources"] },
       ...finopsLevelSections,
     ],
   },
