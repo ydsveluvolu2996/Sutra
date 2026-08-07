@@ -345,6 +345,23 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   );
   const templateGate = workflow.slice(templateGateStart, oidcStart);
   assert.match(templateGate, /vars\.SUTRA_TEMPLATE_BUCKET/u);
+  // Where the template is published is independent of where the release
+  // deploys. Building the S3 URL from the deployment region silently broke the
+  // gate the first time they differed: the template sat in us-east-1 while the
+  // release targeted ap-south-1, so the fetch 404'd on a correctly published
+  // object. The region falls back to AWS_REGION when unset, so a same-region
+  // deployment is unaffected.
+  assert.match(templateGate, /vars\.SUTRA_TEMPLATE_REGION/u);
+  assert.match(templateGate, /template_region="\$\{TEMPLATE_REGION:-\$\{AWS_REGION\}\}"/u);
+  assert.match(templateGate, /s3\.\$\{template_region\}\.amazonaws\.com/u);
+  assert.doesNotMatch(
+    templateGate,
+    /s3\.\$\{AWS_REGION\}\.amazonaws\.com/u,
+    "the template URL must not be built from the deployment region",
+  );
+  // The deterministic bucket name ends in the region it was created in, so a
+  // mismatch is reported as a mismatch rather than an opaque 404.
+  assert.match(templateGate, /does not end in the template region/u);
   assert.match(templateGate, /templates\/\$\{version\}\/\$\{digest\}\.yaml/u);
   assert.match(templateGate, /AWS_CUSTOMER_ROLE_TEMPLATE_VERSION/u);
   assert.match(templateGate, /AWS_CUSTOMER_ROLE_TEMPLATE_SHA256/u);
