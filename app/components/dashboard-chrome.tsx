@@ -171,6 +171,110 @@ export function StatePill({ state, label }: { readonly state: ChromeState; reado
   return <span className={styles.statePill} data-state={state}>{label}</span>;
 }
 
+/**
+ * Compact severity counts, e.g. `3 C  4 H  13 M`.
+ *
+ * Built for a table cell where a full legend will not fit. The letter is an
+ * abbreviation of the label, never a replacement for it: each entry carries a
+ * title and screen-reader text with the full severity name, so the meaning does
+ * not depend on knowing the shorthand or seeing the colour.
+ */
+export function SeverityCountGroup({
+  counts,
+}: {
+  readonly counts: readonly SeverityCount[];
+}) {
+  return (
+    <span className={styles.severityCounts}>
+      {counts.map((entry) => (
+        <span key={entry.severity} data-severity={entry.severity} title={`${entry.count} ${entry.label}`}>
+          <b>{entry.count.toLocaleString("en-US")}</b>
+          <i aria-hidden="true">{entry.label.slice(0, 1).toUpperCase()}</i>
+          <span className="sr-only">{entry.label}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A period-over-period change, e.g. `56% lower`.
+ *
+ * Direction and sentiment are separate for the same reason as on StatTile: a
+ * fall in open issues is good and a fall in coverage is bad.
+ */
+export function TrendPill({
+  label,
+  direction,
+  sentiment,
+}: {
+  readonly label: string;
+  readonly direction: "up" | "down" | "flat";
+  readonly sentiment: "good" | "bad" | "neutral";
+}) {
+  return (
+    <span className={styles.trendPill} data-sentiment={sentiment}>
+      <svg viewBox="0 0 10 10" aria-hidden="true">
+        {direction === "flat"
+          ? <path d="M2 5h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          : <path
+              d={direction === "up" ? "M5 8V2m0 0L2.5 4.5M5 2l2.5 2.5" : "M5 2v6m0 0L2.5 5.5M5 8l2.5-2.5"}
+              fill="none" stroke="currentColor" strokeWidth="1.6"
+              strokeLinecap="round" strokeLinejoin="round"
+            />}
+      </svg>
+      {label}
+    </span>
+  );
+}
+
+/** A key/value chip, e.g. an external system reference on a row. */
+export function TagChip({ label, value }: { readonly label: string; readonly value?: string }) {
+  return (
+    <span className={styles.tagChip}>
+      <span>{label}</span>
+      {value === undefined ? null : <b>{value}</b>}
+    </span>
+  );
+}
+
+export interface RankedEntry {
+  readonly id: string;
+  readonly label: string;
+  readonly value: string;
+  readonly meta?: ReactNode;
+}
+
+/**
+ * A short ranked list inside a card -- "top five by X".
+ *
+ * Ranks are numbered rather than implied by order alone, and an empty list says
+ * so, because a blank card reads as a broken one.
+ */
+export function RankedList({
+  entries,
+  empty = "No results for the current filters.",
+}: {
+  readonly entries: readonly RankedEntry[];
+  readonly empty?: ReactNode;
+}) {
+  if (entries.length === 0) {
+    return <p className={styles.rankedEmpty} role="status">{empty}</p>;
+  }
+  return (
+    <ol className={styles.rankedList}>
+      {entries.map((entry, index) => (
+        <li key={entry.id}>
+          <span className={styles.rank} aria-hidden="true">{index + 1}</span>
+          <span className={styles.rankLabel}>{entry.label}</span>
+          {entry.meta === undefined ? null : <span className={styles.rankMeta}>{entry.meta}</span>}
+          <b>{entry.value}</b>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export interface DataTableColumn<Row> {
   readonly id: string;
   readonly header: string;

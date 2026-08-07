@@ -89,3 +89,30 @@ test("an empty table says so instead of rendering an empty body", () => {
 test("the chrome stays presentational so server components can render it", () => {
   assert.doesNotMatch(chrome, /\buseState\b|\buseEffect\b|\buseMemo\b|"use client"/u);
 });
+
+test("the compact severity counts never rely on the letter alone", () => {
+  const start = chrome.indexOf("export function SeverityCountGroup(");
+  const body = chrome.slice(start, chrome.indexOf("\nexport ", start + 1));
+  // The letter is an abbreviation; the full label must still reach a screen
+  // reader and a hover, so the cell is readable without decoding "C" or seeing
+  // the colour.
+  assert.match(body, /title=\{`\$\{entry\.count\} \$\{entry\.label\}`\}/u);
+  assert.match(body, /<span className="sr-only">\{entry\.label\}<\/span>/u);
+  assert.match(body, /aria-hidden="true">\{entry\.label\.slice\(0, 1\)/u);
+});
+
+test("trend pills separate direction from sentiment", () => {
+  const start = chrome.indexOf("export function TrendPill(");
+  const body = chrome.slice(start, chrome.indexOf("\nexport ", start + 1));
+  assert.match(body, /readonly direction: "up" \| "down" \| "flat";/u);
+  assert.match(body, /readonly sentiment: "good" \| "bad" \| "neutral";/u);
+  assert.match(chromeCss, /\.trendPill\[data-sentiment="bad"\]/u);
+});
+
+test("a ranked list numbers its ranks and says when it is empty", () => {
+  const start = chrome.indexOf("export function RankedList(");
+  const body = chrome.slice(start, chrome.indexOf("\nexport ", start + 1));
+  assert.match(body, /if \(entries\.length === 0\)/u);
+  assert.match(body, /role="status"/u);
+  assert.match(body, /\{index \+ 1\}/u);
+});
