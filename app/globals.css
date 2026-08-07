@@ -3774,3 +3774,68 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .app-shell .operations-job-table,
   .app-shell .change-event-list { margin-inline: -16px; }
 }
+
+/*
+ * Baseline table chrome for every dashboard.
+ *
+ * 47 of the 103 dashboard tables are written as a bare <table> with no class,
+ * so they inherited nothing and rendered at browser defaults beside their
+ * styled neighbours. These rules give every table -- classed or not -- the same
+ * density, a header that stays readable while the body scrolls, and numeric
+ * columns that line up.
+ *
+ * Scoped to .dashboard-surface so it cannot reach tables in unrelated pages
+ * that already style themselves deliberately.
+ */
+.dashboard-surface table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--table-font);
+}
+.dashboard-surface th,
+.dashboard-surface td {
+  padding: var(--table-pad-y) var(--table-pad-x);
+  text-align: left;
+  border-bottom: 1px solid var(--table-rule);
+  vertical-align: top;
+}
+.dashboard-surface thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--table-head-bg);
+  font-size: var(--table-head-font);
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--table-head-ink);
+  white-space: nowrap;
+}
+.dashboard-surface tbody tr:last-child > * { border-bottom: 0; }
+.dashboard-surface tbody tr:hover > * { background: var(--surface-soft); }
+/*
+ * A row header inside the body stays a header semantically but must not wear
+ * the sticky column-header styling.
+ */
+.dashboard-surface tbody th {
+  position: static;
+  background: transparent;
+  font-size: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--ink);
+}
+/* Digits line up down a column wherever a cell is marked numeric. */
+.dashboard-surface [data-numeric="true"],
+.dashboard-surface .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dashboard-surface caption {
+  padding-bottom: 6px;
+  text-align: left;
+  font-size: var(--table-head-font);
+  font-weight: 600;
+  color: var(--table-head-ink);
+}

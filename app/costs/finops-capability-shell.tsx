@@ -114,7 +114,7 @@ export function FinopsCapabilityShell({
     || state === "empty";
 
   return (
-    <article className={styles.capabilityShell} aria-labelledby={`finops-dashboard-${dashboard.slug}`}>
+    <article className={`${styles.capabilityShell} dashboard-surface`} aria-labelledby={`finops-dashboard-${dashboard.slug}`}>
       {/*
         The name, glyph and summary are rendered once by `FinopsDashboardIdentity`
         above every dashboard, so this header carries only the badges. The

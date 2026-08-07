@@ -91,7 +91,7 @@ export function FinopsDashboardRouteView({
   }
 
   return (
-    <div className={styles.page}>
+    <div className={`${styles.page} dashboard-surface`}>
       {view({ connectionId, dashboard, openSharedAnalysis })}
     </div>
   );
