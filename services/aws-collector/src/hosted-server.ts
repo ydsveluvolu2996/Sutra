@@ -9,6 +9,7 @@ import {
   HostedPostgresState,
   type HostedAgentlessRecoveryClaim,
 } from "./hosted-postgres-state.js";
+import { hostedCredentialKmsConfiguration } from "./hosted-credential-kms-client.js";
 import { HostedComputeOptimizerExportLaunchLedger } from
   "./compute-optimizer-export-launch-ledger.js";
 import { HostedRequestAuthenticator } from "./hosted-request-auth.js";
@@ -263,9 +264,15 @@ export async function startHostedCollectorServer(): Promise<{
   const taxonomySigningKeyId = hostedTaxonomySigningKey(identity.accountId, region);
 
   const databaseUrl = required("DATABASE_URL");
+  // Absent is a supported deployment: the broker then refuses static-credential
+  // connections rather than sealing customer key material under the shared
+  // application registry key. Present-but-wrong throws here, before the server
+  // listens.
+  const credentialKms = hostedCredentialKmsConfiguration(identity.accountId, region);
   const state = new HostedPostgresState({
     connectionString: databaseUrl,
     encryptionKey: required("SUTRA_REGISTRY_ENCRYPTION_KEY"),
+    ...credentialKms,
   });
   const launchLedger = new HostedComputeOptimizerExportLaunchLedger({
     connectionString: databaseUrl,
