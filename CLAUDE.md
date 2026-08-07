@@ -25,19 +25,28 @@ below.
 - Superseded parked runs are left to expire. Do not approve them to clear the
   queue.
 
-Do not open a pull request unless the user asks for one. The round trip costs
-more time than it returns on work the user is waiting on.
+There is exactly one development branch: **`develop`**. All work goes there.
 
-- Commit and push completed work directly to `main`. No branch, no pull
-  request, no waiting to be told to merge.
-- Open a pull request only when the user says to, or when the change cannot be
-  verified locally and needs CI to prove it.
-- Push only what local verification already covers: the relevant tests,
-  `tsc`, `eslint` and the repository secret scan for the changed area. CI on
-  `main` is then a confirmation, not the first time the change is checked.
-- If a direct push does turn `main` red, fixing it is the immediate next task,
-  ahead of whatever came next. A red `main` blocks every later release, because
-  the release run only fires on a successful CI run.
+- Commit and push new functionality to `develop`. Do not create a branch per
+  change, per feature or per fix -- a second working branch is the thing this
+  rule exists to prevent.
+- Do not open a pull request unless the user asks for one. The round trip costs
+  more time than it returns on work the user is waiting on.
+- `develop` is only promoted to `main` when the user says "commit to main" (or
+  equivalent). Merging is never implied by finishing work, by green checks, or
+  by the user approving the work itself.
+- Promotion is a fast-forward or merge of `develop` into `main`, never a
+  force-push and never a rewrite of `main`.
+- Push only what local verification already covers: the relevant tests, `tsc`,
+  `eslint` and the repository secret scan for the changed area.
+- If a push turns `main` red, fixing it is the immediate next task, ahead of
+  whatever came next. A red `main` blocks every later release, because the
+  release run only fires on a successful CI run.
+
+Promoting to `main` fires a release run, which then waits for the
+`ec2-live-release` environment approval. That approval is the deployment
+permission prompt: it is answered by the user, never by an agent. "Commit to
+main" authorizes the merge, not the deployment.
 
 ## Mandatory read order
 
