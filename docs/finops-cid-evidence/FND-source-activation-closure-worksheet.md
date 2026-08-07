@@ -59,7 +59,7 @@ $ grep -rl "FinopsDataExportObservationRepository" --include=*.ts .
 | Collector adapter | `services/aws-collector/src/scad-cur2-provider-adapter.ts` | `UNAVAILABLE_BY_CONTRACT` for reuse | Its whole runtime is uncomposed (`finops-scad-production-composition` has 0 callers; no `loadBoundary` implementation exists) | Do **not** build on it; mirror the wired Compute Optimizer discovery instead |
 | SDK reader/client | `@aws-sdk/client-s3` in collector; no `bcm-data-exports` client | `MISSING` | No `ListExports`/`GetExport` call anywhere | Add reader; command must be declared in `COLLECTOR_COMMANDS` |
 | Provider route | `app/api/v1/finops/cudos/route.ts` and siblings | `REUSE_AS_IS` | G4 `IMPLEMENTED_UNVERIFIED` | Freeze |
-| Session/IAM contract | `bcm-data-exports:ListExports` / `GetExport` | `MISSING` | **CORRECTED.** Both appear only inside `DenyUnimplementedActions` `NotAction` (ceiling-permitted, never Allowed). `.14`–`.18` Allow `GetExport`/`GetExecution`/`ListExecutions` but **no pack Allows `ListExports`** | Blocked on a permission decision — see below |
+| Session/IAM contract | `infrastructure/finops-foundational-cur2-export-v1.1.yaml` | `REUSE_AS_IS` | **CORRECTED TWICE.** The CUR 2.0 add-on already grants `ListExports` and bounds `GetExport` to the exact created export ARN. The base role must never grant them | Freeze; run discovery under the add-on session |
 | Role broker/local server | `services/aws-collector/src/local-server.ts`, `role-broker.ts` | `REPAIR` | New route needed to expose discovery; integrator-owned files | Bounded addition |
 | Drizzle migration | `finops_data_export_observations` in `db/runtime-migrations.ts` | `REUSE_AS_IS` | Table exists both engines | Freeze |
 | PostgreSQL migration | `postgres/migrations/0078_finops_data_export_observations.sql` | `REUSE_AS_IS` | Registered at `db/postgres-runtime-migrations.ts:205` | Freeze |
@@ -71,7 +71,7 @@ $ grep -rl "FinopsDataExportObservationRepository" --include=*.ts .
 | Native four-state UI | Foundational sheet shell + `finops-source-coverage.tsx` | `REUSE_AS_IS` | Four-state rendering asserted by existing tests | Freeze |
 | Focused tests | `tests/finops-data-export-ingest-job.test.ts`, `finops-cudos*.test.*`, `finops-foundational-ui-contract.test.mjs` | `REUSE_AS_IS` | 23 passed in FND-01 record | Freeze; add discovery tests alongside |
 | Shared/predecessor tests | `tests/collector-permission-coverage.test.mjs` | `REPAIR` | New SDK command must be mapped | One entry |
-| Permission successor | packs `.13`–`.18` exist; `.19` is the last slot reserved by `CLAUDE.md` | `MISSING` | Enumeration needs an Allow that no pack grants | **Decision required** — a new pack forces every onboarded customer to redeploy their role |
+| Permission successor | — | `UNAVAILABLE_BY_CONTRACT` → not required | The add-on grants both actions; a base-role grant is forbidden by test | **No new pack.** `.19` was authored, then deleted |
 | Documentation/tracker | FND-01/02/03 evidence, `FINOPS_CID_IMPLEMENTATION_TRACKER.md` | `REPAIR` | G1 must move from "activation gated" once observed | Update only after the final SHA passes gates |
 
 ## Second-pass finding: composed vs uncomposed runtimes
@@ -106,6 +106,54 @@ Consequences for this worksheet:
   to this one.
 - "Exists in the tree" is not a classification. Every `REUSE_AS_IS` row above was
   re-checked for a live caller before being frozen.
+
+## Third-pass finding: the permission gap was mine, not the repository's
+
+Two classifications in the table above were wrong, and a third correction
+reversed the first two. Recorded in full because the sequence is the lesson.
+
+**Pass 1 — wrong.** "`bcm-data-exports` actions are present in
+`public/sutra-customer-onboarding-role.yaml:216-217`, no successor needed."
+They are present only inside `DenyUnimplementedActions`'s `NotAction`. A ceiling
+permits an action; it never grants one.
+
+**Pass 2 — also wrong.** Concluded the base role must grant them, authored pack
+`.19` on `.18`, and pinned it. `tests/aws-template-contract.test.mjs` refused the
+adoption: pack `.14` grants `s3:GetObject` with `Resource: '*'` inside
+`ExactCostOptimizationHubRead` — account-wide object-payload read in the role
+every customer grants, contradicting the template's own guarantee. Rebuilt `.19`
+on `.12` instead, adding only the two enumeration actions.
+
+**Pass 3 — the actual answer.** `tests/finops-foundational-cur2-export-template.test.mjs`
+lists both actions in `ADD_ON_EXPORT_READS` and asserts the base role
+**never** grants them. They belong to the separately deployed CUR 2.0 add-on,
+which already grants them — and grants them better:
+
+```yaml
+- Sid: ListDataExports          # infrastructure/finops-foundational-cur2-export-v1.1.yaml
+  Action: bcm-data-exports:ListExports
+  Resource: '*'
+- Sid: ReadOnlyThisDataExport
+  Action: bcm-data-exports:GetExport
+  Resource: !GetAtt FoundationalCur2Export.ExportArn    # bounded to the export it created
+```
+
+My `.19` would have granted `GetExport` on `*`. The add-on bounds it to one exact
+export ARN.
+
+**Net permission change required by this vertical: none.** Pack `.19` was deleted,
+the pin stays at `.12`, and the two commands are scoped `source_session` in the
+coverage guard — the existing scope for an action that runs under a
+source-specific, fail-closed session rather than the default metadata role.
+
+What this changes for the implementation: discovery must run under the **add-on's
+session**, not the default collector session. A connection without the CUR 2.0
+add-on deployed cannot enumerate, and that is a `CONFIGURATION_REQUIRED` state to
+surface, not an error and not an empty result.
+
+**Separate defect, not fixed here:** `.14`'s `s3:GetObject` on `Resource: '*'`
+blocks adoption of the whole `.13`-`.19` chain and would fail a customer security
+review. It needs its own repair before any vertical adopts those packs.
 
 ## Frozen reuse set and bounded edit set
 
