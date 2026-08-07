@@ -25,20 +25,19 @@ below.
 - Superseded parked runs are left to expire. Do not approve them to clear the
   queue.
 
-Pull requests exist to keep `main` green, because a `main` push whose CI passes
-is what fires a release run. Where there is nothing for CI to prove, the pull
-request buys nothing and is skipped:
+Do not open a pull request unless the user asks for one. The round trip costs
+more time than it returns on work the user is waiting on.
 
-- Documentation-only changes -- `*.md` and files under `docs/` -- are committed
-  and pushed directly to `main`. No branch, no pull request.
-- Everything else goes through a pull request so its checks run before the code
-  lands: `app/`, `lib/`, `services/`, `db/`, `scripts/`, `infrastructure/`,
-  `tests/`, `.github/`, and any dependency manifest.
-- A change that touches both takes the pull request path. The documentation
-  exemption applies only when the change is documentation and nothing else.
-- Open pull requests ready for review, not as drafts, and merge them as soon as
-  the required checks are green without waiting to be told. Use a draft only
-  when the work is knowingly incomplete.
+- Commit and push completed work directly to `main`. No branch, no pull
+  request, no waiting to be told to merge.
+- Open a pull request only when the user says to, or when the change cannot be
+  verified locally and needs CI to prove it.
+- Push only what local verification already covers: the relevant tests,
+  `tsc`, `eslint` and the repository secret scan for the changed area. CI on
+  `main` is then a confirmation, not the first time the change is checked.
+- If a direct push does turn `main` red, fixing it is the immediate next task,
+  ahead of whatever came next. A red `main` blocks every later release, because
+  the release run only fires on a successful CI run.
 
 ## Mandatory read order
 
