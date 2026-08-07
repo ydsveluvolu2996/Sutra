@@ -75,8 +75,10 @@ export const docsSections: readonly DocSection[] = [
       },
       {
         label: "Connection health",
-        href: "/onboard#connection-lifecycle",
-        description: "Confirm the trust role is reachable, and revoke or clean up a connection when offboarding.",
+        href: "/connection-health",
+        // Health and lifecycle are separate destinations now, so the
+        // description no longer promises revocation from a read-only page.
+        description: "Confirm the trust binding is validated and collection is running. Disable and offboard live on Manage AWS account.",
       },
       {
         label: "Invite your team",

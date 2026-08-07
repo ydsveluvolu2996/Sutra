@@ -20,6 +20,7 @@ export function finopsDashboardNavKey(catalogId: FinopsDashboardCatalogId): Fino
 
 export type NavKey =
   | "finops_dashboards"
+  | "finops_sources"
   | FinopsDashboardNavKey
   | "overview"
   | "customers"
@@ -161,7 +162,10 @@ export const navGroups: readonly NavGroup[] = [
       { key: "onboard_client", label: "Onboard a client", href: "/onboard/client", capabilities: ["customer:create", "connection:manage"] },
       { key: "customers", label: "Customers & accounts", href: "/customers", capabilities: readWorkspace },
       { key: "onboard", label: "Manage AWS account", href: "/onboard", capabilities: ["connection:manage"] },
-      { key: "connection_health", label: "Connection health", href: "/onboard#connection-lifecycle", capabilities: readConnection },
+      // A read-only health page, not an anchor into the onboarding form. The old
+      // href landed on the Disable and Offboard controls, so "check health"
+      // arrived at the two destructive actions.
+      { key: "connection_health", label: "Connection health", href: "/connection-health", capabilities: readConnection },
     ],
   },
   {
@@ -252,10 +256,14 @@ export const navGroups: readonly NavGroup[] = [
       { key: "costs", label: "AWS costs", href: "/costs", capabilities: readConnection },
       { key: "showback", label: "Customer showback", href: "/costs/showback", capabilities: readConnection },
       { key: "finops_dashboards", label: "All dashboards", href: "/costs/dashboards", capabilities: readConnection },
+      // The source contract belongs beside the dashboards it describes. It used
+      // to render on /onboard, so registering one AWS role also displayed the
+      // whole catalog.
+      { key: "finops_sources", label: "Data sources", href: "/costs/sources", capabilities: readConnection },
       ...finopsDashboardItems,
     ],
     sections: [
-      { label: "Cost workspace", keys: ["costs", "showback", "finops_dashboards"] },
+      { label: "Cost workspace", keys: ["costs", "showback", "finops_dashboards", "finops_sources"] },
       ...finopsLevelSections,
     ],
   },

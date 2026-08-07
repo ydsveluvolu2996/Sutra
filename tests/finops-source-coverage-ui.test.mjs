@@ -28,14 +28,14 @@ const vite = await createServer({
 });
 after(async () => vite.close());
 
-const ui = await vite.ssrLoadModule("/app/onboard/finops-onboarding-sources.tsx");
-const map = await vite.ssrLoadModule("/app/onboard/finops-onboarding-source-map.ts");
+const ui = await vite.ssrLoadModule("/app/costs/sources/finops-source-coverage.tsx");
+const map = await vite.ssrLoadModule("/app/costs/sources/finops-source-coverage-map.ts");
 const catalog = await vite.ssrLoadModule("/lib/finops-dashboard-catalog.ts");
 const health = await vite.ssrLoadModule("/lib/finops-source-health.ts");
 const registry = await vite.ssrLoadModule("/lib/finops-source-runtime-registry.ts");
 const templateContract = await vite.ssrLoadModule("/lib/aws-template-contract.ts");
 
-const html = renderToStaticMarkup(createElement(ui.FinopsOnboardingSources));
+const html = renderToStaticMarkup(createElement(ui.FinopsSourceCoverage));
 const coverage = map.buildFinopsOnboardingCoverage();
 
 test("every catalog dashboard is rendered under its official level", () => {
@@ -268,7 +268,7 @@ test("reserved packs are exactly the successors this build's collector does not 
   assert.deepEqual(
     [...exported].sort(),
     [...map.ACCEPTED_SUCCESSOR_PACK_VERSIONS].sort(),
-    "the collector's pack constants changed: update app/onboard/finops-onboarding-source-map.ts so the onboarding UI stops calling a published pack reserved",
+    "the collector's pack constants changed: update app/costs/sources/finops-source-coverage-map.ts so the onboarding UI stops calling a published pack reserved",
   );
   // Packs .13 through .18 are now authored and accepted, so no source is
   // reserved-blocked any more. The invariant that matters is not "some reserved
@@ -351,16 +351,33 @@ test("the section renders no credential, ExternalId, account number or ARN", () 
   assert.doesNotMatch(html, /ExternalId|AKIA|SecretAccess|aws_secret/u);
 });
 
-test("the existing onboarding flow is still mounted alongside the new section", async () => {
-  const page = await readFile(`${root}app/onboard/page.tsx`, "utf8");
-  assert.match(page, /<OnboardAccount \/>/u);
-  assert.match(page, /<FinopsOnboardingSources \/>/u);
+test("the source contract lives in FinOps and the onboarding page carries only onboarding", async () => {
+  // It used to render under app/onboard/page.tsx, so registering one AWS role
+  // also displayed the whole 29-dashboard catalog -- and "Connection health",
+  // which links into that page by anchor, inherited it too.
+  const onboard = await readFile(`${root}app/onboard/page.tsx`, "utf8");
+  assert.match(onboard, /<OnboardAccount \/>/u);
+  assert.doesNotMatch(onboard, /FinopsSourceCoverage|FinopsOnboardingSources/u);
+
+  const finops = await readFile(`${root}app/costs/sources/page.tsx`, "utf8");
+  assert.match(finops, /<FinopsSourceCoverage \/>/u);
+  assert.match(finops, /active="finops_sources"/u);
+
+  // Reachable from the FinOps section, not orphaned at a URL nothing links to.
+  const navigation = await readFile(`${root}app/components/navigation-config.ts`, "utf8");
+  const finopsSection = navigation.slice(
+    navigation.indexOf('key: "finops"'),
+    navigation.indexOf('key: "operations"'),
+  );
+  assert.match(finopsSection, /key: "finops_sources".*href: "\/costs\/sources"/u);
+  assert.match(finopsSection, /keys: \["costs", "showback", "finops_dashboards", "finops_sources"\]/u);
+
   const client = await readFile(`${root}app/onboard/onboard-account.tsx`, "utf8");
   assert.match(client, /^"use client";/u);
   // The coverage section must stay server-rendered: the runtime registry is
   // server-owned policy and must not be pulled into the client bundle.
   assert.doesNotMatch(
-    await readFile(`${root}app/onboard/finops-onboarding-sources.tsx`, "utf8"),
+    await readFile(`${root}app/costs/sources/finops-source-coverage.tsx`, "utf8"),
     /"use client"/u,
   );
 });

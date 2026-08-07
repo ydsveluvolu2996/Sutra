@@ -1,12 +1,12 @@
-import { GlyphIcon } from "../components/nav-icon";
+import { GlyphIcon } from "../../components/nav-icon";
 import {
   buildFinopsOnboardingCoverage,
   describeSourceReads,
   describeTransport,
   type FinopsOnboardingDashboardView,
   type FinopsOnboardingSourceView,
-} from "./finops-onboarding-source-map";
-import styles from "./finops-onboarding-sources.module.css";
+} from "./finops-source-coverage-map";
+import styles from "./finops-source-coverage.module.css";
 
 /**
  * Onboarding-time answer to "what will this account actually feed?".
@@ -120,18 +120,18 @@ function DashboardCard({ dashboard }: { readonly dashboard: FinopsOnboardingDash
   );
 }
 
-export function FinopsOnboardingSources() {
+export function FinopsSourceCoverage() {
   const coverage = buildFinopsOnboardingCoverage();
 
   return (
-    <section className={styles.wrap} aria-labelledby="onboard-finops-coverage-title">
+    <section className={styles.wrap} aria-labelledby="finops-source-coverage-title">
       <header className={styles.head}>
         <div>
-          <p className="eyebrow">What this account will feed</p>
-          <h2 id="onboard-finops-coverage-title">FinOps dashboards and data sources</h2>
+          <p className="eyebrow">What each connected account feeds</p>
+          <h2 id="finops-source-coverage-title">FinOps dashboards and data sources</h2>
           <p className={styles.lede}>
             The official Cloud Intelligence Dashboards catalog, grouped by level, with the exact AWS
-            reads and permission pack each source needs. This is the declared onboarding contract, not
+            reads and permission pack each source needs. This is the declared source contract, not
             a health reading: nothing here is collecting until Sutra observes a real delivery, whether
             or not the permissions are already granted.
           </p>
