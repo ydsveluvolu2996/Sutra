@@ -53,6 +53,15 @@ const finopsTemplatePath = resolve(
 const COLLECTOR_COMMANDS = {
   AssumeRoleCommand: { action: "sts:AssumeRole", scope: "vendor" },
   SignCommand: { action: "kms:Sign", scope: "vendor_cryptographic" },
+  // Wrap and unwrap the data keys that encrypt customer-supplied AWS access
+  // keys. Vendor-cryptographic, not customer: the CMK lives in Sutra's own
+  // account and is used by the broker task role, never by the assumed customer
+  // session. Granting either of these in the onboarding template would ask
+  // every customer for a permission Sutra does not use against their account.
+  // The instance-role grant lives in deploy/ec2/cloudformation-single-node.yaml
+  // and is bound to the envelope's exact encryption context.
+  GenerateDataKeyCommand: { action: "kms:GenerateDataKey", scope: "vendor_cryptographic" },
+  DecryptCommand: { action: "kms:Decrypt", scope: "vendor_cryptographic" },
   // Reads an agentless scan's published findings from SUTRA's OWN bucket. Vendor
   // scope, deliberately: this is never a customer permission, and putting it in the
   // onboarding template would misrepresent what Sutra asks customers to grant.
