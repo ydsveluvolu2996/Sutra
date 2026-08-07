@@ -25,15 +25,36 @@ export interface DeploymentRow {
   readonly connection: PortfolioConnectionSummary;
 }
 
+// Keyed by the type, so a new source kind fails the build here rather than
+// silently losing its tab: a deployment whose kind has no entry is reachable
+// only under "All", and selecting any other tab hides it entirely.
 const KIND_LABEL: Readonly<Record<PortfolioConnectionSummary["sourceKind"], string>> = {
   aws_trust_role: "Cloud",
+  aws_static_credentials: "Access keys",
   simulated_fixture: "Simulated",
 };
 
-const STATUS_ORDER = ["active", "pending", "disabled", "error"] as const;
+// Exactly the states connectionHealth() derives, in escalation order. It
+// previously omitted `validating` and `needs_attention` and carried an `error`
+// state that is never produced -- so aging, stale, failed-validation and
+// in-progress rows could not be selected at all, and a queue holding only
+// healthy plus needs-attention rows showed no status controls, because just one
+// listed state counted as present.
+const STATUS_ORDER = ["active", "validating", "pending", "needs_attention", "disabled"] as const;
+
+const STATUS_LABEL: Readonly<Record<(typeof STATUS_ORDER)[number], string>> = {
+  active: "Active",
+  validating: "Validating",
+  pending: "Pending",
+  needs_attention: "Needs attention",
+  disabled: "Disabled",
+};
 
 function statusLabel(state: string): string {
-  return `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`;
+  return STATUS_LABEL[state as (typeof STATUS_ORDER)[number]]
+    // A state outside the map is shown as-is rather than capitalised into a
+    // plausible-looking label that hides the fact it was never expected.
+    ?? state.replace(/_/gu, " ");
 }
 
 export function DeploymentsPanel({

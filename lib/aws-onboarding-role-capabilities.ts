@@ -45,9 +45,9 @@ export const ONBOARDING_ROLE_CAPABILITIES: readonly OnboardingRoleCapability[] =
     id: "s3_object_inspection",
     label: "S3 object inspection",
     description:
-      "Read object contents, versions and attributes. This is the read that data-security inspection of bucket contents depends on.",
+      "Reading object contents, versions and attributes. The deployed pack names these actions only in the DenyUnimplementedActions ceiling, which permits them to be granted later but grants nothing, so the role cannot read object contents today.",
     actions: ["s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectAttributes"],
-    granted: true,
+    granted: false,
   },
   {
     id: "guardduty_findings",
@@ -66,9 +66,9 @@ export const ONBOARDING_ROLE_CAPABILITIES: readonly OnboardingRoleCapability[] =
     id: "billing_export_discovery",
     label: "Billing export discovery",
     description:
-      "Enumerate AWS Data Exports and resolve the S3 destination of a CUR 2.0 or FOCUS 1.2 export. Reads export configuration, never billing rows.",
+      "Enumerating AWS Data Exports and resolving the S3 destination of a CUR 2.0 or FOCUS 1.2 export. The base onboarding role does not grant this; the separate CUR 2.0 add-on stack does, scoped to the export it creates. A customer without that add-on has no billing export discovery.",
     actions: ["bcm-data-exports:ListExports", "bcm-data-exports:GetExport"],
-    granted: true,
+    granted: false,
   },
   {
     id: "lightsail_workload_scanning",

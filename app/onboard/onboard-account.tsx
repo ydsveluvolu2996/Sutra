@@ -926,7 +926,14 @@ export function OnboardAccount() {
                 {/* Stated, not offered. Every row is verified against the
                     deployed pack YAML by
                     tests/aws-onboarding-role-capabilities.test.mjs, so a row
-                    cannot claim a grant the template does not contain. */}
+                    cannot claim a grant the template does not contain.
+
+                    Role paths only. The access-key path deploys no role and
+                    enforces no pack policy, so these rows would describe a
+                    permission boundary that does not exist for that connection:
+                    the IAM user's effective permissions are whatever the
+                    customer attached, which may be narrower or broader. */}
+                {connectionMethod === "iam_role" ? (
                 <details className="wiz-capabilities">
                   <summary className="wiz-capabilities-legend">
                     <span>
@@ -956,6 +963,18 @@ export function OnboardAccount() {
                     successor pack, never as a checkbox here.
                   </p>
                 </details>
+                ) : (
+                  <div className="inline-warning" role="note">
+                    <strong>Permissions come from the IAM user, not from a Sutra pack.</strong>
+                    <span>
+                      This path deploys no role, so no versioned permission pack applies and
+                      Sutra cannot state in advance what the credentials may read. Registration
+                      proves the account with GetCallerIdentity; it does not attest the key&apos;s
+                      policy. Grant the dedicated user read-only access, and expect collection to
+                      report each source as unavailable wherever the key cannot read it.
+                    </span>
+                  </div>
+                )}
                 </WizardSection>
                 <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>

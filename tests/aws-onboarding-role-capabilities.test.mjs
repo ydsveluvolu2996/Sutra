@@ -45,11 +45,66 @@ async function loadCapabilities() {
   }));
 }
 
-// An action is granted only as an exact list entry. A substring match would let
+/**
+ * Collects the actions the pack actually grants.
+ *
+ * Matching raw `- action` lines is not enough, and the difference is not
+ * academic. `DenyUnimplementedActions` is a `Deny` whose `NotAction` list names
+ * every action the role is *permitted to be given*; it grants nothing. A line
+ * scan reads that ceiling as a grant, so `s3:GetObject` and
+ * `bcm-data-exports:ListExports` -- which appear only there -- looked granted
+ * while the deployed role denies them.
+ *
+ * So the statements are parsed: an action counts only inside an `Action` list on
+ * an `Effect: Allow` statement. There is no YAML parser in this repository's
+ * dependencies, hence the indentation-aware scan rather than a load-and-walk.
+ */
+function allowedActions(yaml) {
+  const allowed = new Set();
+  let effect = null;
+  let list = null;
+
+  for (const raw of yaml.split("\n")) {
+    const line = raw.replace(/\s+$/u, "");
+    if (line.trim() === "" || line.trim().startsWith("#")) continue;
+
+    // A new statement resets both, so an Allow above can never leak its effect
+    // onto the list of a Deny below it.
+    if (/^\s*-\s+Sid:/u.test(line)) {
+      effect = null;
+      list = null;
+      continue;
+    }
+
+    const effectMatch = /^\s*-?\s*Effect:\s*(Allow|Deny)\s*$/u.exec(line);
+    if (effectMatch) {
+      effect = effectMatch[1];
+      list = null;
+      continue;
+    }
+
+    const keyMatch = /^\s*-?\s*(NotAction|Action|Resource|Condition|Principal):\s*(.*)$/u.exec(line);
+    if (keyMatch) {
+      const [, key, inline] = keyMatch;
+      list = key === "Action" || key === "NotAction" ? key : null;
+      // `Action: sts:GetCallerIdentity` on one line is as much a grant as a
+      // list, and dropping it would understate the pack.
+      if (list === "Action" && effect === "Allow" && inline.trim() !== "") {
+        allowed.add(inline.trim().replace(/^["']|["']$/gu, ""));
+      }
+      continue;
+    }
+
+    const item = /^\s*-\s+([a-z0-9-]+:[A-Za-z0-9*]+)\s*$/u.exec(line);
+    if (item && list === "Action" && effect === "Allow") allowed.add(item[1]);
+  }
+  return allowed;
+}
+
+// An action is granted only as an exact entry. A substring match would let
 // `s3:GetObject` be satisfied by `s3:GetObjectAcl`, which is a different grant.
 function grants(yaml, action) {
-  const literal = action.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-  return new RegExp(`^\\s*-\\s*${literal}\\s*$`, "mu").test(yaml);
+  return allowedActions(yaml).has(action);
 }
 
 test("every capability declares at least one action", async () => {

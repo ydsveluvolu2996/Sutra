@@ -4,7 +4,11 @@ import type { AwsRegionSelection } from "./aws-region-selection.ts";
 export interface PortfolioConnectionSummary {
   readonly id: string;
   readonly customerId: string;
-  readonly sourceKind: "aws_trust_role" | "simulated_fixture";
+  // `aws_static_credentials` is a live AWS source the database already returns:
+  // access-key onboarding writes it, and lib/compliance-engine.ts has always
+  // modelled it. Omitting it here made the portfolio type narrower than the rows
+  // it describes, so an access-key deployment was typed as something it is not.
+  readonly sourceKind: "aws_trust_role" | "aws_static_credentials" | "simulated_fixture";
   readonly fixtureId: string | null;
   readonly fixtureVersion: string | null;
   readonly awsAccountId: string;
