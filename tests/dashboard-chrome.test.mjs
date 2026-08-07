@@ -11,6 +11,7 @@ const chrome = await readFile(new URL("../app/components/dashboard-chrome.tsx", 
 const chromeCss = await readFile(new URL("../app/components/dashboard-chrome.module.css", import.meta.url), "utf8");
 const chartsCss = await readFile(new URL("../app/components/charts/charts.module.css", import.meta.url), "utf8");
 const frame = await readFile(new URL("../app/components/charts/chart-frame.tsx", import.meta.url), "utf8");
+const globals = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
 function hexes(source) {
   return [...source.matchAll(/#[0-9a-f]{6}\b/gu)].map((match) => match[0].toLowerCase());
@@ -115,4 +116,35 @@ test("a ranked list numbers its ranks and says when it is empty", () => {
   assert.match(body, /if \(entries\.length === 0\)/u);
   assert.match(body, /role="status"/u);
   assert.match(body, /\{index \+ 1\}/u);
+});
+
+test("no dashboard module hardcodes its own table density", async () => {
+  // Every FinOps dashboard used to set its own table font size and padding, so
+  // the same table looked different on each one: .8rem / .82rem / 11px fonts and
+  // .62rem / .65rem / "10px 12px" / "6px 10px 6px 0" padding. They now consume
+  // shared tokens, and this keeps them consuming them.
+  const directory = new URL("../app/costs/", import.meta.url);
+  const { readdir } = await import("node:fs/promises");
+  const modules = (await readdir(directory)).filter((file) => file.endsWith(".module.css"));
+  assert.ok(modules.length > 10, "the dashboard modules must actually be found");
+
+  const offenders = [];
+  for (const file of modules) {
+    const source = await readFile(new URL(file, directory), "utf8");
+    for (const rule of source.matchAll(/^\.(?:table|tableWrap)[^{]*\{[^}]*\}/gmu)) {
+      if (/font-size:\s*(?:\.[0-9]+rem|[0-9.]+px)/u.test(rule[0])) {
+        offenders.push(`${file}: ${rule[0].slice(0, 70)}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("the shared table tokens are defined once", () => {
+  for (const token of [
+    "--table-font", "--table-pad-y", "--table-pad-x",
+    "--table-rule", "--table-head-font", "--table-head-ink",
+  ]) {
+    assert.ok(globals.includes(`${token}:`), `${token} must be defined in globals.css`);
+  }
 });

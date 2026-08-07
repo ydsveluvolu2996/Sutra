@@ -169,21 +169,9 @@
 .scroll {
   overflow-x: auto;
 }
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.8rem;
-}
-.table th,
-.table td {
-  text-align: left;
-  padding: 0.62rem;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
-  vertical-align: top;
-}
-.table th {
-  color: #b8c5d9;
-}
+.table { width: 100%; border-collapse: collapse; font-size: var(--table-font); }
+.table th, .table td { padding: var(--table-pad-y) var(--table-pad-x); text-align: left; border-bottom: 1px solid var(--table-rule); vertical-align: top; }
+.table th { color: var(--table-head-ink); background: var(--table-head-bg); font-size: var(--table-head-font); text-transform: uppercase; }
 .pill {
   display: inline-flex;
   padding: 0.14rem 0.46rem;

@@ -339,35 +339,13 @@
   border-radius: 0.5rem;
 }
 
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.78rem;
-}
+.table { width: 100%; border-collapse: collapse; font-size: var(--table-font); }
 
-.table caption {
-  padding: 0.5rem 0.6rem;
-  color: var(--text-muted, #5c6470);
-  font-size: 0.74rem;
-  text-align: left;
-  line-height: 1.45;
-}
+.table caption { padding-bottom: 6px; color: var(--table-head-ink); font-size: var(--table-head-font); font-weight: 600; text-align: left; }
 
-.table th,
-.table td {
-  padding: 0.45rem 0.6rem;
-  border-top: 1px solid var(--border, #dfe3e8);
-  text-align: left;
-  vertical-align: top;
-}
+.table th, .table td { padding: var(--table-pad-y) var(--table-pad-x); text-align: left; border-bottom: 1px solid var(--table-rule); vertical-align: top; }
 
-.table thead th {
-  border-top: 0;
-  color: var(--text-muted, #5c6470);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
+.table thead th { color: var(--table-head-ink); font-size: var(--table-head-font); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 
 .table small {
   display: block;

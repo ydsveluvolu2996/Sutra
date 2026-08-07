@@ -1,6 +1,23 @@
 @import "tailwindcss";
 
 :root {
+  /*
+   * Shared table density.
+   *
+   * Every FinOps dashboard module defined its own table font size and padding,
+   * so the same table looked different on each dashboard: font sizes ranged
+   * across .8rem, .82rem and 11px, and padding across .62rem, .65rem,
+   * "10px 12px" and "6px 10px 6px 0". These tokens are the single source, so a
+   * density change lands everywhere at once instead of drifting again.
+   */
+  --table-font: 12.5px;
+  --table-pad-y: 8px;
+  --table-pad-x: 14px;
+  --table-rule: #e6ebf5;
+  --table-head-font: 11px;
+  --table-head-ink: #667085;
+  --table-head-bg: #f8faff;
+
   --ink: #1c2333;
   --ink-soft: #565f7d;
   --ink-faint: #7d87a6;

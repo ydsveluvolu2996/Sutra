@@ -28,9 +28,9 @@
 .statusCards span, .summaryCards span { color: #647a77; font-size: 9px; text-transform: capitalize; }
 .statusCards strong, .summaryCards strong { font-size: 18px; }
 .tableWrap { overflow-x: auto; border: 1px solid #d8e5e2; border-radius: 11px; background: #fff; }
-.tableWrap table { width: 100%; min-width: 800px; border-collapse: collapse; font-size: 10px; }
-.tableWrap th, .tableWrap td { padding: 9px 10px; border-bottom: 1px solid #edf1f0; text-align: left; }
-.tableWrap th { color: #607370; background: #f8faf9; font-size: 9px; text-transform: uppercase; }
+.tableWrap table { width: 100%; border-collapse: collapse; font-size: var(--table-font); min-width: 800px; }
+.tableWrap th, .tableWrap td { padding: var(--table-pad-y) var(--table-pad-x); border-bottom: 1px solid var(--table-rule); text-align: left; }
+.tableWrap th { color: var(--table-head-ink); background: var(--table-head-bg); font-size: var(--table-head-font); text-transform: uppercase; }
 .executions { display: grid; gap: 7px; }
 .executions details { padding: 10px 12px; border: 1px solid #d8e5e2; border-radius: 9px; background: #fff; font-size: 10px; }
 .executions summary { color: #075e54; font-weight: 750; cursor: pointer; }

@@ -146,16 +146,8 @@
   overflow: auto;
   max-height: 430px;
 }
-.tableWrap table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.78rem;
-}
-.tableWrap caption {
-  text-align: left;
-  color: var(--text-secondary);
-  padding: 0 0 0.6rem;
-}
+.tableWrap table { width: 100%; border-collapse: collapse; font-size: var(--table-font); }
+.tableWrap caption { padding: var(--table-pad-y) var(--table-pad-x); text-align: left; font-weight: 600; }
 .tableWrap th,
 .tableWrap td {
   padding: 0.62rem;
@@ -163,12 +155,7 @@
   text-align: left;
   white-space: nowrap;
 }
-.tableWrap th {
-  position: sticky;
-  top: 0;
-  background: var(--bg-secondary);
-  z-index: 1;
-}
+.tableWrap th { color: var(--table-head-ink); background: var(--table-head-bg); font-size: var(--table-head-font); text-transform: uppercase; }
 .tableWrap code {
   font-size: 0.72rem;
 }
