@@ -38,11 +38,14 @@ import {
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 import { useSession } from "../components/use-session";
 import {
+  WizardCodeBlock,
+  WizardPermissionToggle,
   WizardRadioGroup,
   WizardSection,
   WizardStepRail,
   type WizardStep,
 } from "./onboard-wizard-chrome";
+import { ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
 
 interface CreateConnectionResponse {
   readonly connection: PilotConnection;
@@ -919,6 +922,31 @@ export function OnboardAccount() {
                 </> : <div className="inline-warning" role="note"><strong>Access keys are entered in the next step.</strong><span>After the connection contract exists, Sutra asks for a dedicated read-only IAM user&apos;s access key ID and secret (plus a session token for temporary ASIA keys), verifies the account with GetCallerIdentity, and stores them encrypted in the collector. Keys never accompany this create request.</span></div>}
                 <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
                 {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
+                {/* Stated, not offered. Every row is verified against the
+                    deployed pack YAML by
+                    tests/aws-onboarding-role-capabilities.test.mjs, so a row
+                    cannot claim a grant the template does not contain. */}
+                <div className="wiz-capabilities">
+                  <p className="wiz-capabilities-legend">
+                    What permission pack <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> grants
+                  </p>
+                  {ONBOARDING_ROLE_CAPABILITIES.map((capability) => (
+                    <WizardPermissionToggle
+                      description={capability.description}
+                      key={capability.id}
+                      label={capability.label}
+                      note={capability.granted
+                        ? `Granted by ${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}: ${capability.actions.join(", ")}`
+                        : `Not granted by ${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}. This capability is not collected.`}
+                      state={capability.granted ? "granted" : "unavailable"}
+                    />
+                  ))}
+                  <p className="wiz-capabilities-note">
+                    These are fixed by the pack this connection deploys, not per-connection
+                    settings. Permission packs are immutable; a new capability arrives as a
+                    successor pack, never as a checkbox here.
+                  </p>
+                </div>
                 </WizardSection>
                 <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>
@@ -989,6 +1017,15 @@ export function OnboardAccount() {
                   <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}.yaml`, customerManagedArtifacts.cloudFormationYaml, "application/yaml;charset=utf-8")}>Download CloudFormation</button>
                   <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}-trust-policy.json`, customerManagedArtifacts.trustPolicyJson, "application/json;charset=utf-8")}>Download JSON trust policy</button>
                 </div>
+                {/* The same generated Terraform, inline and copyable, for
+                    operators who paste into an existing repository rather than
+                    download a file. It is the identical artifact the Download
+                    Terraform button writes -- rendered, not re-derived, so the
+                    two can never disagree. */}
+                <WizardCodeBlock
+                  code={customerManagedArtifacts.terraformHcl}
+                  filename={`${connection.expectedRoleName}.tf`}
+                />
                 <ol className="deployment-checklist">
                   <li><b>1</b><span><strong>Create a new dedicated role.</strong> Do not reuse an administrator, power-user, shared operations, break-glass, or AWS account-access role.</span></li>
                   <li><b>2</b><span><strong>Keep trust exact.</strong> The principal must be <code>{principalArn}</code>; account roots, multiple principals, and wildcard trust are rejected.</span></li>

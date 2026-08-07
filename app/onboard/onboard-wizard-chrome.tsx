@@ -150,42 +150,45 @@ export function WizardRadioGroup({
 }
 
 /**
- * A permission add-on row.
+ * One permission add-on row, stated rather than offered.
  *
- * `locked` states the pack that governs the grant. Sutra's permission packs are
- * immutable and integrated sequentially by a designated integrator, so a
- * checkbox here selects among *published* packs -- it never composes a policy
- * per connection. A combination with no published pack is shown as locked with
- * the reason, rather than silently granting something unreviewed.
+ * The reference design makes these interactive checkboxes that compose an IAM
+ * policy per connection. Sutra cannot honour that: onboarding deploys a single
+ * pinned permission pack, packs are immutable, and successors are integrated
+ * sequentially by a designated integrator. So a row here reports what the
+ * deployed pack grants -- it never offers a grant the pack does not contain.
+ *
+ * The control is a disabled checkbox rather than a live one because "on, and
+ * you cannot change it" is exactly the truth. `note` must name the pack, so a
+ * reader can tell which contract produced the answer.
  */
 export function WizardPermissionToggle({
-  checked,
   description,
   label,
-  locked,
-  onChange,
+  note,
+  state,
 }: {
-  readonly checked: boolean;
   readonly description: string;
   readonly label: string;
-  readonly locked?: string;
-  readonly onChange: (next: boolean) => void;
+  readonly note: string;
+  readonly state: "granted" | "unavailable";
 }) {
-  const blocked = locked !== undefined;
+  const granted = state === "granted";
   return (
-    <label className="wiz-toggle" data-locked={blocked ? "true" : undefined}>
+    <div className="wiz-toggle" data-state={state}>
       <input
-        checked={checked && !blocked}
-        disabled={blocked}
-        onChange={(event) => onChange(event.target.checked)}
+        aria-label={`${label}: ${granted ? "granted" : "not granted"}`}
+        checked={granted}
+        disabled
+        readOnly
         type="checkbox"
       />
       <span className="wiz-toggle-body">
         <b>{label}</b>
         <small>{description}</small>
-        {blocked ? <small className="wiz-toggle-locked">{locked}</small> : null}
+        <small className={granted ? "wiz-toggle-granted" : "wiz-toggle-absent"}>{note}</small>
       </span>
-    </label>
+    </div>
   );
 }
 

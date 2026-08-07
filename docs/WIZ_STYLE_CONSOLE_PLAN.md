@@ -104,17 +104,35 @@ Only after steps 1-3 are accepted.
 
 ## Recorded conflicts — resolve with the user, do not guess
 
-1. **Per-connection permission toggles.** The reference AWS screen offers
-   `Add DSPM Permissions`, `Add Lightsail workload scanning permissions` and
-   `Add EKS Scanning` as free checkboxes that recompose the role's policy.
-   Sutra's model is the opposite by design: permission packs are immutable,
-   use exact enumerated allowlists, and successors `.8.12`-`.8.19` must be
-   integrated **sequentially by the designated integrator**. Checkboxes that
-   compose a policy per connection would break that reservation.
-   *Proposed resolution:* render the toggles as a **selector over existing
-   packs**, showing which pack a given combination resolves to, and disable
-   any combination with no published pack. No new pack authored as part of
-   the UI work.
+1. **Per-connection permission toggles. RESOLVED — stated, not selectable.**
+   The reference AWS screen offers `Add DSPM Permissions`, `Add Lightsail
+   workload scanning permissions` and `Add EKS Scanning` as free checkboxes
+   that recompose the role's policy.
+
+   The proposed resolution — a selector over published packs — turned out to
+   be impossible, and the reason matters. Onboarding deploys exactly one pack:
+   `AWS_CUSTOMER_ROLE_TEMPLATE_VERSION` is a single pinned literal
+   (`standard-2026-08.12`, 274 actions). Packs `.6`-`.19` are *runtime*
+   allowlists answering "is this pack new enough for capability X", not
+   alternative onboarding roles. **There is nothing to select between.**
+
+   Worse, two of the three reference toggles would have been false either way:
+   the pinned pack already grants EKS (`eks:ListClusters`,
+   `eks:DescribeCluster`, `eks:DescribeClusterVersions`) and S3 object reads,
+   so "Add EKS Scanning" would offer something already granted; and no
+   `lightsail:` action exists in any pack, so "Add Lightsail" could not be
+   honoured at all.
+
+   *Shipped instead:* `lib/aws-onboarding-role-capabilities.ts` declares seven
+   capabilities with the exact actions that evidence each, rendered as disabled
+   rows stating granted / not granted and naming the pack.
+   `tests/aws-onboarding-role-capabilities.test.mjs` checks every declared
+   action against the pack YAML in both directions — a granted row whose action
+   is missing fails, and an ungranted row whose action the pack quietly gains
+   also fails. The pack is resolved from the template constant, so a successor
+   bump re-verifies every row rather than leaving stale claims passing.
+
+   No pack was authored, modified or renumbered. The reservation is intact.
 
 2. **Connector Scope: Organization.** The reference offers org-wide or
    single-account onboarding. Sutra is single-account today ("Onboard one AWS
