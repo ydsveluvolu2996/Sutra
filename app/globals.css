@@ -438,14 +438,6 @@ h3 { letter-spacing: -.02em; }
 .onboard-heading { align-items: center; }
 .onboard-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); gap: 13px; align-items: start; }
 .onboard-panel { padding: 24px; }
-.stepper { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 8px; margin-bottom: 30px; color: var(--ink-faint); font-size: 9px; }
-.stepper span { min-height: 36px; display: flex; align-items: center; gap: 7px; padding-right: 8px; border-bottom: 2px solid var(--line); white-space: nowrap; }
-.stepper b { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--line-dark); border-radius: 50%; font-size: 8px; }
-.stepper .active { border-color: #3b82f6; color: var(--ink); font-weight: 750; }
-.stepper .active b { border-color: #3b82f6; background: #3b82f6; color: #061225; }
-.stepper .complete { border-color: #a5c0fa; color: #4a5f94; }
-.stepper .complete b { border-color: #a5c0fa; background: #dde9fe; color: #1d4ed8; }
-.stepper i { height: 1px; background: var(--line); }
 .onboard-copy { max-width: 620px; margin-bottom: 20px; }
 .onboard-copy h2 { font-size: 18px; margin-bottom: 7px; }
 .onboard-copy > p:last-child { color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
@@ -1509,8 +1501,6 @@ h3 { letter-spacing: -.02em; }
   .coverage-grid { grid-template-columns: 1fr; }
   .customer-live-card dl { grid-template-columns: 1fr; }
   .template-actions { align-items: flex-start; flex-direction: column; }
-  .stepper { grid-template-columns: 1fr; gap: 7px; }
-  .stepper i { display: none; }
   .architecture-flow { grid-template-columns: 1fr; }
   .security-group-grid { grid-template-columns: 1fr; }
   .finding-summary { grid-template-columns: repeat(2, 1fr); }
@@ -3866,7 +3856,13 @@ button.orbit-node { font: inherit; cursor: pointer; }
    these classes only frame them.
 --------------------------------------------------------------------------- */
 .wiz-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 28px; align-items: start; }
-@media (max-width: 900px) { .wiz-layout { grid-template-columns: 1fr; gap: 18px; } }
+/* Higher than .onboard-layout's own 860px collapse on purpose: this rail is
+   nested inside that layout's narrowed column and competes with a 260px
+   aside, so it has to stack while the outer grid is still two columns. */
+@media (max-width: 1080px) { .wiz-layout { grid-template-columns: 1fr; gap: 16px; }
+  .wiz-step-rail { position: static; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  .wiz-step-body > small { display: none; } }
+@media (max-width: 620px) { .wiz-step-rail { grid-auto-flow: row; } }
 
 .wiz-step-rail { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; position: sticky; top: 16px; }
 .wiz-step { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 10px; border-radius: 8px; }
@@ -3901,8 +3897,16 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .wiz-radio-blocked { color: #a54b34; }
 
 .wiz-capabilities { display: grid; gap: 6px; }
+.wiz-capabilities > summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); cursor: pointer; list-style: none; }
+.wiz-capabilities > summary::-webkit-details-marker { display: none; }
+.wiz-capabilities > summary:hover { border-color: #94a3b8; }
+.wiz-capabilities > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
 .wiz-capabilities-legend { margin: 0; font-size: 10px; font-weight: 700; color: var(--ink); }
+.wiz-capabilities-legend > span { flex: 1 1 auto; }
+.wiz-capabilities-legend > em { padding: 2px 7px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 8px; font-style: normal; font-weight: 700; }
 .wiz-capabilities-legend code { font-size: 9px; }
+.wiz-capabilities[open] > summary { margin-bottom: 2px; }
+.wiz-capabilities[open] .nav-group-chevron { transform: rotate(180deg); }
 .wiz-capabilities-note { margin: 2px 0 0; padding: 9px 11px; border-radius: 7px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8.5px; line-height: 1.5; }
 .wiz-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
 .wiz-toggle[data-state="unavailable"] { background: var(--surface-soft); }

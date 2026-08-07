@@ -46,6 +46,7 @@ import {
   type WizardStep,
 } from "./onboard-wizard-chrome";
 import { ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
+import { GlyphIcon } from "../components/nav-icon";
 
 interface CreateConnectionResponse {
   readonly connection: PilotConnection;
@@ -878,6 +879,8 @@ export function OnboardAccount() {
                   ]}
                   value="account"
                 />
+                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
+                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
                 </WizardSection>
                 <WizardSection
                   title="Deploy"
@@ -920,16 +923,22 @@ export function OnboardAccount() {
                   <div className="inline-warning" role={customerManagedRoleError ? "alert" : "note"}><strong>{customerManagedRoleError ? "Role contract needs attention" : "Dedicated customer role required"}</strong><span>{customerManagedRoleError ?? "Existing admin, shared operations, power-user, break-glass, account-access, broader-policy, and wildcard-trust roles are rejected during live attestation. Every accepted session is still intersected with Sutra's fixed read-only STS session policy."}</span></div>
                 </> : null}
                 </> : <div className="inline-warning" role="note"><strong>Access keys are entered in the next step.</strong><span>After the connection contract exists, Sutra asks for a dedicated read-only IAM user&apos;s access key ID and secret (plus a session token for temporary ASIA keys), verifies the account with GetCallerIdentity, and stores them encrypted in the collector. Keys never accompany this create request.</span></div>}
-                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
-                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
                 {/* Stated, not offered. Every row is verified against the
                     deployed pack YAML by
                     tests/aws-onboarding-role-capabilities.test.mjs, so a row
                     cannot claim a grant the template does not contain. */}
-                <div className="wiz-capabilities">
-                  <p className="wiz-capabilities-legend">
-                    What permission pack <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> grants
-                  </p>
+                <details className="wiz-capabilities">
+                  <summary className="wiz-capabilities-legend">
+                    <span>
+                      What permission pack <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> grants
+                    </span>
+                    <em>
+                      {ONBOARDING_ROLE_CAPABILITIES.filter((capability) => capability.granted).length}
+                      {" of "}
+                      {ONBOARDING_ROLE_CAPABILITIES.length} granted
+                    </em>
+                    <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
+                  </summary>
                   {ONBOARDING_ROLE_CAPABILITIES.map((capability) => (
                     <WizardPermissionToggle
                       description={capability.description}
@@ -946,7 +955,7 @@ export function OnboardAccount() {
                     settings. Permission packs are immutable; a new capability arrives as a
                     successor pack, never as a checkbox here.
                   </p>
-                </div>
+                </details>
                 </WizardSection>
                 <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>
