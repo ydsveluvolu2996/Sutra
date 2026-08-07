@@ -11,8 +11,13 @@ const REGION = "ap-south-1";
 const ACCOUNT = "373665157695";
 const ARN = (name: string) => `arn:aws:bcm-data-exports:${REGION}:${ACCOUNT}:export/${name}`;
 
+// Deliberately NOT shaped like a real key id. scripts/check-repository-secrets.mjs
+// matches /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/ and cannot tell a fixture from a live
+// credential, which is the correct posture -- so the fixture is built at runtime
+// from a lowercase stem that can never match. The reader never inspects these
+// values; they exist only to satisfy the credential type.
 const CREDENTIALS = {
-  accessKeyId: "ASIAEXAMPLEEXAMPLE00",
+  accessKeyId: `fixture-${"x".repeat(12)}`,
   secretAccessKey: "s".repeat(40),
   sessionToken: "t".repeat(64),
   expiration: new Date(Date.now() + 900_000).toISOString(),
