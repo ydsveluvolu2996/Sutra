@@ -349,10 +349,26 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   // deploys. Building the S3 URL from the deployment region silently broke the
   // gate the first time they differed: the template sat in us-east-1 while the
   // release targeted ap-south-1, so the fetch 404'd on a correctly published
-  // object. The region falls back to AWS_REGION when unset, so a same-region
-  // deployment is unaffected.
+  // object.
   assert.match(templateGate, /vars\.SUTRA_TEMPLATE_REGION/u);
-  assert.match(templateGate, /template_region="\$\{TEMPLATE_REGION:-\$\{AWS_REGION\}\}"/u);
+  // Both variables are overrides. `vars.*` expands an unset variable to the
+  // empty string, so requiring them made an unset variable, a variable created
+  // as a secret and a typo'd name all fail identically -- and all of them fail
+  // AFTER the operator has published correctly. The default must therefore be
+  // the publisher's own default (us-east-1), never the deployment region.
+  assert.match(templateGate, /template_region="\$\{TEMPLATE_REGION:-us-east-1\}"/u);
+  assert.doesNotMatch(
+    templateGate,
+    /TEMPLATE_REGION:-\$\{AWS_REGION\}/u,
+    "the template region must not default to the deployment region",
+  );
+  // The bucket is derived the same way scripts/publish-onboarding-template.mjs
+  // derives it, so the gate looks where the publisher actually wrote.
+  assert.match(
+    templateGate,
+    /template_bucket="\$\{TEMPLATE_BUCKET:-sutra-onboarding-\$\{AWS_ACCOUNT_ID\}-\$\{template_region\}\}"/u,
+  );
+  assert.match(templateGate, /\[\[ "\$\{AWS_ACCOUNT_ID\}" =~ \^\[0-9\]\{12\}\$ \]\]/u);
   assert.match(templateGate, /s3\.\$\{template_region\}\.amazonaws\.com/u);
   assert.doesNotMatch(
     templateGate,

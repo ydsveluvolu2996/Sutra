@@ -127,36 +127,42 @@ jobs:
       # exact reviewed digest before any image is built or deployed.
       - name: Require the reviewed onboarding template to be published
         env:
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          # Both of these are OVERRIDES, not requirements. The publisher
+          # (scripts/publish-onboarding-template.mjs) derives its destination
+          # deterministically as sutra-onboarding-<account>-<region>, defaulting
+          # the region to us-east-1, so this gate derives the identical location
+          # instead of depending on an operator remembering to mirror it into a
+          # repository variable. Two releases were burned proving that point:
+          # an unset variable reads as the empty string in `vars.*`, which is
+          # indistinguishable here from a variable that was never created,
+          # created as a secret, or created under a different name.
           TEMPLATE_BUCKET: ${{ vars.SUTRA_TEMPLATE_BUCKET }}
           # Where the template is PUBLISHED, which is independent of where this
           # release deploys. The quick-create template is a public read-only
           # artifact that customers fetch directly; it does not have to live in
-          # the region hosting ECR and the EC2 instance, and pinning it to the
-          # deployment region silently breaks the gate the first time those
-          # differ. Unset keeps the previous behaviour.
+          # the region hosting ECR and the EC2 instance. Defaulting this to the
+          # deployment region -- as it previously did -- is wrong for the same
+          # reason: the publisher's default is us-east-1, so the two sides
+          # disagreed the moment the release targeted anywhere else.
           TEMPLATE_REGION: ${{ vars.SUTRA_TEMPLATE_REGION }}
-          AWS_REGION: ${{ vars.AWS_REGION }}
         run: |
           set -euo pipefail
-          if [[ -z "${TEMPLATE_BUCKET}" ]]; then
-            echo "SUTRA_TEMPLATE_BUCKET is not configured." >&2
-            echo "Set it as a repository VARIABLE (not a secret) to the bucket that" >&2
-            echo "'pnpm live:aws:publish-template' reported, e.g." >&2
-            echo "  sutra-onboarding-<account-id>-<region>" >&2
-            exit 1
-          fi
-          [[ "${TEMPLATE_BUCKET}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
-          template_region="${TEMPLATE_REGION:-${AWS_REGION}}"
+          [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
+          template_region="${TEMPLATE_REGION:-us-east-1}"
           [[ "${template_region}" =~ ^[a-z]{2}-[a-z0-9-]+-[0-9]+$ ]]
+          template_bucket="${TEMPLATE_BUCKET:-sutra-onboarding-${AWS_ACCOUNT_ID}-${template_region}}"
+          [[ "${template_bucket}" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]]
           # The deterministic bucket name ends in the region it was created in,
           # so a mismatch is detectable here rather than as an opaque 404.
-          if [[ "${TEMPLATE_BUCKET}" == sutra-onboarding-*-* \
-                && "${TEMPLATE_BUCKET}" != *"-${template_region}" ]]; then
-            echo "SUTRA_TEMPLATE_BUCKET ${TEMPLATE_BUCKET} does not end in the template region ${template_region}." >&2
+          if [[ "${template_bucket}" == sutra-onboarding-*-* \
+                && "${template_bucket}" != *"-${template_region}" ]]; then
+            echo "Template bucket ${template_bucket} does not end in the template region ${template_region}." >&2
             echo "Set SUTRA_TEMPLATE_REGION to the region the template was published in," >&2
             echo "or republish the template into ${template_region}." >&2
             exit 1
           fi
+          echo "Template location: s3://${template_bucket} (${template_region})."
           contract="lib/aws-template-contract.ts"
           version="$(node -e "const s=require('fs').readFileSync('${contract}','utf8');const m=/AWS_CUSTOMER_ROLE_TEMPLATE_VERSION\s*=\s*\"([^\"]+)\"/.exec(s);if(!m)process.exit(1);process.stdout.write(m[1])")"
           digest="$(node -e "const s=require('fs').readFileSync('${contract}','utf8');const m=/AWS_CUSTOMER_ROLE_TEMPLATE_SHA256\s*=\s*\n?\s*\"([a-f0-9]{64})\"/.exec(s);if(!m)process.exit(1);process.stdout.write(m[1])")"
@@ -164,7 +170,7 @@ jobs:
           [[ "${digest}" =~ ^[a-f0-9]{64}$ ]]
           # The published object is public and read-only by contract, so this
           # needs no credentials and runs before the OIDC role is assumed.
-          url="https://${TEMPLATE_BUCKET}.s3.${template_region}.amazonaws.com/templates/${version}/${digest}.yaml"
+          url="https://${template_bucket}.s3.${template_region}.amazonaws.com/templates/${version}/${digest}.yaml"
           if ! curl -fsSL --max-time 30 --retry 2 --retry-delay 5 -o published-template.yaml "${url}"; then
             echo "The reviewed onboarding template ${version} is NOT published." >&2
             echo "Expected object: ${url}" >&2
