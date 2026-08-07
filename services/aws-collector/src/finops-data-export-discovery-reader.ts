@@ -140,10 +140,12 @@ function destinationOf(detail: unknown): Omit<DiscoveredDataExport, "region"> | 
     : undefined;
   // `in` walks the prototype chain, so `constructor`, `toString` and every other
   // Object.prototype member would pass this check and then index the frozen map
-  // to an inherited function rather than a contract id. It fails closed
-  // downstream -- JSON.stringify drops a function, and the ingest payload
-  // validator accepts only the two exact literals -- but a validated table name
-  // must not depend on that.
+  // to an inherited member rather than a contract id. Serialization does not
+  // reliably contain that: a function value is dropped by JSON.stringify, but
+  // `__proto__` resolves to Object.prototype, which serializes to `{}` and
+  // travels downstream intact. The ingest validator's two-literal check would
+  // still reject it, but a validated table name must not lean on one
+  // downstream guard.
   if (tableName === undefined || !Object.hasOwn(FOUNDATIONAL_EXPORT_TABLES, tableName)) return null;
   const table = tableName as FoundationalExportTable;
 
