@@ -60,15 +60,33 @@ one-time handoff and its sessionStorage recovery draft, `quickLaunchUrl`,
 `expectedRoleArn`, `validateCustomerManagedRoleSelection`, and every existing
 `/api` call.
 
-### Step 2 — Deployments list page
+### Step 2 — Deployments operating queue (DONE)
 
-The reference "Deployments" screen: tab strip (All, Cloud, Kubernetes,
-Registry, Version Control, Outpost, Sensor, Broker, Remediation & Response),
-search, filter chips, and a table of deployment / health / status / sources /
-modules / last activity.
+The reference "Deployments" screen: tab strip, search, filter chips, and a
+table of deployment / health / status / sources / modules / last activity.
 
-Sutra equivalents already exist and must be aggregated, not re-collected:
-`/customers`, `/connection-health`, `/kubernetes`, `/registry/inventory`.
+**Built by restyling `/customers` in place, not as a new page.** The user chose
+this after the inventory found that `app/customers/customers-browser.tsx`
+already rendered a "Customer cloud accounts" table carrying health, evidence
+source, workload and freshness for every connection. A separate `/deployments`
+route would have duplicated that table and its data path.
+
+Shipped as `app/customers/deployments-panel.tsx`: tab strip, controlled search,
+status chips, live result count and reset, over the same server-scoped
+`usePortfolio()` read. Filters narrow rows already returned, so no filter can
+widen what the browser can see.
+
+Two constraints found while building, both honoured:
+
+- Only three client data hooks exist (`use-pilot-state`, `use-portfolio`,
+  `use-session`). There is no browser-reachable Kubernetes or registry
+  collector list, so those tabs have no data path and were not invented.
+- `PortfolioConnectionSummary.sourceKind` is only `aws_trust_role |
+  simulated_fixture`. The tab strip is derived from the kinds actually present
+  and hides itself entirely below two, rather than declaring a fixed set.
+
+Per the user's decision, tabs with no Sutra equivalent (Outpost, Sensor,
+Broker, Remediation & Response) are omitted rather than rendered empty.
 
 ### Step 3 — Icon navigation rail
 

@@ -3917,3 +3917,38 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .wiz-code > pre { margin: 0; padding: 12px; overflow-x: auto; }
 .wiz-code code { font: 9px/1.65 var(--font-geist-mono), monospace; color: var(--ink); white-space: pre; }
 .wiz-code-error { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); color: #a54b34; font-size: 8.5px; }
+
+/* ---------------------------------------------------------------------------
+   Deployments operating queue
+   app/customers/deployments-panel.tsx. Tabs and status chips are derived from
+   the rows present, so both strips can be absent; the table stands alone.
+--------------------------------------------------------------------------- */
+.deployments-panel .panel-heading { margin-bottom: 13px; }
+
+.deployments-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.deployments-tabs > button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-faint); font-size: 10px; font-weight: 650; cursor: pointer; }
+.deployments-tabs > button:hover { color: var(--ink); }
+.deployments-tabs > button[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
+.deployments-tabs em { padding: 1px 6px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8px; font-style: normal; font-weight: 700; }
+.deployments-tabs > button[aria-selected="true"] em { background: #dbeafe; color: #1d4ed8; }
+
+.deployments-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.deployments-search { flex: 1 1 200px; min-width: 160px; }
+.deployments-search input { width: 100%; min-height: 32px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 10px; }
+.deployments-search input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.deployments-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.deployments-chips > button { padding: 5px 10px; border: 1px solid var(--line-dark); border-radius: 999px; background: var(--surface); color: var(--ink-soft); font-size: 9px; font-weight: 620; cursor: pointer; }
+.deployments-chips > button:hover { border-color: #94a3b8; color: var(--ink); }
+.deployments-chips > button[data-active="true"] { border-color: #2563eb; background: #eff4ff; color: #1d4ed8; }
+.deployments-count { color: var(--ink-faint); font-size: 9px; }
+.deployments-reset { padding: 5px 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface); color: var(--ink-soft); font-size: 9px; font-weight: 620; cursor: pointer; }
+.deployments-reset:hover { border-color: #94a3b8; color: var(--ink); }
+
+.deployments-table { margin: 0 -20px -19px; }
+.deployments-table .data-row { display: grid; grid-template-columns: minmax(170px, 1.35fr) minmax(130px, 1fr) 110px minmax(140px, 1fr) minmax(130px, 1fr) minmax(120px, .9fr); gap: 14px; align-items: start; padding: 11px 20px; border-top: 1px solid var(--line); }
+.deployments-table .data-header { align-items: center; padding-top: 0; padding-bottom: 0; }
+.deployments-table .primary-cell { min-width: 0; display: grid; gap: 3px; }
+.deployments-table .primary-cell strong { overflow-wrap: anywhere; font-size: 9.5px; }
+.deployments-table .primary-cell small { color: var(--ink-faint); font-size: 8px; line-height: 1.45; }
+.deployments-empty { padding: 22px 20px; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 9.5px; text-align: center; }
+@media (max-width: 1100px) { .deployments-table { overflow-x: auto; } .deployments-table .data-row { min-width: 860px; } }

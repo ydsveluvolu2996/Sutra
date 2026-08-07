@@ -3,12 +3,11 @@
 import { usePortfolio } from "../components/use-portfolio";
 import { useSession } from "../components/use-session";
 import { formatTimestamp } from "../components/use-pilot-state";
-import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 import {
   connectionHealth,
-  evidenceSourceLabel,
   snapshotFreshness,
 } from "../../lib/portfolio-presentation.ts";
+import { DeploymentsPanel } from "./deployments-panel";
 
 function initials(name: string): string {
   const words = name.trim().split(/\s+/u).filter(Boolean);
@@ -78,26 +77,14 @@ export function CustomersBrowser() {
             </div>
           </section>
 
-          <section className="panel account-directory">
-            <div className="panel-heading"><div><p className="eyebrow">Operating queue</p><h2>Customer cloud accounts</h2></div>{canOnboard ? <a href="/onboard" className="text-link">Manage trust roles →</a> : null}</div>
-            <div className="data-table account-table" role="table" aria-label="Authorized cloud account connections">
-              <div className="data-row data-header" role="row"><span>Health</span><span>Customer / account</span><span>Evidence source</span><span>Workload</span><span>Freshness</span></div>
-              {connections.map(({ customer, connection }) => {
-                const health = connectionHealth(connection, portfolio.measuredAt);
-                const source = evidenceSourceLabel(connection);
-                const freshness = snapshotFreshness(connection.latestSnapshotAt, portfolio.measuredAt);
-                const connectionQuery = `connectionId=${encodeURIComponent(connection.id)}`;
-                return <div className="data-row" role="row" key={connection.id}>
-                  <span className="primary-cell"><span className={`connection-status connection-${health.state}`}>{health.label}</span><small>{health.detail}</small></span>
-                  <span className="primary-cell"><a className="resource-link" href={`/cmdb?${connectionQuery}`}><strong>{customer.name}</strong><small>{connection.awsAccountId} · {connection.partition}</small></a></span>
-                  <span className="primary-cell"><strong>{source.label}</strong><small>{source.detail}</small><small>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All enabled Regions" : `${connection.enabledRegions.length} explicit Regions`} · {connection.permissionPackVersion}</small></span>
-                  <span className="primary-cell"><a className="text-link" href={`/cmdb?${connectionQuery}`}>{connection.resourceCount.toLocaleString()} assets</a><a className="text-link" href={`/findings?${connectionQuery}`}>{connection.openFindingCount.toLocaleString()} open findings</a></span>
-                  <span className="primary-cell"><strong>{freshness.label}</strong><small>{formatTimestamp(connection.latestSnapshotAt)}</small></span>
-                </div>;
-              })}
-            </div>
-            <p className="panel-footnote">Health is derived only from persisted connection state and complete-snapshot age. It is an operating signal, not a security, compliance, or risk score.</p>
-          </section>
+          <DeploymentsPanel
+            canOnboard={canOnboard}
+            measuredAt={portfolio.measuredAt}
+            rows={connections.map(({ customer, connection }) => ({
+              customerName: customer.name,
+              connection,
+            }))}
+          />
 
           <section className="panel tenant-boundary-note"><p className="eyebrow">Isolation evidence</p><h2>Portfolio totals are computed after access scope is applied</h2><p>All-customer memberships see the organization portfolio. Assigned-customer memberships are constrained through persisted customer grants in each SQL query. The same organization, membership, and customer keys must match before resources or findings contribute to these totals.</p></section>
         </>
