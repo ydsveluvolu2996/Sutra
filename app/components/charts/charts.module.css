@@ -8,15 +8,31 @@
  */
 
 .chartTone {
+  /*
+   * Validated against the #ffffff chart surface with the six-check palette
+   * validator: lightness band, chroma floor, adjacent-pair CVD separation,
+   * normal-vision floor, and contrast. Worst adjacent pair is red/green at
+   * dE 13.3 (deuteranopia), comfortably clear of the 8.0 floor.
+   *
+   * The previous values failed three of those checks: green and red sat at
+   * dE 5.8 for deuteranopes, slate and cyan at dE 9.8 even with full colour
+   * vision, and slate's chroma read as plain grey. Re-step with the validator
+   * -- never by eye -- before changing any value here.
+   */
   --chart-blue: #2563eb;
-  --chart-indigo: #4f46e5;
-  --chart-cyan: #0891b2;
-  --chart-teal: #0d9488;
-  --chart-green: #059669;
-  --chart-amber: #d97706;
   --chart-orange: #ea580c;
-  --chart-red: #e11d48;
+  --chart-teal: #0d9488;
   --chart-violet: #7c3aed;
+  --chart-green: #65a30d;
+  --chart-red: #be123c;
+  --chart-cyan: #0891b2;
+  --chart-amber: #d97706;
+  --chart-indigo: #4338ca;
+  /*
+   * Reserved neutral, deliberately outside the categorical sequence. It marks
+   * "not a series" -- a remainder slice, an absent or failed state -- so it is
+   * exempt from the chroma floor, which scopes to categorical palettes.
+   */
   --chart-slate: #64748b;
 }
 

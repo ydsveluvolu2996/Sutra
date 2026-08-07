@@ -20,9 +20,9 @@
 .card small, .muted { color: #94a3b8; }
 .panel h3 { margin: 0 0 .8rem; font-size: 1rem; }
 .scroll { overflow-x: auto; }
-.table { width: 100%; border-collapse: collapse; font-size: .82rem; }
-.table th, .table td { text-align: left; padding: .65rem; border-bottom: 1px solid rgba(148,163,184,.18); vertical-align: top; }
-.table th { color: #b8c5d9; font-weight: 600; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--table-font); }
+.table th, .table td { padding: var(--table-pad-y) var(--table-pad-x); text-align: left; border-bottom: 1px solid var(--table-rule); vertical-align: top; }
+.table th { color: var(--table-head-ink); background: var(--table-head-bg); font-size: var(--table-head-font); text-transform: uppercase; }
 .pill { display: inline-flex; border-radius: 999px; background: rgba(56,189,248,.14); color: #7dd3fc; padding: .15rem .48rem; font-size: .72rem; }
 .unknown { color: #fbbf24; }
 .evidence { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .74rem; color: #9fb0c8; }

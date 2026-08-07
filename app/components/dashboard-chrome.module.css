@@ -1,0 +1,342 @@
+/*
+ * Shared dashboard chrome.
+ *
+ * Density is the point: this is an operator surface where a reader scans many
+ * rows, so padding is tight, type is small, and the grid and rules are
+ * recessive. Colour is carried by the data marks and the reserved status
+ * palette, never by the furniture.
+ *
+ * The status colours below are reserved. They never appear in the categorical
+ * series palette in charts.module.css, so "critical red" can never be mistaken
+ * for "series 6".
+ */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 210px;
+}
+.search input {
+  width: 100%;
+  padding: 6px 10px 6px 30px;
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 7px;
+  background: var(--surface-soft, #f8faff);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink, #101828);
+}
+.search input:focus-visible {
+  outline: 2px solid var(--chart-blue, #2563eb);
+  outline-offset: 1px;
+}
+.searchGlyph {
+  position: absolute;
+  left: 9px;
+  width: 13px;
+  height: 13px;
+  color: var(--ink-muted, #667085);
+  pointer-events: none;
+}
+
+.chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--ink-soft, #475467);
+  white-space: nowrap;
+}
+.chip b { font-weight: 600; color: var(--ink, #101828); }
+.chip svg { width: 9px; height: 6px; color: var(--ink-muted, #667085); }
+/* An active filter is outlined, not filled: a filled chip competes with the data. */
+.chip[data-active="true"] {
+  border-color: var(--chart-blue, #2563eb);
+  color: var(--chart-blue, #2563eb);
+  background: color-mix(in srgb, var(--chart-blue, #2563eb) 7%, transparent);
+}
+.chip[data-active="true"] b { color: inherit; }
+
+.resultCount {
+  margin-left: auto;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted, #667085);
+  white-space: nowrap;
+}
+.toolbarActions { display: inline-flex; align-items: center; gap: 4px; }
+
+.tileRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.statTile {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+}
+.statLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #667085);
+}
+.statValueRow { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.statValue {
+  font-size: 25px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink, #101828);
+}
+.statCaption { margin: 0; font-size: 11.5px; color: var(--ink-muted, #667085); }
+
+.delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.delta svg { width: 10px; height: 10px; }
+/*
+ * Sentiment, not direction. A fall in spend is good and a fall in coverage is
+ * bad, so the caller says which it is and the arrow says which way it moved.
+ */
+.delta[data-sentiment="good"] { color: #047857; }
+.delta[data-sentiment="bad"] { color: #b42318; }
+.delta[data-sentiment="neutral"] { color: var(--ink-muted, #667085); }
+
+.severityLegend { display: flex; align-items: center; gap: 18px; }
+.severityTotal { display: flex; flex-direction: column; }
+.severityTotal strong {
+  font-size: 27px;
+  font-weight: 650;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink, #101828);
+}
+.severityTotal span {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--ink-muted, #667085);
+}
+.severityLegend ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+.severityLegend li {
+  display: grid;
+  grid-template-columns: 9px 1fr auto;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-soft, #475467);
+}
+.severityLegend li i { width: 9px; height: 9px; border-radius: 2px; }
+.severityLegend li b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink, #101828);
+}
+
+/*
+ * Reserved status ramp. Ordered by seriousness rather than by hue family, and
+ * every use is accompanied by its label.
+ */
+li i[data-severity="critical"], .severityPill[data-severity="critical"] { --status: #b42318; --status-wash: #fef3f2; }
+li i[data-severity="high"],     .severityPill[data-severity="high"]     { --status: #b54708; --status-wash: #fffaeb; }
+li i[data-severity="medium"],   .severityPill[data-severity="medium"]   { --status: #854a0e; --status-wash: #fefbe8; }
+li i[data-severity="low"],      .severityPill[data-severity="low"]      { --status: #175cd3; --status-wash: #eff8ff; }
+li i[data-severity="info"],     .severityPill[data-severity="info"]     { --status: #475467; --status-wash: #f2f4f7; }
+li i[data-severity] { background: var(--status); }
+
+.severityPill,
+.statePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--status-wash);
+  color: var(--status);
+}
+
+.statePill[data-state="open"]       { --status: #b42318; --status-wash: #fef3f2; }
+.statePill[data-state="resolved"]   { --status: #047857; --status-wash: #ecfdf3; }
+.statePill[data-state="suppressed"] { --status: #475467; --status-wash: #f2f4f7; }
+.statePill[data-state="pending"]    { --status: #b54708; --status-wash: #fffaeb; }
+.statePill[data-state="failed"]     { --status: #b42318; --status-wash: #fef3f2; }
+
+.card {
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line, #e6ebf5);
+}
+.cardHeader h3 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink, #101828); }
+.cardHeader p { margin: 2px 0 0; font-size: 11.5px; color: var(--ink-muted, #667085); }
+.cardActions { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
+
+/* Wide tables scroll inside the card; the page itself never scrolls sideways. */
+.tableScroll { overflow-x: auto; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.table th,
+.table td {
+  padding: 8px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--line, #e6ebf5);
+  white-space: nowrap;
+}
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-soft, #f8faff);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .03em;
+  text-transform: uppercase;
+  color: var(--ink-muted, #667085);
+}
+.table td { color: var(--ink-soft, #475467); }
+.table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr:hover td { background: var(--surface-soft, #f8faff); }
+.table [data-numeric="true"] { text-align: right; font-variant-numeric: tabular-nums; }
+
+.tableEmpty {
+  padding: 26px 14px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-muted, #667085);
+}
+
+@media (max-width: 720px) {
+  .toolbar { align-items: stretch; }
+  .search { min-width: 0; flex: 1 1 100%; }
+  .resultCount { margin-left: 0; }
+  .severityLegend { flex-direction: column; align-items: flex-start; gap: 10px; }
+}
+
+/*
+ * Compact severity counts for a table cell. The count wears the status colour;
+ * the letter beside it is a recessive abbreviation, and the full label travels
+ * in a title and in screen-reader text.
+ */
+.severityCounts { display: inline-flex; align-items: center; gap: 10px; }
+.severityCounts > span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.severityCounts b { font-weight: 600; color: var(--ink, #101828); }
+.severityCounts i {
+  font-style: normal;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--status);
+}
+.severityCounts > span[data-severity="critical"] { --status: #b42318; }
+.severityCounts > span[data-severity="high"]     { --status: #b54708; }
+.severityCounts > span[data-severity="medium"]   { --status: #854a0e; }
+.severityCounts > span[data-severity="low"]      { --status: #175cd3; }
+.severityCounts > span[data-severity="info"]     { --status: #475467; }
+
+.trendPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  background: var(--status-wash);
+  color: var(--status);
+  white-space: nowrap;
+}
+.trendPill svg { width: 10px; height: 10px; }
+.trendPill[data-sentiment="good"]    { --status: #047857; --status-wash: #ecfdf3; }
+.trendPill[data-sentiment="bad"]     { --status: #b42318; --status-wash: #fef3f2; }
+.trendPill[data-sentiment="neutral"] { --status: #475467; --status-wash: #f2f4f7; }
+
+.tagChip {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--line, #e6ebf5);
+  border-radius: 6px;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+.tagChip > span { padding: 0 6px; background: var(--surface-soft, #f8faff); color: var(--ink-muted, #667085); }
+.tagChip > b { padding: 0 6px; font-weight: 600; color: var(--ink, #101828); }
+
+.rankedList { margin: 0; padding: 8px 0; list-style: none; display: grid; }
+.rankedList li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+}
+.rankedList li:hover { background: var(--surface-soft, #f8faff); }
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--surface-soft, #f8faff);
+  border: 1px solid var(--line, #e6ebf5);
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted, #667085);
+}
+.rankLabel { color: var(--ink, #101828); overflow: hidden; text-overflow: ellipsis; }
+.rankMeta { color: var(--ink-muted, #667085); }
+.rankedList b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink, #101828); }
+.rankedEmpty { margin: 0; padding: 22px 14px; text-align: center; font-size: 12.5px; color: var(--ink-muted, #667085); }

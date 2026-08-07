@@ -95,10 +95,10 @@
 
 /* Tables for pivot-style sheets. */
 .tableWrap { overflow-x: auto; overscroll-behavior-x: contain; }
-.table { width: 100%; border-collapse: collapse; font-size: 11px; }
-.table caption { padding-bottom: 6px; color: var(--ink-faint); font-size: 10px; font-weight: 800; text-align: left; }
-.table th, .table td { padding: 6px 10px 6px 0; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
-.table thead th { color: var(--ink-faint); font-size: 9px; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--table-font); }
+.table caption { padding-bottom: 6px; color: var(--table-head-ink); font-size: var(--table-head-font); font-weight: 600; text-align: left; }
+.table th, .table td { padding: var(--table-pad-y) var(--table-pad-x); text-align: left; border-bottom: 1px solid var(--table-rule); vertical-align: top; }
+.table thead th { color: var(--table-head-ink); font-size: var(--table-head-font); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .table td.numeric, .table th.numeric { text-align: right; font-variant-numeric: tabular-nums; font-weight: 800; }
 .table tbody tr:hover { background: #f8fafc; }
 
