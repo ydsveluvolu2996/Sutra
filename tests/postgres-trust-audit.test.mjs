@@ -85,10 +85,10 @@ test("PostgreSQL commits each AWS trust mutation with one chained audit event", 
     assert.equal(registered.roleArn, replacementRoleArn);
     assert.equal(registered.status, "active");
 
-    const disabled = await pilotRepository.disableAwsConnection(connectionId, actorId);
+    const disabled = await pilotRepository.disableAwsConnection(connectionId, actorId, pilotRepository.LOCAL_ORG_ID);
     assert.equal(disabled.status, "disabled");
 
-    const offboarded = await pilotRepository.offboardAwsConnection(connectionId, actorId);
+    const offboarded = await pilotRepository.offboardAwsConnection(connectionId, actorId, pilotRepository.LOCAL_ORG_ID);
     assert.equal(offboarded.roleArn, null);
     assert.equal(offboarded.status, "disabled");
 

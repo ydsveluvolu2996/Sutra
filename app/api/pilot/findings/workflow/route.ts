@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("AWS connection not found"), { code: "NOT_FOUND" });
     }
     assertSessionCapability(actor.authenticated, "finding:manage", connection.customerId);
-    await setFindingWorkflowStatus(body.connectionId, body.fingerprint, body.status, body.note, actor.id);
+    await setFindingWorkflowStatus(actor.orgId, body.connectionId, body.fingerprint, body.status, body.note, actor.id);
     return jsonResponse({ updated: true, fingerprint: body.fingerprint, status: body.status });
   } catch (error) {
     return errorResponse(error);

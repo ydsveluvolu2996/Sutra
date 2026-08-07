@@ -1,5 +1,5 @@
 import { publishLocalFixtureJob } from "../../../../../db/local-operations-repository";
-import { getConnection, getPilotState } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, getPilotState, LOCAL_ORG_ID } from "../../../../../db/pilot-repository";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { authorize } from "../../../../../lib/auth-policy";
@@ -69,7 +69,7 @@ export async function POST(request: Request): Promise<Response> {
     }
     const { fixture, result } = scoped;
     assertSessionCapability(actor.authenticated, "sync:run", fixture.customerId);
-    const existingConnection = await getConnection(fixture.connectionId);
+    const existingConnection = await getConnectionForOrg(LOCAL_ORG_ID, fixture.connectionId);
     const allowProvisioning = existingConnection === null;
     if (allowProvisioning) {
       assertSessionCapability(actor.authenticated, "customer:create");

@@ -486,6 +486,10 @@ export async function publishLocalFixtureJob(input: {
     },
     input.result.job.jobId,
     input.result.job.scheduleId,
+    // This path is local-fixture only; the caller has already asserted that the
+    // fixture and result both carry LOCAL_ORG_ID. Passing it explicitly keeps
+    // the persisted tenant visible here rather than inherited from a default.
+    LOCAL_ORG_ID,
   );
   const stored = await insertPublication(db, {
     jobId: input.result.job.jobId,

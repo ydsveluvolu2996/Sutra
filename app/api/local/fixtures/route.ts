@@ -1,6 +1,6 @@
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
 import { authorize } from "../../../../lib/auth-policy";
-import { getConnection } from "../../../../db/pilot-repository";
+import { getConnectionForOrg, LOCAL_ORG_ID } from "../../../../db/pilot-repository";
 import { assertLocalSimulationRuntime, errorResponse, getLocalFixtureCatalog, jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ export async function GET(request: Request): Promise<Response> {
         capability: "connection:manage",
         customerId: fixture.customerId,
       }).allowed;
-      const connection = await getConnection(fixture.connectionId);
+      const connection = await getConnectionForOrg(LOCAL_ORG_ID, fixture.connectionId);
       if (connection !== null && (
         connection.customerId !== fixture.customerId ||
         connection.sourceKind !== "simulated_fixture" ||

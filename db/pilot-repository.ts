@@ -655,10 +655,6 @@ export async function getConnectionForOrg(
   return row === null ? null : toPilotConnection(row);
 }
 
-export function getConnection(connectionId: string): Promise<PilotConnection | null> {
-  return getConnectionForOrg(LOCAL_ORG_ID, connectionId);
-}
-
 export async function getLatestConnectionForOrg(orgId: string): Promise<PilotConnection | null> {
   const db = await readyDatabase();
   const row = await db.prepare(
@@ -699,10 +695,6 @@ export async function getLatestConnectionForCustomer(
       LIMIT 1`,
   ).bind(orgId, customerId).first<ConnectionRow>();
   return row === null ? null : toPilotConnection(row);
-}
-
-export function getLatestConnection(): Promise<PilotConnection | null> {
-  return getLatestConnectionForOrg(LOCAL_ORG_ID);
 }
 
 /**
@@ -1111,7 +1103,7 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
 export function disableAwsConnection(
   connectionId: string,
   actorId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<PilotConnection> {
   return serializeAuditOperation(() => disableAwsConnectionWithAtomicAudit(connectionId, actorId, orgId));
 }
@@ -1173,7 +1165,7 @@ async function disableAwsConnectionWithAtomicAudit(
 export function offboardAwsConnection(
   connectionId: string,
   actorId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<PilotConnection> {
   return serializeAuditOperation(() => offboardAwsConnectionWithAtomicAudit(connectionId, actorId, orgId));
 }
@@ -1275,7 +1267,7 @@ async function offboardAwsConnectionWithAtomicAudit(
 function resolveConnectionDisabledAudit(
   connection: PilotConnection,
   actorId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): ResolvedAuditInput {
   return resolveAuditInput({
     orgId,
@@ -1293,7 +1285,7 @@ function resolveConnectionDisabledAudit(
 function resolveConnectionOffboardedAudit(
   connection: PilotConnection,
   actorId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): ResolvedAuditInput {
   return resolveAuditInput({
     orgId,
@@ -1336,7 +1328,7 @@ function nextMutationTimestamp(connection: PilotConnection): number {
 async function connectionHasActiveWork(
   db: D1Database,
   connectionId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<boolean> {
   return await db.prepare(
     `SELECT 1 FROM sync_runs
@@ -1405,7 +1397,7 @@ async function commitAuditedConnectionMutation(
 async function requireUpdatedConnection(
   connectionId: string,
   message: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<PilotConnection> {
   const updated = await getConnectionForOrg(orgId, connectionId);
   if (updated === null) throw new PilotRepositoryError("PERSISTENCE_FAILED", message);
@@ -1477,13 +1469,9 @@ export async function getStoredConnectionSecretForOrg(
   };
 }
 
-export function getStoredConnectionSecret(connectionId: string): Promise<StoredConnectionSecret> {
-  return getStoredConnectionSecretForOrg(LOCAL_ORG_ID, connectionId);
-}
-
 export async function markConnectionValidating(
   connectionId: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<void> {
   const db = await readyDatabase();
   const result = await db.prepare(
@@ -1503,7 +1491,7 @@ export async function markConnectionValidated(
   connectionId: string,
   actorId: string,
   verification: VerifiedRoleEvidence,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<void> {
   const db = await readyDatabase();
   const now = Date.now();
@@ -1586,7 +1574,7 @@ export async function markConnectionNeedsAttention(
   connectionId: string,
   actorId: string,
   safeReason: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<void> {
   const db = await readyDatabase();
   const failure = parseSafePilotFailure({ code: safeReason });
@@ -1779,7 +1767,7 @@ export async function failSyncRun(
   connectionId: string,
   actorId: string,
   safeReason: string,
-  orgId: string = LOCAL_ORG_ID,
+  orgId: string,
 ): Promise<void> {
   const db = await readyDatabase();
   const failure = parseSafePilotFailure({ code: safeReason });
@@ -1842,11 +1830,11 @@ export async function persistSnapshot(
   origin: SnapshotOrigin = { kind: "unknown", fixtureId: null, fixtureVersion: null },
   localFixtureJobId: string | null = null,
   localFixtureScheduleId: string | null = null,
-  // `orgId` defaults to the local pilot organization so every existing local
-  // caller is byte-identical. Hosted callers pass the org resolved STRICTLY from
-  // the durable job's server-derived scope; the whole persist is then scoped to
-  // that tenant and never to anything read from the payload.
-  orgId: string = LOCAL_ORG_ID,
+  // `orgId` is required so the persisted tenant is always visible at the call
+  // site. Hosted callers pass the org resolved STRICTLY from the durable job's
+  // server-derived scope; the whole persist is then scoped to that tenant and
+  // never to anything read from the payload.
+  orgId: string,
   // Hosted ingestion supplies the exact request bytes covered by the broker
   // signature. Manual live collection omits this and archives canonical JSON.
   rawEvidenceBytes?: Uint8Array,
@@ -2799,6 +2787,7 @@ export function getPilotState(connectionId?: string): Promise<PilotState> {
 }
 
 export async function setFindingWorkflowStatus(
+  orgId: string,
   connectionId: string,
   fingerprint: string,
   status: "open" | "acknowledged" | "suppressed",
@@ -2806,7 +2795,7 @@ export async function setFindingWorkflowStatus(
   actorId: string,
 ): Promise<void> {
   const db = await readyDatabase();
-  const connection = await getConnection(connectionId);
+  const connection = await getConnectionForOrg(orgId, connectionId);
   if (connection === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
@@ -2818,7 +2807,7 @@ export async function setFindingWorkflowStatus(
       WHERE h.org_id = ? AND h.customer_id = ? AND h.connection_id = ?
         AND f.fingerprint = ?
       LIMIT 1`,
-  ).bind(LOCAL_ORG_ID, connection.customerId, connectionId, fingerprint).first<{ fingerprint: string }>();
+  ).bind(orgId, connection.customerId, connectionId, fingerprint).first<{ fingerprint: string }>();
   if (currentFinding === null) {
     throw new PilotRepositoryError("NOT_FOUND", "Finding is not present in the active CMDB snapshot");
   }
@@ -2832,7 +2821,7 @@ export async function setFindingWorkflowStatus(
        actor_id = excluded.actor_id, updated_at = excluded.updated_at`,
   ).bind(
     id("fw"),
-    LOCAL_ORG_ID,
+    orgId,
     connection.customerId,
     connectionId,
     fingerprint,
