@@ -144,6 +144,15 @@ Resources:
             #
             # Every sibling role in this repository already uses the
             # environment form; this one was the outlier.
+            #
+            # Note that the DEPLOYED stack cannot have carried the subject this
+            # file previously declared: a release succeeded against it on
+            # 2026-08-05, back when the workflow had no `environment:` key and
+            # therefore presented the ref form. So this template had already
+            # drifted from the live trust policy. Confirm the live policy with
+            #   aws iam get-role --role-name <role> --query AssumeRolePolicyDocument
+            # before updating the stack, so the update is a known change rather
+            # than a second guess.
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com

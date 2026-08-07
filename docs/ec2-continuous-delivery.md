@@ -57,10 +57,16 @@ This previously described a single subject of the form
 `ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main`. No GitHub
 token ever carries that value: `sub` contains no numeric ids under any subject
 customization, and a job that declares `environment:` is issued the
-`...:environment:<name>` form rather than the ref form. The role was
-consequently unassumable, which surfaced as
-`Not authorized to perform sts:AssumeRoleWithWebIdentity` the first time a
-release reached the OIDC step.
+`...:environment:<name>` form rather than the ref form.
+
+The live trust policy cannot have matched this file either: a release
+succeeded on 2026-08-05, when the workflow had no `environment:` key and so
+presented `repo:ydsveluvolu2996/Sutra:ref:refs/heads/main`. Adding the
+`ec2-live-release` environment changed the subject the job presents, and the
+next release that got as far as the OIDC step failed with
+`Not authorized to perform sts:AssumeRoleWithWebIdentity`. Read the live
+policy with `aws iam get-role --query AssumeRolePolicyDocument` before
+updating the stack.
 
 The role cannot create or delete repositories, mutate general infrastructure,
 start or stop EC2, deploy to another instance, read SSM parameters, or open an
