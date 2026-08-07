@@ -454,6 +454,25 @@ h3 { letter-spacing: -.02em; }
 .onboard-form label > span { font-size: 10px; font-weight: 700; }
 .onboard-form label > small { color: var(--ink-faint); font-size: 8.5px; line-height: 1.4; }
 .onboard-form input, .onboard-form select, .filter-control { width: 100%; min-height: 40px; padding: 0 11px; border: 1px solid var(--line-dark); border-radius: 7px; background: #fff; color: var(--ink); font-size: 10px; }
+
+/* Access-grant paths. Native radios inside labels, so keyboard, screen-reader
+   and form semantics come free; the card is the label. The radio stays in the
+   layout rather than being hidden, because a hidden control leaves the focus
+   ring nowhere to land. */
+.onboard-paths { display: grid; gap: 8px; margin: 0; padding: 0; border: 0; }
+.onboard-paths > legend { padding: 0 0 8px; font-size: 10px; font-weight: 700; color: var(--ink); }
+.onboard-path { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; padding: 12px 13px; border: 1px solid var(--line-dark); border-radius: 9px; background: #fff; cursor: pointer; }
+.onboard-path:hover { border-color: #94a3b8; }
+.onboard-path:focus-within { outline: 2px solid #2563eb; outline-offset: 1px; }
+.onboard-path[data-selected="true"] { border-color: #2563eb; background: #f5f8ff; }
+.onboard-path > input { width: 15px; min-height: 15px; height: 15px; margin: 2px 0 0; padding: 0; accent-color: #2563eb; }
+.onboard-path-body { display: grid; gap: 5px; }
+.onboard-path-body > b { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; font-size: 11.5px; font-weight: 650; color: var(--ink); }
+.onboard-path-body > b > em { padding: 1px 6px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 8px; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.onboard-path-summary { color: var(--ink-faint); font-size: 9px; line-height: 1.5; }
+.onboard-path-traits { display: flex; flex-wrap: wrap; gap: 5px; }
+.onboard-path-traits > span { padding: 2px 7px; border: 1px solid var(--line-dark); border-radius: 999px; color: var(--ink-faint); font-size: 8px; }
+.onboard-path[data-selected="true"] .onboard-path-traits > span { border-color: #bfdbfe; background: #fff; color: #1d4ed8; }
 .onboard-form input::placeholder { color: #a3abc4; }
 .onboard-form input[aria-invalid="true"] { border-color: #dca0a0; background: #fffafa; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
