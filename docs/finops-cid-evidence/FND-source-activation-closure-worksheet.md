@@ -59,7 +59,7 @@ $ grep -rl "FinopsDataExportObservationRepository" --include=*.ts .
 | Collector adapter | `services/aws-collector/src/scad-cur2-provider-adapter.ts` | `UNAVAILABLE_BY_CONTRACT` for reuse | Its whole runtime is uncomposed (`finops-scad-production-composition` has 0 callers; no `loadBoundary` implementation exists) | Do **not** build on it; mirror the wired Compute Optimizer discovery instead |
 | SDK reader/client | `@aws-sdk/client-s3` in collector; no `bcm-data-exports` client | `MISSING` | No `ListExports`/`GetExport` call anywhere | Add reader; command must be declared in `COLLECTOR_COMMANDS` |
 | Provider route | `app/api/v1/finops/cudos/route.ts` and siblings | `REUSE_AS_IS` | G4 `IMPLEMENTED_UNVERIFIED` | Freeze |
-| Session/IAM contract | `bcm-data-exports:ListExports`, `bcm-data-exports:GetExport`, four S3 reads in pack `standard-2026-08.12` | `REUSE_AS_IS` | Present in `public/sutra-customer-onboarding-role.yaml:216-217` | **No permission successor needed** |
+| Session/IAM contract | `bcm-data-exports:ListExports` / `GetExport` | `MISSING` | **CORRECTED.** Both appear only inside `DenyUnimplementedActions` `NotAction` (ceiling-permitted, never Allowed). `.14`–`.18` Allow `GetExport`/`GetExecution`/`ListExecutions` but **no pack Allows `ListExports`** | Blocked on a permission decision — see below |
 | Role broker/local server | `services/aws-collector/src/local-server.ts`, `role-broker.ts` | `REPAIR` | New route needed to expose discovery; integrator-owned files | Bounded addition |
 | Drizzle migration | `finops_data_export_observations` in `db/runtime-migrations.ts` | `REUSE_AS_IS` | Table exists both engines | Freeze |
 | PostgreSQL migration | `postgres/migrations/0078_finops_data_export_observations.sql` | `REUSE_AS_IS` | Registered at `db/postgres-runtime-migrations.ts:205` | Freeze |
@@ -71,7 +71,7 @@ $ grep -rl "FinopsDataExportObservationRepository" --include=*.ts .
 | Native four-state UI | Foundational sheet shell + `finops-source-coverage.tsx` | `REUSE_AS_IS` | Four-state rendering asserted by existing tests | Freeze |
 | Focused tests | `tests/finops-data-export-ingest-job.test.ts`, `finops-cudos*.test.*`, `finops-foundational-ui-contract.test.mjs` | `REUSE_AS_IS` | 23 passed in FND-01 record | Freeze; add discovery tests alongside |
 | Shared/predecessor tests | `tests/collector-permission-coverage.test.mjs` | `REPAIR` | New SDK command must be mapped | One entry |
-| Permission successor | — | `UNAVAILABLE_BY_CONTRACT` → not required | The two `bcm-data-exports` actions are already granted by the deployed pack | **No new pack**; do not renumber |
+| Permission successor | packs `.13`–`.18` exist; `.19` is the last slot reserved by `CLAUDE.md` | `MISSING` | Enumeration needs an Allow that no pack grants | **Decision required** — a new pack forces every onboarded customer to redeploy their role |
 | Documentation/tracker | FND-01/02/03 evidence, `FINOPS_CID_IMPLEMENTATION_TRACKER.md` | `REPAIR` | G1 must move from "activation gated" once observed | Update only after the final SHA passes gates |
 
 ## Second-pass finding: composed vs uncomposed runtimes
@@ -201,3 +201,44 @@ docs/finops-cid-evidence/FND-0{1,2,3}-*.md        (G1 promotion, last)
 | Tracker/evidence commit | pending — second commit |
 | Tracker/evidence pushed and remote SHA matched | pending |
 | Remaining G7 release-only gaps | G7–G10 stay `NOT_STARTED`: exact-tree gate, controlled reconciliation, live acceptance. Observing a first delivery does not promote them. |
+
+## Blocker — recorded 2026-08-07
+
+`bcm-data-exports:ListExports` is not granted by any permission pack.
+
+```
+line 216: - bcm-data-exports:ListExports   <- Sid=DenyUnimplementedActions under NotAction
+line 217: - bcm-data-exports:GetExport     <- Sid=DenyUnimplementedActions under NotAction
+```
+
+Absence from a Deny is not permission; IAM requires an explicit `Allow`. The
+first inventory pass read those two lines as a grant and classified the row
+`REUSE_AS_IS`. That was wrong, and it is the same failure mode as the second-pass
+finding above: presence in a file is not reachability.
+
+`tests/collector-permission-coverage.test.mjs` caught it —
+*"collector calls bcm-data-exports:ListExports but the onboarding template does
+not Allow it"* — which is why the reader is committed with that gate red rather
+than with the assertion relaxed. **Do not weaken that test to make this branch
+green.** It is the only thing standing between this vertical and a discovery job
+that returns `AccessDenied` for every real customer while passing locally.
+
+Pack coverage:
+
+| Pack | `ListExports` | `GetExport` |
+|---|---|---|
+| `standard-2026-08.12` (pinned, published) | no | no |
+| `.13` | no | no |
+| `.14`–`.18` | **no** | yes (`ExactCostOptimizationHubRead`) |
+
+Options put to the user, unresolved:
+
+1. Author pack `.19` granting `ListExports`. Consumes the last reserved slot and
+   requires every onboarded customer to redeploy their role.
+2. Drop `ListExports`: have the operator name the export during onboarding and
+   resolve it with `GetExport` alone, which `.14`+ already allows. No new pack,
+   but it reintroduces the configuration surface this worksheet had eliminated,
+   and `.14` is still not the pinned pack.
+
+Implementation is stopped here. The template's own rule applies: *do not
+implement while a required decision is blank or contradictory.*

@@ -18,6 +18,9 @@ importers:
 
   .:
     dependencies:
+      '@aws-sdk/client-bcm-data-exports':
+        specifier: 3.1087.0
+        version: 3.1087.0
       '@aws-sdk/client-kms':
         specifier: 3.1087.0
         version: 3.1087.0
@@ -120,6 +123,9 @@ importers:
         specifier: 3.1087.0
         version: 3.1087.0
       '@aws-sdk/client-auto-scaling':
+        specifier: 3.1087.0
+        version: 3.1087.0
+      '@aws-sdk/client-bcm-data-exports':
         specifier: 3.1087.0
         version: 3.1087.0
       '@aws-sdk/client-bedrock':
@@ -267,6 +273,10 @@ packages:
 
   '@aws-sdk/client-auto-scaling@3.1087.0':
     resolution: {integrity: sha512-6YGc+weyXLBZ3NbELJrOE5ezSLKGwNox3FCFQC7K7IAbNfdaBMYHlYK1+bUR/V1jLL7kQSNHoBV0PVlfOA1rrQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-bcm-data-exports@3.1087.0':
+    resolution: {integrity: sha512-119dlYoNTZ7Sf/YA4Y1IRSItKXJIx3PFdUBBTR46JD/1LDr2rZuiUBP6QGHPPfxdW7o9pnuZLYJ5S4cd3qvWrQ==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-bedrock@3.1087.0':
@@ -3741,6 +3751,17 @@ snapshots:
       tslib: 2.8.1
 
   '@aws-sdk/client-auto-scaling@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.31.1
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-bcm-data-exports@3.1087.0':
     dependencies:
       '@aws-sdk/core': 3.975.2
       '@aws-sdk/credential-provider-node': 3.972.68

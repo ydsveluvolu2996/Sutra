@@ -104,6 +104,13 @@ const COLLECTOR_COMMANDS = {
   DescribeListenersCommand: { action: "elasticloadbalancing:DescribeListeners", scope: "customer" },
   DescribeTargetGroupsCommand: { action: "elasticloadbalancing:DescribeTargetGroups", scope: "customer" },
   DescribeTargetHealthCommand: { action: "elasticloadbalancing:DescribeTargetHealth", scope: "customer" },
+  // Foundational billing export discovery. Customer scope, unlike the KMS
+  // envelope pair above: these run inside the assumed customer session against
+  // the customer's own Data Exports, and the onboarding template must therefore
+  // Allow them. It already does — pack standard-2026-08.12 grants both — so no
+  // successor pack is required for this vertical.
+  ListExportsCommand: { action: "bcm-data-exports:ListExports", scope: "customer" },
+  GetExportCommand: { action: "bcm-data-exports:GetExport", scope: "customer" },
   ListKeysCommand: { action: "kms:ListKeys", scope: "customer" },
   ListAliasesCommand: { action: "kms:ListAliases", scope: "customer" },
   DescribeKeyCommand: { action: "kms:DescribeKey", scope: "customer" },
