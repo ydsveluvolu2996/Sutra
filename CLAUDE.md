@@ -25,6 +25,21 @@ below.
 - Superseded parked runs are left to expire. Do not approve them to clear the
   queue.
 
+Pull requests exist to keep `main` green, because a `main` push whose CI passes
+is what fires a release run. Where there is nothing for CI to prove, the pull
+request buys nothing and is skipped:
+
+- Documentation-only changes -- `*.md` and files under `docs/` -- are committed
+  and pushed directly to `main`. No branch, no pull request.
+- Everything else goes through a pull request so its checks run before the code
+  lands: `app/`, `lib/`, `services/`, `db/`, `scripts/`, `infrastructure/`,
+  `tests/`, `.github/`, and any dependency manifest.
+- A change that touches both takes the pull request path. The documentation
+  exemption applies only when the change is documentation and nothing else.
+- Open pull requests ready for review, not as drafts, and merge them as soon as
+  the required checks are green without waiting to be told. Use a draft only
+  when the work is knowingly incomplete.
+
 ## Mandatory read order
 
 Before editing this repository, read these files completely in order:
