@@ -438,12 +438,33 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   );
 
   assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
+  // The subject must be the claim GitHub actually mints. This previously read
+  // `repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main`,
+  // which is unmatchable twice over: `sub` carries no numeric ids, and a job
+  // declaring `environment:` gets the environment form rather than the ref
+  // form. The role was therefore unassumable, and a release died on
+  // "Not authorized to perform sts:AssumeRoleWithWebIdentity" the first time
+  // the pipeline ever reached the OIDC step.
+  const releaseEnvironment = /^\s{4}environment: (\S+)$/mu.exec(workflow);
+  assert.ok(releaseEnvironment !== null, "the release job must run in an environment");
   assert.match(
     role,
-    /token\.actions\.githubusercontent\.com:sub: repo:ydsveluvolu2996@229068958\/Sutra@1301833628:ref:refs\/heads\/main/u,
+    new RegExp(
+      `token\\.actions\\.githubusercontent\\.com:sub: repo:ydsveluvolu2996/Sutra:environment:${releaseEnvironment[1]}$`,
+      "mu",
+    ),
+    "the trusted subject must name the environment the release job actually runs in",
   );
   assert.doesNotMatch(role, /token\.actions\.githubusercontent\.com:sub:.*\*/u);
-  assert.doesNotMatch(role, /GitHubRepository|ReleaseEnvironment|:environment:/u);
+  assert.doesNotMatch(
+    role,
+    /token\.actions\.githubusercontent\.com:sub:.*@[0-9]/u,
+    "sub carries no numeric identity; use the repository_id claims for that",
+  );
+  // The immutable identity the subject cannot express is pinned separately, so
+  // an owner rename or a re-registered login still cannot assume this role.
+  assert.match(role, /token\.actions\.githubusercontent\.com:repository_owner_id: "229068958"/u);
+  assert.match(role, /token\.actions\.githubusercontent\.com:repository_id: "1301833628"/u);
   assert.match(role, /Action: ssm:GetConnectionStatus/u);
   assert.match(role, /Action: ssm:SendCommand/u);
   assert.match(role, /Sutra-DeployImmutableRelease/u);

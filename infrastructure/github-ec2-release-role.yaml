@@ -124,10 +124,32 @@ Resources:
             Principal:
               Federated: !Ref GitHubOidcProviderArn
             Action: sts:AssumeRoleWithWebIdentity
+            # The subject is matched against the claim GitHub actually mints,
+            # not a rendering of it. Two things were wrong here and both made
+            # the role unassumable:
+            #
+            #   * `sub` never contains numeric ids. GitHub emits
+            #     `repo:<owner>/<repo>:...`; the immutable account and
+            #     repository identity this template wants to pin is carried in
+            #     the separate `repository_owner_id` and `repository_id`
+            #     claims, which are asserted below and are exactly as immutable
+            #     as intended -- a rename or a re-registered owner name changes
+            #     neither.
+            #   * A job that declares `environment:` gets
+            #     `...:environment:<name>`, never `...:ref:refs/heads/main`.
+            #     The release job runs under the `ec2-live-release`
+            #     environment, so a ref-form subject cannot match it, and the
+            #     manual approval on that environment is a stronger boundary
+            #     than the branch anyway.
+            #
+            # Every sibling role in this repository already uses the
+            # environment form; this one was the outlier.
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996/Sutra:environment:ec2-live-release
+                token.actions.githubusercontent.com:repository_owner_id: "229068958"
+                token.actions.githubusercontent.com:repository_id: "1301833628"
       Policies:
         - PolicyName: PushOnlyImmutableSutraApplicationRelease
           PolicyDocument:

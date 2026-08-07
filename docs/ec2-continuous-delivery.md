@@ -45,12 +45,22 @@ workflow and must be created only once. Deploy
 - existing ECR repository `sutra/app`; and
 - the exact instance ID output by `sutra-private-beta`.
 
-The template fixes the OIDC subject to the immutable GitHub owner/repository
-identity `ydsveluvolu2996@229068958/Sutra@1301833628` and exact ref
-`refs/heads/main`; neither value is a deploy-time parameter that can
-accidentally broaden the trust policy. These numeric IDs are emitted by the
-repository's customized OIDC subject and keep the trust boundary pinned if an
-owner or repository display name is later reused.
+The template fixes the OIDC subject to
+`repo:ydsveluvolu2996/Sutra:environment:ec2-live-release` and separately
+requires the `repository_owner_id` (`229068958`) and `repository_id`
+(`1301833628`) claims; none of the three is a deploy-time parameter that can
+accidentally broaden the trust policy. The numeric IDs keep the trust boundary
+pinned if an owner or repository display name is later reused, and the
+environment carries the manual approval gate.
+
+This previously described a single subject of the form
+`ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main`. No GitHub
+token ever carries that value: `sub` contains no numeric ids under any subject
+customization, and a job that declares `environment:` is issued the
+`...:environment:<name>` form rather than the ref form. The role was
+consequently unassumable, which surfaced as
+`Not authorized to perform sts:AssumeRoleWithWebIdentity` the first time a
+release reached the OIDC step.
 
 The role cannot create or delete repositories, mutate general infrastructure,
 start or stop EC2, deploy to another instance, read SSM parameters, or open an
@@ -95,14 +105,20 @@ image-deletion permission.
 
 ## One-time GitHub setup
 
-Do not create a deployment environment for this workflow. GitHub Free does not
-make environments or environment variables available to a private repository.
-The workflow instead uses ordinary repository Actions variables, is
-manual-only, rejects every ref except exact `main`, and runs its own bounded
-source/release gates. AWS independently rejects every OIDC subject except the
-exact `main` branch of the immutable `ydsveluvolu2996@229068958/Sutra@1301833628`
-repository identity, so a workflow created on another branch or a renamed
-lookalike repository cannot assume the release role.
+The workflow runs in the `ec2-live-release` deployment environment, which must
+exist and must list a required reviewer -- that reviewer's approval is what
+holds every release until a human releases it. The workflow additionally uses
+ordinary repository Actions variables, rejects every ref except exact `main`,
+and runs its own bounded source/release gates. AWS independently rejects every
+OIDC subject except `repo:ydsveluvolu2996/Sutra:environment:ec2-live-release`
+carrying the immutable owner and repository ids, so a workflow created on
+another branch, in a renamed lookalike repository, or outside that environment
+cannot assume the release role.
+
+An earlier revision of this document said not to create the environment, on
+the grounds that GitHub Free withholds environments from private repositories.
+That is no longer the arrangement in use: the environment exists, gates each
+run, and is the subject AWS trusts.
 
 Under **Settings -> Secrets and variables -> Actions -> Variables**, set these
 repository variables (not secrets):
