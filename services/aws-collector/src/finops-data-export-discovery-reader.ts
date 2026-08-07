@@ -138,7 +138,13 @@ function destinationOf(detail: unknown): Omit<DiscoveredDataExport, "region"> | 
     && tables.TableConfigurations !== null
     ? Object.keys(tables.TableConfigurations)[0]
     : undefined;
-  if (tableName === undefined || !(tableName in FOUNDATIONAL_EXPORT_TABLES)) return null;
+  // `in` walks the prototype chain, so `constructor`, `toString` and every other
+  // Object.prototype member would pass this check and then index the frozen map
+  // to an inherited function rather than a contract id. It fails closed
+  // downstream -- JSON.stringify drops a function, and the ingest payload
+  // validator accepts only the two exact literals -- but a validated table name
+  // must not depend on that.
+  if (tableName === undefined || !Object.hasOwn(FOUNDATIONAL_EXPORT_TABLES, tableName)) return null;
   const table = tableName as FoundationalExportTable;
 
   const destinations = record(exportDetail.DestinationConfigurations)
