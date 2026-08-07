@@ -138,6 +138,7 @@ const migrationFiles = [
   "0124_finops_pricing_change_runtime.sql",
   "0125_finops_aws_config_compliance_runtime.sql",
   "0126_static_credential_connections.sql",
+  "0127_hosted_credential_envelope.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

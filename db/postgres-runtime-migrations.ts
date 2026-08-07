@@ -123,6 +123,7 @@ import postgresFinopsAmazonConnectRuntimeSql from "../postgres/migrations/0123_f
 import postgresFinopsPricingChangeRuntimeSql from "../postgres/migrations/0124_finops_pricing_change_runtime.sql?raw";
 import postgresFinopsAwsConfigComplianceRuntimeSql from "../postgres/migrations/0125_finops_aws_config_compliance_runtime.sql?raw";
 import postgresStaticCredentialConnectionsSql from "../postgres/migrations/0126_static_credential_connections.sql?raw";
+import postgresHostedCredentialEnvelopeSql from "../postgres/migrations/0127_hosted_credential_envelope.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -250,6 +251,7 @@ const migrations = [
   { id: "0124_finops_pricing_change_runtime", source: postgresFinopsPricingChangeRuntimeSql },
   { id: "0125_finops_aws_config_compliance_runtime", source: postgresFinopsAwsConfigComplianceRuntimeSql },
   { id: "0126_static_credential_connections", source: postgresStaticCredentialConnectionsSql },
+  { id: "0127_hosted_credential_envelope", source: postgresHostedCredentialEnvelopeSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;
