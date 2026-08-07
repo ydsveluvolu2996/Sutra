@@ -162,7 +162,10 @@ export const navGroups: readonly NavGroup[] = [
       { key: "onboard_client", label: "Onboard a client", href: "/onboard/client", capabilities: ["customer:create", "connection:manage"] },
       { key: "customers", label: "Customers & accounts", href: "/customers", capabilities: readWorkspace },
       { key: "onboard", label: "Manage AWS account", href: "/onboard", capabilities: ["connection:manage"] },
-      { key: "connection_health", label: "Connection health", href: "/onboard#connection-lifecycle", capabilities: readConnection },
+      // A read-only health page, not an anchor into the onboarding form. The old
+      // href landed on the Disable and Offboard controls, so "check health"
+      // arrived at the two destructive actions.
+      { key: "connection_health", label: "Connection health", href: "/connection-health", capabilities: readConnection },
     ],
   },
   {
