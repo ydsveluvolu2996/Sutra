@@ -1,6 +1,6 @@
-import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 "use client";
 
+import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PilotConnection } from "../../lib/pilot-types";
 import type {

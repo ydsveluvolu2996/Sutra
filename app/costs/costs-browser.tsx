@@ -1,6 +1,6 @@
-import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 "use client";
 
+import { isCollectableAwsSourceKind } from "../../lib/aws-connection-source";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FinopsPanels } from "./finops-panels";
 import { VisibilityPanels } from "./visibility-panels";
@@ -204,7 +204,10 @@ export function CostsBrowser() {
   }, []);
 
   return (
-    <>
+    // `dashboard-surface` gives every table on this page the shared density,
+    // sticky header and numeric alignment, including the ones written as a bare
+    // <table> that previously inherited nothing.
+    <div className="dashboard-surface">
       <section className="page-heading">
         <div>
           <p className="eyebrow">FinOps command center</p>
@@ -431,6 +434,6 @@ export function CostsBrowser() {
           <a className="button button-secondary" href="/onboard">Review AWS connection</a>
         </section>
       ) : null}
-    </>
+    </div>
   );
 }
