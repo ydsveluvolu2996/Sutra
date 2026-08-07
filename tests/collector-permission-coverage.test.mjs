@@ -104,6 +104,19 @@ const COLLECTOR_COMMANDS = {
   DescribeListenersCommand: { action: "elasticloadbalancing:DescribeListeners", scope: "customer" },
   DescribeTargetGroupsCommand: { action: "elasticloadbalancing:DescribeTargetGroups", scope: "customer" },
   DescribeTargetHealthCommand: { action: "elasticloadbalancing:DescribeTargetHealth", scope: "customer" },
+  // Foundational billing export discovery. These belong to the separately
+  // deployed CUR 2.0 add-on, NOT to the base onboarding role: the add-on grants
+  // ListExports and, better than any base grant could, bounds GetExport to the
+  // exact ExportArn it created. The base template lists both only in its deny
+  // ceiling so that scoped add-on Allow can take effect --
+  // tests/finops-foundational-cur2-export-template.test.mjs asserts the base
+  // role never grants them.
+  //
+  // "source_session" is the existing scope for exactly this: an action that runs
+  // under a source-specific, fail-closed session rather than the default
+  // metadata role.
+  ListExportsCommand: { action: "bcm-data-exports:ListExports", scope: "source_session" },
+  GetExportCommand: { action: "bcm-data-exports:GetExport", scope: "source_session" },
   ListKeysCommand: { action: "kms:ListKeys", scope: "customer" },
   ListAliasesCommand: { action: "kms:ListAliases", scope: "customer" },
   DescribeKeyCommand: { action: "kms:DescribeKey", scope: "customer" },
