@@ -106,7 +106,15 @@ describe("grouped workspace navigation", () => {
     const customerAdminItems = visibleNavigation(customerAdminCapabilities).flatMap((group) => group.items);
 
     assert.equal(readerItems.some((item) => item.href === "/onboard"), false);
-    assert.equal(readerItems.some((item) => item.href === "/onboard#connection-lifecycle"), true);
+    // A reader reaches connection health without connection:manage. It used to
+    // be an anchor into the onboarding page, which meant "check health" landed
+    // on the Disable and Offboard controls; it is now its own read-only page.
+    assert.equal(readerItems.some((item) => item.href === "/connection-health"), true);
+    assert.equal(
+      readerItems.some((item) => item.href.startsWith("/onboard#")),
+      false,
+      "no navigation entry may deep-link a reader into the onboarding form",
+    );
     assert.equal(readerItems.some((item) => item.href === "/operations"), false);
     assert.equal(customerAdminItems.some((item) => item.href === "/onboard"), true);
     assert.equal(customerAdminItems.some((item) => item.href === "/onboard/client"), false);
