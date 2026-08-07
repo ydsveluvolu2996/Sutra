@@ -124,10 +124,34 @@ Resources:
             Principal:
               Federated: !Ref GitHubOidcProviderArn
             Action: sts:AssumeRoleWithWebIdentity
+            # The subject below is the claim this repository's tokens are
+            # actually observed to carry, not a reconstruction of it.
+            #
+            # GitHub renders the repo component of `sub` for this repository
+            # with immutable ids -- `<owner>@<owner_id>/<repo>@<repo_id>` --
+            # rather than the plain `<owner>/<repo>` seen on most repositories.
+            # That is verified, not assumed: release run 31004938955 assumed
+            # this exact role on 2026-08-05 against a live trust policy pinning
+            # `repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main`.
+            #
+            # Only the SELECTOR changed. A job that declares `environment:` is
+            # issued `...:environment:<name>` in place of `...:ref:<ref>`. The
+            # release job gained `environment: ec2-live-release` in 23c8236,
+            # which silently invalidated a trust match that had been working
+            # and produced `Not authorized to perform sts:AssumeRoleWithWebIdentity`
+            # on the next release that reached the OIDC step.
+            #
+            # The ref form is deliberately NOT kept alongside this one. Any
+            # workflow on main could assume the role under it, bypassing the
+            # environment's required-reviewer approval.
+            #
+            # The release workflow prints the subject it is about to present and
+            # fails on a mismatch before calling STS, so this value and the
+            # token can never disagree silently again.
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996@229068958/Sutra@1301833628:ref:refs/heads/main
+                token.actions.githubusercontent.com:sub: repo:ydsveluvolu2996@229068958/Sutra@1301833628:environment:ec2-live-release
       Policies:
         - PolicyName: PushOnlyImmutableSutraApplicationRelease
           PolicyDocument:
