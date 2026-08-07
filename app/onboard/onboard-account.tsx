@@ -37,6 +37,16 @@ import {
 } from "../../lib/pilot-types";
 import { formatTimestamp, postPilot, usePilotState } from "../components/use-pilot-state";
 import { useSession } from "../components/use-session";
+import {
+  WizardCodeBlock,
+  WizardPermissionToggle,
+  WizardRadioGroup,
+  WizardSection,
+  WizardStepRail,
+  type WizardStep,
+} from "./onboard-wizard-chrome";
+import { ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
+import { GlyphIcon } from "../components/nav-icon";
 
 interface CreateConnectionResponse {
   readonly connection: PilotConnection;
@@ -349,6 +359,19 @@ export function OnboardAccount() {
   const currentStep = liveConnection?.status === "active" || liveConnection?.status === "disabled"
     ? 4
     : connection?.roleArn || credentialsRegistered ? 3 : liveConnection ? 2 : 1;
+  const enteringAccessKeys = Boolean(credentialConnection)
+    || (!liveConnection && connectionMethod === "static_credentials");
+  // The rail states what each step actually proves, so an operator can see why
+  // a step exists before reaching it. Step 2's contract differs by grant path:
+  // a role is deployed in the customer account, access keys are handed over.
+  const wizardSteps: readonly WizardStep[] = [
+    { label: "Connection", detail: "Customer, AWS account and grant path" },
+    enteringAccessKeys
+      ? { label: "Enter access keys", detail: "Register keys the collector stores encrypted" }
+      : { label: "Deploy role", detail: "Create the role in the customer account" },
+    { label: "Validate trust", detail: "Prove the ExternalId boundary" },
+    { label: "Inventory", detail: "Publish the first complete snapshot" },
+  ];
   const trustHealth = connection
     ? describeTrustHealth(connection)
     : credentialConnection ? describeStaticCredentialHealth(credentialConnection) : null;
@@ -814,12 +837,9 @@ export function OnboardAccount() {
 
       <div className="onboard-layout">
         <section className="panel onboard-panel">
-          <div className="stepper" aria-label="Onboarding steps">
-            {["Connection", credentialConnection || (!liveConnection && connectionMethod === "static_credentials") ? "Enter access keys" : "Deploy role", "Validate trust", "Inventory"].map((label, index) => {
-              const step = index + 1;
-              return <span key={label} className={step === currentStep ? "active" : step < currentStep ? "complete" : undefined}><b>{step < currentStep ? "✓" : step}</b>{label}</span>;
-            })}
-          </div>
+          <div className="wiz-layout">
+            <WizardStepRail current={currentStep} steps={wizardSteps} />
+            <div className="wiz-body">
 
           {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the AWS workspace…</div> : null}
 
@@ -831,11 +851,41 @@ export function OnboardAccount() {
             <>
               <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. A lost response can recover the same actor-bound value only until the customer role is registered.</p></div>
               <form className="onboard-form" onSubmit={createConnection}>
+                <WizardSection
+                  title="Choose Your Setup"
+                  description="Bind this connection to one approved customer workspace and one AWS account."
+                >
                 <label><span>Customer workspace</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" required /><small>Each connection is bound to one approved customer workspace and one AWS account.</small></label>
                 <div className="form-grid">
                   <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                   <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
                 </div>
+                {/* Scope is single-account today. Organization-wide assumption
+                    across member accounts is a collector capability, not a form
+                    field, so it is shown as unavailable rather than offered and
+                    silently ignored. */}
+                <WizardRadioGroup
+                  legend="Connector scope"
+                  name="connector-scope"
+                  onChange={() => undefined}
+                  options={[
+                    { id: "account", label: "Account", description: "Scan the single AWS account entered above." },
+                    {
+                      id: "organization",
+                      label: "Organization",
+                      description: "Scan an AWS organization and its member accounts from one role.",
+                      unavailable: "The collector assumes one customer role per account. Onboard member accounts individually until organization-wide assumption ships.",
+                    },
+                  ]}
+                  value="account"
+                />
+                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
+                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
+                </WizardSection>
+                <WizardSection
+                  title="Deploy"
+                  description="Sutra never creates customer access keys. The recommended paths store no long-lived customer secret at all."
+                >
                 <fieldset className="onboard-paths">
                   <legend>How will the customer grant access?</legend>
                   {ONBOARD_PATHS.map((path) => (
@@ -873,8 +923,40 @@ export function OnboardAccount() {
                   <div className="inline-warning" role={customerManagedRoleError ? "alert" : "note"}><strong>{customerManagedRoleError ? "Role contract needs attention" : "Dedicated customer role required"}</strong><span>{customerManagedRoleError ?? "Existing admin, shared operations, power-user, break-glass, account-access, broader-policy, and wildcard-trust roles are rejected during live attestation. Every accepted session is still intersected with Sutra's fixed read-only STS session policy."}</span></div>
                 </> : null}
                 </> : <div className="inline-warning" role="note"><strong>Access keys are entered in the next step.</strong><span>After the connection contract exists, Sutra asks for a dedicated read-only IAM user&apos;s access key ID and secret (plus a session token for temporary ASIA keys), verifies the account with GetCallerIdentity, and stores them encrypted in the collector. Keys never accompany this create request.</span></div>}
-                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
-                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
+                {/* Stated, not offered. Every row is verified against the
+                    deployed pack YAML by
+                    tests/aws-onboarding-role-capabilities.test.mjs, so a row
+                    cannot claim a grant the template does not contain. */}
+                <details className="wiz-capabilities">
+                  <summary className="wiz-capabilities-legend">
+                    <span>
+                      What permission pack <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> grants
+                    </span>
+                    <em>
+                      {ONBOARDING_ROLE_CAPABILITIES.filter((capability) => capability.granted).length}
+                      {" of "}
+                      {ONBOARDING_ROLE_CAPABILITIES.length} granted
+                    </em>
+                    <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
+                  </summary>
+                  {ONBOARDING_ROLE_CAPABILITIES.map((capability) => (
+                    <WizardPermissionToggle
+                      description={capability.description}
+                      key={capability.id}
+                      label={capability.label}
+                      note={capability.granted
+                        ? `Granted by ${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}: ${capability.actions.join(", ")}`
+                        : `Not granted by ${AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}. This capability is not collected.`}
+                      state={capability.granted ? "granted" : "unavailable"}
+                    />
+                  ))}
+                  <p className="wiz-capabilities-note">
+                    These are fixed by the pack this connection deploys, not per-connection
+                    settings. Permission packs are immutable; a new capability arrives as a
+                    successor pack, never as a checkbox here.
+                  </p>
+                </details>
+                </WizardSection>
                 <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
               </form>
             </>
@@ -944,6 +1026,15 @@ export function OnboardAccount() {
                   <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}.yaml`, customerManagedArtifacts.cloudFormationYaml, "application/yaml;charset=utf-8")}>Download CloudFormation</button>
                   <button className="button button-secondary" type="button" onClick={() => downloadSensitiveArtifact(`${connection.expectedRoleName}-trust-policy.json`, customerManagedArtifacts.trustPolicyJson, "application/json;charset=utf-8")}>Download JSON trust policy</button>
                 </div>
+                {/* The same generated Terraform, inline and copyable, for
+                    operators who paste into an existing repository rather than
+                    download a file. It is the identical artifact the Download
+                    Terraform button writes -- rendered, not re-derived, so the
+                    two can never disagree. */}
+                <WizardCodeBlock
+                  code={customerManagedArtifacts.terraformHcl}
+                  filename={`${connection.expectedRoleName}.tf`}
+                />
                 <ol className="deployment-checklist">
                   <li><b>1</b><span><strong>Create a new dedicated role.</strong> Do not reuse an administrator, power-user, shared operations, break-glass, or AWS account-access role.</span></li>
                   <li><b>2</b><span><strong>Keep trust exact.</strong> The principal must be <code>{principalArn}</code>; account roots, multiple principals, and wildcard trust are rejected.</span></li>
@@ -1025,6 +1116,8 @@ export function OnboardAccount() {
           {notice?.tone === "success" ? <div className="validation-result" role="status"><span>✓</span><div><strong>{notice.title}</strong><p>{notice.message}</p></div></div> : null}
           {notice?.tone === "warning" ? <div className="inline-warning" role="status"><strong>{notice.title}</strong><span>{notice.message}</span></div> : null}
           {error ? <div className="validation-result validation-error" role="alert"><span>!</span><div><strong>Action needs attention</strong><p>{error}</p></div></div> : null}
+            </div>
+          </div>
         </section>
 
         <aside className="onboard-aside">
