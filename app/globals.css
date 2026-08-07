@@ -164,17 +164,32 @@ h3 { letter-spacing: -.02em; }
 .page-subtitle { margin-bottom: 0; color: var(--ink-soft); font-size: 13px; }
 .heading-actions { display: flex; gap: 9px; flex-wrap: wrap; }
 /* Flagship dashboard hero: night-navy aurora banner matching the marketing site */
-.dashboard-hero { position: relative; overflow: hidden; isolation: isolate; align-items: center; margin-bottom: 22px; padding: 30px 32px 32px; border: 1px solid rgba(120,150,230,.24); border-radius: 20px; background: var(--night); color: #f3f6ff; box-shadow: 0 28px 60px rgba(7,12,34,.35), inset 0 1px 0 rgba(160,190,255,.14); }
-.dashboard-hero::before { content: ""; position: absolute; inset: 0; z-index: -2; background: radial-gradient(72% 130% at 86% -24%, rgba(59,130,246,.42), transparent 60%), radial-gradient(56% 110% at 2% 122%, rgba(139,92,246,.36), transparent 58%), radial-gradient(42% 84% at 52% 28%, rgba(34,211,238,.14), transparent 70%), linear-gradient(120deg, #070b18 0%, #0a1020 58%, #0b1124 100%); }
-.dashboard-hero::after { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: .5; background-image: linear-gradient(rgba(120,150,220,.09) 1px, transparent 1px), linear-gradient(90deg, rgba(120,150,220,.09) 1px, transparent 1px); background-size: 40px 40px; -webkit-mask-image: radial-gradient(110% 130% at 74% 0%, #000 0%, transparent 72%); mask-image: radial-gradient(110% 130% at 74% 0%, #000 0%, transparent 72%); }
-.dashboard-hero .eyebrow { display: inline-block; background: linear-gradient(90deg, #5eeaff, #86b3ff 55%, #b8a1ff); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; }
-.dashboard-hero h1 { color: #f4f7ff; text-shadow: 0 2px 18px rgba(6,12,34,.5); }
-.dashboard-hero .page-subtitle { max-width: 760px; color: #a9b4d0; }
-.dashboard-hero .button-secondary { border-color: rgba(160,190,255,.3); background: rgba(255,255,255,.06); color: #e8edfb; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-.dashboard-hero .button-secondary:hover { background: rgba(255,255,255,.12); border-color: rgba(160,190,255,.48); }
+/*
+ * Compact page header.
+ *
+ * This was a 200px dark hero with radial glows, a masked grid overlay and
+ * gradient-clipped text. On an operator surface that space belongs to data: the
+ * reader already knows which product they opened, and the banner pushed the
+ * first real number below the fold. The header now states the workspace and its
+ * actions in one quiet row.
+ */
+.dashboard-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 0 0 13px;
+  border-bottom: 1px solid var(--line, #e6ebf5);
+}
+.dashboard-hero .eyebrow { color: var(--ink-muted, #667085); }
+.dashboard-hero h1 { margin: 2px 0 0; font-size: 21px; font-weight: 650; color: var(--ink, #101828); }
+.dashboard-hero .page-subtitle { margin: 3px 0 0; max-width: 720px; font-size: 12.5px; color: var(--ink-muted, #667085); }
+
 .button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 0 14px; border-radius: 8px; border: 1px solid transparent; font-size: 11px; font-weight: 680; cursor: pointer; transition: transform .16s ease, box-shadow .2s ease, filter .16s ease, background .16s ease, border-color .16s ease; }
-.button-primary { background: var(--grad); color: #061225; border: 0; box-shadow: 0 8px 20px rgba(59,130,246,.3), inset 0 1px 0 rgba(255,255,255,.35); }
-.button-primary:hover { filter: brightness(1.07); transform: translateY(-1px); box-shadow: 0 12px 26px rgba(99,102,241,.36), inset 0 1px 0 rgba(255,255,255,.35); }
+/* Flat and solid. A glowing, lifting button reads as a marketing site. */
+.button-primary { background: #2563eb; color: #fff; border: 1px solid #2563eb; }
+.button-primary:hover { background: #1d4ed8; border-color: #1d4ed8; }
 .button:disabled { opacity: .52; cursor: not-allowed; box-shadow: none; transform: none; }
 .button-secondary { background: rgba(255,255,255,.92); border-color: var(--line-dark); color: var(--ink); }
 .button-secondary:hover { background: #f5f8ff; border-color: #aebfe8; }
@@ -184,9 +199,17 @@ h3 { letter-spacing: -.02em; }
 .trust-strip .trust-icon { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: linear-gradient(135deg, #22d3ee, #3b82f6); color: #fff; font-weight: 800; box-shadow: 0 3px 8px rgba(59,130,246,.3); }
 .trust-strip a { margin-left: auto; color: var(--forest); font-weight: 700; white-space: nowrap; }
 .metrics-grid { display: grid; grid-template-columns: 1.25fr repeat(3, 1fr); gap: 13px; margin-bottom: 13px; }
-.metric-card, .panel { border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, #ffffff, #fcfdff); box-shadow: inset 0 1px 0 rgba(255,255,255,.9), var(--shadow); }
-.metric-card { min-height: 148px; padding: 17px 18px; transition: transform .2s cubic-bezier(.2,.8,.3,1), box-shadow .22s ease, border-color .2s ease; }
-.metric-card:hover { transform: translateY(-2px); border-color: #c6d5fa; box-shadow: inset 0 1px 0 rgba(255,255,255,.9), 0 20px 44px rgba(30,45,110,.12); }
+/*
+ * Flat surfaces. The gradient fill, inset highlight and drop shadow read as
+ * decoration on a surface whose job is to disappear behind its data.
+ */
+.metric-card, .panel { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+/*
+ * 148px of height for a single number pushed the first table below the fold.
+ * A tile is a headline, not a panel.
+ */
+.metric-card { min-height: 96px; padding: 12px 14px; transition: border-color .16s ease, background .16s ease; }
+.metric-card:hover { border-color: #c6d5fa; background: var(--surface-soft); }
 .metric-card-featured { position: relative; overflow: hidden; border-color: #c3d5fb; background: linear-gradient(150deg, #f6f9ff 0%, #eef3ff 58%, #f1edff 100%); }
 .metric-card-featured::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--grad); }
 .metric-card-featured::after { content: ""; position: absolute; width: 160px; height: 160px; right: -64px; top: -64px; border-radius: 50%; background: radial-gradient(circle, rgba(99,102,241,.16), transparent 70%); pointer-events: none; }
@@ -197,7 +220,7 @@ h3 { letter-spacing: -.02em; }
 .score-row span { color: var(--ink-faint); font-size: 12px; }
 .score-track { height: 5px; margin-top: 10px; overflow: hidden; border-radius: 4px; background: #e2e8f8; }
 .score-track span { height: 100%; display: block; border-radius: inherit; background: linear-gradient(90deg, #22d3ee, #3b82f6); }
-.metric-value { display: block; margin-top: 22px; font-size: 29px; letter-spacing: -.045em; line-height: 1; }
+.metric-value { display: block; margin-top: 10px; font-size: 25px; font-variant-numeric: tabular-nums; letter-spacing: -.045em; line-height: 1; }
 .metric-glyph { min-width: 27px; height: 21px; display: grid; place-items: center; padding: 0 5px; border-radius: 5px; background: #edf1fa; color: var(--forest); font: 700 8px var(--font-geist-mono), monospace; }
 .metric-glyph-alert { background: #f9eaea; color: var(--red); font-size: 11px; }
 .delta { font-weight: 750; }
