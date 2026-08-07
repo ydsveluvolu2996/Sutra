@@ -35,6 +35,12 @@ import {
   validateComputeOptimizerExportLaunchProvisioningContractSet,
   validateComputeOptimizerExportLaunchProvisioningVerification,
 } from "./compute-optimizer-export-launch-provisioning.js";
+import {
+  openStaticCredentials,
+  sealStaticCredentials,
+  type CredentialKmsClient,
+  type SealedCredentialEnvelope,
+} from "./hosted-credential-envelope.js";
 import type { HostedRequestReplayStore } from "./hosted-request-auth.js";
 import {
   AgentlessRunAlreadyRunningError,
@@ -62,7 +68,16 @@ interface ConnectionRow {
   encrypted_state: string | null;
   state_sha256: string | null;
   tombstoned_at: string | number | null;
+  // Customer key material is never inside `encrypted_state`. It is sealed under
+  // a per-connection KMS data key and stored here instead, so the application
+  // registry key alone cannot read any tenant's credentials.
+  credential_envelope?: string | null;
+  credential_key_arn?: string | null;
 }
+
+const CONNECTION_COLUMNS =
+  "tenant_id, connection_id, encrypted_state, state_sha256, tombstoned_at, "
+  + "credential_envelope, credential_key_arn";
 
 interface EndUserComputingPartitionRow {
   id:string;export_name:string;billing_period:string;active_generation_id:string;
@@ -201,6 +216,8 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
   private readonly now: () => number;
   private readonly leaseMs: number;
   private readonly agentlessLeases = new Map<string, { tenantId: string; token: string }>();
+  private readonly credentialKms: CredentialKmsClient | null;
+  private readonly credentialKeyArn: string | null;
 
   public constructor(options: {
     readonly connectionString: string;
@@ -209,6 +226,14 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     readonly now?: () => number;
     readonly leaseMs?: number;
     readonly pool?: pg.Pool;
+    /**
+     * Supplying both enables static-credential connections. Omitting either
+     * keeps the broker refusing them, so a deployment that has not been given a
+     * customer-credential CMK never silently falls back to sealing key material
+     * under the shared application registry key.
+     */
+    readonly credentialKms?: CredentialKmsClient;
+    readonly credentialKeyArn?: string;
   }) {
     if (!options.connectionString.startsWith("postgres")) {
       throw new RegistryConfigurationError("DATABASE_URL must be a PostgreSQL URL");
@@ -221,6 +246,14 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
       idleTimeoutMillis: 30_000,
     });
     this.key = decodeKey(options.encryptionKey);
+    // Both or neither: a half-configured credential CMK must not look enabled.
+    this.credentialKms = options.credentialKms ?? null;
+    this.credentialKeyArn = options.credentialKeyArn ?? null;
+    if ((this.credentialKms === null) !== (this.credentialKeyArn === null)) {
+      throw new RegistryConfigurationError(
+        "Hosted customer-credential storage needs both a KMS client and a CMK ARN",
+      );
+    }
     this.owner = options.owner ?? `broker-${randomUUID()}`;
     if (!IDENTIFIER.test(this.owner)) throw new RegistryConfigurationError("Broker owner id is invalid");
     this.now = options.now ?? Date.now;
@@ -297,7 +330,7 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
   ): Promise<RegisteredAwsConnection | null> {
     assertScope(scope, connectionId);
     const result = await this.pool.query<ConnectionRow>(
-      `SELECT tenant_id, connection_id, encrypted_state, state_sha256, tombstoned_at
+      `SELECT ${CONNECTION_COLUMNS}
          FROM hosted_broker_connections
         WHERE tenant_id = $1 AND connection_id = $2
         LIMIT 1`,
@@ -305,18 +338,28 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     );
     const row = result.rows[0];
     if (row === undefined || row.tombstoned_at !== null) return null;
-    return this.decrypt(row);
+    return await this.hydrateCredentials(row, this.decrypt(row));
   }
 
   public async upsert(input: RegisterAwsConnectionInput): Promise<void> {
-    // Static-credential connections are a local-collector capability: customer
-    // key material has a reviewed at-rest contract only in the encrypted local
-    // registry file. The hosted broker fails closed until a hosted storage
-    // contract for that material is separately reviewed.
-    if (input.credentialKind === "static_credentials") {
-      throw new RegistryStateError();
-    }
     const candidate = parseConnectionInput(input);
+    let credential: { envelope: string; keyArn: string } | null = null;
+    if (candidate.credentialKind === "static_credentials") {
+      // Fail closed when this deployment has no customer-credential CMK. The
+      // alternative -- sealing key material under the shared application
+      // registry key -- is the contract this work exists to avoid.
+      if (this.credentialKms === null || this.credentialKeyArn === null) {
+        throw new RegistryStateError();
+      }
+      if (candidate.staticCredentials === undefined) throw new RegistryStateError();
+      const sealed = await sealStaticCredentials(
+        this.credentialKms,
+        this.credentialKeyArn,
+        { tenantId: candidate.tenantId, connectionId: candidate.connectionId },
+        candidate.staticCredentials,
+      );
+      credential = { envelope: JSON.stringify(sealed), keyArn: this.credentialKeyArn };
+    }
     await this.mutate(candidate.tenantId, candidate.connectionId, (previous, tombstoned) => {
       if (tombstoned || previous?.status === "DISABLED") throw new RegistryStateError();
       const unchanged = previous !== null && stableEqual(previous, candidate);
@@ -358,7 +401,7 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
         createdAt: previous?.createdAt ?? timestamp,
         updatedAt: timestamp,
       };
-    });
+    }, false, credential);
   }
 
   public async disable(scope: ConnectionScope, connectionId: string): Promise<void> {
@@ -386,6 +429,9 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
          VALUES ($1, $2, NULL, NULL, $3, $3, $3)
          ON CONFLICT (tenant_id, connection_id) DO UPDATE
            SET encrypted_state = NULL, state_sha256 = NULL,
+               -- Offboarding destroys the sealed credential rather than leaving
+               -- customer key material behind on a tombstoned row.
+               credential_envelope = NULL, credential_key_arn = NULL,
                tombstoned_at = EXCLUDED.tombstoned_at, updated_at = EXCLUDED.updated_at`,
         [scope.tenantId, connectionId, now],
       );
@@ -1151,12 +1197,17 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
       tombstoned: boolean,
     ) => RegisteredAwsConnection | null,
     allowMissing = false,
+    // Written in the same transaction as the state, so a connection is never
+    // durable without the credential it needs, nor the reverse.
+    credential: { envelope: string; keyArn: string } | null = null,
   ): Promise<void> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
       const row = await this.lockRow(client, tenantId, connectionId);
-      const previous = row === null || row.tombstoned_at !== null ? null : this.decrypt(row);
+      const previous = row === null || row.tombstoned_at !== null
+        ? null
+        : await this.hydrateCredentials(row, this.decrypt(row));
       if (row === null && allowMissing) {
         await client.query("COMMIT");
         return;
@@ -1165,16 +1216,27 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
       if (next !== null) {
         const encrypted = this.encrypt(next);
         const now = this.now();
+        // A write that carries no new envelope keeps whatever is already
+        // stored, so an unrelated metadata update never silently drops the
+        // customer's credentials.
         await client.query(
           `INSERT INTO hosted_broker_connections
-             (tenant_id, connection_id, encrypted_state, state_sha256, tombstoned_at, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, NULL, $5, $5)
+             (tenant_id, connection_id, encrypted_state, state_sha256, tombstoned_at,
+              credential_envelope, credential_key_arn, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, NULL, $6, $7, $5, $5)
            ON CONFLICT (tenant_id, connection_id) DO UPDATE
              SET encrypted_state = EXCLUDED.encrypted_state,
                  state_sha256 = EXCLUDED.state_sha256,
                  tombstoned_at = NULL,
+                 credential_envelope = COALESCE(
+                   EXCLUDED.credential_envelope, hosted_broker_connections.credential_envelope),
+                 credential_key_arn = COALESCE(
+                   EXCLUDED.credential_key_arn, hosted_broker_connections.credential_key_arn),
                  updated_at = EXCLUDED.updated_at`,
-          [tenantId, connectionId, encrypted.value, encrypted.sha256, now],
+          [
+            tenantId, connectionId, encrypted.value, encrypted.sha256, now,
+            credential?.envelope ?? null, credential?.keyArn ?? null,
+          ],
         );
       }
       await client.query("COMMIT");
@@ -1192,7 +1254,7 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     connectionId: string,
   ): Promise<ConnectionRow | null> {
     const result = await client.query<ConnectionRow>(
-      `SELECT tenant_id, connection_id, encrypted_state, state_sha256, tombstoned_at
+      `SELECT ${CONNECTION_COLUMNS}
          FROM hosted_broker_connections
         WHERE tenant_id = $1 AND connection_id = $2
         FOR UPDATE`,
@@ -1201,8 +1263,46 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     return result.rows[0] ?? null;
   }
 
+  /**
+   * Re-attach the customer's credentials to a decrypted connection.
+   *
+   * `encrypted_state` deliberately never contains key material, so a
+   * static-credential connection read back without this step has no usable
+   * credentials. Failing closed here rather than returning a partial connection
+   * keeps "the row exists" from being mistaken for "the credentials are usable".
+   */
+  private async hydrateCredentials(
+    row: ConnectionRow,
+    connection: RegisteredAwsConnection,
+  ): Promise<RegisteredAwsConnection> {
+    if (connection.credentialKind !== "static_credentials") return connection;
+    if (
+      typeof row.credential_envelope !== "string" || row.credential_envelope.length === 0
+      || this.credentialKms === null
+    ) {
+      throw new RegistryIntegrityError();
+    }
+    let envelope: SealedCredentialEnvelope;
+    try {
+      envelope = JSON.parse(row.credential_envelope) as SealedCredentialEnvelope;
+    } catch {
+      throw new RegistryIntegrityError();
+    }
+    const material = await openStaticCredentials(
+      this.credentialKms,
+      { tenantId: row.tenant_id, connectionId: row.connection_id },
+      envelope,
+    );
+    return { ...connection, staticCredentials: material };
+  }
+
   private encrypt(connection: RegisteredAwsConnection): { value: string; sha256: string } {
-    const cleartext = JSON.stringify(connection);
+    // Customer key material must never enter the application-key envelope: it
+    // belongs only in the KMS-sealed credential envelope. Stripping it here,
+    // at the single point where state is serialized, means no future caller can
+    // reintroduce it by building a connection object that happens to carry it.
+    const { staticCredentials: _sealed, ...persistable } = connection;
+    const cleartext = JSON.stringify(persistable);
     const iv = randomBytes(12);
     const aad = Buffer.from(`${connection.tenantId}\0${connection.connectionId}`, "utf8");
     const cipher = createCipheriv("aes-256-gcm", this.key, iv);
