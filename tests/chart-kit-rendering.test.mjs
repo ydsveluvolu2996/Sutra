@@ -244,8 +244,15 @@ test("a share bar renders contiguous segments covering the full width", () => {
 
 test("series colours are deterministic and paired with a non-colour cue", () => {
   assert.equal(kit.chartToneAt(0), "blue");
-  assert.equal(kit.chartToneAt(kit.CHART_TONE_SEQUENCE.length), "blue", "cycles");
   assert.equal(kit.chartToneAt(1), kit.CHART_TONE_SEQUENCE[1]);
+  // Past the sequence the tone is the reserved neutral, not a second series
+  // wearing the first series' colour. This assertion previously required
+  // cycling back to blue, which meant series 1 and series 10 were painted
+  // identically and the chart silently lied about identity.
+  assert.equal(kit.chartToneAt(kit.CHART_TONE_SEQUENCE.length), "slate");
+  assert.equal(kit.chartToneAt(-1), "slate");
+  // The neutral is never issued as a categorical identity.
+  assert.ok(!kit.CHART_TONE_SEQUENCE.includes("slate"));
   // Hue is never the only cue: the first series is solid and later ones dash.
   assert.equal(kit.chartDashAt(0), undefined);
   assert.notEqual(kit.chartDashAt(1), undefined);

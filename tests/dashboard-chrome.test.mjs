@@ -1,0 +1,91 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+// The chrome is shared by every dashboard, so a regression here is a regression
+// on all of them. These lock the properties that are easy to erode: reserved
+// status colours staying out of the categorical palette, colour never being the
+// only cue, and wide tables scrolling inside their own container.
+
+const chrome = await readFile(new URL("../app/components/dashboard-chrome.tsx", import.meta.url), "utf8");
+const chromeCss = await readFile(new URL("../app/components/dashboard-chrome.module.css", import.meta.url), "utf8");
+const chartsCss = await readFile(new URL("../app/components/charts/charts.module.css", import.meta.url), "utf8");
+const frame = await readFile(new URL("../app/components/charts/chart-frame.tsx", import.meta.url), "utf8");
+
+function hexes(source) {
+  return [...source.matchAll(/#[0-9a-f]{6}\b/gu)].map((match) => match[0].toLowerCase());
+}
+
+test("the categorical palette clears every validator check", () => {
+  // The values are validated by scripts/validate_palette.js; this asserts the
+  // recorded outcome stays recorded, so a later edit cannot quietly drop it.
+  assert.match(chartsCss, /Validated against the #ffffff chart surface/u);
+  assert.match(chartsCss, /dE 13\.3 \(deuteranopia\)/u);
+});
+
+test("reserved status colours never collide with the categorical series palette", () => {
+  const categorical = new Set(
+    [...chartsCss.matchAll(/--chart-(?!slate)[a-z]+:\s*(#[0-9a-f]{6})/gu)].map((m) => m[1].toLowerCase()),
+  );
+  assert.ok(categorical.size >= 8, "the categorical palette must actually be found");
+  const status = hexes(
+    chromeCss.slice(chromeCss.indexOf("Reserved status ramp")),
+  );
+  for (const colour of status) {
+    assert.ok(
+      !categorical.has(colour),
+      `${colour} is used as both a status colour and a categorical series colour`,
+    );
+  }
+});
+
+test("the neutral tone is never issued as a categorical identity", () => {
+  const sequence = /CHART_TONE_SEQUENCE: readonly ChartTone\[\] = Object\.freeze\(\[([\s\S]*?)\]\)/u
+    .exec(frame);
+  assert.ok(sequence !== null);
+  assert.ok(!sequence[1].includes("slate"), "slate is the reserved neutral, not series 10");
+  // Past the sequence the tone must not wrap back onto an in-use hue.
+  assert.match(frame, /if \(!Number\.isInteger\(index\) \|\| index < 0 \|\| index >= sequence\.length\) return "slate";/u);
+});
+
+test("severity and state are always rendered with a text label", () => {
+  // Both pills take a `label` and render it, so the colour is a second cue and
+  // never the only one.
+  assert.match(chrome, /function SeverityPill\(\{ severity, label \}[\s\S]*?\{label\}<\/span>/u);
+  assert.match(chrome, /function StatePill\(\{ state, label \}[\s\S]*?\{label\}<\/span>/u);
+});
+
+test("the severity legend labels every row rather than relying on swatches", () => {
+  const start = chrome.indexOf("export function SeverityLegend(");
+  const body = chrome.slice(start, chrome.indexOf("\nexport ", start + 1));
+  assert.match(body, /<span>\{entry\.label\}<\/span>/u);
+  assert.match(body, /<b>\{entry\.count/u);
+  assert.match(body, /aria-hidden="true" data-severity=/u, "the swatch itself is decorative");
+});
+
+test("delta separates direction from sentiment", () => {
+  // A fall in spend is good and a fall in coverage is bad; conflating them
+  // colours a win red.
+  assert.match(chrome, /readonly direction: "up" \| "down" \| "flat";/u);
+  assert.match(chrome, /readonly sentiment: "good" \| "bad" \| "neutral";/u);
+  assert.match(chromeCss, /\.delta\[data-sentiment="good"\]/u);
+});
+
+test("wide tables scroll inside their own container", () => {
+  assert.match(chromeCss, /\.tableScroll \{\s*overflow-x: auto;\s*\}/u);
+  assert.match(chrome, /className=\{styles\.tableScroll\}/u);
+});
+
+test("the table header stays readable while scrolling and numbers align", () => {
+  assert.match(chromeCss, /\.table th \{[\s\S]*?position: sticky;/u);
+  assert.match(chromeCss, /\[data-numeric="true"\] \{ text-align: right; font-variant-numeric: tabular-nums; \}/u);
+});
+
+test("an empty table says so instead of rendering an empty body", () => {
+  assert.match(chrome, /if \(rows\.length === 0 && empty !== undefined\)/u);
+  assert.match(chrome, /role="status"/u);
+});
+
+test("the chrome stays presentational so server components can render it", () => {
+  assert.doesNotMatch(chrome, /\buseState\b|\buseEffect\b|\buseMemo\b|"use client"/u);
+});

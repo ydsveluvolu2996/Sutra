@@ -17,23 +17,37 @@ export type ChartTone =
   | "amber" | "orange" | "red" | "violet" | "slate";
 
 /**
- * Default series order. Chosen so the first four tones stay distinguishable for
- * the most common forms of colour vision deficiency; components additionally
- * vary dash patterns and markers so hue is never the only cue.
+ * Categorical series order, validated as a whole rather than chosen by eye.
+ * Every adjacent pair clears the colour-vision-deficiency separation floor, so
+ * neighbouring series stay distinguishable; components additionally vary dash
+ * patterns and markers so hue is never the only cue.
+ *
+ * `slate` is deliberately absent. It is the reserved neutral for a remainder,
+ * absent or failed state, and a neutral must never become "series 10".
  */
 export const CHART_TONE_SEQUENCE: readonly ChartTone[] = Object.freeze([
-  "blue", "amber", "teal", "violet", "red",
-  "green", "indigo", "orange", "cyan", "slate",
+  "blue", "orange", "teal", "violet", "green",
+  "red", "cyan", "amber", "indigo",
 ]);
 
 export function chartToneColor(tone: ChartTone): string {
   return `var(--chart-${tone})`;
 }
 
-/** Deterministic tone for series `index`, cycling through the sequence. */
+/**
+ * Deterministic tone for series `index`.
+ *
+ * Beyond the sequence this returns the reserved neutral rather than cycling
+ * back to blue. Two different series painted the same colour is worse than one
+ * painted grey: a caller with more series than distinguishable hues should fold
+ * the tail into an explicit "Other", facet into small multiples, or rank and
+ * cut -- and a grey tail makes that need visible instead of hiding it behind a
+ * repeated hue.
+ */
 export function chartToneAt(index: number): ChartTone {
   const sequence = CHART_TONE_SEQUENCE;
-  return sequence[((index % sequence.length) + sequence.length) % sequence.length]!;
+  if (!Number.isInteger(index) || index < 0 || index >= sequence.length) return "slate";
+  return sequence[index]!;
 }
 
 /** Dash pattern per series index; `null` means a solid stroke. */
