@@ -7,7 +7,7 @@ import {
   type BeginLocalScheduleMutationInput,
   type LocalScheduleMutation,
 } from "../db/local-schedule-outbox-repository";
-import { getConnection } from "../db/pilot-repository";
+import { getConnectionForOrg, LOCAL_ORG_ID } from "../db/pilot-repository";
 import type { AuthenticatedLocalSession } from "../db/auth-repository";
 import { assertSessionCapability } from "./api-auth";
 import type { LocalFixtureDescriptor, LocalFixtureSchedule } from "./local-ops-types";
@@ -38,7 +38,7 @@ export async function assertLocalScheduleProvisioningScope(
 ): Promise<{ readonly customerId: string | null }> {
   assertSessionCapability(authenticated, "sync:run", fixture.customerId);
   assertSessionCapability(authenticated, "connection:manage", fixture.customerId);
-  const connection = await getConnection(fixture.connectionId);
+  const connection = await getConnectionForOrg(LOCAL_ORG_ID, fixture.connectionId);
   if (connection === null) {
     assertSessionCapability(authenticated, "customer:create");
     return { customerId: null };
@@ -113,7 +113,7 @@ async function applyLocalScheduleMutation(
       "The pending schedule identity is invalid",
     );
   }
-  const connection = await getConnection(fixture.connectionId);
+  const connection = await getConnectionForOrg(LOCAL_ORG_ID, fixture.connectionId);
   if (connection !== null && (
     connection.customerId !== fixture.customerId ||
     connection.sourceKind !== "simulated_fixture" ||

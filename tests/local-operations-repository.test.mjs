@@ -342,7 +342,7 @@ describe("recoverable initial AWS connection handoff", () => {
         grantedActions,
         missingActions: [missingAction],
       });
-      const stored = await pilotRepository.getStoredConnectionSecret(input.connectionId);
+      const stored = await pilotRepository.getStoredConnectionSecretForOrg(pilotRepository.LOCAL_ORG_ID, input.connectionId);
       assert.equal(stored.roleArn, roleArn);
       assert.deepEqual(stored.permissionCapabilities, committed.permissionCapabilities);
       const row = await database.prepare(
@@ -723,6 +723,7 @@ describe("AWS trust health remains separate from collection health", () => {
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
         "COLLECTION_FAILED",
+        pilotRepository.LOCAL_ORG_ID,
       );
       const connection = await database.prepare(
         "SELECT status FROM aws_connections WHERE id = ? LIMIT 1",
@@ -745,6 +746,9 @@ describe("AWS trust health remains separate from collection health", () => {
         await partialLiveSnapshot(runId),
         "usr_local_operations_test",
         { kind: "aws_live", fixtureId: null, fixtureVersion: null },
+        null,
+        null,
+        pilotRepository.LOCAL_ORG_ID,
       );
       const connection = await database.prepare(
         "SELECT status, last_successful_sync_at FROM aws_connections WHERE id = ? LIMIT 1",
@@ -782,6 +786,9 @@ describe("AWS trust health remains separate from collection health", () => {
         await completeLiveSnapshot(completeRunId),
         "usr_local_operations_test",
         { kind: "aws_live", fixtureId: null, fixtureVersion: null },
+        null,
+        null,
+        pilotRepository.LOCAL_ORG_ID,
       );
       // Make ordering deterministic even if both runs are created in the same
       // millisecond on a fast local database.
@@ -795,6 +802,9 @@ describe("AWS trust health remains separate from collection health", () => {
         await partialLiveSnapshot(partialRunId),
         "usr_local_operations_test",
         { kind: "aws_live", fixtureId: null, fixtureVersion: null },
+        null,
+        null,
+        pilotRepository.LOCAL_ORG_ID,
       );
 
       const state = await pilotRepository.getPilotState(LIVE_CONNECTION_ID);
@@ -813,7 +823,7 @@ describe("AWS trust health remains separate from collection health", () => {
   it("allows explicit trust revalidation only while no sync is running", async () => {
     await withDatabase(async (database) => {
       await provisionValidatedLiveConnection(database);
-      await pilotRepository.markConnectionValidating(LIVE_CONNECTION_ID);
+      await pilotRepository.markConnectionValidating(LIVE_CONNECTION_ID, pilotRepository.LOCAL_ORG_ID);
       assert.equal(
         (await database.prepare("SELECT status FROM aws_connections WHERE id = ?")
           .bind(LIVE_CONNECTION_ID).first())?.status,
@@ -827,6 +837,7 @@ describe("AWS trust health remains separate from collection health", () => {
             ...verifiedRoleEvidence(),
             roleSessionName: "sutra-different-session",
           },
+          pilotRepository.LOCAL_ORG_ID,
         ),
         (error) => error?.code === "INVALID_STATE",
       );
@@ -834,6 +845,7 @@ describe("AWS trust health remains separate from collection health", () => {
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
         verifiedRoleEvidence(),
+        pilotRepository.LOCAL_ORG_ID,
       );
       assert.equal(
         (await database.prepare("SELECT permission_pack_version FROM aws_connections WHERE id = ?")
@@ -842,7 +854,7 @@ describe("AWS trust health remains separate from collection health", () => {
       );
       await pilotRepository.createSyncRun(LIVE_CONNECTION_ID);
       await assert.rejects(
-        pilotRepository.markConnectionValidating(LIVE_CONNECTION_ID),
+        pilotRepository.markConnectionValidating(LIVE_CONNECTION_ID, pilotRepository.LOCAL_ORG_ID),
         (error) => error?.code === "INVALID_STATE",
       );
     });
@@ -917,6 +929,7 @@ describe("AWS trust connection lifecycle", () => {
         pilotRepository.disableAwsConnection(
           LIVE_CONNECTION_ID,
           "usr_local_operations_test",
+          pilotRepository.LOCAL_ORG_ID,
         ),
         (error) => error?.code === "INVALID_STATE",
       );
@@ -925,17 +938,19 @@ describe("AWS trust connection lifecycle", () => {
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
         "COLLECTION_FAILED",
+        pilotRepository.LOCAL_ORG_ID,
       );
       const disabled = await pilotRepository.disableAwsConnection(
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
+          pilotRepository.LOCAL_ORG_ID,
       );
       assert.equal(disabled.status, "disabled");
       await assert.rejects(
         pilotRepository.createSyncRun(LIVE_CONNECTION_ID),
         (error) => error?.code === "INVALID_STATE",
       );
-      const stored = await pilotRepository.getStoredConnectionSecret(LIVE_CONNECTION_ID);
+      const stored = await pilotRepository.getStoredConnectionSecretForOrg(pilotRepository.LOCAL_ORG_ID, LIVE_CONNECTION_ID);
       assert.equal(stored.externalIdCiphertext, "test-ciphertext");
       assert.equal(stored.status, "disabled");
       const audit = await database.prepare(
@@ -983,11 +998,12 @@ describe("AWS trust connection lifecycle", () => {
       const offboarded = await pilotRepository.offboardAwsConnection(
         LIVE_CONNECTION_ID,
         "usr_local_operations_test",
+          pilotRepository.LOCAL_ORG_ID,
       );
       assert.equal(offboarded.status, "disabled");
       assert.equal(offboarded.roleArn, null);
       await assert.rejects(
-        pilotRepository.getStoredConnectionSecret(LIVE_CONNECTION_ID),
+        pilotRepository.getStoredConnectionSecretForOrg(pilotRepository.LOCAL_ORG_ID, LIVE_CONNECTION_ID),
         (error) => error?.code === "INVALID_STATE",
       );
       const retained = await database.prepare(
@@ -1040,21 +1056,21 @@ describe("AWS trust connection lifecycle", () => {
       assert.equal(crossActorRegistration.roleArn, roleArn);
       assert.notEqual(crossActorRegistration.updatedAt, roleReplay.updatedAt);
 
-      const disabled = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId);
-      const disableReplay = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId);
+      const disabled = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId, pilotRepository.LOCAL_ORG_ID);
+      const disableReplay = await pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, actorId, pilotRepository.LOCAL_ORG_ID);
       assert.equal(disableReplay.updatedAt, disabled.updatedAt);
       assert.equal(disableReplay.status, "disabled");
       await assert.rejects(
-        pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, "usr_different_actor"),
+        pilotRepository.disableAwsConnection(LIVE_CONNECTION_ID, "usr_different_actor", pilotRepository.LOCAL_ORG_ID),
         (error) => error?.code === "INVALID_STATE",
       );
 
-      const offboarded = await pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, actorId);
-      const offboardReplay = await pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, actorId);
+      const offboarded = await pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, actorId, pilotRepository.LOCAL_ORG_ID);
+      const offboardReplay = await pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, actorId, pilotRepository.LOCAL_ORG_ID);
       assert.equal(offboardReplay.updatedAt, offboarded.updatedAt);
       assert.equal(offboardReplay.roleArn, null);
       await assert.rejects(
-        pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, "usr_different_actor"),
+        pilotRepository.offboardAwsConnection(LIVE_CONNECTION_ID, "usr_different_actor", pilotRepository.LOCAL_ORG_ID),
         (error) => error?.code === "INVALID_STATE",
       );
 
@@ -1122,6 +1138,7 @@ describe("AWS trust connection lifecycle", () => {
         withForcedAtomicAuditFailure(database, () => pilotRepository.disableAwsConnection(
           LIVE_CONNECTION_ID,
           "usr_local_operations_test",
+          pilotRepository.LOCAL_ORG_ID,
         )),
         (error) => error?.code === "PERSISTENCE_FAILED",
       );
@@ -1153,6 +1170,7 @@ describe("AWS trust connection lifecycle", () => {
         withForcedAtomicAuditFailure(database, () => pilotRepository.offboardAwsConnection(
           LIVE_CONNECTION_ID,
           "usr_local_operations_test",
+          pilotRepository.LOCAL_ORG_ID,
         )),
         (error) => error?.code === "PERSISTENCE_FAILED",
       );

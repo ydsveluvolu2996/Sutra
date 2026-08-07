@@ -1,5 +1,5 @@
 import { assertSessionCapability } from "../../../../../lib/api-auth";
-import { getConnection } from "../../../../../db/pilot-repository";
+import { getConnectionForOrg, LOCAL_ORG_ID } from "../../../../../db/pilot-repository";
 import { assertSameOrigin, readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import type { LocalFixtureVersion } from "../../../../../lib/local-ops-types";
 import {
@@ -48,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
       throw Object.assign(new Error("The simulated fixture or version was not found"), { code: "NOT_FOUND" });
     }
     assertSessionCapability(actor.authenticated, "sync:run", fixture.customerId);
-    const connection = await getConnection(fixture.connectionId);
+    const connection = await getConnectionForOrg(LOCAL_ORG_ID, fixture.connectionId);
     if (connection === null) {
       assertSessionCapability(actor.authenticated, "customer:create");
       assertSessionCapability(actor.authenticated, "connection:manage", fixture.customerId);
