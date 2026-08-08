@@ -88,15 +88,43 @@ Two constraints found while building, both honoured:
 Per the user's decision, tabs with no Sutra equivalent (Outpost, Sensor,
 Broker, Remediation & Response) are omitted rather than rendered empty.
 
-### Step 3 — Icon navigation rail
+### Step 3 — Icon navigation rail (DONE)
 
-Collapse the sidebar to a Wiz-style icon rail (glyph over short label) with a
-flyout for group contents. Constraint: Sutra has 100+ destinations across 8
-groups against Wiz's ~9 top-level entries, so the rail must be a collapsed
-*mode* of the existing grouped nav, never a replacement that hides
-destinations. `tests/navigation-config.test.ts` and
-`tests/finops-navigation-subsections.test.mjs` already assert that every
-visible item appears in exactly one section — that invariant must survive.
+The sidebar collapses to an icon rail: one glyph per nav group with the label
+under it, and the group's destinations in a flyout. A control on the rail
+restores the expanded nav, and the choice persists per operator.
+
+Built as a **mode**, never a replacement. Sutra carries 100+ destinations
+across 8 groups against the reference console's ~9 top-level entries, so a
+standalone rail would have to drop most of the product — and silently: the
+shell still renders, the operator just cannot reach a page.
+
+What keeps it honest:
+
+- The rail is fed `allVisibleNav` (`visibleNavigation(capabilitySet)`), the same
+  capability-filtered list the expanded nav uses. It cannot show a group the
+  operator cannot open, or hide one they can.
+- The flyout renders `open.items` in full through the **same** `NavItemLink`
+  component as the expanded nav — one component, so active marking, glyph chip
+  and tone cannot drift between the two.
+- The mobile drawer is untouched and still enumerates every group and item.
+- Group glyphs and tones are their own maps rather than borrowed from each
+  group's first item, so reordering a group's items cannot repaint the rail.
+
+`tests/navigation-rail-contract.test.mjs` pins all of the above.
+**Verified non-vacuous** by mutation: truncating the flyout to five items,
+feeding the rail unfiltered `navGroups`, and deleting the expand control each
+fail exactly one assertion and nothing else.
+
+The preference is read through `useSyncExternalStore`, not seeded by an effect —
+the server has no `localStorage`, so an effect-seeded value would contradict its
+own hydrated markup. Every storage access is guarded; private mode, a full
+quota or disabled storage all read as expanded rather than breaking the shell.
+
+The pre-existing invariant that every visible item appears in exactly one
+section survives: `tests/navigation-config.test.ts` and
+`tests/finops-navigation-subsections.test.mjs` still pass, along with the five
+exact source strings the latter asserts against `app-shell.tsx`.
 
 ### Step 4 — Additional connectors
 
