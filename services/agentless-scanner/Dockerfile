@@ -18,7 +18,9 @@
 
 # Trivy 0.72.0's published binary still contains fixed High-severity Go
 # dependencies. Build the stable module with those dependencies upgraded instead
-# of shipping a known-vulnerable security scanner. Building it as a dependency
+# of shipping a known-vulnerable security scanner. go-git joined the override
+# list for CVE-2026-71556 (fixed in 5.19.2), which Trivy 0.72.0 pins below.
+# Building it as a dependency
 # of a tiny external module is intentional: Go then records Trivy's real v0.72.0
 # module version in the binary instead of the unversioned/pseudo-version metadata
 # produced when compiling a source checkout. Both the Go toolchain image and all
@@ -39,6 +41,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
   && go mod edit -replace=golang.org/x/text=golang.org/x/text@v0.39.0 \
   && go mod edit -replace=google.golang.org/grpc=google.golang.org/grpc@v1.82.1 \
   && go mod edit -replace=oras.land/oras-go/v2=oras.land/oras-go/v2@v2.6.2 \
+  && go mod edit -replace=github.com/go-git/go-git/v5=github.com/go-git/go-git/v5@v5.19.2 \
   && TRIVY_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
        go mod download -json github.com/aquasecurity/trivy@v0.72.0)" \
   && printf '%s\n' "${TRIVY_MODULE}" \
@@ -55,6 +58,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
        go mod download -json oras.land/oras-go/v2@v2.6.2)" \
   && printf '%s\n' "${ORAS_MODULE}" \
        | grep -Fq '"Sum": "h1:N04RXngAp1LJKTG6ifz3xHPipasEkWr+hFmInja5YKo="' \
+  && GOGIT_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json github.com/go-git/go-git/v5@v5.19.2)" \
+  && printf '%s\n' "${GOGIT_MODULE}" \
+       | grep -Fq '"Sum": "h1:wkfn7vOlUBu8ivAWKBWisTiwJK4jYHzTF8Ndv1LyGqY="' \
   && GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go mod download all \
   && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOMAXPROCS=2 \
      GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go build \

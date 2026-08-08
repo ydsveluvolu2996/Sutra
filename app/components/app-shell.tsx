@@ -9,6 +9,8 @@ import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 import { groupContainsActiveItem, resolveActiveNavKey, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
 import { GlyphIcon, NavGroupIcon, navGroupTone, NavIcon, navTone } from "./nav-icon";
 import { AccountMenu } from "./account-menu";
+import { useOnboarding } from "./use-onboarding";
+import { OnboardingStrip } from "./onboarding-strip";
 
 const NAV_RAIL_STORAGE_KEY = "sutra.nav-rail.v1";
 
@@ -125,6 +127,13 @@ function AuthenticatedAppShell({
   readonly children: ReactNode;
   readonly session: PublicLocalSession;
 }) {
+  // Guided onboarding applies only to trial workspaces; for everyone else the
+  // hook stays disabled and fetches nothing. Null progress renders nothing --
+  // unknown is never presented as complete or incomplete.
+  const onboarding = useOnboarding(session.organization.plan === "trial");
+  const onboardingGuiding = session.organization.plan === "trial"
+    && onboarding.progress !== null
+    && !onboarding.progress.completed;
   const { state, health, loading } = usePilotState();
   // FinOps dashboard routes all declare `active="costs"`; the exact rail
   // destination is resolved from the path so the open dashboard is the one
@@ -203,7 +212,29 @@ function AuthenticatedAppShell({
 
   return (
     <div className="app-shell" data-nav={railMode ? "rail" : "expanded"}>
-      {railMode ? (
+      {onboardingGuiding ? (
+        <aside className="sidebar sidebar-onboarding">
+          <Link className="brand" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
+            <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
+            <span><strong>Sutra</strong><small>Cloud security, woven together.</small></span>
+          </Link>
+          {/* While a trial workspace is onboarding, the sidebar offers Home and
+              nothing else -- the guided flow owns the journey, and a hundred
+              destinations before the first connection is noise, not product.
+              Capability gating is untouched: this narrows presentation only,
+              and every route stays server-authorized. */}
+          <nav aria-label="Primary navigation" className="nav-groups nav-groups-onboarding">
+            <Link
+              aria-current={activeKey === "overview" ? "page" : undefined}
+              className="nav-item"
+              href={scopedWorkspaceHref("/dashboard", selectedConnectionId)}
+            >
+              Home
+            </Link>
+          </nav>
+          <div className="sidebar-spacer" />
+        </aside>
+      ) : railMode ? (
         <aside className="sidebar sidebar-collapsed">
           <Link className="brand brand-compact" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
             <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
@@ -314,6 +345,9 @@ function AuthenticatedAppShell({
             <span>Workspace</span>
             <strong>{scopeLabel}</strong>
           </div>
+          {onboardingGuiding && onboarding.progress !== null
+            ? <OnboardingStrip progress={onboarding.progress} />
+            : null}
           <div className="topbar-actions">
             <span className="mfa-badge"><i /> MFA verified</span>
             <span className={`demo-badge mode-${modeKind}`}><i /> {modeLabel}</span>
@@ -322,6 +356,7 @@ function AuthenticatedAppShell({
               email={session.user.email}
               roleLabel={roleLabel(session.membership.role)}
               organizationName={session.organization.name}
+              organizationPlan={session.organization.plan}
               initials={initials}
               mfaVerified={session.mfa.verified}
               capabilities={capabilitySet}

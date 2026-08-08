@@ -4018,3 +4018,70 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .app-shell[data-nav="rail"] { grid-template-columns: 1fr; }
   .nav-rail-flyout { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
 }
+
+/* --- Guided onboarding chrome (trial workspaces) ------------------------- */
+/* The three-step strip lives in the topbar: label above a small marker bar,
+   check for done, number for current, muted for upcoming. */
+.onboarding-strip { display: flex; align-items: flex-start; gap: 28px; margin: 0 auto; padding: 0 16px; }
+.onboarding-strip-step { display: flex; flex-direction: column; gap: 5px; min-width: 130px; text-decoration: none; }
+.onboarding-strip-label { font-size: 12.5px; font-weight: 600; color: var(--text-muted, #8a93a6); white-space: nowrap; }
+.onboarding-strip-step[data-state="done"] .onboarding-strip-label,
+.onboarding-strip-step[data-state="current"] .onboarding-strip-label { color: var(--accent, #19b8a6); }
+.onboarding-strip-marker { position: relative; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.onboarding-strip-step::after { content: ""; display: block; height: 6px; border-radius: 3px; margin-top: -12px; margin-left: 26px; background: color-mix(in srgb, var(--accent, #19b8a6) 18%, transparent); }
+.onboarding-strip-step[data-state="done"] .onboarding-strip-marker { background: var(--accent, #19b8a6); color: #fff; }
+.onboarding-strip-step[data-state="current"] .onboarding-strip-marker { border: 1.5px solid var(--accent, #19b8a6); color: var(--accent, #19b8a6); }
+.onboarding-strip-step[data-state="upcoming"] .onboarding-strip-marker { border: 1.5px solid var(--border-strong, #3a4257); color: var(--text-muted, #8a93a6); }
+.onboarding-strip-step[data-state="upcoming"]::after { background: color-mix(in srgb, var(--border-strong, #3a4257) 35%, transparent); }
+@media (max-width: 960px) { .onboarding-strip { display: none; } }
+
+/* Trial badge in the account menu header. */
+.account-plan-badge { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; background: color-mix(in srgb, var(--accent, #19b8a6) 16%, transparent); color: var(--accent, #19b8a6); width: fit-content; }
+
+/* Home-only sidebar while a trial workspace is onboarding. */
+.sidebar-onboarding .nav-groups-onboarding { display: flex; flex-direction: column; padding: 10px 12px; }
+.sidebar-onboarding .nav-groups-onboarding .nav-item { display: block; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; color: inherit; }
+.sidebar-onboarding .nav-groups-onboarding .nav-item[aria-current="page"] { background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); }
+
+/* --- Guided welcome flow -------------------------------------------------- */
+.welcome-flow { display: flex; flex-direction: column; gap: 44px; max-width: 980px; padding: 8px 4px 64px; }
+.welcome-step h2 { margin: 4px 0 6px; }
+.welcome-step-copy { color: var(--text-muted, #8a93a6); max-width: 640px; margin-bottom: 18px; }
+.welcome-goal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.welcome-goal-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; padding: 16px; border-radius: 12px; border: 1.5px solid var(--border-strong, #3a4257); background: transparent; cursor: pointer; color: inherit; }
+.welcome-goal-card[aria-pressed="true"] { border-color: var(--accent, #19b8a6); background: color-mix(in srgb, var(--accent, #19b8a6) 8%, transparent); }
+.welcome-goal-card strong { font-size: 15px; }
+.welcome-goal-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.welcome-goal-tags em { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); color: var(--accent, #19b8a6); }
+.welcome-goal-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0; }
+.welcome-name-form { display: flex; align-items: flex-end; gap: 12px; max-width: 560px; }
+.welcome-name-form label { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.welcome-connect-done { color: var(--accent, #19b8a6); font-weight: 600; }
+
+/* Provider cards in the welcome connect step. */
+.welcome-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.welcome-provider-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; border: 1.5px solid var(--border-strong, #3a4257); }
+.welcome-provider-card[data-available="false"] { opacity: 0.65; }
+.welcome-provider-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0 0 4px; flex: 1; }
+.welcome-provider-soon { font-size: 12px; font-weight: 600; color: var(--text-muted, #8a93a6); }
+
+/* Authenticate-using tabs on the AWS onboarding form. */
+.onboard-method-tabs { display: flex; border-bottom: 1.5px solid var(--border-strong, #3a4257); margin-bottom: 14px; }
+.onboard-method-tab { flex: 1; padding: 10px 16px; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -1.5px; font-size: 14px; font-weight: 600; color: var(--text-muted, #8a93a6); cursor: pointer; }
+.onboard-method-tab[aria-selected="true"] { color: inherit; border-bottom-color: var(--accent, #19b8a6); background: color-mix(in srgb, var(--accent, #19b8a6) 6%, transparent); }
+
+/* "Your goals" on Home. */
+.home-goals { margin: 18px 0 6px; }
+.home-goals-edit { font-size: 13px; font-weight: 600; }
+.home-goals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 14px; margin-top: 10px; }
+.home-goal-card { display: flex; flex-direction: column; gap: 6px; padding: 16px; border-radius: 12px; border: 1.5px solid var(--border-strong, #3a4257); text-decoration: none; color: inherit; }
+.home-goal-card:hover { border-color: var(--accent, #19b8a6); }
+.home-goal-card em { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; width: fit-content; background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); color: var(--accent, #19b8a6); }
+.home-goal-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0; }
+
+/* Quick-start guide page and its entry link. */
+.onboard-guide { max-width: 860px; display: flex; flex-direction: column; gap: 26px; padding-bottom: 64px; }
+.onboard-guide h2 { margin-bottom: 8px; }
+.onboard-guide h3 { margin: 14px 0 6px; }
+.onboard-guide ol, .onboard-guide ul { padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.onboard-guide-link { font-size: 13px; color: var(--text-muted, #8a93a6); margin-bottom: 10px; }

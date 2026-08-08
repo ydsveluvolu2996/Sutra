@@ -179,7 +179,11 @@ jobs:
     needs: reuse-pr-gate
     if: ${{ needs.reuse-pr-gate.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 30 minutes was killed twice in two days by runner variance alone -- shard 3
+    # at 29m14s and shard 6 at 29m39s, both while every test that had run was
+    # passing. The budget is a hang detector, not a performance target; 45 keeps
+    # it far above observed worst case while still catching a wedged shard.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

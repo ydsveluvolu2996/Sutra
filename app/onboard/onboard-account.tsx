@@ -886,9 +886,36 @@ export function OnboardAccount() {
                   title="Deploy"
                   description="Sutra never creates customer access keys. The recommended paths store no long-lived customer secret at all."
                 >
+                <p className="onboard-guide-link">New here? <a href="/onboard/guide">Read the AWS quick-start guide</a>.</p>
+                {/* The reference presents authentication as two tabs. The tab
+                    switches the SAME connectionMethod state the radio cards
+                    set, so the wire contract is untouched: IAM Role shows the
+                    two role paths, Access & Secret Keys is the key path. */}
+                <div aria-label="Authenticate using" className="onboard-method-tabs" role="tablist">
+                  <button
+                    aria-selected={connectionMethod === "iam_role"}
+                    className="onboard-method-tab"
+                    onClick={() => selectOnboardPath(roleProvisioningMode === "customer_managed" ? "customer_managed_role" : "sutra_template_role")}
+                    role="tab"
+                    type="button"
+                  >
+                    IAM Role
+                  </button>
+                  <button
+                    aria-selected={connectionMethod === "static_credentials"}
+                    className="onboard-method-tab"
+                    onClick={() => selectOnboardPath("static_credentials")}
+                    role="tab"
+                    type="button"
+                  >
+                    Access & Secret Keys
+                  </button>
+                </div>
                 <fieldset className="onboard-paths">
                   <legend>How will the customer grant access?</legend>
-                  {ONBOARD_PATHS.map((path) => (
+                  {ONBOARD_PATHS.filter((path) => connectionMethod === "static_credentials"
+                    ? path.id === "static_credentials"
+                    : path.id !== "static_credentials").map((path) => (
                     <label
                       key={path.id}
                       className="onboard-path"

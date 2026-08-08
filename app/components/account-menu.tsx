@@ -10,6 +10,7 @@ export function AccountMenu({
   email,
   roleLabel,
   organizationName,
+  organizationPlan,
   initials,
   mfaVerified,
   capabilities,
@@ -20,6 +21,8 @@ export function AccountMenu({
   readonly email: string;
   readonly roleLabel: string;
   readonly organizationName: string;
+  /** Rendered as a badge only while 'trial'; presentation, never permission. */
+  readonly organizationPlan: "trial" | "standard";
   readonly initials: string;
   readonly mfaVerified: boolean;
   readonly capabilities: ReadonlySet<Capability>;
@@ -71,6 +74,7 @@ export function AccountMenu({
               <strong>{displayName}</strong>
               <small>{email}</small>
               <span className="account-menu-role">{roleLabel} · {organizationName}</span>
+              {organizationPlan === "trial" ? <span className="account-plan-badge">Trial</span> : null}
             </div>
           </div>
           <div className="account-menu-status">

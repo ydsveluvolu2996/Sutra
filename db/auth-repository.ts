@@ -88,6 +88,8 @@ export interface PublicLocalSession {
     readonly id: string;
     readonly slug: string;
     readonly name: string;
+    /** 'trial' for self-serve signups; presentation/gating only, never authorization. */
+    readonly plan: "trial" | "standard";
   };
   readonly membership: {
     readonly id: string;
@@ -130,6 +132,7 @@ interface SessionRow {
   org_id: string;
   org_slug: string;
   org_name: string;
+  org_plan: "trial" | "standard";
   membership_id: string;
   membership_role: OrgRole;
   scope_mode: ScopeMode;
@@ -406,7 +409,7 @@ function publicSession(
       email: row.email,
       displayName: row.display_name ?? row.email,
     },
-    organization: { id: row.org_id, slug: row.org_slug, name: row.org_name },
+    organization: { id: row.org_id, slug: row.org_slug, name: row.org_name, plan: row.org_plan },
     membership: {
       id: row.membership_id,
       role: row.membership_role,
@@ -844,8 +847,8 @@ export async function provisionSelfServeHostedOrg(
   try {
     const results = await db.batch([
       db.prepare(
-        `INSERT INTO organizations (id, slug, name, status, created_at)
-         VALUES (?, ?, ?, 'active', ?)`,
+        `INSERT INTO organizations (id, slug, name, status, plan, created_at)
+         VALUES (?, ?, ?, 'active', 'trial', ?)`,
       ).bind(orgId, orgSlug, orgName, now),
       db.prepare(
         `INSERT INTO users (id, issuer, subject, email, display_name, status, created_at)
@@ -886,6 +889,7 @@ export async function getLocalSession(
     `SELECT s.id AS session_id, s.token_digest, s.expires_at, s.mfa_verified_at,
             u.id AS user_id, u.email, u.display_name,
             o.id AS org_id, o.slug AS org_slug, o.name AS org_name,
+            o.plan AS org_plan,
             m.id AS membership_id, m.role AS membership_role, m.scope_mode,
             CASE WHEN u.issuer = ? THEN t.confirmed_at ELSE s.mfa_verified_at END AS mfa_confirmed_at
        FROM local_sessions s

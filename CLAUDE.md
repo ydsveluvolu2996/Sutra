@@ -63,6 +63,14 @@ Promoting to `main` runs CI but does not start a release. "Commit to main"
 authorizes the merge only. A later, current-turn "deploy" instruction authorizes
 the exact-SHA manual release described above.
 
+## Runtime infrastructure
+
+The live application is a Docker image running on a single EC2 instance, with
+the database on that same instance. There is no managed RDS, no multi-node
+runtime, and no separate database host: designs must not assume one. Releases
+replace the container via SSM; data durability and migrations act on the
+instance-local database.
+
 ## Mandatory read order
 
 Before editing this repository, read these files completely in order:

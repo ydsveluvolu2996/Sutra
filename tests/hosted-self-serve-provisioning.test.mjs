@@ -122,10 +122,15 @@ test("a brand-new verified identity is provisioned into its OWN new org as sole 
     assert.equal(session.subject.role, "org_owner");
     assert.equal(session.subject.scopeMode, "all_customers");
     assert.deepEqual(session.subject.grants, []);
+    // A self-serve org is born on the trial plan, and the session carries it so
+    // the UI can render the trial badge without a second lookup. Provisioned
+    // (invited/bootstrap) orgs stay 'standard' by column default.
+    assert.equal(session.session.organization.plan, "trial");
     // A subsequent normal login for the SAME identity resolves to that same org.
     const relogin = await authRepo.loginHostedUser(id);
     assert.equal(relogin.session.subject.orgId, session.subject.orgId);
     assert.equal(relogin.session.subject.userId, session.subject.userId);
+    assert.equal(relogin.session.session.organization.plan, "trial");
   });
 });
 
