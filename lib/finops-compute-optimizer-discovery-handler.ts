@@ -60,6 +60,16 @@ export interface ComputeOptimizerDiscoveryTrustedBoundary {
 export interface ComputeOptimizerDiscoveryHandlerContext {
   readonly signal: AbortSignal;
   readonly deadlineAtMs: number;
+  /**
+   * True once this run's own deadline timer has fired.
+   *
+   * The timer and `Date.now()` are different clocks, and a timer may fire a
+   * fraction before the wall clock reaches its target. Re-deriving the reason
+   * from `Date.now()` alone therefore reports our own deadline as a caller
+   * abort whenever it lands in that gap -- two different facts, and two
+   * different places for an operator to go looking.
+   */
+  readonly deadlineFired?: () => boolean;
 }
 
 export interface ComputeOptimizerDiscoveryHandlerDependencies {
@@ -140,6 +150,10 @@ function assertActive(
   context: ComputeOptimizerDiscoveryHandlerContext,
   dependencies: ComputeOptimizerDiscoveryHandlerDependencies,
 ): void {
+  // The fired flag is authoritative and is checked first: it is the only signal
+  // that distinguishes our own deadline from a caller abort. Everything after it
+  // keeps the original precedence.
+  if (context.deadlineFired?.()) reject("DEADLINE_EXCEEDED");
   if (context.signal.aborted) reject("ABORTED");
   if (nowMs(dependencies) >= context.deadlineAtMs) reject("DEADLINE_EXCEEDED");
 }
@@ -162,7 +176,7 @@ async function active<T>(
     const onAbort = () => finish({
       ok: false,
       error: new ComputeOptimizerDiscoveryHandlerError(
-        nowMs(dependencies) >= context.deadlineAtMs
+        context.deadlineFired?.() || nowMs(dependencies) >= context.deadlineAtMs
           ? "DEADLINE_EXCEEDED" : "ABORTED",
       ),
     });
@@ -548,11 +562,15 @@ export async function runComputeOptimizerDiscoveryHandler(
   const abort = () => controller.abort();
   options.signal?.addEventListener("abort", abort, { once: true });
   const remaining = Math.max(1, deadlineAtMs - startedAt);
-  const timer = setTimeout(abort, remaining);
+  // Recorded rather than inferred: this is the one place that knows the abort
+  // came from the deadline and not from the caller.
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; controller.abort(); }, remaining);
+  const deadlineFired = () => expired;
   try {
     if (options.signal?.aborted) reject("ABORTED");
-    await execute(job, dependencies, { signal: controller.signal, deadlineAtMs });
-    assertActive({ signal: controller.signal, deadlineAtMs }, dependencies);
+    await execute(job, dependencies, { signal: controller.signal, deadlineAtMs, deadlineFired });
+    assertActive({ signal: controller.signal, deadlineAtMs, deadlineFired }, dependencies);
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener("abort", abort);
