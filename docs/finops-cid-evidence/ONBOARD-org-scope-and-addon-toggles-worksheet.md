@@ -43,6 +43,33 @@ alone.
 | Migration registries (three) | `db/runtime-migrations.ts`, `db/postgres-runtime-migrations.ts`, `scripts/postgres-migrate.mjs` | `REPAIR`, integrator-owned |
 | Collector role assumption | `services/aws-collector/src/role-broker.ts` | `REPAIR`, integrator-owned |
 
+## Review corrections (Codex, 2026-08-08) — all three verified and adopted
+
+1. **Lightsail cannot be the first toggle.** The `.12` base role's
+   `DenyUnimplementedActions` ceiling reserves no `lightsail:` action, so an
+   add-on Allow attached to that role is Deny-overridden. The CUR 2.0 add-on
+   works only because its S3/KMS/BCM actions are already reserved in the
+   ceiling. The first real toggles are therefore the two Foundational export
+   add-ons (`foundational-cur2-export-v1`, `foundational-focus12-export-v1`),
+   whose templates already exist and whose actions sit inside the ceiling.
+   Lightsail waits for a successor ceiling pack, authored sequentially by the
+   integrator, and only then re-enters the add-on enum by migration.
+
+2. **Member accounts need their own trusted role.** A stack in the management
+   account cannot create roles in member accounts. Member provisioning is a
+   CloudFormation StackSet from the management account deploying the pinned
+   base-role template to the selected OU. Organization connections use a
+   management-scoped ExternalId shared by member roles (a recorded relaxation
+   of one-ExternalId-per-connection, bounded to org scope); per-member trust is
+   still proven by the existing role-ARN/account/partition validation before a
+   member connection activates.
+
+3. **OU scoping requires traversal, not `ListAccounts`.** The management role
+   grants `organizations:ListRoots`, `ListOrganizationalUnitsForParent` and
+   `ListAccountsForParent`, and enumeration walks the requested OU subtree with
+   bounded pagination, so the UI can prove a listed member belongs to the OU
+   the operator scoped.
+
 ## Build order
 
 Each phase lands on `develop`, verifiable alone, in this order. A later phase

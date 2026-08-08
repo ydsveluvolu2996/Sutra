@@ -127,6 +127,7 @@ import finopsAmazonConnectRuntimeSchemaSql from "../drizzle/0127_finops_amazon_c
 import finopsPricingChangeRuntimeSchemaSql from "../drizzle/0128_finops_pricing_change_runtime.sql?raw";
 import finopsAwsConfigComplianceRuntimeSchemaSql from "../drizzle/0129_finops_aws_config_compliance_runtime.sql?raw";
 import staticCredentialConnectionsSchemaSql from "../drizzle/0130_static_credential_connections.sql?raw";
+import awsOrgScopeAndConnectionAddonsSchemaSql from "../drizzle/0131_aws_org_scope_and_connection_addons.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -271,6 +272,7 @@ const migrations = [
   { id: "0128_finops_pricing_change_runtime", statements: statementsFrom(finopsPricingChangeRuntimeSchemaSql) },
   { id: "0129_finops_aws_config_compliance_runtime", statements: statementsFrom(finopsAwsConfigComplianceRuntimeSchemaSql) },
   { id: "0130_static_credential_connections", statements: statementsFrom(staticCredentialConnectionsSchemaSql) },
+  { id: "0131_aws_org_scope_and_connection_addons", statements: statementsFrom(awsOrgScopeAndConnectionAddonsSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

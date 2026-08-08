@@ -236,6 +236,11 @@ export const awsConnections = sqliteTable("aws_connections", {
   expectedRoleName: text("expected_role_name").notNull().default("SutraCollectorRole"),
   permissionCapabilitiesJson: text("permission_capabilities_json"),
   status: text("status", { enum: ["pending", "validating", "active", "needs_attention", "disabled"] }).notNull().default("pending"),
+  // Organization scope. Member rows carry their management connection's id;
+  // the cross-column invariant is enforced at the repository boundary.
+  orgScope: text("org_scope", { enum: ["account", "organization_management", "organization_member"] }).notNull().default("account"),
+  managementConnectionId: text("management_connection_id"),
+  organizationOuId: text("organization_ou_id"),
   enabledRegionsJson: text("enabled_regions_json").notNull().default("[]"),
   lastValidatedAt: integer("last_validated_at", { mode: "timestamp_ms" }),
   lastSuccessfulSyncAt: integer("last_successful_sync_at", { mode: "timestamp_ms" }),
@@ -250,6 +255,36 @@ export const awsConnections = sqliteTable("aws_connections", {
     .on(table.roleArn)
     .where(sql`${table.sourceKind} IN ('aws_trust_role','aws_static_credentials') AND ${table.roleArn} <> ''`),
   index("aws_connections_scope_status_idx").on(table.orgId, table.customerId, table.status),
+  index("aws_connections_management_idx")
+    .on(table.managementConnectionId)
+    .where(sql`${table.managementConnectionId} IS NOT NULL`),
+]);
+
+/**
+ * Add-on packs attached to one connection.
+ *
+ * The base role deploys exactly the pinned pack and is never recomposed; each
+ * optional capability is a separate stack with its own enumerated allowlist.
+ * Only `verified` rows (deploy-state proven, `verified_at` set) may widen any
+ * downstream behaviour -- `declared` is an operator intention, not evidence.
+ */
+export const awsConnectionAddons = sqliteTable("aws_connection_addons", {
+  id: text("id").primaryKey(),
+  orgId: text("org_id").notNull().references(() => organizations.id),
+  customerId: text("customer_id").notNull().references(() => customers.id),
+  connectionId: text("connection_id").notNull().references(() => awsConnections.id),
+  addonContractId: text("addon_contract_id", { enum: [
+    "foundational-cur2-export-v1",
+    "foundational-focus12-export-v1",
+  ] }).notNull(),
+  status: text("status", { enum: ["declared", "verified", "detached"] }).notNull().default("declared"),
+  stackArn: text("stack_arn"),
+  verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+}, (table) => [
+  uniqueIndex("aws_connection_addons_connection_contract_uq").on(table.connectionId, table.addonContractId),
+  index("aws_connection_addons_scope_idx").on(table.orgId, table.customerId, table.connectionId, table.status),
 ]);
 
 export const evidenceObjects = sqliteTable("evidence_objects", {
