@@ -4057,3 +4057,10 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .welcome-name-form { display: flex; align-items: flex-end; gap: 12px; max-width: 560px; }
 .welcome-name-form label { flex: 1; display: flex; flex-direction: column; gap: 6px; }
 .welcome-connect-done { color: var(--accent, #19b8a6); font-weight: 600; }
+
+/* Provider cards in the welcome connect step. */
+.welcome-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.welcome-provider-card { display: flex; flex-direction: column; gap: 8px; padding: 16px; border-radius: 12px; border: 1.5px solid var(--border-strong, #3a4257); }
+.welcome-provider-card[data-available="false"] { opacity: 0.65; }
+.welcome-provider-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0 0 4px; flex: 1; }
+.welcome-provider-soon { font-size: 12px; font-weight: 600; color: var(--text-muted, #8a93a6); }

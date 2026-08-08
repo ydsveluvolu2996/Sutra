@@ -39,6 +39,8 @@ const GOAL_CARDS: readonly {
   },
 ];
 
+const ROADMAP_PROVIDERS = ["Microsoft Azure", "Google Cloud", "Oracle Cloud"] as const;
+
 async function patchOnboarding(body: Record<string, unknown>): Promise<OnboardingProgress> {
   const response = await fetch("/api/v1/onboarding", {
     method: "PATCH",
@@ -176,7 +178,24 @@ export function WelcomeFlow() {
         {progress?.steps.connect ? (
           <p className="welcome-connect-done" role="status">Your infrastructure is connected. This step completed itself the moment a real connection existed.</p>
         ) : (
-          <Link className="button button-primary" href="/onboard">Connect infrastructure</Link>
+          <div className="welcome-provider-grid">
+            {/* AWS is the one provider with a collector behind it. The others
+                are roadmap cards, deliberately not buttons: rendering a
+                Connect control for a provider Sutra cannot collect would be a
+                claim, not a plan. No invented object counts either. */}
+            <article className="welcome-provider-card" data-available="true">
+              <strong>Amazon Web Services</strong>
+              <p>Read-only IAM role or access keys, guided end to end.</p>
+              <Link className="button button-primary" href="/onboard">Connect AWS</Link>
+            </article>
+            {ROADMAP_PROVIDERS.map((provider) => (
+              <article className="welcome-provider-card" data-available="false" key={provider}>
+                <strong>{provider}</strong>
+                <p>On the roadmap</p>
+                <span className="welcome-provider-soon">Not yet available</span>
+              </article>
+            ))}
+          </div>
         )}
       </section>
 
