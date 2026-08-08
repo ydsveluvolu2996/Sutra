@@ -324,3 +324,35 @@ test("handler returns at the absolute deadline when a dependency never settles",
   assert.equal(testFixture.calls.seal, 0);
   assert.equal(testFixture.calls.record, 0);
 });
+
+test("a deadline timer firing ahead of the wall clock still reports DEADLINE_EXCEEDED", async () => {
+  // The deadline is enforced by a timer but was classified by re-reading the
+  // clock, and those are not the same clock: a timer can fire fractionally
+  // before Date.now() reaches its target. In that window the run's own deadline
+  // was reported as ABORTED -- a caller cancellation -- sending an operator to
+  // look for whoever cancelled the job instead of at the slow dependency.
+  //
+  // On a contended CI runner the gap is real but sub-millisecond, so it
+  // surfaced as a flaky test rather than a reproducible one. Here it is made
+  // deterministic with a clock that advances at half real speed: when the timer
+  // fires at real +30ms, the injected clock still reads +15ms, short of the
+  // deadline. Before the fix this produced ABORTED.
+  const realStart = Date.now();
+  const testFixture = fixture({
+    now: () => realStart + Math.floor((Date.now() - realStart) / 2),
+    async collect(_input, context) {
+      testFixture.calls.collect += 1;
+      assert.ok(context.signal instanceof AbortSignal);
+      return await new Promise<never>(() => undefined);
+    },
+  });
+  await assert.rejects(
+    runComputeOptimizerDiscoveryHandler(job(), testFixture.dependencies, {
+      deadlineAtMs: realStart + 30,
+    }),
+    (error) => error instanceof ComputeOptimizerDiscoveryHandlerError
+      && error.code === "DEADLINE_EXCEEDED",
+  );
+  assert.equal(testFixture.calls.seal, 0);
+  assert.equal(testFixture.calls.record, 0);
+});

@@ -438,14 +438,6 @@ h3 { letter-spacing: -.02em; }
 .onboard-heading { align-items: center; }
 .onboard-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(260px, .75fr); gap: 13px; align-items: start; }
 .onboard-panel { padding: 24px; }
-.stepper { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 8px; margin-bottom: 30px; color: var(--ink-faint); font-size: 9px; }
-.stepper span { min-height: 36px; display: flex; align-items: center; gap: 7px; padding-right: 8px; border-bottom: 2px solid var(--line); white-space: nowrap; }
-.stepper b { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--line-dark); border-radius: 50%; font-size: 8px; }
-.stepper .active { border-color: #3b82f6; color: var(--ink); font-weight: 750; }
-.stepper .active b { border-color: #3b82f6; background: #3b82f6; color: #061225; }
-.stepper .complete { border-color: #a5c0fa; color: #4a5f94; }
-.stepper .complete b { border-color: #a5c0fa; background: #dde9fe; color: #1d4ed8; }
-.stepper i { height: 1px; background: var(--line); }
 .onboard-copy { max-width: 620px; margin-bottom: 20px; }
 .onboard-copy h2 { font-size: 18px; margin-bottom: 7px; }
 .onboard-copy > p:last-child { color: var(--ink-soft); font-size: 10px; line-height: 1.5; }
@@ -1509,8 +1501,6 @@ h3 { letter-spacing: -.02em; }
   .coverage-grid { grid-template-columns: 1fr; }
   .customer-live-card dl { grid-template-columns: 1fr; }
   .template-actions { align-items: flex-start; flex-direction: column; }
-  .stepper { grid-template-columns: 1fr; gap: 7px; }
-  .stepper i { display: none; }
   .architecture-flow { grid-template-columns: 1fr; }
   .security-group-grid { grid-template-columns: 1fr; }
   .finding-summary { grid-template-columns: repeat(2, 1fr); }
@@ -3857,4 +3847,174 @@ button.orbit-node { font: inherit; cursor: pointer; }
   font-size: var(--table-head-font);
   font-weight: 600;
   color: var(--table-head-ink);
+}
+
+/* ---------------------------------------------------------------------------
+   Onboarding wizard chrome
+   Layout for app/onboard/onboard-wizard-chrome.tsx: a numbered step rail beside
+   a sectioned body. The richer grant-path cards keep using .onboard-path above;
+   these classes only frame them.
+--------------------------------------------------------------------------- */
+.wiz-layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); gap: 28px; align-items: start; }
+/* Higher than .onboard-layout's own 860px collapse on purpose: this rail is
+   nested inside that layout's narrowed column and competes with a 260px
+   aside, so it has to stack while the outer grid is still two columns. */
+@media (max-width: 1080px) { .wiz-layout { grid-template-columns: 1fr; gap: 16px; }
+  .wiz-step-rail { position: static; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); }
+  .wiz-step-body > small { display: none; } }
+@media (max-width: 620px) { .wiz-step-rail { grid-auto-flow: row; } }
+
+.wiz-step-rail { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; position: sticky; top: 16px; }
+.wiz-step { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; padding: 9px 10px; border-radius: 8px; }
+.wiz-step[data-state="current"] { background: #eef3ff; }
+.wiz-step-marker { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 1px solid var(--line-dark); border-radius: 50%; background: var(--surface); color: var(--ink-faint); font-size: 9.5px; font-weight: 700; }
+.wiz-step[data-state="current"] .wiz-step-marker { border-color: #2563eb; background: #2563eb; color: #fff; }
+.wiz-step[data-state="complete"] .wiz-step-marker { border-color: #bfdbfe; background: #dbeafe; color: #1d4ed8; }
+.wiz-step-body { display: grid; gap: 2px; min-width: 0; }
+.wiz-step-body > b { font-size: 10.5px; font-weight: 650; color: var(--ink-faint); }
+.wiz-step[data-state="current"] .wiz-step-body > b { color: #1d4ed8; }
+.wiz-step[data-state="complete"] .wiz-step-body > b { color: var(--ink); }
+.wiz-step-body > small { color: var(--ink-faint); font-size: 8.5px; line-height: 1.45; }
+
+.wiz-section { display: grid; gap: 11px; padding: 0 0 22px; }
+.wiz-section + .wiz-section { padding-top: 22px; border-top: 1px solid var(--line); }
+.wiz-section-title { margin: 0; font-size: 14px; font-weight: 680; color: var(--ink); }
+.wiz-section-description { margin: -5px 0 0; color: var(--ink-faint); font-size: 9.5px; line-height: 1.55; }
+
+.wiz-radio-group { display: grid; gap: 6px; margin: 0; padding: 0; border: 0; }
+.wiz-radio-group > legend { padding: 0 0 6px; font-size: 10px; font-weight: 700; color: var(--ink); }
+.wiz-radio { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.wiz-radio:hover:not([data-unavailable="true"]) { border-color: #94a3b8; }
+.wiz-radio:focus-within { outline: 2px solid #2563eb; outline-offset: 1px; }
+.wiz-radio[data-selected="true"] { border-color: #2563eb; background: #f5f8ff; }
+.wiz-radio[data-unavailable="true"] { background: var(--surface-soft); cursor: not-allowed; opacity: .72; }
+.wiz-radio > input { width: 14px; height: 14px; min-height: 14px; margin: 2px 0 0; accent-color: #2563eb; }
+.wiz-radio-body { display: grid; gap: 3px; min-width: 0; }
+.wiz-radio-body > b { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 650; color: var(--ink); }
+.wiz-radio-body > b > em { padding: 1px 6px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 7.5px; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.wiz-radio-body > b > i { padding: 1px 6px; border-radius: 999px; background: #eef1f7; color: var(--ink-faint); font-size: 7.5px; font-style: normal; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.wiz-radio-body > small { color: var(--ink-faint); font-size: 8.5px; line-height: 1.5; }
+.wiz-radio-blocked { color: #a54b34; }
+
+.wiz-capabilities { display: grid; gap: 6px; }
+.wiz-capabilities > summary { display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-soft); cursor: pointer; list-style: none; }
+.wiz-capabilities > summary::-webkit-details-marker { display: none; }
+.wiz-capabilities > summary:hover { border-color: #94a3b8; }
+.wiz-capabilities > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.wiz-capabilities-legend { margin: 0; font-size: 10px; font-weight: 700; color: var(--ink); }
+.wiz-capabilities-legend > span { flex: 1 1 auto; }
+.wiz-capabilities-legend > em { padding: 2px 7px; border-radius: 999px; background: #dbeafe; color: #1d4ed8; font-size: 8px; font-style: normal; font-weight: 700; }
+.wiz-capabilities-legend code { font-size: 9px; }
+.wiz-capabilities[open] > summary { margin-bottom: 2px; }
+.wiz-capabilities[open] .nav-group-chevron { transform: rotate(180deg); }
+.wiz-capabilities-note { margin: 2px 0 0; padding: 9px 11px; border-radius: 7px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8.5px; line-height: 1.5; }
+.wiz-toggle { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 9px; align-items: start; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.wiz-toggle[data-state="unavailable"] { background: var(--surface-soft); }
+.wiz-toggle > input { width: 14px; height: 14px; min-height: 14px; margin: 2px 0 0; accent-color: #2563eb; }
+.wiz-toggle-body { display: grid; gap: 3px; min-width: 0; }
+.wiz-toggle-body > b { font-size: 10.5px; font-weight: 650; color: var(--ink); }
+.wiz-toggle[data-state="unavailable"] .wiz-toggle-body > b { color: var(--ink-soft); }
+.wiz-toggle-body > small { color: var(--ink-faint); font-size: 8.5px; line-height: 1.5; }
+.wiz-toggle-granted { overflow-wrap: anywhere; color: #23724b; font-family: var(--font-geist-mono), monospace; font-size: 8px; }
+.wiz-toggle-absent { color: var(--ink-faint); font-style: italic; }
+
+.wiz-code { border: 1px solid var(--line-dark); border-radius: 8px; background: var(--surface-soft); overflow: hidden; }
+.wiz-code-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.wiz-code-header > span { font: 9px/1 var(--font-geist-mono), monospace; color: var(--ink-soft); }
+.wiz-code-copy { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid var(--line-dark); border-radius: 6px; background: var(--surface); color: var(--ink-soft); font-size: 8.5px; font-weight: 650; cursor: pointer; }
+.wiz-code-copy:hover { border-color: #94a3b8; color: var(--ink); }
+.wiz-code > pre { margin: 0; padding: 12px; overflow-x: auto; }
+.wiz-code code { font: 9px/1.65 var(--font-geist-mono), monospace; color: var(--ink); white-space: pre; }
+.wiz-code-error { margin: 0; padding: 8px 12px; border-top: 1px solid var(--line); color: #a54b34; font-size: 8.5px; }
+
+/* ---------------------------------------------------------------------------
+   Deployments operating queue
+   app/customers/deployments-panel.tsx. Tabs and status chips are derived from
+   the rows present, so both strips can be absent; the table stands alone.
+--------------------------------------------------------------------------- */
+.deployments-panel .panel-heading { margin-bottom: 13px; }
+
+.deployments-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
+.deployments-tabs > button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-faint); font-size: 10px; font-weight: 650; cursor: pointer; }
+.deployments-tabs > button:hover { color: var(--ink); }
+.deployments-tabs > button[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
+.deployments-tabs em { padding: 1px 6px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8px; font-style: normal; font-weight: 700; }
+.deployments-tabs > button[aria-selected="true"] em { background: #dbeafe; color: #1d4ed8; }
+
+.deployments-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.deployments-search { flex: 1 1 200px; min-width: 160px; }
+.deployments-search input { width: 100%; min-height: 32px; padding: 0 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 10px; }
+.deployments-search input:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+.deployments-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.deployments-chips > button { padding: 5px 10px; border: 1px solid var(--line-dark); border-radius: 999px; background: var(--surface); color: var(--ink-soft); font-size: 9px; font-weight: 620; cursor: pointer; }
+.deployments-chips > button:hover { border-color: #94a3b8; color: var(--ink); }
+.deployments-chips > button[data-active="true"] { border-color: #2563eb; background: #eff4ff; color: #1d4ed8; }
+.deployments-count { color: var(--ink-faint); font-size: 9px; }
+.deployments-reset { padding: 5px 10px; border: 1px solid var(--line-dark); border-radius: 7px; background: var(--surface); color: var(--ink-soft); font-size: 9px; font-weight: 620; cursor: pointer; }
+.deployments-reset:hover { border-color: #94a3b8; color: var(--ink); }
+
+.deployments-table { margin: 0 -20px -19px; }
+.deployments-table .data-row { display: grid; grid-template-columns: minmax(170px, 1.35fr) minmax(130px, 1fr) 110px minmax(140px, 1fr) minmax(130px, 1fr) minmax(120px, .9fr); gap: 14px; align-items: start; padding: 11px 20px; border-top: 1px solid var(--line); }
+.deployments-table .data-header { align-items: center; padding-top: 0; padding-bottom: 0; }
+.deployments-table .primary-cell { min-width: 0; display: grid; gap: 3px; }
+.deployments-table .primary-cell strong { overflow-wrap: anywhere; font-size: 9.5px; }
+.deployments-table .primary-cell small { color: var(--ink-faint); font-size: 8px; line-height: 1.45; }
+.deployments-empty { padding: 22px 20px; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 9.5px; text-align: center; }
+@media (max-width: 1100px) { .deployments-table { overflow-x: auto; } .deployments-table .data-row { min-width: 860px; } }
+
+/* ---------------------------------------------------------------------------
+   Collapsed navigation rail
+   A mode of the grouped nav in app/components/app-shell.tsx, not a replacement:
+   the rail shows one glyph per group and the flyout carries that group's full
+   item list, so no destination becomes unreachable when it is collapsed.
+--------------------------------------------------------------------------- */
+.app-shell[data-nav="rail"] { grid-template-columns: 82px minmax(0, 1fr); }
+.sidebar-collapsed { padding: 18px 8px 12px; overflow: visible; }
+.brand-compact { justify-content: center; padding: 0 0 14px; }
+
+.nav-collapse { position: absolute; top: 4px; right: 4px; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid rgba(150,175,235,.22); border-radius: 6px; background: rgba(14,22,45,.7); color: #b9c6ea; cursor: pointer; }
+.nav-collapse:hover { border-color: rgba(150,175,235,.45); color: #eef2ff; }
+.nav-collapse svg { transform: rotate(90deg); }
+
+.nav-rail-wrap { position: relative; display: flex; min-height: 0; flex: 1 1 auto; }
+.nav-rail { display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 0; overflow-y: auto; scrollbar-width: none; }
+.nav-rail::-webkit-scrollbar { display: none; }
+.nav-rail-button { position: relative; display: grid; gap: 4px; justify-items: center; padding: 9px 2px 7px; border: 1px solid transparent; border-radius: 9px; background: none; color: #aab8dd; cursor: pointer; }
+.nav-rail-button:hover { background: rgba(120,150,230,.12); color: #eef2ff; }
+.nav-rail-button:focus-visible { outline: 2px solid #60a5fa; outline-offset: 1px; }
+.nav-rail-button[data-open="true"] { border-color: rgba(150,175,235,.3); background: rgba(120,150,230,.16); color: #fff; }
+/* The active group keeps a persistent marker so the current area is readable
+   with every flyout closed. */
+.nav-rail-button[data-active="true"]::before { content: ""; position: absolute; left: -8px; top: 50%; width: 3px; height: 22px; transform: translateY(-50%); border-radius: 0 3px 3px 0; background: #60a5fa; }
+.nav-rail-button[data-active="true"] { color: #fff; }
+.nav-rail-glyph { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 30px; border-radius: 8px; background: rgba(255,255,255,.06); }
+.nav-rail-button[data-tone="blue"] .nav-rail-glyph { background: rgba(59,130,246,.2); color: #93c5fd; }
+.nav-rail-button[data-tone="cyan"] .nav-rail-glyph { background: rgba(6,182,212,.2); color: #67e8f9; }
+.nav-rail-button[data-tone="teal"] .nav-rail-glyph { background: rgba(20,184,166,.2); color: #5eead4; }
+.nav-rail-button[data-tone="green"] .nav-rail-glyph { background: rgba(34,197,94,.2); color: #86efac; }
+.nav-rail-button[data-tone="amber"] .nav-rail-glyph { background: rgba(245,158,11,.2); color: #fcd34d; }
+.nav-rail-button[data-tone="violet"] .nav-rail-glyph { background: rgba(139,92,246,.22); color: #c4b5fd; }
+.nav-rail-button[data-tone="indigo"] .nav-rail-glyph { background: rgba(99,102,241,.22); color: #a5b4fc; }
+.nav-rail-button[data-tone="red"] .nav-rail-glyph { background: rgba(239,68,68,.2); color: #fca5a5; }
+.nav-rail-label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; font-size: 8px; font-weight: 620; letter-spacing: .01em; white-space: nowrap; }
+.nav-rail-button > em { position: absolute; top: 5px; right: 4px; min-width: 14px; padding: 0 3px; border-radius: 999px; background: rgba(9,14,30,.85); color: #8fa2cd; font-size: 7px; font-style: normal; font-weight: 700; text-align: center; }
+
+.nav-rail-expand { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; margin-top: 4px; border: 1px dashed rgba(150,175,235,.24); border-radius: 8px; background: none; color: #96a6cd; cursor: pointer; }
+.nav-rail-expand:hover { border-color: rgba(150,175,235,.5); color: #eef2ff; }
+.nav-rail-expand svg { transform: rotate(-90deg); }
+
+.nav-rail-flyout { position: absolute; left: calc(100% + 6px); top: 0; z-index: 40; width: 258px; max-height: min(74vh, 560px); display: flex; flex-direction: column; border: 1px solid rgba(120,150,230,.24); border-radius: 11px; background: #0b1223; box-shadow: 18px 18px 54px rgba(3,7,22,.55); }
+.nav-rail-flyout-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-bottom: 1px solid rgba(120,150,230,.16); }
+.nav-rail-flyout-head strong { color: #eef2ff; font-size: 10.5px; }
+.nav-rail-flyout-head button { padding: 0 5px; border: 0; background: none; color: #8fa2cd; font-size: 14px; line-height: 1; cursor: pointer; }
+.nav-rail-flyout-head button:hover { color: #eef2ff; }
+.nav-rail-flyout-items { display: flex; flex-direction: column; gap: 1px; padding: 7px; overflow-y: auto; }
+
+.nav-rail-status { display: flex; align-items: center; justify-content: center; min-height: 26px; }
+
+/* Below the mobile-drawer breakpoint the whole sidebar is already replaced by
+   the topbar drawer, so the rail must not claim a grid column. */
+@media (max-width: 860px) {
+  .app-shell[data-nav="rail"] { grid-template-columns: 1fr; }
+  .nav-rail-flyout { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
 }

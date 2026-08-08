@@ -1,14 +1,53 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { PublicLocalSession } from "../../db/auth-repository";
 import { postAuth, useSession } from "./use-session";
 import { snapshotOriginLabel, usePilotState } from "./use-pilot-state";
 import { groupContainsActiveItem, resolveActiveNavKey, visibleNavigation, type NavGroup, type NavKey } from "./navigation-config";
-import { GlyphIcon, NavIcon, navTone } from "./nav-icon";
+import { GlyphIcon, NavGroupIcon, navGroupTone, NavIcon, navTone } from "./nav-icon";
 import { AccountMenu } from "./account-menu";
+
+const NAV_RAIL_STORAGE_KEY = "sutra.nav-rail.v1";
+
+/**
+ * The rail preference lives in localStorage, which is external to React, so it
+ * is read through `useSyncExternalStore` rather than seeded into state by an
+ * effect. That keeps the server snapshot (expanded) authoritative during
+ * hydration instead of producing markup the client immediately contradicts, and
+ * it makes the preference follow the operator across tabs for free.
+ *
+ * Every access is guarded: private mode, a full quota or disabled storage must
+ * leave the navigation working, so a failure reads as "expanded".
+ */
+const railListeners = new Set<() => void>();
+
+function subscribeRailPreference(onStoreChange: () => void): () => void {
+  railListeners.add(onStoreChange);
+  window.addEventListener("storage", onStoreChange);
+  return () => {
+    railListeners.delete(onStoreChange);
+    window.removeEventListener("storage", onStoreChange);
+  };
+}
+
+function readRailPreference(): boolean {
+  try {
+    return window.localStorage.getItem(NAV_RAIL_STORAGE_KEY) === "collapsed";
+  } catch {
+    return false;
+  }
+}
+
+function writeRailPreference(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(NAV_RAIL_STORAGE_KEY, collapsed ? "collapsed" : "expanded");
+  } catch { /* the preference simply does not persist */ }
+  // `storage` does not fire in the tab that wrote, so this tab is told directly.
+  for (const listener of [...railListeners]) listener();
+}
 
 function connectionTone(status: string | undefined): string {
   if (status === "active") return "healthy";
@@ -94,6 +133,7 @@ function AuthenticatedAppShell({
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [navQuery, setNavQuery] = useState("");
+  const railMode = useSyncExternalStore(subscribeRailPreference, readRailPreference, () => false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
   const mobileNavPanelRef = useRef<HTMLDivElement>(null);
@@ -126,6 +166,8 @@ function AuthenticatedAppShell({
     setMobileNavOpen(false);
     if (returnFocus) mobileNavToggleRef.current?.focus();
   }, []);
+
+  const setRail = useCallback((collapsed: boolean) => writeRailPreference(collapsed), []);
 
   useEffect(() => {
     if (!mobileNavOpen) return;
@@ -160,12 +202,38 @@ function AuthenticatedAppShell({
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-nav={railMode ? "rail" : "expanded"}>
+      {railMode ? (
+        <aside className="sidebar sidebar-collapsed">
+          <Link className="brand brand-compact" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
+            <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
+          </Link>
+          <NavigationRail
+            active={activeKey}
+            connectionId={selectedConnectionId}
+            groups={allVisibleNav}
+            onExpand={() => setRail(false)}
+            openFindings={openFindings}
+          />
+          <div className="sidebar-spacer" />
+          <span
+            className={`nav-rail-status collector-${connectionTone(connection?.status)}`}
+            title={modeLabel}
+          >
+            <span className="pulse-dot" />
+            <span className="sr-only">{modeLabel}</span>
+          </span>
+        </aside>
+      ) : (
       <aside className="sidebar">
         <Link className="brand" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span><strong>Sutra</strong><small>Cloud security, woven together.</small></span>
         </Link>
+        <button className="nav-collapse" onClick={() => setRail(true)} type="button" title="Collapse navigation to icons">
+          <GlyphIcon name="chevron" size={13} />
+          <span className="sr-only">Collapse navigation to icons</span>
+        </button>
         <div className="workspace-label">{session.organization.name}</div>
         <div className="nav-search">
           <GlyphIcon className="nav-search-icon" name="search" size={13} />
@@ -206,6 +274,7 @@ function AuthenticatedAppShell({
             sign-out attempt from anywhere fails. */}
         {signOutError ? <p className="sidebar-error" role="alert">{signOutError}</p> : null}
       </aside>
+      )}
       <main className="main-area">
         <header className="topbar">
           <div className="mobile-nav">
@@ -272,6 +341,124 @@ function AuthenticatedAppShell({
 }
 
 /**
+ * One nav destination.
+ *
+ * Extracted so the expanded rail and the collapsed rail's flyout render the
+ * identical link — same active marking, same glyph chip, same tone. A second
+ * copy would be free to drift, and the drift an operator would notice least is
+ * a flyout that stops marking the current page.
+ */
+function NavItemLink({
+  active,
+  connectionId,
+  item,
+  openFindings,
+}: {
+  readonly active: NavKey;
+  readonly connectionId: string | null;
+  readonly item: NavGroup["items"][number];
+  readonly openFindings: number;
+}) {
+  const isActive = active === item.key;
+  return (
+    <Link
+      href={scopedWorkspaceHref(item.href, connectionId)}
+      className={isActive ? "active" : undefined}
+      aria-current={isActive ? "page" : undefined}
+    >
+      <span className="nav-glyph-chip" data-tone={navTone(item.key)} aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
+      {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
+    </Link>
+  );
+}
+
+/**
+ * The collapsed icon rail: one glyph per group, with the group's destinations in
+ * a flyout.
+ *
+ * This is a *mode* of the grouped nav, never a replacement for it. Sutra has
+ * over a hundred destinations across eight groups where the reference console
+ * has about nine top-level entries, so a rail that stood alone would have to
+ * hide most of the product. Every destination stays reachable: the flyout lists
+ * a group's full item set, and the expand control restores the text nav.
+ */
+function NavigationRail({
+  active,
+  connectionId,
+  groups,
+  onExpand,
+  openFindings,
+}: {
+  readonly active: NavKey;
+  readonly connectionId: string | null;
+  readonly groups: readonly NavGroup[];
+  readonly onExpand: () => void;
+  readonly openFindings: number;
+}) {
+  const [openGroup, setOpenGroup] = useState<NavGroup["key"] | null>(null);
+  const open = groups.find((group) => group.key === openGroup) ?? null;
+
+  // Escape closes the flyout rather than trapping a keyboard user inside it.
+  useEffect(() => {
+    if (open === null) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenGroup(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  return (
+    <nav aria-label="Primary navigation" className="nav-rail-wrap">
+      <div className="nav-rail">
+        {groups.map((group) => {
+          const containsActive = groupContainsActiveItem(group, active);
+          return (
+            <button
+              aria-expanded={openGroup === group.key}
+              className="nav-rail-button"
+              data-active={containsActive ? "true" : undefined}
+              data-open={openGroup === group.key ? "true" : undefined}
+              data-tone={navGroupTone(group.key)}
+              key={group.key}
+              onClick={() => setOpenGroup(openGroup === group.key ? null : group.key)}
+              type="button"
+            >
+              <span className="nav-rail-glyph" aria-hidden="true"><NavGroupIcon groupKey={group.key} /></span>
+              <span className="nav-rail-label">{group.label}</span>
+              <em>{group.items.length}</em>
+            </button>
+          );
+        })}
+        <button className="nav-rail-expand" onClick={onExpand} type="button" title="Expand navigation">
+          <GlyphIcon name="chevron" size={13} />
+          <span className="sr-only">Expand navigation</span>
+        </button>
+      </div>
+      {open === null ? null : (
+        <div className="nav-rail-flyout">
+          <div className="nav-rail-flyout-head">
+            <strong>{open.label}</strong>
+            <button aria-label="Close group" onClick={() => setOpenGroup(null)} type="button">×</button>
+          </div>
+          <div className="nav-rail-flyout-items">
+            {open.items.map((item) => (
+              <NavItemLink
+                active={active}
+                connectionId={connectionId}
+                item={item}
+                key={`rail-${open.key}-${item.href}`}
+                openFindings={openFindings}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </nav>
+  );
+}
+
+/**
  * A collapsed sub-list inside a nav group. Native `<details>`/`<summary>` keeps
  * it keyboard operable with no custom key handling, and the count is the only
  * metadata shown — delivery maturity is never implied here.
@@ -325,20 +512,15 @@ function NavigationGroup({
   // While a search filter is active, every matching group is expanded.
   const isOpen = forceOpen || open;
 
-  const renderItem = (item: NavGroup["items"][number]) => {
-    const isActive = active === item.key;
-    return (
-      <Link
-        href={scopedWorkspaceHref(item.href, connectionId)}
-        key={`${group.key}-${item.href}`}
-        className={isActive ? "active" : undefined}
-        aria-current={isActive ? "page" : undefined}
-      >
-        <span className="nav-glyph-chip" data-tone={navTone(item.key)} aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
-        {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
-      </Link>
-    );
-  };
+  const renderItem = (item: NavGroup["items"][number]) => (
+    <NavItemLink
+      active={active}
+      connectionId={connectionId}
+      item={item}
+      key={`${group.key}-${item.href}`}
+      openFindings={openFindings}
+    />
+  );
 
   // Large groups (e.g. Kubernetes) declare display-only sections so their long
   // item list reads as labelled clusters instead of one dense column.

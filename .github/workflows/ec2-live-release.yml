@@ -7,13 +7,6 @@ on:
         description: Approved reason for this live EC2 release
         required: true
         type: string
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
-    branches:
-      - main
 
 permissions:
   contents: read
@@ -26,18 +19,12 @@ env:
   APP_ECR_REPOSITORY: sutra/app
   PUBLIC_ORIGIN: https://www.sutracmdb.com
   RELEASE_DOCUMENT_NAME: Sutra-DeployImmutableRelease
-  RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
-  RELEASE_REASON: ${{ github.event_name == 'workflow_run' && format('Automated release after successful CI for {0}', github.event.workflow_run.head_sha) || inputs.releaseReason }}
+  RELEASE_SHA: ${{ github.sha }}
+  RELEASE_REASON: ${{ inputs.releaseReason }}
 
 jobs:
   release:
     name: Build, scan, deploy, and verify
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: ec2-live-release
@@ -57,24 +44,13 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           EC2_INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
-          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
-          TRIGGER_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
-          TRIGGER_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          TRIGGER_HEAD_REPOSITORY: ${{ github.event.workflow_run.head_repository.full_name }}
         run: |
           set -euo pipefail
           [[ "${GITHUB_REPOSITORY}" == "ydsveluvolu2996/Sutra" ]]
+          [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]
+          [[ "${GITHUB_REF}" == "refs/heads/main" ]]
           [[ "${RELEASE_SHA}" =~ ^[a-f0-9]{40}$ ]]
           [[ "$(git rev-parse HEAD)" == "${RELEASE_SHA}" ]]
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            [[ "${GITHUB_REF}" == "refs/heads/main" ]]
-          else
-            [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]
-            [[ "${TRIGGER_EVENT}" == "push" ]]
-            [[ "${TRIGGER_CONCLUSION}" == "success" ]]
-            [[ "${TRIGGER_HEAD_BRANCH}" == "main" ]]
-            [[ "${TRIGGER_HEAD_REPOSITORY}" == "${GITHUB_REPOSITORY}" ]]
-          fi
           [[ "${AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]
           [[ "${AWS_REGION}" =~ ^[a-z]{2}(-gov)?-[a-z]+-[0-9]+$ ]]
           [[ "${AWS_ROLE_ARN}" =~ ^arn:aws:iam::${AWS_ACCOUNT_ID}:role/[A-Za-z0-9+=,.@_/-]+$ ]]

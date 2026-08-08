@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { FINOPS_DASHBOARD_CATALOG } from "../../lib/finops-dashboard-catalog";
-import { finopsDashboardNavKey, type FinopsDashboardNavKey, type NavKey } from "./navigation-config";
+import { finopsDashboardNavKey, type FinopsDashboardNavKey, type NavGroup, type NavKey } from "./navigation-config";
 
 // Hand-drawn line icons (24px grid, 1.75 stroke, currentColor) so the product
 // ships no icon-font or CDN dependency. Each nav destination maps to a glyph by
@@ -218,6 +218,44 @@ const KEY_TONE: Partial<Record<NavKey, NavTone>> = {
 
 export function navTone(navKey: NavKey): NavTone {
   return KEY_TONE[navKey] ?? "slate";
+}
+
+/**
+ * One glyph and tone per nav *group*, for the collapsed icon rail.
+ *
+ * The rail shows eight groups where the expanded nav shows a hundred
+ * destinations, so a group needs its own glyph rather than borrowing its first
+ * item's. Borrowing would make the rail's meaning depend on item ordering, and
+ * reordering a group's items would silently repaint the rail.
+ */
+const GROUP_ICON: Record<NavGroup["key"], IconName> = {
+  overview: "dashboard",
+  onboarding: "plus",
+  cmdb: "server",
+  kubernetes: "hexagon",
+  security: "shieldCheck",
+  compliance: "clipboardCheck",
+  finops: "dollar",
+  operations: "refresh",
+};
+
+const GROUP_TONE: Record<NavGroup["key"], NavTone> = {
+  overview: "cyan",
+  onboarding: "green",
+  cmdb: "indigo",
+  kubernetes: "blue",
+  security: "red",
+  compliance: "teal",
+  finops: "amber",
+  operations: "violet",
+};
+
+export function navGroupTone(groupKey: NavGroup["key"]): NavTone {
+  return GROUP_TONE[groupKey];
+}
+
+export function NavGroupIcon({ groupKey }: { readonly groupKey: NavGroup["key"] }) {
+  return <GlyphIcon name={GROUP_ICON[groupKey]} size={19} />;
 }
 
 export function NavIcon({ navKey }: { readonly navKey: NavKey }) {
