@@ -4018,3 +4018,27 @@ button.orbit-node { font: inherit; cursor: pointer; }
   .app-shell[data-nav="rail"] { grid-template-columns: 1fr; }
   .nav-rail-flyout { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
 }
+
+/* --- Guided onboarding chrome (trial workspaces) ------------------------- */
+/* The three-step strip lives in the topbar: label above a small marker bar,
+   check for done, number for current, muted for upcoming. */
+.onboarding-strip { display: flex; align-items: flex-start; gap: 28px; margin: 0 auto; padding: 0 16px; }
+.onboarding-strip-step { display: flex; flex-direction: column; gap: 5px; min-width: 130px; text-decoration: none; }
+.onboarding-strip-label { font-size: 12.5px; font-weight: 600; color: var(--text-muted, #8a93a6); white-space: nowrap; }
+.onboarding-strip-step[data-state="done"] .onboarding-strip-label,
+.onboarding-strip-step[data-state="current"] .onboarding-strip-label { color: var(--accent, #19b8a6); }
+.onboarding-strip-marker { position: relative; display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 700; }
+.onboarding-strip-step::after { content: ""; display: block; height: 6px; border-radius: 3px; margin-top: -12px; margin-left: 26px; background: color-mix(in srgb, var(--accent, #19b8a6) 18%, transparent); }
+.onboarding-strip-step[data-state="done"] .onboarding-strip-marker { background: var(--accent, #19b8a6); color: #fff; }
+.onboarding-strip-step[data-state="current"] .onboarding-strip-marker { border: 1.5px solid var(--accent, #19b8a6); color: var(--accent, #19b8a6); }
+.onboarding-strip-step[data-state="upcoming"] .onboarding-strip-marker { border: 1.5px solid var(--border-strong, #3a4257); color: var(--text-muted, #8a93a6); }
+.onboarding-strip-step[data-state="upcoming"]::after { background: color-mix(in srgb, var(--border-strong, #3a4257) 35%, transparent); }
+@media (max-width: 960px) { .onboarding-strip { display: none; } }
+
+/* Trial badge in the account menu header. */
+.account-plan-badge { display: inline-block; margin-top: 3px; padding: 1px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.02em; background: color-mix(in srgb, var(--accent, #19b8a6) 16%, transparent); color: var(--accent, #19b8a6); width: fit-content; }
+
+/* Home-only sidebar while a trial workspace is onboarding. */
+.sidebar-onboarding .nav-groups-onboarding { display: flex; flex-direction: column; padding: 10px 12px; }
+.sidebar-onboarding .nav-groups-onboarding .nav-item { display: block; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; color: inherit; }
+.sidebar-onboarding .nav-groups-onboarding .nav-item[aria-current="page"] { background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); }
