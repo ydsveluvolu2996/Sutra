@@ -108,6 +108,13 @@ services:
       # The deployment boundary selects only the switch matching identity mode;
       # neither switch can enable the other adapter.
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"
+      # Self-serve signup: a verified Google identity with no membership creates
+      # its own trial organization. Off unless explicitly enabled in .env.ec2;
+      # the invitation path is unaffected either way, and the create-new-org
+      # path carries its own per-source rate limit and optional domain
+      # allowlist (SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS).
+      SUTRA_HOSTED_SELF_SERVE_SIGNUP: ${SUTRA_HOSTED_SELF_SERVE_SIGNUP:-false}
+      SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS: ${SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS:-}
       SUTRA_PASSWORD_MFA_REQUIRED: "true"
       # Turnstile is mandatory for public password login, invitation acceptance
       # and the unauthenticated contact form. The entrypoint persists these into

@@ -230,8 +230,11 @@ test("self-serve provisioning mints only a NEW org and never joins an existing o
   // email, and a known pair is refused rather than given a second org.
   assert.match(authRepo, /SELECT id FROM users WHERE issuer = \? AND subject = \?/u);
   assert.match(authRepo, /provisionSelfServeHostedOrg[\s\S]*existing !== null[\s\S]*IDENTITY_NOT_PROVISIONED/u);
-  // A brand-new identity gets a fresh org + a single owner membership.
-  assert.match(authRepo, /INSERT INTO organizations \(id, slug, name, status, created_at\)/u);
+  // A brand-new identity gets a fresh org + a single owner membership. The
+  // org is born on the trial plan -- self-serve is the only path that mints
+  // trial, and every provisioned org keeps the standard column default.
+  assert.match(authRepo, /INSERT INTO organizations \(id, slug, name, status, plan, created_at\)/u);
+  assert.match(authRepo, /VALUES \(\?, \?, \?, 'active', 'trial', \?\)/u);
   assert.match(authRepo, /'org_owner', 'all_customers', 'active'/u);
   // The separate signup switch is off unless the exact string "true".
   assert.match(runtime, /SUTRA_HOSTED_SELF_SERVE_SIGNUP === "true"/u);

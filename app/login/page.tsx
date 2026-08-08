@@ -329,9 +329,19 @@ export default function LoginPage() {
           ) : mode === "hosted" ? (
             <>
               <div className="auth-heading">
-                <span>Enterprise identity</span>
-                <h2>Sign in to Sutra</h2>
-                <p>Continue through an identity provider configured by your organization. Sutra accepts only verified, pre-provisioned memberships.</p>
+                {federation !== null && !federation.invitationOnly ? (
+                  <>
+                    <span>Get started</span>
+                    <h2>Sign in or create your workspace</h2>
+                    <p>Continue with your identity provider. First time here? Signing in creates your own Sutra workspace on a free trial — no credit card, read-only cloud permissions.</p>
+                  </>
+                ) : (
+                  <>
+                    <span>Enterprise identity</span>
+                    <h2>Sign in to Sutra</h2>
+                    <p>Continue through an identity provider configured by your organization. Sutra accepts only verified, pre-provisioned memberships.</p>
+                  </>
+                )}
               </div>
               {federation?.providers.map((provider, index) => (
                 <a
