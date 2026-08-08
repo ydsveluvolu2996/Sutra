@@ -105,3 +105,12 @@ never starts before the previous one is green.
   on both engines.
 - `tests/aws-onboarding-role-capabilities.test.mjs` keeps its
   both-directions guarantee, extended over add-on packs.
+
+## SUPERSEDED 2026-08-08 — direction pivot
+
+The user replaced this direction with a Cloudaware-style self-serve signup
+onboarding (Google sign-in → choose goals → name → connect infrastructure) and
+an initial goal-driven home dashboard. Phase 1 (the DB migration) had already
+been completed and verified and stays landed; phases 2-5 of this worksheet are
+cancelled, not pending. The new effort is planned in
+`docs/ONBOARD-signup-flow-plan.md`.
