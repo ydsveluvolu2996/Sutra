@@ -43,6 +43,9 @@ export const organizations = sqliteTable("organizations", {
   slug: text("slug").notNull(),
   name: text("name").notNull(),
   status: text("status", { enum: ["active", "suspended"] }).notNull().default("active"),
+  // Presentation and gating state (trial badge, onboarding), never an
+  // authorization input: memberships and scopes decide what a session may do.
+  plan: text("plan", { enum: ["trial", "standard"] }).notNull().default("standard"),
   createdAt: timestamp("created_at"),
 }, (table) => [uniqueIndex("organizations_slug_uq").on(table.slug)]);
 

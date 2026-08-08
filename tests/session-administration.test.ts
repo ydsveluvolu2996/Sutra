@@ -23,7 +23,7 @@ function actor(role: AuthenticatedLocalSession["subject"]["role"]): Authenticate
     session: {
       id: `sess_${"a".repeat(32)}`,
       user: { id: "user_actor", email: "actor@example.test", displayName: "Actor" },
-      organization: { id: "org_a", slug: "org-a", name: "Org A" },
+      organization: { id: "org_a", slug: "org-a", name: "Org A", plan: "standard" as const },
       membership: { id: "member_a", role, scopeMode: "all_customers" },
       availableOrganizations: [{ id: "org_a", slug: "org-a", name: "Org A", role }],
       capabilities: ["workspace:read"],
