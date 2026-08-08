@@ -4064,3 +4064,8 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .welcome-provider-card[data-available="false"] { opacity: 0.65; }
 .welcome-provider-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0 0 4px; flex: 1; }
 .welcome-provider-soon { font-size: 12px; font-weight: 600; color: var(--text-muted, #8a93a6); }
+
+/* Authenticate-using tabs on the AWS onboarding form. */
+.onboard-method-tabs { display: flex; border-bottom: 1.5px solid var(--border-strong, #3a4257); margin-bottom: 14px; }
+.onboard-method-tab { flex: 1; padding: 10px 16px; background: transparent; border: none; border-bottom: 2px solid transparent; margin-bottom: -1.5px; font-size: 14px; font-weight: 600; color: var(--text-muted, #8a93a6); cursor: pointer; }
+.onboard-method-tab[aria-selected="true"] { color: inherit; border-bottom-color: var(--accent, #19b8a6); background: color-mix(in srgb, var(--accent, #19b8a6) 6%, transparent); }
