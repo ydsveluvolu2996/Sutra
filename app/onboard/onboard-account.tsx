@@ -886,6 +886,7 @@ export function OnboardAccount() {
                   title="Deploy"
                   description="Sutra never creates customer access keys. The recommended paths store no long-lived customer secret at all."
                 >
+                <p className="onboard-guide-link">New here? <a href="/onboard/guide">Read the AWS quick-start guide</a>.</p>
                 {/* The reference presents authentication as two tabs. The tab
                     switches the SAME connectionMethod state the radio cards
                     set, so the wire contract is untouched: IAM Role shows the

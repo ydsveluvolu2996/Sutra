@@ -4078,3 +4078,10 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .home-goal-card:hover { border-color: var(--accent, #19b8a6); }
 .home-goal-card em { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; width: fit-content; background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); color: var(--accent, #19b8a6); }
 .home-goal-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0; }
+
+/* Quick-start guide page and its entry link. */
+.onboard-guide { max-width: 860px; display: flex; flex-direction: column; gap: 26px; padding-bottom: 64px; }
+.onboard-guide h2 { margin-bottom: 8px; }
+.onboard-guide h3 { margin: 14px 0 6px; }
+.onboard-guide ol, .onboard-guide ul { padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.onboard-guide-link { font-size: 13px; color: var(--text-muted, #8a93a6); margin-bottom: 10px; }
