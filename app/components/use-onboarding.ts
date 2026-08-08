@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { OnboardingProgress } from "../../db/onboarding-repository";
+import type { OnboardingProgress } from "../../lib/onboarding-goals";
 
 /**
  * Client view of the guided-onboarding progress.

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { OnboardingProgress } from "../../db/onboarding-repository";
+import type { OnboardingProgress } from "../../lib/onboarding-goals";
 
 /**
  * The three-step progress strip shown in the top bar while a trial workspace

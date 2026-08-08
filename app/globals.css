@@ -4042,3 +4042,18 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .sidebar-onboarding .nav-groups-onboarding { display: flex; flex-direction: column; padding: 10px 12px; }
 .sidebar-onboarding .nav-groups-onboarding .nav-item { display: block; padding: 8px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; text-decoration: none; color: inherit; }
 .sidebar-onboarding .nav-groups-onboarding .nav-item[aria-current="page"] { background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); }
+
+/* --- Guided welcome flow -------------------------------------------------- */
+.welcome-flow { display: flex; flex-direction: column; gap: 44px; max-width: 980px; padding: 8px 4px 64px; }
+.welcome-step h2 { margin: 4px 0 6px; }
+.welcome-step-copy { color: var(--text-muted, #8a93a6); max-width: 640px; margin-bottom: 18px; }
+.welcome-goal-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 18px; }
+.welcome-goal-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left; padding: 16px; border-radius: 12px; border: 1.5px solid var(--border-strong, #3a4257); background: transparent; cursor: pointer; color: inherit; }
+.welcome-goal-card[aria-pressed="true"] { border-color: var(--accent, #19b8a6); background: color-mix(in srgb, var(--accent, #19b8a6) 8%, transparent); }
+.welcome-goal-card strong { font-size: 15px; }
+.welcome-goal-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.welcome-goal-tags em { font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 4px; background: color-mix(in srgb, var(--accent, #19b8a6) 14%, transparent); color: var(--accent, #19b8a6); }
+.welcome-goal-card p { font-size: 13px; color: var(--text-muted, #8a93a6); margin: 0; }
+.welcome-name-form { display: flex; align-items: flex-end; gap: 12px; max-width: 560px; }
+.welcome-name-form label { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.welcome-connect-done { color: var(--accent, #19b8a6); font-weight: 600; }

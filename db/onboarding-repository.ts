@@ -13,25 +13,10 @@
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import type { AuthorizationSubject } from "../lib/auth-policy";
+import { ONBOARDING_GOALS, type OnboardingGoal, type OnboardingProgress } from "../lib/onboarding-goals";
 
-export const ONBOARDING_GOALS = Object.freeze([
-  "cmdb",
-  "finops",
-  "vulnerabilities",
-] as const);
-
-export type OnboardingGoal = (typeof ONBOARDING_GOALS)[number];
-
-export interface OnboardingProgress {
-  readonly goals: readonly OnboardingGoal[];
-  readonly steps: {
-    readonly goals: boolean;
-    readonly name: boolean;
-    readonly connect: boolean;
-  };
-  /** All three steps done. Purely derived; nothing stores "complete". */
-  readonly completed: boolean;
-}
+export { ONBOARDING_GOALS } from "../lib/onboarding-goals";
+export type { OnboardingGoal, OnboardingProgress } from "../lib/onboarding-goals";
 
 export class OnboardingError extends Error {
   public readonly status: number;
