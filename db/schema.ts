@@ -49,6 +49,18 @@ export const organizations = sqliteTable("organizations", {
   createdAt: timestamp("created_at"),
 }, (table) => [uniqueIndex("organizations_slug_uq").on(table.slug)]);
 
+/**
+ * Guided-onboarding progress, one row per organization. The connect step is
+ * always derived from real connection existence, never stored here.
+ */
+export const organizationOnboarding = sqliteTable("organization_onboarding", {
+  orgId: text("org_id").primaryKey().references(() => organizations.id),
+  goalsJson: text("goals_json").notNull().default("[]"),
+  nameSharedAt: integer("name_shared_at", { mode: "timestamp_ms" }),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
+});
+
 export const localSessions = sqliteTable("local_sessions", {
   id: text("id").primaryKey(),
   tokenDigest: text("token_digest").notNull(),
