@@ -1,107 +1,127 @@
 # Development and release flow
 
-Two branches, one standing pull request, two human decisions. This is the whole
-process; `CLAUDE.md` and `AGENTS.md` state the same rules as agent instructions.
+Two branches, one standing pull request, two human decisions. `CLAUDE.md` and
+`AGENTS.md` state the same rules as agent instructions.
 
-```
-work ──push──> develop ──CI on PR #N──> "commit to main" ──merge──> main
-                                                                     │
-                                                              CI on main
-                                                                     │
-                                                          release run PARKS
-                                                                     │
-                                                          "deploy" ──approve──> live
+```text
+pnpm work:start
+      │
+      ▼
+daily work ──pnpm work:save──> develop ──CI on standing PR──> "commit to main"
+                                                                       │
+                                                                       ▼
+                                                                     main
+                                                                       │
+                                                                 CI on main
+                                                                       │
+                                     no release is started until "deploy"
+                                                                       │
+                                                                       ▼
+                                  manual exact-SHA release ──approval──> EC2 live
 ```
 
 ## Branches
 
 | Branch | Purpose | Who writes |
 | --- | --- | --- |
-| `main` | what is released | only a merge of the standing pull request |
-| `develop` | all work in progress | agents and humans, directly |
+| `main` | deployable, protected history | only a merge of the standing pull request |
+| `develop` | all normal work in progress | agents and humans, directly |
 
-There is no branch per change, per feature or per fix. A second working branch is
-the thing this rule exists to prevent.
+There is no branch per routine change, feature or fix. This keeps the daily path
+fast and prevents abandoned agent branches. If Claude and Codex truly work at the
+same time, one remains the `develop` integrator and the other uses a temporary
+branch that pull-requests into `develop`; they must not concurrently rewrite the
+same shared working tree.
+
+## Daily commands
+
+Start a session from a clean tree:
+
+```bash
+pnpm work:start
+```
+
+This switches to `develop`, fetches `main` and `develop`, and fast-forwards to
+GitHub. It stops rather than moving a dirty tree.
+
+After running the focused tests appropriate to the change, save everything to
+GitHub:
+
+```bash
+pnpm work:save -- "Describe the completed work"
+```
+
+The checkpoint command runs the repository secret scan, stages the current
+worktree, rejects whitespace errors, commits, synchronizes unpublished local
+commits, pushes `develop`, and makes sure exactly one standing PR exists. If a
+concurrent push creates a rebase conflict, it aborts the rebase and pushes the
+intact local commit to a timestamped `checkpoint/*` branch. That path needs
+manual integration, but the work is already safe on GitHub.
 
 ## The standing pull request
 
-Exactly one pull request is open at any time: `develop` → `main`, titled
-`develop → main`. It updates itself on every push, so no pull request is ever
-opened for an individual change. When it is merged, a fresh one is opened
-immediately for the next cycle.
+Exactly one pull request stays open: `develop` → `main`, titled
+`develop → main`. It updates on every push, so routine checkpoints do not create
+new pull requests.
 
-It is not ceremony, and deleting it would not save time. CI triggers on
-`pull_request` and on `push` to `main` -- **not** on branch pushes. Without an
-open pull request, `develop` carries no verification at all and the first CI run
-happens on `main`, where a successful run is what fires a release. The standing
-pull request is the only thing keeping unverified code off `main`.
-
-It also produces the review pass. On 2026-08-07 that review caught six defects
-that CI passed, including onboarding UI stating that the customer role grants
-`s3:GetObject` when the deployed pack denies it -- the test asserting the grant
-was itself the defect, so no test could have caught it.
+The standing PR is also the CI and review surface. CI triggers on
+`pull_request` and on pushes to `main`, not on direct pushes to `develop`.
+Without the PR, `develop` would carry no verification before promotion. A prior
+review caught onboarding permission claims that their own tests incorrectly
+asserted, which is why review remains useful even with a green build.
 
 ## The two human decisions
 
 | Phrase | Effect | Never implied by |
 | --- | --- | --- |
-| **"commit to main"** | merge the standing pull request into `main` | finishing work, green checks, a reviewer approving |
-| **"deploy"** | approve the parked release run | merging, a green pipeline, an approval given for an earlier release |
+| **"commit to main"** | merge the green standing PR into protected `main` | finishing work, green checks, reviewer comments |
+| **"deploy"** | release the exact current `main` SHA to EC2 and verify it | merging, a green pipeline, an instruction from an earlier turn |
 
-Green checks are a *precondition* for merging, never an instruction to merge.
+Green checks are a precondition for merging, never an instruction to merge.
 
 ## Deployment
 
-Merging to `main` runs CI. On success, `ec2-live-release.yml` fires
-automatically and then **parks** on the `ec2-live-release` environment approval.
-Parked runs accumulate; that is expected. Nothing reaches
-https://www.sutracmdb.com until a human approves one.
+Merging to `main` runs CI and does nothing else. The EC2 release workflow is
+`workflow_dispatch`-only; there are no automatic or parked release runs, so
+merges cannot spend AWS compute or queue behind stale approvals.
 
-Each parked run is pinned to the SHA it was created from. Approve the newest, or
-dispatch fresh at current `main` if the newest parked run is not the current
-head. Approving an older parked run deploys superseded code over newer code.
-State which SHA is going live before approving. Parked runs expire after 30 days.
+After the user explicitly says `deploy`, the agent states the exact current
+`origin/main` SHA and runs:
 
-After approval the run builds, scans the exact digest, promotes it to a retained
-tag, deploys over SSM, and verifies the live site -- including asserting that the
-`x-sutra-release-image` header byte-matches the digest just deployed. If the site
-serves anything else, the release fails.
+```bash
+pnpm deploy:ec2 -- "Approved reason for this production release"
+```
 
-## Keeping `develop` green
+The command fails closed unless that exact SHA has a successful completed `main`
+CI run. It then dispatches `ec2-live-release.yml` on `main`, resolves the new run,
+approves the `ec2-live-release` environment for that run only, waits for the
+workflow, and proves the completed run used the same SHA.
 
-One branch means one red check blocks every promotion, including unrelated work.
-Fixing a red `develop` or `main` is the immediate next task, ahead of whatever
-came next. A red `main` blocks every later release, because the release run only
-fires on a successful CI run.
+The workflow builds and scans an immutable digest, promotes that exact digest to
+a retained release tag, deploys through the constrained SSM document, and checks
+the public site. Its final verification asserts that the
+`x-sutra-release-image` header byte-matches the digest just deployed.
 
-Push only what local verification already covers: the relevant tests, `tsc`,
-`eslint` and the repository secret scan for the changed area.
+## Keeping integration green
 
-## Parallel agents
+One integration branch means one red check blocks every promotion. Fixing a red
+`develop` or `main` is the immediate next task. Push only after relevant local
+tests, typecheck/lint for the changed area, and the repository secret scan pass;
+the standing PR supplies the complete remote gate.
 
-More than one agent may work `develop`. They share its state, so one agent's red
-check blocks the other's promotion. If two agents run concurrently, either
-serialise them or give the second a branch that pull-requests into `develop`;
-`develop` itself stays the single integration branch either way.
-
-Shared files listed in `CLAUDE.md` -- dependency manifests, the role broker, the
-migration registries, the tracker -- remain integrator-owned regardless.
-
-## Repository settings that enforce this
-
-These are GitHub settings, not repository files, and must be set in the web UI.
-Without them the flow is convention; with them it is enforced.
+## Repository settings that enforce the flow
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| `main` → Require a pull request before merging | on | stops a direct push bypassing CI |
-| `main` → Require status checks to pass | on, with `Typecheck, lint, test, and build` | makes green a precondition mechanically |
-| `main` → Require branches to be up to date | on | the merged result is what was tested |
-| `main` → Block force pushes | on | promotion is never a rewrite |
-| `main` → Restrict deletions | on | |
-| `ec2-live-release` environment → Required reviewers | the account owner | this is the deployment gate |
-| Automatically delete head branches | on | dead branches stop accumulating |
+| `main` → Require a pull request before merging | on, zero required approvals | prevents direct pushes without blocking a single-owner repository |
+| `main` → Require status checks | `Typecheck, lint, test, and build` | makes the aggregate CI gate mandatory |
+| `main` → Require branches to be up to date | on | tests the result being promoted |
+| `main` → Include administrators | on | the owner follows the same safety path |
+| `main` → Force pushes and deletions | blocked | release history cannot be rewritten or removed |
+| `develop` → Force pushes and deletions | blocked | daily checkpoints cannot be erased accidentally |
+| `ec2-live-release` environment → Required reviewer | repository owner | preserves a second GitHub-side production boundary |
+| Automatically delete head branches | off | `develop` is the standing PR head and must persist after promotion |
 
-Approvals cannot be set to "anyone" for the release environment: the environment
-approval *is* the deployment permission prompt, and it is answered by a human,
-never by an agent.
+The deployment helper performs the environment approval only after an explicit
+current-turn `deploy` instruction. It never approves an already-existing run or
+reuses a prior authorization.

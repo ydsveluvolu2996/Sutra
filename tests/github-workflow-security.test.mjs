@@ -300,6 +300,10 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
     new URL("../infrastructure/github-ec2-release-role.yaml", import.meta.url),
     "utf8",
   );
+  const deployHelper = readFileSync(
+    new URL("../scripts/deploy-main.sh", import.meta.url),
+    "utf8",
+  );
   const candidateBuildStart = workflow.indexOf("Build and push an immutable scan candidate");
   const scanStart = workflow.indexOf("Scan the exact application digest");
   const promotionStart = workflow.indexOf("Promote the scanned digest to a retained release tag");
@@ -315,13 +319,11 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   const promotion = workflow.slice(promotionStart, ssmStart);
 
   assert.match(workflow, /^\s{2}workflow_dispatch:\s*$/mu);
-  assert.match(workflow, /^\s{2}workflow_run:\s*$/mu);
-  assert.match(workflow, /workflows:\s*\n\s+- CI/u);
-  assert.match(workflow, /github\.event\.workflow_run\.event == 'push'/u);
-  assert.match(workflow, /github\.event\.workflow_run\.conclusion == 'success'/u);
-  assert.match(workflow, /github\.event\.workflow_run\.head_branch == 'main'/u);
-  assert.match(workflow, /github\.event\.workflow_run\.head_repository\.full_name == github\.repository/u);
-  assert.doesNotMatch(workflow, /^\s{2}(push|pull_request):\s*$/mu);
+  assert.doesNotMatch(workflow, /^\s{2}(workflow_run|push|pull_request):\s*$/mu);
+  assert.doesNotMatch(workflow, /github\.event\.workflow_run/u);
+  assert.match(workflow, /RELEASE_SHA: \$\{\{ github\.sha \}\}/u);
+  assert.match(workflow, /RELEASE_REASON: \$\{\{ inputs\.releaseReason \}\}/u);
+  assert.match(workflow, /GITHUB_EVENT_NAME.+workflow_dispatch/u);
   assert.match(workflow, /^\s{4}environment: ec2-live-release\s*$/mu);
   for (const variable of ["AWS_ACCOUNT_ID", "AWS_REGION", "AWS_ROLE_ARN", "EC2_INSTANCE_ID"]) {
     assert.match(workflow, new RegExp(`\\$\\{\\{ vars\\.${variable} \\}\\}`));
@@ -436,6 +438,18 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
     workflow,
     /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws ssm start-session|AWS-RunShellScript|aws ec2 (?:start|stop)-instances/u,
   );
+
+  assert.match(deployHelper, /git fetch origin main/u);
+  assert.match(deployHelper, /git ls-remote origin refs\/heads\/main/u);
+  assert.match(deployHelper, /actions\/workflows\/ci\.yml\/runs\?branch=main/u);
+  assert.match(deployHelper, /head_sha == \$release_sha and \.conclusion == "success"/u);
+  assert.match(deployHelper, /gh workflow run ec2-live-release\.yml/u);
+  assert.match(deployHelper, /--ref main/u);
+  assert.match(deployHelper, /event=workflow_dispatch&branch=main/u);
+  assert.match(deployHelper, /pending_deployments/u);
+  assert.match(deployHelper, /state: "approved"/u);
+  assert.match(deployHelper, /gh run watch/u);
+  assert.match(deployHelper, /completed_sha.+release_sha/u);
 
   assert.match(role, /token\.actions\.githubusercontent\.com:aud: sts\.amazonaws\.com/u);
   // The trusted subject must name the environment the release job actually
@@ -559,4 +573,27 @@ test("live EC2 host start and stop remain explicit, SSO-only, and exact-instance
   assert.match(packageJson, /"cloud:status": "bash deploy\/ec2\/manual-host-control\.sh status"/u);
   assert.match(packageJson, /"cloud:start": "bash deploy\/ec2\/manual-host-control\.sh start"/u);
   assert.match(packageJson, /"cloud:stop": "bash deploy\/ec2\/manual-host-control\.sh stop"/u);
+});
+
+test("daily development helpers preserve work and the standing integration PR", () => {
+  const start = readFileSync(new URL("../scripts/work-start.sh", import.meta.url), "utf8");
+  const save = readFileSync(new URL("../scripts/work-save.sh", import.meta.url), "utf8");
+  const packageJson = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+
+  assert.match(start, /git status --porcelain=v1 --untracked-files=all/u);
+  assert.match(start, /git fetch origin main develop/u);
+  assert.match(start, /git merge --ff-only origin\/develop/u);
+  assert.match(save, /node scripts\/check-repository-secrets\.mjs/u);
+  assert.match(save, /git diff --cached --check/u);
+  assert.match(save, /git push origin develop/u);
+  assert.match(save, /git rebase --abort/u);
+  assert.match(save, /refs\/heads\/\$\{recovery_branch\}/u);
+  assert.match(save, /pulls\?state=open&base=main&head=ydsveluvolu2996:develop/u);
+  assert.match(save, /-f head=develop/u);
+  assert.match(save, /-f base=main/u);
+  assert.match(save, /-f title="develop → main"/u);
+  assert.doesNotMatch(`${start}\n${save}`, /push --force|push -f|reset --hard/u);
+  assert.match(packageJson, /"work:start": "bash scripts\/work-start\.sh"/u);
+  assert.match(packageJson, /"work:save": "bash scripts\/work-save\.sh"/u);
+  assert.match(packageJson, /"deploy:ec2": "bash scripts\/deploy-main\.sh"/u);
 });

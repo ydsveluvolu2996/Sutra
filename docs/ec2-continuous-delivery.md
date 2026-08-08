@@ -116,11 +116,14 @@ image-deletion permission.
 ## One-time GitHub setup
 
 The workflow runs in the `ec2-live-release` deployment environment, which must
-exist and must list a required reviewer -- that reviewer's approval is what
-holds every release until a human releases it. The workflow additionally uses
-ordinary repository Actions variables, rejects every ref except exact `main`,
-and runs its own bounded source/release gates. AWS independently rejects every
-OIDC subject except
+exist and must list the repository owner as a required reviewer. The workflow
+is `workflow_dispatch`-only: merging to `main` never creates a release run. This
+avoids stale approvals, prevents old runs from occupying the serialized release
+lane, and keeps AWS work tied to an explicit deployment instruction. The
+deployment helper approves only the new run it just dispatched after that
+instruction. The workflow additionally uses ordinary repository Actions
+variables, rejects every ref except exact `main`, and runs its own bounded
+source/release gates. AWS independently rejects every OIDC subject except
 `repo:ydsveluvolu2996@229068958/Sutra@1301833628:environment:ec2-live-release`,
 whose repo component carries the immutable owner and repository ids, so a
 workflow created in a renamed lookalike repository, or one running outside that
@@ -146,10 +149,17 @@ SSH key, database password or Cloudflare credential belongs in GitHub.
 
 Run the existing CI and security jobs for `main` before release. The release
 workflow also reruns its bounded source gates and is deliberately manual and
-serialized: GitHub Actions -> **Release Sutra private beta to EC2** -> **Run
-workflow**, then enter a release reason. The reason must be 10-100 characters
-because it is also recorded as the SSM command comment. A push alone does not
-spend AWS compute or deploy.
+serialized. From an authenticated checkout, the normal entrypoint is:
+
+```bash
+pnpm deploy:ec2 -- "Approved reason for this production release"
+```
+
+The helper resolves current `origin/main`, requires a successful completed CI
+run for that exact SHA, dispatches a new release, approves the environment for
+that run only, waits for completion, and verifies the completed run's SHA. The
+reason must be 10-100 characters because it is also recorded as the SSM command
+comment. A push or merge alone does not spend AWS compute or deploy.
 
 The exact-branch cloud trust is not a replacement for pull-request review or
 branch protection: a repository writer who can change `main` can change released

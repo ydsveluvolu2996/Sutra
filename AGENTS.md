@@ -14,20 +14,19 @@ Merging and deploying are separate decisions.
   not the user approving the work itself, not a reviewer signing off.
 - Merging does not require deployment authorization. "Commit to main"
   authorizes the merge and nothing further.
-- Never approve a release run. Deployment to https://www.sutracmdb.com happens
-  only when the user says "deploy" in that turn. A merge is not a deploy
-  instruction, an approval given for an earlier release does not carry forward,
-  and neither does a green pipeline.
-- Every merge to `main` automatically fires `.github/workflows/ec2-live-release.yml`,
-  which parks on the `ec2-live-release` environment approval. Parked runs are
-  expected to accumulate; leave them parked.
-- Each parked run is pinned to the SHA it was created from. When the user says
-  "deploy", approve the newest parked run, or dispatch a fresh one at current
-  `main` if the newest parked run is not the current head. Never approve an
-  older parked run -- doing so deploys superseded code over newer code. State
-  which SHA is going live before approving.
-- Parked runs expire after 30 days. After a long gap, dispatch fresh rather than
-  approving a stale run.
+- Deployment to https://www.sutracmdb.com happens only when the user says
+  "deploy" in that turn. A merge is not a deploy instruction, an instruction
+  from an earlier turn does not carry forward, and neither does a green
+  pipeline.
+- Merging to `main` never starts a release. `.github/workflows/ec2-live-release.yml`
+  is manual-only so releases cannot accumulate, queue behind an old approval,
+  or spend AWS compute merely because code was merged.
+- When the user says "deploy", state the exact current `origin/main` SHA and run
+  `pnpm deploy:ec2 -- "<approved reason>"`. The script requires successful CI
+  for that SHA, dispatches the workflow on `main`, approves the
+  `ec2-live-release` environment for that run only, waits for completion, and
+  verifies that the completed run used the same SHA. Never dispatch or approve
+  a different or older run.
 
 ## Branching and promotion
 
@@ -38,6 +37,14 @@ request by default.
 - Commit and push new functionality to `develop`. Do not create a branch per
   change, per feature or per fix -- a second working branch is the thing this
   rule exists to prevent.
+- Start a normal work session with `pnpm work:start`. It refuses to overwrite a
+  dirty tree, switches to `develop`, and fast-forwards from GitHub.
+- At the end of a task or day, after focused verification, run
+  `pnpm work:save -- "<what changed>"`. It scans for committed credentials,
+  checks the staged diff, commits all current work, rebases only unpublished
+  local commits when necessary, pushes `develop`, and ensures the standing pull
+  request exists. If a rebase conflicts, it aborts and pushes the intact commit
+  to a timestamped `checkpoint/*` recovery branch instead of losing work.
 - Keep exactly one standing pull request open, `develop` -> `main`, titled
   `develop → main`. It updates itself with every push, so no pull request is
   ever opened per change. If none is open, open one; never open a second.
@@ -58,10 +65,9 @@ request by default.
   blocks every later release, because the release run only fires on a successful
   CI run.
 
-Promoting to `main` fires a release run, which then waits for the
-`ec2-live-release` environment approval. That approval is the deployment
-permission prompt: it is answered by the user, never by an agent. "Commit to
-main" authorizes the merge, not the deployment.
+Promoting to `main` runs CI but does not start a release. "Commit to main"
+authorizes the merge only. A later, current-turn "deploy" instruction authorizes
+the exact-SHA manual release described above.
 
 ## Finish quickly
 
@@ -80,7 +86,7 @@ main" authorizes the merge, not the deployment.
 
 ## Deployment completion
 
-- When the user asks to deploy, continue through the repository's existing build, release, and deployment workflow; do not stop after creating or merging a PR. Report the deployed environment, release commit, and verification result.
-- Do not treat a successful merge as authorization to deploy. The release run fires automatically and then waits; approving it is a separate act that requires the user to have asked for a deployment. See the release and deployment policy above.
+- When the user asks to deploy, continue through dispatch, the exact run's environment approval, build, release, EC2 update, and live verification; do not stop after creating a run. Report the deployed environment, release commit, run URL, and verification result.
+- Do not treat a successful merge as authorization to deploy. Dispatch and approve only after an explicit current-turn deployment instruction. See the release and deployment policy above.
 - Use focused pre-merge checks and let CI run the repository's required full gates. Do not duplicate an expensive full suite locally unless it materially reduces risk.
 - Treat missing credentials, environment approvals, failed required checks, and absent deployment configuration as explicit blockers. Never bypass them or claim that source changes are deployed.
