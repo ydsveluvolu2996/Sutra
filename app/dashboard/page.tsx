@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { isAllEnabledAwsRegionSelection } from "../../lib/aws-region-selection.ts";
 import { AppShell } from "../components/app-shell";
+import { HomeGoals } from "../components/home-goals";
 import { formatTimestamp, postPilot, snapshotOriginLabel, usePilotState } from "../components/use-pilot-state";
 
 function errorMessage(value: unknown): string {
@@ -331,6 +332,8 @@ export default function Home() {
         <span><strong>{state?.activeSnapshot ? `${snapshotOriginLabel(state.activeSnapshot.origin)}.` : health?.mode === "live" ? "AWS collector ready." : health?.mode === "fixture" ? "Fixture collector ready." : "Collector status unavailable."}</strong> Customer infrastructure is never modified, and only a complete collection can replace the active CMDB projection.</span>
         <a href="/controls">See boundaries</a>
       </div>
+
+      <HomeGoals />
 
       {error || actionError ? <div className="page-alert page-alert-error" role="alert"><strong>Workspace needs attention</strong><span>{actionError ?? error}</span><button type="button" onClick={() => void refresh()}>Retry</button></div> : null}
       {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading the cloud workspace…</div> : null}
