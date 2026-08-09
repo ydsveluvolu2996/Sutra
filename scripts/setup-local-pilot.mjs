@@ -175,12 +175,24 @@ const AGENTLESS_VARS = [
   "SUTRA_AGENTLESS_INSTANCE_PROFILE_ARN",
   "SUTRA_AGENTLESS_FINDINGS_BUCKET",
 ];
+// Self-serve signup is read from the Worker `env` (lib/hosted-oidc-runtime), so
+// the switch and its optional verified-domain allowlist must reach `.dev.vars`
+// and not merely the container process environment — compose sets them on the
+// container, but the Worker only sees what is written here. Anything other
+// than the exact string "true" keeps signup off, and an unset name is removed
+// from a retained runtime volume below so a stale value cannot survive the
+// operator withdrawing it.
+const HOSTED_SIGNUP_VARS = [
+  "SUTRA_HOSTED_SELF_SERVE_SIGNUP",
+  "SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS",
+];
 const optionalPassthroughVars = [
   ...CONTACT_VARS,
   ...INVITATION_VARS,
   ...ZOHO_VARS,
   ...OIDC_VARS,
   ...AGENTLESS_VARS,
+  ...HOSTED_SIGNUP_VARS,
 ].map((name) => {
   const value = process.env[name]?.trim();
   if (value !== undefined && /[\r\n]/u.test(value)) {
@@ -453,6 +465,14 @@ if (existingContents === null) {
   }
   for (const { name, value } of optionalPassthroughVars) {
     updatedContents = upsertVariable(updatedContents, additions, name, value);
+  }
+  // Withdrawing the signup opt-in (or its domain allowlist) from the container
+  // configuration must fail closed even when the persistent runtime volume
+  // still carries a previously enabled value.
+  for (const name of HOSTED_SIGNUP_VARS) {
+    if (!process.env[name]?.trim()) {
+      updatedContents = updatedContents.replace(new RegExp(`^${name}=.*(?:\\n|$)`, "mu"), "");
+    }
   }
   if (additions.length > 0 || updatedContents !== existingContents) {
     const prefix = updatedContents.endsWith("\n") ? updatedContents : `${updatedContents}\n`;
