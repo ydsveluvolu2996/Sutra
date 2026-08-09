@@ -3943,7 +3943,7 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .deployments-tabs > button:hover { color: var(--ink); }
 .deployments-tabs > button[aria-pressed="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
 .deployments-tabs em { padding: 1px 6px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8px; font-style: normal; font-weight: 700; }
-.deployments-tabs > button[aria-selected="true"] em { background: #dbeafe; color: #1d4ed8; }
+.deployments-tabs > button[aria-pressed="true"] em { background: #dbeafe; color: #1d4ed8; }
 
 .deployments-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .deployments-search { flex: 1 1 200px; min-width: 160px; }
