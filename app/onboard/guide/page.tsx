@@ -9,8 +9,9 @@ export const metadata: Metadata = { title: "AWS quick-start guide" };
  * like the reference: prerequisites, account creation, goals, the two AWS
  * connection paths, validation, and what to explore next. Every claim below
  * describes what Sutra actually does -- the guide is documentation of the real
- * flow, not marketing ahead of it. Screenshots of the shipped flow are added
- * once the flow is live, never mocked up in advance.
+ * flow, not marketing ahead of it. The screenshots under
+ * public/onboarding-guide/ are captures of the shipped pages rendered by the
+ * real application, never mock-ups.
  */
 export default function OnboardingGuidePage() {
   return (
@@ -41,11 +42,23 @@ export default function OnboardingGuidePage() {
         <section aria-labelledby="guide-goals">
           <h2 id="guide-goals">2. Choose your goals and name the workspace</h2>
           <p>The <Link href="/welcome">guided setup</Link> asks what you want from Sutra — cloud visibility (CMDB), cost optimization (FinOps), or vulnerability remediation — and what to call your workspace. Goals shape your home page; they never change what your workspace is allowed to do.</p>
+          <figure>
+            <img alt="The guided setup: choose your goals, share the workspace name, and connect your infrastructure" className="onboard-guide-shot" src="/onboarding-guide/guided-setup.webp" />
+            <figcaption>The three-step guided setup at /welcome: goals, workspace name, and the provider hub.</figcaption>
+          </figure>
         </section>
 
         <section aria-labelledby="guide-connect">
           <h2 id="guide-connect">3. Connect your AWS account</h2>
           <p>Open <Link href="/onboard">Manage AWS account</Link> and choose how to authenticate.</p>
+          <figure>
+            <img alt="Step 1 of the connection wizard: create the connection contract with customer workspace, AWS account ID, and partition" className="onboard-guide-shot" src="/onboarding-guide/connect-contract.webp" />
+            <figcaption>The connection contract: one customer workspace, one AWS account, and the Region coverage choice.</figcaption>
+          </figure>
+          <figure>
+            <img alt="The Authenticate using tabs: IAM Role and Access and Secret Keys" className="onboard-guide-shot" src="/onboarding-guide/authenticate-tabs.webp" />
+            <figcaption>Choose the authentication path: IAM Role (recommended) or Access &amp; Secret Keys.</figcaption>
+          </figure>
           <h3>IAM Role (recommended)</h3>
           <ol>
             <li>Create the connection contract: customer name, 12-digit AWS account ID, and partition. Sutra binds a unique ExternalId to this connection.</li>
@@ -67,6 +80,10 @@ export default function OnboardingGuidePage() {
             <li><Link href="/connection-health">Connection health</Link> shows trust validation and collection outcomes per account.</li>
             <li>Your chosen goals link straight into the CMDB, FinOps and vulnerability views.</li>
           </ul>
+          <figure>
+            <img alt="The home dashboard with the Your goals section and the get-started checklist" className="onboard-guide-shot" src="/onboarding-guide/home-goals.webp" />
+            <figcaption>Home after setup: your goals up top, the first-collection checklist below.</figcaption>
+          </figure>
         </section>
       </article>
     </AppShell>

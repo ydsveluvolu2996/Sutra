@@ -45,3 +45,14 @@ test("runtime synchronization is fail-closed and never prints credential values"
   assert.doesNotMatch(sync, /cat "\$payload"/u);
   assert.doesNotMatch(sync, /set -x/u);
 });
+
+test("the host accepts at most one optional Google provider pinned to Google's exact endpoints", () => {
+  assert.match(sync, /\(length == 1 or length == 2\)/u);
+  assert.match(sync, /\.\[1\]\.id == "google"/u);
+  assert.match(sync, /\.\[1\]\.issuer == "https:\/\/accounts\.google\.com"/u);
+  assert.match(sync, /\.\[1\]\.tokenEndpoint == "https:\/\/oauth2\.googleapis\.com\/token"/u);
+  assert.match(sync, /\.\[1\]\.jwksUri == "https:\/\/www\.googleapis\.com\/oauth2\/v3\/certs"/u);
+  assert.ok(sync.includes('test("^[A-Za-z0-9._-]{4,200}\\\\.apps\\\\.googleusercontent\\\\.com$")'));
+  // No third entry: only lengths 1 and 2 appear in the provider gate.
+  assert.doesNotMatch(sync, /\.\[2\]/u);
+});
