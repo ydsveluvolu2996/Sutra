@@ -22,8 +22,13 @@ const [
   readFile(new URL("../db/identity-invitation-repository.ts", import.meta.url), "utf8"),
 ]);
 
-test("production organization creation is invitation-only", () => {
-  assert.match(compose, /SUTRA_HOSTED_SELF_SERVE_SIGNUP: "false"/u);
+test("production organization creation is invitation-only unless the deployment explicitly opts in", () => {
+  // Self-serve signup is a product feature now, so the switch is env-driven --
+  // but the DEFAULT stays false, the value is read only from the managed
+  // .env.ec2 file, and this pin fails if either the default or the exact
+  // opt-in shape drifts. A duplicate literal alongside this line is what
+  // failed release run 21; tests/compose-duplicate-keys.test.mjs guards that.
+  assert.match(compose, /SUTRA_HOSTED_SELF_SERVE_SIGNUP: \$\{SUTRA_HOSTED_SELF_SERVE_SIGNUP:-false\}/u);
   assert.match(callback, /Default \(invite-only\) behaviour is unchanged/u);
   assert.match(callback, /isHostedSelfServeSignupEnabled\(\)/u);
   assert.match(invitations, /token_digest = \? AND i\.email = \?/u);
