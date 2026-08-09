@@ -41,7 +41,12 @@ async function loadCapabilities() {
   return entries.map(([, id, actionBlock, granted]) => ({
     id,
     granted: granted === "true",
-    actions: [...actionBlock.matchAll(/"([a-z0-9-]+:[A-Za-z]+)"/gu)].map(([, action]) => action),
+    // The action segment must accept digits and wildcards, matching what
+    // allowedActions() parses out of the pack. A stricter pattern here does not
+    // fail -- it silently drops the action from the extracted list, so a
+    // capability naming `ec2:DescribeIpv6Pools` would be verified against its
+    // remaining actions only, and against none at all if that were its only one.
+    actions: [...actionBlock.matchAll(/"([a-z0-9-]+:[A-Za-z0-9*]+)"/gu)].map(([, action]) => action),
   }));
 }
 
@@ -150,5 +155,22 @@ test("the onboarding pack is a single pinned version, not a per-connection choic
     [...contract.matchAll(/AWS_CUSTOMER_ROLE_TEMPLATE_VERSION\s*=/gu)].length,
     1,
     "onboarding must deploy exactly one permission pack version",
+  );
+});
+
+test("the advertised action count matches what the pack actually allows", async () => {
+  // Onboarding shows this number as the scale of the permission boundary, so it
+  // is pinned to the pack rather than maintained by hand. A successor pack
+  // changes the count and fails here instead of leaving a stale figure on the
+  // page -- which is the same failure the capability rows themselves had, where
+  // a hand-picked "2 of 7" read as the whole grant.
+  const { version, yaml } = await loadDeployedPack();
+  const source = await readFile(path.join(root, "lib/aws-onboarding-role-capabilities.ts"), "utf8");
+  const declared = /ONBOARDING_ROLE_ALLOWED_ACTION_COUNT = (\d+)/u.exec(source)?.[1];
+  assert.ok(declared, "the allowed-action count must be declared as data");
+  assert.equal(
+    Number(declared),
+    allowedActions(yaml).size,
+    `the onboarding page advertises ${declared} allowed actions but ${version} allows ${allowedActions(yaml).size}`,
   );
 });

@@ -18,6 +18,21 @@
  * instead of silently invalidating it.
  */
 
+/**
+ * How many distinct actions the deployed pack actually allows.
+ *
+ * The capability rows below are a chosen sample -- the questions customers ask
+ * most, including several answered "no" -- not an enumeration of the pack. A
+ * badge reading "2 of 7 granted" over them therefore describes the sample, but
+ * reads as the permission boundary, and understates a role that allows this many
+ * actions by an order of magnitude.
+ *
+ * `tests/aws-onboarding-role-capabilities.test.mjs` pins this to the count
+ * parsed out of the pack YAML, so a pack bump fails the test rather than
+ * quietly leaving a stale number on the onboarding page.
+ */
+export const ONBOARDING_ROLE_ALLOWED_ACTION_COUNT = 119;
+
 export interface OnboardingRoleCapability {
   readonly id: string;
   readonly label: string;

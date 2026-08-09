@@ -1018,7 +1018,11 @@ h3 { letter-spacing: -.02em; }
 .user-card button:hover { background: rgba(236,82,102,.16); border-color: rgba(236,82,102,.38); color: #ffd4da; }
 .user-signout-glyph { display: block; }
 .user-card button:disabled { opacity: .5; cursor: wait; }
-.sidebar-error { margin: 8px 4px 0; color: #efb9be; font-size: 8px; line-height: 1.4; }
+/* Sign-out failures render in the main area, not the sidebar, so they survive
+   the collapsed navigation rail (which renders no sidebar body). Styled for the
+   light content surface rather than the dark sidebar the old rule assumed --
+   #efb9be on white was near-invisible. */
+.shell-error { margin: 0 0 12px; padding: 10px 12px; border: 1px solid #edcccc; border-radius: 7px; background: #fff6f6; color: #9e2e2e; font-size: 9px; font-weight: 600; line-height: 1.45; }
 
 /* Organization membership customer assignments */
 .assignment-admin { margin-bottom: 13px; }
@@ -3937,9 +3941,9 @@ button.orbit-node { font: inherit; cursor: pointer; }
 .deployments-tabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
 .deployments-tabs > button { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; margin-bottom: -1px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--ink-faint); font-size: 10px; font-weight: 650; cursor: pointer; }
 .deployments-tabs > button:hover { color: var(--ink); }
-.deployments-tabs > button[aria-selected="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
+.deployments-tabs > button[aria-pressed="true"] { border-bottom-color: #2563eb; color: #1d4ed8; }
 .deployments-tabs em { padding: 1px 6px; border-radius: 999px; background: var(--surface-soft); color: var(--ink-faint); font-size: 8px; font-style: normal; font-weight: 700; }
-.deployments-tabs > button[aria-selected="true"] em { background: #dbeafe; color: #1d4ed8; }
+.deployments-tabs > button[aria-pressed="true"] em { background: #dbeafe; color: #1d4ed8; }
 
 .deployments-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .deployments-search { flex: 1 1 200px; min-width: 160px; }

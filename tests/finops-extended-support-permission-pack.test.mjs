@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 import { load as parseYaml } from
-  "../node_modules/.pnpm/js-yaml@4.3.0/node_modules/js-yaml/index.js";
+  "../node_modules/.pnpm/js-yaml@4.3.1/node_modules/js-yaml/index.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const priorPath = resolve(root,

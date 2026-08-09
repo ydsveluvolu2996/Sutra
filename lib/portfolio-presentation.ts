@@ -145,11 +145,22 @@ export function evidenceSourceLabel(connection: PortfolioConnectionSummary): {
       detail: `${connection.fixtureId ?? "fixture"} · ${connection.fixtureVersion ?? "version unavailable"}`,
     };
   }
+
+  // The credential mechanism is read from sourceKind rather than assumed. This
+  // previously fell through to trust-role wording for every non-fixture
+  // connection, so once `aws_static_credentials` became representable an
+  // access-key deployment asserted "Customer trust role" in its Source cell --
+  // naming a role that was never deployed, for the one connection kind whose
+  // permissions Sutra cannot state in advance.
+  const staticKeys = connection.sourceKind === "aws_static_credentials";
+  const mechanism = staticKeys ? "Customer IAM user access key" : "Customer trust role";
+  const idleLabel = staticKeys ? "AWS access keys" : "AWS trust role";
+
   if (connection.latestSnapshotOrigin === "aws_live") {
-    return { label: "Live AWS", detail: "Customer trust role · AWS API evidence" };
+    return { label: "Live AWS", detail: `${mechanism} · AWS API evidence` };
   }
   if (connection.latestSnapshotAt === null) {
-    return { label: "AWS trust role", detail: "No evidence snapshot published" };
+    return { label: idleLabel, detail: "No evidence snapshot published" };
   }
-  return { label: "AWS trust role", detail: "Stored snapshot origin unavailable" };
+  return { label: idleLabel, detail: "Stored snapshot origin unavailable" };
 }

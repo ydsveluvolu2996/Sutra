@@ -40,6 +40,20 @@ overrides:
   # @esbuild-kit/core-utils, which pins esbuild 0.18.20; patched in 0.24.3.
   # Scoped to that one parent so the app's own esbuild is untouched.
   "@esbuild-kit/core-utils>esbuild": ^0.25.12
+  # GHSA-5p4m-2wfm-xmqj (CVE-2026-59870): quadratic CPU consumption resolving
+  # !!omap. Transitive via @eslint/eslintrc across 26 paths, all of them the
+  # eslint toolchain, so it never reaches the deployed app. Patched in 4.3.1,
+  # which stays on the 4.x line the toolchain resolves.
+  "js-yaml@>=4.0.0 <4.3.1": 4.3.1
+  # Deliberately absent: image-size (GHSA-w3rx-r6r6-pgpr ICNS, GHSA-5p2g-fcmc-qvqq
+  # JXL/HEIF -- infinite loops on malformed headers). Both advisories name >=2.0.3
+  # as patched and no 2.0.3 exists on the registry; 2.0.2 is the newest published
+  # 2.x, so there is nothing to force yet. The single path is `vinext > image-size`,
+  # a build-time tool with no production resolution, and it parses only images
+  # committed to this repository -- there is no route by which a customer supplies
+  # one. Recheck when 2.0.3 publishes; do not cross-force to a 1.x line, which has
+  # a different API. Until then `pnpm audit` reports 2 high advisories and that is
+  # the accepted state, not an oversight.
 
 allowBuilds:
   esbuild: true

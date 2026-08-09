@@ -300,10 +300,6 @@ function AuthenticatedAppShell({
             <small>{loading ? "Checking workspace…" : connection ? `${connection.awsAccountId} · ${connection.status.replace("_", " ")}` : "No cloud account connected"}</small>
           </div>
         </div>
-        {/* Account identity + sign-out live in the top-right account menu; the
-            sidebar stays clean. The sign-out error still surfaces here if a
-            sign-out attempt from anywhere fails. */}
-        {signOutError ? <p className="sidebar-error" role="alert">{signOutError}</p> : null}
       </aside>
       )}
       <main className="main-area">
@@ -365,6 +361,12 @@ function AuthenticatedAppShell({
             />
           </div>
         </header>
+        {/* Account identity + sign-out live in the top-right account menu. This
+            alert belongs to the main area, not the sidebar: a failed sign-out
+            must be visible in every navigation mode, and the collapsed rail
+            renders no sidebar body to carry it. Silence here would leave the
+            operator believing they had signed out while the session is live. */}
+        {signOutError ? <p className="shell-error" role="alert">{signOutError}</p> : null}
         <div className="content-wrap">{children}</div>
         <footer className="app-footer">
           <span>Sutra · CNAPP for managed service providers</span>
@@ -387,11 +389,13 @@ function NavItemLink({
   active,
   connectionId,
   item,
+  onNavigate,
   openFindings,
 }: {
   readonly active: NavKey;
   readonly connectionId: string | null;
   readonly item: NavGroup["items"][number];
+  readonly onNavigate?: () => void;
   readonly openFindings: number;
 }) {
   const isActive = active === item.key;
@@ -400,6 +404,7 @@ function NavItemLink({
       href={scopedWorkspaceHref(item.href, connectionId)}
       className={isActive ? "active" : undefined}
       aria-current={isActive ? "page" : undefined}
+      onClick={onNavigate}
     >
       <span className="nav-glyph-chip" data-tone={navTone(item.key)} aria-hidden="true"><NavIcon navKey={item.key} /></span>{item.label}
       {item.key === "findings" && openFindings > 0 ? <b aria-label={`${openFindings} open findings`}>{openFindings}</b> : null}
@@ -432,19 +437,30 @@ function NavigationRail({
 }) {
   const [openGroup, setOpenGroup] = useState<NavGroup["key"] | null>(null);
   const open = groups.find((group) => group.key === openGroup) ?? null;
+  const wrapRef = useRef<HTMLElement | null>(null);
 
-  // Escape closes the flyout rather than trapping a keyboard user inside it.
+  // Escape closes the flyout rather than trapping a keyboard user inside it, and
+  // a pointer landing outside dismisses it. Without the second handler the
+  // 258px overlay sits on top of the page with no obvious way to dismiss it --
+  // the mobile drawer already does both, and the rail owes the same.
   useEffect(() => {
     if (open === null) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpenGroup(null);
     };
+    const onPointerDown = (event: PointerEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setOpenGroup(null);
+    };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
   }, [open]);
 
   return (
-    <nav aria-label="Primary navigation" className="nav-rail-wrap">
+    <nav aria-label="Primary navigation" className="nav-rail-wrap" ref={wrapRef}>
       <div className="nav-rail">
         {groups.map((group) => {
           const containsActive = groupContainsActiveItem(group, active);
@@ -483,6 +499,9 @@ function NavigationRail({
                 connectionId={connectionId}
                 item={item}
                 key={`rail-${open.key}-${item.href}`}
+                // Client-side navigation does not unmount the rail, so without
+                // this the overlay stays open over the page just navigated to.
+                onNavigate={() => setOpenGroup(null)}
                 openFindings={openFindings}
               />
             ))}

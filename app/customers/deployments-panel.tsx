@@ -34,28 +34,29 @@ const KIND_LABEL: Readonly<Record<PortfolioConnectionSummary["sourceKind"], stri
   simulated_fixture: "Simulated",
 };
 
-// Exactly the states connectionHealth() derives, in escalation order. It
-// previously omitted `validating` and `needs_attention` and carried an `error`
-// state that is never produced -- so aging, stale, failed-validation and
-// in-progress rows could not be selected at all, and a queue holding only
-// healthy plus needs-attention rows showed no status controls, because just one
-// listed state counted as present.
-const STATUS_ORDER = ["active", "validating", "pending", "needs_attention", "disabled"] as const;
-
-const STATUS_LABEL: Readonly<Record<(typeof STATUS_ORDER)[number], string>> = {
-  active: "Active",
-  validating: "Validating",
-  pending: "Pending",
-  needs_attention: "Needs attention",
-  disabled: "Disabled",
-};
-
-function statusLabel(state: string): string {
-  return STATUS_LABEL[state as (typeof STATUS_ORDER)[number]]
-    // A state outside the map is shown as-is rather than capitalised into a
-    // plausible-looking label that hides the fact it was never expected.
-    ?? state.replace(/_/gu, " ");
-}
+/**
+ * Filter chips are keyed on the health *label*, not the health state.
+ *
+ * `connectionHealth()` maps several labels onto one state: `needs_attention`
+ * carries "Needs attention", "Stale" and "No baseline", and `validating` carries
+ * both "Validating" and "Aging". Chips built from states therefore spoke a
+ * different vocabulary than the rows -- a chip reading "Validating" selected
+ * rows that all read "Aging", and "Stale" and "No baseline" had no chip at all
+ * despite being the two states an operator most needs to isolate.
+ *
+ * Filtering on the label the row actually displays means a chip can never
+ * select rows that disagree with it.
+ */
+const LABEL_ORDER = [
+  "Healthy",
+  "Aging",
+  "Validating",
+  "Pending",
+  "Stale",
+  "No baseline",
+  "Needs attention",
+  "Disabled",
+] as const;
 
 export function DeploymentsPanel({
   canOnboard,
@@ -84,15 +85,20 @@ export function DeploymentsPanel({
       .filter((candidate) => decorated.some((row) => row.connection.sourceKind === candidate)),
     [decorated],
   );
-  const presentStatuses = useMemo(
-    () => STATUS_ORDER.filter((candidate) => decorated.some((row) => row.health.state === candidate)),
-    [decorated],
-  );
+  // Any label the rows carry but LABEL_ORDER does not list is appended rather
+  // than dropped, so a new health label loses its position in the escalation
+  // order without becoming unselectable.
+  const presentStatuses = useMemo(() => {
+    const present = new Set(decorated.map((row) => row.health.label));
+    const ordered = LABEL_ORDER.filter((candidate) => present.has(candidate));
+    const unlisted = [...present].filter((label) => !LABEL_ORDER.includes(label as (typeof LABEL_ORDER)[number]));
+    return [...ordered, ...unlisted.sort((left, right) => left.localeCompare(right, "en-US"))];
+  }, [decorated]);
 
   const search = query.trim().toLocaleLowerCase("en-US");
   const visible = decorated.filter((row) =>
     (kind === "all" || row.connection.sourceKind === kind)
-    && (status === "all" || row.health.state === status)
+    && (status === "all" || row.health.label === status)
     && (search === ""
       || row.customerName.toLocaleLowerCase("en-US").includes(search)
       || row.connection.awsAccountId.includes(search)));
@@ -106,17 +112,21 @@ export function DeploymentsPanel({
         {canOnboard ? <a href="/onboard" className="button button-primary">Add deployment</a> : null}
       </div>
 
+      {/* Buttons, not tabs. `role="tablist"` promises `aria-controls`, a
+          matching `tabpanel`, roving tabindex and arrow-key traversal; these
+          have none of that, and a screen reader announcing "tab 2 of 3" that
+          does not respond to arrow keys is worse than an honest button. They
+          filter rows in place, so `aria-pressed` states what they do. */}
       {presentKinds.length > 1 ? (
-        <div className="deployments-tabs" role="tablist" aria-label="Deployment kind">
-          <button aria-selected={kind === "all"} onClick={() => setKind("all")} role="tab" type="button">
+        <div className="deployments-tabs" role="group" aria-label="Deployment kind">
+          <button aria-pressed={kind === "all"} onClick={() => setKind("all")} type="button">
             All<em>{decorated.length}</em>
           </button>
           {presentKinds.map((candidate) => (
             <button
-              aria-selected={kind === candidate}
+              aria-pressed={kind === candidate}
               key={candidate}
               onClick={() => setKind(candidate)}
-              role="tab"
               type="button"
             >
               {KIND_LABEL[candidate]}
@@ -140,17 +150,20 @@ export function DeploymentsPanel({
         </label>
         {presentStatuses.length > 1 ? (
           <div className="deployments-chips">
-            <button data-active={status === "all" ? "true" : undefined} onClick={() => setStatus("all")} type="button">
+            {/* Same reasoning as the kind filter: the pressed state is real
+                information and must be announced, not only painted. */}
+            <button aria-pressed={status === "all"} data-active={status === "all" ? "true" : undefined} onClick={() => setStatus("all")} type="button">
               Any status
             </button>
             {presentStatuses.map((candidate) => (
               <button
+                aria-pressed={status === candidate}
                 data-active={status === candidate ? "true" : undefined}
                 key={candidate}
                 onClick={() => setStatus(candidate)}
                 type="button"
               >
-                {statusLabel(candidate)}
+                {candidate}
               </button>
             ))}
           </div>
