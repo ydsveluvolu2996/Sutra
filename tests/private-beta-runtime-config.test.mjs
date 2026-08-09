@@ -28,6 +28,8 @@ const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_TURNSTILE_SITE_KEY",
   "SUTRA_TURNSTILE_SECRET_KEY",
   "SUTRA_TURNSTILE_DEV_BYPASS",
+  "SUTRA_HOSTED_SELF_SERVE_SIGNUP",
+  "SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS",
 ]);
 
 const RELEASE_IMAGE =
@@ -135,6 +137,64 @@ test("setup materializes an explicitly approved invitation-only private-beta OID
     assert.match(contents, /^SUTRA_PRIVATE_BETA_OIDC_ENABLED=true$/mu);
     assert.match(contents, /^SUTRA_OIDC_TRANSACTION_KEY=A{43}$/mu);
     assert.ok(contents.includes(`SUTRA_OIDC_PROVIDERS=${OIDC.SUTRA_OIDC_PROVIDERS}`));
+  });
+});
+
+test("the self-serve signup switch reaches the Worker runtime file and fails closed when withdrawn", async () => {
+  await withConfig(async (config) => {
+    const privateBetaOidc = {
+      SUTRA_LOCAL_CONFIG_PATH: config,
+      SUTRA_DEPLOYMENT_ENV: "staging",
+      SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+      SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+      SUTRA_LOCAL_MODE: "false",
+      SUTRA_IDENTITY_MODE: "oidc",
+      SUTRA_PASSWORD_MFA_REQUIRED: "true",
+      SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
+      SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
+      ...OIDC,
+      ...TURNSTILE,
+    };
+    // The compose file passes the switch into the container process env; the
+    // Worker only ever sees what setup writes to .dev.vars. Release 24 shipped
+    // without this passthrough, so the live flag could never turn on.
+    await execute(process.execPath, [setupScript], {
+      env: cleanEnvironment({
+        ...privateBetaOidc,
+        SUTRA_HOSTED_SELF_SERVE_SIGNUP: "true",
+        SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS: "example.com,example.org",
+      }),
+    });
+    const enabled = await readFile(config, "utf8");
+    assert.match(enabled, /^SUTRA_HOSTED_SELF_SERVE_SIGNUP=true$/mu);
+    assert.match(enabled, /^SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS=example\.com,example\.org$/mu);
+
+    // Compose's default supplies the exact string "false" when the operator
+    // has not opted in; the retained volume value must be overwritten.
+    await execute(process.execPath, [setupScript], {
+      env: cleanEnvironment({
+        ...privateBetaOidc,
+        SUTRA_HOSTED_SELF_SERVE_SIGNUP: "false",
+        SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS: "",
+      }),
+    });
+    const disabled = await readFile(config, "utf8");
+    assert.match(disabled, /^SUTRA_HOSTED_SELF_SERVE_SIGNUP=false$/mu);
+    assert.doesNotMatch(disabled, /^SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS=/mu);
+
+    // A wholly absent switch (no compose default at all) is also withdrawn
+    // from the retained runtime file, never left at a stale enabled value.
+    await execute(process.execPath, [setupScript], {
+      env: cleanEnvironment({
+        ...privateBetaOidc,
+        SUTRA_HOSTED_SELF_SERVE_SIGNUP: "true",
+      }),
+    });
+    await execute(process.execPath, [setupScript], {
+      env: cleanEnvironment(privateBetaOidc),
+    });
+    const withdrawn = await readFile(config, "utf8");
+    assert.doesNotMatch(withdrawn, /^SUTRA_HOSTED_SELF_SERVE_SIGNUP=/mu);
   });
 });
 
