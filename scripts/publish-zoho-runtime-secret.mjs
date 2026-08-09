@@ -63,31 +63,56 @@ export function buildRuntimeSecret(bundle, identityMode) {
     throw new Error("The Keychain bundle does not match the approved Sutra aliases and endpoints.");
   }
   const providers = JSON.parse(bundle.SUTRA_OIDC_PROVIDERS);
-  const provider = Array.isArray(providers) ? providers[0] : undefined;
-  const providerKeys = provider === null || typeof provider !== "object"
+  const providerKeys = (provider) => (provider === null || typeof provider !== "object"
     ? []
-    : Object.keys(provider).sort();
+    : Object.keys(provider).sort());
+  const EXACT_PROVIDER_KEYS = [
+    "authorizationEndpoint",
+    "clientId",
+    "clientSecret",
+    "id",
+    "issuer",
+    "jwksUri",
+    "tokenEndpoint",
+  ].join("\0");
+  // Exactly one Zoho provider, optionally followed by exactly one Google
+  // provider for public self-serve signup. Both are pinned to their exact
+  // published endpoints -- the bundle chooses WHETHER Google sign-in exists,
+  // never WHERE its endpoints point.
+  const zoho = Array.isArray(providers) ? providers[0] : undefined;
   if (
     !Array.isArray(providers)
-    || providers.length !== 1
-    || providerKeys.join("\0") !== [
-      "authorizationEndpoint",
-      "clientId",
-      "clientSecret",
-      "id",
-      "issuer",
-      "jwksUri",
-      "tokenEndpoint",
-    ].join("\0")
-    || provider?.id !== "zoho"
-    || provider?.issuer !== "https://accounts.zoho.in"
-    || provider?.authorizationEndpoint !== "https://accounts.zoho.in/oauth/v2/auth"
-    || provider?.tokenEndpoint !== "https://accounts.zoho.in/oauth/v2/token"
-    || provider?.jwksUri !== "https://accounts.zoho.in/oauth/v2/keys"
-    || !oneLine(provider?.clientId)
-    || !oneLine(provider?.clientSecret)
+    || providers.length < 1
+    || providers.length > 2
+    || providerKeys(zoho).join("\0") !== EXACT_PROVIDER_KEYS
+    || zoho?.id !== "zoho"
+    || zoho?.issuer !== "https://accounts.zoho.in"
+    || zoho?.authorizationEndpoint !== "https://accounts.zoho.in/oauth/v2/auth"
+    || zoho?.tokenEndpoint !== "https://accounts.zoho.in/oauth/v2/token"
+    || zoho?.jwksUri !== "https://accounts.zoho.in/oauth/v2/keys"
+    || !oneLine(zoho?.clientId)
+    || !oneLine(zoho?.clientSecret)
   ) {
     throw new Error("The Keychain OIDC provider does not match the approved Zoho India contract.");
+  }
+  const google = providers[1];
+  if (
+    providers.length === 2
+    && (
+      providerKeys(google).join("\0") !== EXACT_PROVIDER_KEYS
+      || google?.id !== "google"
+      || google?.issuer !== "https://accounts.google.com"
+      || google?.authorizationEndpoint !== "https://accounts.google.com/o/oauth2/v2/auth"
+      || google?.tokenEndpoint !== "https://oauth2.googleapis.com/token"
+      || google?.jwksUri !== "https://www.googleapis.com/oauth2/v3/certs"
+      || typeof google?.clientId !== "string"
+      || !/^[A-Za-z0-9._-]{4,200}\.apps\.googleusercontent\.com$/u.test(google.clientId)
+      || !oneLine(google?.clientSecret)
+      || google.clientSecret.length < 8
+      || google.clientSecret.length > 512
+    )
+  ) {
+    throw new Error("The Keychain OIDC provider does not match the approved Google contract.");
   }
   return Object.fromEntries([
     ...KEYS.map((key) => [key, bundle[key]]),

@@ -89,7 +89,7 @@ jq -e '
     .SUTRA_OIDC_PROVIDERS
     | fromjson
     | type == "array"
-      and length == 1
+      and (length == 1 or length == 2)
       and ((.[0] | keys - [
         "authorizationEndpoint",
         "clientId",
@@ -106,6 +106,28 @@ jq -e '
       and .[0].jwksUri == "https://accounts.zoho.in/oauth/v2/keys"
       and (.[0].clientId | type == "string" and length >= 8 and length <= 256)
       and (.[0].clientSecret | type == "string" and length >= 8 and length <= 512)
+      and (
+        length == 1
+        or (
+          ((.[1] | keys - [
+            "authorizationEndpoint",
+            "clientId",
+            "clientSecret",
+            "id",
+            "issuer",
+            "jwksUri",
+            "tokenEndpoint"
+          ]) | length) == 0
+          and .[1].id == "google"
+          and .[1].issuer == "https://accounts.google.com"
+          and .[1].authorizationEndpoint == "https://accounts.google.com/o/oauth2/v2/auth"
+          and .[1].tokenEndpoint == "https://oauth2.googleapis.com/token"
+          and .[1].jwksUri == "https://www.googleapis.com/oauth2/v3/certs"
+          and (.[1].clientId
+            | type == "string" and test("^[A-Za-z0-9._-]{4,200}\\.apps\\.googleusercontent\\.com$"))
+          and (.[1].clientSecret | type == "string" and length >= 8 and length <= 512)
+        )
+      )
   )
   and (
     [

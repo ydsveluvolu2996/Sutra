@@ -60,3 +60,54 @@ test("publisher refuses an unapproved endpoint, missing secret, or identity mode
   );
   assert.throws(() => buildRuntimeSecret(BUNDLE, "hybrid"), /password or oidc/u);
 });
+
+const GOOGLE_PROVIDER = {
+  id: "google",
+  issuer: "https://accounts.google.com",
+  authorizationEndpoint: "https://accounts.google.com/o/oauth2/v2/auth",
+  tokenEndpoint: "https://oauth2.googleapis.com/token",
+  jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
+  clientId: "1234567890-example.apps.googleusercontent.com",
+  clientSecret: "google-client-secret",
+};
+
+function withProviders(...providers) {
+  return { ...BUNDLE, SUTRA_OIDC_PROVIDERS: JSON.stringify(providers) };
+}
+
+test("publisher accepts the exact optional Google provider after Zoho", () => {
+  const zoho = JSON.parse(BUNDLE.SUTRA_OIDC_PROVIDERS)[0];
+  const result = buildRuntimeSecret(withProviders(zoho, GOOGLE_PROVIDER), "oidc");
+  assert.deepEqual(JSON.parse(result.SUTRA_OIDC_PROVIDERS), [zoho, GOOGLE_PROVIDER]);
+});
+
+test("publisher refuses any Google entry off the exact pinned contract", () => {
+  const zoho = JSON.parse(BUNDLE.SUTRA_OIDC_PROVIDERS)[0];
+  for (const broken of [
+    { ...GOOGLE_PROVIDER, issuer: "https://accounts.google.com.attacker.example" },
+    { ...GOOGLE_PROVIDER, tokenEndpoint: "https://attacker.example/token" },
+    { ...GOOGLE_PROVIDER, jwksUri: "https://attacker.example/certs" },
+    { ...GOOGLE_PROVIDER, clientId: "not-a-google-client-id" },
+    { ...GOOGLE_PROVIDER, clientSecret: "short" },
+    { ...GOOGLE_PROVIDER, unexpectedEndpoint: "https://attacker.example" },
+  ]) {
+    assert.throws(
+      () => buildRuntimeSecret(withProviders(zoho, broken), "oidc"),
+      /approved Google contract/u,
+    );
+  }
+  // Order and cardinality are part of the contract: Zoho leads, Google is the
+  // only optional second entry, and there is never a third.
+  assert.throws(
+    () => buildRuntimeSecret(withProviders(GOOGLE_PROVIDER, zoho), "oidc"),
+    /approved Zoho India contract/u,
+  );
+  assert.throws(
+    () => buildRuntimeSecret(withProviders(zoho, GOOGLE_PROVIDER, GOOGLE_PROVIDER), "oidc"),
+    /approved Zoho India contract/u,
+  );
+  assert.throws(
+    () => buildRuntimeSecret(withProviders(zoho, zoho), "oidc"),
+    /approved Google contract/u,
+  );
+});
