@@ -45,7 +45,7 @@ import {
   WizardStepRail,
   type WizardStep,
 } from "./onboard-wizard-chrome";
-import { ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
+import { ONBOARDING_ROLE_ALLOWED_ACTION_COUNT, ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
 import { GlyphIcon } from "../components/nav-icon";
 
 interface CreateConnectionResponse {
@@ -966,11 +966,11 @@ export function OnboardAccount() {
                     <span>
                       What permission pack <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> grants
                     </span>
-                    <em>
-                      {ONBOARDING_ROLE_CAPABILITIES.filter((capability) => capability.granted).length}
-                      {" of "}
-                      {ONBOARDING_ROLE_CAPABILITIES.length} granted
-                    </em>
+                    {/* The count of what the pack allows, not of the sample
+                        below. "2 of 7 granted" described these rows but read as
+                        the permission boundary, understating a role that allows
+                        119 actions. */}
+                    <em>{ONBOARDING_ROLE_ALLOWED_ACTION_COUNT} actions allowed</em>
                     <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
                   </summary>
                   {ONBOARDING_ROLE_CAPABILITIES.map((capability) => (
@@ -985,9 +985,13 @@ export function OnboardAccount() {
                     />
                   ))}
                   <p className="wiz-capabilities-note">
-                    These are fixed by the pack this connection deploys, not per-connection
-                    settings. Permission packs are immutable; a new capability arrives as a
-                    successor pack, never as a checkbox here.
+                    The {ONBOARDING_ROLE_CAPABILITIES.length} capabilities above are selected
+                    examples, including ones Sutra is <strong>not</strong> granted — they are not
+                    the full pack, which allows {ONBOARDING_ROLE_ALLOWED_ACTION_COUNT} actions in
+                    total. The template below is the authoritative list. These are fixed by the
+                    pack this connection deploys, not per-connection settings. Permission packs are
+                    immutable; a new capability arrives as a successor pack, never as a checkbox
+                    here.
                   </p>
                 </details>
                 ) : (

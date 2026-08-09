@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import {
@@ -115,4 +116,39 @@ test("hosted portfolios remove fixture-only customers and recompute mixed aggreg
   assert.equal(hosted.customers[0]?.latestSnapshotAt, live.latestSnapshotAt);
   assert.equal(hosted.customers.some((customer) => customer.name === "Fixture only"), false);
   assert.equal(portfolioForRuntime(portfolio, true), portfolio);
+});
+
+test("every health label the panel can receive has a filter chip", async () => {
+  // Finding: the deployments queue built its chips from health *states* while
+  // rows displayed health *labels*, and connectionHealth() maps several labels
+  // onto one state -- so a chip reading "Validating" selected rows all reading
+  // "Aging", and "Stale"/"No baseline" had no chip at all.
+  //
+  // The chips now key on the label, which makes this pairing load-bearing: a new
+  // label in connectionHealth() must appear in LABEL_ORDER to take its place in
+  // the escalation order. The panel appends unlisted labels rather than dropping
+  // them, so drift costs ordering rather than reachability -- this keeps the
+  // ordering honest anyway.
+  const [presentation, panel] = await Promise.all([
+    readFile(new URL("../lib/portfolio-presentation.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/customers/deployments-panel.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const health = /export function connectionHealth[\s\S]*?\n\}/u.exec(presentation)?.[0];
+  assert.ok(health, "connectionHealth must be locatable to enumerate its labels");
+  const emitted = [...health.matchAll(/label:\s*"([^"]+)"/gu)].map(([, label]) => label);
+  assert.ok(emitted.length > 0, "connectionHealth must emit labels");
+
+  const order = /const LABEL_ORDER = \[([\s\S]*?)\] as const;/u.exec(panel)?.[1];
+  assert.ok(order, "the panel must declare LABEL_ORDER as data");
+  const listed = new Set([...order.matchAll(/"([^"]+)"/gu)].map(([, label]) => label));
+
+  for (const label of new Set(emitted)) {
+    assert.ok(listed.has(label), `connectionHealth emits "${label}" but LABEL_ORDER omits it`);
+  }
+  // And nothing listed that can never appear -- a chip for an impossible state
+  // is the `error` state this panel already shipped once.
+  for (const label of listed) {
+    assert.ok(emitted.includes(label), `LABEL_ORDER lists "${label}" but connectionHealth never emits it`);
+  }
 });
