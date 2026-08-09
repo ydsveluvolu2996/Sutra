@@ -109,7 +109,9 @@ services:
       # neither switch can enable the other adapter.
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"
       # Self-serve signup: a verified Google identity with no membership creates
-      # its own trial organization. Off unless explicitly enabled in .env.ec2;
+      # its own trial organization. Off unless explicitly enabled in .env.ec2 --
+      # the value comes only from that managed file, never from ambient host
+      # environment, so a stale variable cannot enable public signup by accident;
       # the invitation path is unaffected either way, and the create-new-org
       # path carries its own per-source rate limit and optional domain
       # allowlist (SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS).
@@ -163,10 +165,6 @@ services:
       SUTRA_ZOHO_REFRESH_TOKEN: ${SUTRA_ZOHO_REFRESH_TOKEN:-}
       SUTRA_OIDC_PROVIDERS: ${SUTRA_OIDC_PROVIDERS:-}
       SUTRA_OIDC_TRANSACTION_KEY: ${SUTRA_OIDC_TRANSACTION_KEY:-}
-      # Production provisioning is invitation-only. Keep this a literal false
-      # so a stale host environment value can never enable public organization
-      # creation during an identity-provider cutover.
-      SUTRA_HOSTED_SELF_SERVE_SIGNUP: "false"
       # Agentless disk scanning. All twelve default to empty: the
       # resolver in lib/aws-agentless-executor-config.ts has NO defaults by design
       # and refuses with the exact list of unset names, so an unconfigured host
